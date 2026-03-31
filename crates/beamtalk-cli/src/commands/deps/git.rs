@@ -19,7 +19,6 @@ use super::lockfile::LockEntry;
 
 /// Result of resolving a single git dependency.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Used by tests; will be called by build system (ADR 0070 Phase 2+)
 pub struct ResolvedGitDep {
     /// The dependency name.
     pub name: String,
@@ -46,7 +45,6 @@ pub struct ResolvedGitDep {
 /// - The git URL is unreachable or invalid
 /// - The requested tag/branch/rev does not exist
 /// - Git commands fail
-#[allow(dead_code)] // Used by tests; will be called by build system (ADR 0070 Phase 2+)
 pub fn resolve_git_dep(
     name: &str,
     url: &str,
@@ -105,7 +103,6 @@ pub fn resolve_git_dep(
 }
 
 /// Clone a git repository to the given path.
-#[allow(dead_code)] // Called by resolve_git_dep (ADR 0070 Phase 2+)
 fn clone_repo(name: &str, url: &str, target: &Utf8Path) -> Result<()> {
     let output = Command::new("git")
         .args(["clone", "--quiet", url, target.as_str()])
@@ -126,7 +123,6 @@ fn clone_repo(name: &str, url: &str, target: &Utf8Path) -> Result<()> {
 }
 
 /// Check out the requested reference (tag, branch, or rev).
-#[allow(dead_code)] // Called by resolve_git_dep (ADR 0070 Phase 2+)
 fn checkout_ref(name: &str, reference: &GitReference, repo_path: &Utf8Path) -> Result<()> {
     let (ref_type, ref_value) = match reference {
         GitReference::Tag(tag) => ("tag", tag.as_str()),
@@ -163,7 +159,6 @@ fn checkout_ref(name: &str, reference: &GitReference, repo_path: &Utf8Path) -> R
 }
 
 /// Resolve the current HEAD to an exact commit SHA.
-#[allow(dead_code)] // Called by resolve_git_dep (ADR 0070 Phase 2+)
 fn resolve_head_sha(name: &str, repo_path: &Utf8Path) -> Result<String> {
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -194,7 +189,6 @@ fn resolve_head_sha(name: &str, repo_path: &Utf8Path) -> Result<String> {
 ///
 /// Returns `true` if the checkout's HEAD matches the expected SHA.
 /// Returns `false` if the SHA cannot be resolved (stale/corrupt checkout).
-#[allow(dead_code)] // Called by resolve_git_dep (ADR 0070 Phase 2+)
 fn verify_checkout(name: &str, repo_path: &Utf8Path, expected_sha: &str) -> bool {
     if let Ok(sha) = resolve_head_sha(name, repo_path) {
         sha == expected_sha

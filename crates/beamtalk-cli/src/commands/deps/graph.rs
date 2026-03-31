@@ -18,6 +18,8 @@ use tracing::{debug, info};
 
 use crate::commands::manifest::{self, ParsedManifest};
 
+use super::lockfile::{LockEntry, Lockfile};
+
 use super::path::{ResolvedDependency, canonicalize_dep_path};
 
 /// A node in the dependency graph, representing a discovered package.
@@ -68,18 +70,38 @@ pub fn resolve_dependency_graph(
 
     let root_name = root_manifest.package.name.clone();
 
-    // Phase 1: Discover the full dependency graph
-    let mut graph: BTreeMap<String, DepNode> = BTreeMap::new();
-    let mut discovery_stack: Vec<String> = vec![root_name.clone()];
+    // Read lockfile for git dep SHA pinning
+    let lockfile = Lockfile::read(project_root)?.unwrap_or_default();
 
-    discover_deps(
+    // Phase 1: Discover the full dependency graph
+    // Newly resolved git deps are collected so we can update the lockfile.
+    let mut ctx = DiscoveryContext {
         project_root,
-        project_root,
-        &root_name,
-        &root_manifest,
-        &mut graph,
-        &mut discovery_stack,
-    )?;
+        graph: BTreeMap::new(),
+        discovery_stack: vec![root_name.clone()],
+        lockfile: &lockfile,
+        new_git_resolutions: Vec::new(),
+    };
+
+    discover_deps(&mut ctx, project_root, &root_name, &root_manifest)?;
+
+    // Extract results from context (drops the lockfile borrow)
+    let graph = ctx.graph;
+    let new_git_resolutions = ctx.new_git_resolutions;
+
+    // Update lockfile with any newly resolved git deps
+    if !new_git_resolutions.is_empty() {
+        let mut lockfile = lockfile;
+        for resolved in &new_git_resolutions {
+            lockfile.insert(LockEntry {
+                name: resolved.name.clone(),
+                url: resolved.url.clone(),
+                reference: resolved.reference.clone(),
+                resolved_sha: resolved.resolved_sha.clone(),
+            });
+        }
+        lockfile.write(project_root)?;
+    }
 
     if graph.is_empty() {
         return Ok(Vec::new());
@@ -171,17 +193,25 @@ fn compute_via_chain(
     Vec::new()
 }
 
+/// Mutable state accumulated during dependency graph discovery.
+struct DiscoveryContext<'a> {
+    project_root: &'a Utf8Path,
+    graph: BTreeMap<String, DepNode>,
+    discovery_stack: Vec<String>,
+    lockfile: &'a Lockfile,
+    new_git_resolutions: Vec<super::git::ResolvedGitDep>,
+}
+
 /// Recursively discover dependencies by walking manifests.
 ///
 /// Builds the `graph` map of all packages found in the transitive closure.
 /// Detects cycles via `discovery_stack` and version conflicts via stored versions.
+/// Git dependencies that haven't been cloned yet are automatically fetched.
 fn discover_deps(
-    project_root: &Utf8Path,
+    ctx: &mut DiscoveryContext<'_>,
     parent_root: &Utf8Path,
     parent_name: &str,
     parent_manifest: &ParsedManifest,
-    graph: &mut BTreeMap<String, DepNode>,
-    discovery_stack: &mut Vec<String>,
 ) -> Result<()> {
     for (dep_name, spec) in &parent_manifest.dependencies {
         match &spec.source {
@@ -195,35 +225,51 @@ fn discover_deps(
                 let dep_root = canonicalize_dep_path(parent_root, relative_utf8);
 
                 discover_single_dep(
-                    project_root,
+                    ctx,
                     dep_name,
                     &dep_root,
                     &format!("path: {relative_utf8}"),
                     parent_name,
-                    graph,
-                    discovery_stack,
                 )?;
             }
-            DependencySource::Git { url, .. } => {
-                // Git deps are always cloned to {project_root}/_build/deps/{name}/
-                let git_checkout = find_git_checkout(project_root, dep_name);
-                if let Some(checkout_root) = git_checkout {
-                    discover_single_dep(
-                        project_root,
-                        dep_name,
-                        &checkout_root,
-                        &format!("git: {url}"),
-                        parent_name,
-                        graph,
-                        discovery_stack,
-                    )?;
-                } else {
-                    debug!(
-                        dep = %dep_name,
-                        url = %url,
-                        "Git dependency not yet cloned, skipping transitive discovery"
-                    );
-                }
+            DependencySource::Git { url, reference } => {
+                // Git deps are cloned to {project_root}/_build/deps/{name}/
+                // If not yet cloned, fetch them now.
+                let checkout_root =
+                    if let Some(existing) = find_git_checkout(ctx.project_root, dep_name) {
+                        existing
+                    } else {
+                        info!(
+                            dep = %dep_name,
+                            url = %url,
+                            "Git dependency not yet cloned, fetching..."
+                        );
+                        let lock_entry = ctx.lockfile.get(dep_name);
+                        let resolved = super::git::resolve_git_dep(
+                            dep_name,
+                            url,
+                            reference,
+                            ctx.project_root,
+                            lock_entry,
+                        )
+                        .wrap_err_with(|| {
+                            format!(
+                                "Failed to fetch git dependency '{dep_name}' \
+                                 (required by '{parent_name}')"
+                            )
+                        })?;
+                        let checkout = resolved.checkout_path.clone();
+                        ctx.new_git_resolutions.push(resolved);
+                        checkout
+                    };
+
+                discover_single_dep(
+                    ctx,
+                    dep_name,
+                    &checkout_root,
+                    &format!("git: {url}"),
+                    parent_name,
+                )?;
             }
         }
     }
@@ -246,13 +292,11 @@ fn find_git_checkout(project_root: &Utf8Path, dep_name: &str) -> Option<Utf8Path
 /// Validates the manifest, checks for cycles and version conflicts,
 /// then recurses into the dependency's own dependencies.
 fn discover_single_dep(
-    project_root: &Utf8Path,
+    ctx: &mut DiscoveryContext<'_>,
     dep_name: &str,
     dep_root: &Utf8Path,
     source_description: &str,
     parent_name: &str,
-    graph: &mut BTreeMap<String, DepNode>,
-    discovery_stack: &mut Vec<String>,
 ) -> Result<()> {
     // Validate directory exists
     if !dep_root.exists() {
@@ -283,9 +327,13 @@ fn discover_single_dep(
     }
 
     // Check for circular dependencies
-    if discovery_stack.contains(&dep_name.to_string()) {
-        let cycle_start = discovery_stack.iter().position(|n| n == dep_name).unwrap();
-        let cycle_path: Vec<&str> = discovery_stack[cycle_start..]
+    if ctx.discovery_stack.contains(&dep_name.to_string()) {
+        let cycle_start = ctx
+            .discovery_stack
+            .iter()
+            .position(|n| n == dep_name)
+            .unwrap();
+        let cycle_path: Vec<&str> = ctx.discovery_stack[cycle_start..]
             .iter()
             .map(String::as_str)
             .chain(std::iter::once(dep_name))
@@ -298,7 +346,7 @@ fn discover_single_dep(
     }
 
     // Single-version policy: if we've already seen this package, check version matches
-    if let Some(existing) = graph.get(dep_name) {
+    if let Some(existing) = ctx.graph.get(dep_name) {
         if existing.version != dep_manifest.package.version {
             miette::bail!(
                 "Version conflict for dependency '{dep_name}':\n  \
@@ -320,7 +368,7 @@ fn discover_single_dep(
     let dep_deps: Vec<String> = dep_manifest.dependencies.keys().cloned().collect();
     let has_transitive_deps = !dep_manifest.dependencies.is_empty();
 
-    graph.insert(
+    ctx.graph.insert(
         dep_name.to_string(),
         DepNode {
             name: dep_name.to_string(),
@@ -333,16 +381,9 @@ fn discover_single_dep(
 
     // Recurse into this dependency's own dependencies
     if has_transitive_deps {
-        discovery_stack.push(dep_name.to_string());
-        discover_deps(
-            project_root,
-            dep_root,
-            dep_name,
-            &dep_manifest,
-            graph,
-            discovery_stack,
-        )?;
-        discovery_stack.pop();
+        ctx.discovery_stack.push(dep_name.to_string());
+        discover_deps(ctx, dep_root, dep_name, &dep_manifest)?;
+        ctx.discovery_stack.pop();
     }
 
     Ok(())
@@ -430,6 +471,7 @@ fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Resul
 mod tests {
     use super::*;
     use std::fs;
+    use std::process::Command;
     use tempfile::TempDir;
 
     /// Create a minimal beamtalk.toml manifest in a directory.
@@ -858,5 +900,163 @@ pkg_b = {{ path = "{b_str}" }}"#
         let resolved = result.unwrap();
         let names: Vec<&str> = resolved.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["pkg_d", "pkg_c", "pkg_b"]);
+    }
+
+    /// Create a local git repo with a beamtalk.toml, a tag, and a branch.
+    /// Returns (`TempDir`, url, `commit_sha`).
+    fn create_git_dep_repo(pkg_name: &str, version: &str, deps: &str) -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path();
+
+        run_git_cmd(path, &["init"]);
+        run_git_cmd(path, &["config", "user.email", "test@test.com"]);
+        run_git_cmd(path, &["config", "user.name", "Test"]);
+        run_git_cmd(path, &["config", "commit.gpgsign", "false"]);
+
+        write_manifest(path, pkg_name, version, deps);
+
+        run_git_cmd(path, &["add", "."]);
+        run_git_cmd(path, &["commit", "-m", "initial"]);
+        run_git_cmd(path, &["tag", "-m", "v1.0.0", "v1.0.0"]);
+
+        let sha = get_git_sha(path);
+        let mut path_str = path.display().to_string().replace('\\', "/");
+        if !path_str.starts_with('/') {
+            path_str.insert(0, '/');
+        }
+        let url = format!("file://{path_str}");
+        (dir, url, sha)
+    }
+
+    fn run_git_cmd(dir: &std::path::Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn get_git_sha(dir: &std::path::Path) -> String {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn test_git_dep_auto_cloned_during_resolve() {
+        // Create a git repo that acts as a dependency
+        let (_git_dir, url, _sha) = create_git_dep_repo("my_git_dep", "0.1.0", "");
+
+        // Create a root project that depends on the git dep
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            &format!(
+                r#"[dependencies]
+my_git_dep = {{ git = "{url}", tag = "v1.0.0" }}"#
+            ),
+        );
+
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        // _build/deps should NOT exist yet
+        let deps_dir = root.join("_build").join("deps");
+        assert!(
+            !deps_dir.exists(),
+            "deps dir should not exist before resolve"
+        );
+
+        // resolve_dependency_graph should auto-clone the git dep
+        let result = resolve_dependency_graph(&root_path, &options);
+        assert!(
+            result.is_ok(),
+            "Git dep should be auto-cloned: {:?}",
+            result.err()
+        );
+
+        // Verify the git dep was cloned
+        let checkout = deps_dir.join("my_git_dep").join("beamtalk.toml");
+        assert!(
+            checkout.exists(),
+            "Git dep should have been cloned to _build/deps/my_git_dep/"
+        );
+
+        // Verify a lockfile was written
+        let lock_path = root.join("beamtalk.lock");
+        assert!(lock_path.exists(), "Lockfile should have been written");
+        let lock_content = fs::read_to_string(&lock_path).unwrap();
+        assert!(
+            lock_content.contains("my_git_dep"),
+            "Lockfile should contain the git dep"
+        );
+    }
+
+    #[test]
+    fn test_transitive_git_dep_auto_cloned() {
+        // Create the leaf git dep
+        let (_leaf_dir, leaf_url, _leaf_sha) = create_git_dep_repo("leaf_dep", "0.1.0", "");
+
+        // Create the middle path dep that depends on the leaf git dep
+        let workspace = TempDir::new().unwrap();
+        let middle_dir = workspace.path().join("middle");
+        fs::create_dir_all(&middle_dir).unwrap();
+        write_manifest(
+            &middle_dir,
+            "middle",
+            "0.1.0",
+            &format!(
+                r#"[dependencies]
+leaf_dep = {{ git = "{leaf_url}", tag = "v1.0.0" }}"#
+            ),
+        );
+
+        // Create the root project that depends on the middle path dep
+        let root = workspace.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        let middle_str = middle_dir.to_str().unwrap().replace('\\', "/");
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            &format!(
+                r#"[dependencies]
+middle = {{ path = "{middle_str}" }}"#
+            ),
+        );
+
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let result = resolve_dependency_graph(&root_path, &options);
+        assert!(
+            result.is_ok(),
+            "Transitive git dep should be auto-cloned: {:?}",
+            result.err()
+        );
+
+        let resolved = result.unwrap();
+        let names: Vec<&str> = resolved.iter().map(|r| r.name.as_str()).collect();
+        assert!(
+            names.contains(&"leaf_dep"),
+            "Transitive git dep should be resolved: {names:?}"
+        );
+        assert!(
+            names.contains(&"middle"),
+            "Direct path dep should be resolved: {names:?}"
+        );
     }
 }

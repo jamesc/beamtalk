@@ -15,8 +15,9 @@
 use crate::commands::build::collect_source_files_from_dir;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
+use tracing::warn;
 
 /// Collect lint diagnostics for a parsed module.
 ///
@@ -118,6 +119,18 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         parsed_files.push((file.clone(), source, module, parse_diags));
     }
 
+    // Resolve dependency class metadata so lint sees the same class hierarchy
+    // as build. Without this, @expect annotations that suppress real cross-package
+    // diagnostics would be reported as stale.
+    let project_root = if source_path.is_dir() {
+        source_path.clone()
+    } else {
+        source_path
+            .parent()
+            .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
+    };
+    resolve_dep_class_infos(&project_root, &mut all_class_infos);
+
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
 
@@ -181,6 +194,35 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolve dependency classes and merge them into the class info list.
+///
+/// Best-effort: if dependency resolution fails (e.g. network error for a git
+/// dep), lint continues without dep classes rather than failing entirely.
+fn resolve_dep_class_infos(
+    project_root: &Utf8Path,
+    all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) {
+    if !project_root.join("beamtalk.toml").exists() {
+        return;
+    }
+
+    let options = beamtalk_core::CompilerOptions::default();
+    match super::deps::ensure_deps_resolved(project_root, &options) {
+        Ok(resolved_deps) => {
+            for dep in &resolved_deps {
+                all_class_infos.extend(dep.class_infos.clone());
+            }
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Failed to resolve dependencies for lint; \
+                 dependency classes may not be available"
+            );
+        }
+    }
 }
 
 /// Output format for lint diagnostics.

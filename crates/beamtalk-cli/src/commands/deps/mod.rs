@@ -23,8 +23,9 @@ pub mod path;
 // Re-export commonly used items
 pub use path::collect_dep_ebin_paths;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
+use std::collections::BTreeMap;
 use tracing::{debug, info};
 
 use crate::commands::build_layout::BuildLayout;
@@ -68,62 +69,130 @@ pub fn ensure_deps_resolved(
     graph::resolve_dependency_graph(project_root, options)
 }
 
+/// A discovered dependency root (direct or transitive) for freshness checking.
+struct DiscoveredDep {
+    name: String,
+    root: Utf8PathBuf,
+    is_direct: bool,
+    /// For transitive deps, the chain of intermediate dep names.
+    via_chain: Vec<String>,
+}
+
+/// Recursively discover all dependency names and roots by walking manifests.
+///
+/// Returns all deps (direct + transitive) without compilation or ebin checks.
+/// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
+/// transitive graph rather than just direct deps.
+fn discover_all_dep_roots(
+    project_root: &Utf8Path,
+    manifest: &manifest::ParsedManifest,
+) -> Vec<DiscoveredDep> {
+    use beamtalk_core::compilation::DependencySource;
+
+    let layout = BuildLayout::new(project_root);
+    let direct_names: std::collections::HashSet<&str> =
+        manifest.dependencies.keys().map(String::as_str).collect();
+
+    // BFS queue: (parent_root, deps_map, via_chain)
+    let mut queue: Vec<(
+        Utf8PathBuf,
+        BTreeMap<String, beamtalk_core::compilation::DependencySpec>,
+        Vec<String>,
+    )> = vec![(
+        project_root.to_path_buf(),
+        manifest.dependencies.clone(),
+        Vec::new(),
+    )];
+    let mut visited = std::collections::HashSet::new();
+    let mut result = Vec::new();
+
+    while let Some((parent_root, deps, via_chain)) = queue.pop() {
+        for (dep_name, spec) in &deps {
+            if !visited.insert(dep_name.clone()) {
+                continue; // Already discovered (diamond deps)
+            }
+
+            let dep_root = match &spec.source {
+                DependencySource::Path { path } => {
+                    if let Some(relative_utf8) = camino::Utf8Path::from_path(path) {
+                        path::canonicalize_dep_path(&parent_root, relative_utf8)
+                    } else {
+                        continue;
+                    }
+                }
+                DependencySource::Git { .. } => layout.dep_checkout_dir(dep_name),
+            };
+
+            let is_direct = direct_names.contains(dep_name.as_str());
+
+            result.push(DiscoveredDep {
+                name: dep_name.clone(),
+                root: dep_root.clone(),
+                is_direct,
+                via_chain: if is_direct {
+                    Vec::new()
+                } else {
+                    via_chain.clone()
+                },
+            });
+
+            // Enqueue this dep's own dependencies for discovery
+            let dep_manifest_path = dep_root.join("beamtalk.toml");
+            if let Ok(dep_parsed) = manifest::parse_manifest_full(&dep_manifest_path) {
+                if !dep_parsed.dependencies.is_empty() {
+                    let mut child_chain = via_chain.clone();
+                    child_chain.push(dep_name.clone());
+                    queue.push((dep_root, dep_parsed.dependencies, child_chain));
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// Collect `ResolvedDependency` structs for already-compiled dependencies.
 ///
 /// Rebuilds the class module index from each dependency's source files
 /// without recompiling. This is the fast path for the "deps are fresh" case.
+/// Discovers the full transitive graph so that transitive deps are not lost.
 fn collect_fresh_deps(
     project_root: &Utf8Path,
     parsed: &manifest::ParsedManifest,
 ) -> Result<Vec<path::ResolvedDependency>> {
-    use beamtalk_core::compilation::DependencySource;
-
     let layout = BuildLayout::new(project_root);
+    let all_deps = discover_all_dep_roots(project_root, parsed);
     let mut resolved = Vec::new();
 
-    for (dep_name, spec) in &parsed.dependencies {
-        let dep_root = match &spec.source {
-            DependencySource::Path { path } => {
-                let relative_utf8 = camino::Utf8Path::from_path(path).ok_or_else(|| {
-                    miette::miette!(
-                        "Dependency '{dep_name}' has a non-UTF-8 path: {}",
-                        path.display()
-                    )
-                })?;
-                path::canonicalize_dep_path(project_root, relative_utf8)
-            }
-            DependencySource::Git { .. } => {
-                // Git deps are cloned to _build/deps/{name}/
-                layout.dep_checkout_dir(dep_name)
-            }
-        };
-
-        let ebin_path = layout.dep_ebin_dir(dep_name);
+    for dep in &all_deps {
+        let ebin_path = layout.dep_ebin_dir(&dep.name);
 
         // Rebuild class module index from source files (fast — no compilation)
-        let (class_module_index, class_infos) = path::build_dep_class_index(&dep_root, dep_name)?;
+        let (class_module_index, class_infos) = path::build_dep_class_index(&dep.root, &dep.name)?;
 
         debug!(
-            dep = %dep_name,
+            dep = %dep.name,
             classes = class_module_index.len(),
+            is_direct = dep.is_direct,
             "Loaded fresh dependency class index"
         );
 
         resolved.push(path::ResolvedDependency {
-            name: dep_name.clone(),
-            root: dep_root,
+            name: dep.name.clone(),
+            root: dep.root.clone(),
             ebin_path,
             class_module_index,
             class_infos,
-            is_direct: true, // collect_fresh_deps only processes direct deps
-            via_chain: Vec::new(),
+            is_direct: dep.is_direct,
+            via_chain: dep.via_chain.clone(),
         });
     }
 
     Ok(resolved)
 }
 
-/// Check whether all dependencies are already resolved and compiled.
+/// Check whether all dependencies (direct and transitive) are already
+/// resolved and compiled.
 ///
 /// Returns `true` (fresh) when:
 /// 1. All dependency ebin directories exist under `_build/deps/{name}/ebin/`
@@ -162,12 +231,14 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
         }
     }
 
-    // Check that all dependency ebin directories exist and are up-to-date
+    // Discover all deps (direct + transitive) and check their ebin directories
+    let all_deps = discover_all_dep_roots(project_root, manifest);
     let layout = BuildLayout::new(project_root);
-    for (dep_name, spec) in &manifest.dependencies {
-        let ebin_dir = layout.dep_ebin_dir(dep_name);
+
+    for dep in &all_deps {
+        let ebin_dir = layout.dep_ebin_dir(&dep.name);
         if !ebin_dir.exists() {
-            debug!(dep = %dep_name, "Dependency ebin directory missing — deps are stale");
+            debug!(dep = %dep.name, "Dependency ebin directory missing — deps are stale");
             return false;
         }
 
@@ -181,20 +252,17 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
             .unwrap_or(false);
 
         if !has_beam {
-            debug!(dep = %dep_name, "Dependency ebin directory has no .beam files — deps are stale");
+            debug!(dep = %dep.name, "Dependency ebin directory has no .beam files — deps are stale");
             return false;
         }
 
         // For path deps, check if source files are newer than compiled output.
-        // This catches the common dev workflow of editing a path dep's source.
-        if let beamtalk_core::compilation::DependencySource::Path { path: dep_path } = &spec.source
-        {
-            if let Some(relative_utf8) = camino::Utf8Path::from_path(dep_path) {
-                let dep_root = path::canonicalize_dep_path(project_root, relative_utf8);
-                if path_dep_source_newer_than_ebin(&dep_root, &ebin_dir) {
-                    debug!(dep = %dep_name, "Path dependency source is newer than compiled output — deps are stale");
-                    return false;
-                }
+        // Git deps don't need mtime checking — the lockfile handles freshness.
+        if dep.root.exists() && !dep.root.starts_with(layout.deps_dir()) {
+            // Not under _build/deps/ → it's a path dep
+            if path_dep_source_newer_than_ebin(&dep.root, &ebin_dir) {
+                debug!(dep = %dep.name, "Path dependency source is newer than compiled output — deps are stale");
+                return false;
             }
         }
     }
@@ -481,5 +549,111 @@ mod tests {
             result[0].class_module_index.get("Helper").unwrap(),
             "bt@utils@helper"
         );
+    }
+
+    #[test]
+    fn test_deps_stale_transitive_ebin_missing() {
+        // my_app -> utils -> shared
+        // utils ebin exists, shared ebin is missing → should be stale
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create shared (leaf dep)
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&shared_dir).unwrap();
+        write_manifest(&shared_dir, "shared", "");
+
+        // Create utils (depends on shared)
+        let utils_dir = temp.path().join("utils");
+        fs::create_dir_all(&utils_dir).unwrap();
+        write_manifest(
+            &utils_dir,
+            "utils",
+            "[dependencies]\nshared = { path = \"../shared\" }",
+        );
+
+        // Create compiled ebin for utils (direct dep) but NOT for shared (transitive)
+        create_dep_ebin_with_beam(temp.path(), "utils");
+
+        // Create main manifest
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+
+        // Should be stale because transitive dep "shared" has no ebin
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "Should detect missing transitive dep ebin as stale"
+        );
+    }
+
+    #[test]
+    fn test_collect_fresh_deps_includes_transitive() {
+        // my_app -> utils -> shared
+        // Both compiled — collect_fresh_deps should return both
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create shared (leaf dep) with source
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&shared_dir).unwrap();
+        write_manifest(&shared_dir, "shared", "");
+        write_source(
+            &shared_dir,
+            "base.bt",
+            "Object subclass: Base\n  name => \"base\"\n",
+        );
+
+        // Create utils (depends on shared) with source
+        let utils_dir = temp.path().join("utils");
+        fs::create_dir_all(&utils_dir).unwrap();
+        write_manifest(
+            &utils_dir,
+            "utils",
+            "[dependencies]\nshared = { path = \"../shared\" }",
+        );
+        write_source(
+            &utils_dir,
+            "helper.bt",
+            "Object subclass: Helper\n  greet => \"hi\"\n",
+        );
+
+        // Create compiled ebin for both deps
+        create_dep_ebin_with_beam(temp.path(), "utils");
+        create_dep_ebin_with_beam(temp.path(), "shared");
+
+        // Create main manifest
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+
+        let result = collect_fresh_deps(&root, &parsed).unwrap();
+        let names: Vec<&str> = result.iter().map(|r| r.name.as_str()).collect();
+
+        assert!(
+            names.contains(&"utils"),
+            "Should include direct dep: {names:?}"
+        );
+        assert!(
+            names.contains(&"shared"),
+            "Should include transitive dep: {names:?}"
+        );
+
+        // Check is_direct metadata
+        let utils = result.iter().find(|r| r.name == "utils").unwrap();
+        assert!(utils.is_direct, "utils should be marked as direct");
+
+        let shared = result.iter().find(|r| r.name == "shared").unwrap();
+        assert!(!shared.is_direct, "shared should be marked as transitive");
     }
 }
