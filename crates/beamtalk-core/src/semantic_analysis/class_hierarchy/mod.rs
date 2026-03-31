@@ -596,6 +596,29 @@ impl ClassHierarchy {
             .collect()
     }
 
+    /// Filter `all_class_infos` to exclude classes defined in `module`,
+    /// returning only cross-file class metadata suitable for injection into
+    /// semantic analysis.
+    ///
+    /// Used by both `lint` and `build` to avoid duplicating classes that the
+    /// current module's `ClassHierarchy::build()` will add from the AST.
+    #[must_use]
+    pub fn cross_file_class_infos(
+        all_class_infos: &[ClassInfo],
+        module: &Module,
+    ) -> Vec<ClassInfo> {
+        let current: std::collections::HashSet<&str> = module
+            .classes
+            .iter()
+            .map(|c| c.name.name.as_str())
+            .collect();
+        all_class_infos
+            .iter()
+            .filter(|ci| !current.contains(ci.name.as_str()))
+            .cloned()
+            .collect()
+    }
+
     /// Registers extension methods from the [`ExtensionIndex`] into the hierarchy.
     ///
     /// Each extension entry is converted to a [`MethodInfo`] and appended to the

@@ -121,26 +121,20 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
 
-    for (file, source, module, parse_diags) in &parsed_files {
-        // Exclude classes defined in this file from the cross-file set.
-        let current_file_classes: std::collections::HashSet<&str> = module
-            .classes
-            .iter()
-            .map(|c| c.name.name.as_str())
-            .collect();
-        let cross_file_classes: Vec<_> = all_class_infos
-            .iter()
-            .filter(|ci| !current_file_classes.contains(ci.name.as_str()))
-            .cloned()
-            .collect();
+    for (file, source, module, parse_diags) in parsed_files {
+        let cross_file_classes =
+            beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
+                &all_class_infos,
+                &module,
+            );
 
-        let lint_diags = collect_diagnostics(module, parse_diags.clone(), cross_file_classes);
+        let lint_diags = collect_diagnostics(&module, parse_diags, cross_file_classes);
 
         for diag in &lint_diags {
             match format {
                 OutputFormat::Text => {
                     let compile_diag =
-                        CompileDiagnostic::from_core_diagnostic(diag, file.as_str(), source);
+                        CompileDiagnostic::from_core_diagnostic(diag, file.as_str(), &source);
                     eprintln!("{:?}", miette::Report::new(compile_diag));
                 }
                 OutputFormat::Json => {
