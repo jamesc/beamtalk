@@ -923,20 +923,29 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 target/release/beamtalk-mcp "${PREFIX}/bin/beamtalk-mcp"
     install -m 755 target/release/beamtalk-exec "${PREFIX}/bin/beamtalk-exec"
 
-    # OTP application ebin directories
-    for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib cowboy cowlib ranch gun yamerl telemetry telemetry_poller; do
-        SRC="runtime/_build/default/lib/${app}/ebin"
-        if ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
-            echo "❌ No .beam files found in ${SRC}. Run 'just build-erlang' first."
-            exit 1
+    # OTP application directories (discovered from rebar3 build output)
+    OTP_APP_COUNT=0
+    for ebin_dir in runtime/_build/default/lib/*/ebin; do
+        app_dir="$(dirname "${ebin_dir}")"
+        app="$(basename "${app_dir}")"
+        if ! ls "${ebin_dir}"/*.beam 1>/dev/null 2>&1; then
+            continue
         fi
         install -d "${PREFIX}/lib/beamtalk/lib/${app}/ebin"
-        install -m 644 "${SRC}"/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
-        # Copy .app file if present
-        if ls "${SRC}"/*.app 1>/dev/null 2>&1; then
-            install -m 644 "${SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        install -m 644 "${ebin_dir}"/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        if ls "${ebin_dir}"/*.app 1>/dev/null 2>&1; then
+            install -m 644 "${ebin_dir}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
         fi
+        # Copy priv/ directory if present (e.g. beamtalk_workspace browser UI)
+        if [ -d "${app_dir}/priv" ]; then
+            cp -rL "${app_dir}/priv" "${PREFIX}/lib/beamtalk/lib/${app}/priv"
+        fi
+        OTP_APP_COUNT=$((OTP_APP_COUNT + 1))
     done
+    if [ "${OTP_APP_COUNT}" -eq 0 ]; then
+        echo "❌ No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."
+        exit 1
+    fi
 
     # OTP application include directories (for native Erlang compilation)
     for app in beamtalk_runtime; do
@@ -1050,8 +1059,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-lsp.exe dist/bin/
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
-    foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','cowboy','cowlib','ranch','gun','yamerl','telemetry','telemetry_poller')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
-    $stdlib = "runtime/apps/beamtalk_stdlib/ebin"; if (!(Test-Path "$stdlib/*.beam")) { Write-Error "No stdlib .beam files"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin" | Out-Null; Copy-Item "$stdlib/*.beam" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/"; Copy-Item "$stdlib/*.app" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/" -ErrorAction SilentlyContinue
+    $appCount = 0; foreach ($ebinDir in (Get-ChildItem -Directory "runtime/_build/default/lib/*/ebin" -ErrorAction SilentlyContinue)) { $app = $ebinDir.Parent.Name; $appRoot = $ebinDir.Parent.FullName; if (!(Get-ChildItem "$($ebinDir.FullName)/*.beam" -ErrorAction SilentlyContinue)) { continue }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$($ebinDir.FullName)/*.beam" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop; if (Get-ChildItem "$($ebinDir.FullName)/*.app" -ErrorAction SilentlyContinue) { Copy-Item "$($ebinDir.FullName)/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop }; $privSrc = Join-Path $appRoot "priv"; if (Test-Path $privSrc) { New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/priv" | Out-Null; Copy-Item "$privSrc/*" "dist/lib/beamtalk/lib/$app/priv/" -Recurse }; $appCount++ }; if ($appCount -eq 0) { Write-Error "No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."; exit 1 }
     if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
     just dist-vscode
     @echo "✅ Distribution ready in dist/"
