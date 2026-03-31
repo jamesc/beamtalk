@@ -112,9 +112,8 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        all_class_infos.extend(
-            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module),
-        );
+        all_class_infos
+            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
         parsed_files.push((file.clone(), source, module, parse_diags));
     }
