@@ -6,7 +6,8 @@ Tooling is part of the language, not an afterthought. Beamtalk is designed to be
 
 ```bash
 # Project management
-beamtalk new myapp          # Create new project
+beamtalk new mylib          # Create new library project
+beamtalk new myapp --app    # Create new application project (supervisor + Main)
 beamtalk build              # Compile to BEAM
 beamtalk run                # Compile and start
 beamtalk check              # Check for errors without compiling
@@ -15,6 +16,32 @@ beamtalk check              # Check for errors without compiling
 beamtalk repl               # Interactive REPL (connects to workspace)
 beamtalk test               # Run test suite
 ```
+
+### Project Types
+
+`beamtalk new` creates a **library** by default — a package with source and tests, no application supervisor. Pass `--app` to create an **application** project with a supervisor and `Main` entry point.
+
+| Variant | Command | What you get |
+|---------|---------|--------------|
+| Library (default) | `beamtalk new foo` | `beamtalk.toml`, `src/Foo.bt`, `test/FooTest.bt` |
+| Application | `beamtalk new foo --app` | Above plus `[application]` in toml, `src/FooAppSup.bt`, `src/Main.bt` |
+
+Both variants generate a `Justfile`, `.github/workflows/ci.yml`, `AGENTS.md`, and `.mcp.json`.
+
+### Standard Justfile Targets
+
+Every generated project includes a `Justfile` with these targets:
+
+| Target | Command | Description |
+|--------|---------|-------------|
+| `build` | `beamtalk build` | Compile the project |
+| `test` | `beamtalk test` | Run the test suite |
+| `fmt` | `beamtalk fmt --check` | Check formatting |
+| `fmt-fix` | `beamtalk fmt` | Format in place |
+| `ci` | `fmt build test` | Full CI check |
+| `release` | *(script)* | Tag a release from `beamtalk.toml` version |
+| `publish` | `git push origin --tags` | Push release tags |
+| `run` | `beamtalk run` | Run the application (**`--app` only**) |
 
 ## REPL
 
