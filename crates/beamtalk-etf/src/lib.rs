@@ -32,10 +32,11 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
     let mut len_buf = [0u8; 4];
 
     // Read the first byte separately to distinguish clean EOF from truncated prefix.
-    match reader.read(&mut len_buf[..1])? {
-        0 => return Ok(None), // Clean EOF — no data at all.
-        1 => {}
-        _ => unreachable!(),
+    // Using read_exact (not read) so that Interrupted is automatically retried.
+    match reader.read_exact(&mut len_buf[..1]) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
     }
     // We got the first byte; the remaining 3 bytes are mandatory.
     reader.read_exact(&mut len_buf[1..])?;
@@ -271,13 +272,14 @@ mod tests {
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
 
-    /// Verify `write_packet` returns `InvalidInput` for payloads exceeding `u32::MAX`.
+    /// Verify that converting a `usize` larger than `u32::MAX` with
+    /// `u32::try_from` fails on 64-bit targets.
     ///
-    /// We can't allocate a >4 GiB slice in a unit test, so we verify the
-    /// `u32::try_from` guard that `write_packet` relies on.
+    /// This mirrors the guard used by `write_packet` for payload lengths
+    /// without requiring allocation of a >4 GiB slice in a unit test.
     #[test]
     #[cfg(target_pointer_width = "64")]
-    fn write_packet_oversized_returns_error() {
+    fn u32_try_from_oversized_len_fails() {
         let oversized_len: usize = u32::MAX as usize + 1;
         assert!(u32::try_from(oversized_len).is_err());
     }
