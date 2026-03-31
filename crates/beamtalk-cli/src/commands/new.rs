@@ -285,8 +285,7 @@ fn write_gitignore(path: &Utf8Path) -> Result<()> {
 }
 
 fn write_justfile(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
-    let mut content =
-        include_str!("../../templates/Justfile").replace("{{project_name}}", name);
+    let mut content = include_str!("../../templates/Justfile").replace("{{project_name}}", name);
 
     if kind == ProjectKind::Application {
         content.push_str("\n# Run the application\nrun:\n    beamtalk run\n");
