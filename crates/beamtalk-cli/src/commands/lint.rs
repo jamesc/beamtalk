@@ -15,8 +15,9 @@
 use crate::commands::build::collect_source_files_from_dir;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
+use tracing::warn;
 
 /// Collect lint diagnostics for a parsed module.
 ///
@@ -118,6 +119,15 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         parsed_files.push((file.clone(), source, module, parse_diags));
     }
 
+    // Resolve dependency class metadata so lint sees the same class hierarchy
+    // as build. Without this, @expect annotations that suppress real cross-package
+    // diagnostics would be reported as stale.
+    // Walk ancestors to find the package root (directory containing beamtalk.toml),
+    // since the lint target may be a subdirectory or single file.
+    if let Some(project_root) = find_package_root(&source_path) {
+        resolve_dep_class_infos(&project_root, &mut all_class_infos);
+    }
+
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
 
@@ -181,6 +191,54 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
+///
+/// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
+fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start_dir = if start.is_file() {
+        start.parent()?
+    } else {
+        start
+    };
+
+    let mut dir = start_dir;
+    loop {
+        if dir.join("beamtalk.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// Resolve dependency classes and merge them into the class info list.
+///
+/// Best-effort: if dependency resolution fails (e.g. network error for a git
+/// dep), lint continues without dep classes rather than failing entirely.
+fn resolve_dep_class_infos(
+    project_root: &Utf8Path,
+    all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) {
+    if !project_root.join("beamtalk.toml").exists() {
+        return;
+    }
+
+    let options = beamtalk_core::CompilerOptions::default();
+    match super::deps::ensure_deps_resolved(project_root, &options) {
+        Ok(resolved_deps) => {
+            for dep in &resolved_deps {
+                all_class_infos.extend(dep.class_infos.clone());
+            }
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Failed to resolve dependencies for lint; \
+                 dependency classes may not be available"
+            );
+        }
+    }
 }
 
 /// Output format for lint diagnostics.
@@ -303,6 +361,54 @@ mod tests {
             !stale,
             "@expect all should not be stale when cross-file Actor class info is provided, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn find_package_root_from_subdir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+
+        let root_utf8 = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        let src_utf8 = camino::Utf8PathBuf::from_path_buf(src.clone()).unwrap();
+
+        // From subdir, should find parent
+        assert_eq!(find_package_root(&src_utf8), Some(root_utf8.clone()));
+
+        // From root itself, should find it directly
+        assert_eq!(find_package_root(&root_utf8), Some(root_utf8.clone()));
+    }
+
+    #[test]
+    fn find_package_root_from_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("foo.bt"), "Object subclass: Foo\n").unwrap();
+
+        let file_utf8 = camino::Utf8PathBuf::from_path_buf(src.join("foo.bt")).unwrap();
+        let root_utf8 = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+
+        assert_eq!(find_package_root(&file_utf8), Some(root_utf8));
+    }
+
+    #[test]
+    fn find_package_root_none_without_manifest() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        assert_eq!(find_package_root(&dir), None);
     }
 
     #[test]
