@@ -840,6 +840,22 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
         initialize_pipeline(test_path, test_files, build_dir, warnings_as_errors, jobs)?;
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
+
+    // Cheap pre-scan: check if any package might have native test files
+    // so we can skip build_packages entirely when there are no tests at all.
+    let has_native_test_dir = pipeline.discovered_packages.iter().any(|(pkg_root, _)| {
+        let native_test_dir = pkg_root.join("native").join("test");
+        native_test_dir.is_dir()
+    });
+
+    if pipeline.compiled_tests.is_empty()
+        && pipeline.compiled_doc_tests.is_empty()
+        && !has_native_test_dir
+    {
+        println!("No tests found");
+        return Ok(());
+    }
+
     build_packages(&mut pipeline)?;
 
     if pipeline.compiled_tests.is_empty()
@@ -1342,11 +1358,20 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
 
             // Discover native EUnit test modules (_test or _tests suffix)
-            // in the native ebin dir after compilation.
+            // in the native ebin dir after compilation. Skip duplicates
+            // (BEAM code path is global, first module wins).
             let native_ebin = pkg_layout.native_ebin_dir();
             for module in collect_beam_module_names(&native_ebin)? {
                 if module.ends_with("_test") || module.ends_with("_tests") {
-                    pipeline.native_test_modules.push(module);
+                    if pipeline.native_test_modules.contains(&module) {
+                        warn!(
+                            "Duplicate native test module '{}' in package '{}' — skipping \
+                             (already discovered in another package)",
+                            module, pkg.name
+                        );
+                    } else {
+                        pipeline.native_test_modules.push(module);
+                    }
                 }
             }
         }
