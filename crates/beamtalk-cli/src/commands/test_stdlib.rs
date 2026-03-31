@@ -746,22 +746,9 @@ pub(crate) fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path
     }
     debug!("Batch compiling {} EUnit wrappers", erl_files.len());
 
-    let mut cmd = std::process::Command::new("erlc");
-    cmd.arg("-o").arg(output_dir.as_str());
-    for erl_file in erl_files {
-        cmd.arg(erl_file.as_str());
-    }
-
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run erlc")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        miette::bail!("erlc batch compilation failed:\n{}{}", stdout, stderr);
-    }
+    beamtalk_cli::erlc::ErlcInvocation::new(output_dir)
+        .source_files(erl_files)
+        .run("erlc batch compilation")?;
 
     Ok(())
 }
