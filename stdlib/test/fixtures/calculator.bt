@@ -3,7 +3,7 @@
 
 // Calculator - tests local variable bindings in Object subclass method bodies (BT-744)
 
-Object subclass: Calculator
+Value subclass: Calculator
 
   // Single local variable: assign then read
   double: n =>

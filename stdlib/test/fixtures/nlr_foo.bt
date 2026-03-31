@@ -3,7 +3,7 @@
 
 // BT-754: NlrFoo — ifTrue:ifFalse: non-local return fixture
 
-Object subclass: NlrFoo
+Value subclass: NlrFoo
 
   classify: x =>
     x > 0 ifTrue: [^"positive"] ifFalse: [^"non-positive"]

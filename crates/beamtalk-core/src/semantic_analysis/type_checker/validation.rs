@@ -50,7 +50,13 @@ impl TypeChecker {
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
 
-        if !has_class_method && !hierarchy.has_class_dnu_override(class_name) {
+        if !has_class_method
+            && !hierarchy.has_class_dnu_override(class_name)
+            // BT-1736: Cross-file inheritance — if the parent class is not in
+            // the hierarchy, we can't know the full class-side method set.
+            // Instance-side already checks this; class-side must do the same.
+            && !hierarchy.has_cross_file_parent(class_name)
+        {
             // Fall back to the Class→Behaviour→Object→ProtoObject instance-method chain.
             // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
             // fallthrough), so the type checker must model the same path.

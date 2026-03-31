@@ -3,6 +3,6 @@
 
 // BT-754: NlrBaz — simple value-type fixture used by NLR regression tests
 
-Object subclass: NlrBaz
+Value subclass: NlrBaz
 
   double: x => x + x

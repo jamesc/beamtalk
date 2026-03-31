@@ -1,10 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Abstract Shape class for E2E testing
+// Abstract shape class for E2E testing
 // Demonstrates subclassResponsibility pattern
 
-abstract Actor subclass: Shape
+abstract Actor subclass: AbstractShape
   state: name = "shape"
 
   // Abstract method — subclasses must override

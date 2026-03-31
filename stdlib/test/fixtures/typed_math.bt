@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-typed Object subclass: TypedMath
+typed Value subclass: TypedMath
 
   identity: value :: Integer -> Integer => value
 

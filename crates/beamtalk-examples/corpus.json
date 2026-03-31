@@ -9980,7 +9980,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,\n// and error behaviour when sending to a stopped actor\n\nTestCase subclass: ActorLifecycleTest\n\n  testIsAliveAndStop =>\n    counter := Counter spawn\n    // isAlive returns true for a running actor\n    self assert: counter isAlive\n    // Actor still works after isAlive check\n    self assert: counter increment equals: 1\n    // isAlive still true after message processing\n    self assert: counter isAlive\n    // Stop the actor gracefully\n    self assert: counter stop equals: #ok\n    // Stopping an already-stopped actor is idempotent\n    self assert: counter stop equals: #ok\n    // isAlive returns false after stop\n    self deny: counter isAlive\n    // Sending a message to a stopped actor raises an error\n    self should: [counter increment] raise: #actor_dead\n\n  testNonMapArgumentToSpawnwith =>\n    // not silently fall back to spawn/0\n    self should: [Counter spawnWith: 42] raise: #type_error\n    // Passing a non-Dictionary argument to spawnWith: should raise type_error,\n    self should: [Counter spawnWith: \"hello\"] raise: #type_error\n    self should: [Counter spawnWith: true] raise: #type_error\n\n  testSpawnwithWithBareIdentifierKeys =>\n    // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)\n    c3 := Counter spawnWith: #{#value => 10}\n    self assert: c3 getValue equals: 10\n    self assert: c3 increment equals: 11\n\n  testPrintstringActorInstanceAndClassObject =>\n    // Actor instance printString returns \"a ClassName\"\n    c2 := Counter spawn\n    self assert: c2 printString equals: \"a Counter\"\n    // Class object printString returns class name\n    self assert: Counter printString equals: \"Counter\"\n\n  testNewRaisesInstantiationError =>\n    // Counter new raises InstantiationError (BT-1056: class-side new)\n    self should: [Counter new] raise: #instantiation_error\n    // Counter new: raises InstantiationError (BT-1056: class-side new:)\n    self should: [Counter new: #{}] raise: #instantiation_error\n\n  testNewIsCatchableAsInstantiationError =>\n    // Counter new is catchable via on: InstantiationError do: (BT-1056)\n    result := [Counter new] on: InstantiationError do: [:_e | #caught]\n    self assert: result equals: #caught",
+      "source": "// BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,\n// and error behaviour when sending to a stopped actor\n\nTestCase subclass: ActorLifecycleTest\n\n  testIsAliveAndStop =>\n    counter := Counter spawn\n    // isAlive returns true for a running actor\n    self assert: counter isAlive\n    // Actor still works after isAlive check\n    self assert: counter increment equals: 1\n    // isAlive still true after message processing\n    self assert: counter isAlive\n    // Stop the actor gracefully\n    self assert: counter stop equals: #ok\n    // Stopping an already-stopped actor is idempotent\n    self assert: counter stop equals: #ok\n    // isAlive returns false after stop\n    self deny: counter isAlive\n    // Sending a message to a stopped actor raises an error\n    self should: [counter increment] raise: #actor_dead\n\n  testNonMapArgumentToSpawnwith =>\n    // not silently fall back to spawn/0\n    self should: [Counter spawnWith: 42] raise: #type_error\n    // Passing a non-Dictionary argument to spawnWith: should raise type_error,\n    self should: [Counter spawnWith: \"hello\"] raise: #type_error\n    self should: [Counter spawnWith: true] raise: #type_error\n\n  testSpawnwithWithBareIdentifierKeys =>\n    // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)\n    c3 := Counter spawnWith: #{#value => 10}\n    self assert: c3 getValue equals: 10\n    self assert: c3 increment equals: 11\n\n  testPrintstringActorInstanceAndClassObject =>\n    // Actor instance printString returns \"a ClassName\"\n    c2 := Counter spawn\n    self assert: c2 printString equals: \"a Counter\"\n    // Class object printString returns class name\n    self assert: Counter printString equals: \"Counter\"\n\n  testNewRaisesInstantiationError =>\n    // Counter new raises InstantiationError (BT-1056: class-side new)\n    @expect all\n    self should: [Counter new] raise: #instantiation_error\n    // Counter new: raises InstantiationError (BT-1056: class-side new:)\n    @expect all\n    self should: [Counter new: #{}] raise: #instantiation_error\n\n  testNewIsCatchableAsInstantiationError =>\n    // Counter new is catchable via on: InstantiationError do: (BT-1056)\n    @expect all\n    result := [Counter new] on: InstantiationError do: [:_e | #caught]\n    self assert: result equals: #caught",
       "explanation": "BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop, and error behaviour when sending to a stopped actor"
     },
     {
@@ -11787,7 +11787,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)\n\nTestCase subclass: CompiledMethodTest\n\n  testMethodLookup =>\n    self assert: (Counter >> #getValue) notNil\n    self assert: (Counter >> #nonExistent) equals: nil\n\n  testMethodLookupOnVariableReceivers =>\n    cls := Counter\n    self assert: cls equals: Counter\n    self assert: (cls >> #getValue) notNil\n    self assert: (cls >> #getValue) selector equals: #getValue\n    self assert: (cls >> #nonExistent) equals: nil\n\n  testClass => self assert: (Counter >> #getValue) class equals: CompiledMethod\n\n  testSelector =>\n    self assert: (Counter >> #getValue) selector equals: #getValue\n    self assert: (Counter >> #increment) selector equals: #increment\n\n  testArgumentCount =>\n    self assert: (Counter >> #getValue) argumentCount equals: 0\n    self assert: (Counter >> #increment) argumentCount equals: 0\n\n  testSource =>\n    self assert: (Counter >> #getValue) source equals: \"getValue => self.value\"\n\n  testPrintString =>\n    self assert: (Counter >> #getValue) printString equals: \"a CompiledMethod(getValue)\"\n\n  testLookupOnNonClass =>\n    // >> on non-class value produces type_error\n    @expect dnu\n    self should: [42 >> #foo] raise: #type_error\n\n  testAsString =>\n    self assert: (Counter >> #getValue) asString equals: \"a CompiledMethod(getValue)\"",
+      "source": "// Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)\n\nTestCase subclass: CompiledMethodTest\n\n  testMethodLookup =>\n    self assert: (Counter >> #getValue) notNil\n    self assert: (Counter >> #nonExistent) equals: nil\n\n  testMethodLookupOnVariableReceivers =>\n    cls := Counter\n    self assert: cls equals: Counter\n    // Type checker infers cls as Counter instance, not Counter class object,\n    // so >> is not found via instance-side lookup. At runtime, cls holds the\n    // class object and dispatches through Class→Behaviour chain.\n    @expect dnu\n    self assert: (cls >> #getValue) notNil\n    @expect dnu\n    self assert: (cls >> #getValue) selector equals: #getValue\n    @expect dnu\n    self assert: (cls >> #nonExistent) equals: nil\n\n  testClass => self assert: (Counter >> #getValue) class equals: CompiledMethod\n\n  testSelector =>\n    self assert: (Counter >> #getValue) selector equals: #getValue\n    self assert: (Counter >> #increment) selector equals: #increment\n\n  testArgumentCount =>\n    self assert: (Counter >> #getValue) argumentCount equals: 0\n    self assert: (Counter >> #increment) argumentCount equals: 0\n\n  testSource =>\n    self assert: (Counter >> #getValue) source equals: \"getValue => self.value\"\n\n  testPrintString =>\n    self assert: (Counter >> #getValue) printString equals: \"a CompiledMethod(getValue)\"\n\n  testLookupOnNonClass =>\n    // >> on non-class value produces type_error\n    @expect dnu\n    self should: [42 >> #foo] raise: #type_error\n\n  testAsString =>\n    self assert: (Counter >> #getValue) asString equals: \"a CompiledMethod(getValue)\"",
       "explanation": "Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)"
     },
     {
@@ -13062,11 +13062,11 @@
     },
     {
       "id": "stdlib-test-fixtures-abstract-shape",
-      "title": "Shape",
+      "title": "AbstractShape",
       "category": "stdlib-fixtures",
       "tags": [
+        "AbstractShape",
         "Actor",
-        "Shape",
         "abstract_shape",
         "actor",
         "area",
@@ -13085,8 +13085,8 @@
         "property",
         "subclassing"
       ],
-      "source": "// Abstract Shape class for E2E testing\n// Demonstrates subclassResponsibility pattern\n\nabstract Actor subclass: Shape\n  state: name = \"shape\"\n\n  // Abstract method — subclasses must override\n  area => self subclassResponsibility\n\n  getName => self.name",
-      "explanation": "Abstract Shape class for E2E testing Demonstrates subclassResponsibility pattern"
+      "source": "// Abstract shape class for E2E testing\n// Demonstrates subclassResponsibility pattern\n\nabstract Actor subclass: AbstractShape\n  state: name = \"shape\"\n\n  // Abstract method — subclasses must override\n  area => self subclassResponsibility\n\n  getName => self.name",
+      "explanation": "Abstract shape class for E2E testing Demonstrates subclassResponsibility pattern"
     },
     {
       "id": "stdlib-test-fixtures-actor-chaining-fixture",
@@ -13795,7 +13795,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "Calculator",
-        "Object",
+        "Value",
         "absVal:",
         "addAndNegate:to:",
         "assign",
@@ -13813,12 +13813,12 @@
         "mutate",
         "mutation",
         "negation",
-        "object",
         "set",
         "subclassing",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "// Calculator - tests local variable bindings in Object subclass method bodies (BT-744)\n\nObject subclass: Calculator\n\n  // Single local variable: assign then read\n  double: n =>\n    result := n * 2\n    result\n\n  // Multiple local variables in sequence\n  compute: x =>\n    doubled := x * 2\n    sum := doubled + 10\n    sum\n\n  // Local variable used in a message send\n  addAndNegate: a to: b =>\n    total := a + b\n    total negated\n\n  // Local variable from a conditional expression\n  absVal: n =>\n    positive := n > 0\n    positive ifTrue: [n] ifFalse: [n negated]",
+      "source": "// Calculator - tests local variable bindings in Object subclass method bodies (BT-744)\n\nValue subclass: Calculator\n\n  // Single local variable: assign then read\n  double: n =>\n    result := n * 2\n    result\n\n  // Multiple local variables in sequence\n  compute: x =>\n    doubled := x * 2\n    sum := doubled + 10\n    sum\n\n  // Local variable used in a message send\n  addAndNegate: a to: b =>\n    total := a + b\n    total negated\n\n  // Local variable from a conditional expression\n  absVal: n =>\n    positive := n > 0\n    positive ifTrue: [n] ifFalse: [n negated]",
       "explanation": "Calculator - tests local variable bindings in Object subclass method bodies (BT-744)"
     },
     {
@@ -14398,7 +14398,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "ConditionalLocalMutation",
-        "Object",
+        "Value",
         "anonymous function",
         "assign",
         "assignment",
@@ -14421,7 +14421,6 @@
         "mutate",
         "mutation",
         "negation",
-        "object",
         "process",
         "set",
         "subclassing",
@@ -14432,9 +14431,10 @@
         "testMultipleMutations:",
         "testMutationWithExpression:",
         "testSequentialConditionals:and:",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "// BT-1392: Value type fixture for testing local variable mutations inside\n// ifTrue:/ifFalse:/ifTrue:ifFalse: blocks in non-actor context.\n\nObject subclass: ConditionalLocalMutation\n\n  // Single ifTrue: with captured local mutation\n  testIfTrueSimple: flag =>\n    x := 1\n    flag ifTrue: [x := 2]\n    x\n\n  // Single ifFalse: with captured local mutation\n  testIfFalseSimple: flag =>\n    x := 1\n    flag ifFalse: [x := 2]\n    x\n\n  // ifTrue:ifFalse: with captured local mutation in both branches\n  testIfTrueIfFalse: flag =>\n    x := 1\n    flag ifTrue: [x := 2] ifFalse: [x := 3]\n    x\n\n  // Multiple captured mutations in one block\n  testMultipleMutations: flag =>\n    x := 1\n    y := 10\n    flag\n      ifTrue: [\n        x := 2\n        y := 20\n      ]\n    x + y\n\n  // Mutation with expression (not just literal)\n  testMutationWithExpression: flag =>\n    x := 5\n    flag ifTrue: [x := x + 10]\n    x\n\n  // Sequential conditionals\n  testSequentialConditionals: a and: b =>\n    x := 0\n    a ifTrue: [x := x + 1]\n    b ifTrue: [x := x + 10]\n    x",
+      "source": "// BT-1392: Value type fixture for testing local variable mutations inside\n// ifTrue:/ifFalse:/ifTrue:ifFalse: blocks in non-actor context.\n\nValue subclass: ConditionalLocalMutation\n\n  // Single ifTrue: with captured local mutation\n  testIfTrueSimple: flag =>\n    x := 1\n    flag ifTrue: [x := 2]\n    x\n\n  // Single ifFalse: with captured local mutation\n  testIfFalseSimple: flag =>\n    x := 1\n    flag ifFalse: [x := 2]\n    x\n\n  // ifTrue:ifFalse: with captured local mutation in both branches\n  testIfTrueIfFalse: flag =>\n    x := 1\n    flag ifTrue: [x := 2] ifFalse: [x := 3]\n    x\n\n  // Multiple captured mutations in one block\n  testMultipleMutations: flag =>\n    x := 1\n    y := 10\n    flag\n      ifTrue: [\n        x := 2\n        y := 20\n      ]\n    x + y\n\n  // Mutation with expression (not just literal)\n  testMutationWithExpression: flag =>\n    x := 5\n    flag ifTrue: [x := x + 10]\n    x\n\n  // Sequential conditionals\n  testSequentialConditionals: a and: b =>\n    x := 0\n    a ifTrue: [x := x + 1]\n    b ifTrue: [x := x + 10]\n    x",
       "explanation": "BT-1392: Value type fixture for testing local variable mutations inside ifTrue:/ifFalse:/ifTrue:ifFalse: blocks in non-actor context."
     },
     {
@@ -15908,7 +15908,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "MathHelper",
-        "Object",
+        "Value",
         "async",
         "branch",
         "concurrent",
@@ -15925,12 +15925,12 @@
         "inheritance",
         "math_helper",
         "negation",
-        "object",
         "process",
         "subclassing",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "// MathHelper - value type with recursive methods for testing BT-330\n// Value types use direct function calls, so recursive self-dispatch works\n\nObject subclass: MathHelper\n\n  // Recursive keyword method: factorial\n  factorial: n => (n <= 1) ifTrue: [1] ifFalse: [n * (self factorial: n - 1)]\n\n  // Double-recursive keyword method: fibonacci\n  fibonacci: n =>\n    (n <= 1) ifTrue: [\n      n\n    ] ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]\n\n  // Simple recursive keyword method: countdown\n  countdown: n => (n <= 0) ifTrue: [0] ifFalse: [1 + (self countdown: n - 1)]",
+      "source": "// MathHelper - value type with recursive methods for testing BT-330\n// Value types use direct function calls, so recursive self-dispatch works\n\nValue subclass: MathHelper\n\n  // Recursive keyword method: factorial\n  factorial: n => (n <= 1) ifTrue: [1] ifFalse: [n * (self factorial: n - 1)]\n\n  // Double-recursive keyword method: fibonacci\n  fibonacci: n =>\n    (n <= 1) ifTrue: [\n      n\n    ] ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]\n\n  // Simple recursive keyword method: countdown\n  countdown: n => (n <= 0) ifTrue: [0] ifFalse: [1 + (self countdown: n - 1)]",
       "explanation": "MathHelper - value type with recursive methods for testing BT-330 Value types use direct function calls, so recursive self-dispatch works"
     },
     {
@@ -15973,17 +15973,17 @@
       "category": "stdlib-fixtures",
       "tags": [
         "MultiExprCalc",
-        "Object",
+        "Value",
         "compute:with:",
         "doubleAfterAdd:",
         "extends",
         "inherit",
         "inheritance",
         "multi_expr_calc",
-        "object",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "// MultiExprCalc - value type with multi-expression methods for testing BT-367\n// Verifies that non-last expressions in value-type methods are sequenced correctly\n// (side effects execute, but only the last expression's value is returned)\n\nObject subclass: MultiExprCalc\n\n  // Two-expression method: first expression is discarded, second is returned\n  doubleAfterAdd: x =>\n    x abs\n    x * 2\n\n  // Three-expression method: first two are discarded, third is returned\n  compute: a with: b =>\n    a abs\n    b abs\n    a * b",
+      "source": "// MultiExprCalc - value type with multi-expression methods for testing BT-367\n// Verifies that non-last expressions in value-type methods are sequenced correctly\n// (side effects execute, but only the last expression's value is returned)\n\nValue subclass: MultiExprCalc\n\n  // Two-expression method: first expression is discarded, second is returned\n  doubleAfterAdd: x =>\n    x abs\n    x * 2\n\n  // Three-expression method: first two are discarded, third is returned\n  compute: a with: b =>\n    a abs\n    b abs\n    a * b",
       "explanation": "MultiExprCalc - value type with multi-expression methods for testing BT-367 Verifies that non-last expressions in value-type methods are sequenced correctly (side effects execute, but only the last expression's value is returned)"
     },
     {
@@ -16204,7 +16204,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrBar",
-        "Object",
+        "Value",
         "check:",
         "extends",
         "if not",
@@ -16212,11 +16212,11 @@
         "inheritance",
         "negation",
         "nlr_bar",
-        "object",
         "subclassing",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "// BT-754: NlrBar — ifFalse: non-local return fixture\n\nObject subclass: NlrBar\n\n  check: x =>\n    x isEmpty ifFalse: [^\"not empty\"]\n    \"empty\"",
+      "source": "// BT-754: NlrBar — ifFalse: non-local return fixture\n\nValue subclass: NlrBar\n\n  check: x =>\n    x isEmpty ifFalse: [^\"not empty\"]\n    \"empty\"",
       "explanation": "BT-754: NlrBar — ifFalse: non-local return fixture"
     },
     {
@@ -16225,16 +16225,16 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrBaz",
-        "Object",
+        "Value",
         "double:",
         "extends",
         "inherit",
         "inheritance",
         "nlr_baz",
-        "object",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "// BT-754: NlrBaz — simple value-type fixture used by NLR regression tests\n\nObject subclass: NlrBaz\n\n  double: x => x + x",
+      "source": "// BT-754: NlrBaz — simple value-type fixture used by NLR regression tests\n\nValue subclass: NlrBaz\n\n  double: x => x + x",
       "explanation": "BT-754: NlrBaz — simple value-type fixture used by NLR regression tests"
     },
     {
@@ -16243,7 +16243,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrDoubler",
-        "Object",
+        "Value",
         "branch",
         "conditional",
         "extends",
@@ -16251,11 +16251,11 @@
         "inherit",
         "inheritance",
         "nlr_doubler",
-        "object",
         "subclassing",
-        "test:"
+        "test:",
+        "value"
       ],
-      "source": "// BT-754: NlrDoubler — non-local return with computed value fixture\n\nObject subclass: NlrDoubler\n\n  test: x =>\n    x > 0 ifTrue: [^x * 2]\n    0",
+      "source": "// BT-754: NlrDoubler — non-local return with computed value fixture\n\nValue subclass: NlrDoubler\n\n  test: x =>\n    x > 0 ifTrue: [^x * 2]\n    0",
       "explanation": "BT-754: NlrDoubler — non-local return with computed value fixture"
     },
     {
@@ -16315,7 +16315,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrFoo",
-        "Object",
+        "Value",
         "branch",
         "classify:",
         "conditional",
@@ -16327,12 +16327,12 @@
         "inheritance",
         "negation",
         "nlr_foo",
-        "object",
         "subclassing",
         "ternary",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "// BT-754: NlrFoo — ifTrue:ifFalse: non-local return fixture\n\nObject subclass: NlrFoo\n\n  classify: x =>\n    x > 0 ifTrue: [^\"positive\"] ifFalse: [^\"non-positive\"]\n    \"unreachable\"",
+      "source": "// BT-754: NlrFoo — ifTrue:ifFalse: non-local return fixture\n\nValue subclass: NlrFoo\n\n  classify: x =>\n    x > 0 ifTrue: [^\"positive\"] ifFalse: [^\"non-positive\"]\n    \"unreachable\"",
       "explanation": "BT-754: NlrFoo — ifTrue:ifFalse: non-local return fixture"
     },
     {
@@ -16341,17 +16341,17 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrMatch",
-        "Object",
+        "Value",
         "classify:",
         "extends",
         "findStatus:",
         "inherit",
         "inheritance",
         "nlr_match",
-        "object",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "// NlrMatch — non-local return inside match arm bodies\n\nObject subclass: NlrMatch\n\n  // ^ in a match arm should exit the method early\n  findStatus: status =>\n    status match: [\n      #completed -> ^\"done\";\n      #failed -> ^\"error\";\n      _ -> nil\n    ]\n    \"fallthrough\"\n\n  // Only some arms have ^, others fall through\n  classify: value =>\n    value match: [\n      #stop -> ^\"stopped early\";\n      _ -> nil\n    ]\n    \"continued\"",
+      "source": "// NlrMatch — non-local return inside match arm bodies\n\nValue subclass: NlrMatch\n\n  // ^ in a match arm should exit the method early\n  findStatus: status =>\n    status match: [\n      #completed -> ^\"done\";\n      #failed -> ^\"error\";\n      _ -> nil\n    ]\n    \"fallthrough\"\n\n  // Only some arms have ^, others fall through\n  classify: value =>\n    value match: [\n      #stop -> ^\"stopped early\";\n      _ -> nil\n    ]\n    \"continued\"",
       "explanation": "NlrMatch — non-local return inside match arm bodies"
     },
     {
@@ -16400,7 +16400,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrOnDo",
-        "Object",
+        "Value",
         "branch",
         "conditional",
         "extends",
@@ -16414,11 +16414,11 @@
         "iteration",
         "loop",
         "nlr_on_do",
-        "object",
         "subclassing",
-        "test:"
+        "test:",
+        "value"
       ],
-      "source": "// BT-754: NlrOnDo — NLR throw propagates through on:do: fixture\n// Verifies that on:do: does NOT swallow NLR throws (re-raises them)\n\nObject subclass: NlrOnDo\n\n  test: x =>\n    [x isEmpty ifTrue: [^\"early\"]] on: Error do: [:e | \"caught\"]\n    \"not early\"",
+      "source": "// BT-754: NlrOnDo — NLR throw propagates through on:do: fixture\n// Verifies that on:do: does NOT swallow NLR throws (re-raises them)\n\nValue subclass: NlrOnDo\n\n  test: x =>\n    [x isEmpty ifTrue: [^\"early\"]] on: Error do: [:e | \"caught\"]\n    \"not early\"",
       "explanation": "BT-754: NlrOnDo — NLR throw propagates through on:do: fixture Verifies that on:do: does NOT swallow NLR throws (re-raises them)"
     },
     {
@@ -16427,7 +16427,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrReturnTest",
-        "Object",
+        "Value",
         "branch",
         "conditional",
         "extends",
@@ -16435,11 +16435,11 @@
         "inherit",
         "inheritance",
         "nlr_return_test",
-        "object",
         "subclassing",
-        "test:"
+        "test:",
+        "value"
       ],
-      "source": "// BT-754: NlrReturnTest — ifTrue: non-local return fixture\n\nObject subclass: NlrReturnTest\n\n  test: x =>\n    x isEmpty ifTrue: [^\"empty\"]\n    \"not empty\"",
+      "source": "// BT-754: NlrReturnTest — ifTrue: non-local return fixture\n\nValue subclass: NlrReturnTest\n\n  test: x =>\n    x isEmpty ifTrue: [^\"empty\"]\n    \"not empty\"",
       "explanation": "BT-754: NlrReturnTest — ifTrue: non-local return fixture"
     },
     {
@@ -16448,7 +16448,7 @@
       "category": "stdlib-fixtures",
       "tags": [
         "NlrSkipper",
-        "Object",
+        "Value",
         "branch",
         "conditional",
         "extends",
@@ -16456,11 +16456,11 @@
         "inherit",
         "inheritance",
         "nlr_skipper",
-        "object",
         "subclassing",
-        "test:"
+        "test:",
+        "value"
       ],
-      "source": "// BT-754: NlrSkipper — early return skips later expressions fixture\n\nObject subclass: NlrSkipper\n\n  test: x =>\n    x isEmpty ifTrue: [^\"early\"]\n    \"middle\"",
+      "source": "// BT-754: NlrSkipper — early return skips later expressions fixture\n\nValue subclass: NlrSkipper\n\n  test: x =>\n    x isEmpty ifTrue: [^\"early\"]\n    \"middle\"",
       "explanation": "BT-754: NlrSkipper — early return skips later expressions fixture"
     },
     {
@@ -17626,8 +17626,8 @@
       "category": "stdlib-fixtures",
       "tags": [
         "+",
-        "Object",
         "TypedMath",
+        "Value",
         "branch",
         "conditional",
         "extends",
@@ -17639,13 +17639,13 @@
         "inheritance",
         "maybeName:",
         "negation",
-        "object",
         "subclassing",
         "sum:with:",
         "typed_math",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "typed Object subclass: TypedMath\n\n  identity: value :: Integer -> Integer => value\n\n  identityWithSpace: value :: Integer -> Integer => value\n\n  + other :: Number -> Number => other\n\n  sum: left :: Integer with: right :: Integer -> Integer => left + right\n\n  maybeName: flag :: Boolean -> Integer | String =>\n    flag ifTrue: [1] ifFalse: [\"none\"]",
+      "source": "typed Value subclass: TypedMath\n\n  identity: value :: Integer -> Integer => value\n\n  identityWithSpace: value :: Integer -> Integer => value\n\n  + other :: Number -> Number => other\n\n  sum: left :: Integer with: right :: Integer -> Integer => left + right\n\n  maybeName: flag :: Boolean -> Integer | String =>\n    flag ifTrue: [1] ifFalse: [\"none\"]",
       "explanation": ""
     },
     {
@@ -17685,8 +17685,8 @@
       "title": "Validator",
       "category": "stdlib-fixtures",
       "tags": [
-        "Object",
         "Validator",
+        "Value",
         "branch",
         "check:",
         "conditional",
@@ -17695,13 +17695,13 @@
         "if",
         "inherit",
         "inheritance",
-        "object",
         "raise",
         "subclassing",
         "throw",
-        "validator"
+        "validator",
+        "value"
       ],
-      "source": "// Test fixture: Validator value type with error: usage\n\nObject subclass: Validator\n\n  check: value =>\n    value < 0 ifTrue: [self error: \"must be non-negative\"]\n    value",
+      "source": "// Test fixture: Validator value type with error: usage\n\nValue subclass: Validator\n\n  check: value =>\n    value < 0 ifTrue: [self error: \"must be non-negative\"]\n    value",
       "explanation": "Test fixture: Validator value type with error: usage"
     },
     {
@@ -17796,7 +17796,7 @@
         "value_sub_circle",
         "withRadius:"
       ],
-      "source": "// BT-1559: Concrete Value sub-subclass for inheritance tests.\n// Extends ValueBaseShape (which extends Value), adding its own field.\n// Exercises: new, new:, keyword constructor, inherited field access,\n// and withX: setters on both own and inherited fields.\n\nValueBaseShape subclass: ValueSubCircle\n  field: radius = 1.0\n\n  // Class-side factory using new:\n  class withRadius: r =>\n    // DNU false positive: new: is on Value ancestor, resolved via cross-file hierarchy\n    // at runtime. Fixture compilation doesn't inject sibling fixture class infos to\n    // avoid cascading DNU warnings across unrelated fixtures (e.g. >> operator).\n    @expect dnu\n    self new: #{#radius => r}\n\n  // User-defined method using both inherited and own fields\n  describe => \"{self.color} circle r={self.radius}\"",
+      "source": "// BT-1559: Concrete Value sub-subclass for inheritance tests.\n// Extends ValueBaseShape (which extends Value), adding its own field.\n// Exercises: new, new:, keyword constructor, inherited field access,\n// and withX: setters on both own and inherited fields.\n\nValueBaseShape subclass: ValueSubCircle\n  field: radius = 1.0\n\n  // Class-side factory using new:\n  class withRadius: r => self new: #{#radius => r}\n\n  // User-defined method using both inherited and own fields\n  describe => \"{self.color} circle r={self.radius}\"",
       "explanation": "BT-1559: Concrete Value sub-subclass for inheritance tests. Extends ValueBaseShape (which extends Value), adding its own field. Exercises: new, new:, keyword constructor, inherited field access, and withX: setters on both own and inherited fields."
     },
     {
