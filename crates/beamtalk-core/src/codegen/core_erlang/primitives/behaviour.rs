@@ -8,6 +8,10 @@
 //! Maps `@primitive "classXxx"` declarations in `lib/Behaviour.bt` and `lib/Class.bt`
 //! to direct calls into `beamtalk_behaviour_intrinsics`. These are thin data-access
 //! functions — hierarchy-walking logic lives in pure Beamtalk.
+//!
+//! Exception: `@primitive "methodLookup"` (BT-1735) maps to
+//! `beamtalk_method_resolver:resolve/2` instead, since method lookup is a
+//! separate domain service.
 
 use super::super::document::Document;
 use crate::docvec;
@@ -72,6 +76,14 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         | "classConformsTo" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
+        }
+        "methodLookup" => {
+            let arg = params.first()?;
+            Some(docvec![
+                "call 'beamtalk_method_resolver':'resolve'(Self, ",
+                arg.clone(),
+                ")"
+            ])
         }
         "classSetMethodDoc" => {
             let sel = params.first()?;
@@ -256,6 +268,18 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classReload'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_method_lookup() {
+        let result = doc_to_string(generate_behaviour_bif(
+            "methodLookup",
+            &["Selector".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_method_resolver':'resolve'(Self, Selector)".to_string())
         );
     }
 

@@ -1265,6 +1265,28 @@ mod tests {
     }
 
     #[test]
+    fn test_method_lookup_operator_no_warning() {
+        // BT-1735: Integer >> #+  — >> is defined on Behaviour, inherited via Class chain
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Binary(">>".into()),
+            vec![sym_lit("increment")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            ">> is defined on Behaviour, should not produce DNU warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
     fn test_character_literal_integer_method_no_warning() {
         // BT-778: $A + 1 — Character inherits Integer's +, no DNU warning
         let module = make_module(vec![msg_send(
