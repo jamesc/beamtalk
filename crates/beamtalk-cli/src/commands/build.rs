@@ -1649,6 +1649,11 @@ fn compile_native_erlang_with_deps(
         );
     }
 
+    // BT-1732: User-visible output confirming native Erlang compilation.
+    let count = erl_files.len();
+    let plural = if count == 1 { "" } else { "s" };
+    eprintln!("Compiled {count} native Erlang file{plural}");
+
     Ok(Some(ebin_dir))
 }
 

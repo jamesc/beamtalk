@@ -44,6 +44,8 @@
 -export([runAll/0, runAll/1, run/1, run/2]).
 %% Exported for testing
 -export([path_suffix_match/2]).
+%% BT-1732: Module loading with on_load failure reporting
+-export([ensure_loaded_or_warn/1]).
 %% TestResult instance-side
 -export([
     passed/1,
@@ -756,3 +758,25 @@ failures(Self) -> result_failures(Self).
 hasPassed(Self) -> result_has_passed(Self).
 summary(Self) -> result_summary(Self).
 printString(Self) -> result_print_string(Self).
+
+%%====================================================================
+%% BT-1732: Module loading with on_load failure reporting
+%%====================================================================
+
+%% @doc Load a module via code:ensure_loaded/1, printing a warning to stderr
+%% if loading fails (e.g., on_load hook crashes). This replaces bare
+%% code:ensure_loaded/1 calls in the test harness eval command so that
+%% class on_load failures are reported instead of silently ignored.
+-spec ensure_loaded_or_warn(module()) -> ok.
+ensure_loaded_or_warn(Module) ->
+    case code:ensure_loaded(Module) of
+        {module, _} ->
+            ok;
+        {error, Reason} ->
+            io:format(
+                standard_error,
+                "Warning: failed to load module '~s' (on_load): ~p~n",
+                [Module, Reason]
+            ),
+            ok
+    end.

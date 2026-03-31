@@ -1482,39 +1482,47 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     // Build fixture loading commands
+    // BT-1732: Use ensure_loaded_or_warn for consistent on_load failure reporting.
     let fixture_load_cmd = if pipeline.all_fixture_modules.is_empty() {
         String::new()
     } else {
         pipeline
             .all_fixture_modules
             .iter()
-            .map(|m| format!("code:ensure_loaded('{m}')"))
+            .map(|m| format!("beamtalk_test_runner:ensure_loaded_or_warn('{m}')"))
             .collect::<Vec<_>>()
             .join(", ")
             + ", "
     };
 
     // Build package module loading commands (triggers on_load → class registration)
+    // BT-1732: Check return values and report which class failed to load and why.
     let package_load_cmd = if pipeline.package_modules.is_empty() {
         String::new()
     } else {
         pipeline
             .package_modules
             .iter()
-            .map(|m| format!("code:ensure_loaded('{m}')"))
+            .map(|m| format!("beamtalk_test_runner:ensure_loaded_or_warn('{m}')"))
             .collect::<Vec<_>>()
             .join(", ")
             + ", "
     };
 
     // Build test module loading commands (triggers on_load → class registration)
+    // BT-1732: Check return values and report which test class failed to load.
     let test_load_cmd = if pipeline.compiled_tests.is_empty() {
         String::new()
     } else {
         pipeline
             .compiled_tests
             .iter()
-            .map(|t| format!("code:ensure_loaded('{}')", t.test_class.module_name))
+            .map(|t| {
+                format!(
+                    "beamtalk_test_runner:ensure_loaded_or_warn('{}')",
+                    t.test_class.module_name
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ")
             + ", "
