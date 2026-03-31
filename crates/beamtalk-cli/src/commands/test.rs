@@ -1738,7 +1738,7 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
          HasFailed = lists:foldl(fun(M, Acc) -> \
              Res = eunit:test(M, [verbose]), \
              io:format(\"NATIVE_EUNIT_DONE:~s~n\", [M]), \
-             case Res of error -> true; _ -> Acc end \
+             case Res of ok -> Acc; _ -> true end \
          end, false, Mods), \
          init:stop(case HasFailed of true -> 1; false -> 0 end)."
     );
@@ -1803,7 +1803,22 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     for line in stdout.lines() {
         if let Some(module_name) = line.strip_prefix("NATIVE_EUNIT_DONE:") {
             // Parse the section for this module's EUnit summary
-            let (passed, failed, skipped) = parse_eunit_summary(&current_section);
+            let (passed, mut failed, skipped) = parse_eunit_summary(&current_section);
+
+            // If EUnit crashed before printing a summary (e.g. {error, Reason}),
+            // parse_eunit_summary returns (0, 0, 0). Detect this by checking the
+            // exit status — if the process failed and no tests were counted, treat
+            // the module as having 1 failure.
+            if passed == 0 && failed == 0 && skipped == 0 && !output.status.success() {
+                // Check if the section contains EUnit error indicators
+                if current_section.contains("*failed*")
+                    || current_section.contains("Error in")
+                    || current_section.contains("{error,")
+                {
+                    failed = 1;
+                }
+            }
+
             modules.push((module_name.to_string(), passed, failed, skipped));
             total_passed += passed;
             total_failed += failed;
