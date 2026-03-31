@@ -38,6 +38,7 @@
 %%% | `classes'     | List all loaded user classes                        |
 %%% | `load:'       | Compile and load a .bt file                         |
 %%% | `globals'     | Full workspace namespace snapshot (Dictionary)      |
+%%% | `sync'        | Incremental project sync (compile changed files)   |
 %%% | `bind:as:'    | Register a value in workspace namespace             |
 %%% | `unbind:'     | Remove a value from workspace namespace             |
 
@@ -58,6 +59,8 @@
 -export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
 %% Package reflection (ADR 0070 Phase 5)
 -export([dependencies/0]).
+%% Project sync (BT-1723)
+-export([sync/0]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
@@ -93,6 +96,8 @@ dispatch('stopSupervisor:', [ClassArg], _Self) ->
     stopSupervisor(ClassArg);
 dispatch(supervisors, [], _Self) ->
     supervisors();
+dispatch(sync, [], _Self) ->
+    sync();
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -436,6 +441,40 @@ dependencies() ->
                     DepNames
                 )
             )
+    end.
+
+%%% ============================================================================
+%%% Project sync (BT-1723)
+%%% ============================================================================
+
+%% @doc Perform an incremental project sync from the current working directory.
+%%
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) sync`.
+%% Delegates to `beamtalk_repl_ops_load:sync_project/2` which handles
+%% incremental compilation (mtime tracking, native .erl files, dependency
+%% ordering) and returns a result map.
+%%
+%% Returns a Dictionary with keys:
+%%   - `#summary` — human-readable summary (e.g. "Reloaded 2 of 5 files (3 unchanged)")
+%%   - `#classes` — List of loaded class name Strings
+%%   - `#errors` — List of error Dictionaries (empty on success)
+%%   - `#changedCount` — number of files reloaded
+%%   - `#unchangedCount` — number of unchanged files
+%%   - `#deletedCount` — number of deleted files
+-spec sync() -> map().
+sync() ->
+    case beamtalk_repl_ops_load:sync_project(".", #{}) of
+        {ok, Result} ->
+            #{
+                summary => maps:get(summary, Result),
+                classes => maps:get(classes, Result),
+                errors => maps:get(errors, Result),
+                changedCount => maps:get(changed_count, Result),
+                unchangedCount => maps:get(unchanged_count, Result),
+                deletedCount => maps:get(deleted_count, Result)
+            };
+        {error, Err} ->
+            beamtalk_error:raise(Err)
     end.
 
 %%% ============================================================================
