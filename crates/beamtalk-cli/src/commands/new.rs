@@ -9,8 +9,15 @@ use std::fs;
 
 use super::manifest::{format_name_error, validate_package_name};
 
+/// Whether the project is a library or an application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectKind {
+    Library,
+    Application,
+}
+
 /// Create a new beamtalk project.
-pub fn new_project(name: &str) -> Result<()> {
+pub fn new_project(name: &str, app: bool) -> Result<()> {
     // Validate package name before creating anything
     if let Err(e) = validate_package_name(name) {
         miette::bail!("{}", format_name_error(name, &e));
@@ -23,22 +30,35 @@ pub fn new_project(name: &str) -> Result<()> {
         miette::bail!("Directory '{}' already exists", name);
     }
 
+    let kind = if app {
+        ProjectKind::Application
+    } else {
+        ProjectKind::Library
+    };
+
     // Create project directory structure
-    create_project_structure(&project_path, name)
+    create_project_structure(&project_path, name, kind)
         .wrap_err_with(|| format!("Failed to create project '{name}'"))?;
 
-    println!("Created package '{name}'");
+    let kind_label = match kind {
+        ProjectKind::Library => "library",
+        ProjectKind::Application => "application",
+    };
+    println!("Created {kind_label} package '{name}'");
     println!();
     println!("Next steps:");
     println!("  cd {name}");
-    println!("  beamtalk build");
-    println!("  beamtalk repl");
+    println!("  just build");
+    println!("  just test");
+    if kind == ProjectKind::Application {
+        println!("  just run");
+    }
 
     Ok(())
 }
 
 /// Create the project directory structure with template files.
-fn create_project_structure(path: &Utf8Path, name: &str) -> Result<()> {
+fn create_project_structure(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
     // Create directories
     fs::create_dir_all(path.join("src"))
         .into_diagnostic()
@@ -48,36 +68,120 @@ fn create_project_structure(path: &Utf8Path, name: &str) -> Result<()> {
         .into_diagnostic()
         .wrap_err("Failed to create test directory")?;
 
-    fs::create_dir_all(path.join(".github"))
+    fs::create_dir_all(path.join(".github").join("workflows"))
         .into_diagnostic()
-        .wrap_err("Failed to create .github directory")?;
+        .wrap_err("Failed to create .github/workflows directory")?;
 
     // Create beamtalk.toml
-    let toml_content = format!(
+    write_beamtalk_toml(path, name, kind)?;
+
+    // Create source files
+    match kind {
+        ProjectKind::Library => write_library_sources(path, name)?,
+        ProjectKind::Application => write_application_sources(path, name)?,
+    }
+
+    // Create test file
+    write_sample_test(path, name, kind)?;
+
+    // Create README.md
+    write_readme(path, name, kind)?;
+
+    // Create .gitignore
+    write_gitignore(path)?;
+
+    // Create Justfile
+    write_justfile(path, kind)?;
+
+    // Create CI workflow
+    write_ci_workflow(path)?;
+
+    // Create AGENTS.md
+    write_agents_md(path, name)?;
+
+    // Create .github/copilot-instructions.md
+    write_copilot_instructions(path, name)?;
+
+    // Create .mcp.json
+    write_mcp_json(path)?;
+
+    Ok(())
+}
+
+fn write_beamtalk_toml(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
+    let mut content = format!(
         r#"# Copyright 2026 {name} authors
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
 name = "{name}"
 version = "0.1.0"
-
-[dependencies]
 "#
     );
-    fs::write(path.join("beamtalk.toml"), toml_content)
-        .into_diagnostic()
-        .wrap_err("Failed to create beamtalk.toml")?;
 
-    // Create main.bt
+    if kind == ProjectKind::Application {
+        use std::fmt::Write;
+        let supervisor = to_class_name(name, "AppSup");
+        write!(content, "\n[application]\nsupervisor = \"{supervisor}\"\n").unwrap();
+    }
+
+    content.push_str("\n[dependencies]\n");
+
+    fs::write(path.join("beamtalk.toml"), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create beamtalk.toml")
+}
+
+fn write_library_sources(path: &Utf8Path, name: &str) -> Result<()> {
+    let class_name = to_class_name(name, "");
+    let content = format!(
+        r#"// Copyright 2026 {name} authors
+// SPDX-License-Identifier: Apache-2.0
+
+/// {class_name} — main class for the {name} library.
+Object subclass: {class_name}
+
+  /// Return a greeting string.
+  class greet => "Hello from {name}!"
+"#
+    );
+    fs::write(path.join("src").join(format!("{class_name}.bt")), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create library source file")
+}
+
+fn write_application_sources(path: &Utf8Path, name: &str) -> Result<()> {
+    let sup_name = to_class_name(name, "AppSup");
+    let main_name = "Main";
+
+    // Write supervisor
+    let sup_content = format!(
+        r"// Copyright 2026 {name} authors
+// SPDX-License-Identifier: Apache-2.0
+
+/// {sup_name} — root supervisor for {name}.
+///
+/// Referenced in beamtalk.toml [application] supervisor.
+/// `beamtalk run` starts this automatically as an OTP application.
+Supervisor subclass: {sup_name}
+
+  class strategy -> Symbol => #oneForOne
+
+  class children => #()
+"
+    );
+    fs::write(path.join("src").join(format!("{sup_name}.bt")), sup_content)
+        .into_diagnostic()
+        .wrap_err("Failed to create supervisor")?;
+
+    // Write Main entry point
     let main_content = format!(
         r#"// Copyright 2026 {name} authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Main entry point for {name}.
-// Run with: beamtalk run Main run
-// Or load interactively: beamtalk repl
-
-Object subclass: Main
+/// Main entry point for {name}.
+/// Run with: beamtalk run Main run
+Object subclass: {main_name}
 
   class run =>
     self new run
@@ -87,35 +191,84 @@ Object subclass: Main
     self
 "#
     );
-    fs::write(path.join("src").join("main.bt"), main_content)
+    fs::write(path.join("src").join("Main.bt"), main_content)
         .into_diagnostic()
-        .wrap_err("Failed to create main.bt")?;
+        .wrap_err("Failed to create Main.bt")
+}
 
-    // Create README.md
-    let readme_content = format!(
+fn write_sample_test(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
+    let (class_name, assertion) = match kind {
+        ProjectKind::Library => {
+            let cn = to_class_name(name, "");
+            let assertion = format!("self assert: ({cn} greet) equals: \"Hello from {name}!\"");
+            (format!("{cn}Test"), assertion)
+        }
+        ProjectKind::Application => {
+            // Main is a value object, so `new` returns an instance
+            let assertion = "self assert: (Main new class name) equals: #Main".to_string();
+            ("MainTest".to_string(), assertion)
+        }
+    };
+
+    let content = format!(
+        r"// Copyright 2026 {name} authors
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: {class_name}
+
+  testBasic =>
+    {assertion}
+"
+    );
+    fs::write(path.join("test").join(format!("{class_name}.bt")), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create test file")
+}
+
+fn write_readme(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
+    let kind_label = match kind {
+        ProjectKind::Library => "library",
+        ProjectKind::Application => "application",
+    };
+
+    let mut content = format!(
         r"# {name}
 
-A beamtalk project.
+A Beamtalk {kind_label}.
 
 ## Building
 
 ```bash
-beamtalk build
+just build
 ```
 
-## Running
+## Testing
 
 ```bash
-beamtalk repl
+just test
 ```
 "
     );
-    fs::write(path.join("README.md"), readme_content)
-        .into_diagnostic()
-        .wrap_err("Failed to create README.md")?;
 
-    // Create .gitignore
-    let gitignore_content = r"# Build outputs
+    if kind == ProjectKind::Application {
+        content.push_str(
+            r"
+## Running
+
+```bash
+just run
+```
+",
+        );
+    }
+
+    fs::write(path.join("README.md"), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create README.md")
+}
+
+fn write_gitignore(path: &Utf8Path) -> Result<()> {
+    let content = r"# Build outputs
 /_build/
 *.beam
 *.core
@@ -126,32 +279,102 @@ beamtalk repl
 *.swp
 *.swo
 ";
-    fs::write(path.join(".gitignore"), gitignore_content)
+    fs::write(path.join(".gitignore"), content)
         .into_diagnostic()
-        .wrap_err("Failed to create .gitignore")?;
-
-    // Create AGENTS.md
-    write_agents_md(path, name)?;
-
-    // Create .github/copilot-instructions.md
-    write_copilot_instructions(path, name)?;
-
-    // Create .mcp.json — points at beamtalk-mcp with --start so Claude auto-boots
-    // the workspace on first open without requiring `beamtalk repl` to be running.
-    let mcp_content = r#"{
-  "mcpServers": {
-    "beamtalk": {
-      "command": "beamtalk-mcp",
-      "args": ["--start"]
-    }
-  }
+        .wrap_err("Failed to create .gitignore")
 }
-"#;
-    fs::write(path.join(".mcp.json"), mcp_content)
-        .into_diagnostic()
-        .wrap_err("Failed to create .mcp.json")?;
 
-    Ok(())
+fn write_justfile(path: &Utf8Path, kind: ProjectKind) -> Result<()> {
+    let mut content = String::from(
+        r#"# Standard Beamtalk project targets.
+# See: https://beamtalk.dev/docs/tooling
+
+# Build the project
+build:
+    beamtalk build
+
+# Run the test suite
+test:
+    beamtalk test
+
+# Check formatting
+fmt:
+    beamtalk fmt --check
+
+# Format in place
+fmt-fix:
+    beamtalk fmt
+
+# Full CI check (fmt + build + test)
+ci: fmt build test
+
+# Tag a release from beamtalk.toml version
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(grep '^version' beamtalk.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+    git tag "v${version}"
+    echo "Tagged v${version}"
+
+# Push release tags to origin
+publish:
+    git push origin --tags
+"#,
+    );
+
+    if kind == ProjectKind::Application {
+        content.push_str(
+            r"
+# Run the application
+run:
+    beamtalk run
+",
+        );
+    }
+
+    fs::write(path.join("Justfile"), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create Justfile")
+}
+
+fn write_ci_workflow(path: &Utf8Path) -> Result<()> {
+    let content = r#"name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+
+      - name: Install Beamtalk
+        run: curl -fsSL https://beamtalk.dev/install.sh | sudo sh -s -- --nightly --prefix /usr/local
+
+      - name: Check formatting
+        run: beamtalk fmt --check
+
+      - name: Build
+        run: beamtalk build
+
+      - name: Test
+        run: beamtalk test
+"#;
+    fs::write(
+        path.join(".github").join("workflows").join("ci.yml"),
+        content,
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to create CI workflow")
 }
 
 fn write_agents_md(path: &Utf8Path, name: &str) -> Result<()> {
@@ -172,151 +395,266 @@ fn write_copilot_instructions(path: &Utf8Path, name: &str) -> Result<()> {
     .wrap_err("Failed to create .github/copilot-instructions.md")
 }
 
+fn write_mcp_json(path: &Utf8Path) -> Result<()> {
+    let content = r#"{
+  "mcpServers": {
+    "beamtalk": {
+      "command": "beamtalk-mcp",
+      "args": ["--start"]
+    }
+  }
+}
+"#;
+    fs::write(path.join(".mcp.json"), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create .mcp.json")
+}
+
+/// Convert a `snake_case` package name to a `PascalCase` class name.
+/// If `suffix` is non-empty, it is appended.
+fn to_class_name(name: &str, suffix: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = true;
+    for ch in name.chars() {
+        if ch == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(ch.to_uppercase().next().unwrap());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+    result.push_str(suffix);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
     use tempfile::TempDir;
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
-    #[test]
-    #[serial(cwd)]
-    fn test_new_project_creates_directory() {
+    /// Helper: create a project in a temp dir and return the temp dir.
+    fn create_test_project(project_name: &str, app: bool) -> (TempDir, std::path::PathBuf) {
         let temp = TempDir::new().unwrap();
-        let project_name = "test_project";
-
-        // Save current dir and change to temp
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp.path()).unwrap();
 
-        new_project(project_name).unwrap();
+        new_project(project_name, app).unwrap();
 
-        // Restore directory before checking files
         std::env::set_current_dir(&original_dir).unwrap();
 
         let project_path = temp.path().join(project_name);
+        (temp, project_path)
+    }
+
+    #[test]
+    fn test_to_class_name() {
+        assert_eq!(to_class_name("foo", ""), "Foo");
+        assert_eq!(to_class_name("my_cool_app", ""), "MyCoolApp");
+        assert_eq!(to_class_name("my_app", "AppSup"), "MyAppAppSup");
+        assert_eq!(to_class_name("http", "AppSup"), "HttpAppSup");
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_library_creates_directory() {
+        let (_temp, project_path) = create_test_project("test_lib_dir", false);
         assert!(project_path.exists());
         assert!(project_path.is_dir());
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
-    fn test_new_project_creates_src_directory() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_src";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        // Restore directory before checking files
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let src_path = temp.path().join(project_name).join("src");
-        assert!(src_path.exists());
-        assert!(src_path.is_dir());
+    fn test_new_library_creates_src_directory() {
+        let (_temp, project_path) = create_test_project("test_lib_src", false);
+        assert!(project_path.join("src").exists());
+        assert!(project_path.join("src").is_dir());
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
-    fn test_new_project_creates_beamtalk_toml() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_toml";
+    fn test_new_library_creates_test_directory() {
+        let (_temp, project_path) = create_test_project("test_lib_testdir", false);
+        assert!(project_path.join("test").exists());
+        assert!(project_path.join("test").is_dir());
+    }
 
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        // Restore directory before checking files
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let toml_path = temp.path().join(project_name).join("beamtalk.toml");
-        assert!(toml_path.exists());
-
-        let content = fs::read_to_string(toml_path).unwrap();
+    #[test]
+    #[serial(cwd)]
+    fn test_new_library_creates_beamtalk_toml() {
+        let (_temp, project_path) = create_test_project("test_lib_toml", false);
+        let content = fs::read_to_string(project_path.join("beamtalk.toml")).unwrap();
         assert!(content.contains("[package]"));
-        assert!(content.contains(&format!("name = \"{project_name}\"")));
+        assert!(content.contains("name = \"test_lib_toml\""));
         assert!(content.contains("version = \"0.1.0\""));
         assert!(
-            !content.contains("[run]"),
-            "should not contain [run] section"
+            !content.contains("[application]"),
+            "library should not contain [application] section"
         );
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
-    fn test_new_project_creates_main_bt() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_main";
+    fn test_new_library_creates_class_file() {
+        let (_temp, project_path) = create_test_project("my_lib", false);
+        let class_path = project_path.join("src").join("MyLib.bt");
+        assert!(class_path.exists(), "library class file should exist");
 
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
+        let content = fs::read_to_string(class_path).unwrap();
+        assert!(content.contains("Object subclass: MyLib"));
+        assert!(content.contains("class greet"));
+    }
 
-        new_project(project_name).unwrap();
+    #[test]
+    #[serial(cwd)]
+    fn test_new_library_creates_test_file() {
+        let (_temp, project_path) = create_test_project("my_lib", false);
+        let test_path = project_path.join("test").join("MyLibTest.bt");
+        assert!(test_path.exists(), "library test file should exist");
 
-        // Restore directory before checking files
-        std::env::set_current_dir(&original_dir).unwrap();
+        let content = fs::read_to_string(test_path).unwrap();
+        assert!(content.contains("TestCase subclass: MyLibTest"));
+        assert!(content.contains("MyLib greet"));
+        assert!(
+            content.contains("assert:"),
+            "test should use assert: method"
+        );
+        assert!(
+            content.contains("equals:"),
+            "test should use equals: assertion"
+        );
+    }
 
-        let main_path = temp.path().join(project_name).join("src").join("main.bt");
-        assert!(main_path.exists());
+    #[test]
+    #[serial(cwd)]
+    fn test_new_library_has_no_main() {
+        let (_temp, project_path) = create_test_project("test_lib_nomain", false);
+        assert!(
+            !project_path.join("src").join("main.bt").exists(),
+            "library should not have main.bt"
+        );
+        assert!(
+            !project_path.join("src").join("Main.bt").exists(),
+            "library should not have Main.bt"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_app_creates_beamtalk_toml_with_application() {
+        let (_temp, project_path) = create_test_project("test_app_toml", true);
+        let content = fs::read_to_string(project_path.join("beamtalk.toml")).unwrap();
+        assert!(content.contains("[package]"));
+        assert!(content.contains("name = \"test_app_toml\""));
+        assert!(
+            content.contains("[application]"),
+            "app should contain [application] section"
+        );
+        assert!(
+            content.contains("supervisor = \"TestAppTomlAppSup\""),
+            "app should reference supervisor class: {content}"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_app_creates_supervisor() {
+        let (_temp, project_path) = create_test_project("my_app", true);
+        let sup_path = project_path.join("src").join("MyAppAppSup.bt");
+        assert!(sup_path.exists(), "supervisor file should exist");
+
+        let content = fs::read_to_string(sup_path).unwrap();
+        assert!(content.contains("Supervisor subclass: MyAppAppSup"));
+        assert!(content.contains("class children"));
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_app_creates_main() {
+        let (_temp, project_path) = create_test_project("my_app", true);
+        let main_path = project_path.join("src").join("Main.bt");
+        assert!(main_path.exists(), "Main.bt should exist for app");
 
         let content = fs::read_to_string(main_path).unwrap();
         assert!(content.contains("Object subclass: Main"));
         assert!(content.contains("TranscriptStream current show:"));
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_library_creates_justfile() {
+        let (_temp, project_path) = create_test_project("test_lib_just", false);
+        let content = fs::read_to_string(project_path.join("Justfile")).unwrap();
+        assert!(content.contains("build:"));
+        assert!(content.contains("test:"));
+        assert!(content.contains("fmt:"));
+        assert!(content.contains("ci:"));
+        assert!(content.contains("release:"));
+        assert!(content.contains("publish:"));
+        assert!(
+            !content.contains("run:"),
+            "library Justfile should not have run target"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_app_creates_justfile_with_run() {
+        let (_temp, project_path) = create_test_project("test_app_just", true);
+        let content = fs::read_to_string(project_path.join("Justfile")).unwrap();
+        assert!(content.contains("build:"));
+        assert!(content.contains("test:"));
+        assert!(
+            content.contains("run:"),
+            "app Justfile should have run target"
+        );
+        assert!(content.contains("beamtalk run"));
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_project_creates_ci_workflow() {
+        let (_temp, project_path) = create_test_project("test_ci_wf", false);
+        let ci_path = project_path
+            .join(".github")
+            .join("workflows")
+            .join("ci.yml");
+        assert!(ci_path.exists(), "CI workflow should exist");
+
+        let content = fs::read_to_string(ci_path).unwrap();
+        assert!(content.contains("erlef/setup-beam"));
+        assert!(content.contains("beamtalk.dev/install.sh"));
+        assert!(content.contains("beamtalk fmt --check"));
+        assert!(content.contains("beamtalk build"));
+        assert!(content.contains("beamtalk test"));
+    }
+
     #[test]
     #[serial(cwd)]
     fn test_new_project_creates_readme() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_readme";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        // Restore directory before checking files
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let readme_path = temp.path().join(project_name).join("README.md");
-        assert!(readme_path.exists());
-
-        let content = fs::read_to_string(readme_path).unwrap();
-        assert!(content.contains(&format!("# {project_name}")));
+        let (_temp, project_path) = create_test_project("test_readme", false);
+        let content = fs::read_to_string(project_path.join("README.md")).unwrap();
+        assert!(content.contains("# test_readme"));
+        assert!(content.contains("library"));
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_app_creates_readme_with_run() {
+        let (_temp, project_path) = create_test_project("test_readme_app", true);
+        let content = fs::read_to_string(project_path.join("README.md")).unwrap();
+        assert!(content.contains("# test_readme_app"));
+        assert!(content.contains("application"));
+        assert!(content.contains("just run"));
+    }
+
     #[test]
     #[serial(cwd)]
     fn test_new_project_creates_gitignore() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_gitignore";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        // Restore directory before checking files
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let gitignore_path = temp.path().join(project_name).join(".gitignore");
-        assert!(gitignore_path.exists());
-
-        let content = fs::read_to_string(gitignore_path).unwrap();
+        let (_temp, project_path) = create_test_project("test_gitignore", false);
+        let content = fs::read_to_string(project_path.join(".gitignore")).unwrap();
         assert!(content.contains("/_build/"));
         assert!(
             !content.contains("/build/"),
@@ -326,51 +664,38 @@ mod tests {
         assert!(content.contains("*.core"));
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
     fn test_new_project_fails_if_directory_exists() {
         let temp = TempDir::new().unwrap();
-        let project_name = "test_project_exists";
+        let project_name = "test_exists";
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp.path()).unwrap();
 
-        // Create project first time
-        new_project(project_name).unwrap();
+        new_project(project_name, false).unwrap();
 
         // Try to create again - should fail
-        let result = new_project(project_name);
+        let result = new_project(project_name, false);
         assert!(result.is_err());
 
-        // Restore directory before test ends
         std::env::set_current_dir(original_dir).unwrap();
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
     fn test_new_project_with_underscores_and_digits() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "my_cool_project123";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        // Restore directory before checking files to avoid tempdir cleanup issues
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let project_path = temp.path().join(project_name);
+        let (_temp, project_path) = create_test_project("my_cool_project123", false);
         assert!(project_path.exists());
-        assert!(project_path.join("src").join("main.bt").exists());
+        // Library class should be named MyCoolProject123.bt
+        assert!(
+            project_path
+                .join("src")
+                .join("MyCoolProject123.bt")
+                .exists()
+        );
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
     fn test_new_project_rejects_invalid_name() {
@@ -380,7 +705,7 @@ mod tests {
         std::env::set_current_dir(temp.path()).unwrap();
 
         // Dashes are invalid
-        let result = new_project("my-cool-app");
+        let result = new_project("my-cool-app", false);
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -389,13 +714,13 @@ mod tests {
         );
 
         // CamelCase is invalid
-        let result = new_project("MyApp");
+        let result = new_project("MyApp", false);
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("my_app"), "error should suggest my_app: {err}");
 
         // Reserved name
-        let result = new_project("stdlib");
+        let result = new_project("stdlib", false);
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -403,102 +728,38 @@ mod tests {
             "error should mention reserved: {err}"
         );
 
-        // Restore directory
         std::env::set_current_dir(original_dir).unwrap();
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
-    #[test]
-    #[serial(cwd)]
-    fn test_new_project_creates_test_directory() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_testdir";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let test_path = temp.path().join(project_name).join("test");
-        assert!(test_path.exists());
-        assert!(test_path.is_dir());
-    }
-
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
     fn test_new_project_creates_agents_md() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_agents";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let agents_path = temp.path().join(project_name).join("AGENTS.md");
-        assert!(agents_path.exists());
-
-        let content = fs::read_to_string(agents_path).unwrap();
-        assert!(content.contains(project_name));
+        let (_temp, project_path) = create_test_project("test_agents", false);
+        let content = fs::read_to_string(project_path.join("AGENTS.md")).unwrap();
+        assert!(content.contains("test_agents"));
         assert!(content.contains("beamtalk build"));
         assert!(content.contains("beamtalk repl"));
         assert!(content.contains("Syntax"));
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
     fn test_new_project_creates_copilot_instructions() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_copilot";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let copilot_path = temp
-            .path()
-            .join(project_name)
-            .join(".github")
-            .join("copilot-instructions.md");
+        let (_temp, project_path) = create_test_project("test_copilot", false);
+        let copilot_path = project_path.join(".github").join("copilot-instructions.md");
         assert!(copilot_path.exists());
 
         let content = fs::read_to_string(copilot_path).unwrap();
-        assert!(content.contains(project_name));
+        assert!(content.contains("test_copilot"));
         assert!(content.contains("Beamtalk"));
         assert!(content.contains("beamtalk build"));
     }
 
-    /// Uses `#[serial(cwd)]` because it changes the current working directory
-    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
     fn test_new_project_creates_mcp_json() {
-        let temp = TempDir::new().unwrap();
-        let project_name = "test_project_mcp";
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name).unwrap();
-
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let mcp_path = temp.path().join(project_name).join(".mcp.json");
-        assert!(mcp_path.exists());
-
-        let content = fs::read_to_string(mcp_path).unwrap();
+        let (_temp, project_path) = create_test_project("test_mcp", false);
+        let content = fs::read_to_string(project_path.join(".mcp.json")).unwrap();
         assert!(content.contains("mcpServers"));
         assert!(content.contains("beamtalk-mcp"));
         assert!(content.contains("--start"));

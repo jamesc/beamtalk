@@ -85,10 +85,14 @@ enum Command {
         selector: Option<String>,
     },
 
-    /// Create a new Beamtalk project
+    /// Create a new Beamtalk project (library by default, --app for application)
     New {
         /// Name of the project to create
         name: String,
+
+        /// Create an application project with supervisor and Main entry point
+        #[arg(long)]
+        app: bool,
     },
 
     /// Start an interactive REPL
@@ -407,7 +411,7 @@ fn run() -> Result<()> {
             class_or_dot,
             selector,
         } => commands::run::run(&class_or_dot, selector.as_deref()),
-        Command::New { name } => commands::new::new_project(&name),
+        Command::New { name, app } => commands::new::new_project(&name, app),
         Command::Repl {
             port,
             node,
