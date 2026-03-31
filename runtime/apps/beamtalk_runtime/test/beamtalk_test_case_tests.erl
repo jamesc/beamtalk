@@ -299,8 +299,8 @@ format_stacktrace_preserves_innermost_first_test() ->
     {TestNotFoundIdx, _} = TestNotFoundPos,
     ?assert(BaseurlIdx < TestNotFoundIdx).
 
-%% At most 3 frames are shown.
-format_stacktrace_limits_to_three_frames_test() ->
+%% At most 3 frames are shown: first 2 innermost + outermost when >3 exist.
+format_stacktrace_selects_first_two_plus_last_test() ->
     Frames = [
         {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
         {'bt@user@A', m2, 0, [{file, "a.bt"}, {line, 2}]},
@@ -308,10 +308,11 @@ format_stacktrace_limits_to_three_frames_test() ->
         {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
     ],
     Result = beamtalk_test_case:format_stacktrace(Frames),
-    %% m4 (the 4th frame) should be excluded
+    %% First 2 (m1, m2) + last (m4) are shown; m3 is dropped
     ?assertNotEqual(nomatch, binary:match(Result, <<"m1">>)),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"m3">>)),
-    ?assertEqual(nomatch, binary:match(Result, <<"m4">>)).
+    ?assertNotEqual(nomatch, binary:match(Result, <<"m2">>)),
+    ?assertEqual(nomatch, binary:match(Result, <<"m3">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"m4">>)).
 
 %%% ============================================================================
 %%% ensure_test_context/4 Tests (BT-1743: frame ordering)
@@ -329,8 +330,9 @@ ensure_test_context_has_test_frame_test() ->
     ),
     ?assertEqual(FailMsg, Result).
 
-%% When the test method is NOT in the rendered frames, context is injected.
-ensure_test_context_injects_context_test() ->
+%% When the test method is NOT in the rendered frames, context is appended
+%% after existing stacktrace lines (innermost-first ordering preserved).
+ensure_test_context_appends_context_test() ->
     FailMsg = <<"FAIL testBar: some error\n  at A>>helper">>,
     Stacktrace = [
         {'bt@user@A', helper, 0, []},
@@ -339,4 +341,8 @@ ensure_test_context_injects_context_test() ->
     Result = beamtalk_test_case:ensure_test_context(
         FailMsg, 'bt@user@A', testBar, Stacktrace
     ),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"testBar">>)).
+    ?assertNotEqual(nomatch, binary:match(Result, <<"testBar">>)),
+    %% The synthetic test context should appear after the existing "at" line
+    {HelperPos, _} = binary:match(Result, <<"helper">>),
+    {TestBarPos, _} = binary:match(Result, <<"testBar">>),
+    ?assert(HelperPos < TestBarPos).
