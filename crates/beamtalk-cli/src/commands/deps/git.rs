@@ -243,7 +243,14 @@ mod tests {
         // Get the commit SHA
         let sha = get_git_sha(repo_path);
 
-        let url = format!("file://{}", repo_path.display());
+        // file:// URLs need forward slashes. On Windows, paths don't start with
+        // `/`, so we prepend one to get `file:///C:/...`. On Unix, `display()`
+        // already starts with `/`, giving `file:///tmp/...` (BT-1737).
+        let mut path_str = repo_path.display().to_string().replace('\\', "/");
+        if !path_str.starts_with('/') {
+            path_str.insert(0, '/');
+        }
+        let url = format!("file://{path_str}");
         (repo_dir, url, sha)
     }
 

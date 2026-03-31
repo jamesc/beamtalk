@@ -540,9 +540,14 @@ mod tests {
         run_git_cmd(path, &["branch", "develop"]);
 
         let sha = get_git_sha(path);
-        // Use forward slashes for file:// URLs (Windows paths with backslashes
-        // break TOML parsing when embedded in string values)
-        let url = format!("file://{}", path.display().to_string().replace('\\', "/"));
+        // file:// URLs need forward slashes. On Windows, paths don't start with
+        // `/`, so we prepend one to get `file:///C:/...`. On Unix, `display()`
+        // already starts with `/`, giving `file:///tmp/...` (BT-1737).
+        let mut path_str = path.display().to_string().replace('\\', "/");
+        if !path_str.starts_with('/') {
+            path_str.insert(0, '/');
+        }
+        let url = format!("file://{path_str}");
         (dir, url, sha)
     }
 
