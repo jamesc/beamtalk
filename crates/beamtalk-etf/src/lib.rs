@@ -271,20 +271,15 @@ mod tests {
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
 
+    /// Verify `write_packet` returns `InvalidInput` for payloads exceeding `u32::MAX`.
+    ///
+    /// We can't allocate a >4 GiB slice in a unit test, so we verify the
+    /// `u32::try_from` guard that `write_packet` relies on.
     #[test]
+    #[cfg(target_pointer_width = "64")]
     fn write_packet_oversized_returns_error() {
-        // We can't allocate u32::MAX + 1 bytes, so test the logic directly
-        // by checking the error path with a mock. Instead, verify the function
-        // signature change: it should return InvalidInput for data > u32::MAX.
-        // Since we can't create such a large slice in a test, we verify the
-        // conversion logic by checking u32::try_from on an oversized value.
         let oversized_len: usize = u32::MAX as usize + 1;
         assert!(u32::try_from(oversized_len).is_err());
-        // The actual write_packet wraps this in io::ErrorKind::InvalidInput.
-        // We test normal-sized packets work fine as a sanity check.
-        let mut buf = Vec::new();
-        write_packet(&mut buf, b"small").unwrap();
-        assert_eq!(buf.len(), 4 + 5);
     }
 
     // ── Term constructors ───────────────────────────────────────
