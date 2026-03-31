@@ -73,6 +73,14 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
         }
+        "methodLookup" => {
+            let arg = params.first()?;
+            Some(docvec![
+                "call 'beamtalk_method_resolver':'resolve'(Self, ",
+                arg.clone(),
+                ")"
+            ])
+        }
         "classSetMethodDoc" => {
             let sel = params.first()?;
             let doc = params.get(1)?;
@@ -256,6 +264,18 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classReload'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_method_lookup() {
+        let result = doc_to_string(generate_behaviour_bif(
+            "methodLookup",
+            &["Selector".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_method_resolver':'resolve'(Self, Selector)".to_string())
         );
     }
 
