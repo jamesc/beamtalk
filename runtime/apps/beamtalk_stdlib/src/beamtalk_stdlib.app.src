@@ -80,8 +80,7 @@
             #{name => 'TypeError', module => 'bt@stdlib@type_error', parent => 'Error', package => 'stdlib', kind => object, type_params => []},
             #{name => 'UndefinedObject', module => 'bt@stdlib@undefined_object', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Value', module => 'bt@stdlib@value', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
-            #{name => 'WorkspaceInterface', module => 'bt@stdlib@workspace_interface', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
-            #{name => 'Yaml', module => 'bt@stdlib@yaml', parent => 'Object', package => 'stdlib', kind => object, type_params => []}
+            #{name => 'WorkspaceInterface', module => 'bt@stdlib@workspace_interface', parent => 'Object', package => 'stdlib', kind => object, type_params => []}
         ]}
     ]}
 ]}.

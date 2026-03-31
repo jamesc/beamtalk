@@ -45,14 +45,12 @@ pub struct BeamPaths {
     pub workspace_ebin: PathBuf,
     /// Path to the `beamtalk_compiler` application's `ebin/` directory.
     pub compiler_ebin: PathBuf,
-    /// Path to the `yamerl` YAML library's `ebin/` directory (BT-1122).
-    pub yamerl_ebin: PathBuf,
     /// Path to the `beamtalk_stdlib` application's `ebin/` directory.
     /// In Dev layout this is `apps/beamtalk_stdlib/ebin/` (Beamtalk-compiled class beams).
     pub stdlib_ebin: PathBuf,
     /// Path to the rebar3-compiled Erlang modules for `beamtalk_stdlib`.
     /// In Dev layout this is `_build/default/lib/beamtalk_stdlib/ebin/`
-    /// (contains `beamtalk_yaml.beam`, `beamtalk_json.beam`, `beamtalk_regex.beam`).
+    /// (contains `beamtalk_json.beam`, `beamtalk_regex.beam`, etc.).
     /// In Installed layout this equals `stdlib_ebin`.
     pub stdlib_erlang_ebin: PathBuf,
     /// Path to the `cowboy` HTTP server's `ebin/` directory (ADR 0020).
@@ -61,8 +59,6 @@ pub struct BeamPaths {
     pub cowlib_ebin: PathBuf,
     /// Path to the `ranch` acceptor pool's `ebin/` directory (cowboy dependency).
     pub ranch_ebin: PathBuf,
-    /// Path to the `gun` HTTP client's `ebin/` directory (BT-1114).
-    pub gun_ebin: PathBuf,
     /// Path to the `telemetry` event bus's `ebin/` directory (ADR 0069).
     pub telemetry_ebin: PathBuf,
     /// Path to the `telemetry_poller` periodic VM stats `ebin/` directory (ADR 0069).
@@ -86,11 +82,9 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
                 workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
                 compiler_ebin: build_lib_dir.join("beamtalk_compiler/ebin"),
-                yamerl_ebin: build_lib_dir.join("yamerl/ebin"),
                 cowboy_ebin: build_lib_dir.join("cowboy/ebin"),
                 cowlib_ebin: build_lib_dir.join("cowlib/ebin"),
                 ranch_ebin: build_lib_dir.join("ranch/ebin"),
-                gun_ebin: build_lib_dir.join("gun/ebin"),
                 telemetry_ebin: build_lib_dir.join("telemetry/ebin"),
                 telemetry_poller_ebin: build_lib_dir.join("telemetry_poller/ebin"),
                 // Stdlib class beams are produced by `beamtalk build-stdlib` under apps/, not _build/
@@ -105,11 +99,9 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 runtime_ebin: lib_dir.join("beamtalk_runtime/ebin"),
                 workspace_ebin: lib_dir.join("beamtalk_workspace/ebin"),
                 compiler_ebin: lib_dir.join("beamtalk_compiler/ebin"),
-                yamerl_ebin: lib_dir.join("yamerl/ebin"),
                 cowboy_ebin: lib_dir.join("cowboy/ebin"),
                 cowlib_ebin: lib_dir.join("cowlib/ebin"),
                 ranch_ebin: lib_dir.join("ranch/ebin"),
-                gun_ebin: lib_dir.join("gun/ebin"),
                 telemetry_ebin: lib_dir.join("telemetry/ebin"),
                 telemetry_poller_ebin: lib_dir.join("telemetry_poller/ebin"),
                 stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
@@ -295,11 +287,9 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         &paths.runtime_ebin,
         &paths.workspace_ebin,
         &paths.compiler_ebin,
-        &paths.yamerl_ebin,
         &paths.cowboy_ebin,
         &paths.cowlib_ebin,
         &paths.ranch_ebin,
-        &paths.gun_ebin,
         &paths.telemetry_ebin,
         &paths.telemetry_poller_ebin,
         &paths.stdlib_ebin,
@@ -578,10 +568,6 @@ mod tests {
             PathBuf::from("/rt/_build/default/lib/beamtalk_compiler/ebin")
         );
         assert_eq!(
-            paths.yamerl_ebin,
-            PathBuf::from("/rt/_build/default/lib/yamerl/ebin")
-        );
-        assert_eq!(
             paths.cowboy_ebin,
             PathBuf::from("/rt/_build/default/lib/cowboy/ebin")
         );
@@ -592,10 +578,6 @@ mod tests {
         assert_eq!(
             paths.ranch_ebin,
             PathBuf::from("/rt/_build/default/lib/ranch/ebin")
-        );
-        assert_eq!(
-            paths.gun_ebin,
-            PathBuf::from("/rt/_build/default/lib/gun/ebin")
         );
         assert_eq!(
             paths.telemetry_ebin,
@@ -619,8 +601,8 @@ mod tests {
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
-        // Should be 24 elements: 12 dirs × 2 (flag + path)
-        assert_eq!(args.len(), 24);
+        // Should be 20 elements: 10 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 20);
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
@@ -645,10 +627,6 @@ mod tests {
             PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_compiler/ebin")
         );
         assert_eq!(
-            paths.yamerl_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/yamerl/ebin")
-        );
-        assert_eq!(
             paths.cowboy_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/cowboy/ebin")
         );
@@ -659,10 +637,6 @@ mod tests {
         assert_eq!(
             paths.ranch_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/ranch/ebin")
-        );
-        assert_eq!(
-            paths.gun_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/gun/ebin")
         );
         assert_eq!(
             paths.telemetry_ebin,
