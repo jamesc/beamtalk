@@ -1020,10 +1020,10 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline
         .class_superclass_index
         .extend(fixture_superclass_index);
-    // Note: fixture ClassInfo is intentionally NOT added to all_class_infos.
+    // Fixture ClassInfo is intentionally NOT added to all_class_infos.
     // The class_module_index merge above is sufficient for the unresolved-class
-    // validator. Adding full ClassInfo would cause false DNU/actor-new errors
-    // in tests that intentionally test error paths (e.g., Counter new).
+    // validator. Full ClassInfo injection requires resolving inherited methods
+    // and class protocol methods (>>, doc, etc.) which is tracked in BT-1733.
     drop(fixture_class_infos);
 
     let precompiled = compile_fixtures_directory(
