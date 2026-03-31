@@ -576,6 +576,17 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
 | **BUnit tests** | **~85 files** | **—** | **Language features (TestCase classes)** |
 | E2E tests | ~36 files | ~50s | REPL/workspace integration |
 
+### Cross-Repo Package Tests
+
+The [cross-repo workflow](../../.github/workflows/cross-repo.yml) tests first-party packages that have been extracted to their own repositories (per [ADR 0073](../ADR/0073-package-distribution-and-discovery.md)). It builds the compiler from source, then checks out and tests each package against it.
+
+**Runs on:** push to main + nightly schedule (7am UTC)
+
+**Current packages tested:**
+- [`beamtalk-http`](https://github.com/jamesc/beamtalk-http) — HTTP client and server
+
+**Adding a new package:** Add a new job to `cross-repo.yml` following the `beamtalk-http` job as a template. Each job checks out the compiler, builds it, installs the binary, then checks out and tests the package.
+
 ---
 
 ## Test Organization Conventions

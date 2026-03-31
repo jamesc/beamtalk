@@ -1,0 +1,105 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cross-Repo Package Tests
+# =========================
+# Builds the Beamtalk compiler from source and tests first-party packages
+# extracted to their own repositories (starting with beamtalk-http).
+#
+# Catches compiler regressions that break downstream packages — these are
+# invisible to the main CI since the packages live in separate repos.
+#
+# Runs on push to main (to catch regressions immediately) and on a nightly
+# schedule (to catch issues from upstream dependency changes).
+#
+# Pattern: add new packages as additional jobs following the beamtalk-http
+# template below.
+
+name: Cross-Repo Packages
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
+  schedule:
+    # 7am UTC daily (11pm PT, 8am CET) — offset from nightly.yml (6am) to
+    # avoid resource contention
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─── beamtalk-http ──────────────────────────────────────────────────
+  beamtalk-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout beamtalk compiler
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Build compiler and stdlib
+        run: just build
+
+      - name: Install compiler on PATH
+        run: |
+          # Make the freshly-built beamtalk binary available system-wide
+          # just build produces a debug build
+          sudo cp target/debug/beamtalk /usr/local/bin/beamtalk
+          beamtalk --version
+
+      - name: Checkout beamtalk-http
+        uses: actions/checkout@v6
+        with:
+          repository: jamesc/beamtalk-http
+          path: _packages/beamtalk-http
+
+      - name: Build beamtalk-http
+        working-directory: _packages/beamtalk-http
+        run: beamtalk build
+
+      - name: Test beamtalk-http
+        working-directory: _packages/beamtalk-http
+        run: beamtalk test
