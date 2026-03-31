@@ -122,14 +122,11 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Resolve dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
     // diagnostics would be reported as stale.
-    let project_root = if source_path.is_dir() {
-        source_path.clone()
-    } else {
-        source_path
-            .parent()
-            .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
-    };
-    resolve_dep_class_infos(&project_root, &mut all_class_infos);
+    // Walk ancestors to find the package root (directory containing beamtalk.toml),
+    // since the lint target may be a subdirectory or single file.
+    if let Some(project_root) = find_package_root(&source_path) {
+        resolve_dep_class_infos(&project_root, &mut all_class_infos);
+    }
 
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
@@ -194,6 +191,25 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
+///
+/// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
+fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start_dir = if start.is_file() {
+        start.parent()?
+    } else {
+        start
+    };
+
+    let mut dir = start_dir;
+    loop {
+        if dir.join("beamtalk.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
 }
 
 /// Resolve dependency classes and merge them into the class info list.
