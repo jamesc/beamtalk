@@ -968,12 +968,8 @@ fn initialize_pipeline(
     }
 
     // BT-1733: Single unified collection of all ClassInfo from all sources.
-    // Fixture ClassInfo is deliberately excluded: compile_fixtures() builds
-    // fixture class indexes (merged into class_module_index) but drops
-    // fixture_class_infos because duplicate class names across fixture files
-    // (e.g. two `Shape` classes in test/fixtures/) cause false DNU and
-    // actor-new compile errors. See build_fixture_class_indexes() and the
-    // drop(fixture_class_infos) call in compile_fixtures().
+    // Fixture ClassInfo is added later in compile_fixtures() via
+    // pipeline.all_class_infos.extend(fixture_class_infos).
     // To add a new .bt source location, add its ClassInfo slice here.
     let all_class_infos =
         super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
@@ -1034,12 +1030,11 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline
         .class_superclass_index
         .extend(fixture_superclass_index);
-    // BT-1733: Fixture ClassInfo is not yet added to all_class_infos because
-    // duplicate class names across fixtures (e.g. two `Shape` classes) cause
-    // false DNU errors. The class_module_index merge above is sufficient for
-    // the unresolved-class validator. Adding fixture ClassInfo requires
-    // deduplication or scoping logic to avoid cross-fixture conflicts.
-    drop(fixture_class_infos);
+    // BT-1736: Fixture ClassInfo is now included in all_class_infos so the type
+    // checker can validate cross-file references in test files. The Shape class
+    // name collision between abstract_shape.bt and class_method_self_new.bt was
+    // resolved by renaming abstract_shape's class to AbstractShape.
+    pipeline.all_class_infos.extend(fixture_class_infos);
 
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,

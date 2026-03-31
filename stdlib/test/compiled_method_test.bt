@@ -12,8 +12,14 @@ TestCase subclass: CompiledMethodTest
   testMethodLookupOnVariableReceivers =>
     cls := Counter
     self assert: cls equals: Counter
+    // Type checker infers cls as Counter instance, not Counter class object,
+    // so >> is not found via instance-side lookup. At runtime, cls holds the
+    // class object and dispatches through Class→Behaviour chain.
+    @expect dnu
     self assert: (cls >> #getValue) notNil
+    @expect dnu
     self assert: (cls >> #getValue) selector equals: #getValue
+    @expect dnu
     self assert: (cls >> #nonExistent) equals: nil
 
   testClass => self assert: (Counter >> #getValue) class equals: CompiledMethod

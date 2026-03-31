@@ -4,7 +4,7 @@
 // BT-1392: Value type fixture for testing local variable mutations inside
 // ifTrue:/ifFalse:/ifTrue:ifFalse: blocks in non-actor context.
 
-Object subclass: ConditionalLocalMutation
+Value subclass: ConditionalLocalMutation
 
   // Single ifTrue: with captured local mutation
   testIfTrueSimple: flag =>

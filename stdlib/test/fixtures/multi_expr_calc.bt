@@ -5,7 +5,7 @@
 // Verifies that non-last expressions in value-type methods are sequenced correctly
 // (side effects execute, but only the last expression's value is returned)
 
-Object subclass: MultiExprCalc
+Value subclass: MultiExprCalc
 
   // Two-expression method: first expression is discarded, second is returned
   doubleAfterAdd: x =>

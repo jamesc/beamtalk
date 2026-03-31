@@ -45,11 +45,14 @@ TestCase subclass: ActorLifecycleTest
 
   testNewRaisesInstantiationError =>
     // Counter new raises InstantiationError (BT-1056: class-side new)
+    @expect all
     self should: [Counter new] raise: #instantiation_error
     // Counter new: raises InstantiationError (BT-1056: class-side new:)
+    @expect all
     self should: [Counter new: #{}] raise: #instantiation_error
 
   testNewIsCatchableAsInstantiationError =>
     // Counter new is catchable via on: InstantiationError do: (BT-1056)
+    @expect all
     result := [Counter new] on: InstantiationError do: [:_e | #caught]
     self assert: result equals: #caught
