@@ -292,7 +292,10 @@ eql(Self, Other) -> '=:='(Self, Other).
 neq(Self, Other) -> '/='(Self, Other).
 
 %% `sneq:with:` → strips to `sneq`, arity 2 (strict inequality)
-sneq(Self, Other) -> Self =/= Other.
+sneq(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) =/= 'asTimestamp'(Other);
+sneq(_, _) ->
+    raise_type_error(sneq, <<"Argument must be a DateTime">>).
 
 %%% ============================================================================
 %%% Internal Functions

@@ -370,6 +370,13 @@ ffi_shim_comparisons_test() ->
     ?assert(beamtalk_datetime:sneq(Dt1, Dt2)),
     ?assertNot(beamtalk_datetime:sneq(Dt1, Dt1)).
 
+ffi_shim_sneq_type_error_test() ->
+    Dt = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_datetime:sneq(Dt, <<"other">>)
+    ).
+
 %%% ============================================================================
 %%% monotonicNow
 %%% ============================================================================
