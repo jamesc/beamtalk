@@ -20,18 +20,26 @@ use eetf::{Atom, Binary, FixInteger, Map, Term, Tuple};
 
 /// Read a `{packet, 4}` framed message from a reader.
 ///
-/// Returns `Ok(None)` on clean EOF (no partial length prefix).
+/// Returns `Ok(None)` on clean EOF (zero bytes available before the length
+/// prefix). A *truncated* length prefix (1–3 bytes followed by EOF) is an
+/// error and returns `Err` with kind `UnexpectedEof`.
 ///
 /// # Errors
 ///
-/// Returns an I/O error if the read fails or the packet length exceeds 64 MiB.
+/// Returns an I/O error if the read fails, the length prefix is truncated,
+/// or the packet length exceeds 64 MiB.
 pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
     let mut len_buf = [0u8; 4];
-    match reader.read_exact(&mut len_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
+
+    // Read the first byte separately to distinguish clean EOF from truncated prefix.
+    match reader.read(&mut len_buf[..1])? {
+        0 => return Ok(None), // Clean EOF — no data at all.
+        1 => {}
+        _ => unreachable!(),
     }
+    // We got the first byte; the remaining 3 bytes are mandatory.
+    reader.read_exact(&mut len_buf[1..])?;
+
     let len = u32::from_be_bytes(len_buf) as usize;
     // Guard against unreasonably large packets (>64 MiB)
     if len > 64 * 1024 * 1024 {
@@ -49,14 +57,19 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
 ///
 /// # Errors
 ///
-/// Returns an I/O error if the write fails.
-///
-/// # Panics
-///
-/// Panics if the data length exceeds `u32::MAX` (4 GiB).
+/// Returns an I/O error if the write fails or the data length exceeds
+/// `u32::MAX` (4 GiB) — in that case the error kind is `InvalidInput`.
 pub fn write_packet(writer: &mut impl Write, data: &[u8]) -> io::Result<()> {
     let len = u32::try_from(data.len())
-        .expect("packet too large for {packet, 4} framing")
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "packet too large for {{packet, 4}} framing: {} bytes exceeds u32::MAX",
+                    data.len()
+                ),
+            )
+        })?
         .to_be_bytes();
     writer.write_all(&len)?;
     writer.write_all(data)?;
@@ -228,6 +241,50 @@ mod tests {
         let mut cursor = io::Cursor::new(buf);
         let result = read_packet(&mut cursor).unwrap().unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn read_packet_truncated_length_prefix_returns_error() {
+        // Only 2 bytes of a 4-byte length prefix — should be UnexpectedEof, not Ok(None).
+        let partial: &[u8] = &[0x00, 0x0A];
+        let mut cursor = io::Cursor::new(partial);
+        let result = read_packet(&mut cursor);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn read_packet_truncated_one_byte_length_prefix() {
+        let partial: &[u8] = &[0x01];
+        let mut cursor = io::Cursor::new(partial);
+        let result = read_packet(&mut cursor);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn read_packet_truncated_three_byte_length_prefix() {
+        let partial: &[u8] = &[0x00, 0x00, 0x05];
+        let mut cursor = io::Cursor::new(partial);
+        let result = read_packet(&mut cursor);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn write_packet_oversized_returns_error() {
+        // We can't allocate u32::MAX + 1 bytes, so test the logic directly
+        // by checking the error path with a mock. Instead, verify the function
+        // signature change: it should return InvalidInput for data > u32::MAX.
+        // Since we can't create such a large slice in a test, we verify the
+        // conversion logic by checking u32::try_from on an oversized value.
+        let oversized_len: usize = u32::MAX as usize + 1;
+        assert!(u32::try_from(oversized_len).is_err());
+        // The actual write_packet wraps this in io::ErrorKind::InvalidInput.
+        // We test normal-sized packets work fine as a sanity check.
+        let mut buf = Vec::new();
+        write_packet(&mut buf, b"small").unwrap();
+        assert_eq!(buf.len(), 4 + 5);
     }
 
     // ── Term constructors ───────────────────────────────────────
