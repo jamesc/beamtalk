@@ -98,6 +98,15 @@ sealed Number subclass: Integer
   /// ```
   =:= other :: Number -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 =/= 2         // => true
+  /// 42 =/= 42       // => false
+  /// ```
+  =/= other :: Number -> Boolean => @primitive "=/="
+
   /// Test inequality with another integer.
   ///
   /// ## Examples

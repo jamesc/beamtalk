@@ -41,6 +41,14 @@ sealed Object subclass: Port
   /// ```
   =:= other -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another port.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// port1 =/= port2        // => true
+  /// ```
+  =/= other -> Boolean => @primitive "=/="
+
   /// Test inequality with another port.
   ///
   /// ## Examples

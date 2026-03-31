@@ -51,6 +51,15 @@ sealed Object subclass: Symbol
   /// ```
   =:= other :: Symbol -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello =/= #world        // => true
+  /// #hello =/= #hello        // => false
+  /// ```
+  =/= other :: Symbol -> Boolean => @primitive "=/="
+
   /// Test inequality with another symbol.
   ///
   /// ## Examples
