@@ -285,50 +285,11 @@ fn write_gitignore(path: &Utf8Path) -> Result<()> {
 }
 
 fn write_justfile(path: &Utf8Path, kind: ProjectKind) -> Result<()> {
-    let mut content = String::from(
-        r#"# Standard Beamtalk project targets.
-# See: https://beamtalk.dev/docs/tooling
-
-# Build the project
-build:
-    beamtalk build
-
-# Run the test suite
-test:
-    beamtalk test
-
-# Check formatting
-fmt:
-    beamtalk fmt --check
-
-# Format in place
-fmt-fix:
-    beamtalk fmt
-
-# Full CI check (fmt + build + test)
-ci: fmt build test
-
-# Tag a release from beamtalk.toml version
-release:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version=$(grep '^version' beamtalk.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
-    git tag "v${version}"
-    echo "Tagged v${version}"
-
-# Push release tags to origin
-publish:
-    git push origin --tags
-"#,
-    );
+    let mut content = include_str!("../../templates/Justfile").to_string();
 
     if kind == ProjectKind::Application {
         content.push_str(
-            r"
-# Run the application
-run:
-    beamtalk run
-",
+            "\n# Run the application\nrun:\n    beamtalk run\n",
         );
     }
 
@@ -338,37 +299,7 @@ run:
 }
 
 fn write_ci_workflow(path: &Utf8Path) -> Result<()> {
-    let content = r#"name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  ci:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@v1
-        with:
-          otp-version: "27"
-
-      - name: Install Beamtalk
-        run: curl -fsSL https://beamtalk.dev/install.sh | sudo sh -s -- --nightly --prefix /usr/local
-
-      - name: Check formatting
-        run: beamtalk fmt --check
-
-      - name: Build
-        run: beamtalk build
-
-      - name: Test
-        run: beamtalk test
-"#;
+    let content = include_str!("../../templates/ci.yml");
     fs::write(
         path.join(".github").join("workflows").join("ci.yml"),
         content,
@@ -590,7 +521,9 @@ mod tests {
         assert!(content.contains("build:"));
         assert!(content.contains("test:"));
         assert!(content.contains("fmt:"));
-        assert!(content.contains("ci:"));
+        assert!(content.contains("lint:"));
+        assert!(content.contains("clean:"));
+        assert!(content.contains("ci: fmt lint build test"));
         assert!(content.contains("release:"));
         assert!(content.contains("publish:"));
         assert!(
@@ -626,9 +559,11 @@ mod tests {
         let content = fs::read_to_string(ci_path).unwrap();
         assert!(content.contains("erlef/setup-beam"));
         assert!(content.contains("beamtalk.dev/install.sh"));
-        assert!(content.contains("beamtalk fmt --check"));
-        assert!(content.contains("beamtalk build"));
-        assert!(content.contains("beamtalk test"));
+        assert!(content.contains("setup-just"));
+        assert!(content.contains("just fmt"));
+        assert!(content.contains("just lint"));
+        assert!(content.contains("just build"));
+        assert!(content.contains("just test"));
     }
 
     #[test]
