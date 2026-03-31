@@ -1,0 +1,22 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-etf"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared ETF packet framing and term helpers for Beamtalk OTP port binaries"
+readme = "README.md"
+keywords = ["etf", "beam", "erlang", "protocol"]
+categories = ["encoding"]
+
+[dependencies]
+# why: encode/decode Erlang External Term Format — the shared term type
+eetf = "0.11"
+
+[lints]
+workspace = true

@@ -35,8 +35,12 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+use beamtalk_etf::{
+    self as etf, atom, binary as binary_term, int_term, map_get, term_to_bytes, term_to_string,
+    term_to_string_list, term_to_string_map, tuple3,
+};
 use clap::{ArgAction, Parser};
-use eetf::{Atom, Binary, FixInteger, Map, Term, Tuple};
+use eetf::{Map, Term};
 use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -138,71 +142,7 @@ mod job_object {
 }
 
 // ────────────────────────────────────────────────────────────────
-// {packet, 4} framing
-
-/// Read a `{packet, 4}` framed message from stdin.
-fn read_packet(stdin: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
-    let mut len_buf = [0u8; 4];
-    match stdin.read_exact(&mut len_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
-    }
-    let len = u32::from_be_bytes(len_buf) as usize;
-    // Guard against unreasonably large packets (>64 MiB)
-    if len > 64 * 1024 * 1024 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("packet too large: {len} bytes"),
-        ));
-    }
-    let mut buf = vec![0u8; len];
-    stdin.read_exact(&mut buf)?;
-    Ok(Some(buf))
-}
-
-/// Write a `{packet, 4}` framed message to a writer.
-fn write_packet(out: &mut impl Write, data: &[u8]) -> io::Result<()> {
-    let len = u32::try_from(data.len())
-        .expect("packet too large for {packet, 4} framing")
-        .to_be_bytes();
-    out.write_all(&len)?;
-    out.write_all(data)?;
-    out.flush()
-}
-
-// ────────────────────────────────────────────────────────────────
-// ETF helpers
-
-fn atom(name: &str) -> Term {
-    Term::from(Atom::from(name))
-}
-
-fn binary_term(data: &[u8]) -> Term {
-    Term::from(Binary::from(data))
-}
-
-fn int_term(n: i32) -> Term {
-    Term::from(FixInteger::from(n))
-}
-
-fn tuple3(a: Term, b: Term, c: Term) -> Term {
-    Term::from(Tuple::from(vec![a, b, c]))
-}
-
-/// Extract raw bytes from a `Binary` or `ByteList` term.
-fn term_to_bytes(term: &Term) -> Option<Vec<u8>> {
-    match term {
-        Term::Binary(b) => Some(b.bytes.clone()),
-        Term::ByteList(bl) => Some(bl.bytes.clone()),
-        _ => None,
-    }
-}
-
-/// Extract a UTF-8 string from a `Binary` or `ByteList` term.
-fn term_to_string(term: &Term) -> Option<String> {
-    String::from_utf8(term_to_bytes(term)?).ok()
-}
+// Domain-specific ETF helpers (not shared via beamtalk-etf)
 
 /// Extract a `u32` child ID from a `FixInteger` term.
 fn term_to_child_id(term: &Term) -> Option<u32> {
@@ -210,35 +150,6 @@ fn term_to_child_id(term: &Term) -> Option<u32> {
         Term::FixInteger(n) => u32::try_from(n.value).ok(),
         _ => None,
     }
-}
-
-/// Extract a list of strings from a `List` term.
-fn term_to_string_list(term: &Term) -> Option<Vec<String>> {
-    match term {
-        Term::List(list) => list.elements.iter().map(term_to_string).collect(),
-        _ => None,
-    }
-}
-
-/// Extract a `String → String` map from an ETF `Map` term (for environment variables).
-fn term_to_string_map(term: &Term) -> Option<HashMap<String, String>> {
-    match term {
-        Term::Map(m) => {
-            let mut result = HashMap::new();
-            for (k, v) in &m.map {
-                let key = term_to_string(k)?;
-                let val = term_to_string(v)?;
-                result.insert(key, val);
-            }
-            Some(result)
-        }
-        _ => None,
-    }
-}
-
-/// Look up a key (atom name) in an ETF `Map`.
-fn map_get<'a>(map: &'a Map, key: &str) -> Option<&'a Term> {
-    map.map.get(&atom(key))
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -252,7 +163,7 @@ fn send_event(writer: &SharedWriter, event: &Term) {
     match event.encode(&mut buf) {
         Ok(()) => {
             if let Ok(mut out) = writer.lock() {
-                if let Err(e) = write_packet(&mut *out, &buf) {
+                if let Err(e) = etf::write_packet(&mut *out, &buf) {
                     error!("Failed to write event packet: {e}");
                 }
             }
@@ -815,7 +726,7 @@ fn main() {
     let mut stdin = io::stdin().lock();
 
     loop {
-        let packet = match read_packet(&mut stdin) {
+        let packet = match etf::read_packet(&mut stdin) {
             Ok(Some(data)) => data,
             Ok(None) => break, // EOF — BEAM closed the port.
             Err(e) => {
@@ -857,31 +768,7 @@ fn main() {
 mod tests {
     use super::*;
 
-    // ── Packet framing ──────────────────────────────────────────
-
-    #[test]
-    fn read_write_packet_roundtrip() {
-        let data = b"hello world";
-        let mut buf = Vec::new();
-        write_packet(&mut buf, data).unwrap();
-        // First 4 bytes are big-endian length.
-        assert_eq!(
-            &buf[..4],
-            &(u32::try_from(data.len()).unwrap()).to_be_bytes()
-        );
-        assert_eq!(&buf[4..], data);
-        let mut cursor = io::Cursor::new(buf);
-        let result = read_packet(&mut cursor).unwrap().unwrap();
-        assert_eq!(result, data);
-    }
-
-    #[test]
-    fn read_packet_eof_returns_none() {
-        let empty: &[u8] = &[];
-        let mut cursor = io::Cursor::new(empty);
-        let result = read_packet(&mut cursor).unwrap();
-        assert!(result.is_none());
-    }
+    // NOTE: Packet framing tests are now in beamtalk-etf.
 
     // ── ETF event encoding ──────────────────────────────────────
 

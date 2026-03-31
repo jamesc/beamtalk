@@ -20,6 +20,8 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true }
+# why: shared ETF packet framing and term helpers for OTP port protocol
+beamtalk-etf = { workspace = true }
 # why: encode/decode Erlang External Term Format for compiler port protocol
 eetf = "0.11"
 # why: EcoString is the string type used by ClassInfo/MethodInfo in beamtalk-core
