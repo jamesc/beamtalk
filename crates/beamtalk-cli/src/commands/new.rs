@@ -91,10 +91,10 @@ fn create_project_structure(path: &Utf8Path, name: &str, kind: ProjectKind) -> R
     write_gitignore(path)?;
 
     // Create Justfile
-    write_justfile(path, kind)?;
+    write_justfile(path, name, kind)?;
 
     // Create CI workflow
-    write_ci_workflow(path)?;
+    write_ci_workflow(path, name)?;
 
     // Create AGENTS.md
     write_agents_md(path, name)?;
@@ -284,8 +284,9 @@ fn write_gitignore(path: &Utf8Path) -> Result<()> {
         .wrap_err("Failed to create .gitignore")
 }
 
-fn write_justfile(path: &Utf8Path, kind: ProjectKind) -> Result<()> {
-    let mut content = include_str!("../../templates/Justfile").to_string();
+fn write_justfile(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
+    let mut content =
+        include_str!("../../templates/Justfile").replace("{{project_name}}", name);
 
     if kind == ProjectKind::Application {
         content.push_str("\n# Run the application\nrun:\n    beamtalk run\n");
@@ -296,8 +297,8 @@ fn write_justfile(path: &Utf8Path, kind: ProjectKind) -> Result<()> {
         .wrap_err("Failed to create Justfile")
 }
 
-fn write_ci_workflow(path: &Utf8Path) -> Result<()> {
-    let content = include_str!("../../templates/ci.yml");
+fn write_ci_workflow(path: &Utf8Path, name: &str) -> Result<()> {
+    let content = include_str!("../../templates/ci.yml").replace("{{project_name}}", name);
     fs::write(
         path.join(".github").join("workflows").join("ci.yml"),
         content,
@@ -516,6 +517,10 @@ mod tests {
     fn test_new_library_creates_justfile() {
         let (_temp, project_path) = create_test_project("test_lib_just", false);
         let content = fs::read_to_string(project_path.join("Justfile")).unwrap();
+        assert!(
+            content.contains("Copyright 2026 test_lib_just authors"),
+            "Justfile should have license header with project name"
+        );
         assert!(content.contains("build:"));
         assert!(content.contains("test:"));
         assert!(content.contains("fmt:"));
@@ -557,7 +562,11 @@ mod tests {
         let content = fs::read_to_string(ci_path).unwrap();
         assert!(content.contains("erlef/setup-beam"));
         assert!(content.contains("beamtalk.dev/install.sh"));
-        assert!(content.contains("setup-just"));
+        assert!(
+            content.contains("Copyright 2026 test_ci_wf authors"),
+            "CI workflow should have license header with project name"
+        );
+        assert!(content.contains("setup-just@v3"));
         assert!(content.contains("just fmt"));
         assert!(content.contains("just lint"));
         assert!(content.contains("just build"));

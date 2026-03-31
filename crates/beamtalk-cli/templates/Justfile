@@ -1,3 +1,6 @@
+# Copyright 2026 {{project_name}} authors
+# SPDX-License-Identifier: Apache-2.0
+
 # Standard Beamtalk project targets.
 # See: https://beamtalk.dev/docs/tooling
 
