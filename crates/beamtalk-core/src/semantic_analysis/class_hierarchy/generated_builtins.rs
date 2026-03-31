@@ -93,7 +93,6 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "UndefinedObject"
             | "Value"
             | "WorkspaceInterface"
-            | "Yaml"
     )
 }
 
@@ -2795,34 +2794,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("WorkspaceInterface".into())], doc: Some("Set the current singleton instance.".into()) },
             ],
             class_variables: vec!["current".into()],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        },
-    );
-
-    classes.insert(
-        "Yaml".into(),
-        ClassInfo {
-            name: "Yaml".into(),
-            superclass: Some("Object".into()),
-            is_sealed: true,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: Some("stdlib".into()),
-            is_value: false,
-            is_native: false,
-            state: vec![],
-            state_types: HashMap::new(),
-            methods: vec![],
-            class_methods: vec![
-                MethodInfo { selector: "parse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Yaml".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into())], doc: Some("Parse a YAML string into a Beamtalk value (class method).\n\nYAML mappings become Dictionaries whose key types follow the YAML scalar\ntype (string keys → Strings, integer keys → Integers), sequences become\nLists, strings become Strings, integers become Integers, floats become\nFloats, booleans stay as true/false, null/~ becomes nil.\n\nFor multi-document YAML, only the first document is returned.\nUse `parseAll:` to get all documents.\n\n## Examples\n```beamtalk\n(Yaml parse: \"42\") unwrap              // => 42\n(Yaml parse: \"- 1\\n- 2\\n- 3\") unwrap  // => #(1, 2, 3)\n(Yaml parse: \"null\") unwrap            // => nil\n```".into()) },
-                MethodInfo { selector: "parseAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Yaml".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into())], doc: Some("Parse a multi-document YAML string into a List of values (class method).\n\nReturns a List containing one Beamtalk value per YAML document\n(documents are separated by ---).\n\n## Examples\n```beamtalk\n(Yaml parseAll: \"42\\n---\\n43\") unwrap   // => _\n```".into()) },
-                MethodInfo { selector: "generate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Yaml".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a YAML string from a Beamtalk value (class method).\n\nProduces valid YAML 1.2 in flow style. Dictionaries become YAML\nmappings, Lists become sequences, Strings become YAML strings,\nInteger/Float become numbers, true/false become YAML booleans,\nnil becomes null.\n\n## Examples\n```beamtalk\nYaml generate: #(1, 2, 3)              // => _\nYaml generate: nil                     // => _\nYaml generate: 42                      // => _\n```".into()) },
-                MethodInfo { selector: "parseFile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Yaml".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into())], doc: Some("Parse a YAML file into a Beamtalk value (class method).\n\nReads the file at the given path and parses it as YAML.\nReturns the first document from the file.\n\n## Examples\n```beamtalk\n(Yaml parseFile: \"/etc/myapp.yaml\") unwrap   // => _\n```".into()) },
-            ],
-            class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
