@@ -1385,63 +1385,19 @@ fn compile_native_test_erlang(
         .into_diagnostic()
         .wrap_err("Failed to create native ebin dir for test helpers")?;
 
-    let mut cmd = std::process::Command::new("erlc");
-    cmd.arg("+debug_info");
-    cmd.arg("-o").arg(ebin_dir.as_str());
-
-    // Add rebar3 lib dir to ERL_LIBS so -include_lib can find hex dep headers.
-    let rebar_lib_dir = test_layout.rebar_lib_dir();
-    if rebar_lib_dir.exists() {
-        cmd.env("ERL_LIBS", rebar_lib_dir.as_str());
-    }
-
-    // Add all existing ebin dirs to code path so test helpers can find
-    // both the package's native modules and hex dep modules.
-    for ebin in ebin_dirs {
-        cmd.arg("-pa").arg(ebin.as_str());
-    }
-
-    // Add beamtalk runtime include dir for -include_lib("beamtalk_runtime/...")
-    //   Dev layout:       -I runtime/apps/
-    //   Installed layout:  -I PREFIX/lib/beamtalk/lib/
-    if let Ok((runtime_dir, layout)) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout() {
-        let include_parent = match layout {
-            beamtalk_cli::repl_startup::RuntimeLayout::Dev => runtime_dir.join("apps"),
-            beamtalk_cli::repl_startup::RuntimeLayout::Installed => runtime_dir.join("lib"),
-        };
-        if include_parent.exists() {
-            cmd.arg("-I").arg(&include_parent);
-        }
-    }
-
-    // Add native/include if present
-    let include_dir = pkg_root.join("native").join("include");
-    if include_dir.exists() {
-        cmd.arg("-I").arg(include_dir.as_str());
-    }
-
-    for erl_file in &erl_files {
-        cmd.arg(erl_file.as_str());
-    }
-
     debug!(
         count = erl_files.len(),
         "Compiling native test Erlang helpers"
     );
 
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run erlc for native test helpers")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        miette::bail!(
-            "Native test Erlang compilation failed:\n{}",
-            format!("{stdout}{stderr}").trim_end()
-        );
-    }
+    beamtalk_cli::erlc::ErlcInvocation::new(&ebin_dir)
+        .debug_info()
+        .erl_libs(&test_layout.rebar_lib_dir())
+        .code_paths(ebin_dirs)
+        .runtime_include()
+        .include_dir(pkg_root.join("native").join("include"))
+        .source_files(&erl_files)
+        .run("Native test Erlang compilation")?;
 
     Ok(())
 }
