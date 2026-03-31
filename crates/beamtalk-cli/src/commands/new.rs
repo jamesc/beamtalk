@@ -288,9 +288,7 @@ fn write_justfile(path: &Utf8Path, kind: ProjectKind) -> Result<()> {
     let mut content = include_str!("../../templates/Justfile").to_string();
 
     if kind == ProjectKind::Application {
-        content.push_str(
-            "\n# Run the application\nrun:\n    beamtalk run\n",
-        );
+        content.push_str("\n# Run the application\nrun:\n    beamtalk run\n");
     }
 
     fs::write(path.join("Justfile"), content)
