@@ -764,7 +764,7 @@ printString(Self) -> result_print_string(Self).
 %% BT-1732: Module loading with on_load failure reporting
 %%====================================================================
 
-%% @doc Load a module via code:ensure_loaded/1, printing a warning to stderr
+%% @doc Load a module via code:ensure_loaded/1, logging a warning via OTP logger
 %% if loading fails (e.g., on_load hook crashes). This replaces bare
 %% code:ensure_loaded/1 calls in the test harness eval command so that
 %% class on_load failures are reported instead of silently ignored.
