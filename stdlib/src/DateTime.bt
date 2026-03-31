@@ -208,6 +208,15 @@ sealed Value subclass: DateTime
   =:= other :: DateTime -> Boolean =>
     (Erlang beamtalk_datetime) eql: self with: other
 
+  /// True if this DateTime is not strictly equal to `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) =/= (DateTime year: 2026 month: 1 day: 2)  // => true
+  /// ```
+  =/= other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) sneq: self with: other
+
   /// True if this DateTime does not represent the same instant as `other`.
   ///
   /// ## Examples

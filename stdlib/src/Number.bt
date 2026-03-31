@@ -16,8 +16,11 @@ abstract typed Value subclass: Number
 
   // === Abstract protocol (subclasses must implement) ===
 
-  /// Equality comparison.
+  /// Strict equality comparison.
   =:= _other :: Number -> Boolean => self subclassResponsibility
+
+  /// Strict inequality comparison.
+  =/= _other :: Number -> Boolean => self subclassResponsibility
 
   /// Less than.
   < _other :: Number -> Boolean => self subclassResponsibility

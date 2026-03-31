@@ -37,7 +37,7 @@
 %% FFI shims for (Erlang beamtalk_datetime) dispatch
 -export([year/3, year/6, fromTimestamp/1, fromString/1]).
 -export([addSeconds/2, addDays/2, diffSeconds/2]).
--export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2]).
+-export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -290,6 +290,9 @@ eql(Self, Other) -> '=:='(Self, Other).
 
 %% `neq:with:` → strips to `neq`, arity 2
 neq(Self, Other) -> '/='(Self, Other).
+
+%% `sneq:with:` → strips to `sneq`, arity 2 (strict inequality)
+sneq(Self, Other) -> Self =/= Other.
 
 %%% ============================================================================
 %%% Internal Functions

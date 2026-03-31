@@ -42,6 +42,14 @@ sealed Object subclass: Pid
   /// ```
   =:= other -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another pid.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid1 =/= pid2           // => true
+  /// ```
+  =/= other -> Boolean => @primitive "=/="
+
   /// Test inequality with another pid.
   ///
   /// ## Examples
