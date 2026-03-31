@@ -296,12 +296,12 @@ mod tests {
         let cross_file_classes =
             beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&actor_module);
 
-        let test_source = r#"Object subclass: TestFile
+        let test_source = r"Object subclass: TestFile
 
   class demo =>
     @expect all
     MyActor new
-"#;
+";
         let tokens = lex_with_eof(test_source);
         let (module, parse_diags) = parse(tokens);
         let diags = collect_diagnostics(&module, parse_diags, cross_file_classes);
@@ -316,12 +316,12 @@ mod tests {
     fn expect_all_stale_without_cross_file_actor_class() {
         // Without cross-file class info, lint can't know MyActor is an Actor,
         // so `@expect all` would be stale (no diagnostic emitted).
-        let test_source = r#"Object subclass: TestFile2
+        let test_source = r"Object subclass: TestFile2
 
   class demo =>
     @expect all
     MyActor new
-"#;
+";
         let diags = collect_lint_diagnostics(test_source);
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
