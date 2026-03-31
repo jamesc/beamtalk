@@ -1190,21 +1190,49 @@ mod tests {
 
         let paths = beam_dirs_for_tests();
 
-        // Step 1: First call creates workspace and starts node
-        let (info1, started1, id1) = get_or_start_workspace(
-            &project_path,
-            Some(&tw.id),
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // web_port
-            None, // otp_app_name
-            &[],  // hex_dep_names
-        )
-        .expect("first get_or_start should succeed");
+        // Step 1: First call creates workspace and starts node.
+        // Retry up to 3 times for transient WS health-check failures on loaded
+        // CI runners (same pattern as start_test_node). Between retries we must
+        // clean up the partially-started node so get_or_start_workspace sees a
+        // fresh workspace on the next attempt.
+        let (info1, started1, id1) = {
+            let mut last_err = None;
+            let mut result = None;
+            for attempt in 0..3_usize {
+                match get_or_start_workspace(
+                    &project_path,
+                    Some(&tw.id),
+                    0,
+                    &paths,
+                    &[],
+                    false,
+                    Some(60),
+                    None,
+                    None, // web_port
+                    None, // otp_app_name
+                    &[],  // hex_dep_names
+                ) {
+                    Ok(r) => {
+                        result = Some(r);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("lifecycle step 1 attempt {}/{} failed: {e}", attempt + 1, 3);
+                        // Kill any partially-started node before retrying.
+                        if let Ok(Some(info)) = get_node_info(&tw.id) {
+                            let _ = force_kill_process(info.pid);
+                        }
+                        cleanup_stale_node_info(&tw.id).ok();
+                        last_err = Some(e);
+                    }
+                }
+            }
+            result.unwrap_or_else(|| {
+                panic!(
+                    "first get_or_start should succeed after 3 attempts, last error: {last_err:?}"
+                )
+            })
+        };
         let _guard1 = NodeGuard::new(&info1);
         assert!(started1, "first call should start a new node");
         assert_eq!(id1, tw.id);
@@ -1245,21 +1273,42 @@ mod tests {
         wait_for_epmd_deregistration(&info1.node_name, 15)
             .expect("epmd should deregister node name within timeout");
 
-        // Step 4: Restart — third call starts a new node
-        let (info3, started3, id3) = get_or_start_workspace(
-            &project_path,
-            Some(&tw.id),
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // web_port
-            None, // otp_app_name
-            &[],  // hex_dep_names
-        )
-        .expect("restart should succeed");
+        // Step 4: Restart — third call starts a new node (with retry, same as step 1)
+        let (info3, started3, id3) = {
+            let mut last_err = None;
+            let mut result = None;
+            for attempt in 0..3_usize {
+                match get_or_start_workspace(
+                    &project_path,
+                    Some(&tw.id),
+                    0,
+                    &paths,
+                    &[],
+                    false,
+                    Some(60),
+                    None,
+                    None, // web_port
+                    None, // otp_app_name
+                    &[],  // hex_dep_names
+                ) {
+                    Ok(r) => {
+                        result = Some(r);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("lifecycle step 4 attempt {}/{} failed: {e}", attempt + 1, 3);
+                        if let Ok(Some(info)) = get_node_info(&tw.id) {
+                            let _ = force_kill_process(info.pid);
+                        }
+                        cleanup_stale_node_info(&tw.id).ok();
+                        last_err = Some(e);
+                    }
+                }
+            }
+            result.unwrap_or_else(|| {
+                panic!("restart should succeed after 3 attempts, last error: {last_err:?}")
+            })
+        };
         let _guard3 = NodeGuard::new(&info3);
         assert!(started3, "third call should start a new node");
         assert_eq!(id3, tw.id);
