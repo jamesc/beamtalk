@@ -1640,11 +1640,55 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     })
 }
 
+/// Parse `EUnit`'s summary line from verbose output to extract pass/fail counts.
+///
+/// `EUnit` outputs one of two summary formats:
+/// - `"  N tests passed."` — all passed
+/// - `"  Failed: F.  Skipped: S.  Passed: P."` — mixed results
+///
+/// Returns `(passed, failed)`. Falls back to `(0, 0)` if no summary found.
+fn parse_eunit_summary(output: &str) -> (usize, usize) {
+    for line in output.lines().rev() {
+        let trimmed = line.trim();
+
+        // "All N tests passed.", "N tests passed.", or "Test passed." (single test)
+        if trimmed.ends_with("tests passed.") || trimmed == "Test passed." {
+            if trimmed == "Test passed." {
+                return (1, 0);
+            }
+            if let Some(n_str) = trimmed
+                .strip_suffix(" tests passed.")
+                .and_then(|s| s.strip_prefix("All ").or(Some(s)))
+            {
+                if let Ok(n) = n_str.parse::<usize>() {
+                    return (n, 0);
+                }
+            }
+        }
+
+        // "Failed: F.  Skipped: S.  Passed: P."
+        if trimmed.starts_with("Failed:") && trimmed.contains("Passed:") {
+            let mut passed = 0;
+            let mut failed = 0;
+            for segment in trimmed.split('.') {
+                let seg = segment.trim();
+                if let Some(val) = seg.strip_prefix("Failed:") {
+                    failed = val.trim().parse().unwrap_or(0);
+                } else if let Some(val) = seg.strip_prefix("Passed:") {
+                    passed = val.trim().parse().unwrap_or(0);
+                }
+            }
+            return (passed, failed);
+        }
+    }
+    (0, 0)
+}
+
 /// Run native `EUnit` test modules in a BEAM process.
 ///
 /// Executes `eunit:test/2` for each discovered native test module and
-/// collects per-module pass/fail counts via a small inline Erlang snippet
-/// that introspects `EUnit` results.
+/// collects per-module pass/fail counts by parsing `EUnit`'s verbose
+/// summary output.
 #[allow(clippy::too_many_lines)]
 fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> {
     debug!(
@@ -1670,34 +1714,21 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
         .join(", ");
 
     // Inline Erlang: run EUnit per module with `verbose` so per-test
-    // pass/fail output is printed to stdout. Count test functions from
-    // module_info(exports) for the total. EUnit returns ok | error but
-    // no per-test counts, so on `error` we report all tests as failed —
-    // the verbose output above shows exactly which ones failed.
+    // pass/fail output is printed to stdout. After each module completes,
+    // emit a `NATIVE_EUNIT_DONE:<module>` marker line. The Rust side
+    // parses EUnit's own summary lines to get exact pass/fail counts
+    // (e.g. "  2 tests passed." or "  Failed: 1.  Skipped: 0.  Passed: 2.")
+    // rather than relying on the coarse ok/error return value.
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          {hex_deps_start_cmd}\
          Mods = [{module_list}], \
-         Results = lists:map(fun(M) -> \
-             Count = length([F || {{F, 0}} <- M:module_info(exports), \
-                 lists:suffix(\"_test\", atom_to_list(F)) orelse \
-                 lists:suffix(\"_test_\", atom_to_list(F))]), \
+         HasFailed = lists:foldl(fun(M, Acc) -> \
              Res = eunit:test(M, [verbose]), \
-             case Res of \
-                 ok -> {{M, Count, 0}}; \
-                 error -> {{M, 0, Count}} \
-             end \
-         end, Mods), \
-         JsonMods = lists:map(fun({{M, P, F}}) -> \
-             io_lib:format(\"{{\\\"module\\\": \\\"~s\\\", \\\"passed\\\": ~B, \\\"failed\\\": ~B}}\", [M, P, F]) \
-         end, Results), \
-         Total = lists:sum([P + F || {{_, P, F}} <- Results]), \
-         Passed = lists:sum([P || {{_, P, _}} <- Results]), \
-         Failed = lists:sum([F || {{_, _, F}} <- Results]), \
-         Json = io_lib:format(\"{{\\\"native_total\\\": ~B, \\\"native_passed\\\": ~B, \\\"native_failed\\\": ~B, \\\"modules\\\": [~s]}}\", \
-             [Total, Passed, Failed, lists:join(\", \", JsonMods)]), \
-         io:format(\"~s~n\", [Json]), \
-         init:stop(case Failed of 0 -> 0; _ -> 1 end)."
+             io:format(\"NATIVE_EUNIT_DONE:~s~n\", [M]), \
+             case Res of error -> true; _ -> Acc end \
+         end, false, Mods), \
+         init:stop(case HasFailed of true -> 1; false -> 0 end)."
     );
 
     let mut cmd = std::process::Command::new("erl");
@@ -1742,62 +1773,60 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     debug!("Native EUnit stdout: {}", stdout);
     debug!("Native EUnit stderr: {}", stderr);
 
-    // Extract JSON summary line
-    let json_line = stdout
-        .lines()
-        .find(|line| line.starts_with("{\"native_"))
-        .ok_or_else(|| {
-            let combined = format!("{stdout}\n{stderr}");
-            miette::miette!("No JSON output from native EUnit runner:\n{combined}")
-        })?;
+    // Parse EUnit's summary lines to get exact per-module pass/fail counts.
+    // EUnit outputs one of two summary formats per module:
+    //   "  N tests passed."                          (all passed)
+    //   "  Failed: F.  Skipped: S.  Passed: P."      (some failed)
+    // We split stdout by our NATIVE_EUNIT_DONE markers to attribute
+    // each summary to the correct module.
+    let mut modules = Vec::new();
+    let mut total_passed: usize = 0;
+    let mut total_failed: usize = 0;
+    let mut eunit_output = String::new();
 
-    let result_json: serde_json::Value = serde_json::from_str(json_line)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to parse native EUnit JSON: {json_line}"))?;
+    // Split output into per-module sections using the marker lines
+    let mut current_section = String::new();
+    let mut module_idx = 0;
+    for line in stdout.lines() {
+        if let Some(module_name) = line.strip_prefix("NATIVE_EUNIT_DONE:") {
+            // Parse the section for this module's EUnit summary
+            let (passed, failed) = parse_eunit_summary(&current_section);
+            modules.push((module_name.to_string(), passed, failed));
+            total_passed += passed;
+            total_failed += failed;
 
-    let total = result_json["native_total"]
-        .as_u64()
-        .unwrap_or(0)
-        .try_into()
-        .unwrap_or(0);
-    let passed = result_json["native_passed"]
-        .as_u64()
-        .unwrap_or(0)
-        .try_into()
-        .unwrap_or(0);
-    let failed = result_json["native_failed"]
-        .as_u64()
-        .unwrap_or(0)
-        .try_into()
-        .unwrap_or(0);
+            if failed > 0 {
+                eunit_output.push_str(&current_section);
+            }
 
-    let modules = result_json["modules"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .map(|m| {
-                    let name = m["module"].as_str().unwrap_or("unknown").to_string();
-                    let p =
-                        usize::try_from(m["passed"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
-                    let f =
-                        usize::try_from(m["failed"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
-                    (name, p, f)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+            current_section.clear();
+            module_idx += 1;
+        } else {
+            current_section.push_str(line);
+            current_section.push('\n');
+        }
+    }
 
-    // Capture EUnit verbose output (everything before the JSON line) for failure reporting
-    let eunit_output: String = stdout
-        .lines()
-        .take_while(|line| !line.starts_with("{\"native_"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // If no markers found, fall back to counting test modules as all-passed or all-failed
+    if module_idx == 0 && !pipeline.native_test_modules.is_empty() {
+        warn!("No NATIVE_EUNIT_DONE markers found in EUnit output");
+        let all_passed = output.status.success();
+        for module_name in &pipeline.native_test_modules {
+            if all_passed {
+                modules.push((module_name.clone(), 1, 0));
+                total_passed += 1;
+            } else {
+                modules.push((module_name.clone(), 0, 1));
+                total_failed += 1;
+            }
+        }
+        eunit_output = stdout.to_string();
+    }
 
     Ok(NativeEunitResult {
-        total,
-        passed,
-        failed,
+        total: total_passed + total_failed,
+        passed: total_passed,
+        failed: total_failed,
         modules,
         output: eunit_output,
     })
@@ -2377,5 +2406,41 @@ mod tests {
 
             assert_eq!(test_classes[0].module_name, expected_module);
         }
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_all_passed() {
+        let output = "======================== EUnit ========================\n\
+                      module 'foo_tests'\n\
+                        foo_tests: bar_test...ok\n\
+                        foo_tests: baz_test...ok\n\
+                        [done in 0.006 s]\n\
+                      =======================================================\n\
+                        All 2 tests passed.\n";
+        assert_eq!(parse_eunit_summary(output), (2, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_single_test_passed() {
+        let output = "  Test passed.\n";
+        assert_eq!(parse_eunit_summary(output), (1, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_mixed_results() {
+        let output = "=======================================================\n\
+                        Failed: 1.  Skipped: 0.  Passed: 2.\n";
+        assert_eq!(parse_eunit_summary(output), (2, 1));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_no_summary() {
+        assert_eq!(parse_eunit_summary("some random output\n"), (0, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_61_passed() {
+        let output = "  All 61 tests passed.\n";
+        assert_eq!(parse_eunit_summary(output), (61, 0));
     }
 }
