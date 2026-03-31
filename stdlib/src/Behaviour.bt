@@ -26,7 +26,8 @@ abstract Object subclass: Behaviour
 
   // --- Method lookup ---
 
-  /// Look up a method by selector, returning a CompiledMethod object.
+  /// Look up a method by selector, returning a CompiledMethod object,
+  /// or nil if the selector is not found in the method dictionary.
   ///
   /// Follows Smalltalk-80 convention: `Behaviour >> #selector` returns a
   /// CompiledMethod with selector, source, and argument count metadata.
@@ -35,8 +36,10 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// (Integer >> #+) selector         // => #+
   /// (Integer >> #+) argumentCount    // => 1
+  /// Integer >> #nonExistent          // => nil
   /// ```
-  sealed >> aSelector :: Symbol -> CompiledMethod => @primitive "methodLookup"
+  sealed >> aSelector :: Symbol -> CompiledMethod | Nil =>
+    @primitive "methodLookup"
 
   // --- Hierarchy queries ---
 

@@ -8,6 +8,10 @@
 //! Maps `@primitive "classXxx"` declarations in `lib/Behaviour.bt` and `lib/Class.bt`
 //! to direct calls into `beamtalk_behaviour_intrinsics`. These are thin data-access
 //! functions — hierarchy-walking logic lives in pure Beamtalk.
+//!
+//! Exception: `@primitive "methodLookup"` (BT-1735) maps to
+//! `beamtalk_method_resolver:resolve/2` instead, since method lookup is a
+//! separate domain service.
 
 use super::super::document::Document;
 use crate::docvec;
