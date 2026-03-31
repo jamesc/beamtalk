@@ -426,24 +426,24 @@ Use `__beamtalk_meta/0` function exports as the sole source of API metadata. MCP
 7. Add cross-repo CI: main repo periodically builds against latest tagged HTTP package
 
 ### Phase 2: Hex-Compatible Registry (When Needed)
-5. `beamtalk package build --tarball` — pure Rust tarball creation (reference: Gleam's `publish.rs`)
-6. `beamtalk package registry build` — pure Rust static registry generation (`prost`, `rsa`/`ring`)
-7. `[repos]` section in manifest parser
-8. `{ version = "...", repo = "..." }` table form for `[native.dependencies]`
-9. Generated `rebar.config` includes `{hex, [{repos, ...}]}` when private repos are configured
-10. Version constraint solver — `pubgrub::DependencyProvider` (reference: Gleam's `dependency.rs`)
-11. Lockfile extension with `source = "registry"` entries
-12. `beamtalk package retire` / `beamtalk package unretire`
-13. Set up static registry hosting
+8. `beamtalk package build --tarball` — pure Rust tarball creation (reference: Gleam's `publish.rs`)
+9. `beamtalk package registry build` — pure Rust static registry generation (`prost`, `rsa`/`ring`)
+10. `[repos]` section in manifest parser
+11. `{ version = "...", repo = "..." }` table form for `[native.dependencies]`
+12. Generated `rebar.config` includes `{hex, [{repos, ...}]}` when private repos are configured
+13. Version constraint solver — `pubgrub::DependencyProvider` (reference: Gleam's `dependency.rs`)
+14. Lockfile extension with `source = "registry"` entries
+15. `beamtalk package retire` / `beamtalk package unretire`
+16. Set up static registry hosting
 
 ### Phase 3: hex.pm (When APIs Stabilise)
-14. `beamtalk package publish` with hex.pm API integration (via `hexpm` Rust crate)
-15. Registry deps in `[dependencies]` resolve from hex.pm by default
+17. `beamtalk package publish` with hex.pm API integration (via `hexpm` Rust crate)
+18. Registry deps in `[dependencies]` resolve from hex.pm by default
 
 ### Future: Beamtalk-Native Package Operations
-16. Reimplement package operations as Beamtalk expressions using `hex_core` (pure Erlang)
-17. `Package publish: "http"` — publish from the REPL
-18. `Package add: "json"` — dynamically resolve, fetch, compile, and load without editing `beamtalk.toml`
+19. Reimplement package operations as Beamtalk expressions using `hex_core` (pure Erlang)
+20. `Package publish: "http"` — publish from the REPL
+21. `Package add: "json"` — dynamically resolve, fetch, compile, and load without editing `beamtalk.toml`
 
 ### Affected Components
 
