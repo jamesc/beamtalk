@@ -91,10 +91,10 @@ fn create_project_structure(path: &Utf8Path, name: &str, kind: ProjectKind) -> R
     write_gitignore(path)?;
 
     // Create Justfile
-    write_justfile(path, kind)?;
+    write_justfile(path, name, kind)?;
 
     // Create CI workflow
-    write_ci_workflow(path)?;
+    write_ci_workflow(path, name)?;
 
     // Create AGENTS.md
     write_agents_md(path, name)?;
@@ -284,52 +284,11 @@ fn write_gitignore(path: &Utf8Path) -> Result<()> {
         .wrap_err("Failed to create .gitignore")
 }
 
-fn write_justfile(path: &Utf8Path, kind: ProjectKind) -> Result<()> {
-    let mut content = String::from(
-        r#"# Standard Beamtalk project targets.
-# See: https://beamtalk.dev/docs/tooling
-
-# Build the project
-build:
-    beamtalk build
-
-# Run the test suite
-test:
-    beamtalk test
-
-# Check formatting
-fmt:
-    beamtalk fmt --check
-
-# Format in place
-fmt-fix:
-    beamtalk fmt
-
-# Full CI check (fmt + build + test)
-ci: fmt build test
-
-# Tag a release from beamtalk.toml version
-release:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version=$(grep '^version' beamtalk.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
-    git tag "v${version}"
-    echo "Tagged v${version}"
-
-# Push release tags to origin
-publish:
-    git push origin --tags
-"#,
-    );
+fn write_justfile(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
+    let mut content = include_str!("../../templates/Justfile").replace("{{project_name}}", name);
 
     if kind == ProjectKind::Application {
-        content.push_str(
-            r"
-# Run the application
-run:
-    beamtalk run
-",
-        );
+        content.push_str("\n# Run the application\nrun:\n    beamtalk run\n");
     }
 
     fs::write(path.join("Justfile"), content)
@@ -337,38 +296,8 @@ run:
         .wrap_err("Failed to create Justfile")
 }
 
-fn write_ci_workflow(path: &Utf8Path) -> Result<()> {
-    let content = r#"name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  ci:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@v1
-        with:
-          otp-version: "27"
-
-      - name: Install Beamtalk
-        run: curl -fsSL https://beamtalk.dev/install.sh | sudo sh -s -- --nightly --prefix /usr/local
-
-      - name: Check formatting
-        run: beamtalk fmt --check
-
-      - name: Build
-        run: beamtalk build
-
-      - name: Test
-        run: beamtalk test
-"#;
+fn write_ci_workflow(path: &Utf8Path, name: &str) -> Result<()> {
+    let content = include_str!("../../templates/ci.yml").replace("{{project_name}}", name);
     fs::write(
         path.join(".github").join("workflows").join("ci.yml"),
         content,
@@ -587,10 +516,16 @@ mod tests {
     fn test_new_library_creates_justfile() {
         let (_temp, project_path) = create_test_project("test_lib_just", false);
         let content = fs::read_to_string(project_path.join("Justfile")).unwrap();
+        assert!(
+            content.contains("Copyright 2026 test_lib_just authors"),
+            "Justfile should have license header with project name"
+        );
         assert!(content.contains("build:"));
         assert!(content.contains("test:"));
         assert!(content.contains("fmt:"));
-        assert!(content.contains("ci:"));
+        assert!(content.contains("lint:"));
+        assert!(content.contains("clean:"));
+        assert!(content.contains("ci: fmt lint build test"));
         assert!(content.contains("release:"));
         assert!(content.contains("publish:"));
         assert!(
@@ -626,9 +561,15 @@ mod tests {
         let content = fs::read_to_string(ci_path).unwrap();
         assert!(content.contains("erlef/setup-beam"));
         assert!(content.contains("beamtalk.dev/install.sh"));
-        assert!(content.contains("beamtalk fmt --check"));
-        assert!(content.contains("beamtalk build"));
-        assert!(content.contains("beamtalk test"));
+        assert!(
+            content.contains("Copyright 2026 test_ci_wf authors"),
+            "CI workflow should have license header with project name"
+        );
+        assert!(content.contains("setup-just@v3"));
+        assert!(content.contains("just fmt"));
+        assert!(content.contains("just lint"));
+        assert!(content.contains("just build"));
+        assert!(content.contains("just test"));
     }
 
     #[test]
