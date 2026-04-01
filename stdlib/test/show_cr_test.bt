@@ -2,14 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-984: BUnit tests for Object>>show: and Object>>showCr:
-// (renamed from trace:/traceCr: in BT-1636)
 //
 // Verifies:
 // - Silent no-op when TranscriptStream current is nil
 // - Output is routed when a transcript instance is set as current
-// - Deprecated trace:/traceCr: still work but emit compiler warnings
 
-TestCase subclass: TraceCrTest
+TestCase subclass: ShowCrTest
 
   setUp =>
     // Ensure current is nil before each test (default in test environment)
@@ -46,19 +44,3 @@ TestCase subclass: TraceCrTest
     TranscriptStream current: ts
     42 show: "world"
     self assert: (ts recent includes: "world")
-
-  testDeprecatedTraceCrStillWorks =>
-    // trace:/traceCr: still work (backward compatibility) but emit deprecation warnings
-    ts := TranscriptStream spawn
-    TranscriptStream current: ts
-    @expect deprecation
-    42 traceCr: "legacy"
-    self assert: (ts recent includes: "legacy")
-
-  testDeprecatedTraceStillWorks =>
-    // trace: still works (backward compatibility) but emits a deprecation warning
-    ts := TranscriptStream spawn
-    TranscriptStream current: ts
-    @expect deprecation
-    42 trace: "legacy"
-    self assert: (ts recent includes: "legacy")
