@@ -103,7 +103,12 @@ obj1 become: obj2   "All references to obj1 now point to obj2"
 - **Restart semantics are the real risk:** Class-side dispatch already routes through `gen_server:call` to the class process (`beamtalk_class_dispatch:class_send/3`), so promoting class processes to supervised actors adds no new dispatch overhead. The concern is restart semantics: if a supervised class process crashes and restarts, what happens to running actor instances that depend on that class? Method dictionaries, hot-patches, and class variable state would be lost on restart. Defining safe recovery semantics is the hard problem, not performance.
 - **Incremental path exists:** The current `beamtalk_object_class` gen_server state already holds method dictionaries, superclass refs, and metadata. Promoting these to supervised actors is additive, not a rewrite — though this becomes harder if the class process API accumulates dependents without supervision contracts.
 
-**Revisitation triggers:** This deferral should be revisited if: (a) a Beamtalk framework needs metaclass-level `doesNotUnderstand:` for dynamic routing, (b) class process crashes become a reliability concern in production, or (c) multi-node hot-patching requires class processes to participate in distributed state protocols.
+**Expected resolution path:** The practical gap closes incrementally through infrastructure needed for other reasons:
+1. **BT-1768** — crash detection + auto-restart from compiled state (immediate)
+2. **Dirty marking + disk flush** — needed for workspace persistence; once class state flushes to disk, hot-patches and class vars survive restarts
+3. **Supervisor link** — trivial add-on once 1+2 exist: `init/1` reads flushed state instead of compiled defaults
+
+This makes "supervised class processes" an emergent outcome rather than a designed feature. The remaining "class-as-actor" gap — user-defined lifecycle hooks and `state:` on the class side — would only be needed if a framework requires metaclass-level `doesNotUnderstand:` for dynamic routing, which is speculative.
 
 ## Prior Art
 
