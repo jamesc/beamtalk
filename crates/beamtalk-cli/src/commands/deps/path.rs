@@ -462,10 +462,22 @@ fn compile_dependency_with_context(
 
     // Generate .app file for the dependency
     let dep_manifest = manifest::parse_manifest(&dep_root.join("beamtalk.toml"))?;
-    let class_metadata: Vec<crate::commands::app_file::ClassMetadata> = Vec::new();
-    // Read full manifest to get native dependency names for {applications} list
-    let dep_hex_dep_names: Vec<String> = manifest::find_manifest_full(dep_root)?
+    let class_metadata = crate::commands::build::build_class_metadata(
+        &all_class_infos,
+        &own_class_module_index,
+        dep_name,
+    );
+    // Read full manifest to get dependency names for {applications} list
+    let full_manifest = manifest::find_manifest_full(dep_root)?;
+    let dep_hex_dep_names: Vec<String> = full_manifest
+        .as_ref()
         .map(|m| m.native_dependencies.keys().cloned().collect())
+        .unwrap_or_default();
+    // Use the manifest's declared BT dependencies (not the full prior_deps
+    // topo-order prefix) so {applications} lists only direct dependencies.
+    let dep_bt_dep_names: Vec<String> = full_manifest
+        .as_ref()
+        .map(|m| m.dependencies.keys().cloned().collect())
         .unwrap_or_default();
     crate::commands::app_file::generate_app_file(
         &ebin_path,
@@ -475,6 +487,7 @@ fn compile_dependency_with_context(
         None,
         // TODO(ADR 0072): Wire up native module discovery for path dependencies
         &[],
+        &dep_bt_dep_names,
         &dep_hex_dep_names,
     )?;
 

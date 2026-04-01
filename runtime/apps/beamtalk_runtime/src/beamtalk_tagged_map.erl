@@ -135,12 +135,14 @@ user_field_keys(State) when is_map(State) ->
 
 %% @doc Formats a tagged map for transcript/REPL display.
 %%
-%% Tagged maps display as `<<"a ClassName">>`, plain maps use `io_lib:format`.
+%% Dispatches `displayString` to the value class so user-defined
+%% display methods are honoured. Falls back to `"a ClassName"` if
+%% dispatch fails.
 -spec format_for_display(map()) -> binary().
 format_for_display(Map) when is_map(Map) ->
     case class_of(Map) of
         undefined ->
             list_to_binary(io_lib:format("~p", [Map]));
-        Class ->
-            <<"a ", (atom_to_binary(Class, utf8))/binary>>
+        _Class ->
+            beamtalk_primitive:send(Map, 'displayString', [])
     end.
