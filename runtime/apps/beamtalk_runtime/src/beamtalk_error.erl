@@ -57,7 +57,7 @@ new(Kind, Class, Selector) ->
     with_selector(new(Kind, Class), Selector).
 
 %% @doc Create a new error with kind, class, selector, and hint.
--spec new(atom(), atom(), atom(), binary()) -> #beamtalk_error{}.
+-spec new(atom(), atom(), atom(), term()) -> #beamtalk_error{}.
 new(Kind, Class, Selector, Hint) ->
     with_hint(new(Kind, Class, Selector), Hint).
 

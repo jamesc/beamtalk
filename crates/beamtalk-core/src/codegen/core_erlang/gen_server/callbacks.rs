@@ -377,6 +377,7 @@ impl CoreErlangGenerator {
     ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
     ///                     {'noreply', InitNewState}
     ///                 <{'error', InitError, InitErrState}> when 'true' ->
+    ///                     let _ = call 'logger':'error'(...) in
     ///                     {'stop', InitError, InitErrState}
     ///             end
     ///         <_> when 'true' -> {'noreply', State}
