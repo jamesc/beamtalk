@@ -292,7 +292,7 @@ format_single_failure(#{name := Name, error := Error} = Entry) ->
     ErrorBin =
         case is_binary(Error) of
             true -> Error;
-            false -> iolist_to_binary(io_lib:format("~p", [Error]))
+            false -> beamtalk_primitive:print_string(Error)
         end,
     [
         "  \xe2\x9c\x97 ",
@@ -359,7 +359,7 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
         #{error := Error} when is_binary(Error) ->
             Base#{<<"error">> => Error};
         #{error := Error} ->
-            Base#{<<"error">> => iolist_to_binary(io_lib:format("~p", [Error]))};
+            Base#{<<"error">> => beamtalk_primitive:print_string(Error)};
         _ ->
             Base
     end.
@@ -676,9 +676,8 @@ run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap) ->
         {'DOWN', MonRef, process, _Pid, Reason} ->
             %% Worker died without sending a result — synthesize a failure
             ClassName = maps:get(MonRef, PidMap, unknown_class),
-            ErrMsg = iolist_to_binary(
-                io_lib:format("Test worker crashed: ~p", [Reason])
-            ),
+            ErrMsg = <<"Test worker crashed: ",
+                (beamtalk_primitive:print_string(Reason))/binary>>,
             Result = make_test_result(
                 1,
                 0,
