@@ -2088,6 +2088,7 @@ impl CoreErlangGenerator {
     /// BT-447: For classes with zero instance methods (e.g., File), generates a
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
+    #[allow(clippy::too_many_lines)] // BT-1763: DNU catch-all logic adds essential branches
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
@@ -2133,8 +2134,31 @@ impl CoreErlangGenerator {
         // Route each class-defined method to its individual function
         let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
 
-        // Default case: extension fallback, then superclass delegation
-        let not_found_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
+        // BT-1763: Check if this class defines doesNotUnderstand:args: with a
+        // structural intrinsic body (@intrinsic, unquoted). This indicates a
+        // catch-all DNU handler (like ErlangModule/Erlang) rather than the
+        // error-raising default in ProtoObject (@primitive "doesNotUnderstand:args:").
+        let has_catch_all_dnu = class.methods.iter().any(|m| {
+            m.selector.name() == "doesNotUnderstand:args:"
+                && m.body.len() == 1
+                && matches!(
+                    &m.body[0].expression,
+                    crate::ast::Expression::Primitive {
+                        is_quoted: false,
+                        ..
+                    }
+                )
+        });
+
+        // Default case: extension fallback, then superclass delegation (or DNU)
+        let not_found_branch: Document<'static> = if has_catch_all_dnu {
+            // Class defines DNU — route unknown selectors through it
+            docvec![
+                "                    call '",
+                Document::String(mod_name.to_string()),
+                "':'doesNotUnderstand:args:'(Self, Selector, Args)\n",
+            ]
+        } else if let Some(ref super_mod) = superclass_mod {
             Document::String(format!(
                 "                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"
             ))
@@ -2586,6 +2610,28 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
+
+        // BT-1763: If the class defines doesNotUnderstand:args: with a structural
+        // intrinsic body, it accepts any selector — return true unconditionally.
+        // Excludes ProtoObject's error-raising DNU (@primitive "doesNotUnderstand:args:").
+        let has_catch_all_dnu = class.methods.iter().any(|m| {
+            m.selector.name() == "doesNotUnderstand:args:"
+                && m.body.len() == 1
+                && matches!(
+                    &m.body[0].expression,
+                    crate::ast::Expression::Primitive {
+                        is_quoted: false,
+                        ..
+                    }
+                )
+        });
+        if has_catch_all_dnu {
+            return Ok(docvec![
+                "'has_method'/1 = fun (_Selector) ->\n",
+                "    'true'\n",
+                "\n",
+            ]);
+        }
 
         // BT-447: Class-methods-only classes delegate directly to superclass —
         // but only when there are no auto-generated slot methods either.

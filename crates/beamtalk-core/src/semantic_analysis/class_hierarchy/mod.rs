@@ -3633,17 +3633,18 @@ mod tests {
     }
 
     #[test]
-    fn has_class_dnu_override_detects_erlang() {
-        // Erlang has doesNotUnderstand:args: as a class method.
+    fn has_instance_dnu_override_detects_erlang() {
+        // BT-1763: Erlang has doesNotUnderstand:args: as an instance method
+        // (the singleton tagged map dispatches through instance dispatch).
         let h = ClassHierarchy::with_builtins();
         assert!(
-            h.has_class_dnu_override("Erlang"),
-            "Erlang class-side DNU override should be detected"
+            h.has_instance_dnu_override("Erlang"),
+            "Erlang instance-side DNU override should be detected"
         );
-        // Erlang has no instance-side DNU
+        // Erlang has no class-side DNU
         assert!(
-            !h.has_instance_dnu_override("Erlang"),
-            "Erlang should not have instance-side DNU override"
+            !h.has_class_dnu_override("Erlang"),
+            "Erlang should not have class-side DNU override"
         );
     }
 

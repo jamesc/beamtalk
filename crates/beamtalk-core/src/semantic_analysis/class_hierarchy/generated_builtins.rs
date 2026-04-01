@@ -795,10 +795,10 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
-            methods: vec![],
-            class_methods: vec![
-                MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Look up an Erlang module by name, returning an ErlangModule proxy.\n\nInvoked automatically when an unknown unary message is sent to `Erlang`.\nThe `selector` becomes the module name; `arguments` is always empty.\nCompiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\nErlang lists       // => #ErlangModule<lists>\nErlang maps        // => #ErlangModule<maps>\n```".into()) },
+            methods: vec![
+                MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Look up an Erlang module by name, returning an ErlangModule proxy.\n\nInvoked automatically when an unknown message is sent to the `Erlang`\nsingleton. The `selector` becomes the module name; `arguments` is\nalways empty for unary lookups.\nCompiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\nErlang lists       // => #ErlangModule<lists>\nErlang maps        // => #ErlangModule<maps>\n```".into()) },
             ],
+            class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],

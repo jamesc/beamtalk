@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ErlangModule and Erlang Object-inheritance tests (BT-1763)
+//
+// After removing the module_for_value overrides for ErlangModule and Erlang,
+// dispatch goes through the compiled bt@stdlib@erlang_module and bt@stdlib@erlang
+// modules. These tests verify that Object-inherited methods work correctly
+// and that Erlang FFI dispatch is preserved.
+
+TestCase subclass: ErlangObjectInheritanceTest
+
+  // === ErlangModule: Object-inherited methods ===
+  testErlangModuleDisplayString =>
+    proxy := Erlang lists
+    self assert: (proxy displayString isKindOf: String)
+
+  testErlangModuleInspect =>
+    proxy := Erlang lists
+    self assert: (proxy inspect isKindOf: String)
+
+  testErlangModuleIsNilReturnsFalse =>
+    proxy := Erlang lists
+    self deny: proxy isNil
+
+  testErlangModuleRespondsToDisplayString =>
+    proxy := Erlang lists
+    self assert: (proxy respondsTo: #displayString)
+
+  testErlangModuleRespondsToIsNil =>
+    proxy := Erlang lists
+    self assert: (proxy respondsTo: #isNil)
+
+  testErlangModuleHash =>
+    proxy := Erlang lists
+    self assert: (proxy hash isKindOf: Integer)
+
+  // === ErlangModule: FFI dispatch still works ===
+  testErlangModuleKeywordDispatch =>
+    proxy := Erlang lists
+    self assert: (proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)
+
+  testErlangModuleUnaryDispatch =>
+    proxy := Erlang erlang
+    self assert: proxy node notNil
+
+  // === Erlang: Object-inherited methods ===
+  // Note: Must use dynamic dispatch (via variable or perform:) because
+  // compile-time `Erlang <selector>` always creates an ErlangModule proxy.
+  testErlangDisplayString =>
+    e := Erlang
+    self assert: (e displayString isKindOf: String)
+
+  testErlangInspect =>
+    e := Erlang
+    self assert: (e inspect isKindOf: String)
+
+  testErlangIsNilReturnsFalse =>
+    e := Erlang
+    self deny: e isNil
+
+  testErlangRespondsToDisplayString =>
+    e := Erlang
+    self assert: (e respondsTo: #displayString)
+
+  testErlangRespondsToIsNil =>
+    e := Erlang
+    self assert: (e respondsTo: #isNil)
+
+  testErlangHash =>
+    e := Erlang
+    self assert: (e hash isKindOf: Integer)
+
+  // === Erlang: module lookup still works ===
+  testErlangModuleLookup =>
+    self assert: (Erlang lists) class equals: ErlangModule
+
+  testErlangModuleLookupAndDispatch =>
+    self assert: (Erlang lists reverse: #(1, 2)) equals: #(2, 1)
