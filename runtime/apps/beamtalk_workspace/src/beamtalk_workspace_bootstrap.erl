@@ -25,10 +25,7 @@
 
 %% Backwards-compatible re-exports — callers should migrate to
 %% beamtalk_module_activation directly.
--export([find_bt_modules_in_dir/1, sort_modules_by_dependency/2]).
--ifdef(TEST).
--export([is_valid_module_name/1]).
--endif.
+-export([find_bt_modules_in_dir/1, sort_modules_by_dependency/2, is_valid_module_name/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").

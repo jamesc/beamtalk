@@ -40,9 +40,8 @@
     load_app_from_ebin/1
 ]).
 
--ifdef(TEST).
+%% Exported for callers that need validation (e.g. workspace_bootstrap backwards compat).
 -export([is_valid_module_name/1]).
--endif.
 
 %% Maximum number of modules activated per ebin directory.
 %% Prevents atom table exhaustion if the directory contains excessive files.
