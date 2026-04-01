@@ -559,12 +559,18 @@ activate_dependency_modules(AbsPath) ->
 
 %%% Internal helpers
 
-%% @private Format a dependency activation error as a user-facing binary string.
--spec format_dep_error(module(), term()) -> binary().
+%% @private Format a dependency activation error as a structured error map.
+%% Matches the `#{<<"path">> => ..., <<"kind">> => ..., <<"message">> => ...}`
+%% format used by native Erlang and Beamtalk compilation errors.
+-spec format_dep_error(module(), term()) -> map().
 format_dep_error(Mod, Reason) ->
-    iolist_to_binary(
-        io_lib:format("Failed to activate dependency module ~p: ~p", [Mod, Reason])
-    ).
+    #{
+        <<"path">> => atom_to_binary(Mod, utf8),
+        <<"kind">> => <<"dep_activation_error">>,
+        <<"message">> => iolist_to_binary(
+            io_lib:format("Failed to activate dependency module ~p: ~p", [Mod, Reason])
+        )
+    }.
 
 %% @private
 %% @doc Recursively find all .bt files in a directory.

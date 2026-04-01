@@ -127,7 +127,7 @@ sort_modules_empty_test() ->
 load_app_missing_dir_test() ->
     %% Should not crash on missing directory (platform-agnostic path)
     NonExistent = filename:join(get_tmp_base(), "nonexistent_ebin_dir_xyz"),
-    ?assertEqual(ok, beamtalk_module_activation:load_app_from_ebin(NonExistent)).
+    ?assertEqual({ok, []}, beamtalk_module_activation:load_app_from_ebin(NonExistent)).
 
 load_app_from_ebin_loads_metadata_test() ->
     %% Create a temp directory with a minimal .app file
@@ -143,7 +143,7 @@ load_app_from_ebin_loads_metadata_test() ->
         _ = application:unload(beamtalk_test_fake),
 
         %% Load it
-        ok = beamtalk_module_activation:load_app_from_ebin(TmpDir),
+        {ok, []} = beamtalk_module_activation:load_app_from_ebin(TmpDir),
 
         %% Verify the app metadata is now visible
         {ok, Classes} = application:get_env(beamtalk_test_fake, classes),

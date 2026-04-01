@@ -98,10 +98,10 @@ activate_ebin(EbinDir, Opts) ->
             {ok, []};
         true ->
             _ = code:add_pathz(EbinDir),
-            load_app_from_ebin(EbinDir),
+            {ok, AppErrors} = load_app_from_ebin(EbinDir),
             Modules = find_bt_modules_in_dir(EbinDir),
             Sorted = sort_modules_by_dependency(EbinDir, Modules),
-            Errors = lists:filtermap(
+            ModErrors = lists:filtermap(
                 fun(Mod) ->
                     case activate_module(Mod, Opts) of
                         ok -> false;
@@ -110,7 +110,7 @@ activate_ebin(EbinDir, Opts) ->
                 end,
                 Sorted
             ),
-            {ok, Errors}
+            {ok, AppErrors ++ ModErrors}
     end.
 
 %% @doc Activate a single module with default options.
@@ -131,8 +131,19 @@ activate_module(Module, Opts) ->
                 ok ->
                     SourcePath = extract_source_path(Module),
                     case maps:find(on_activate, Opts) of
-                        {ok, Callback} -> Callback({Module, SourcePath});
-                        error -> ok
+                        {ok, Callback} ->
+                            try
+                                Callback({Module, SourcePath})
+                            catch
+                                Class:Reason ->
+                                    ?LOG_WARNING(
+                                        "on_activate callback failed for ~p: ~p:~p",
+                                        [Module, Class, Reason],
+                                        #{domain => Domain}
+                                    )
+                            end;
+                        error ->
+                            ok
                     end,
                     ?LOG_DEBUG(
                         "Activated module ~p",
@@ -258,29 +269,34 @@ extract_class_names(ModuleName) ->
 %% metadata) visible to `application:loaded_applications/0` and
 %% `application:get_env/2`, which `beamtalk_package:all/0` relies on.
 %%
+%% Returns `{ok, Errors}` where `Errors` is a list of `{AppName, Reason}`
+%% pairs for any `.app` files that could not be loaded.
+%%
 %% Safe to call multiple times — `application:load/1` is idempotent when the
 %% application is already loaded.
--spec load_app_from_ebin(file:filename()) -> ok.
+-spec load_app_from_ebin(file:filename()) -> {ok, [{atom(), term()}]}.
 load_app_from_ebin(EbinDir) ->
     case file:list_dir(EbinDir) of
         {ok, Files} ->
             AppFiles = [F || F <- Files, filename:extension(F) =:= ".app"],
-            lists:foreach(
+            Errors = lists:filtermap(
                 fun(AppFile) ->
                     BaseName = filename:rootname(AppFile),
                     case is_valid_module_name(BaseName) of
-                        false -> ok;
+                        false -> false;
                         true -> load_single_app(list_to_atom(BaseName))
                     end
                 end,
                 AppFiles
-            );
+            ),
+            {ok, Errors};
         {error, _} ->
-            ok
+            {ok, []}
     end.
 
 %% @private Load a single OTP application by name.
--spec load_single_app(atom()) -> ok.
+%% Returns false on success, {true, {AppName, Reason}} on failure.
+-spec load_single_app(atom()) -> {true, {atom(), term()}} | false.
 load_single_app(AppName) ->
     case application:load(AppName) of
         ok ->
@@ -288,15 +304,17 @@ load_single_app(AppName) ->
                 "Loaded OTP application metadata: ~p",
                 [AppName],
                 #{domain => [beamtalk, runtime]}
-            );
+            ),
+            false;
         {error, {already_loaded, _}} ->
-            ok;
+            false;
         {error, Reason} ->
-            ?LOG_DEBUG(
+            ?LOG_WARNING(
                 "Could not load OTP application ~p: ~p",
                 [AppName, Reason],
                 #{domain => [beamtalk, runtime]}
-            )
+            ),
+            {true, {AppName, Reason}}
     end.
 
 %%% ============================================================================
