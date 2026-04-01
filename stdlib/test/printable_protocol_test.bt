@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1766: Printable protocol conformance tests.
+// Verifies that the Printable protocol is registered and that classes
+// with both asString and printString conform structurally.
+
+TestCase subclass: PrintableProtocolTest
+
+  // --- Protocol registration ---
+  testPrintableIsRegistered =>
+    self assert: (Protocol isProtocol: #Printable) equals: true
+
+  testRequiredMethods =>
+    methods := Protocol requiredMethods: #Printable
+    self assert: methods size equals: 2
+    self assert: (methods includes: #asString) equals: true
+    self assert: (methods includes: #printString) equals: true
+
+  testAllProtocolsIncludesPrintable =>
+    self assert: (Protocol allProtocols includes: #Printable) equals: true
+
+  // --- Conforming classes (have both asString and printString) ---
+  testIntegerConforms =>
+    self assert: (Integer conformsTo: #Printable) equals: true
+
+  testFloatConforms => self assert: (Float conformsTo: #Printable) equals: true
+
+  testStringConforms =>
+    self assert: (String conformsTo: #Printable) equals: true
+
+  testCharacterConforms =>
+    self assert: (Character conformsTo: #Printable) equals: true
+
+  testSymbolConforms =>
+    self assert: (Symbol conformsTo: #Printable) equals: true
+
+  testDateTimeConforms =>
+    self assert: (DateTime conformsTo: #Printable) equals: true
+
+  testListConforms => self assert: (List conformsTo: #Printable) equals: true
+
+  testArrayConforms => self assert: (Array conformsTo: #Printable) equals: true
+
+  testDictionaryConforms =>
+    self assert: (Dictionary conformsTo: #Printable) equals: true
+
+  testSetConforms => self assert: (Set conformsTo: #Printable) equals: true
+
+  testBagConforms => self assert: (Bag conformsTo: #Printable) equals: true
+
+  testTupleConforms => self assert: (Tuple conformsTo: #Printable) equals: true
+
+  testBinaryConforms =>
+    self assert: (Binary conformsTo: #Printable) equals: true
+
+  testPidConforms => self assert: (Pid conformsTo: #Printable) equals: true
+
+  testPortConforms => self assert: (Port conformsTo: #Printable) equals: true
+
+  testReferenceConforms =>
+    self assert: (Reference conformsTo: #Printable) equals: true
+
+  testCompiledMethodConforms =>
+    self assert: (CompiledMethod conformsTo: #Printable) equals: true
+
+  testCollectionConforms =>
+    self assert: (Collection conformsTo: #Printable) equals: true
+
+  // --- Conformance via protocols method ---
+  testIntegerProtocolsIncludesPrintable =>
+    self assert: (Integer protocols includes: #Printable) equals: true
+
+  testStringProtocolsIncludesPrintable =>
+    self assert: (String protocols includes: #Printable) equals: true
+
+  // --- Classes with auto-generated asString (codegen-synthesized) ---
+  testTrueConforms => self assert: (True conformsTo: #Printable) equals: true
+
+  testFalseConforms => self assert: (False conformsTo: #Printable) equals: true
+
+  testUndefinedObjectConforms =>
+    self assert: (UndefinedObject conformsTo: #Printable) equals: true
+
+  // --- Non-conforming class (no asString in hierarchy) ---
+  testBooleanDoesNotConform =>
+    // Boolean has printString (from Object) but no asString
+    self assert: (Boolean conformsTo: #Printable) equals: false

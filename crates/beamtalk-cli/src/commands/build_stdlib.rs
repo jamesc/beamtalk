@@ -100,9 +100,23 @@ pub fn build_stdlib(quiet: bool) -> Result<()> {
     // Compile each .bt file to .core (files are independent, no ordering required)
     let mut core_files = Vec::new();
     let mut class_metadata = Vec::new();
+    let mut protocol_modules = Vec::new();
     for source_file in &source_files {
         let module_name = module_name_from_path(source_file)?;
         let core_file = temp_path.join(format!("{module_name}.core"));
+
+        // Protocol-only files (e.g. Printable.bt) have no class definition —
+        // skip metadata extraction but still compile them so the protocol
+        // gets registered at runtime.
+        if is_protocol_only_file(source_file)? {
+            if !quiet {
+                println!("  Compiling {source_file} (protocol)...");
+            }
+            compile_stdlib_file(source_file, &module_name, &core_file, &options, &bindings)?;
+            core_files.push(core_file);
+            protocol_modules.push(module_name);
+            continue;
+        }
 
         // Extract class metadata (class_name, superclass) before compilation
         let meta = extract_class_metadata(source_file, &module_name)?;
@@ -122,11 +136,11 @@ pub fn build_stdlib(quiet: bool) -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
-    generate_app_file(&ebin_dir, &source_files, &class_metadata)?;
+    generate_app_file(&ebin_dir, &source_files, &class_metadata, &protocol_modules)?;
     // Also update .app.src so rebar3 picks up the classes env
     let app_src_dir = Utf8PathBuf::from("runtime/apps/beamtalk_stdlib/src");
     if app_src_dir.exists() {
-        generate_app_src_file(&app_src_dir, &class_metadata)?;
+        generate_app_src_file(&app_src_dir, &class_metadata, &protocol_modules)?;
     }
 
     // Generate Rust builtins file from parsed class metadata
@@ -586,6 +600,32 @@ fn fmt_default(expr: &beamtalk_core::ast::Expression) -> String {
     }
 }
 
+/// Check whether a `.bt` file contains only protocol definitions (no classes).
+///
+/// Protocol-only files (e.g. `Printable.bt`) define structural protocols via
+/// `Protocol define:` but contain no class definitions. These files still need
+/// to be compiled so the protocol gets registered at runtime, but they have no
+/// class metadata to extract.
+fn is_protocol_only_file(path: &Utf8Path) -> Result<bool> {
+    let source = fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{path}'"))?;
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // If parsing produced errors, the class/protocol lists may be incomplete.
+    // Be conservative: treat as a normal class file so extract_class_metadata
+    // reports the real error instead of silently misclassifying.
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    if has_errors {
+        return Ok(false);
+    }
+
+    Ok(module.classes.is_empty() && !module.protocols.is_empty())
+}
+
 /// Extract class metadata from a `.bt` source file.
 ///
 /// Parses the full class definition to extract the class name, superclass,
@@ -715,6 +755,7 @@ fn generate_app_file(
     ebin_dir: &Utf8Path,
     source_files: &[Utf8PathBuf],
     class_metadata: &[ClassMeta],
+    protocol_modules: &[String],
 ) -> Result<()> {
     let module_names: Vec<String> = source_files
         .iter()
@@ -730,6 +771,13 @@ fn generate_app_file(
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n                    ");
 
+    // BT-1766: Protocol-only modules need to be loaded separately during stdlib init
+    let protocol_modules_list = protocol_modules
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     let version = env!("BEAMTALK_VERSION");
     let app_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -739,7 +787,8 @@ fn generate_app_file(
          \x20   {{registered, []}},\n\
          \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
-         \x20       {{classes, [{classes_list}]}}\n\
+         \x20       {{classes, [{classes_list}]}},\n\
+         \x20       {{protocol_modules, [{protocol_modules_list}]}}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
@@ -757,9 +806,20 @@ fn generate_app_file(
 ///
 /// The `.app.src` uses `{modules, []}` (rebar3 auto-fills modules) but embeds
 /// the `{classes, [...]}` env for the runtime to read via `application:get_env`.
-fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Result<()> {
+fn generate_app_src_file(
+    src_dir: &Utf8Path,
+    class_metadata: &[ClassMeta],
+    protocol_modules: &[String],
+) -> Result<()> {
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n            ");
+
+    // BT-1766: Protocol-only modules need to be loaded separately during stdlib init
+    let protocol_modules_list = protocol_modules
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     let app_src_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -771,7 +831,8 @@ fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Re
          \x20   {{env, [\n\
          \x20       {{classes, [\n\
          \x20           {classes_list}\n\
-         \x20       ]}}\n\
+         \x20       ]}},\n\
+         \x20       {{protocol_modules, [{protocol_modules_list}]}}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
@@ -1146,7 +1207,7 @@ mod tests {
             Utf8PathBuf::from("lib/String.bt"),
         ];
 
-        generate_app_file(&ebin_dir, &source_files, &[]).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &[]).unwrap();
 
         let app_file = ebin_dir.join("beamtalk_stdlib.app");
         assert!(app_file.exists());
@@ -1163,7 +1224,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
-        generate_app_file(&ebin_dir, &[], &[]).unwrap();
+        generate_app_file(&ebin_dir, &[], &[], &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
@@ -1179,8 +1240,25 @@ mod tests {
             Utf8PathBuf::from("lib/my-bad-name.bt"),
         ];
 
-        let result = generate_app_file(&ebin_dir, &source_files, &[]);
+        let result = generate_app_file(&ebin_dir, &source_files, &[], &[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_generate_app_file_with_protocol_modules() {
+        let temp = TempDir::new().unwrap();
+        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_files = vec![Utf8PathBuf::from("lib/Integer.bt")];
+        let protocol_modules = vec!["bt@stdlib@printable".to_string()];
+
+        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules).unwrap();
+
+        let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
+        assert!(
+            content.contains("{protocol_modules, ['bt@stdlib@printable']}"),
+            "Should contain protocol_modules env key. Got:\n{content}"
+        );
     }
 
     fn sample_class_meta() -> ClassMeta {
