@@ -487,13 +487,15 @@ fn analyse_full(
             known_vars,
             &mut result.diagnostics,
         );
-        // BT-1759: Warn when a workspace binding shadows a class name.
-        validators::check_workspace_shadows(
-            &result.class_hierarchy,
-            known_vars,
-            &mut result.diagnostics,
-        );
     }
+    // BT-1759: Warn when a workspace binding shadows a class name.
+    // This check works against the full class hierarchy (including locally
+    // defined classes), so it does not require cross-file metadata.
+    validators::check_workspace_shadows(
+        &result.class_hierarchy,
+        known_vars,
+        &mut result.diagnostics,
+    );
     // Warn on Erlang FFI calls to unknown modules.
     validators::check_unresolved_ffi_modules(module, &mut result.diagnostics);
     // Warn on Erlang FFI calls with wrong arity for known functions.
