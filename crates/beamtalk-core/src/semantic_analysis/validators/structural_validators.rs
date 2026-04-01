@@ -21,8 +21,9 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 /// BT-1726: Warn on class references that don't exist in the hierarchy.
 ///
 /// Walks all expressions looking for `ClassReference` nodes whose name is
-/// not found in the `ClassHierarchy`. Skips built-in names (`Erlang`, `Self`)
-/// and type parameters of the enclosing class.
+/// not found in the `ClassHierarchy`. Skips built-in names (`Erlang`, `Self`,
+/// `Nil`, `True`, `False`), type parameters of the enclosing class, and
+/// REPL workspace bindings passed via `known_vars`.
 pub(crate) fn check_unresolved_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
