@@ -260,7 +260,7 @@ sealed Behaviour subclass: Class
   sealed isClass => true
 
   /// Return the metaclass sentinel.
-  /// (Full metaclass tower is future work — see design-metaprogramming.md)
+  /// (Full metaclass tower shipped in ADR 0036)
   sealed class => @intrinsic classClass
 ```
 
@@ -419,7 +419,7 @@ The gold standard. Pharo defines a four-class tower: `Behavior → ClassDescript
 - `ClassDescription` (method categorization/protocols, comments) — useful but not needed for the hierarchy bug fix
 - Real metaclass instances — ADR 0013's virtual metaclass approach is sufficient for now
 - `methodDict` returning a real MethodDictionary object — we return selector lists instead
-- `CompiledMethod` objects (`>>` operator, method introspection) — deferred to design-metaprogramming.md
+- `CompiledMethod` objects (`>>` operator, method introspection) — deferred to ADR 0074
 - `compile:` (dynamic method compilation from strings)
 - `addSelector:withMethod:` / `removeSelector:` (dynamic method mutation)
 - `allInstances` (already exists via ETS tracking, not part of this ADR)
@@ -544,7 +544,7 @@ Fix BT-721 (make `responds_to_slow` use the flattened table) and BT-510 (synchro
 - **Extensibility foundation**: `Behaviour`/`Class` establish the class protocol in Beamtalk rather than Erlang. All methods are sealed at v0.1 to limit blast radius; unsealing specific methods is a future option as the metaclass tower matures.
 - **Discoverability**: `Counter methods`, `Counter allSuperclasses`, `Counter canUnderstand: #x` are explorable in the REPL
 - **Bug reduction**: `respondsTo:` becomes `self class canUnderstand: selector` — one line, no duplication
-- **Foundation for metaprogramming**: `Behaviour`/`Class` are the base that the full metaclass tower (design-metaprogramming.md) builds on
+- **Foundation for metaprogramming**: `Behaviour`/`Class` are the base that the full metaclass tower (ADR 0074) builds on
 - **Principle alignment**: Satisfies Principles 6 (Messages All The Way Down), 8 (Reflection as Primitive), and 11 (Live Patching is a Message Send)
 
 ### Negative
@@ -622,7 +622,7 @@ Prove the core assumption before building the full feature: a class-side message
 
 Not part of this ADR, but enabled by it:
 - `ClassDescription` with method categorization/protocols
-- Full metaclass tower (design-metaprogramming.md Phases 1-5)
+- Full metaclass tower (ADR 0074 Phases 1-5)
 - `CompiledMethod` objects and `>>` operator
 - Dynamic method addition/removal (`addSelector:withMethod:`)
 - Smart dispatch cache: sealed method promotion, hot call site caching based on profiling data
@@ -662,7 +662,7 @@ The `methods` selector on class objects already returned flattened (inherited) s
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (Compilable Stdlib), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Virtual Metaclasses), [ADR 0015](0015-repl-error-objects-and-exception-hierarchy.md) (Error Hierarchy — new intrinsics must use `beamtalk_error:raise/1`), [ADR 0035](0035-field-based-reflection-api.md) (Field-Based Reflection API — `instVarNames`/`instVarAt:`/`instVarAt:put:` renamed to `fieldNames`/`fieldAt:`/`fieldAt:put:`)
-- Design docs: [design-metaprogramming.md](../internal/design-metaprogramming.md), [design-self-as-object.md](../internal/design-self-as-object.md)
+- Design docs: [ADR 0074](0074-deferred-metaprogramming.md), [design-self-as-object.md](../internal/design-self-as-object.md)
 - Fixed bugs: BT-721 (respondsTo: for inherited methods), BT-510 (out-of-order class loading), BT-734 (follow-up: runtime dispatch/intrinsics)
 - Pharo sources: [Behavior.class.st](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/Behavior.class.st), [Class.class.st](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/Class.class.st), [Metaclass.class.st](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/Metaclass.class.st)
 - [Pharo Reflective Core Booklet](https://books.pharo.org/booklet-ReflectiveCore/)

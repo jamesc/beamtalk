@@ -1371,17 +1371,7 @@ BT-156 (primitive) ──┬──> BT-162 (Integer)
 
 ### Deferred for Future Design
 
-See **[design-metaprogramming.md](design-metaprogramming.md)** for comprehensive coverage of:
-
-- Class objects as processes (full metaclass protocol)
-- Runtime method dictionaries and dynamic dispatch
-- Dynamic `super` dispatch
-- Class method inheritance and `self` in class methods
-- Passing classes as first-class values
-- Method objects (CompiledMethod introspection)
-- `thisContext` emulation
-- `become:` emulation
-- Full class/system reflection API
+See **[ADR 0074](../ADR/0074-deferred-metaprogramming.md)** for the status of deferred metaprogramming features (`thisContext`, `become:`, class-as-actor). Most features originally listed here have shipped — see ADR 0074's "What Has Shipped" table.
 
 **Also deferred (not metaprogramming):**
 
