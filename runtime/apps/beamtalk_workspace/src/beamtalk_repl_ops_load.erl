@@ -990,6 +990,35 @@ collect_load_warnings(Classes) ->
     ].
 
 %% @private
+%% @doc Collect collision warnings with package-aware draining.
+%% BT-742: Uses the module atom to derive the package, then drains only
+%% that package's warnings — leaving sibling packages' warnings intact.
+-spec collect_load_warnings_qualified([map()], atom() | undefined) -> [binary()].
+collect_load_warnings_qualified(Classes, ModuleAtom) ->
+    Package = case ModuleAtom of
+        undefined -> undefined;
+        _ -> beamtalk_class_registry:extract_package_from_module(ModuleAtom)
+    end,
+    ClassNames = lists:filtermap(
+        fun
+            (#{name := N}) when N =/= "" ->
+                case beamtalk_repl_errors:safe_to_existing_atom(list_to_binary(N)) of
+                    {ok, Atom} -> {true, Atom};
+                    {error, badarg} -> false
+                end;
+            (_) ->
+                false
+        end,
+        Classes
+    ),
+    QualifiedNames = [{Package, CN} || CN <- ClassNames],
+    Collisions = beamtalk_runtime_api:drain_class_warnings_by_qualified_names(QualifiedNames),
+    [
+        format_collision_warning(ClassName, OldModule, NewModule)
+     || {ClassName, OldModule, NewModule} <- Collisions
+    ].
+
+%% @private
 -spec format_collision_warning(atom(), atom(), atom()) -> binary().
 format_collision_warning(ClassName, OldModule, NewModule) ->
     ClassBin = atom_to_binary(ClassName, utf8),
@@ -1057,8 +1086,9 @@ do_reload(Path, ModuleAtom, Msg, SessionPid) ->
     end,
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
-            %% BT-737: Collect any cross-package collision warnings from this load.
-            Warnings = collect_load_warnings(Classes),
+            %% BT-742: Use qualified drain for reload — only drain warnings for
+            %% this file's package, not sibling packages with same class names.
+            Warnings = collect_load_warnings_qualified(Classes, ModuleAtom),
             {ActorCount, MigrationFailures} =
                 trigger_actor_code_change(ModuleAtom, Classes),
             beamtalk_repl_json:encode_reloaded(

@@ -36,6 +36,8 @@
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
+    drain_class_warnings_by_qualified_names/1,
+    extract_package_from_module/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     validate_class_update/3,
@@ -177,9 +179,11 @@ ensure_module_table() ->
     beamtalk_class_module_table:new().
 
 %% @doc Ensure the class collision warnings ETS table exists.
-%% BT-737: Stores collision warnings keyed by class name (atom).
+%% BT-737/BT-742: Stores collision warnings keyed by {Package, ClassName}.
 %% Uses bag type so multiple warnings per class are all captured.
 %% Uses try/catch to handle concurrent creation race (TOCTOU safe).
+%% BT-742: Key changed from flat ClassName to {Package | undefined, ClassName}
+%% so that draining warnings for one package doesn't affect another's.
 -spec ensure_class_warnings_table() -> ok.
 ensure_class_warnings_table() ->
     case ets:info(beamtalk_class_warnings) of
@@ -197,19 +201,22 @@ ensure_class_warnings_table() ->
             ok
     end.
 
-%% @doc Record a class collision warning keyed by class name.
+%% @doc Record a class collision warning keyed by {Package, ClassName}.
 %% BT-737: Called by beamtalk_object_class when update_class detects module mismatch.
-%% Keyed by ClassName (not caller PID) so it can be drained by the load handler
-%% regardless of which process the on_load function ran in.
+%% BT-742: Package is extracted from NewModule (the replacing module) so that
+%% warnings can be drained per-package during selective reloads.
 -spec record_class_collision_warning(atom(), atom(), atom()) -> ok.
 record_class_collision_warning(ClassName, OldModule, NewModule) ->
     ensure_class_warnings_table(),
-    ets:insert(beamtalk_class_warnings, {ClassName, OldModule, NewModule}),
+    Package = extract_package_from_module(NewModule),
+    ets:insert(beamtalk_class_warnings, {{Package, ClassName}, OldModule, NewModule}),
     ok.
 
 %% @doc Drain collision warnings for the given class names after a file load.
 %% BT-737: Called by the REPL load handler after loading a file, to collect
 %% warnings and surface them to the client. Removes entries from the table.
+%% BT-742: Drains ALL packages for each class name. Use
+%% drain_class_warnings_by_qualified_names/1 for per-package precision.
 -spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
 drain_class_warnings_by_names(ClassNames) ->
     case ets:info(beamtalk_class_warnings) of
@@ -218,15 +225,56 @@ drain_class_warnings_by_names(ClassNames) ->
         _ ->
             lists:flatmap(
                 fun(ClassName) ->
-                    %% ets:take/2 atomically removes and returns entries (OTP 21+).
-                    %% Avoids TOCTOU race between lookup and delete in concurrent loads.
-                    [
-                        {CN, OldMod, NewMod}
-                     || {CN, OldMod, NewMod} <- ets:take(beamtalk_class_warnings, ClassName)
-                    ]
+                    %% BT-742: Key is now {Package, ClassName}. Use match_object
+                    %% to drain all packages for this class name.
+                    Pattern = {{'_', ClassName}, '_', '_'},
+                    Matches = ets:match_object(beamtalk_class_warnings, Pattern),
+                    %% Delete matched entries (match_object doesn't remove them).
+                    lists:foreach(
+                        fun(Entry) ->
+                            ets:delete_object(beamtalk_class_warnings, Entry)
+                        end,
+                        Matches
+                    ),
+                    [{CN, OldMod, NewMod} || {{_Pkg, CN}, OldMod, NewMod} <- Matches]
                 end,
                 ClassNames
             )
+    end.
+
+%% @doc Drain collision warnings for the given {Package, ClassName} pairs.
+%% BT-742: Package-aware drain that only removes warnings for the specified
+%% package, leaving other packages' warnings intact. Use this from reload
+%% handlers where the package context is known.
+-spec drain_class_warnings_by_qualified_names([{atom() | undefined, atom()}]) ->
+    [{atom(), atom(), atom()}].
+drain_class_warnings_by_qualified_names(QualifiedNames) ->
+    case ets:info(beamtalk_class_warnings) of
+        undefined ->
+            [];
+        _ ->
+            lists:flatmap(
+                fun({Package, ClassName}) ->
+                    %% ets:take/2 atomically removes and returns entries (OTP 21+).
+                    [{CN, OldMod, NewMod}
+                     || {{_Pkg, CN}, OldMod, NewMod} <-
+                            ets:take(beamtalk_class_warnings, {Package, ClassName})]
+                end,
+                QualifiedNames
+            )
+    end.
+
+%% @doc Extract the package segment from a bt@{pkg}@{class} module name.
+%% Returns the package name atom or undefined for unqualified modules.
+%% BT-742: Used to derive the package portion of the ETS key from module atoms.
+-spec extract_package_from_module(atom()) -> atom() | undefined.
+extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
+    ModStr = atom_to_list(ModuleName),
+    case string:split(ModStr, "@", all) of
+        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
+            list_to_atom(Pkg);
+        _ ->
+            undefined
     end.
 
 %% @doc Record a structured error to be surfaced after a failed module load.
