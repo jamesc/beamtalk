@@ -24,8 +24,9 @@ sealed ProtoObject subclass: Erlang
 
   /// Look up an Erlang module by name, returning an ErlangModule proxy.
   ///
-  /// Invoked automatically when an unknown unary message is sent to `Erlang`.
-  /// The `selector` becomes the module name; `arguments` is always empty.
+  /// Invoked automatically when an unknown message is sent to the `Erlang`
+  /// singleton. The `selector` becomes the module name; `arguments` is
+  /// always empty for unary lookups.
   /// Compiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.
   ///
   /// ## Examples
@@ -33,5 +34,4 @@ sealed ProtoObject subclass: Erlang
   /// Erlang lists       // => #ErlangModule<lists>
   /// Erlang maps        // => #ErlangModule<maps>
   /// ```
-  class doesNotUnderstand: selector args: arguments =>
-    @intrinsic erlangModuleLookup
+  doesNotUnderstand: selector args: arguments => @intrinsic erlangModuleLookup

@@ -52,6 +52,10 @@ impl TypeChecker {
 
         if !has_class_method
             && !hierarchy.has_class_dnu_override(class_name)
+            // BT-1763: Sealed value types (like Erlang) dispatch class-side
+            // messages through instance dispatch. Instance-side DNU also
+            // suppresses class-side warnings for these types.
+            && !hierarchy.has_instance_dnu_override(class_name)
             // BT-1736: Cross-file inheritance — if the parent class is not in
             // the hierarchy, we can't know the full class-side method set.
             // Instance-side already checks this; class-side must do the same.
