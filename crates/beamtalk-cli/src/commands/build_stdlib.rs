@@ -611,7 +611,18 @@ fn is_protocol_only_file(path: &Utf8Path) -> Result<bool> {
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{path}'"))?;
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // If parsing produced errors, the class/protocol lists may be incomplete.
+    // Be conservative: treat as a normal class file so extract_class_metadata
+    // reports the real error instead of silently misclassifying.
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    if has_errors {
+        return Ok(false);
+    }
+
     Ok(module.classes.is_empty() && !module.protocols.is_empty())
 }
 
@@ -1231,6 +1242,23 @@ mod tests {
 
         let result = generate_app_file(&ebin_dir, &source_files, &[], &[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_generate_app_file_with_protocol_modules() {
+        let temp = TempDir::new().unwrap();
+        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_files = vec![Utf8PathBuf::from("lib/Integer.bt")];
+        let protocol_modules = vec!["bt@stdlib@printable".to_string()];
+
+        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules).unwrap();
+
+        let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
+        assert!(
+            content.contains("{protocol_modules, ['bt@stdlib@printable']}"),
+            "Should contain protocol_modules env key. Got:\n{content}"
+        );
     }
 
     fn sample_class_meta() -> ClassMeta {

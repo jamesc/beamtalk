@@ -178,7 +178,7 @@ load_protocol_modules() ->
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to load protocol module ~s: ~p",
-                                [Mod, Reason],
+                                [format_bt_module(Mod), Reason],
                                 #{
                                     module => Mod,
                                     reason => Reason,
