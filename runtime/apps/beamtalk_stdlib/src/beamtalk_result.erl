@@ -182,7 +182,7 @@ from_tagged_tuple({error, Reason}) ->
 %%   % raises the embedded error
 %%
 %% beamtalk_result:'unwrapError:'(undefined, file_not_found)
-%%   % raises: "unwrap called on Result error: file_not_found"
+%%   % raises: "unwrap called on Result error: #file_not_found"
 %% ```
 -spec 'unwrapError:'(term(), term()) -> no_return().
 'unwrapError:'(_Self, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Error}) ->
