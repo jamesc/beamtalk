@@ -22,26 +22,26 @@ pkgs includes: "stdlib"
 // PACKAGE NAMED: — INTROSPECT A SPECIFIC PACKAGE
 // ===========================================================================
 
-// Package named: returns a Dictionary for a known package
-info := Package named: "stdlib"
+// Package named: returns a Package object for a known package
+pkg := Package named: "stdlib"
 // => _
 
-info class =:= Dictionary
-// => true
+pkg class
+// => Package
 
-// The info dictionary has the expected #name key
-info at: #name
+// The Package has accessors
+pkg name
 // => stdlib
 
-// The info dictionary has a version string
-(info at: #version) class =:= String
+// The version is a non-empty string
+(pkg version) class =:= String
 // => true
 
-(info at: #version) size > 0
+(pkg version) size > 0
 // => true
 
-// The info dictionary has a classes list with core classes
-stdlibClasses := info at: #classes
+// The classes list includes core classes
+stdlibClasses := pkg classes
 // => _
 
 stdlibClasses includes: #Object
@@ -51,6 +51,10 @@ stdlibClasses includes: #Integer
 // => true
 
 stdlibClasses includes: #String
+// => true
+
+// printString returns a non-empty string
+(pkg printString) size > 0
 // => true
 
 // ===========================================================================
@@ -128,14 +132,14 @@ Object class packageName
 // METACLASS PACKAGE — FULL PACKAGE INFO FROM CLASS SIDE
 // ===========================================================================
 
-// Integer class package returns a Dictionary with package info
+// Integer class package returns a Package object with package info
 intPkg := Integer class package
 // => _
 
-intPkg class =:= Dictionary
-// => true
+intPkg class
+// => Package
 
-intPkg at: #name
+intPkg name
 // => stdlib
 
 // ===========================================================================

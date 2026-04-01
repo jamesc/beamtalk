@@ -75,12 +75,25 @@ named(Name) when is_binary(Name) ->
         {ok, AppName} ->
             build_package_info(AppName, Name);
         error ->
-            error(
-                beamtalk_error:with_message(
-                    beamtalk_error:new(package_not_found, 'Package'),
-                    <<"Package not found: ", Name/binary>>
-                )
-            )
+            LoadedPkgs = all(),
+            Hint =
+                case LoadedPkgs of
+                    [] ->
+                        <<"No packages are currently loaded.">>;
+                    _ ->
+                        PkgList = lists:join(<<", ">>, LoadedPkgs),
+                        iolist_to_binary([
+                            <<"Loaded packages: ">>,
+                            PkgList
+                        ])
+                end,
+            Error0 = beamtalk_error:new(package_not_found, 'Package', 'named:'),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                <<"Package not found: ", Name/binary>>
+            ),
+            Error2 = beamtalk_error:with_hint(Error1, Hint),
+            beamtalk_error:raise(Error2)
     end.
 
 %% @doc Returns the package name (binary) for a given class name.
@@ -205,7 +218,10 @@ find_app_for_package(PkgName, [{AppName, _Desc, _Vsn} | Rest]) ->
             find_app_for_package(PkgName, Rest)
     end.
 
-%% @private Build a full package info map from OTP application metadata.
+%% @private Build a Package tagged map from OTP application metadata.
+%%
+%% Returns a map with `$beamtalk_class => 'Package'` so the runtime
+%% dispatches instance methods defined in Package.bt.
 -spec build_package_info(atom(), binary()) -> map().
 build_package_info(AppName, PkgName) ->
     Version =
@@ -229,6 +245,7 @@ build_package_info(AppName, PkgName) ->
             _ -> <<"">>
         end,
     #{
+        '$beamtalk_class' => 'Package',
         name => PkgName,
         version => Version,
         classes => ClassNames,

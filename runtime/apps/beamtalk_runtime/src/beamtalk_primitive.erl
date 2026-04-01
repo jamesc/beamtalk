@@ -438,6 +438,8 @@ module_for_value(X) when is_map(X) ->
             'bt@stdlib@beamtalk_interface';
         'WorkspaceInterface' ->
             'bt@stdlib@workspace_interface';
+        'Package' ->
+            'bt@stdlib@package';
         undefined ->
             'bt@stdlib@dictionary';
         Other ->
