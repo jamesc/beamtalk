@@ -54,13 +54,21 @@ class_send(ClassPid, spawn, Args) when ClassPid =:= self() ->
 class_send(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
 class_send(ClassPid, 'new', []) ->
-    unwrap_class_call(gen_server:call(ClassPid, {new, []}));
+    class_send_with_recovery(ClassPid, 'new', fun(P) ->
+        unwrap_class_call(gen_server:call(P, {new, []}))
+    end);
 class_send(ClassPid, 'new:', [Map]) ->
-    unwrap_class_call(gen_server:call(ClassPid, {new, [Map]}));
+    class_send_with_recovery(ClassPid, 'new:', fun(P) ->
+        unwrap_class_call(gen_server:call(P, {new, [Map]}))
+    end);
 class_send(ClassPid, spawn, []) ->
-    unwrap_class_call(gen_server:call(ClassPid, {spawn, []}));
+    class_send_with_recovery(ClassPid, spawn, fun(P) ->
+        unwrap_class_call(gen_server:call(P, {spawn, []}))
+    end);
 class_send(ClassPid, 'spawnWith:', [Map]) ->
-    unwrap_class_call(gen_server:call(ClassPid, {spawn, [Map]}));
+    class_send_with_recovery(ClassPid, 'spawnWith:', fun(P) ->
+        unwrap_class_call(gen_server:call(P, {spawn, [Map]}))
+    end);
 %% ADR 0032 Phase 2 (BT-734): 8 of the originally planned 12 hardcoded selector
 %% clauses were removed here (methods, superclass, class_name, module_name,
 %% printString, class, subclasses, allSubclasses); they now dispatch through the
@@ -71,6 +79,13 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
 %% is future work (ADR 0032 Phase 4+).
 class_send(ClassPid, Selector, Args) ->
+    class_send_with_recovery(ClassPid, Selector, fun(P) ->
+        class_send_dispatch(P, Selector, Args)
+    end).
+
+%% @private Dispatch a class method call (the main logic for the catch-all clause).
+-spec class_send_dispatch(pid(), selector(), list()) -> term().
+class_send_dispatch(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     %% BT-440: Test execution may take a long time; use longer timeout.
     %% Class methods can do arbitrary I/O (HTTP, file, database), so the default
@@ -138,6 +153,14 @@ class_send(ClassPid, Selector, Args) ->
 %% Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send(Pid, Selector, Args, Self) ->
+    %% BT-1768: Wrap in crash recovery, same as class_send.
+    class_send_with_recovery(Pid, Selector, fun(P) ->
+        metaclass_send_dispatch(P, Selector, Args, Self)
+    end).
+
+%% @private Dispatch a metaclass method call (the main logic for metaclass_send).
+-spec metaclass_send_dispatch(pid(), atom(), list(), #beamtalk_object{}) -> term().
+metaclass_send_dispatch(Pid, Selector, Args, Self) ->
     %% ADR-0036 Phase 2 (BT-823): Use metaclass_method_call so that
     %% `self species withAll: x` and similar dynamic class-side sends find
     %% user-defined class methods (e.g. `withAll:`) via the proper handler.
@@ -493,6 +516,60 @@ is_dispatch_undef(Module, FunName, [{Module, FunName, _, _} | _]) ->
     end;
 is_dispatch_undef(_Module, _FunName, _ST) ->
     false.
+
+%%% ============================================================================
+%%% Internal Functions — BT-1768 (Class Process Crash Recovery)
+%%% ============================================================================
+
+%% @private
+%% @doc Execute a class_send operation with automatic crash detection and recovery.
+%%
+%% BT-1768: Wraps a gen_server call in a try/catch. If the target class process
+%% has crashed (noproc), looks up the class name from the pid reverse index,
+%% attempts auto-restart via `beamtalk_class_registry:restart_class/1`, and
+%% retries the operation with the new pid. If restart fails, raises a clear error.
+%%
+%% Only attempts recovery once to avoid infinite loops.
+-spec class_send_with_recovery(pid(), selector(), fun((pid()) -> term())) -> term().
+class_send_with_recovery(ClassPid, Selector, Action) ->
+    try
+        Action(ClassPid)
+    catch
+        exit:{noproc, {gen_server, call, _}} ->
+            handle_class_crash_recovery(ClassPid, Selector, Action);
+        exit:{noproc, _} ->
+            handle_class_crash_recovery(ClassPid, Selector, Action)
+    end.
+
+%% @private
+%% @doc Attempt to recover from a crashed class process and retry the operation.
+-spec handle_class_crash_recovery(pid(), selector(), fun((pid()) -> term())) -> term().
+handle_class_crash_recovery(ClassPid, Selector, Action) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_registry:restart_class(ClassName) of
+                {ok, NewPid} ->
+                    %% Retry with the restarted class process.
+                    Action(NewPid);
+                {error, _Reason} ->
+                    Error = beamtalk_error:new(
+                        class_not_found,
+                        ClassName,
+                        Selector,
+                        <<"Class process crashed and could not be restarted">>
+                    ),
+                    beamtalk_error:raise(Error)
+            end;
+        not_found ->
+            %% Cannot identify the class — raise a clear error.
+            Error = beamtalk_error:new(
+                class_not_found,
+                unknown,
+                Selector,
+                <<"Class process is not running (pid not found in registry)">>
+            ),
+            beamtalk_error:raise(Error)
+    end.
 
 %%% ============================================================================
 %%% Internal Functions — BT-893 (Self-Instantiation)
