@@ -48,6 +48,11 @@ jobs:
   beamtalk-http:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Point to the compiler repo's runtime so the freshly-installed
+      # beamtalk binary uses the bundled runtime tools (including rebar3)
+      # instead of whatever happens to be available on PATH.
+      BEAMTALK_RUNTIME_DIR: ${{ github.workspace }}/runtime
     steps:
       - name: Checkout beamtalk compiler
         uses: actions/checkout@v6
@@ -99,13 +104,7 @@ jobs:
       - name: Build beamtalk-http
         working-directory: _packages/beamtalk-http
         run: beamtalk build
-        env:
-          # Point to the compiler repo's runtime so the bundled rebar3 (3.27)
-          # is used instead of the older system rebar3 from setup-beam.
-          BEAMTALK_RUNTIME_DIR: ${{ github.workspace }}/runtime
 
       - name: Test beamtalk-http
         working-directory: _packages/beamtalk-http
         run: beamtalk test
-        env:
-          BEAMTALK_RUNTIME_DIR: ${{ github.workspace }}/runtime
