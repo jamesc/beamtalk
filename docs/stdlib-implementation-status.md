@@ -1,7 +1,7 @@
 # Stdlib Implementation Status
 
-> **Last updated:** 2026-02-12
-> **Issue:** BT-247
+> **Last updated:** 2026-04-01
+> **Issue:** BT-247, BT-1808
 > **Methodology:** Audit of `stdlib/src/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
 > runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and E2E test coverage (`tests/e2e/cases/*.btscript`).
 
@@ -9,14 +9,10 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 332 |
-| **✅ Implemented** | 332 (100%) |
-| **❌ Not Implemented** | 0 (0%) |
-| **Stdlib test coverage** | 1046 assertions in stdlib/bootstrap-test/ |
-| **E2E test coverage** | 213 assertions in tests/e2e/cases/ |
-| **Stdlib .bt files** | 29 |
-| **Runtime-only classes** | 0 (CompiledMethod now has stdlib/src/CompiledMethod.bt) |
+| **Stdlib .bt files** | 76 |
+| **Runtime-only classes** | 0 (all classes have stdlib/src/*.bt) |
 | **Missing .bt files** | 0 |
+| **Protocols** | 1 (Printable) |
 
 ## Status Categories
 
@@ -58,8 +54,6 @@
 
 | Selector | Mechanism | Status | E2E | Notes |
 |----------|-----------|--------|-----|-------|
-| `new` | intrinsic `basicNew` | ✅ | 🧪 | Inline codegen for value type instantiation |
-| `new:` | intrinsic `basicNewWith` | ✅ | 🧪 | Instantiation with constructor args |
 | `isNil` | intrinsic + pure BT | ✅ | 🧪 | Pattern match at call site; Object.bt returns `false` |
 | `notNil` | intrinsic + pure BT | ✅ | 🧪 | Pattern match at call site; Object.bt returns `true` |
 | `ifNil:` | intrinsic + pure BT | ✅ | 🧪 | Inline pattern match |
@@ -67,8 +61,8 @@
 | `ifNil:ifNotNil:` | intrinsic + pure BT | ✅ | 🧪 | Inline pattern match |
 | `ifNotNil:ifNil:` | intrinsic + pure BT | ✅ | 🧪 | Inline pattern match |
 | `printString` | pure BT | ✅ | 🧪 | `'a ' ++ self class printString` (BT-477) |
-| `inspect` | pure BT | ✅ | | Calls `self describe` |
-| `describe` | pure BT | ✅ | | Returns `'an Object'` |
+| `displayString` | pure BT | ✅ | | Delegates to `printString`; override for user-facing display |
+| `inspect` | pure BT | ✅ | | Delegates to `printString` |
 | `yourself` | intrinsic + pure BT | ✅ | 🧪 | Returns self |
 | `hash` | intrinsic | ✅ | 🧪 | `erlang:phash2/1` |
 | `respondsTo:` | intrinsic | ✅ | 🧪 | `beamtalk_primitive:responds_to/2` |
@@ -78,14 +72,75 @@
 | `perform:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
 | `perform:withArgs:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
 | `subclassResponsibility` | pure BT | ✅ | 🧪 | Calls `self error:` — pure Beamtalk method (BT-405) |
+| `notImplemented` | pure BT | ✅ | | Calls `self error:` — WIP stub marker |
+| `show:` | pure BT | ✅ | | Nil-safe Transcript output (no newline); returns `self` |
+| `showCr:` | pure BT | ✅ | | Nil-safe Transcript output (with newline); returns `self` |
+| `isKindOf:` | pure BT | ✅ | | `self class includesBehaviour: aClass` |
 | `error:` | intrinsic | ✅ | 🧪 | Smalltalk-style error signaling |
 | `sealed` | modifier | ✅ | 🧪 | Method modifier preventing override |
 
 _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getValue => ...`), not an `Object` selector. It is documented here for completeness but is not counted as a stdlib method.
 
+_Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses without data (FFI namespaces, abstract extension points) cannot be directly instantiated.
+
+### Value (`stdlib/src/Value.bt`)
+
+**Class:** `Value` — superclass: `Object`
+**Methods:** 3/3 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `new` | intrinsic `basicNew` | ✅ | 🧪 | Inline codegen for value type instantiation |
+| `new:` | intrinsic `basicNewWith` | ✅ | 🧪 | Instantiation with constructor args |
+| `inspect` | pure BT | ✅ | | `ClassName(field: value, ...)` format |
+
+### Collection (`stdlib/src/Collection.bt`)
+
+**Class:** `Collection` — superclass: `Value` — `abstract typed`
+**Methods:** 12/12 implemented (100%)
+**Note:** Abstract superclass for List, Set, Array, Binary, etc. Provides default iteration built on `size` and `do:`.
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `withAll:` | pure BT | ✅ | | Factory — create from list |
+| `size` | abstract | ✅ | | Subclass must implement |
+| `do:` | abstract | ✅ | | Subclass must implement |
+| `isEmpty` | pure BT | ✅ | 🧪 | `self size =:= 0` |
+| `isNotEmpty` | pure BT | ✅ | 🧪 | `self isEmpty not` |
+| `includes:` | pure BT | ✅ | | Linear search via `do:` |
+| `collect:` | pure BT | ✅ | 🧪 | Map via `do:` |
+| `select:` | pure BT | ✅ | 🧪 | Filter via `do:` |
+| `reject:` | pure BT | ✅ | 🧪 | Negated filter |
+| `inject:into:` | pure BT | ✅ | 🧪 | Fold via `do:` |
+| `detect:` | pure BT | ✅ | | First match |
+| `detect:ifNone:` | pure BT | ✅ | | First match with default |
+
+### Binary (`stdlib/src/Binary.bt`)
+
+**Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0069](ADR/0069-string-subclass-of-binary.md))
+**Methods:** 14/14 implemented (100%)
+**Note:** Byte-level data and serialization. Parent of String. Maps to Erlang `binary()`.
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `class serialize:` | @primitive selector | ✅ | 🧪 | External term format |
+| `class deserialize:` | @primitive selector | ✅ | 🧪 | Reverse of serialize |
+| `class deserializeWithUsed:` | @primitive selector | ✅ | | Returns `#(value, bytesConsumed)` |
+| `class fromBytes:` | @primitive selector | ✅ | 🧪 | Build from byte list |
+| `class fromIolist:` | @primitive selector | ✅ | 🧪 | Build from iolist |
+| `byteSize` | @primitive selector | ✅ | 🧪 | Byte count |
+| `byteAt:` | @primitive selector | ✅ | 🧪 | 0-based byte access |
+| `toBytes` | @primitive selector | ✅ | 🧪 | Byte list |
+| `part:size:` | @primitive selector | ✅ | 🧪 | Byte-level slice |
+| `concat:` | @primitive selector | ✅ | 🧪 | Byte concatenation |
+| `size` | @primitive selector | ✅ | 🧪 | Same as `byteSize` |
+| `do:` | @primitive selector | ✅ | 🧪 | Iterate bytes |
+| `printString` | pure BT | ✅ | | Developer representation |
+| `asString` | @primitive selector | ✅ | | UTF-8 decode |
+
 ### Number (`stdlib/src/Number.bt`)
 
-**Class:** `Number` — superclass: `Object` — `abstract`
+**Class:** `Number` — superclass: `Value` — `abstract typed`
 **Methods:** 5/5 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
@@ -144,7 +199,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### String (`stdlib/src/String.bt`)
 
-**Class:** `String` — superclass: `Object` — `@sealed`
+**Class:** `String` — superclass: `Binary` — `@sealed` ([ADR 0069](ADR/0069-string-subclass-of-binary.md))
 **Methods:** 48/48 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
@@ -200,7 +255,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### List (`stdlib/src/List.bt`)
 
-**Class:** `List` — superclass: `Object` — `@sealed`
+**Class:** `List` — superclass: `Collection` — `@sealed typed`
 **Methods:** 38/38 implemented (100%)
 **Note:** List in Beamtalk maps to Erlang linked lists. Literal syntax: `#(1, 2, 3)`. Renamed from Array in BT-419 — `Array` is reserved for a future tuple-backed O(1)-indexed collection.
 **Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `stdlib/src/List.bt` with BIF mappings (Option A). Complex operations delegate to `beamtalk_list_ops.erl`.
@@ -376,7 +431,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### Dictionary (`stdlib/src/Dictionary.bt` — BT-418)
 
-**Stdlib module:** `stdlib/src/Dictionary.bt` → `beamtalk_dictionary`
+**Class:** `Dictionary(K, V)` — superclass: `Collection` — `@sealed`
 **Helper module:** `beamtalk_map_ops.erl` (complex operations)
 **Methods:** 12 — all implemented
 
@@ -397,7 +452,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### Set (`stdlib/src/Set.bt` — BT-73)
 
-**Stdlib module:** `stdlib/src/Set.bt` → `beamtalk_set`
+**Class:** `Set(E)` — superclass: `Collection` — `@sealed`
 **Helper module:** `beamtalk_set_ops.erl` (ordsets operations + tagged map wrapping)
 **Representation:** Tagged map `#{'$beamtalk_class' => 'Set', elements => [sorted_list]}`
 **Methods:** 14 — all implemented
@@ -424,7 +479,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### Tuple (`stdlib/src/Tuple.bt`)
 
-**Class:** `Tuple` — superclass: `Object` — `@sealed`
+**Class:** `Tuple` — superclass: `Collection` — `@sealed typed`
 **Methods:** 8/8 implemented (100%)
 **Note:** BEAM-specific, wraps Erlang result tuples `{ok, Value}` / `{error, Reason}`.
 
@@ -482,17 +537,17 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### TranscriptStream (`stdlib/src/TranscriptStream.bt`)
 
-**Class:** `TranscriptStream` — superclass: `Actor`
+**Class:** `TranscriptStream` — superclass: `Actor` (native: `beamtalk_transcript_stream`)
 **Methods:** 6/6 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
-| `show:` | @primitive selector | ✅ | 🧪 | `Transcript>>show:` |
-| `cr` | @primitive selector | ✅ | 🧪 | `Transcript>>cr` |
-| `subscribe` | @primitive selector | ✅ | | N/A |
-| `unsubscribe` | @primitive selector | ✅ | | N/A |
-| `recent` | @primitive selector | ✅ | | N/A |
-| `clear` | @primitive selector | ✅ | | N/A |
+| `show:` | native delegate | ✅ | 🧪 | `Transcript>>show:` — accepts `Printable` |
+| `cr` | native delegate | ✅ | 🧪 | `Transcript>>cr` |
+| `subscribe` | native delegate | ✅ | | N/A |
+| `unsubscribe` | native delegate | ✅ | | N/A |
+| `recent` | native delegate | ✅ | | N/A |
+| `clear` | native delegate | ✅ | | N/A |
 
 ---
 
@@ -511,7 +566,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### Character (`stdlib/src/Character.bt`)
 
-**Class:** `Character` — superclass: `Object` — `@sealed`
+**Class:** `Character` — superclass: `Integer` — `@sealed`
 **Methods:** 19/19 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Notes |
@@ -538,7 +593,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### Boolean (`stdlib/src/Boolean.bt`)
 
-**Class:** `Boolean` — superclass: `Object` — `abstract`
+**Class:** `Boolean` — superclass: `Value` — `abstract`
 **Methods:** 4/4 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Notes |
@@ -550,7 +605,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ### TestCase (`stdlib/src/TestCase.bt`)
 
-**Class:** `TestCase` — superclass: `Object`
+**Class:** `TestCase` — superclass: `Value`
 **Methods:** 7/7 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Notes |
@@ -589,6 +644,78 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | Selector | Mechanism | Status | E2E | Notes |
 |----------|-----------|--------|-----|-------|
 | `describe` | pure BT | ✅ | 🧪 | Error description |
+
+---
+
+## Protocols
+
+### Printable (`stdlib/src/Printable.bt`)
+
+**Protocol:** `Printable` — structural protocol (ADR 0068, BT-1766)
+**Required methods:** 2
+
+| Selector | Return Type | Notes |
+|----------|-------------|-------|
+| `asString` | `String` | Human-readable string representation |
+| `printString` | `String` | Developer-oriented representation (debugging, REPL) |
+
+**Conformance:** Automatic — any class implementing both `asString` and `printString` conforms.
+Most stdlib classes conform because `Object` provides a default `printString` and subclasses typically override `asString`.
+
+**Usage:** `TranscriptStream >> show:` accepts `Printable`, so conforming objects can be displayed directly without manual `asString` calls.
+
+---
+
+## Classes Added Since v0.3.1
+
+The following stdlib `.bt` files have been added since the previous audit (2026-02-12). They are listed here for completeness; full method-level audit is tracked as future work.
+
+| Class | Superclass | File | Notes |
+|-------|------------|------|-------|
+| `Array` | `Collection` | `Array.bt` | Fixed-size O(1) indexed collection (Erlang tuple-backed) |
+| `AtomicCounter` | `Object` | `AtomicCounter.bt` | Lock-free counter via `atomics` |
+| `BEAMError` | `Error` | `BEAMError.bt` | Wraps raw BEAM exceptions |
+| `Bag` | `Collection` | `Bag.bt` | Multiset / counted collection |
+| `Behaviour` | `Object` | `Behaviour.bt` | Metaclass introspection |
+| `Class` | `Behaviour` | `Class.bt` | Class mirror |
+| `ClassBuilder` | `Object` | `ClassBuilder.bt` | Dynamic class creation |
+| `DateTime` | `Value` | `DateTime.bt` | Date/time value type |
+| `DynamicSupervisor` | `Object` | `DynamicSupervisor.bt` | OTP DynamicSupervisor wrapper |
+| `Erlang` | `Object` | `Erlang.bt` | Direct Erlang module access |
+| `ErlangModule` | `Object` | `ErlangModule.bt` | Erlang module wrapper |
+| `ExitError` | `Error` | `ExitError.bt` | Process exit wrapper |
+| `FileHandle` | `Object` | `FileHandle.bt` | File I/O handle |
+| `Interval` | `Collection` | `Interval.bt` | Arithmetic sequence (1 to: 10) |
+| `Json` | `Object` | `Json.bt` | JSON parse/stringify |
+| `Logger` | `Object` | `Logger.bt` | OTP logger wrapper |
+| `Metaclass` | `Behaviour` | `Metaclass.bt` | Metaclass mirror |
+| `OS` | `Object` | `OS.bt` | OS-level operations |
+| `Package` | `Object` | `Package.bt` | Package management |
+| `Pid` | `Object` | `Pid.bt` | BEAM process identifier |
+| `Port` | `Object` | `Port.bt` | BEAM port wrapper |
+| `Printable` | protocol | `Printable.bt` | String representation protocol |
+| `Protocol` | `Object` | `Protocol.bt` | Protocol mirror |
+| `Queue` | `Collection` | `Queue.bt` | FIFO queue |
+| `Random` | `Object` | `Random.bt` | Random number generation |
+| `ReactiveSubprocess` | `Actor` | `ReactiveSubprocess.bt` | Streaming subprocess |
+| `Reference` | `Object` | `Reference.bt` | BEAM reference wrapper |
+| `Regex` | `Value` | `Regex.bt` | Regular expressions |
+| `Result` | `Value` | `Result.bt` | Ok/Error result type |
+| `Server` | `Actor` | `Server.bt` | OTP Server base class |
+| `StackFrame` | `Object` | `StackFrame.bt` | Stack trace inspection |
+| `Stream` | `Object` | `Stream.bt` | Lazy sequences |
+| `Subprocess` | `Actor` | `Subprocess.bt` | OS subprocess management |
+| `SupervisionSpec` | `Value` | `SupervisionSpec.bt` | Supervisor child specs |
+| `Supervisor` | `Object` | `Supervisor.bt` | OTP Supervisor wrapper |
+| `System` | `Object` | `System.bt` | System info and control |
+| `TestResult` | `Value` | `TestResult.bt` | BUnit test result |
+| `TestRunner` | `Object` | `TestRunner.bt` | BUnit test runner |
+| `ThrowError` | `Error` | `ThrowError.bt` | Non-local return error |
+| `Time` | `Object` | `Time.bt` | Time operations |
+| `TimeoutProxy` | `Object` | `TimeoutProxy.bt` | Timeout wrapper |
+| `Timer` | `Object` | `Timer.bt` | Timer operations |
+| `Tracing` | `Object` | `Tracing.bt` | Actor observability |
+| `WorkspaceInterface` | `Actor` | `WorkspaceInterface.bt` | Workspace management |
 
 ---
 
@@ -658,12 +785,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 ## Missing `.bt` Files
 
-All stdlib classes now have corresponding `stdlib/src/*.bt` definitions.
-
-| Class | Status | Notes |
-|-------|--------|-------|
-| `Collection` | N/A | Abstract concept — not planned as a standalone `.bt` file |
-| `SequenceableCollection` | N/A | Abstract concept — not planned as a standalone `.bt` file |
+All stdlib classes now have corresponding `stdlib/src/*.bt` definitions. `Collection` is now defined in `stdlib/src/Collection.bt` as an abstract typed subclass of `Value`.
 
 ---
 

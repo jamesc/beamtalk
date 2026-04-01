@@ -170,8 +170,11 @@ fn test_valid_selector_no_warning() {
 }
 
 #[test]
-fn test_class_side_dnu_suppresses_warning() {
-    // Erlang erlang  ← Erlang has class-side doesNotUnderstand:args:
+fn test_instance_side_dnu_suppresses_class_side_warning() {
+    // Erlang erlang  ← Erlang has instance-side doesNotUnderstand:args:
+    // BT-1763: Erlang is a sealed singleton that dispatches class-side
+    // messages through instance dispatch, so instance-side DNU also
+    // suppresses class-side warnings.
     // Should NOT produce "does not understand" warning
     let module = make_module(vec![msg_send(
         class_ref("Erlang"),
@@ -188,7 +191,7 @@ fn test_class_side_dnu_suppresses_warning() {
         .collect();
     assert!(
         dnu_warnings.is_empty(),
-        "Erlang class-side DNU should suppress warnings, got: {dnu_warnings:?}"
+        "Erlang instance-side DNU should suppress class-side warnings, got: {dnu_warnings:?}"
     );
 }
 

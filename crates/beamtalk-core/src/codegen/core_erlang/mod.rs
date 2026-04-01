@@ -2766,6 +2766,7 @@ impl CoreErlangGenerator {
     /// For **structural intrinsics** (bare, e.g., `@primitive blockValue`),
     /// these are handled at the call site by `dispatch_codegen`, not here.
     /// The method body for structural intrinsics is never directly called.
+    #[allow(clippy::too_many_lines)] // BT-1763: Erlang interop intrinsics add essential branches
     fn generate_primitive(
         &mut self,
         name: &str,
@@ -2812,6 +2813,52 @@ impl CoreErlangGenerator {
                         "call 'erlang':'get'('beamtalk_class_module'), [",
                         Document::String(param),
                         "])",
+                    ]);
+                }
+                _ => {}
+            }
+        }
+
+        // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
+        // the handler module's dispatch/3 rather than passing the intrinsic name.
+        // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
+        // forward Selector and Args as the dispatch selector and argument list.
+        if !is_quoted {
+            match name {
+                "erlangApply" => {
+                    let params = &self.current_method_params;
+                    let selector_param = params
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Selector".to_string());
+                    let args_param = params
+                        .get(1)
+                        .cloned()
+                        .unwrap_or_else(|| "Arguments".to_string());
+                    return Ok(docvec![
+                        "call 'beamtalk_erlang_proxy':'dispatch'(",
+                        Document::String(selector_param),
+                        ", ",
+                        Document::String(args_param),
+                        ", Self)"
+                    ]);
+                }
+                "erlangModuleLookup" => {
+                    let params = &self.current_method_params;
+                    let selector_param = params
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Selector".to_string());
+                    let args_param = params
+                        .get(1)
+                        .cloned()
+                        .unwrap_or_else(|| "Arguments".to_string());
+                    return Ok(docvec![
+                        "call 'beamtalk_erlang_class':'dispatch'(",
+                        Document::String(selector_param),
+                        ", ",
+                        Document::String(args_param),
+                        ", Self)"
                     ]);
                 }
                 _ => {}

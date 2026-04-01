@@ -19,6 +19,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
 - [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
 - [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
+  - [Printable Protocol and Display Methods](#printable-protocol-and-display-methods)
 - [Union Types and Narrowing (ADR 0068)](#union-types-and-narrowing-adr-0068)
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
@@ -27,6 +28,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Live Patching](#live-patching)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
+  - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
 - [Tooling](#tooling)
 - [Inspiration Sources](#inspiration-sources)
@@ -915,6 +917,8 @@ Protocols define named message sets. A class conforms to a protocol if it respon
 Protocol define: Printable
   /// Return a human-readable string representation.
   asString -> String
+  /// Return a developer-oriented representation (for debugging/REPL).
+  printString -> String
 
 Protocol define: Comparable
   < other :: Self -> Boolean
@@ -1012,7 +1016,7 @@ Actor subclass: Logger(T :: Printable)
 => #(Printable, Comparable)
 
 > Printable requiredMethods
-=> #(#asString)
+=> #(#asString, #printString)
 
 > Printable conformingClasses
 => #(Integer, Float, String, Boolean, Symbol, Array, ...)
@@ -1027,6 +1031,51 @@ Protocol conformance issues are **warnings, never errors**:
 | Protocol conformance unverifiable | Warning |
 | Missing method for protocol | Warning |
 | Namespace collision (class + protocol same name) | Error (structural) |
+
+### Printable Protocol and Display Methods
+
+The `Printable` protocol is the standard contract for objects that can represent themselves as strings. It requires two methods:
+
+- **`asString`** — a human-readable representation (for end-user display)
+- **`printString`** — a developer-oriented representation (for debugging, logging, and REPL display)
+
+Most stdlib classes conform automatically because `Object` provides a default `printString` (`"a ClassName"`) and most subclasses implement `asString`. Custom classes only need to implement these two methods to conform:
+
+```beamtalk
+Value subclass: Point
+  field: x = 0
+  field: y = 0
+
+  // Human-readable
+  asString -> String => "({self.x}, {self.y})"
+
+  // Developer-readable (REPL display)
+  printString -> String => "Point({self.x}, {self.y})"
+```
+
+The related display methods on `Object` are:
+
+| Method | Behaviour |
+|--------|-----------|
+| `asString` | Human-readable string (override per class) |
+| `printString` | Developer-readable string (REPL/inspector uses this) |
+| `displayString` | User-facing display; defaults to `printString` |
+| `inspect` | Inspection; defaults to `printString` |
+| `show: value` | Write `value` to Transcript (nil-safe, returns `self`) |
+| `showCr: value` | Write `value` to Transcript followed by newline (nil-safe, returns `self`) |
+
+`show:` and `showCr:` are convenience methods on `Object` that delegate to `TranscriptStream`. They are nil-safe — when no transcript is active (e.g. batch compilation), they silently do nothing and return `self`, making them safe for cascaded chains:
+
+```beamtalk
+// Cascaded output
+Transcript show: "Hello"; cr; show: "World"
+
+// show:/showCr: on any object — nil-safe
+42 show: "value: "
+42 showCr: "hello world"
+```
+
+`TranscriptStream >> show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
 
 ---
 
@@ -2132,7 +2181,7 @@ Actor messages automatically carry a propagated context map across boundaries. T
 
 ## Namespace and Class Visibility
 
-Beamtalk v0.1 uses a **flat global namespace** (ADR 0031). All classes are globally
+Beamtalk uses a **flat global namespace** (ADR 0031). All classes are globally
 visible — no `import`, `export`, or namespace declaration is needed or available.
 
 ### How loading works
@@ -2236,8 +2285,147 @@ Integer subclass: SafeInteger
 
 ### Namespace
 
-Class names must be globally unique. A module/import system is planned for a future release. See [known-limitations.md](known-limitations.md) and
+Class names must be globally unique. A package namespace and dependency system is designed ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)) but not yet implemented. See [known-limitations.md](known-limitations.md) and
 [ADR 0031](ADR/0031-flat-namespace-for-v01.md) for details.
+
+### Visibility and Access Control (ADR 0071)
+
+Beamtalk classes and methods are **public by default** — visible to any package. The `internal` modifier restricts visibility to the defining package only. Enforcement is **compile-time only**, with zero runtime overhead.
+
+**Core principle:** Visibility controls *dependency*, not *knowledge*. Internal classes and methods are fully visible to browsing, reflection, and documentation tools — you just cannot name them in compiled code from outside the package. The REPL's `:browse`, `:doc`, and `:source` commands work on internal items normally.
+
+#### Class-Level `internal`
+
+Mark a class as `internal` to hide it from other packages:
+
+```beamtalk
+// Public (default) — available to any package
+Actor subclass: HttpClient
+  get: url => ...
+
+// Internal — only visible within this package
+internal Actor subclass: ConnectionPool
+  state: connections = #{}
+
+  acquire => ...
+  release: conn => ...
+```
+
+Cross-package references to internal classes produce a compile error:
+
+```text
+error[E0401]: Class 'ConnectionPool' is internal to package 'http' and cannot be referenced from 'my_app'
+  --> src/app.bt:5:12
+   |
+ 5 |     http@ConnectionPool new
+   |          ^^^^^^^^^^^^^^
+   |
+   = note: 'ConnectionPool' is declared 'internal' in package 'http'
+```
+
+#### Method-Level `internal`
+
+Mark individual methods as `internal` to hide implementation helpers on public classes:
+
+```beamtalk
+Actor subclass: HttpClient
+  state: config = #{}
+
+  // Public — part of the package API
+  get: url => ...
+  post: url body: body => ...
+
+  // Internal — implementation details, not callable from outside the package
+  internal buildHeaders: request => ...
+  internal retryWithBackoff: block maxAttempts: n => ...
+```
+
+When the compiler can determine the receiver type (via type annotations, literal class references, or type inference), cross-package sends to internal methods produce a compile error:
+
+```text
+error[E0403]: Method 'buildHeaders:' is internal to package 'http' and cannot be called from 'my_app'
+  --> src/app.bt:10:5
+   |
+10 |     client buildHeaders: req
+   |            ^^^^^^^^^^^^^^
+```
+
+For untyped dynamic sends where the receiver type is unknown, no enforcement — the message send succeeds at runtime, consistent with the "visibility controls dependency, not knowledge" principle.
+
+#### Combining Modifiers
+
+`internal` composes with all existing class modifiers in any order:
+
+```beamtalk
+// Internal abstract base — must be subclassed within the package
+internal abstract Actor subclass: InternalAbstractBase
+  state: label = "base"
+  getLabel => self.label
+  compute => self subclassResponsibility
+
+// Internal sealed — cannot be subclassed, even within the package
+internal sealed Actor subclass: InternalSealedCache
+  state: data = 0
+  store: val => self.data := val
+  retrieve => self.data
+
+// Internal typed — type annotations required on methods
+internal typed Actor subclass: InternalTypedConfig
+  state: setting :: Integer = 0
+  getSetting -> Integer => self.setting
+  setSetting: val :: Integer -> Integer => self.setting := val
+
+// Modifier order is flexible
+abstract internal Actor subclass: AlsoValid
+  ...
+```
+
+| Combination | Valid? | Notes |
+|-------------|--------|-------|
+| `internal sealed` | Yes | Prevents subclassing even within the package |
+| `internal abstract` | Yes | Internal base class, must be subclassed within the package |
+| `internal typed` | Yes | Internal class with type annotation requirements |
+| Stacking order | Any | `internal` can appear anywhere in the modifier list |
+
+#### Library Author Patterns
+
+A typical package exposes a few public classes and hides implementation details:
+
+```beamtalk
+// json/src/parser.bt — Public API
+Object subclass: Parser
+  /// Parse a JSON string into a Beamtalk value.
+  parse: input :: String => ...
+
+// json/src/parser_state.bt — Internal implementation
+internal Value subclass: ParserState
+  field: position = 0
+  field: buffer = ""
+
+// json/src/token_buffer.bt — Internal implementation
+internal Value subclass: TokenBuffer
+  field: tokens = #()
+```
+
+**Leaked visibility** — if an internal class appears in the public signature of a public method, the compiler emits a hard error. This prevents accidentally exposing implementation types:
+
+```text
+error[E0402]: Internal class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:'
+  --> src/parser.bt:12:3
+   |
+12 |   tokenize: input :: String -> TokenBuffer =>
+   |                                ^^^^^^^^^^^
+   |
+   = note: 'TokenBuffer' is declared 'internal' — make it public, or change the return type
+```
+
+All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes.
+
+#### Metadata
+
+Visibility is recorded in `__beamtalk_meta/0` as a compile-time constant atom (`public` or `internal`). Tooling (LSP, REPL completions) uses this field to filter internal items from cross-package suggestions while still showing them in `:browse` and `:doc` output.
+
+See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full design, including edge cases (subclassing, protocol conformance, extension methods, `perform:` dynamic sends) and the enforcement model.
 
 ---
 
