@@ -135,7 +135,7 @@ No `become:` or `thisContext`. Reference capabilities ensure data-race safety th
 
 **Erlang/BEAM developer:** Will find this natural — BEAM developers don't expect stack reification or identity swapping. The current reflection API (`class`, `methods`, `respondsTo:`) goes well beyond what Erlang offers.
 
-**Production operator:** Benefits from the deferral — class processes as runtime infrastructure (not supervised actors) means fewer moving parts in the supervision tree, simpler debugging via Observer, and no risk of class process crashes affecting user actors.
+**Production operator:** Benefits from simpler supervision trees and straightforward Observer debugging. Class process crashes are a latent risk (BT-1768 addresses detection and recovery), but existing actor instances are unaffected since they dispatch through compiled modules, not the class process.
 
 ## Steelman Analysis
 
@@ -171,7 +171,7 @@ Implement a global name registry where all object references are indirected thro
 ### Alternative: Opt-In Supervised Class Processes
 Allow specific class processes to be supervised via a modifier (e.g. `supervised class Foo`), rather than requiring all class processes to be full actors.
 
-**Rejected for now:** Narrower scope avoids the global bootstrap ordering problem, but still requires the compiler to distinguish supervised vs unsupervised class processes and generate different registration paths. A reasonable future step if class process reliability becomes a concern, but premature without evidence of class process crashes in practice.
+**Superseded by the expected resolution path:** BT-1768 + dirty marking makes all class processes recoverable without per-class opt-in. No compiler changes needed — supervision is added at the runtime level for all class processes uniformly.
 
 ### Alternative: Implement Class-as-Actor for v0.1
 Promote all class processes to full supervised actors with `state:` declarations and OTP lifecycle.
@@ -193,7 +193,7 @@ Promote all class processes to full supervised actors with `state:` declarations
 
 ### Neutral
 - **This ADR is the authoritative reference** for which Smalltalk-80 metaprogramming features Beamtalk implements, defers, or rules out. The original design doc has been removed — this ADR supersedes it.
-- The `beamtalk_object_class` gen_server architecture is explicitly designed to evolve toward class-as-actor if demand materialises. This deferral is a scope decision, not an architectural dead end.
+- Supervised class processes are expected to emerge from BT-1768 (crash detection) + dirty marking/disk flush (state persistence) rather than requiring a dedicated "class-as-actor" effort.
 - `known-limitations.md` documents the user-facing limitations concisely.
 
 ## Implementation
