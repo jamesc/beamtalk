@@ -300,7 +300,14 @@ is_future_selector(_) -> false.
 send_tagged_map_fallback(X, Class, Selector, Args) ->
     case beamtalk_exception_handler:is_exception_class(Class) of
         true ->
-            beamtalk_exception_handler:dispatch(Selector, Args, X);
+            case beamtalk_exception_handler:has_method(Selector) of
+                true ->
+                    beamtalk_exception_handler:dispatch(Selector, Args, X);
+                false ->
+                    %% Fall through to Object hierarchy for inherited methods
+                    %% (e.g. displayString, respondsTo:, etc.)
+                    value_type_send(X, Class, Selector, Args)
+            end;
         false ->
             value_type_send(X, Class, Selector, Args)
     end.
@@ -358,8 +365,11 @@ responds_to_map(X, Selector) ->
         undefined ->
             Class = beamtalk_tagged_map:class_of(X),
             case beamtalk_exception_handler:is_exception_class(Class) of
-                true -> beamtalk_exception_handler:has_method(Selector);
-                false -> value_type_responds_to(Class, Selector)
+                true ->
+                    beamtalk_exception_handler:has_method(Selector) orelse
+                        value_type_responds_to(Class, Selector);
+                false ->
+                    value_type_responds_to(Class, Selector)
             end;
         Mod ->
             Mod:has_method(Selector)

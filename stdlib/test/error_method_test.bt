@@ -56,3 +56,11 @@ TestCase subclass: ErrorMethodTest
     self assert: ([
       42 error: 99
     ] on: Exception do: [:e | e errorClass]) equals: #Integer
+
+  testExceptionDisplayString =>
+    // displayString on an Exception delegates to printString
+    self assert: ([
+      42 error: "too big"
+    ] on: Exception do: [:e |
+      e displayString
+    ]) equals: ([42 error: "too big"] on: Exception do: [:e | e printString])
