@@ -288,11 +288,9 @@ await_initialize(Pid) ->
             receive
                 {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
             end;
-        exit:{{Reason, _CallInfo}, _} ->
-            %% gen_server stop reason wrapped by sys
-            erlang:demonitor(MonRef, [flush]),
-            {error, Reason};
         exit:{Reason, _} ->
+            %% gen_server stop reason wrapped by sys: {StopReason, {sys, get_state, ...}}
+            %% Reason is the full stop reason (e.g. {error, function_clause}).
             erlang:demonitor(MonRef, [flush]),
             {error, Reason}
     end.

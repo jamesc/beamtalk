@@ -142,6 +142,11 @@ enum Command {
         #[arg(long)]
         confirm_network: bool,
 
+        /// Set the OTP logger level for the workspace node
+        /// (emergency|alert|critical|error|warning|notice|info|debug)
+        #[arg(long, default_value = "info")]
+        log_level: String,
+
         /// Start browser workspace (serves HTML UI at `http://localhost:<port>/`)
         #[arg(long)]
         web: bool,
@@ -423,6 +428,7 @@ fn run() -> Result<()> {
             no_color,
             bind,
             confirm_network,
+            log_level,
             web,
             web_port,
         } => commands::repl::run(
@@ -436,6 +442,7 @@ fn run() -> Result<()> {
             no_color,
             bind.as_deref(),
             confirm_network,
+            &log_level,
             web,
             web_port,
         ),

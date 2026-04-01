@@ -353,6 +353,7 @@ pub fn run(
     no_color: bool,
     bind: Option<&str>,
     confirm_network: bool,
+    log_level: &str,
     web: bool,
     web_port: Option<u16>,
 ) -> Result<()> {
@@ -364,6 +365,23 @@ pub fn run(
         return Err(miette!(
             "--web-port must be > 0 (use --web without --web-port to reuse the REPL port)"
         ));
+    }
+
+    // Validate log level against OTP logger levels (also prevents eval injection)
+    {
+        const VALID: &[&str] = &[
+            "emergency",
+            "alert",
+            "critical",
+            "error",
+            "warning",
+            "notice",
+            "info",
+            "debug",
+        ];
+        if !VALID.contains(&log_level) {
+            return Err(miette!("--log-level must be one of: {}", VALID.join(", ")));
+        }
     }
 
     // Resolve bind address: --bind flag → IP address (ADR 0020)
@@ -428,6 +446,7 @@ pub fn run(
             &project_root,
             Some(bind_addr),
             web_port,
+            log_level,
             otp_app_name.as_deref(),
             &hex_dep_names,
         )?;
