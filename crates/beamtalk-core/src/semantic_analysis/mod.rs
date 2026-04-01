@@ -487,6 +487,12 @@ fn analyse_full(
             known_vars,
             &mut result.diagnostics,
         );
+        // BT-1759: Warn when a workspace binding shadows a class name.
+        validators::check_workspace_shadows(
+            &result.class_hierarchy,
+            known_vars,
+            &mut result.diagnostics,
+        );
     }
     // Warn on Erlang FFI calls to unknown modules.
     validators::check_unresolved_ffi_modules(module, &mut result.diagnostics);
@@ -4251,6 +4257,107 @@ Value subclass: Caller
         assert!(
             dnu.is_empty(),
             "Class-side extension should suppress DNU, got: {dnu:?}"
+        );
+    }
+
+    // ── BT-1759: Workspace binding shadows class ──
+
+    #[test]
+    fn workspace_binding_shadowing_class_emits_warning() {
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        use crate::source_analysis::DiagnosticCategory;
+
+        // Pre-load a class "Workspace" so the hierarchy knows about it.
+        let pre_class = ClassInfo {
+            name: EcoString::from("Workspace"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+
+        let src = "42.";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+        // Analyse with "Workspace" as both a known_var and a pre-loaded class.
+        let result = analyse_with_known_vars_and_classes(&module, &["Workspace"], vec![pre_class]);
+
+        let shadow_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::ShadowedClass))
+            .collect();
+
+        assert_eq!(
+            shadow_warnings.len(),
+            1,
+            "Should emit exactly one shadow warning, got: {shadow_warnings:?}"
+        );
+        assert!(
+            shadow_warnings[0]
+                .message
+                .contains("Workspace binding `Workspace` shadows class `Workspace`")
+        );
+    }
+
+    #[test]
+    fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        use crate::source_analysis::DiagnosticCategory;
+
+        let src = "42.";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+        // "myCustomVar" is not a class — no shadow warning expected.
+        // Use empty pre_loaded_classes so has_cross_file_classes is false,
+        // meaning the shadow check doesn't run at all. To test the no-match
+        // path, we need at least one pre-loaded class.
+        let dummy_class = ClassInfo {
+            name: EcoString::from("DummyClass"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+
+        let result =
+            analyse_with_known_vars_and_classes(&module, &["myCustomVar"], vec![dummy_class]);
+
+        let shadow_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::ShadowedClass))
+            .collect();
+
+        assert!(
+            shadow_warnings.is_empty(),
+            "Non-class bindings should not trigger shadow warnings, got: {shadow_warnings:?}"
         );
     }
 }
