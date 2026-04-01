@@ -422,7 +422,9 @@ class_method_fun_name(Selector) ->
 %% BT-440: These selectors need special handling to avoid gen_server deadlock.
 -spec is_test_execution_selector(selector()) -> boolean().
 is_test_execution_selector(runAll) -> true;
+is_test_execution_selector('runAll:') -> true;
 is_test_execution_selector('run:') -> true;
+is_test_execution_selector('run:method:') -> true;
 is_test_execution_selector(_) -> false.
 
 %% @doc Handle async cast message dispatch for Future protocol.

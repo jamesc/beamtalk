@@ -109,8 +109,12 @@ is_test_execution_selector_test_() ->
     [
         {"runAll is a test execution selector",
             ?_assert(beamtalk_class_dispatch:is_test_execution_selector(runAll))},
+        {"runAll: is a test execution selector",
+            ?_assert(beamtalk_class_dispatch:is_test_execution_selector('runAll:'))},
         {"run: is a test execution selector",
             ?_assert(beamtalk_class_dispatch:is_test_execution_selector('run:'))},
+        {"run:method: is a test execution selector",
+            ?_assert(beamtalk_class_dispatch:is_test_execution_selector('run:method:'))},
         {"increment is not a test execution selector",
             ?_assertNot(beamtalk_class_dispatch:is_test_execution_selector(increment))},
         {"new is not a test execution selector",
