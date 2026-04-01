@@ -35,10 +35,7 @@ pub fn run(class_name: &str) -> Result<()> {
             .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
             .map(|d| d.message.to_string())
             .collect();
-        miette::bail!(
-            "Parse errors in '{bt_path}':\n{}",
-            errors.join("\n")
-        );
+        miette::bail!("Parse errors in '{bt_path}':\n{}", errors.join("\n"));
     }
 
     // Find the class matching the requested name
@@ -49,16 +46,13 @@ pub fn run(class_name: &str) -> Result<()> {
         .ok_or_else(|| miette::miette!("Class '{class_name}' not found in '{bt_path}'"))?;
 
     // Ensure the class has a native: declaration
-    let backing_module = class
-        .backing_module
-        .as_ref()
-        .ok_or_else(|| {
-            miette::miette!(
-                "Class '{class_name}' has no `native:` declaration. \
+    let backing_module = class.backing_module.as_ref().ok_or_else(|| {
+        miette::miette!(
+            "Class '{class_name}' has no `native:` declaration. \
                  Only native Actor classes can generate Erlang stubs.\n\
                  Expected: Actor subclass: {class_name} native: <module_name>"
-            )
-        })?;
+        )
+    })?;
 
     let module_name = backing_module.name.as_str();
 
@@ -130,8 +124,16 @@ fn generate_erlang_stub(
     let mut out = String::new();
 
     // Header comment
-    writeln!(out, "%% Generated from {class_name}.bt — fill in implementations").unwrap();
-    writeln!(out, "%% @doc Backing gen_server for the {class_name} native Actor.").unwrap();
+    writeln!(
+        out,
+        "%% Generated from {class_name}.bt — fill in implementations"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "%% @doc Backing gen_server for the {class_name} native Actor."
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // Module declaration
@@ -149,7 +151,11 @@ fn generate_erlang_stub(
     writeln!(out).unwrap();
 
     // Type spec and start_link
-    writeln!(out, "-spec start_link(map()) -> {{ok, pid()}} | {{error, term()}}.").unwrap();
+    writeln!(
+        out,
+        "-spec start_link(map()) -> {{ok, pid()}} | {{error, term()}}."
+    )
+    .unwrap();
     writeln!(out, "start_link(Config) ->").unwrap();
     writeln!(out, "    gen_server:start_link(?MODULE, Config, []).").unwrap();
     writeln!(out).unwrap();
@@ -331,8 +337,11 @@ Actor subclass: MyActor native: my_actor
   getValue -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("-module(my_actor)."));
@@ -346,8 +355,11 @@ Actor subclass: MyActor native: my_actor
   getValue -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("start_link(Config) ->"));
@@ -362,8 +374,11 @@ Actor subclass: MyActor native: my_actor
   status -> String => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("handle_call({status, []}, _From, State) ->"));
@@ -378,8 +393,11 @@ Actor subclass: MyActor native: my_actor
   writeLine: data -> Nil => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(
@@ -395,8 +413,11 @@ Actor subclass: MyActor native: my_actor
   at: index put: value -> Nil => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(
@@ -413,8 +434,11 @@ Actor subclass: MyActor native: my_actor
   getValue -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         // Should have getValue but not create
@@ -430,8 +454,11 @@ Actor subclass: MyActor native: my_actor
   count -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("%% status -> String"));
@@ -445,8 +472,11 @@ Actor subclass: MyActor native: my_actor
   getValue -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("handle_call(_Request, _From, State) ->"));
@@ -460,8 +490,11 @@ Actor subclass: MyActor native: my_actor
   getValue -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         // Delegate clauses use {ok, todo} wrapping
@@ -493,8 +526,11 @@ Actor subclass: MyActor native: my_actor
   getValue -> Integer => self delegate
 ";
         let class = parse_class(source);
-        let delegates: Vec<&MethodDefinition> =
-            class.methods.iter().filter(|m| m.is_self_delegate()).collect();
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("Generated from MyActor.bt"));
