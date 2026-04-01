@@ -57,6 +57,11 @@ impl BuildLayout {
         self.native_dir().join("ebin")
     }
 
+    /// `_build/dev/native/include/` — generated headers (e.g. `beamtalk_classes.hrl`).
+    pub fn native_include_dir(&self) -> Utf8PathBuf {
+        self.native_dir().join("include")
+    }
+
     /// `_build/dev/native/default/lib/` — rebar3 hex dep libs (`ERL_LIBS`).
     pub fn rebar_lib_dir(&self) -> Utf8PathBuf {
         self.native_dir().join("default").join("lib")
@@ -102,6 +107,15 @@ mod tests {
         assert_eq!(
             layout.native_ebin_dir(),
             "/home/user/my_app/_build/dev/native/ebin"
+        );
+    }
+
+    #[test]
+    fn test_native_include_dir() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.native_include_dir(),
+            "/home/user/my_app/_build/dev/native/include"
         );
     }
 

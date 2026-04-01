@@ -265,7 +265,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
 
             // ADR 0070: Add dependency ebin directories to BEAM code path.
             // build() already resolved and compiled deps; collect their ebin paths.
-            for dep_ebin in crate::commands::deps::collect_dep_ebin_paths(project_root_utf8) {
+            for dep_ebin in crate::commands::deps::collect_dep_ebin_paths(&repl_layout) {
                 code_paths.push(dep_ebin.into_std_path_buf());
             }
 
@@ -277,8 +277,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
             }
 
             // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths (Path B).
-            let rebar_base_dir = repl_layout.native_dir();
-            for ebin in crate::commands::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+            for ebin in crate::commands::build::collect_rebar3_ebin_paths(&repl_layout) {
                 code_paths.push(ebin.into_std_path_buf());
             }
 

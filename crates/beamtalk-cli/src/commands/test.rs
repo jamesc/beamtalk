@@ -1336,7 +1336,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
 
         // ADR 0070: Add dependency ebin directories to code path and load
         // dep modules so their on_load hooks register classes before tests run.
-        for dep_ebin in super::deps::collect_dep_ebin_paths(pkg_root) {
+        for dep_ebin in super::deps::collect_dep_ebin_paths(&pkg_layout) {
             if let Ok(dep_modules) = collect_beam_module_names(&dep_ebin) {
                 pipeline.package_modules.extend(dep_modules);
             }
@@ -1350,8 +1350,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         }
 
         // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-        let rebar_base_dir = pkg_layout.native_dir();
-        for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+        for ebin in super::build::collect_rebar3_ebin_paths(&pkg_layout) {
             pipeline.package_ebin_dirs.push(ebin);
         }
 

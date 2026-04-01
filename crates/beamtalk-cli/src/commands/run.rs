@@ -210,7 +210,7 @@ fn run_script(
     }
 
     // ADR 0070: Add dependency ebin directories to BEAM code path
-    for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
+    for dep_ebin in super::deps::collect_dep_ebin_paths(&layout) {
         args.push(OsString::from("-pa"));
         #[cfg(windows)]
         {
@@ -239,8 +239,7 @@ fn run_script(
     }
 
     // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-    let rebar_base_dir = layout.native_dir();
-    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+    for ebin in super::build::collect_rebar3_ebin_paths(&layout) {
         args.push(OsString::from("-pa"));
         #[cfg(windows)]
         {
@@ -369,7 +368,7 @@ fn run_package_as_otp_application(
     let mut extra_code_paths = vec![ebin_dir.clone()];
 
     // ADR 0070: Add dependency ebin directories to code path
-    for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
+    for dep_ebin in super::deps::collect_dep_ebin_paths(&layout) {
         extra_code_paths.push(dep_ebin.into_std_path_buf());
     }
 
@@ -380,8 +379,7 @@ fn run_package_as_otp_application(
     }
 
     // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-    let rebar_base_dir = layout.native_dir();
-    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+    for ebin in super::build::collect_rebar3_ebin_paths(&layout) {
         extra_code_paths.push(ebin.into_std_path_buf());
     }
 

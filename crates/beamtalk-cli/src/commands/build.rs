@@ -368,11 +368,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // This header provides ?BT_CLASS_MODULE macros so native .erl files can
     // reference Beamtalk class modules without hardcoding bt@<pkg>@<class> atoms.
     if pkg_manifest.is_some() {
-        let hrl_dir = project_root
-            .join("_build")
-            .join("dev")
-            .join("native")
-            .join("include");
+        let hrl_dir = layout.native_include_dir();
         generate_class_header(&hrl_dir, &class_module_index)?;
     }
 
@@ -1604,7 +1600,8 @@ fn compile_with_rebar3(
     // Generate the rebar.config in _build/dev/native/
     let config_path = generate_rebar_config(project_root, native_deps, locked_versions)?;
 
-    let rebar_base_dir = BuildLayout::new(project_root).native_dir();
+    let rebar_layout = BuildLayout::new(project_root);
+    let rebar_base_dir = rebar_layout.native_dir();
 
     info!(
         rebar3 = %rebar3.display(),
@@ -1640,7 +1637,7 @@ fn compile_with_rebar3(
     }
 
     // Collect all ebin directories produced by rebar3
-    let ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
+    let ebin_paths = collect_rebar3_ebin_paths(&rebar_layout);
 
     info!(ebin_count = ebin_paths.len(), "rebar3 compilation complete");
 
@@ -1746,7 +1743,7 @@ fn compile_native_erlang_with_deps(
         .erl_libs(&build_layout.rebar_lib_dir())
         .runtime_include()
         // BT-1730: generated include dir for beamtalk_classes.hrl
-        .include_dir(build_layout.native_dir().join("include"));
+        .include_dir(build_layout.native_include_dir());
 
     for inc in &include_dirs {
         invocation = invocation.include_dir(inc);
@@ -1791,8 +1788,11 @@ fn collect_erl_files(dir: &Utf8Path, out: &mut Vec<Utf8PathBuf>) -> Result<()> {
 ///
 /// rebar3 places compiled output at `_build/dev/native/default/lib/{app}/ebin/`.
 /// This scans for all such directories and returns them.
-pub(crate) fn collect_rebar3_ebin_paths(rebar_base_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
-    let lib_dir = rebar_base_dir.join("default").join("lib");
+///
+/// Uses [`BuildLayout::rebar_lib_dir`] as the source of truth for the library
+/// directory location.
+pub(crate) fn collect_rebar3_ebin_paths(layout: &BuildLayout) -> Vec<Utf8PathBuf> {
+    let lib_dir = layout.rebar_lib_dir();
 
     let mut paths = Vec::new();
 
@@ -3299,38 +3299,29 @@ mod tests {
     #[test]
     fn test_collect_rebar3_ebin_paths_empty() {
         let temp = TempDir::new().unwrap();
-        let base_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&project_root);
 
-        let paths = collect_rebar3_ebin_paths(&base_dir);
+        let paths = collect_rebar3_ebin_paths(&layout);
         assert!(paths.is_empty(), "Should return empty for nonexistent tree");
     }
 
     #[test]
     fn test_collect_rebar3_ebin_paths_finds_deps() {
         let temp = TempDir::new().unwrap();
-        let base_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&project_root);
 
-        // Create rebar3-style output tree
-        let gun_ebin = base_dir
-            .join("default")
-            .join("lib")
-            .join("gun")
-            .join("ebin");
-        let cowboy_ebin = base_dir
-            .join("default")
-            .join("lib")
-            .join("cowboy")
-            .join("ebin");
-        let ranch_ebin = base_dir
-            .join("default")
-            .join("lib")
-            .join("ranch")
-            .join("ebin");
+        // Create rebar3-style output tree under _build/dev/native/default/lib/
+        let lib_dir = layout.rebar_lib_dir();
+        let gun_ebin = lib_dir.join("gun").join("ebin");
+        let cowboy_ebin = lib_dir.join("cowboy").join("ebin");
+        let ranch_ebin = lib_dir.join("ranch").join("ebin");
         fs::create_dir_all(&gun_ebin).unwrap();
         fs::create_dir_all(&cowboy_ebin).unwrap();
         fs::create_dir_all(&ranch_ebin).unwrap();
 
-        let paths = collect_rebar3_ebin_paths(&base_dir);
+        let paths = collect_rebar3_ebin_paths(&layout);
         assert_eq!(paths.len(), 3, "Should find 3 ebin directories");
 
         // Verify all paths end with /ebin and contain expected app names
