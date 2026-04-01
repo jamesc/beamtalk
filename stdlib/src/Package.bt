@@ -3,23 +3,31 @@
 
 /// Package — First-class package reflection for the Beamtalk system.
 ///
-/// Provides class methods for discovering and inspecting loaded packages.
-/// Packages map 1:1 to OTP applications whose env contains a `classes` key
-/// (the metadata format defined by ADR 0070 Phase 4).
+/// Provides class methods for discovering packages and instance methods
+/// for inspecting individual packages. Packages map 1:1 to OTP applications
+/// whose env contains a `classes` key (the metadata format defined by
+/// ADR 0070 Phase 4).
 ///
-/// All methods are class-side — Package has no user-constructable instances.
-/// Use `Package named:` to obtain a package info Dictionary.
+/// `Package named:` returns a Package instance with read-only accessors.
 ///
 /// ## Examples
 /// ```beamtalk
 /// Package all
 /// // => _
-/// Package named: "stdlib"
-/// // => _
+/// pkg := Package named: "stdlib".
+/// pkg name       // => "stdlib"
+/// pkg classes    // => _
 /// ```
 ///
 /// @see docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
-sealed Object subclass: Package
+sealed Value subclass: Package
+  field: name :: String = ""
+  field: version :: String = ""
+  field: packageClasses :: List = #()
+  field: packageDependencies :: List = #()
+  field: source :: String = ""
+
+  // ===== Class Methods — Discovery =====
 
   /// Return a List of all loaded package names (Strings).
   ///
@@ -33,19 +41,27 @@ sealed Object subclass: Package
   /// ```
   class sealed all -> List => (Erlang beamtalk_package) all
 
-  /// Return a Dictionary of package info for the given package name.
+  /// Return a Package for the given package name.
   ///
-  /// The dictionary contains keys: #name, #version, #classes, #dependencies, #source.
   /// Raises a #package_not_found error if no such package is loaded.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Package named: "stdlib") at: #name
+  /// (Package named: "stdlib") name
   /// // => "stdlib"
   /// ```
-  class sealed named: name :: String -> Dictionary =>
+  class sealed named: name :: String -> Package =>
     (Erlang beamtalk_package) named: name
 
+  /// Return the package name (String) that owns the given class name (Symbol).
+  ///
+  /// Returns nil if the class is not found or has no package.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Package packageNameFor: #Object
+  /// // => _
+  /// ```
   /// Return a List of class names (Symbols) belonging to the given package.
   ///
   /// Returns an empty List if the package is not found.
@@ -81,3 +97,54 @@ sealed Object subclass: Package
   /// ```
   class sealed packageNameFor: className :: Symbol -> String | Nil =>
     (Erlang beamtalk_package) packageNameFor: className
+
+  // ===== Instance Methods — Accessors =====
+
+  /// The package name.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Package named: "stdlib") name
+  /// // => "stdlib"
+  /// ```
+  name -> String => self.name
+
+  /// The package version string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Package named: "stdlib") version
+  /// // => _
+  /// ```
+  version -> String => self.version
+
+  /// The list of class names (Symbols) in this package.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Package named: "stdlib") classes includes: #Object
+  /// // => true
+  /// ```
+  classes -> List => self.packageClasses
+
+  /// The list of dependency package names (Strings) for this package.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Package named: "stdlib") dependencies
+  /// // => _
+  /// ```
+  dependencies -> List => self.packageDependencies
+
+  /// The package source description.
+  source -> String => self.source
+
+  /// Human-readable representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Package named: "stdlib") printString
+  /// // => _
+  /// ```
+  printString -> String =>
+    "Package(" ++ self.name ++ " v" ++ self.version ++ ")"

@@ -435,6 +435,7 @@ module_for_value(X) when is_map(X) ->
         'Erlang' -> beamtalk_erlang_class;
         'BeamtalkInterface' -> 'bt@stdlib@beamtalk_interface';
         'WorkspaceInterface' -> 'bt@stdlib@workspace_interface';
+        'Package' -> 'bt@stdlib@package';
         undefined -> 'bt@stdlib@dictionary';
         _ -> undefined
     end;

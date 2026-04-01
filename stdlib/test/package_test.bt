@@ -13,23 +13,22 @@ TestCase subclass: PackageTest
     self assert: (pkgs includes: "stdlib")
 
   testNamedStdlib =>
-    // Package named: returns a Dictionary with package info
-    info := Package named: "stdlib"
-    self assert: (info class =:= Dictionary)
-    // Contains required keys
-    self assert: (info at: #name) equals: "stdlib"
+    // Package named: returns a Package object
+    pkg := Package named: "stdlib"
+    self assert: (pkg class =:= Package)
+    // Has accessors
+    self assert: pkg name equals: "stdlib"
     // version is a non-empty string
-    self assert: ((info at: #version) class =:= String)
-    self assert: ((info at: #version) size > 0)
-    // classes is a non-empty collection of atoms
-    classes := info at: #classes
-    self assert: (classes includes: #Object)
+    self assert: (pkg version class =:= String)
+    self assert: (pkg version size > 0)
+    // classes includes core classes
+    self assert: (pkg classes includes: #Object)
 
   testNamedNotFound =>
-    // Package named: with unknown name raises a runtime_error (via Erlang FFI)
+    // Package named: with unknown name raises a package_not_found error
     self should: [
       Package named: "nonexistent_package_xyz_99"
-    ] raise: #runtime_error
+    ] raise: #package_not_found
 
   testClassesStdlib =>
     // Package classes: returns the class names in the package
@@ -64,7 +63,7 @@ TestCase subclass: PackageTest
     self assert: name equals: "stdlib"
 
   testMetaclassPackage =>
-    // Metaclass package returns a Dictionary of package info
+    // Metaclass package returns a Package object
     pkg := Integer class package
-    self assert: (pkg class =:= Dictionary)
-    self assert: (pkg at: #name) equals: "stdlib"
+    self assert: (pkg class =:= Package)
+    self assert: pkg name equals: "stdlib"

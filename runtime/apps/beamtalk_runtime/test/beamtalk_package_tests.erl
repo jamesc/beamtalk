@@ -54,14 +54,15 @@ all_returns_binaries_test() ->
 %%% named/1 tests
 %%% ============================================================================
 
-named_returns_map_for_stdlib_test() ->
+named_returns_tagged_package_map_test() ->
     setup(),
     Info = beamtalk_package:named(<<"stdlib">>),
     ?assert(is_map(Info)),
+    ?assertEqual('Package', maps:get('$beamtalk_class', Info)),
     ?assertEqual(<<"stdlib">>, maps:get(name, Info)),
     ?assert(is_binary(maps:get(version, Info))),
-    ?assert(is_list(maps:get(classes, Info))),
-    ?assert(is_list(maps:get(dependencies, Info))),
+    ?assert(is_list(maps:get('packageClasses', Info))),
+    ?assert(is_list(maps:get('packageDependencies', Info))),
     ?assert(is_binary(maps:get(source, Info))).
 
 named_accepts_atom_test() ->
@@ -72,7 +73,7 @@ named_accepts_atom_test() ->
 named_classes_contains_known_classes_test() ->
     setup(),
     Info = beamtalk_package:named(<<"stdlib">>),
-    Classes = maps:get(classes, Info),
+    Classes = maps:get('packageClasses', Info),
     ?assert(lists:member('Object', Classes)),
     ?assert(lists:member('Integer', Classes)),
     ?assert(lists:member('String', Classes)),
@@ -81,16 +82,29 @@ named_classes_contains_known_classes_test() ->
 named_raises_error_for_unknown_package_test() ->
     setup(),
     ?assertError(
-        #beamtalk_error{kind = package_not_found},
+        #{error := #beamtalk_error{kind = package_not_found}},
         beamtalk_package:named(<<"nonexistent_package_xyz">>)
     ).
 
 named_raises_error_for_unknown_atom_test() ->
     setup(),
     ?assertError(
-        #beamtalk_error{kind = package_not_found},
+        #{error := #beamtalk_error{kind = package_not_found}},
         beamtalk_package:named(nonexistent_package_xyz)
     ).
+
+named_error_includes_hint_with_loaded_packages_test() ->
+    setup(),
+    try
+        beamtalk_package:named(<<"nonexistent_package_xyz">>),
+        ?assert(false)
+    catch
+        error:#{error := #beamtalk_error{hint = Hint}} ->
+            ?assertNotEqual(undefined, Hint),
+            ?assert(is_binary(Hint)),
+            %% Hint should mention loaded packages
+            ?assertMatch({match, _}, re:run(Hint, <<"stdlib">>))
+    end.
 
 %%% ============================================================================
 %%% package_name/1 tests

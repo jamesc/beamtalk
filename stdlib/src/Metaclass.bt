@@ -156,16 +156,15 @@ sealed Class subclass: Metaclass
   sealed packageName -> String | Nil =>
     (Erlang beamtalk_package) packageNameFor: self thisClass name
 
-  /// Return a Dictionary of package info for the package that owns the described class.
+  /// Return the Package that owns the described class.
   ///
-  /// Returns a Dictionary with keys: #name, #version, #classes, #dependencies, #source.
   /// Returns nil if the class has no package association.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Integer class package   // => _
   /// ```
-  sealed package -> Dictionary | Nil =>
+  sealed package -> Package | Nil =>
     name := self packageName
     name isNil ifTrue: [^nil]
     Package named: name
