@@ -1332,30 +1332,23 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         let modules = collect_beam_module_names(&ebin_dir)?;
         debug!(count = modules.len(), "Discovered package modules");
         pipeline.package_modules.extend(modules);
-        pipeline.package_ebin_dirs.push(ebin_dir);
 
-        // ADR 0070: Add dependency ebin directories to code path and load
-        // dep modules so their on_load hooks register classes before tests run.
+        // BT-1750: Use BeamEnvironment for unified code path and OTP app collection.
+        // The environment includes package ebin, dep ebins, native ebin, rebar3 ebins.
+        let beam_env =
+            super::beam_environment::BeamEnvironment::from_layout(&pkg_layout, pkg_root)?;
+
+        // ADR 0070: Discover dep modules for on_load class registration.
+        // Only BT dependency ebins need explicit module loading — native and
+        // rebar3 ebins contain plain Erlang modules that load on demand.
         for dep_ebin in super::deps::collect_dep_ebin_paths(&pkg_layout) {
             if let Ok(dep_modules) = collect_beam_module_names(&dep_ebin) {
                 pipeline.package_modules.extend(dep_modules);
             }
-            pipeline.package_ebin_dirs.push(dep_ebin);
         }
 
-        // ADR 0072: Add native Erlang ebin to code path if present
-        let native_ebin = pkg_layout.native_ebin_dir();
-        if native_ebin.exists() {
-            pipeline.package_ebin_dirs.push(native_ebin);
-        }
-
-        // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-        for ebin in super::build::collect_rebar3_ebin_paths(&pkg_layout) {
-            pipeline.package_ebin_dirs.push(ebin);
-        }
-
-        // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
-        for name in super::deps::lockfile::Lockfile::collect_hex_dep_names(pkg_root)? {
+        pipeline.package_ebin_dirs.extend(beam_env.code_paths);
+        for name in beam_env.otp_apps {
             if !pipeline.hex_dep_names.contains(&name) {
                 pipeline.hex_dep_names.push(name);
             }
