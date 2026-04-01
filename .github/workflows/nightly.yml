@@ -81,7 +81,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -161,7 +161,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -241,7 +241,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -296,7 +296,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
