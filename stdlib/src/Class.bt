@@ -43,10 +43,7 @@ sealed Behaviour subclass: Class
   /// ```
   sealed isClass -> Boolean => true
 
-  /// Return the metaclass sentinel.
-  ///
-  /// Full metaclass tower is future work — see design-metaprogramming.md.
-  /// Returns the 'Metaclass' sentinel atom for now (ADR 0013).
+  /// Return the metaclass for this class (ADR 0036).
   ///
   /// ## Examples
   /// ```beamtalk

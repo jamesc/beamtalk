@@ -32,13 +32,21 @@ There is no macro system. All code runs at runtime.
 
 ### No `become:` or `thisContext`
 
-These Smalltalk reflection features cannot be implemented on the BEAM VM:
-- **`become:`** — BEAM pids are immutable; object identity cannot be swapped. A proxy pattern is planned as a workaround.
-- **`thisContext`** — BEAM does not expose stack frames as first-class objects.
+These Smalltalk reflection features cannot be implemented on the BEAM VM ([ADR 0074](ADR/0074-deferred-metaprogramming.md)):
+- **`become:`** — BEAM processes have separate heaps; object identity cannot be swapped. Use the proxy pattern (`doesNotUnderstand:` delegation) or registry pattern instead.
+- **`thisContext`** — BEAM does not expose stack frames as first-class objects. Post-exception stack traces are available via `e stackTrace` on caught exception objects, returning `StackFrame` values.
 
-### Classes Are Not Yet First-Class Actor Objects
+### Classes Are First-Class Values, Not Actors
 
-Classes compile to Erlang modules. They are not yet actor objects that you can pass around, subclass dynamically, or introspect via the metaclass protocol. Reflection (`class`, `respondsTo:`, `fieldNames`) works, but classes don't participate in the actor model.
+Classes are first-class objects — you can store them in variables, send messages to them, and introspect them via the full metaclass tower (ADR 0036). However, class objects are not actors: they are not supervised, have no `state:` declarations, and do not participate in OTP lifecycle. The backing `beamtalk_object_class` gen_server processes are runtime infrastructure, not user-visible actors. See [ADR 0074](ADR/0074-deferred-metaprogramming.md) for rationale.
+
+```beamtalk
+cls := Beamtalk classNamed: #Counter
+cls spawn           // send messages to class objects
+cls methods         // introspect via metaclass protocol
+cls superclass      // => Actor
+cls class           // => Counter class (metaclass object)
+```
 
 ## Concurrency
 
