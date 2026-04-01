@@ -2133,7 +2133,7 @@ Actor messages automatically carry a propagated context map across boundaries. T
 
 ## Namespace and Class Visibility
 
-Beamtalk v0.1 uses a **flat global namespace** (ADR 0031). All classes are globally
+Beamtalk uses a **flat global namespace** (ADR 0031). All classes are globally
 visible — no `import`, `export`, or namespace declaration is needed or available.
 
 ### How loading works
@@ -2237,7 +2237,7 @@ Integer subclass: SafeInteger
 
 ### Namespace
 
-Class names must be globally unique. A module/import system is planned for a future release. See [known-limitations.md](known-limitations.md) and
+Class names must be globally unique. A package namespace and dependency system is designed ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)) but not yet implemented. See [known-limitations.md](known-limitations.md) and
 [ADR 0031](ADR/0031-flat-namespace-for-v01.md) for details.
 
 ### Visibility and Access Control (ADR 0071)
