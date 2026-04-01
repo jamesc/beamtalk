@@ -27,6 +27,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Live Patching](#live-patching)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
+  - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
 - [Tooling](#tooling)
 - [Inspiration Sources](#inspiration-sources)
@@ -2238,6 +2239,145 @@ Integer subclass: SafeInteger
 
 Class names must be globally unique. A module/import system is planned for a future release. See [known-limitations.md](known-limitations.md) and
 [ADR 0031](ADR/0031-flat-namespace-for-v01.md) for details.
+
+### Visibility and Access Control (ADR 0071)
+
+Beamtalk classes and methods are **public by default** — visible to any package. The `internal` modifier restricts visibility to the defining package only. Enforcement is **compile-time only**, with zero runtime overhead.
+
+**Core principle:** Visibility controls *dependency*, not *knowledge*. Internal classes and methods are fully visible to browsing, reflection, and documentation tools — you just cannot name them in compiled code from outside the package. The REPL's `:browse`, `:doc`, and `:source` commands work on internal items normally.
+
+#### Class-Level `internal`
+
+Mark a class as `internal` to hide it from other packages:
+
+```beamtalk
+// Public (default) — available to any package
+Actor subclass: HttpClient
+  get: url => ...
+
+// Internal — only visible within this package
+internal Actor subclass: ConnectionPool
+  state: connections = #{}
+
+  acquire => ...
+  release: conn => ...
+```
+
+Cross-package references to internal classes produce a compile error:
+
+```text
+error[E0401]: Class 'ConnectionPool' is internal to package 'http' and cannot be referenced from 'my_app'
+  --> src/app.bt:5:12
+   |
+ 5 |     http@ConnectionPool new
+   |          ^^^^^^^^^^^^^^
+   |
+   = note: 'ConnectionPool' is declared 'internal' in package 'http'
+```
+
+#### Method-Level `internal`
+
+Mark individual methods as `internal` to hide implementation helpers on public classes:
+
+```beamtalk
+Actor subclass: HttpClient
+  state: config = #{}
+
+  // Public — part of the package API
+  get: url => ...
+  post: url body: body => ...
+
+  // Internal — implementation details, not callable from outside the package
+  internal buildHeaders: request => ...
+  internal retryWithBackoff: block maxAttempts: n => ...
+```
+
+When the compiler can determine the receiver type (via type annotations, literal class references, or type inference), cross-package sends to internal methods produce a compile error:
+
+```text
+error[E0403]: Method 'buildHeaders:' is internal to package 'http' and cannot be called from 'my_app'
+  --> src/app.bt:10:5
+   |
+10 |     client buildHeaders: req
+   |            ^^^^^^^^^^^^^^
+```
+
+For untyped dynamic sends where the receiver type is unknown, no enforcement — the message send succeeds at runtime, consistent with the "visibility controls dependency, not knowledge" principle.
+
+#### Combining Modifiers
+
+`internal` composes with all existing class modifiers in any order:
+
+```beamtalk
+// Internal abstract base — must be subclassed within the package
+internal abstract Actor subclass: InternalAbstractBase
+  state: label = "base"
+  getLabel => self.label
+  compute => self subclassResponsibility
+
+// Internal sealed — cannot be subclassed, even within the package
+internal sealed Actor subclass: InternalSealedCache
+  state: data = 0
+  store: val => self.data := val
+  retrieve => self.data
+
+// Internal typed — type annotations required on methods
+internal typed Actor subclass: InternalTypedConfig
+  state: setting :: Integer = 0
+  getSetting -> Integer => self.setting
+  setSetting: val :: Integer -> Integer => self.setting := val
+
+// Modifier order is flexible
+abstract internal Actor subclass: AlsoValid
+  ...
+```
+
+| Combination | Valid? | Notes |
+|-------------|--------|-------|
+| `internal sealed` | Yes | Prevents subclassing even within the package |
+| `internal abstract` | Yes | Internal base class, must be subclassed within the package |
+| `internal typed` | Yes | Internal class with type annotation requirements |
+| Stacking order | Any | `internal` can appear anywhere in the modifier list |
+
+#### Library Author Patterns
+
+A typical package exposes a few public classes and hides implementation details:
+
+```beamtalk
+// json/src/parser.bt — Public API
+Object subclass: Parser
+  /// Parse a JSON string into a Beamtalk value.
+  parse: input :: String => ...
+
+// json/src/parser_state.bt — Internal implementation
+internal Value subclass: ParserState
+  field: position = 0
+  field: buffer = ""
+
+// json/src/token_buffer.bt — Internal implementation
+internal Value subclass: TokenBuffer
+  field: tokens = #()
+```
+
+**Leaked visibility** — if an internal class appears in the public signature of a public method, the compiler emits a hard error. This prevents accidentally exposing implementation types:
+
+```text
+error[E0402]: Internal class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:'
+  --> src/parser.bt:12:3
+   |
+12 |   tokenize: input :: String -> TokenBuffer =>
+   |                                ^^^^^^^^^^^
+   |
+   = note: 'TokenBuffer' is declared 'internal' — make it public, or change the return type
+```
+
+All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes.
+
+#### Metadata
+
+Visibility is recorded in `__beamtalk_meta/0` as a compile-time constant atom (`public` or `internal`). Tooling (LSP, REPL completions) uses this field to filter internal items from cross-package suggestions while still showing them in `:browse` and `:doc` output.
+
+See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full design, including edge cases (subclassing, protocol conformance, extension methods, `perform:` dynamic sends) and the enforcement model.
 
 ---
 
