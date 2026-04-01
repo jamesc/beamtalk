@@ -57,8 +57,9 @@
 %%   registered.  Receives `{Module, SourcePath}` where SourcePath may be
 %%   `undefined`.  Defaults to no-op.
 %%
-%% - `log_domain`: Logger domain metadata for all log messages.
-%%   Defaults to `[beamtalk, runtime]`.
+%% - `log_domain`: Logger domain for `activate_module/2` log messages.
+%%   Infrastructure helpers (`load_app_from_ebin`, `find_bt_modules_in_dir`)
+%%   always log under `[beamtalk, runtime]`.  Defaults to `[beamtalk, runtime]`.
 -type opts() :: #{
     on_activate => fun(({module(), string() | undefined}) -> ok),
     log_domain => [atom()]
@@ -252,28 +253,36 @@ load_app_from_ebin(EbinDir) ->
             AppFiles = [F || F <- Files, filename:extension(F) =:= ".app"],
             lists:foreach(
                 fun(AppFile) ->
-                    AppName = list_to_atom(filename:rootname(AppFile)),
-                    case application:load(AppName) of
-                        ok ->
-                            ?LOG_DEBUG(
-                                "Loaded OTP application metadata: ~p",
-                                [AppName],
-                                #{domain => [beamtalk, runtime]}
-                            );
-                        {error, {already_loaded, _}} ->
-                            ok;
-                        {error, Reason} ->
-                            ?LOG_DEBUG(
-                                "Could not load OTP application ~p: ~p",
-                                [AppName, Reason],
-                                #{domain => [beamtalk, runtime]}
-                            )
+                    BaseName = filename:rootname(AppFile),
+                    case is_valid_module_name(BaseName) of
+                        false -> ok;
+                        true -> load_single_app(list_to_atom(BaseName))
                     end
                 end,
                 AppFiles
             );
         {error, _} ->
             ok
+    end.
+
+%% @private Load a single OTP application by name.
+-spec load_single_app(atom()) -> ok.
+load_single_app(AppName) ->
+    case application:load(AppName) of
+        ok ->
+            ?LOG_DEBUG(
+                "Loaded OTP application metadata: ~p",
+                [AppName],
+                #{domain => [beamtalk, runtime]}
+            );
+        {error, {already_loaded, _}} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_DEBUG(
+                "Could not load OTP application ~p: ~p",
+                [AppName, Reason],
+                #{domain => [beamtalk, runtime]}
+            )
     end.
 
 %%% ============================================================================
@@ -366,13 +375,15 @@ entry_class({_Mod, Name, _Super}) -> Name.
 entry_parent(#{parent := Parent}) -> Parent;
 entry_parent({_Mod, _Name, Parent}) -> Parent.
 
-%% @private Check if a filename is a project beam file (bt@* but not bt@stdlib@*).
+%% @private Check if a filename is a candidate project beam file (bt@* but not bt@stdlib@*).
+%% Does NOT validate the module name — that is deferred to beam_file_to_module/1 so
+%% invalid names trigger a warning rather than being silently filtered out.
 -spec is_project_beam_file(string()) -> boolean().
 is_project_beam_file(File) ->
     case filename:extension(File) of
         ".beam" ->
             ModName = filename:rootname(filename:basename(File)),
-            is_user_class_module(ModName) andalso is_valid_module_name(ModName);
+            is_user_class_module(ModName);
         _ ->
             false
     end.

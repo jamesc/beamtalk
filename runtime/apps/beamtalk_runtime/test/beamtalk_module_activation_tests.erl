@@ -50,8 +50,10 @@ topo_sort_diamond_dependency_test() ->
     Result = beamtalk_module_activation:topo_sort(Entries),
     %% A and B before C; both have external superclass so emit first
     Names = [Name || {_, Name, _} <- Result],
-    CPos = index_of('C', Names),
     APos = index_of('A', Names),
+    CPos = index_of('C', Names),
+    ?assertNotEqual(not_found, APos),
+    ?assertNotEqual(not_found, CPos),
     ?assert(APos < CPos).
 
 topo_sort_deep_chain_test() ->
@@ -123,8 +125,9 @@ sort_modules_empty_test() ->
 %%% ============================================================================
 
 load_app_missing_dir_test() ->
-    %% Should not crash on missing directory
-    ?assertEqual(ok, beamtalk_module_activation:load_app_from_ebin("/nonexistent/path")).
+    %% Should not crash on missing directory (platform-agnostic path)
+    NonExistent = filename:join(get_tmp_base(), "nonexistent_ebin_dir_xyz"),
+    ?assertEqual(ok, beamtalk_module_activation:load_app_from_ebin(NonExistent)).
 
 load_app_from_ebin_loads_metadata_test() ->
     %% Create a temp directory with a minimal .app file
@@ -148,7 +151,8 @@ load_app_from_ebin_loads_metadata_test() ->
         ?assertEqual(1, length(Classes)),
 
         %% Clean up
-        _ = application:unload(beamtalk_test_fake)
+        _ = application:unload(beamtalk_test_fake),
+        _ = code:del_path(TmpDir)
     after
         remove_temp_dir(TmpDir)
     end.
@@ -190,10 +194,23 @@ index_of(Elem, [_ | Rest], N) ->
 
 create_temp_dir() ->
     Base = filename:join([
-        "/tmp", "bt_activation_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+        get_tmp_base(),
+        "bt_activation_test_" ++ integer_to_list(erlang:unique_integer([positive]))
     ]),
     ok = filelib:ensure_dir(filename:join(Base, "dummy")),
     Base.
+
+%% @private Platform-agnostic temp directory.
+get_tmp_base() ->
+    case os:getenv("TMPDIR") of
+        false ->
+            case os:getenv("TEMP") of
+                false -> "/tmp";
+                Dir -> Dir
+            end;
+        Dir ->
+            Dir
+    end.
 
 remove_temp_dir(Dir) ->
     case file:list_dir(Dir) of
