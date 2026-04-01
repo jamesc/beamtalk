@@ -100,8 +100,11 @@ pub fn resolve_path_dependencies(
 /// Scans `_build/deps/*/ebin/` for existing dependency ebin directories.
 /// Used by commands (run, test) that need to add dependency ebin paths to the
 /// BEAM code path without re-resolving/re-compiling.
-pub fn collect_dep_ebin_paths(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
-    let deps_dir = BuildLayout::new(project_root).deps_dir();
+///
+/// Uses [`BuildLayout::deps_dir`] as the source of truth for the dependency
+/// directory location.
+pub fn collect_dep_ebin_paths(layout: &BuildLayout) -> Vec<Utf8PathBuf> {
+    let deps_dir = layout.deps_dir();
     let mut paths = Vec::new();
 
     if let Ok(entries) = std::fs::read_dir(&deps_dir) {
@@ -746,8 +749,9 @@ utils = { path = "utils" }"#,
     fn test_collect_dep_ebin_paths_empty() {
         let temp = TempDir::new().unwrap();
         let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&project_root);
 
-        let paths = collect_dep_ebin_paths(&project_root);
+        let paths = collect_dep_ebin_paths(&layout);
         assert!(paths.is_empty());
     }
 
@@ -761,7 +765,7 @@ utils = { path = "utils" }"#,
         let ebin_dir = test_layout.dep_ebin_dir("utils");
         fs::create_dir_all(&ebin_dir).unwrap();
 
-        let paths = collect_dep_ebin_paths(&project_root);
+        let paths = collect_dep_ebin_paths(&test_layout);
         assert_eq!(paths.len(), 1);
         assert!(paths[0].as_str().contains("utils"));
     }
