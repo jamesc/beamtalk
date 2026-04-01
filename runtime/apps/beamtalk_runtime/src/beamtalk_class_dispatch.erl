@@ -154,8 +154,9 @@ class_send_dispatch(ClassPid, Selector, Args) ->
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send(Pid, Selector, Args, Self) ->
     %% BT-1768: Wrap in crash recovery, same as class_send.
+    %% Update Self's pid on recovery so downstream dispatch uses the new process.
     class_send_with_recovery(Pid, Selector, fun(P) ->
-        metaclass_send_dispatch(P, Selector, Args, Self)
+        metaclass_send_dispatch(P, Selector, Args, Self#beamtalk_object{pid = P})
     end).
 
 %% @private Dispatch a metaclass method call (the main logic for metaclass_send).
