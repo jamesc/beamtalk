@@ -159,9 +159,9 @@ from_tagged_tuple({error, Reason}) ->
         kind = type_error,
         class = 'Result',
         selector = 'tryDo:',
-        message = iolist_to_binary(
-            io_lib:format("tryDo: expected a zero-arity block, got: ~p", [Block])
-        ),
+        message =
+            <<"tryDo: expected a zero-arity block, got: ",
+                (beamtalk_primitive:print_string(Block))/binary>>,
         hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
         details = #{got => Block}
     }).
@@ -182,7 +182,7 @@ from_tagged_tuple({error, Reason}) ->
 %%   % raises the embedded error
 %%
 %% beamtalk_result:'unwrapError:'(undefined, file_not_found)
-%%   % raises: "unwrap called on Result error: file_not_found"
+%%   % raises: "unwrap called on Result error: #file_not_found"
 %% ```
 -spec 'unwrapError:'(term(), term()) -> no_return().
 'unwrapError:'(_Self, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Error}) ->
@@ -192,9 +192,8 @@ from_tagged_tuple({error, Reason}) ->
     beamtalk_error:raise(Error);
 'unwrapError:'(_Self, ErrReason) ->
     %% Raw value (symbol, atom, etc.) — signal a generic descriptive error
-    Message = iolist_to_binary(
-        io_lib:format("unwrap called on Result error: ~p", [ErrReason])
-    ),
+    ReasonStr = beamtalk_primitive:print_string(ErrReason),
+    Message = <<"unwrap called on Result error: ", ReasonStr/binary>>,
     GenError = #beamtalk_error{
         kind = signal,
         class = 'Result',

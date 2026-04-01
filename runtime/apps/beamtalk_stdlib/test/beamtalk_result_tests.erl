@@ -233,7 +233,26 @@ unwrap_error_raw_symbol_test() ->
             ),
             #{error := Inner} = Caught,
             ?assertEqual('Result', Inner#beamtalk_error.class),
-            ?assertEqual('unwrap', Inner#beamtalk_error.selector)
+            ?assertEqual('unwrap', Inner#beamtalk_error.selector),
+            ?assertEqual(
+                <<"unwrap called on Result error: #not_found">>,
+                Inner#beamtalk_error.message
+            )
+    end.
+
+unwrap_error_raw_map_test() ->
+    %% unwrapError: with a raw map formats it via print_string, not ~p
+    try
+        beamtalk_result:'unwrapError:'(undefined, #{<<"detail">> => <<"oops">>}),
+        ?assert(false, "unwrapError: should have raised an exception")
+    catch
+        error:Caught ->
+            #{error := Inner} = Caught,
+            Msg = Inner#beamtalk_error.message,
+            %% Should use Beamtalk formatting, not raw Erlang ~p
+            ?assertNotEqual(nomatch, binary:match(Msg, <<"unwrap called on Result error:">>)),
+            %% Must NOT contain Erlang binary syntax
+            ?assertEqual(nomatch, binary:match(Msg, <<"<<\"">>))
     end.
 
 %%% ============================================================================

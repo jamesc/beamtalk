@@ -97,10 +97,14 @@ should_raise(Block, ExpectedKind) ->
     Message =
         case {is_function(Block, 0), is_atom(ExpectedKind)} of
             {false, _} ->
-                iolist_to_binary(io_lib:format("Expected a zero-argument block, got: ~p", [Block]));
+                <<"Expected a zero-argument block, got: ",
+                    (beamtalk_primitive:print_string(Block))/binary>>;
             {_, false} ->
                 iolist_to_binary(
-                    io_lib:format("Expected an error kind atom, got: ~p", [ExpectedKind])
+                    [
+                        <<"Expected an error kind atom, got: ">>,
+                        beamtalk_primitive:print_string(ExpectedKind)
+                    ]
                 )
         end,
     Error2 = beamtalk_error:with_message(Error1, Message),
@@ -122,8 +126,7 @@ fail(Message) when is_binary(Message) ->
 fail(Message) when is_atom(Message) ->
     fail(atom_to_binary(Message, utf8));
 fail(Message) ->
-    MessageBin = iolist_to_binary(io_lib:format("~p", [Message])),
-    fail(MessageBin).
+    fail(beamtalk_primitive:print_string(Message)).
 
 %% @doc Signal that the current test should be skipped.
 %%
@@ -138,7 +141,7 @@ skip(Reason) when is_binary(Reason) ->
 skip(Reason) when is_atom(Reason) ->
     throw({bunit_skip, atom_to_binary(Reason, utf8)});
 skip(Reason) ->
-    throw({bunit_skip, iolist_to_binary(io_lib:format("~p", [Reason]))}).
+    throw({bunit_skip, beamtalk_primitive:print_string(Reason)}).
 
 %% @doc Execute tests from class-side dispatch (BT-440).
 %%
@@ -366,7 +369,7 @@ decode_beam_error({future_rejected, Inner}) ->
 decode_beam_error({error, Map}) when is_map(Map) ->
     case maps:find(error, Map) of
         {ok, Inner} -> decode_beam_error(Inner);
-        _ -> iolist_to_binary(io_lib:format("~p", [Map]))
+        _ -> beamtalk_primitive:print_string(Map)
     end;
 decode_beam_error(#beamtalk_error{message = Msg}) ->
     Msg;
@@ -375,15 +378,15 @@ decode_beam_error(#{class := 'Exception', error := #beamtalk_error{message = Msg
 decode_beam_error(#{'$beamtalk_class' := _, error := #beamtalk_error{message = Msg}}) ->
     Msg;
 decode_beam_error({badkey, Key}) ->
-    iolist_to_binary(io_lib:format("key ~p not found in dictionary", [Key]));
+    <<"key ", (beamtalk_primitive:print_string(Key))/binary, " not found in dictionary">>;
 decode_beam_error({badmap, Map}) ->
-    iolist_to_binary(io_lib:format("~p is not a map", [Map]));
+    <<(beamtalk_primitive:print_string(Map))/binary, " is not a map">>;
 decode_beam_error({badmatch, Value}) ->
-    iolist_to_binary(io_lib:format("no match of right-hand side value ~p", [Value]));
+    <<"no match of right-hand side value ", (beamtalk_primitive:print_string(Value))/binary>>;
 decode_beam_error({case_clause, Value}) ->
-    iolist_to_binary(io_lib:format("no case clause matched ~p", [Value]));
+    <<"no case clause matched ", (beamtalk_primitive:print_string(Value))/binary>>;
 decode_beam_error({try_clause, Value}) ->
-    iolist_to_binary(io_lib:format("no try clause matched ~p", [Value]));
+    <<"no try clause matched ", (beamtalk_primitive:print_string(Value))/binary>>;
 decode_beam_error(function_clause) ->
     <<"no matching function clause">>;
 decode_beam_error(if_clause) ->
@@ -396,7 +399,7 @@ decode_beam_error({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) 
         ])
     );
 decode_beam_error({badfun, Term}) ->
-    iolist_to_binary(io_lib:format("~p is not a function", [Term]));
+    <<(beamtalk_primitive:print_string(Term))/binary, " is not a function">>;
 decode_beam_error(badarg) ->
     <<"bad argument">>;
 decode_beam_error(badarith) ->
@@ -408,7 +411,7 @@ decode_beam_error(noproc) ->
 decode_beam_error(timeout) ->
     <<"operation timed out">>;
 decode_beam_error(Other) ->
-    iolist_to_binary(io_lib:format("~p", [Other])).
+    beamtalk_primitive:print_string(Other).
 
 %% @doc Format a BEAM stacktrace for display in test failure messages.
 %%
@@ -1078,7 +1081,7 @@ skipTest(Reason) when is_binary(Reason) ->
 skipTest(Reason) when is_atom(Reason) ->
     skipTest(atom_to_binary(Reason, utf8));
 skipTest(Reason) ->
-    skipTest(iolist_to_binary(io_lib:format("~p", [Reason]))).
+    skipTest(beamtalk_primitive:print_string(Reason)).
 
 %% suiteFixture: → suiteFixture/1 (BT-1549)
 %%
