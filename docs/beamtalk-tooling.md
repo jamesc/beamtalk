@@ -15,6 +15,9 @@ beamtalk check              # Check for errors without compiling
 # Development
 beamtalk repl               # Interactive REPL (connects to workspace)
 beamtalk test               # Run test suite
+
+# Native Erlang
+beamtalk gen-native MyActor # Generate skeleton gen_server from a native: Actor class
 ```
 
 ### Project Types
@@ -242,3 +245,7 @@ All interfaces — REPL, VS Code, MCP — connect to the same live BEAM workspac
 - All interfaces share actors, loaded modules, and workspace state
 
 Adding a new interface requires only a protocol adapter over the existing WebSocket transport.
+
+## Native Erlang Integration
+
+For packages that need hand-written Erlang code — gen_server implementations, hex.pm dependencies, or direct OTP control — see the [Native Erlang Integration guide](beamtalk-native-erlang.md). It covers the `native/` directory layout, the `native:` keyword for actor classes, the `gen-native` stub generator, and hex dependency management via `[native.dependencies]` in `beamtalk.toml`.
