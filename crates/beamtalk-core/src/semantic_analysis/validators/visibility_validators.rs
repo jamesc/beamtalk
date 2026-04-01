@@ -1064,8 +1064,8 @@ mod tests {
 
     // BT-1702 additional test imports
     use crate::ast::{
-        ClassDefinition, CommentAttachment, ExpressionStatement, Identifier, MessageSelector,
-        MethodDefinition, MethodKind,
+        ClassDefinition, ClassModifiers, CommentAttachment, ExpressionStatement, Identifier,
+        MessageSelector, MethodDefinition, MethodKind,
     };
     use crate::semantic_analysis::class_hierarchy::MethodInfo;
     use crate::source_analysis::Span as Sp;
@@ -1107,8 +1107,7 @@ mod tests {
         ClassDefinition::with_modifiers(
             bt1702_ident(name),
             Some(bt1702_ident(superclass)),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             methods,
             bt1702_span(),

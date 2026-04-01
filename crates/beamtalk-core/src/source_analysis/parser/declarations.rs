@@ -9,10 +9,10 @@
 //! - Method definitions with optional `sealed` or `internal` modifiers
 
 use crate::ast::{
-    ClassDefinition, CommentAttachment, DeclaredKeyword, Expression, ExpressionStatement,
-    Identifier, KeywordPart, MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
-    ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
-    TypeAnnotation, TypeParamDecl,
+    ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, Expression,
+    ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition, MethodKind,
+    MethodModifiers, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
+    StandaloneMethodDefinition, StateDeclaration, TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::TokenKind;
 
@@ -122,8 +122,12 @@ impl Parser {
             return ClassDefinition::with_modifiers(
                 Identifier::new("Error", start),
                 superclass,
-                is_abstract,
-                is_sealed,
+                ClassModifiers {
+                    is_abstract,
+                    is_sealed,
+                    is_typed,
+                    is_internal,
+                },
                 Vec::new(),
                 Vec::new(),
                 start,
@@ -184,14 +188,16 @@ impl Parser {
         let mut class_def = ClassDefinition::with_modifiers(
             name,
             superclass,
-            is_abstract,
-            is_sealed,
+            ClassModifiers {
+                is_abstract,
+                is_sealed,
+                is_typed,
+                is_internal,
+            },
             state,
             methods,
             span,
         );
-        class_def.is_typed = is_typed;
-        class_def.is_internal = is_internal;
         class_def.superclass_package = superclass_package;
         class_def.type_params = type_params;
         class_def.superclass_type_args = superclass_type_args;
@@ -954,11 +960,13 @@ impl Parser {
             parameters,
             body,
             return_type,
-            method_is_sealed,
-            method_kind,
+            MethodModifiers {
+                is_sealed: method_is_sealed,
+                is_internal: method_is_internal,
+                kind: method_kind,
+            },
             span,
         );
-        method.is_internal = method_is_internal;
         method.doc_comment = doc_comment;
         method.comments = comments;
         Some(method)

@@ -989,8 +989,7 @@ mod tests {
         let class = ClassDefinition::with_modifiers(
             Identifier::new("Counter", Span::new(0, 7)),
             Some(Identifier::new("Actor", Span::new(0, 5))),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![],
             Span::new(0, 20),

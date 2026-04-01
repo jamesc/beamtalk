@@ -12,6 +12,23 @@ use super::CommentAttachment;
 use super::ExpressionStatement;
 use super::expression::{Expression, Identifier, MessageSelector, TypeAnnotation};
 
+/// Modifier flags for a method definition.
+///
+/// All flags default to `false` and kind defaults to `Primary`,
+/// so callers can use struct update syntax:
+/// ```ignore
+/// MethodModifiers { is_sealed: true, ..Default::default() }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct MethodModifiers {
+    /// Whether this method is sealed (cannot be overridden).
+    pub is_sealed: bool,
+    /// Whether this method is internal (package-scoped visibility, ADR 0071).
+    pub is_internal: bool,
+    /// The kind of method.
+    pub kind: MethodKind,
+}
+
 /// The kind of method.
 ///
 /// Currently only Primary methods exist. Additional kinds (e.g., AOP-style
@@ -163,8 +180,7 @@ impl MethodDefinition {
         parameters: Vec<ParameterDefinition>,
         body: Vec<ExpressionStatement>,
         return_type: Option<TypeAnnotation>,
-        is_sealed: bool,
-        kind: MethodKind,
+        modifiers: MethodModifiers,
         span: Span,
     ) -> Self {
         Self {
@@ -172,9 +188,9 @@ impl MethodDefinition {
             parameters,
             body,
             return_type,
-            is_sealed,
-            is_internal: false,
-            kind,
+            is_sealed: modifiers.is_sealed,
+            is_internal: modifiers.is_internal,
+            kind: modifiers.kind,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,

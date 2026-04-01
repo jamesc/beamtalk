@@ -390,8 +390,8 @@ pub fn generate_type_alias(class: &ClassDefinition, class_name: &str) -> Option<
 mod tests {
     use super::*;
     use crate::ast::{
-        Identifier, KeywordPart, MessageSelector, MethodDefinition, ParameterDefinition,
-        TypeAnnotation,
+        ClassModifiers, Identifier, KeywordPart, MessageSelector, MethodDefinition,
+        ParameterDefinition, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -835,8 +835,7 @@ mod tests {
         ClassDefinition::with_modifiers(
             Identifier::new(class_name, span()),
             Some(Identifier::new("Value", span())),
-            false,
-            false,
+            ClassModifiers::default(),
             state,
             vec![],
             span(),
@@ -1248,8 +1247,7 @@ mod tests {
         let class = ClassDefinition::with_modifiers(
             Identifier::new("Container", span()),
             Some(Identifier::new("Value", span())),
-            false,
-            false,
+            ClassModifiers::default(),
             state,
             vec![],
             span(),
