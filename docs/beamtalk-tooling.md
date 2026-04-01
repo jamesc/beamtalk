@@ -43,6 +43,109 @@ Every generated project includes a `Justfile` with these targets:
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
 
+## Build System
+
+`beamtalk build` compiles a project (or a single `.bt` file) to BEAM bytecode. The build pipeline is incremental — unchanged files are skipped, and the compiler caches class metadata across builds.
+
+### Build Phases
+
+Every build runs through three sequential phases:
+
+1. **Pass 1 (Discovery)** — Read each `.bt` source file and parse it into an AST. Extract class names, superclass relationships, and method signatures. This produces the `class_module_index` (class name to BEAM module name) and `class_superclass_index` (class to superclass) needed for cross-file resolution in Pass 2. Dependency validation (stdlib reservation checks, native module collision detection) also runs here.
+
+2. **Pass 2 (Compile)** — For each changed source file: run semantic analysis (type checking, protocol conformance, dependency warnings), then generate Core Erlang. The full class-module index from Pass 1 is injected so cross-file class references resolve correctly. Each `.bt` file produces a `.core` file in the build directory.
+
+3. **BEAM compilation (`erlc`)** — Invoke OTP's `compile` module to turn each `.core` file into a `.beam` file. This is the standard Erlang compiler — Beamtalk delegates BEAM bytecode generation entirely to OTP.
+
+### Incremental Compilation
+
+Beamtalk uses mtime-based change detection to avoid redundant work:
+
+- Each `.bt` source file is compared against its corresponding `.beam` output. If the source is newer (or no `.beam` exists), the file is recompiled.
+- **Pass 1 caching** — The class-module index from Pass 1 is cached in `_build/dev/ebin/.beamtalk-pass1-cache.json`. On subsequent builds, only files whose source has changed since the cache was written are re-parsed. Unchanged files reuse their cached class metadata. If the `beamtalk.toml` manifest changes, the entire cache is invalidated and all files are re-parsed.
+- **Force rebuild** — `beamtalk build --force` ignores all caches and recompiles everything. Useful after toolchain upgrades or when build artifacts may be stale (e.g. switching git branches or worktrees).
+- **Orphan detection** — `.beam` files with no corresponding `.bt` source are reported as warnings (the source may have been deleted or renamed).
+
+### Build Artifact Layout (`BuildLayout`)
+
+All build output goes under `_build/` in the project root. The `BuildLayout` struct centralises path construction so all commands (build, test, run, repl, deps) use consistent locations.
+
+```text
+<project_root>/
+  _build/
+    dev/
+      ebin/                        — compiled .beam files from .bt sources
+        .beamtalk-pass1-cache.json — Pass 1 incremental cache
+      native/
+        ebin/                      — compiled .beam files from native .erl sources
+        include/                   — generated headers (e.g. beamtalk_classes.hrl)
+        default/lib/               — rebar3 hex dependency libs (ERL_LIBS)
+        rebar.config               — generated rebar3 config (when hex deps exist)
+    deps/
+      <name>/                      — git dependency checkout
+        ebin/                      — compiled .beam files for the dependency
+```
+
+For single-file builds (no `beamtalk.toml`), output goes to `build/` alongside the source file instead of `_build/dev/ebin/`.
+
+### Module Naming
+
+Beamtalk uses a namespaced BEAM module naming scheme to avoid collisions in the flat BEAM module namespace:
+
+| Mode | Module name | Example |
+|------|-------------|---------|
+| Package (`beamtalk.toml` present) | `bt@<package>@<relative_path>` | `bt@myapp@Counter` |
+| Single file (no manifest) | `bt@<module>` | `bt@Counter` |
+
+Subdirectories within `src/` are reflected in the module name: `src/models/User.bt` in package `myapp` becomes `bt@myapp@models@User`.
+
+### Dependency Compilation Order
+
+When a project has dependencies (declared in `beamtalk.toml`), the build resolves and compiles the full transitive dependency graph in topological order before compiling the project's own sources. Each dependency's class-module index is merged into the project's index so cross-package class references resolve during codegen.
+
+Native Erlang dependencies (`.erl` files under `native/` or hex packages) are compiled after Pass 1 but before Pass 2. This ordering ensures the generated `beamtalk_classes.hrl` header (which maps Beamtalk class names to BEAM module names) is available for native `.erl` files to include.
+
+### `__beamtalk_meta/0` Protocol
+
+Every compiled Beamtalk class module exports a `__beamtalk_meta/0` function — a zero-process reflection entry point that returns a map of class metadata without requiring any gen_server process to be running:
+
+```erlang
+Module:'__beamtalk_meta'() ->
+    #{
+        class             => 'Counter',
+        superclass        => 'Actor',
+        meta_version      => 2,
+        is_sealed         => false,
+        is_abstract       => false,
+        is_value          => false,
+        fields            => [count],
+        field_types       => #{count => 'Integer'},
+        methods           => [{increment, 1}, {value, 0}],
+        class_methods     => [{new, 0}],
+        method_info       => #{...},
+        class_method_info => #{...}
+    }
+```
+
+This metadata serves multiple purposes:
+- **Incremental builds**: The compiler server caches `__beamtalk_meta/0` output for all loaded classes, injecting it into each compilation request so the type checker can validate cross-class method calls on user-defined classes (see [ADR 0050](ADR/0050-incremental-compiler-class-hierarchy.md)).
+- **Crash recovery**: When the compiler port restarts, the server scans all loaded BEAM modules and repopulates its class cache from `__beamtalk_meta/0` — no persistent state files needed.
+- **Tooling**: Debuggers, documentation generators, and the reflection API (`Beamtalk allClasses`, `Beamtalk help:`) can query class structure without going through a class process.
+
+### Hot-Patching
+
+When a `.bt` file is reloaded (via `Workspace load:`, `:reload`, or a VS Code file save), the compiler produces new BEAM bytecode and the runtime hot-loads it using standard OTP code loading (`code:load_binary/3`). The class gen_server process updates its live state to reflect the new methods — hot-patched methods take effect on the next message send without restarting the actor.
+
+The compiler server is also notified of the change so its class cache stays current. Since `__beamtalk_meta/0` is a compiled function baked into the module, it reflects the original compilation — not hot-patches. The gen_server's `class_state` record is the authoritative live view; the compiler server receives updates synthesised from `class_state`, not from the stale `__beamtalk_meta/0`.
+
+### Embedded Compiler Architecture
+
+The Beamtalk compiler (`beamtalk-core`, written in Rust) runs as an OTP Port managed by `beamtalk_compiler_server` — a supervised gen_server inside the BEAM node ([ADR 0022](ADR/0022-embedded-compiler-via-otp-port.md)). This replaces the older separate-daemon architecture and provides:
+
+- **Supervised lifecycle** — The compiler port is restarted automatically on crash. No orphaned socket files or manual recovery.
+- **Cross-platform** — OTP Ports work on all platforms (Linux, macOS, Windows). No Unix-specific IPC.
+- **Stateless port** — The Rust compiler binary is a pure function: source code + metadata in, Core Erlang out. All session state (class cache, known variables) lives in the Erlang gen_server and is injected per request via ETF (Erlang Term Format) over length-prefixed frames.
+
 ## REPL
 
 The REPL connects to a persistent workspace — a detached BEAM node that survives disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md)). Actors keep running between sessions; REPL variable bindings are session-local.
