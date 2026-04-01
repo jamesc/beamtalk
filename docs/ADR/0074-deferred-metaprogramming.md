@@ -145,7 +145,7 @@ No `become:` or `thisContext`. Reference capabilities ensure data-race safety th
 ### For implementing class-as-actor now:
 - **Smalltalk purist:** "Classes should be fully live objects. I want to supervise class processes, add methods dynamically, and have metaclass-level `doesNotUnderstand:` for framework hooks."
 - **BEAM veteran:** "Making class processes unsupervised gen_servers is an OTP anti-pattern. If a class process crashes, recovery semantics are unclear."
-- **Rebuttal:** The incremental path from current infrastructure to full class-as-actor is preserved. Implementing now would add complexity to bootstrap ordering and supervision without clear user demand.
+- **Rebuttal:** The incremental path from current infrastructure to full class-as-actor is preserved. The blocker isn't dispatch overhead (class methods already go through `gen_server:call`) or bootstrap ordering (`Supervisor` is shallow). It's defining safe restart semantics — what happens to hot-patches and dependent actors when a class process restarts?
 
 ### Tension Points
 - Smalltalk purists would prefer all three features; every other cohort is comfortable with the deferral
@@ -177,9 +177,8 @@ Promote all class processes to full supervised actors with `state:` declarations
 
 ### Positive
 - **Simpler runtime:** Fewer moving parts in the process architecture. Class processes are stable infrastructure, not dynamic actors that can crash and restart.
-- **No restart semantics to define:** Class processes don't crash and restart, so there's no question of what happens to hot-patches, class variables, or dependent actors after a restart.
+- **No restart semantics to define:** Without supervision, there's no question of what happens to hot-patches, class variables, or dependent actors after a class process restart. (The trade-off: a crash is unrecoverable — see BT-1768.)
 - **Clearer mental model:** Users don't need to reason about class process lifecycle, supervision, or restart semantics.
-- **Faster bootstrap:** Class registration during `on_load` is straightforward — no supervision tree to build before classes exist.
 
 ### Negative
 - **Debugger limitations:** Cannot build a Pharo-style stack-manipulating debugger. Must rely on BEAM tracing tools (`int`, `dbg`, Observer) instead.
@@ -200,7 +199,7 @@ No implementation work — this is a documentation decision. Completed alongside
 2. Removed `docs/internal/design-metaprogramming.md` — this ADR supersedes it.
 
 ## References
-- Related issues: [BT-303](https://linear.app/beamtalk/issue/BT-303)
+- Related issues: [BT-303](https://linear.app/beamtalk/issue/BT-303), [BT-1768](https://linear.app/beamtalk/issue/BT-1768) (class process crash detection)
 - Source material: `docs/internal/design-metaprogramming.md` (removed — superseded by this ADR)
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model), [ADR 0006](0006-unified-method-dispatch.md) (method dispatch), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (class objects), [ADR 0032](0032-early-class-protocol.md) (Behaviour/Class protocol), [ADR 0033](0033-runtime-embedded-documentation.md) (CompiledMethod docs), [ADR 0036](0036-full-metaclass-tower.md) (metaclass tower)
 - Documentation: `docs/known-limitations.md`
