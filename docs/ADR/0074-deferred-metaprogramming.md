@@ -98,9 +98,9 @@ obj1 become: obj2   "All references to obj1 now point to obj2"
 - But class processes are **runtime infrastructure**, not user-visible actors — no `state:` declarations, no user supervision, no actor lifecycle hooks
 
 **Why defer:**
-- **Complexity cost:** Making class processes full actors requires changes across the compiler, runtime, bootstrap, and supervision infrastructure. The bootstrap ordering alone is delicate — class processes must exist before any user code runs.
+- **Complexity cost:** Making class processes full actors requires changes across the compiler, runtime, and supervision infrastructure. (Bootstrap ordering is less of a concern than originally feared — `Supervisor` is an `Object` subclass, not deep in the hierarchy, so class processes could be supervised without a deep circular dependency.)
 - **Limited practical value for v0.1:** The use cases enabled by class-as-actor (runtime mixin injection, metaclass-level interception, class migration) are exotic. The principled argument is that these features are framework-author tools, not application-developer tools — and Beamtalk doesn't yet have a framework ecosystem that would exercise them.
-- **Performance concern:** Routing all dispatch through actor message passing (gen_server:call) adds latency. Current hybrid approach (compiled dispatch with dynamic overlay) is faster.
+- **Performance concern (primary reason):** Routing all class-side dispatch through actor message passing (gen_server:call) adds measurable latency. Current hybrid approach (compiled dispatch with dynamic overlay for hot-patches) is faster. The performance cost is hard to justify given the limited practical value of the features it enables.
 - **Incremental path exists:** The current `beamtalk_object_class` gen_server state already holds method dictionaries, superclass refs, and metadata. Promoting these to supervised actors is additive, not a rewrite — though this becomes harder if the class process API accumulates dependents without supervision contracts.
 
 **Revisitation triggers:** This deferral should be revisited if: (a) a Beamtalk framework needs metaclass-level `doesNotUnderstand:` for dynamic routing, (b) class process crashes become a reliability concern in production, or (c) multi-node hot-patching requires class processes to participate in distributed state protocols.
@@ -171,7 +171,7 @@ Allow specific class processes to be supervised via a modifier (e.g. `supervised
 ### Alternative: Implement Class-as-Actor for v0.1
 Promote all class processes to full supervised actors with `state:` declarations and OTP lifecycle.
 
-**Rejected:** The bootstrap ordering is already the most complex part of the runtime. Adding supervision to class processes would require solving circular dependencies (supervisor classes need to be loaded to supervise class loading). The incremental path means this can be added later without breaking changes.
+**Rejected:** The performance overhead of full actor dispatch for class methods is the primary concern — the value doesn't justify the cost. Bootstrap ordering is manageable (`Supervisor` is shallow in the hierarchy), and the incremental path means this can be added later without breaking changes.
 
 ## Consequences
 
