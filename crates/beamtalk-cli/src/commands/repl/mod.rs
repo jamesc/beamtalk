@@ -512,6 +512,7 @@ pub fn run(
             timeout,
             Some(bind_addr),
             web_port,
+            log_level,
             otp_app_name.as_deref(),
             &hex_dep_names,
         )?;

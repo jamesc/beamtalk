@@ -1058,6 +1058,7 @@ mod tests {
                 Some(60),
                 None,
                 None,
+                "info",
                 None,
                 &[],
             ) {
@@ -1208,9 +1209,10 @@ mod tests {
                     false,
                     Some(60),
                     None,
-                    None, // web_port
-                    None, // otp_app_name
-                    &[],  // hex_dep_names
+                    None,   // web_port
+                    "info", // log_level
+                    None,   // otp_app_name
+                    &[],    // hex_dep_names
                 ) {
                     Ok(r) => {
                         result = Some(r);
@@ -1251,9 +1253,10 @@ mod tests {
             false,
             Some(60),
             None,
-            None, // web_port
-            None, // otp_app_name
-            &[],  // hex_dep_names
+            None,   // web_port
+            "info", // log_level
+            None,   // otp_app_name
+            &[],    // hex_dep_names
         )
         .expect("reconnect should succeed");
         assert!(!started2, "second call should reuse existing node");
@@ -1287,9 +1290,10 @@ mod tests {
                     false,
                     Some(60),
                     None,
-                    None, // web_port
-                    None, // otp_app_name
-                    &[],  // hex_dep_names
+                    None,   // web_port
+                    "info", // log_level
+                    None,   // otp_app_name
+                    &[],    // hex_dep_names
                 ) {
                     Ok(r) => {
                         result = Some(r);
@@ -1364,9 +1368,10 @@ mod tests {
                         false,
                         Some(60),
                         None,
-                        None, // web_port
-                        None, // otp_app_name
-                        &[],  // hex_dep_names
+                        None,   // web_port
+                        "info", // log_level
+                        None,   // otp_app_name
+                        &[],    // hex_dep_names
                     )
                 })
             })
@@ -1450,6 +1455,7 @@ mod tests {
             Some(60),
             None,
             None,
+            "info",
             None,
             &[],
         )
@@ -1487,6 +1493,7 @@ mod tests {
             Some(60),
             None,
             None,
+            "info",
             None,
             &[],
         )
@@ -1536,6 +1543,7 @@ mod tests {
             Some(60),
             None,
             None,
+            "info",
             None,
             &[],
         )
@@ -1566,6 +1574,7 @@ mod tests {
             Some(60),
             None,
             None,
+            "info",
             None,
             &[],
         )

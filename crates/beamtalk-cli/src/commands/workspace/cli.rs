@@ -367,6 +367,7 @@ fn run_create_background(
         idle_timeout,
         Some(bind_addr),
         web_port,
+        "info",
         None,
         &[], // No hex deps for standalone workspace CLI
     )?;
