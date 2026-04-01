@@ -12,10 +12,17 @@ beamtalk build              # Compile to BEAM
 beamtalk run                # Compile and start
 beamtalk check              # Check for errors without compiling
 
+# Dependencies (see Package Management guide)
+beamtalk deps add json --git https://github.com/jamesc/beamtalk-json --tag v1.0.0
+beamtalk deps list          # Show resolved dependencies
+beamtalk deps update        # Update lockfile
+
 # Development
 beamtalk repl               # Interactive REPL (connects to workspace)
 beamtalk test               # Run test suite
 ```
+
+For full details on `beamtalk.toml`, dependencies, lockfiles, qualified names, and collision detection, see the [Package Management](beamtalk-packages.md) guide.
 
 ### Project Types
 
