@@ -23,8 +23,8 @@
 sealed Value subclass: Package
   field: name :: String = ""
   field: version :: String = ""
-  field: packageClasses :: List = #()
-  field: packageDependencies :: List = #()
+  field: classes :: List = #()
+  field: dependencies :: List = #()
   field: source :: String = ""
 
   // ===== Class Methods — Discovery =====
@@ -53,15 +53,6 @@ sealed Value subclass: Package
   class sealed named: name :: String -> Package =>
     (Erlang beamtalk_package) named: name
 
-  /// Return the package name (String) that owns the given class name (Symbol).
-  ///
-  /// Returns nil if the class is not found or has no package.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Package packageNameFor: #Object
-  /// // => _
-  /// ```
   /// Return a List of class names (Symbols) belonging to the given package.
   ///
   /// Returns an empty List if the package is not found.
@@ -125,7 +116,7 @@ sealed Value subclass: Package
   /// (Package named: "stdlib") classes includes: #Object
   /// // => true
   /// ```
-  classes -> List => self.packageClasses
+  classes -> List => self.classes
 
   /// The list of dependency package names (Strings) for this package.
   ///
@@ -134,7 +125,7 @@ sealed Value subclass: Package
   /// (Package named: "stdlib") dependencies
   /// // => _
   /// ```
-  dependencies -> List => self.packageDependencies
+  dependencies -> List => self.dependencies
 
   /// The package source description.
   source -> String => self.source

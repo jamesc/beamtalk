@@ -248,8 +248,8 @@ build_package_info(AppName, PkgName) ->
         '$beamtalk_class' => 'Package',
         name => PkgName,
         version => Version,
-        'packageClasses' => ClassNames,
-        'packageDependencies' => Deps,
+        classes => ClassNames,
+        dependencies => Deps,
         source => Source
     }.
 

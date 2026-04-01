@@ -61,8 +61,8 @@ named_returns_tagged_package_map_test() ->
     ?assertEqual('Package', maps:get('$beamtalk_class', Info)),
     ?assertEqual(<<"stdlib">>, maps:get(name, Info)),
     ?assert(is_binary(maps:get(version, Info))),
-    ?assert(is_list(maps:get('packageClasses', Info))),
-    ?assert(is_list(maps:get('packageDependencies', Info))),
+    ?assert(is_list(maps:get(classes, Info))),
+    ?assert(is_list(maps:get(dependencies, Info))),
     ?assert(is_binary(maps:get(source, Info))).
 
 named_accepts_atom_test() ->
@@ -73,7 +73,7 @@ named_accepts_atom_test() ->
 named_classes_contains_known_classes_test() ->
     setup(),
     Info = beamtalk_package:named(<<"stdlib">>),
-    Classes = maps:get('packageClasses', Info),
+    Classes = maps:get(classes, Info),
     ?assert(lists:member('Object', Classes)),
     ?assert(lists:member('Integer', Classes)),
     ?assert(lists:member('String', Classes)),
