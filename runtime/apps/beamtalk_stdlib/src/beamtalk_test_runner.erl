@@ -676,8 +676,7 @@ run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap) ->
         {'DOWN', MonRef, process, _Pid, Reason} ->
             %% Worker died without sending a result — synthesize a failure
             ClassName = maps:get(MonRef, PidMap, unknown_class),
-            ErrMsg = <<"Test worker crashed: ",
-                (beamtalk_primitive:print_string(Reason))/binary>>,
+            ErrMsg = <<"Test worker crashed: ", (beamtalk_primitive:print_string(Reason))/binary>>,
             Result = make_test_result(
                 1,
                 0,

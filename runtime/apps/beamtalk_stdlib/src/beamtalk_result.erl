@@ -159,8 +159,9 @@ from_tagged_tuple({error, Reason}) ->
         kind = type_error,
         class = 'Result',
         selector = 'tryDo:',
-        message = <<"tryDo: expected a zero-arity block, got: ",
-            (beamtalk_primitive:print_string(Block))/binary>>,
+        message =
+            <<"tryDo: expected a zero-arity block, got: ",
+                (beamtalk_primitive:print_string(Block))/binary>>,
         hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
         details = #{got => Block}
     }).

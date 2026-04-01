@@ -101,8 +101,10 @@ should_raise(Block, ExpectedKind) ->
                     (beamtalk_primitive:print_string(Block))/binary>>;
             {_, false} ->
                 iolist_to_binary(
-                    [<<"Expected an error kind atom, got: ">>,
-                        beamtalk_primitive:print_string(ExpectedKind)]
+                    [
+                        <<"Expected an error kind atom, got: ">>,
+                        beamtalk_primitive:print_string(ExpectedKind)
+                    ]
                 )
         end,
     Error2 = beamtalk_error:with_message(Error1, Message),
