@@ -1745,6 +1745,15 @@ safe_spawn_success_test() ->
     ?assert(is_process_alive(Pid)),
     gen_server:stop(Pid).
 
+await_initialize_preserves_full_stop_reason_test() ->
+    %% When handle_continue returns {stop, {error, function_clause}, State},
+    %% await_initialize must return {error, {error, function_clause}} — not
+    %% {error, error} (the bug before the pattern-match fix).
+    %% Use gen_server:start (not start_link) to avoid EXIT signal killing the test.
+    {ok, Pid} = gen_server:start(test_crashing_init_actor, #{}, []),
+    Result = beamtalk_actor:await_initialize(Pid),
+    ?assertMatch({error, {error, function_clause}}, Result).
+
 safe_spawn_restores_trap_exit_test() ->
     %% safe_spawn restores the original trap_exit flag
     OldTrap = process_flag(trap_exit, false),

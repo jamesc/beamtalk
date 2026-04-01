@@ -105,6 +105,7 @@ pub fn get_or_start_workspace(
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
     web_port: Option<u16>,
+    log_level: &str,
     otp_app_name: Option<&str>,
     hex_dep_names: &[String],
 ) -> Result<(NodeInfo, bool, String)> {
@@ -165,6 +166,7 @@ pub fn get_or_start_workspace(
             max_idle_seconds,
             bind_addr,
             web_port,
+            log_level,
             otp_app_name,
             hex_dep_names,
         ) {

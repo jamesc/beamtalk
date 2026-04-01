@@ -23,12 +23,14 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 /// The BEAM process's working directory is set to `project_root` so that
 /// relative file paths (e.g., `File lines: "data.csv"`) resolve correctly.
 ///
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn start_beam_node(
     port: u16,
     node_name: Option<&String>,
     project_root: &Path,
     bind_addr: Option<std::net::Ipv4Addr>,
     web_port: Option<u16>,
+    log_level: &str,
     otp_app_name: Option<&str>,
     hex_dep_names: &[String],
 ) -> Result<Child> {
@@ -84,11 +86,19 @@ pub(crate) fn start_beam_node(
             name,
             bind_addr,
             web_port,
+            log_level,
             otp_app_name,
             hex_dep_names,
         )
     } else {
-        repl_startup::build_eval_cmd(port, bind_addr, web_port, otp_app_name, hex_dep_names)
+        repl_startup::build_eval_cmd(
+            port,
+            bind_addr,
+            web_port,
+            log_level,
+            otp_app_name,
+            hex_dep_names,
+        )
     };
 
     // Start erl with beamtalk_workspace running

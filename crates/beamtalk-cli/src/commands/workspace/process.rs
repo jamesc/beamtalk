@@ -113,6 +113,7 @@ pub fn start_detached_node(
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
     web_port: Option<u16>,
+    log_level: &str,
     otp_app_name: Option<&str>,
     hex_dep_names: &[String],
 ) -> Result<NodeInfo> {
@@ -198,6 +199,7 @@ pub fn start_detached_node(
         &bind_addr_erl,
         auto_cleanup,
         idle_timeout,
+        log_level,
         &hex_deps_start,
         &otp_app_start,
     );
@@ -516,6 +518,7 @@ fn build_workspace_eval_cmd(
     bind_addr_erl: &str,
     auto_cleanup: bool,
     idle_timeout: u64,
+    log_level: &str,
     hex_deps_start: &str,
     otp_app_start: &str,
 ) -> String {
@@ -525,6 +528,7 @@ fn build_workspace_eval_cmd(
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
          application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
+         application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{workspace_id => <<\"{workspace_id}\">>, \

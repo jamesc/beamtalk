@@ -52,6 +52,37 @@ with_hint_adds_hint_test() ->
     Error = beamtalk_error:with_hint(Error0, Hint),
     ?assertEqual(Hint, Error#beamtalk_error.hint).
 
+%%% Test: with_hint/2 with undefined is a no-op
+with_hint_undefined_is_noop_test() ->
+    Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+    Error = beamtalk_error:with_hint(Error0, undefined),
+    ?assertEqual(undefined, Error#beamtalk_error.hint).
+
+%%% Test: with_hint/2 with atom converts to binary
+with_hint_atom_converts_to_binary_test() ->
+    Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+    Error = beamtalk_error:with_hint(Error0, function_clause),
+    ?assertEqual(<<"function_clause">>, Error#beamtalk_error.hint).
+
+%%% Test: with_hint/2 with tuple formats as binary
+with_hint_tuple_formats_as_binary_test() ->
+    Error0 = beamtalk_error:new(instantiation_error, 'Counter'),
+    Error = beamtalk_error:with_hint(Error0, {error, function_clause}),
+    ?assert(is_binary(Error#beamtalk_error.hint)),
+    ?assertEqual(<<"{error,function_clause}">>, Error#beamtalk_error.hint).
+
+%%% Test: format/1 works with non-binary hints
+format_with_tuple_hint_test() ->
+    Error0 = beamtalk_error:new(instantiation_error, 'Counter'),
+    Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
+    Error = beamtalk_error:with_hint(Error1, {error, function_clause}),
+    Formatted = beamtalk_error:format(Error),
+    ?assert(is_binary(Formatted)),
+    ?assertEqual(
+        <<"Cannot call 'spawnWith:' on Counter\nHint: {error,function_clause}">>,
+        Formatted
+    ).
+
 %%% Test: with_details/2 adds details map
 with_details_adds_details_test() ->
     Details = #{arity => 2, expected => 1},

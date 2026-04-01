@@ -290,7 +290,7 @@ fn beam_eval_cmd(
         // Cover-compiling must happen before the workspace supervisor spawns
         // the acceptor process, otherwise spawned closures use uninstrumented code.
         // Port 0 = OS-assigned ephemeral port; actual port is reported on stdout.
-        let prelude = repl_startup::startup_prelude(0, None, None);
+        let prelude = repl_startup::startup_prelude(0, None, None, "info");
         format!(
             "cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
@@ -320,7 +320,7 @@ fn beam_eval_cmd(
         )
     } else {
         // Port 0 = OS-assigned ephemeral port; build_eval_cmd already prints BEAMTALK_PORT.
-        repl_startup::build_eval_cmd(0, None, None, None, &[])
+        repl_startup::build_eval_cmd(0, None, None, "info", None, &[])
     }
 }
 
@@ -1600,7 +1600,7 @@ Supervisor subclass: E2EOtpRootSup\n\
     // the running applications to stdout. We check stdout directly instead
     // of evaluating through the REPL, because the REPL eval path requires
     // the compiler port binary which isn't available in this isolated test.
-    let prelude = repl_startup::startup_prelude(0, None, None);
+    let prelude = repl_startup::startup_prelude(0, None, None, "info");
     let eval_cmd = format!(
         "{prelude}, \
          {{ok, _}} = application:ensure_all_started(e2e_otp_test), \

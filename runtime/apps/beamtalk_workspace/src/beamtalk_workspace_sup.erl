@@ -301,6 +301,9 @@ do_setup_file_logger(WorkspaceId) ->
             ]),
             case filelib:ensure_dir(LogFile) of
                 ok ->
+                    %% Read log level from app env (set by --log-level CLI flag),
+                    %% defaulting to info.
+                    Level = application:get_env(beamtalk_runtime, log_level, info),
                     HandlerConfig = #{
                         config => #{
                             file => LogFile,
@@ -308,15 +311,13 @@ do_setup_file_logger(WorkspaceId) ->
                             max_no_bytes => 10485760,
                             max_no_files => 5
                         },
-                        level => info,
+                        level => Level,
                         formatter =>
                             {beamtalk_json_formatter, #{}}
                     },
-                    %% Set primary logger level to info. Debug messages are dropped
-                    %% at the primary level to avoid generating events that no handler
-                    %% displays. Use `Logger setLevel: #debug` at runtime to lower
-                    %% both the primary level and handler levels for troubleshooting.
-                    logger:set_primary_config(level, info),
+                    %% Set primary logger level (from --log-level CLI flag, default info).
+                    %% Use `Logger setLevel: #debug` at runtime to change dynamically.
+                    logger:set_primary_config(level, Level),
                     case logger:add_handler(beamtalk_file_log, logger_std_h, HandlerConfig) of
                         ok ->
                             ?LOG_INFO("Workspace log file: ~s", [LogFile], #{

@@ -57,7 +57,7 @@ new(Kind, Class, Selector) ->
     with_selector(new(Kind, Class), Selector).
 
 %% @doc Create a new error with kind, class, selector, and hint.
--spec new(atom(), atom(), atom(), binary()) -> #beamtalk_error{}.
+-spec new(atom(), atom(), atom(), term()) -> #beamtalk_error{}.
 new(Kind, Class, Selector, Hint) ->
     with_hint(new(Kind, Class, Selector), Hint).
 
@@ -100,9 +100,15 @@ with_selector(#beamtalk_error{kind = Kind, class = Class} = Error, Selector) ->
 %% Example:
 %%   Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
 %%   Error = beamtalk_error:with_hint(Error0, <<"Check spelling">>)
--spec with_hint(#beamtalk_error{}, binary()) -> #beamtalk_error{}.
+-spec with_hint(#beamtalk_error{}, term()) -> #beamtalk_error{}.
+with_hint(Error, undefined) ->
+    Error;
+with_hint(Error, Hint) when is_binary(Hint) ->
+    Error#beamtalk_error{hint = Hint};
+with_hint(Error, Hint) when is_atom(Hint) ->
+    Error#beamtalk_error{hint = atom_to_binary(Hint, utf8)};
 with_hint(Error, Hint) ->
-    Error#beamtalk_error{hint = Hint}.
+    Error#beamtalk_error{hint = iolist_to_binary(io_lib:format("~tp", [Hint]))}.
 
 %% @doc Add additional context details to an error.
 %%

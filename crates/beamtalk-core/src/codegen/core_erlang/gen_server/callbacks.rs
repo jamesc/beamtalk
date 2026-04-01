@@ -377,6 +377,7 @@ impl CoreErlangGenerator {
     ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
     ///                     {'noreply', InitNewState}
     ///                 <{'error', InitError, InitErrState}> when 'true' ->
+    ///                     let _ = call 'logger':'error'(...) in
     ///                     {'stop', InitError, InitErrState}
     ///             end
     ///         <_> when 'true' -> {'noreply', State}
@@ -428,7 +429,9 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    "{'stop', InitError, InitErrState}"
+                                                    "let _ = call 'logger':'error'(~{'msg' => 'initialize failed', 'reason' => InitError}~) in",
+                                                    line(),
+                                                    "{'stop', InitError, InitErrState}",
                                                 ]
                                             ),
                                         ]

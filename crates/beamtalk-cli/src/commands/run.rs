@@ -395,10 +395,11 @@ fn run_package_as_otp_application(
         0, // ephemeral port: OS assigns
         &paths,
         &extra_code_paths,
-        false, // persistent (not auto_cleanup)
-        None,  // max_idle_seconds: use workspace default
-        None,  // bind_addr: loopback default
-        None,  // web_port
+        false,  // persistent (not auto_cleanup)
+        None,   // max_idle_seconds: use workspace default
+        None,   // bind_addr: loopback default
+        None,   // web_port
+        "info", // log_level
         Some(&pkg.name),
         &service_hex_dep_names,
     )?;
