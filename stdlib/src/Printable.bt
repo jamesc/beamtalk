@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+/// Printable — Protocol for objects that can represent themselves as strings.
+///
+/// Any class that implements both `asString` and `printString` automatically
+/// conforms to Printable via structural protocol conformance (ADR 0068).
+///
+/// - `asString` returns a human-readable string representation.
+/// - `printString` returns a developer-oriented representation (suitable for
+///   debugging, logging, and REPL display).
+///
+/// Most stdlib classes conform automatically since `Object` provides a default
+/// `printString` and many subclasses override `asString`.
+Protocol define: Printable
+  asString -> String
+  printString -> String

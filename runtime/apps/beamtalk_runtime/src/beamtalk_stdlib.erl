@@ -82,6 +82,9 @@ do_init() ->
     %% Each module's on_load → register_class/0 creates its class process
     %% with correct method maps generated from the .bt source.
     load_compiled_stdlib_modules(),
+    %% BT-1766: Load protocol-only modules (e.g. Printable) after class modules.
+    %% These have no class definition but register protocols via on_load.
+    load_protocol_modules(),
     ok.
 
 %% @private
@@ -130,6 +133,44 @@ load_compiled_stdlib_modules() ->
             }),
             EbinDir = find_stdlib_ebin(),
             discover_and_load_fallback(EbinDir)
+    end.
+
+%% @private
+%% @doc Load protocol-only modules from the stdlib app env (BT-1766).
+%%
+%% Protocol-only files (e.g. Printable.bt) define structural protocols but
+%% contain no class definition. They are compiled to BEAM modules with on_load
+%% callbacks that register the protocol with beamtalk_protocol_registry.
+%% Since they have no class, they are not in the `classes` env key and must
+%% be loaded explicitly.
+-spec load_protocol_modules() -> ok.
+load_protocol_modules() ->
+    _ = application:load(beamtalk_stdlib),
+    case application:get_env(beamtalk_stdlib, protocol_modules) of
+        {ok, Modules} when is_list(Modules) ->
+            lists:foreach(
+                fun(Mod) ->
+                    case code:ensure_loaded(Mod) of
+                        {module, Mod} ->
+                            ?LOG_DEBUG("Loaded protocol module", #{
+                                module => Mod, domain => [beamtalk, stdlib]
+                            });
+                        {error, Reason} ->
+                            ?LOG_WARNING(
+                                "Failed to load protocol module ~s: ~p",
+                                [format_bt_module(Mod), Reason],
+                                #{
+                                    module => Mod,
+                                    reason => Reason,
+                                    domain => [beamtalk, stdlib]
+                                }
+                            )
+                    end
+                end,
+                Modules
+            );
+        _ ->
+            ok
     end.
 
 %% @private

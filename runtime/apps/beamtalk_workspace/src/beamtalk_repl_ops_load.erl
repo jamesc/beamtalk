@@ -93,6 +93,25 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     %% Activate pre-compiled dependency modules before loading project files,
     %% so that project classes can reference dependency classes (e.g. HTTPClient).
     DepErrors = activate_dependency_modules(AbsPath),
+    %% Load the workspace project's own .app metadata so that
+    %% beamtalk_package:all/0 and Workspace dependencies can discover it.
+    ProjectEbin = filename:join([AbsPath, "_build", "dev", "ebin"]),
+    case filelib:is_dir(ProjectEbin) of
+        true ->
+            _ = code:add_pathz(ProjectEbin),
+            case beamtalk_module_activation:load_app_from_ebin(ProjectEbin) of
+                {ok, []} ->
+                    ok;
+                {ok, AppErrors} ->
+                    ?LOG_WARNING(
+                        "Failed to load project .app metadata: ~p",
+                        [AppErrors],
+                        #{domain => [beamtalk, runtime]}
+                    )
+            end;
+        false ->
+            ok
+    end,
     SrcFiles = find_bt_files(filename:join(AbsPath, "src")),
     TestFiles =
         case IncludeTests of
