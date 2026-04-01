@@ -108,7 +108,9 @@ module 'character_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_c
                 <{'reply', _InitResult, InitNewState}> when 'true' ->
                     {'noreply', InitNewState}
                 <{'error', InitError, InitErrState}> when 'true' ->
-                    let _ = call 'logger':'error'(~{'msg' => 'initialize failed', 'reason' => InitError}~) in
+                    let InitErrorMsg = call 'beamtalk_error':'format_safe'(InitError) in
+                    let InitClassName = call 'character_literals':'class_name'() in
+                    let _ = call 'logger':'error'(~{'msg' => InitErrorMsg, 'class' => InitClassName, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in
                     {'stop', InitError, InitErrState}
             end
         <_> when 'true' -> {'noreply', State}

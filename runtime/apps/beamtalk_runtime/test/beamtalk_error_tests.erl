@@ -291,3 +291,21 @@ raise_produces_exception_class_test() ->
         error:#{'$beamtalk_class' := Class} ->
             ?assertEqual('TypeError', Class)
     end.
+
+%%% Tests: format_safe/1
+
+format_safe_with_beamtalk_error_test() ->
+    Error = beamtalk_error:new(class_not_found, 'HTTPClient'),
+    Result = beamtalk_error:format_safe(Error),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"HTTPClient">>)).
+
+format_safe_with_non_error_term_test() ->
+    Result = beamtalk_error:format_safe(some_atom),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"some_atom">>)).
+
+format_safe_with_tuple_test() ->
+    Result = beamtalk_error:format_safe({badmatch, 42}),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"badmatch">>)).
