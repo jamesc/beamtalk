@@ -1000,7 +1000,7 @@ collect_load_warnings_qualified(Classes, undefined) ->
     %% No module context — fall back to unqualified drain (drains all packages).
     collect_load_warnings(Classes);
 collect_load_warnings_qualified(Classes, ModuleAtom) ->
-    Package = beamtalk_class_registry:extract_package_from_module(ModuleAtom),
+    Package = beamtalk_runtime_api:extract_package_from_module(ModuleAtom),
     ClassNames = lists:filtermap(
         fun
             (#{name := N}) when N =/= "" ->
