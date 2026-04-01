@@ -190,6 +190,7 @@ Promote all class processes to full supervised actors with `state:` declarations
 - **No transparent proxies:** `become:` absence means proxy patterns require explicit delegation via `doesNotUnderstand:`.
 - **Multi-node hot-patching is unspecified:** Method hot-patches via `put_method/3` are node-local. In a multi-node cluster, each node's class processes diverge after a hot-patch. Supervised class actors could participate in distributed state protocols to solve this; without them, multi-node hot-patch consistency is left to the user.
 - **Class process crash semantics are implicit:** If a class process crashes (e.g. via a malicious `put_method/3` call), recovery depends on whether `beamtalk_object_class` is linked to a supervisor. Currently class processes are started unlinked during `on_load` — a crash is unrecoverable without reloading the module.
+- **LSP/tooling blind spot for hot-patches:** Methods added or replaced via `put_method/3` exist only in the class process state — the LSP sees only the compiled source. Completions, diagnostics, and go-to-definition will not reflect hot-patched methods, violating the "compiler is the language service" principle (Principle 12). As hot-patching matures, the compiler server will need a notification path from the runtime so that tooling and runtime stay in sync.
 
 ### Neutral
 - **This ADR is the authoritative reference** for which Smalltalk-80 metaprogramming features Beamtalk implements, defers, or rules out. The original design doc has been removed — this ADR supersedes it.
