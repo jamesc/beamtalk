@@ -226,10 +226,11 @@ drain_class_warnings_by_names(ClassNames) ->
             lists:flatmap(
                 fun(ClassName) ->
                     %% BT-742: Key is now {Package, ClassName}. Use match_object
-                    %% to drain all packages for this class name.
+                    %% to drain all packages for this class name. Unlike the old
+                    %% ets:take/2, this is not atomic — concurrent inserts between
+                    %% match and delete may survive (which is correct behavior).
                     Pattern = {{'_', ClassName}, '_', '_'},
                     Matches = ets:match_object(beamtalk_class_warnings, Pattern),
-                    %% Delete matched entries (match_object doesn't remove them).
                     lists:foreach(
                         fun(Entry) ->
                             ets:delete_object(beamtalk_class_warnings, Entry)

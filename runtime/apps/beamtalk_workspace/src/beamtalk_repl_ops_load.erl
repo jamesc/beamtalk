@@ -993,13 +993,14 @@ collect_load_warnings(Classes) ->
 %% @doc Collect collision warnings with package-aware draining.
 %% BT-742: Uses the module atom to derive the package, then drains only
 %% that package's warnings — leaving sibling packages' warnings intact.
+%% Falls back to unqualified drain when ModuleAtom is undefined (e.g.,
+%% path-based :reload without a known module).
 -spec collect_load_warnings_qualified([map()], atom() | undefined) -> [binary()].
+collect_load_warnings_qualified(Classes, undefined) ->
+    %% No module context — fall back to unqualified drain (drains all packages).
+    collect_load_warnings(Classes);
 collect_load_warnings_qualified(Classes, ModuleAtom) ->
-    Package =
-        case ModuleAtom of
-            undefined -> undefined;
-            _ -> beamtalk_class_registry:extract_package_from_module(ModuleAtom)
-        end,
+    Package = beamtalk_class_registry:extract_package_from_module(ModuleAtom),
     ClassNames = lists:filtermap(
         fun
             (#{name := N}) when N =/= "" ->
