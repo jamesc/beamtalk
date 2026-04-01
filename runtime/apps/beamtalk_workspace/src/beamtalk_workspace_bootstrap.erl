@@ -244,9 +244,19 @@ activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(Pro
     EbinDir = filename:absname(
         filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])
     ),
-    beamtalk_module_activation:activate_ebin(EbinDir, #{
+    {ok, Errors} = beamtalk_module_activation:activate_ebin(EbinDir, #{
         on_activate => fun on_project_module_activated/1
-    });
+    }),
+    case Errors of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_WARNING(
+                "Bootstrap: ~b project module(s) failed to activate",
+                [length(Errors)],
+                #{errors => Errors, domain => [beamtalk, runtime]}
+            )
+    end;
 activate_project_modules(_Other) ->
     ok.
 

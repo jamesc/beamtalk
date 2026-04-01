@@ -92,7 +92,7 @@ sync_project(Path, Options) ->
 do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     %% Activate pre-compiled dependency modules before loading project files,
     %% so that project classes can reference dependency classes (e.g. HTTPClient).
-    activate_dependency_modules(AbsPath),
+    DepErrors = activate_dependency_modules(AbsPath),
     SrcFiles = find_bt_files(filename:join(AbsPath, "src")),
     TestFiles =
         case IncludeTests of
@@ -203,9 +203,11 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     TotalFiles = length(AllFiles) + DeletedCount,
     ChangedCount = length(ChangedBt) + length(ChangedErl),
     UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
+    DepErrorMsgs = [format_dep_error(Mod, Reason) || {Mod, Reason} <- DepErrors],
     {ok, #{
         classes => ClassNames,
         errors => Errors,
+        dep_errors => DepErrorMsgs,
         summary => build_incremental_summary(
             ChangedCount, TotalFiles, UnchangedCount, DeletedCount
         ),
@@ -234,10 +236,11 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
             );
         {ok, Result} ->
             Base = beamtalk_repl_protocol:base_response(Msg),
+            DepErrors = maps:get(dep_errors, Result, []),
             Response = Base#{
                 <<"status">> => [<<"done">>],
                 <<"classes">> => maps:get(classes, Result),
-                <<"errors">> => maps:get(errors, Result),
+                <<"errors">> => maps:get(errors, Result) ++ DepErrors,
                 <<"summary">> => maps:get(summary, Result)
             },
             iolist_to_binary(json:encode(Response))
@@ -489,7 +492,7 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
 %%
 %% Also adds native ebin paths (_build/dev/native/ebin/ and rebar3 hex deps)
 %% to the code path so that FFI modules are available.
--spec activate_dependency_modules(string()) -> ok.
+-spec activate_dependency_modules(string()) -> [{module(), term()}].
 activate_dependency_modules(AbsPath) ->
     DepOpts = #{
         on_activate => fun({Module, SourcePath}) ->
@@ -497,23 +500,27 @@ activate_dependency_modules(AbsPath) ->
         end
     },
     DepsDir = filename:join([AbsPath, "_build", "deps"]),
-    case filelib:is_dir(DepsDir) of
-        false ->
-            ok;
-        true ->
-            case file:list_dir(DepsDir) of
-                {ok, DepNames} ->
-                    lists:foreach(
-                        fun(DepName) ->
-                            EbinDir = filename:join([DepsDir, DepName, "ebin"]),
-                            beamtalk_module_activation:activate_ebin(EbinDir, DepOpts)
-                        end,
-                        lists:sort(DepNames)
-                    );
-                {error, _} ->
-                    ok
-            end
-    end,
+    DepErrors =
+        case filelib:is_dir(DepsDir) of
+            false ->
+                [];
+            true ->
+                case file:list_dir(DepsDir) of
+                    {ok, DepNames} ->
+                        lists:flatmap(
+                            fun(DepName) ->
+                                EbinDir = filename:join([DepsDir, DepName, "ebin"]),
+                                {ok, Errors} = beamtalk_module_activation:activate_ebin(
+                                    EbinDir, DepOpts
+                                ),
+                                Errors
+                            end,
+                            lists:sort(DepNames)
+                        );
+                    {error, _} ->
+                        []
+                end
+        end,
     %% Add native ebin paths for FFI modules.
     NativeEbin = filename:join([AbsPath, "_build", "dev", "native", "ebin"]),
     case filelib:is_dir(NativeEbin) of
@@ -548,9 +555,16 @@ activate_dependency_modules(AbsPath) ->
                     ok
             end
     end,
-    ok.
+    DepErrors.
 
 %%% Internal helpers
+
+%% @private Format a dependency activation error as a user-facing binary string.
+-spec format_dep_error(module(), term()) -> binary().
+format_dep_error(Mod, Reason) ->
+    iolist_to_binary(
+        io_lib:format("Failed to activate dependency module ~p: ~p", [Mod, Reason])
+    ).
 
 %% @private
 %% @doc Recursively find all .bt files in a directory.

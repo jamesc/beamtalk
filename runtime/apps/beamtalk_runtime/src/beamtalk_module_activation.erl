@@ -74,7 +74,7 @@
 %% @doc Activate all Beamtalk modules in an ebin directory.
 %%
 %% Equivalent to `activate_ebin(EbinDir, #{})`.
--spec activate_ebin(file:filename()) -> ok.
+-spec activate_ebin(file:filename()) -> {ok, [{module(), term()}]}.
 activate_ebin(EbinDir) ->
     activate_ebin(EbinDir, #{}).
 
@@ -86,17 +86,31 @@ activate_ebin(EbinDir) ->
 %% 4. Topologically sorts by superclass dependency
 %% 5. Loads each module and calls `register_class/0`
 %% 6. Invokes `on_activate` callback for each successfully activated module
--spec activate_ebin(file:filename(), opts()) -> ok.
+%%
+%% Returns `{ok, Errors}` where `Errors` is a (possibly empty) list of
+%% `{Module, Reason}` pairs for modules that failed to load or register.
+%% Activation is never aborted — all modules are attempted regardless of
+%% individual failures.
+-spec activate_ebin(file:filename(), opts()) -> {ok, [{module(), term()}]}.
 activate_ebin(EbinDir, Opts) ->
     case filelib:is_dir(EbinDir) of
         false ->
-            ok;
+            {ok, []};
         true ->
             _ = code:add_pathz(EbinDir),
             load_app_from_ebin(EbinDir),
             Modules = find_bt_modules_in_dir(EbinDir),
             Sorted = sort_modules_by_dependency(EbinDir, Modules),
-            lists:foreach(fun(Mod) -> activate_module(Mod, Opts) end, Sorted)
+            Errors = lists:filtermap(
+                fun(Mod) ->
+                    case activate_module(Mod, Opts) of
+                        ok -> false;
+                        {error, Reason} -> {true, {Mod, Reason}}
+                    end
+                end,
+                Sorted
+            ),
+            {ok, Errors}
     end.
 
 %% @doc Activate a single module with default options.
