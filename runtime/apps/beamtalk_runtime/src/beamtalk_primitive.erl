@@ -430,10 +430,6 @@ module_for_value(X) when is_map(X) ->
             'bt@stdlib@timer';
         'TestResult' ->
             'bt@stdlib@test_result';
-        'ErlangModule' ->
-            beamtalk_erlang_proxy;
-        'Erlang' ->
-            beamtalk_erlang_class;
         'BeamtalkInterface' ->
             'bt@stdlib@beamtalk_interface';
         'WorkspaceInterface' ->
