@@ -34,10 +34,7 @@
     classify_files_by_change/2,
     get_file_mtime/1,
     extract_native_refs/1,
-    find_project_root/1,
-    maybe_recompile_native_deps/2,
-    activate_dependency_modules/1,
-    activate_dep_ebin/1
+    activate_dependency_modules/1
 ]).
 -endif.
 
@@ -485,17 +482,20 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
 
 %% @doc Discover and activate pre-compiled dependency modules from _build/deps/.
 %%
-%% For each dependency package in `_build/deps/{name}/ebin/`, adds the ebin
-%% directory to the BEAM code path, then loads each `bt@*.beam` module and
-%% calls `register_class/0` so the class is visible in the runtime registry.
+%% For each dependency package in `_build/deps/{name}/ebin/`, delegates to
+%% `beamtalk_module_activation:activate_ebin/2` which adds the ebin to the
+%% code path, loads the OTP `.app` metadata (so `Package all` sees deps),
+%% discovers and topo-sorts `bt@*.beam` modules, and calls `register_class/0`.
 %%
 %% Also adds native ebin paths (_build/dev/native/ebin/ and rebar3 hex deps)
 %% to the code path so that FFI modules are available.
-%%
-%% Dependency modules may be (re)loaded multiple times; `register_class/0`
-%% callbacks are expected to be safe to call more than once.
 -spec activate_dependency_modules(string()) -> ok.
 activate_dependency_modules(AbsPath) ->
+    DepOpts = #{
+        on_activate => fun({Module, SourcePath}) ->
+            beamtalk_workspace_meta:register_module(Module, SourcePath)
+        end
+    },
     DepsDir = filename:join([AbsPath, "_build", "deps"]),
     case filelib:is_dir(DepsDir) of
         false ->
@@ -506,7 +506,7 @@ activate_dependency_modules(AbsPath) ->
                     lists:foreach(
                         fun(DepName) ->
                             EbinDir = filename:join([DepsDir, DepName, "ebin"]),
-                            activate_dep_ebin(EbinDir)
+                            beamtalk_module_activation:activate_ebin(EbinDir, DepOpts)
                         end,
                         lists:sort(DepNames)
                     );
@@ -549,80 +549,6 @@ activate_dependency_modules(AbsPath) ->
             end
     end,
     ok.
-
-%% @private Add a dependency ebin dir to the code path and activate its bt@* modules.
-%% Modules are sorted by superclass dependency order before activation,
-%% matching the approach used by workspace bootstrap.
--spec activate_dep_ebin(string()) -> ok.
-activate_dep_ebin(EbinDir) ->
-    case filelib:is_dir(EbinDir) of
-        false ->
-            ok;
-        true ->
-            _ = code:add_pathz(EbinDir),
-            Modules = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(EbinDir),
-            Sorted = beamtalk_workspace_bootstrap:sort_modules_by_dependency(EbinDir, Modules),
-            lists:foreach(fun activate_dep_module/1, Sorted)
-    end.
-
-%% @private Load a single dependency module, call register_class/0, and register it.
-%% If register_class/0 fails, the failure is logged and the module is not
-%% registered in workspace_meta (to avoid masking the error).
--spec activate_dep_module(module()) -> ok.
-activate_dep_module(ModuleName) ->
-    case code:ensure_loaded(ModuleName) of
-        {module, ModuleName} ->
-            RegisterResult =
-                case erlang:function_exported(ModuleName, register_class, 0) of
-                    true ->
-                        try
-                            ModuleName:register_class(),
-                            ok
-                        catch
-                            Class:Reason:Stacktrace ->
-                                ?LOG_WARNING(
-                                    "load-project: register_class/0 failed for ~p: ~p:~p",
-                                    [ModuleName, Class, Reason],
-                                    #{domain => [beamtalk, runtime], stacktrace => Stacktrace}
-                                ),
-                                {error, {Class, Reason}}
-                        end;
-                    false ->
-                        ok
-                end,
-            case RegisterResult of
-                ok ->
-                    SourcePath = extract_dep_source_path(ModuleName),
-                    beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
-                    ?LOG_DEBUG(
-                        "load-project: activated dependency module ~p",
-                        [ModuleName],
-                        #{domain => [beamtalk, runtime]}
-                    );
-                {error, _} ->
-                    ok
-            end;
-        {error, Reason} ->
-            ?LOG_WARNING(
-                "load-project: failed to load dependency module ~p: ~p",
-                [ModuleName, Reason],
-                #{domain => [beamtalk, runtime]}
-            )
-    end.
-
-%% @private Extract the source file path for a dependency module.
-%% Uses the same beamtalk_source attribute as bootstrap's extract_source_path/1.
--spec extract_dep_source_path(module()) -> string() | undefined.
-extract_dep_source_path(ModuleName) ->
-    try
-        Attrs = erlang:get_module_info(ModuleName, attributes),
-        case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path) -> Path;
-            _ -> undefined
-        end
-    catch
-        _:_ -> undefined
-    end.
 
 %%% Internal helpers
 

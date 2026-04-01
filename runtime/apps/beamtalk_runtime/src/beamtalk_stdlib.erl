@@ -39,10 +39,8 @@
 %% Beamtalk class dispatch - implements class methods for the Beamtalk global
 -export([dispatch/3, has_method/1]).
 
-%% Exported for testing
--ifdef(TEST).
+%% Re-export for backwards compatibility (tests reference beamtalk_stdlib:topo_sort/1)
 -export([topo_sort/1]).
--endif.
 
 %% @doc Start the stdlib initializer as a supervised process.
 %%
@@ -118,29 +116,11 @@ load_compiled_stdlib_modules() ->
             %%   kind => object|value|actor, type_params => []}
             %% BT-446: Load ALL classes — bootstrap no longer registers any
             Sorted = topo_sort(ClassList),
+            StdlibOpts = #{log_domain => [beamtalk, stdlib]},
             lists:foreach(
                 fun(Entry) ->
                     Mod = class_entry_module(Entry),
-                    Class = class_entry_name(Entry),
-                    case code:ensure_loaded(Mod) of
-                        {module, Mod} ->
-                            %% Module loaded. If on_load already ran but the class
-                            %% process was killed (e.g., test teardown), re-register.
-                            ensure_class_registered(Mod, Class),
-                            ?LOG_DEBUG("Loaded stdlib module", #{
-                                module => Mod, domain => [beamtalk, stdlib]
-                            });
-                        {error, Reason} ->
-                            ?LOG_WARNING(
-                                "Failed to load module ~s: ~p",
-                                [format_bt_module(Mod), Reason],
-                                #{
-                                    module => Mod,
-                                    reason => Reason,
-                                    domain => [beamtalk, stdlib]
-                                }
-                            )
-                    end
+                    beamtalk_module_activation:activate_module(Mod, StdlibOpts)
                 end,
                 Sorted
             );
@@ -162,113 +142,15 @@ find_stdlib_ebin() ->
     end.
 
 %% @private
-%% @doc Ensure a class is registered (or updated) after module loading.
-%%
-%% Always calls register_class/0, even if the class process is already alive.
-%% This handles the case where a bootstrap stub re-registered the class with
-%% incomplete methods (e.g., after a test teardown killed all class processes
-%% and a subsequent test re-created the class via the hand-written stub rather
-%% than the compiled module). The compiled register_class/0 handles already_started
-%% via update_class/2, which is idempotent and restores the correct method set.
--spec ensure_class_registered(module(), atom()) -> ok.
-ensure_class_registered(Mod, ClassName) ->
-    try Mod:register_class() of
-        ok ->
-            ok;
-        Other ->
-            ?LOG_WARNING("Unexpected return from register_class", #{
-                module => Mod,
-                class => ClassName,
-                result => Other,
-                domain => [beamtalk, stdlib]
-            }),
-            ok
-    catch
-        error:undef ->
-            %% Module doesn't export register_class/0
-            ?LOG_WARNING("Module missing register_class/0", #{
-                module => Mod,
-                class => ClassName,
-                domain => [beamtalk, stdlib]
-            }),
-            ok;
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR("Failed to register class", #{
-                module => Mod,
-                class => ClassName,
-                error_class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace,
-                domain => [beamtalk, stdlib]
-            }),
-            ok
-    end.
-
-%% @private
-%% @doc Extract class name from a class entry (map or legacy tuple).
-class_entry_name(#{name := Name}) -> Name;
-class_entry_name({_Mod, Name, _Super}) -> Name.
-
-%% @private
 %% @doc Extract module name from a class entry (map or legacy tuple).
 class_entry_module(#{module := Mod}) -> Mod;
 class_entry_module({Mod, _Name, _Super}) -> Mod.
 
-%% @private
-%% @doc Extract parent class name from a class entry (map or legacy tuple).
-class_entry_parent(#{parent := Parent}) -> Parent;
-class_entry_parent({_Mod, _Name, Parent}) -> Parent.
-
-%% @private
-%% @doc Topological sort by superclass dependency.
-%%
-%% ADR 0070 Phase 4: Accepts both map entries and legacy tuple entries.
-%% Returns entries ordered so that each class's superclass appears before it.
+%% @doc Delegate to beamtalk_module_activation:topo_sort/1.
+%% Kept as a public export for backwards compatibility with tests.
 -spec topo_sort([map() | {module(), atom(), atom()}]) -> [map() | {module(), atom(), atom()}].
 topo_sort(Entries) ->
-    ClassSet = sets:from_list([class_entry_name(E) || E <- Entries]),
-    topo_sort_waves(Entries, ClassSet, sets:new(), []).
-
-%% @private
-%% @doc Iteratively emit classes whose superclass dependencies are satisfied.
--spec topo_sort_waves(
-    [map() | {module(), atom(), atom()}],
-    sets:set(atom()),
-    sets:set(atom()),
-    [map() | {module(), atom(), atom()}]
-) -> [map() | {module(), atom(), atom()}].
-topo_sort_waves([], _ClassSet, _Emitted, Acc) ->
-    lists:reverse(Acc);
-topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
-    {Ready, Deferred} = lists:partition(
-        fun(Entry) ->
-            Super = class_entry_parent(Entry),
-            %% Ready if superclass is external (bootstrap) or already emitted
-            (not sets:is_element(Super, ClassSet)) orelse sets:is_element(Super, Emitted)
-        end,
-        Remaining
-    ),
-    case Ready of
-        [] ->
-            %% Circular dependency or missing superclass — emit remaining as-is
-            ?LOG_WARNING(
-                "Stdlib topo_sort: unresolvable dependencies",
-                #{
-                    remaining => [class_entry_name(E) || E <- Deferred],
-                    domain => [beamtalk, stdlib]
-                }
-            ),
-            lists:reverse(Acc) ++ Deferred;
-        _ ->
-            NewEmitted = lists:foldl(
-                fun(Entry, S) ->
-                    sets:add_element(class_entry_name(Entry), S)
-                end,
-                Emitted,
-                Ready
-            ),
-            topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready) ++ Acc)
-    end.
+    beamtalk_module_activation:topo_sort(Entries).
 
 %% @private
 %% @doc Fallback: discover .beam files and load them all.
