@@ -19,6 +19,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
 - [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
 - [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
+  - [Printable Protocol and Display Methods](#printable-protocol-and-display-methods)
 - [Union Types and Narrowing (ADR 0068)](#union-types-and-narrowing-adr-0068)
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
@@ -916,6 +917,8 @@ Protocols define named message sets. A class conforms to a protocol if it respon
 Protocol define: Printable
   /// Return a human-readable string representation.
   asString -> String
+  /// Return a developer-oriented representation (for debugging/REPL).
+  printString -> String
 
 Protocol define: Comparable
   < other :: Self -> Boolean
@@ -1013,7 +1016,7 @@ Actor subclass: Logger(T :: Printable)
 => #(Printable, Comparable)
 
 > Printable requiredMethods
-=> #(#asString)
+=> #(#asString, #printString)
 
 > Printable conformingClasses
 => #(Integer, Float, String, Boolean, Symbol, Array, ...)
@@ -1028,6 +1031,51 @@ Protocol conformance issues are **warnings, never errors**:
 | Protocol conformance unverifiable | Warning |
 | Missing method for protocol | Warning |
 | Namespace collision (class + protocol same name) | Error (structural) |
+
+### Printable Protocol and Display Methods
+
+The `Printable` protocol is the standard contract for objects that can represent themselves as strings. It requires two methods:
+
+- **`asString`** — a human-readable representation (for end-user display)
+- **`printString`** — a developer-oriented representation (for debugging, logging, and REPL display)
+
+Most stdlib classes conform automatically because `Object` provides a default `printString` (`"a ClassName"`) and most subclasses implement `asString`. Custom classes only need to implement these two methods to conform:
+
+```beamtalk
+Value subclass: Point
+  field: x = 0
+  field: y = 0
+
+  // Human-readable
+  asString -> String => "({self.x}, {self.y})"
+
+  // Developer-readable (REPL display)
+  printString -> String => "Point({self.x}, {self.y})"
+```
+
+The related display methods on `Object` are:
+
+| Method | Behaviour |
+|--------|-----------|
+| `asString` | Human-readable string (override per class) |
+| `printString` | Developer-readable string (REPL/inspector uses this) |
+| `displayString` | User-facing display; defaults to `printString` |
+| `inspect` | Inspection; defaults to `printString` |
+| `show: value` | Write `value` to Transcript (nil-safe, returns `self`) |
+| `showCr: value` | Write `value` to Transcript followed by newline (nil-safe, returns `self`) |
+
+`show:` and `showCr:` are convenience methods on `Object` that delegate to `TranscriptStream`. They are nil-safe — when no transcript is active (e.g. batch compilation), they silently do nothing and return `self`, making them safe for cascaded chains:
+
+```beamtalk
+// Cascaded output
+Transcript show: "Hello"; cr; show: "World"
+
+// show:/showCr: on any object — nil-safe
+42 show: "value: "
+42 showCr: "hello world"
+```
+
+`TranscriptStream >> show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
 
 ---
 
