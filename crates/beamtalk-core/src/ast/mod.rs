@@ -3,6 +3,8 @@
 
 //! Abstract Syntax Tree (AST) definitions for Beamtalk.
 //!
+//! **DDD Context:** Source Analysis
+//!
 //! The AST represents the structure of a Beamtalk program after parsing.
 //! Every AST node carries a [`Span`] for error reporting and IDE features.
 //!
