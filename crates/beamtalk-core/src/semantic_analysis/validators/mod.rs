@@ -38,6 +38,7 @@ pub(crate) use native_validators::{check_native_delegate_return_type, check_nati
 pub(crate) use package_validators::check_package_qualifiers;
 pub(crate) use structural_validators::{
     check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
+    check_workspace_shadows,
 };
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,

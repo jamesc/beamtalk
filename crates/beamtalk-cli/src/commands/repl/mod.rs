@@ -759,11 +759,11 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             } else {
                 format!("Workspace test: {class_name}")
             };
-            eval_and_display(client, &expr);
+            sync_tests_then_run(client, &expr);
             return CommandResult::Handled;
         }
         ":test" | ":t" => {
-            eval_and_display(client, "Workspace test");
+            sync_tests_then_run(client, "Workspace test");
             return CommandResult::Handled;
         }
         ":show-codegen" | ":sc" => {
@@ -840,38 +840,7 @@ fn handle_bindings(client: &mut ReplClient) {
 fn handle_sync(client: &mut ReplClient) {
     match client.load_project(".") {
         Ok(response) => {
-            // Always display per-file errors (present on both success and error responses)
-            for err in &response.errors {
-                if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
-                    let path = err
-                        .get("path")
-                        .and_then(|p| p.as_str())
-                        .unwrap_or("unknown");
-                    let line = err.get("line").and_then(serde_json::Value::as_u64);
-                    let hint = err.get("hint").and_then(serde_json::Value::as_str);
-                    let painted = color::paint(color::RED, &format!("Error: {msg}"));
-                    match (line, hint) {
-                        (Some(ln), Some(h)) => {
-                            eprintln!("  {painted} in {path} at line {ln} ({h})");
-                        }
-                        (Some(ln), None) => {
-                            eprintln!("  {painted} in {path} at line {ln}");
-                        }
-                        (None, Some(h)) => {
-                            eprintln!("  {painted} in {path} ({h})");
-                        }
-                        (None, None) => {
-                            eprintln!("  {painted} in {path}");
-                        }
-                    }
-                }
-            }
-            // Always display compiler warnings
-            if let Some(ref warns) = response.warnings {
-                for w in warns {
-                    eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
-                }
-            }
+            display_sync_diagnostics(&response);
 
             if response.is_error() {
                 // Show generic error message only when no structured diagnostics were printed
@@ -894,6 +863,63 @@ fn handle_sync(client: &mut ReplClient) {
         }
         Err(e) => eprintln!("Error: {e}"),
     }
+}
+
+/// Display per-file errors and compiler warnings from a sync response.
+fn display_sync_diagnostics(response: &ReplResponse) {
+    for err in &response.errors {
+        if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
+            let path = err
+                .get("path")
+                .and_then(|p| p.as_str())
+                .unwrap_or("unknown");
+            let line = err.get("line").and_then(serde_json::Value::as_u64);
+            let hint = err.get("hint").and_then(serde_json::Value::as_str);
+            let painted = color::paint(color::RED, &format!("Error: {msg}"));
+            match (line, hint) {
+                (Some(ln), Some(h)) => {
+                    eprintln!("  {painted} in {path} at line {ln} ({h})");
+                }
+                (Some(ln), None) => {
+                    eprintln!("  {painted} in {path} at line {ln}");
+                }
+                (None, Some(h)) => {
+                    eprintln!("  {painted} in {path} ({h})");
+                }
+                (None, None) => {
+                    eprintln!("  {painted} in {path}");
+                }
+            }
+        }
+    }
+    if let Some(ref warns) = response.warnings {
+        for w in warns {
+            eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+        }
+    }
+}
+
+/// Sync the project with tests included, then run a test expression.
+///
+/// Loads `src/` + `test/` via `load-project` (incremental, mtime-based), displays
+/// any sync errors/warnings, then runs the test regardless — some tests may still
+/// pass even when other files fail to compile.
+fn sync_tests_then_run(client: &mut ReplClient, test_expr: &str) {
+    match client.load_project_opts(".", true) {
+        Ok(response) => {
+            display_sync_diagnostics(&response);
+            if response.is_error() && response.errors.is_empty() {
+                if let Some(msg) = response.error_message() {
+                    eprintln!("{}", display::format_error(msg));
+                }
+            }
+        }
+        Err(e) => eprintln!(
+            "{}",
+            color::paint(color::YELLOW, &format!("Sync warning: {e}"))
+        ),
+    }
+    eval_and_display(client, test_expr);
 }
 
 /// Handle `:show-codegen <expr>` -- display generated Core Erlang.

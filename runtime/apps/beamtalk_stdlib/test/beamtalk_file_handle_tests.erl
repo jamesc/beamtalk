@@ -1,14 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_file_handle module (BT-1173).
+%%% @doc EUnit tests for beamtalk_file_handle module (BT-1173, BT-1762).
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests dispatch/3 and has_method/1 for FileHandle instances.
-%%% dispatch/3 routes 'lines' to beamtalk_file:handle_lines/1,
-%%% delegates Object protocol selectors to beamtalk_object_ops,
-%%% and raises DNU for unknown selectors.
+%%% dispatch/3 routes 'lines' to beamtalk_file:handle_lines/1 and
+%%% delegates Object protocol selectors to beamtalk_object_ops.
+%%% Unknown selectors raise case_clause (BT-1762: catch-all removed).
 
 -module(beamtalk_file_handle_tests).
 
@@ -78,21 +78,22 @@ dispatch_printString_returns_binary_test() ->
     end).
 
 %%% ============================================================================
-%%% dispatch/3 — unknown selector raises DNU
+%%% dispatch/3 — unknown selector
+%%% BT-1762: dispatch/3 no longer has a catch-all clause.
+%%% Unknown selectors are now handled by the compiled bt@stdlib@file_handle
+%%% module via Object inheritance (dispatched through value_type_send).
 %%% ============================================================================
 
-dispatch_unknown_selector_raises_dnu_test() ->
+dispatch_unknown_selector_raises_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
         ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-            beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
+            {case_clause, false}, beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
         )
     end).
 
-dispatch_write_selector_raises_dnu_test() ->
+dispatch_write_selector_raises_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
         ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-            beamtalk_file_handle:dispatch('writeLine:', [<<"text">>], Handle)
+            {case_clause, false}, beamtalk_file_handle:dispatch('writeLine:', [<<"text">>], Handle)
         )
     end).

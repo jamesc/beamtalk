@@ -523,6 +523,8 @@ pub enum DiagnosticCategory {
     UnresolvedFfi,
     /// Arity mismatch (BT-1726) — wrong argument count for known Erlang function.
     ArityMismatch,
+    /// Workspace binding shadows class (BT-1759) — REPL binding hides a class name.
+    ShadowedClass,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).
