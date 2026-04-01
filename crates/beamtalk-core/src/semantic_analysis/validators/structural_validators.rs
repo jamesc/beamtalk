@@ -128,6 +128,36 @@ fn visit_unresolved_class(
     }
 }
 
+// ── Workspace binding shadows class ─────────────────────────────────────────
+
+/// BT-1759: Warn when a workspace binding (REPL variable) shadows a class name.
+///
+/// In the REPL, workspace bindings like `Workspace` and `Transcript` are
+/// injected as known variables. If a class with the same name also exists in
+/// the hierarchy, the binding silently shadows the class, which can confuse
+/// users. This check emits a warning for each such collision.
+pub(crate) fn check_workspace_shadows(
+    hierarchy: &ClassHierarchy,
+    known_vars: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for &var_name in known_vars {
+        if hierarchy.has_class(var_name) {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!("Workspace binding `{var_name}` shadows class `{var_name}`"),
+                    crate::source_analysis::Span::new(0, 0),
+                )
+                .with_hint(format!(
+                    "The REPL workspace binding `{var_name}` hides the class with the same name. \
+                     References to `{var_name}` will resolve to the binding, not the class.",
+                ))
+                .with_category(DiagnosticCategory::ShadowedClass),
+            );
+        }
+    }
+}
+
 // ── Unresolved FFI modules ───────────────────────────────────────────────────
 
 /// Known OTP/Erlang modules that are always available on the BEAM.
@@ -928,5 +958,56 @@ mod tests {
         assert!(is_known_erlang_module("beamtalk_extensions"));
         assert!(is_known_erlang_module("beamtalk_runtime"));
         assert!(!is_known_erlang_module("my_custom_module"));
+    }
+
+    // ── Workspace shadow tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_workspace_shadow_warns_when_binding_matches_class() {
+        // "Object" is a built-in class in the hierarchy, so a workspace binding
+        // named "Object" should trigger a shadowing warning.
+        let module = empty_module_with_exprs(vec![]);
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut diags = Vec::new();
+
+        check_workspace_shadows(&hierarchy, &["Object"], &mut diags);
+
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0]
+                .message
+                .contains("Workspace binding `Object` shadows class `Object`")
+        );
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::ShadowedClass));
+    }
+
+    #[test]
+    fn test_workspace_shadow_no_warning_for_non_class() {
+        // "myVar" is not a class, so no shadow warning.
+        let module = empty_module_with_exprs(vec![]);
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut diags = Vec::new();
+
+        check_workspace_shadows(&hierarchy, &["myVar"], &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Non-class bindings should not trigger shadow warnings"
+        );
+    }
+
+    #[test]
+    fn test_workspace_shadow_multiple_collisions() {
+        // Both "Object" and "Integer" are built-in classes.
+        let module = empty_module_with_exprs(vec![]);
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut diags = Vec::new();
+
+        check_workspace_shadows(&hierarchy, &["Object", "Integer", "notAClass"], &mut diags);
+
+        assert_eq!(diags.len(), 2, "Should warn for Object and Integer only");
     }
 }

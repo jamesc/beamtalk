@@ -1048,6 +1048,8 @@ pub enum ExpectCategory {
     UnresolvedFfi,
     /// Suppress arity mismatch warnings (BT-1726).
     ArityMismatch,
+    /// Suppress workspace-binding-shadows-class warnings (BT-1759).
+    ShadowedClass,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -1067,6 +1069,7 @@ impl ExpectCategory {
             "unresolved_class" => Some(Self::UnresolvedClass),
             "unresolved_ffi" => Some(Self::UnresolvedFfi),
             "arity_mismatch" => Some(Self::ArityMismatch),
+            "shadowed_class" => Some(Self::ShadowedClass),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -1086,6 +1089,7 @@ impl ExpectCategory {
             Self::UnresolvedClass => "unresolved_class",
             Self::UnresolvedFfi => "unresolved_ffi",
             Self::ArityMismatch => "arity_mismatch",
+            Self::ShadowedClass => "shadowed_class",
             Self::All => "all",
         }
     }
@@ -1104,6 +1108,7 @@ impl ExpectCategory {
             "unresolved_class",
             "unresolved_ffi",
             "arity_mismatch",
+            "shadowed_class",
             "all",
         ]
     }

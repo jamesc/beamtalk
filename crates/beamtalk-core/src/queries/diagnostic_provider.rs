@@ -211,6 +211,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::ArityMismatch,
                     Some(DiagnosticCategory::ArityMismatch)
                 )
+                | (
+                    ExpectCategory::ShadowedClass,
+                    Some(DiagnosticCategory::ShadowedClass)
+                )
         )
 }
 
