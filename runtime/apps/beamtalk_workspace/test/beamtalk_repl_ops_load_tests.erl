@@ -771,3 +771,64 @@ maybe_recompile_native_deps_ffi_ref_compiles_test() ->
     after
         rm_temp_dir(Dir)
     end.
+
+%%====================================================================
+%% activate_dependency_modules tests
+%%====================================================================
+
+activate_deps_no_build_dir_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        %% No _build dir — should be a no-op.
+        ?assertEqual(ok, beamtalk_repl_ops_load:activate_dependency_modules(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+activate_deps_adds_code_path_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        EbinDir = filename:join([Dir, "_build", "deps", "testdep", "ebin"]),
+        ok = filelib:ensure_dir(filename:join(EbinDir, "dummy")),
+        %% Ensure it's not already on the code path.
+        code:del_path(EbinDir),
+        ?assertNot(lists:member(EbinDir, code:get_path())),
+        ?assertEqual(ok, beamtalk_repl_ops_load:activate_dependency_modules(Dir)),
+        ?assert(lists:member(EbinDir, code:get_path())),
+        %% Cleanup.
+        code:del_path(EbinDir)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+activate_deps_adds_native_ebin_path_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        NativeEbin = filename:join([Dir, "_build", "dev", "native", "ebin"]),
+        ok = filelib:ensure_dir(filename:join(NativeEbin, "dummy")),
+        code:del_path(NativeEbin),
+        ?assertNot(lists:member(NativeEbin, code:get_path())),
+        ?assertEqual(ok, beamtalk_repl_ops_load:activate_dependency_modules(Dir)),
+        ?assert(lists:member(NativeEbin, code:get_path())),
+        code:del_path(NativeEbin)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+activate_deps_adds_hex_ebin_paths_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        HexEbin = filename:join([Dir, "_build", "dev", "native", "default", "lib", "cowboy", "ebin"]),
+        ok = filelib:ensure_dir(filename:join(HexEbin, "dummy")),
+        code:del_path(HexEbin),
+        ?assertNot(lists:member(HexEbin, code:get_path())),
+        ?assertEqual(ok, beamtalk_repl_ops_load:activate_dependency_modules(Dir)),
+        ?assert(lists:member(HexEbin, code:get_path())),
+        code:del_path(HexEbin)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+activate_dep_ebin_nonexistent_test() ->
+    %% Non-existent dir should be a no-op.
+    ?assertEqual(ok, beamtalk_repl_ops_load:activate_dep_ebin("/nonexistent/path")).

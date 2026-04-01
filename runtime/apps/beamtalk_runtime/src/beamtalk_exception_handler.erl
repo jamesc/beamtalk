@@ -356,11 +356,7 @@ dispatch('signal', [], #{'$beamtalk_class' := ClassName}) ->
     signal_from_class(ClassName);
 dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% BT-480: Preserve exception class name from the signaling object
-    signal_message(Message, ClassName);
-dispatch(Selector, _Args, #{'$beamtalk_class' := Class}) ->
-    Error0 = beamtalk_error:new(does_not_understand, Class),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:raise(Error1).
+    signal_message(Message, ClassName).
 
 %% @doc Check if Exception responds to a selector.
 -spec has_method(atom()) -> boolean().

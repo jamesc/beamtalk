@@ -261,28 +261,19 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 if beam_count == 1 { "class" } else { "classes" }
             );
 
-            let mut code_paths = vec![ebin_path.into_std_path_buf()];
-
-            // ADR 0070: Add dependency ebin directories to BEAM code path.
-            // build() already resolved and compiled deps; collect their ebin paths.
-            for dep_ebin in crate::commands::deps::collect_dep_ebin_paths(project_root_utf8) {
-                code_paths.push(dep_ebin.into_std_path_buf());
+            // BT-1750: Use BeamEnvironment for unified code path collection.
+            // from_layout may fail if the lockfile is corrupt; treat as compile failure.
+            match crate::commands::beam_environment::BeamEnvironment::from_layout(
+                &repl_layout,
+                project_root_utf8,
+            ) {
+                Ok(env) => env.code_paths_std(),
+                Err(e) => {
+                    eprintln!("Warning: failed to collect BEAM environment: {e}");
+                    // Fall back to just the package ebin
+                    vec![ebin_path.into_std_path_buf()]
+                }
             }
-
-            // ADR 0072: Add native Erlang ebin to code path if present (Path A).
-            // build() already compiled native/*.erl; add their output dir.
-            let native_ebin = repl_layout.native_ebin_dir();
-            if native_ebin.exists() {
-                code_paths.push(native_ebin.into_std_path_buf());
-            }
-
-            // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths (Path B).
-            let rebar_base_dir = repl_layout.native_dir();
-            for ebin in crate::commands::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
-                code_paths.push(ebin.into_std_path_buf());
-            }
-
-            code_paths
         }
         Err(e) => {
             eprintln!("Warning: package compilation failed: {e}");

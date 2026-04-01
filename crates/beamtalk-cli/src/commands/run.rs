@@ -26,6 +26,7 @@ use tracing::{info, instrument};
 
 use beamtalk_cli::repl_startup;
 
+use super::beam_environment::BeamEnvironment;
 use super::build_layout::BuildLayout;
 use super::manifest;
 use super::workspace;
@@ -163,7 +164,10 @@ fn run_script(
     ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
     let layout = BuildLayout::new(project_root);
-    let ebin_dir = layout.ebin_dir();
+
+    // BT-1750: Unified BEAM environment — single source of truth for code paths
+    // and OTP app names. All commands use BeamEnvironment instead of ad-hoc assembly.
+    let beam_env = BeamEnvironment::from_layout(&layout, project_root)?;
 
     println!("\nRunning {class_name}>>{selector}...");
 
@@ -184,74 +188,16 @@ fn run_script(
     let pid = std::process::id();
     let workspace_id = format!("run_{pid}");
 
-    // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
-    let hex_dep_names = super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
-
     let eval_cmd = build_script_eval_cmd(
         &workspace_id,
         &project_path_escaped,
         class_name,
         selector,
-        &hex_dep_names,
+        &beam_env.otp_apps,
     );
 
     let mut args = repl_startup::beam_pa_args(&paths);
-
-    // Add package ebin to code path
-    args.push(OsString::from("-pa"));
-    #[cfg(windows)]
-    {
-        let ebin_path = ebin_dir.as_str().replace('\\', "/");
-        args.push(OsString::from(ebin_path));
-    }
-    #[cfg(not(windows))]
-    {
-        args.push(OsString::from(ebin_dir.as_str()));
-    }
-
-    // ADR 0070: Add dependency ebin directories to BEAM code path
-    for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
-        args.push(OsString::from("-pa"));
-        #[cfg(windows)]
-        {
-            let dep_ebin_path = dep_ebin.as_str().replace('\\', "/");
-            args.push(OsString::from(dep_ebin_path));
-        }
-        #[cfg(not(windows))]
-        {
-            args.push(OsString::from(dep_ebin.as_str()));
-        }
-    }
-
-    // ADR 0072: Add native Erlang ebin to code path if present
-    let native_ebin = layout.native_ebin_dir();
-    if native_ebin.exists() {
-        args.push(OsString::from("-pa"));
-        #[cfg(windows)]
-        {
-            let native_ebin_path = native_ebin.as_str().replace('\\', "/");
-            args.push(OsString::from(native_ebin_path));
-        }
-        #[cfg(not(windows))]
-        {
-            args.push(OsString::from(native_ebin.as_str()));
-        }
-    }
-
-    // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-    let rebar_base_dir = layout.native_dir();
-    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
-        args.push(OsString::from("-pa"));
-        #[cfg(windows)]
-        {
-            let ebin_path = ebin.as_str().replace('\\', "/");
-            args.push(OsString::from(ebin_path));
-        }
-        #[cfg(not(windows))]
-        {
-            args.push(OsString::from(ebin.as_str()));
-        }
-    }
+    args.extend(beam_env.pa_args());
 
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
@@ -365,29 +311,11 @@ fn run_package_as_otp_application(
     ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
     let layout = BuildLayout::new(project_root);
+
+    // BT-1750: Unified BEAM environment for service mode
+    let beam_env = BeamEnvironment::from_layout(&layout, project_root)?;
+    let extra_code_paths = beam_env.code_paths_std();
     let ebin_dir: PathBuf = layout.ebin_dir().into_std_path_buf();
-    let mut extra_code_paths = vec![ebin_dir.clone()];
-
-    // ADR 0070: Add dependency ebin directories to code path
-    for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
-        extra_code_paths.push(dep_ebin.into_std_path_buf());
-    }
-
-    // ADR 0072: Add native Erlang ebin to code path if present (Path A)
-    let native_ebin_dir: PathBuf = layout.native_ebin_dir().into_std_path_buf();
-    if native_ebin_dir.exists() {
-        extra_code_paths.push(native_ebin_dir);
-    }
-
-    // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-    let rebar_base_dir = layout.native_dir();
-    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
-        extra_code_paths.push(ebin.into_std_path_buf());
-    }
-
-    // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
-    let service_hex_dep_names =
-        super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
 
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
@@ -401,7 +329,7 @@ fn run_package_as_otp_application(
         None,   // web_port
         "info", // log_level
         Some(&pkg.name),
-        &service_hex_dep_names,
+        &beam_env.otp_apps,
     )?;
 
     if !is_new {

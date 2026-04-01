@@ -67,3 +67,35 @@ TestCase subclass: StackFrameTest
     self assert: (frame respondsTo: #moduleName)
     self assert: (frame respondsTo: #receiverClass)
     self assert: (frame respondsTo: #sourceLocation)
+
+  // === BT-1761: Object-inherited methods work after removing module_for_value override ===
+  testDisplayString =>
+    // displayString is inherited from Object, not defined on StackFrame
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    result := frame displayString
+    self assert: (result isKindOf: String)
+
+  testRespondsToDisplayString =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self assert: (frame respondsTo: #displayString)
+
+  testRespondsToHash =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self assert: (frame respondsTo: #hash)
+
+  testRespondsToIsNil =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self assert: (frame respondsTo: #isNil)
+
+  testIsNilReturnsFalse =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self deny: frame isNil
+
+  testHash =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    result := frame hash
+    self assert: (result isKindOf: Integer)
+
+  testRespondsToNonExistentMethod =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self deny: (frame respondsTo: #totallyBogusMethod)

@@ -170,11 +170,7 @@ dispatch('line', [], #{line := Line}) ->
 dispatch('file', [], #{file := File}) ->
     File;
 dispatch('printString', [], Frame) ->
-    format_frame(Frame);
-dispatch(Selector, _Args, _Frame) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'StackFrame'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:raise(Error1).
+    format_frame(Frame).
 
 %% @doc Check if StackFrame responds to a selector.
 -spec has_method(atom()) -> boolean().

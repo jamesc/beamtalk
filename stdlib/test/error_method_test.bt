@@ -64,3 +64,34 @@ TestCase subclass: ErrorMethodTest
     ] on: Exception do: [:e |
       e displayString
     ]) equals: ([42 error: "too big"] on: Exception do: [:e | e printString])
+
+  // === BT-1764: Object-inherited methods work after removing orchestrator patch ===
+  testExceptionRespondsToDisplayString =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    self assert: (exc respondsTo: #displayString)
+
+  testExceptionRespondsToHash =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    self assert: (exc respondsTo: #hash)
+
+  testExceptionRespondsToIsNil =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    self assert: (exc respondsTo: #isNil)
+
+  testExceptionIsNilReturnsFalse =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    self deny: exc isNil
+
+  testExceptionHash =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    result := exc hash
+    self assert: (result isKindOf: Integer)
+
+  testExceptionInspect =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    result := exc inspect
+    self assert: (result isKindOf: String)
+
+  testExceptionRespondsToNonExistentMethod =>
+    exc := [1 / 0] on: Exception do: [:e | e]
+    self deny: (exc respondsTo: #totallyBogusMethod)

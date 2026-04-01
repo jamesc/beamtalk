@@ -953,7 +953,8 @@ my_git_dep = {{ git = "{url}", tag = "v1.0.0" }}"#
         let options = beamtalk_core::CompilerOptions::default();
 
         // _build/deps should NOT exist yet
-        let deps_dir = root.join("_build").join("deps");
+        let test_layout = crate::commands::build_layout::BuildLayout::new(&root_path);
+        let deps_dir = test_layout.deps_dir();
         assert!(
             !deps_dir.exists(),
             "deps dir should not exist before resolve"
