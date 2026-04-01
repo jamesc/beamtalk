@@ -256,9 +256,11 @@ drain_class_warnings_by_qualified_names(QualifiedNames) ->
             lists:flatmap(
                 fun({Package, ClassName}) ->
                     %% ets:take/2 atomically removes and returns entries (OTP 21+).
-                    [{CN, OldMod, NewMod}
+                    [
+                        {CN, OldMod, NewMod}
                      || {{_Pkg, CN}, OldMod, NewMod} <-
-                            ets:take(beamtalk_class_warnings, {Package, ClassName})]
+                            ets:take(beamtalk_class_warnings, {Package, ClassName})
+                    ]
                 end,
                 QualifiedNames
             )

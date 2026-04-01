@@ -1141,9 +1141,15 @@ unqualified_drain_gets_all_packages_test_() ->
 extract_package_from_module_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            ?_assertEqual(json, beamtalk_class_registry:extract_package_from_module('bt@json@parser')),
-            ?_assertEqual(xml, beamtalk_class_registry:extract_package_from_module('bt@xml@parser')),
-            ?_assertEqual(undefined, beamtalk_class_registry:extract_package_from_module('bt@counter')),
+            ?_assertEqual(
+                json, beamtalk_class_registry:extract_package_from_module('bt@json@parser')
+            ),
+            ?_assertEqual(
+                xml, beamtalk_class_registry:extract_package_from_module('bt@xml@parser')
+            ),
+            ?_assertEqual(
+                undefined, beamtalk_class_registry:extract_package_from_module('bt@counter')
+            ),
             ?_assertEqual(undefined, beamtalk_class_registry:extract_package_from_module(module_a))
         ]
     end}.

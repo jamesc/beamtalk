@@ -995,10 +995,11 @@ collect_load_warnings(Classes) ->
 %% that package's warnings — leaving sibling packages' warnings intact.
 -spec collect_load_warnings_qualified([map()], atom() | undefined) -> [binary()].
 collect_load_warnings_qualified(Classes, ModuleAtom) ->
-    Package = case ModuleAtom of
-        undefined -> undefined;
-        _ -> beamtalk_class_registry:extract_package_from_module(ModuleAtom)
-    end,
+    Package =
+        case ModuleAtom of
+            undefined -> undefined;
+            _ -> beamtalk_class_registry:extract_package_from_module(ModuleAtom)
+        end,
     ClassNames = lists:filtermap(
         fun
             (#{name := N}) when N =/= "" ->
