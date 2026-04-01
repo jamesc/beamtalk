@@ -139,17 +139,12 @@ dispatch_print_string_test() ->
     ?assert(is_binary(Result)),
     ?assertNotEqual(<<>>, Result).
 
+%% BT-1761: dispatch/3 no longer has a catch-all clause.
+%% Unknown selectors are now handled by the compiled bt@stdlib@stack_frame
+%% module via Object inheritance (dispatched through value_type_send).
 dispatch_unknown_selector_raises_test() ->
     Frame = make_test_frame(),
-    try
-        beamtalk_stack_frame:dispatch('nonExistent', [], Frame),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
-            ?assertEqual('StackFrame', Inner#beamtalk_error.class),
-            ?assertEqual('nonExistent', Inner#beamtalk_error.selector)
-    end.
+    ?assertError(function_clause, beamtalk_stack_frame:dispatch('nonExistent', [], Frame)).
 
 %%% ===================================================================
 %%% has_method/1 tests
