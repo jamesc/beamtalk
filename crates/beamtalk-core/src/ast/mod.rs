@@ -3,6 +3,8 @@
 
 //! Abstract Syntax Tree (AST) definitions for Beamtalk.
 //!
+//! **DDD Context:** Source Analysis
+//!
 //! The AST represents the structure of a Beamtalk program after parsing.
 //! Every AST node carries a [`Span`] for error reporting and IDE features.
 //!
@@ -989,8 +991,7 @@ mod tests {
         let class = ClassDefinition::with_modifiers(
             Identifier::new("Counter", Span::new(0, 7)),
             Some(Identifier::new("Actor", Span::new(0, 5))),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![],
             Span::new(0, 20),

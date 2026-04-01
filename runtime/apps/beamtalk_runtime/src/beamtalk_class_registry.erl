@@ -50,7 +50,11 @@
     is_class_name/1,
     class_display_name/1,
     get_method_return_type/2,
-    get_class_method_return_type/2
+    get_class_method_return_type/2,
+    restart_class/1,
+    ensure_pid_table/0,
+    record_class_pid/2,
+    class_name_for_pid/1
 ]).
 
 -export_type([
@@ -489,6 +493,142 @@ class_display_name(ClassName) when is_atom(ClassName) ->
     case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
         true -> binary:part(ClassBin, 0, Size);
         false -> ClassBin
+    end.
+
+%%====================================================================
+%% Class Pid Reverse Index (BT-1768)
+%%====================================================================
+
+%% @doc Ensure the pid→classname reverse index table exists (idempotent).
+%%
+%% BT-1768: This table maps `{Pid, ClassName}` so that when a class process
+%% crashes and the Erlang registry removes its name, we can still recover the
+%% class name from the stale pid for auto-restart.
+-spec ensure_pid_table() -> ok.
+ensure_pid_table() ->
+    case ets:info(beamtalk_class_pids) of
+        undefined ->
+            try
+                ets:new(
+                    beamtalk_class_pids,
+                    [set, public, named_table, {read_concurrency, true}]
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            ok
+    end.
+
+%% @doc Record a class pid→classname mapping.
+%%
+%% Called from `beamtalk_object_class:init/1` after the class process starts.
+-spec record_class_pid(pid(), class_name()) -> ok.
+record_class_pid(Pid, ClassName) ->
+    ensure_pid_table(),
+    ets:insert(beamtalk_class_pids, {Pid, ClassName}),
+    ok.
+
+%% @doc Look up the class name for a (possibly dead) pid.
+%%
+%% Returns `{ok, ClassName}` or `not_found`. The entry persists after the
+%% process dies, which is the whole point — we need this for crash recovery.
+-spec class_name_for_pid(pid()) -> {ok, class_name()} | not_found.
+class_name_for_pid(Pid) ->
+    case ets:info(beamtalk_class_pids) of
+        undefined ->
+            not_found;
+        _ ->
+            case ets:lookup(beamtalk_class_pids, Pid) of
+                [{_, ClassName}] -> {ok, ClassName};
+                [] -> not_found
+            end
+    end.
+
+%%====================================================================
+%% Class Process Recovery (BT-1768)
+%%====================================================================
+
+%% @doc Attempt to restart a crashed class process from compiled module state.
+%%
+%% BT-1768: When a class gen_server crashes, the Erlang registry automatically
+%% unregisters its name. This function reconstructs a minimal ClassInfo from:
+%%   1. The ETS module table (ClassName → Module mapping, survives process death)
+%%   2. The ETS hierarchy table (ClassName → Superclass mapping)
+%%   3. The compiled module's `__beamtalk_meta/0` (static metadata baked into BEAM)
+%%
+%% Hot-patched methods and class variable state are lost — only compiled state
+%% is recovered. Logs a warning so the user knows recovery happened.
+%%
+%% Returns `{ok, NewPid}` on success, `{error, Reason}` on failure.
+-spec restart_class(class_name()) -> {ok, pid()} | {error, term()}.
+restart_class(ClassName) ->
+    case beamtalk_class_module_table:lookup(ClassName) of
+        not_found ->
+            {error, {no_module_for_class, ClassName}};
+        {ok, Module} ->
+            Superclass =
+                case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                    {ok, S} -> S;
+                    not_found -> none
+                end,
+            %% Read static metadata from the compiled module.
+            %% This is always available as long as the BEAM file is loaded.
+            %% Ensure the module is loaded so function_exported/3 returns true.
+            %% The BEAM file should still be on disk even after the class process crashed.
+            code:ensure_loaded(Module),
+            Meta =
+                case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+                    true ->
+                        try Module:'__beamtalk_meta'() of
+                            M when is_map(M) -> M;
+                            _ -> #{}
+                        catch
+                            _:_ -> #{}
+                        end;
+                    false ->
+                        #{}
+                end,
+            ClassInfo = #{
+                module => Module,
+                superclass => Superclass,
+                meta => Meta
+            },
+            %% Clean up stale pid entries for this class before restarting.
+            %% On crash, terminate doesn't run, so old {DeadPid, ClassName} entries
+            %% linger. Remove them so they don't accumulate on repeated crashes.
+            _ = (catch ets:match_delete(beamtalk_class_pids, {'_', ClassName})),
+            case beamtalk_object_class:start(ClassName, ClassInfo) of
+                {ok, NewPid} ->
+                    ?LOG_WARNING(
+                        "Class process for '~p' crashed and was auto-restarted "
+                        "(hot-patched methods and class variable state were lost)",
+                        [ClassName],
+                        #{
+                            class => ClassName,
+                            module => Module,
+                            new_pid => NewPid,
+                            domain => [beamtalk, runtime]
+                        }
+                    ),
+                    {ok, NewPid};
+                {error, {already_started, ExistingPid}} ->
+                    %% Another caller already restarted this class (concurrent race).
+                    %% Return the existing process — no need to log an error.
+                    {ok, ExistingPid};
+                {error, Reason} = Err ->
+                    ?LOG_ERROR(
+                        "Failed to restart crashed class process for '~p': ~p",
+                        [ClassName, Reason],
+                        #{
+                            class => ClassName,
+                            module => Module,
+                            domain => [beamtalk, runtime]
+                        }
+                    ),
+                    Err
+            end
     end.
 
 %%====================================================================

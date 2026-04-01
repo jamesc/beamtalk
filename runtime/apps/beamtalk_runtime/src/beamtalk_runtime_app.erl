@@ -32,6 +32,10 @@ start(_StartType, _StartArgs) ->
     %% reason — owned by the application master, not a transient class process.
     beamtalk_class_registry:ensure_module_table(),
 
+    %% BT-1768: Create pid reverse index ETS table at app startup so it's owned
+    %% by the application master (survives individual class process crashes).
+    beamtalk_class_registry:ensure_pid_table(),
+
     %% BT-737: Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 

@@ -50,8 +50,18 @@ impl TypeChecker {
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
 
+        // BT-1763: Sealed value types (like Erlang) dispatch class-side messages
+        // through instance dispatch. Instance-side DNU suppresses class-side
+        // warnings only for sealed classes — not all classes with instance DNU,
+        // which would hide valid diagnostics on normal classes.
+        let is_sealed_with_instance_dnu = hierarchy.has_instance_dnu_override(class_name)
+            && hierarchy
+                .get_class(class_name)
+                .is_some_and(|info| info.is_sealed);
+
         if !has_class_method
             && !hierarchy.has_class_dnu_override(class_name)
+            && !is_sealed_with_instance_dnu
             // BT-1736: Cross-file inheritance — if the parent class is not in
             // the hierarchy, we can't know the full class-side method set.
             // Instance-side already checks this; class-side must do the same.
