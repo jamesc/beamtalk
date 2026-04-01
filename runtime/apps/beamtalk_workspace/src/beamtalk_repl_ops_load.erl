@@ -492,7 +492,8 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
 %% Also adds native ebin paths (_build/dev/native/ebin/ and rebar3 hex deps)
 %% to the code path so that FFI modules are available.
 %%
-%% This is idempotent — already-loaded modules are skipped via code:ensure_loaded.
+%% Dependency modules may be (re)loaded multiple times; `register_class/0`
+%% callbacks are expected to be safe to call more than once.
 -spec activate_dependency_modules(string()) -> ok.
 activate_dependency_modules(AbsPath) ->
     DepsDir = filename:join([AbsPath, "_build", "deps"]),
@@ -550,6 +551,8 @@ activate_dependency_modules(AbsPath) ->
     ok.
 
 %% @private Add a dependency ebin dir to the code path and activate its bt@* modules.
+%% Modules are sorted by superclass dependency order before activation,
+%% matching the approach used by workspace bootstrap.
 -spec activate_dep_ebin(string()) -> ok.
 activate_dep_ebin(EbinDir) ->
     case filelib:is_dir(EbinDir) of
@@ -558,32 +561,47 @@ activate_dep_ebin(EbinDir) ->
         true ->
             _ = code:add_pathz(EbinDir),
             Modules = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(EbinDir),
-            lists:foreach(fun activate_dep_module/1, Modules)
+            Sorted = beamtalk_workspace_bootstrap:sort_modules_by_dependency(EbinDir, Modules),
+            lists:foreach(fun activate_dep_module/1, Sorted)
     end.
 
 %% @private Load a single dependency module, call register_class/0, and register it.
+%% If register_class/0 fails, the failure is logged and the module is not
+%% registered in workspace_meta (to avoid masking the error).
 -spec activate_dep_module(module()) -> ok.
 activate_dep_module(ModuleName) ->
     case code:ensure_loaded(ModuleName) of
         {module, ModuleName} ->
-            %% Call register_class/0 if exported, so the class is visible in the registry.
-            case erlang:function_exported(ModuleName, register_class, 0) of
-                true ->
-                    try
-                        ModuleName:register_class()
-                    catch
-                        _:_ -> ok
-                    end;
-                false ->
+            RegisterResult =
+                case erlang:function_exported(ModuleName, register_class, 0) of
+                    true ->
+                        try
+                            ModuleName:register_class(),
+                            ok
+                        catch
+                            Class:Reason:Stacktrace ->
+                                ?LOG_WARNING(
+                                    "load-project: register_class/0 failed for ~p: ~p:~p",
+                                    [ModuleName, Class, Reason],
+                                    #{domain => [beamtalk, runtime], stacktrace => Stacktrace}
+                                ),
+                                {error, {Class, Reason}}
+                        end;
+                    false ->
+                        ok
+                end,
+            case RegisterResult of
+                ok ->
+                    SourcePath = extract_dep_source_path(ModuleName),
+                    beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
+                    ?LOG_DEBUG(
+                        "load-project: activated dependency module ~p",
+                        [ModuleName],
+                        #{domain => [beamtalk, runtime]}
+                    );
+                {error, _} ->
                     ok
-            end,
-            SourcePath = extract_dep_source_path(ModuleName),
-            beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
-            ?LOG_DEBUG(
-                "load-project: activated dependency module ~p",
-                [ModuleName],
-                #{domain => [beamtalk, runtime]}
-            );
+            end;
         {error, Reason} ->
             ?LOG_WARNING(
                 "load-project: failed to load dependency module ~p: ~p",
