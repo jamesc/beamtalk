@@ -7,7 +7,7 @@
 // - Silent no-op when TranscriptStream current is nil
 // - Output is routed when a transcript instance is set as current
 
-TestCase subclass: TraceCrTest
+TestCase subclass: ShowCrTest
 
   setUp =>
     // Ensure current is nil before each test (default in test environment)
