@@ -42,9 +42,10 @@ pub struct ClassMetadata {
 /// - `{vsn, ...}` from manifest
 /// - `{modules, [...]}` auto-discovered from compiled modules
 /// - `{registered, []}`
-/// - `{applications, [kernel, stdlib, ...hex_deps..., beamtalk_runtime]}`
+/// - `{applications, [kernel, stdlib, ...bt_deps..., ...hex_deps..., beamtalk_runtime]}`
 /// - `{mod, {beamtalk_{appname}_app, []}}` when `app_callback_module` is `Some`
 /// - `{env, [{classes, [...]}]}` class→module mapping
+#[allow(clippy::too_many_arguments)]
 pub fn generate_app_file(
     build_dir: &Utf8Path,
     manifest: &PackageManifest,
@@ -52,6 +53,7 @@ pub fn generate_app_file(
     class_metadata: &[ClassMetadata],
     app_callback_module: Option<&str>,
     native_module_names: &[String],
+    bt_dep_names: &[String],
     hex_dep_names: &[String],
 ) -> Result<()> {
     let app_content = format_app_file(
@@ -60,6 +62,7 @@ pub fn generate_app_file(
         class_metadata,
         app_callback_module,
         native_module_names,
+        bt_dep_names,
         hex_dep_names,
     );
     let app_path = build_dir.join(format!("{}.app", manifest.name));
@@ -78,6 +81,7 @@ fn format_app_file(
     class_metadata: &[ClassMetadata],
     app_callback_module: Option<&str>,
     native_module_names: &[String],
+    bt_dep_names: &[String],
     hex_dep_names: &[String],
 ) -> String {
     let description = escape_erlang_string(
@@ -91,7 +95,7 @@ fn format_app_file(
     let modules_list = format_modules_list(module_names);
     let classes_list = format_classes_list(class_metadata);
     let native_modules_entry = format_native_modules_entry(native_module_names);
-    let applications_list = format_applications_list(hex_dep_names);
+    let applications_list = format_applications_list(bt_dep_names, hex_dep_names);
 
     let mod_entry = match app_callback_module {
         Some(cb_module) => format!("\n    {{mod, {{{cb_module}, []}}}},"),
@@ -140,8 +144,13 @@ fn format_modules_list(module_names: &[String]) -> String {
 /// `beamtalk_runtime` so that `application:ensure_all_started` walks
 /// the dependency tree correctly. Transitive deps (e.g., `ranch` via
 /// `cowboy`) are covered by each dependency's own `.app` file.
-fn format_applications_list(hex_dep_names: &[String]) -> String {
+fn format_applications_list(bt_dep_names: &[String], hex_dep_names: &[String]) -> String {
     let mut apps = vec!["kernel".to_string(), "stdlib".to_string()];
+    if !bt_dep_names.is_empty() {
+        let mut sorted = bt_dep_names.to_vec();
+        sorted.sort();
+        apps.extend(sorted);
+    }
     if !hex_dep_names.is_empty() {
         let mut sorted = hex_dep_names.to_vec();
         sorted.sort();
@@ -235,7 +244,7 @@ mod tests {
         ];
         let classes = vec![];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[]);
+        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[]);
 
         assert!(result.contains("{application, my_app, ["));
         assert!(result.contains("{description, \"A test app\"}"));
@@ -251,7 +260,7 @@ mod tests {
     #[test]
     fn test_format_app_file_default_description() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
 
         assert!(result.contains("{description, \"A beamtalk package\"}"));
     }
@@ -269,7 +278,7 @@ mod tests {
             type_params: vec![],
         }];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[]);
+        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[]);
 
         assert!(
             result.contains("name => 'Counter'"),
@@ -311,7 +320,17 @@ mod tests {
         let modules = vec!["bt@my_app@main".to_string()];
         let classes = vec![];
 
-        generate_app_file(&build_dir, &manifest, &modules, &classes, None, &[], &[]).unwrap();
+        generate_app_file(
+            &build_dir,
+            &manifest,
+            &modules,
+            &classes,
+            None,
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
 
         let app_path = build_dir.join("my_app.app");
         assert!(app_path.exists());
@@ -367,21 +386,29 @@ mod tests {
     #[test]
     fn test_format_app_file_escapes_description() {
         let manifest = test_manifest("my_app", "0.1.0", Some(r#"A "quoted" app"#));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
         assert!(result.contains(r#"{description, "A \"quoted\" app"}"#));
     }
 
     #[test]
     fn test_format_app_file_with_mod_entry() {
         let manifest = test_manifest("my_app", "0.1.0", Some("An OTP app"));
-        let result = format_app_file(&manifest, &[], &[], Some("beamtalk_my_app_app"), &[], &[]);
+        let result = format_app_file(
+            &manifest,
+            &[],
+            &[],
+            Some("beamtalk_my_app_app"),
+            &[],
+            &[],
+            &[],
+        );
         assert!(result.contains("{mod, {beamtalk_my_app_app, []}}"));
     }
 
     #[test]
     fn test_format_app_file_without_mod_entry() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
         assert!(!result.contains("{mod,"));
     }
 
@@ -400,6 +427,7 @@ mod tests {
             &modules,
             &classes,
             Some("beamtalk_my_app_app"),
+            &[],
             &[],
             &[],
         )
@@ -444,7 +472,7 @@ mod tests {
             "beamtalk_http".to_string(),
         ];
 
-        let result = format_app_file(&manifest, &modules, &[], None, &native_modules, &[]);
+        let result = format_app_file(&manifest, &modules, &[], None, &native_modules, &[], &[]);
 
         assert!(
             result.contains("{native_modules, [beamtalk_http, beamtalk_http_server]}"),
@@ -459,7 +487,7 @@ mod tests {
     #[test]
     fn test_format_app_file_without_native_modules_unchanged() {
         let manifest = test_manifest("my_app", "0.1.0", Some("No native"));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
 
         assert!(
             !result.contains("native_modules"),
@@ -469,14 +497,14 @@ mod tests {
 
     #[test]
     fn test_format_applications_list_no_hex_deps() {
-        let result = format_applications_list(&[]);
+        let result = format_applications_list(&[], &[]);
         assert_eq!(result, "kernel, stdlib, beamtalk_runtime");
     }
 
     #[test]
     fn test_format_applications_list_with_hex_deps_sorted() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
-        let result = format_applications_list(&hex_deps);
+        let result = format_applications_list(&[], &hex_deps);
         assert_eq!(result, "kernel, stdlib, cowboy, gun, beamtalk_runtime");
     }
 
@@ -485,7 +513,7 @@ mod tests {
         let manifest = test_manifest("http", "0.1.0", Some("HTTP package"));
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
 
-        let result = format_app_file(&manifest, &[], &[], None, &[], &hex_deps);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &hex_deps);
 
         assert!(
             result.contains("{applications, [kernel, stdlib, cowboy, gun, beamtalk_runtime]}"),
@@ -499,7 +527,7 @@ mod tests {
         let native_modules = vec!["beamtalk_http".to_string()];
         let hex_deps = vec!["gun".to_string()];
 
-        let result = format_app_file(&manifest, &[], &[], None, &native_modules, &hex_deps);
+        let result = format_app_file(&manifest, &[], &[], None, &native_modules, &[], &hex_deps);
 
         assert!(
             result.contains("{applications, [kernel, stdlib, gun, beamtalk_runtime]}"),

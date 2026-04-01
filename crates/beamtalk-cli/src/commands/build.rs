@@ -556,6 +556,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             .as_ref()
             .map(|m| m.native_dependencies.keys().cloned().collect())
             .unwrap_or_default();
+        let bt_dep_names: Vec<String> = resolved_deps.iter().map(|d| d.name.clone()).collect();
         generate_package_outputs(
             &build_dir,
             &project_root,
@@ -563,6 +564,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             &module_names,
             &class_module_index,
             &native_module_names,
+            &bt_dep_names,
             &hex_dep_names,
             &all_class_infos,
             &source_files,
@@ -588,12 +590,12 @@ fn generate_package_outputs(
     module_names: &[String],
     class_module_index: &HashMap<String, String>,
     native_module_names: &[String],
+    bt_dep_names: &[String],
     hex_dep_names: &[String],
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     source_files: &[Utf8PathBuf],
 ) -> Result<()> {
-    // TODO: Extract class metadata from compiled modules in a future issue.
-    let class_metadata: Vec<app_file::ClassMetadata> = Vec::new();
+    let class_metadata = build_class_metadata(all_class_infos, class_module_index, &pkg.name);
 
     // BT-1191: Generate OTP application callback when [application] supervisor is set.
     let app_callback_module =
@@ -643,6 +645,7 @@ fn generate_package_outputs(
         &class_metadata,
         app_callback_module.as_deref(),
         native_module_names,
+        bt_dep_names,
         hex_dep_names,
     )?;
     info!(name = %pkg.name, "Generated .app file");
@@ -1347,6 +1350,55 @@ fn validate_native_class_references(
     }
 
     Ok(())
+}
+
+/// Build `.app`-file class metadata from compiled `ClassInfo` entries.
+///
+/// Converts the compiler's `ClassInfo` into the `ClassMetadata` structs
+/// that `generate_app_file` writes into `{env, [{classes, [...]}]}`.
+/// Only classes belonging to `package_name` are included.
+///
+/// The `kind` field is resolved using a `ClassHierarchy` that includes both
+/// the user/dep classes and stdlib builtins, so `Server subclass: MyServer`
+/// correctly resolves to kind `"actor"`.
+pub(crate) fn build_class_metadata(
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    class_module_index: &HashMap<String, String>,
+    package_name: &str,
+) -> Vec<app_file::ClassMetadata> {
+    // Start from the cached stdlib hierarchy and add user/dep classes so
+    // the superclass chain can be resolved across all sources.
+    let mut hierarchy =
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(all_class_infos.to_vec());
+
+    let module_prefix = format!("bt@{package_name}@");
+    all_class_infos
+        .iter()
+        .filter(|ci| !ci.is_internal)
+        .filter_map(|ci| {
+            let module = class_module_index.get(ci.name.as_str())?;
+            // Scope to this package using the module naming convention
+            // bt@{package}@{class}. ClassInfo.package may be None when
+            // extracted from source AST rather than BEAM metadata.
+            if !module.starts_with(&module_prefix) {
+                return None;
+            }
+            let kind = hierarchy.resolve_class_kind(&ci.name);
+            Some(app_file::ClassMetadata {
+                module: module.clone(),
+                class_name: ci.name.to_string(),
+                parent_class: ci
+                    .superclass
+                    .as_deref()
+                    .unwrap_or("ProtoObject")
+                    .to_string(),
+                package: package_name.to_string(),
+                kind: kind.as_str().to_string(),
+                type_params: ci.type_params.iter().map(ToString::to_string).collect(),
+            })
+        })
+        .collect()
 }
 
 /// Collect `ClassInfo` from multiple sources into a single unified vector.

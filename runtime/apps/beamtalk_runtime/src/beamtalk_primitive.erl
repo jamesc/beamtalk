@@ -184,7 +184,9 @@ print_string_map(X) ->
                 true ->
                     beamtalk_exception_handler:dispatch('printString', [], X);
                 false ->
-                    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(Class, utf8)])
+                    %% Dispatch printString to the value class so user-defined
+                    %% printString methods are honoured (e.g. Package>>printString).
+                    send_map(X, 'printString', [])
             end
     end.
 
