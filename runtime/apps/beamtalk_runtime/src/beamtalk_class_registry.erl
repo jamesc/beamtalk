@@ -575,6 +575,9 @@ restart_class(ClassName) ->
                 end,
             %% Read static metadata from the compiled module.
             %% This is always available as long as the BEAM file is loaded.
+            %% Ensure the module is loaded so function_exported/3 returns true.
+            %% The BEAM file should still be on disk even after the class process crashed.
+            code:ensure_loaded(Module),
             Meta =
                 case erlang:function_exported(Module, '__beamtalk_meta', 0) of
                     true ->
@@ -599,7 +602,7 @@ restart_class(ClassName) ->
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
                     ?LOG_WARNING(
-                        "Class process for '~s' crashed and was auto-restarted "
+                        "Class process for '~p' crashed and was auto-restarted "
                         "(hot-patched methods and class variable state were lost)",
                         [ClassName],
                         #{
@@ -616,7 +619,7 @@ restart_class(ClassName) ->
                     {ok, ExistingPid};
                 {error, Reason} = Err ->
                     ?LOG_ERROR(
-                        "Failed to restart crashed class process for '~s': ~p",
+                        "Failed to restart crashed class process for '~p': ~p",
                         [ClassName, Reason],
                         #{
                             class => ClassName,
