@@ -12,6 +12,25 @@ use super::CommentAttachment;
 use super::expression::{Expression, Identifier, MessageSelector, TypeAnnotation, TypeParamDecl};
 use super::method::{MethodDefinition, ParameterDefinition};
 
+/// Modifier flags for a class definition.
+///
+/// All flags default to `false`, so callers can use struct update syntax:
+/// ```ignore
+/// ClassModifiers { is_typed: true, ..Default::default() }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[allow(clippy::struct_excessive_bools)] // Class modifiers are genuinely independent flags (ADR 0071)
+pub struct ClassModifiers {
+    /// Whether this is an abstract class (cannot be instantiated).
+    pub is_abstract: bool,
+    /// Whether this is a sealed class (cannot be subclassed).
+    pub is_sealed: bool,
+    /// Whether this is a typed class (requires type annotations on methods).
+    pub is_typed: bool,
+    /// Whether this class is internal (package-scoped visibility, ADR 0071).
+    pub is_internal: bool,
+}
+
 /// The kind of supervisor based on ancestry (BT-1218, ADR 0059 Phase 1).
 ///
 /// Set by semantic analysis when a class is found to inherit from
@@ -197,8 +216,7 @@ impl ClassDefinition {
     pub fn with_modifiers(
         name: Identifier,
         superclass: Option<Identifier>,
-        is_abstract: bool,
-        is_sealed: bool,
+        modifiers: ClassModifiers,
         state: Vec<StateDeclaration>,
         methods: Vec<MethodDefinition>,
         span: Span,
@@ -211,10 +229,10 @@ impl ClassDefinition {
             superclass,
             superclass_package: None,
             class_kind,
-            is_abstract,
-            is_sealed,
-            is_typed: false,
-            is_internal: false,
+            is_abstract: modifiers.is_abstract,
+            is_sealed: modifiers.is_sealed,
+            is_typed: modifiers.is_typed,
+            is_internal: modifiers.is_internal,
             supervisor_kind: None,
             state,
             methods,
