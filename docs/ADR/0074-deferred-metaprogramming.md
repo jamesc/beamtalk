@@ -100,7 +100,7 @@ obj1 become: obj2   "All references to obj1 now point to obj2"
 **Why defer:**
 - **Complexity cost:** Making class processes full actors requires changes across the compiler, runtime, and supervision infrastructure. (Bootstrap ordering is less of a concern than originally feared — `Supervisor` is an `Object` subclass, not deep in the hierarchy, so class processes could be supervised without a deep circular dependency.)
 - **Limited practical value for v0.1:** The use cases enabled by class-as-actor (runtime mixin injection, metaclass-level interception, class migration) are exotic. The principled argument is that these features are framework-author tools, not application-developer tools — and Beamtalk doesn't yet have a framework ecosystem that would exercise them.
-- **Performance concern (primary reason):** Routing all class-side dispatch through actor message passing (gen_server:call) adds measurable latency. Current hybrid approach (compiled dispatch with dynamic overlay for hot-patches) is faster. The performance cost is hard to justify given the limited practical value of the features it enables.
+- **Restart semantics are the real risk:** Class-side dispatch already routes through `gen_server:call` to the class process (`beamtalk_class_dispatch:class_send/3`), so promoting class processes to supervised actors adds no new dispatch overhead. The concern is restart semantics: if a supervised class process crashes and restarts, what happens to running actor instances that depend on that class? Method dictionaries, hot-patches, and class variable state would be lost on restart. Defining safe recovery semantics is the hard problem, not performance.
 - **Incremental path exists:** The current `beamtalk_object_class` gen_server state already holds method dictionaries, superclass refs, and metadata. Promoting these to supervised actors is additive, not a rewrite — though this becomes harder if the class process API accumulates dependents without supervision contracts.
 
 **Revisitation triggers:** This deferral should be revisited if: (a) a Beamtalk framework needs metaclass-level `doesNotUnderstand:` for dynamic routing, (b) class process crashes become a reliability concern in production, or (c) multi-node hot-patching requires class processes to participate in distributed state protocols.
@@ -171,13 +171,13 @@ Allow specific class processes to be supervised via a modifier (e.g. `supervised
 ### Alternative: Implement Class-as-Actor for v0.1
 Promote all class processes to full supervised actors with `state:` declarations and OTP lifecycle.
 
-**Rejected:** The performance overhead of full actor dispatch for class methods is the primary concern — the value doesn't justify the cost. Bootstrap ordering is manageable (`Supervisor` is shallow in the hierarchy), and the incremental path means this can be added later without breaking changes.
+**Rejected:** The value doesn't justify the complexity of defining crash/restart semantics for class processes. Bootstrap ordering is manageable (`Supervisor` is shallow in the hierarchy), and dispatch overhead is not a factor (class methods already go through `gen_server:call`). But if a supervised class process restarts, its hot-patched methods and class variable state are lost — defining safe recovery for dependent actors is the unsolved problem. The incremental path means this can be added later without breaking changes.
 
 ## Consequences
 
 ### Positive
 - **Simpler runtime:** Fewer moving parts in the process architecture. Class processes are stable infrastructure, not dynamic actors that can crash and restart.
-- **Better performance:** Compiled dispatch with dynamic overlay is faster than routing all dispatch through actor message passing.
+- **No restart semantics to define:** Class processes don't crash and restart, so there's no question of what happens to hot-patches, class variables, or dependent actors after a restart.
 - **Clearer mental model:** Users don't need to reason about class process lifecycle, supervision, or restart semantics.
 - **Faster bootstrap:** Class registration during `on_load` is straightforward — no supervision tree to build before classes exist.
 
