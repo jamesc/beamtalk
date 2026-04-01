@@ -484,6 +484,7 @@ fn analyse_full(
         validators::check_unresolved_classes(
             module,
             &result.class_hierarchy,
+            known_vars,
             &mut result.diagnostics,
         );
     }
