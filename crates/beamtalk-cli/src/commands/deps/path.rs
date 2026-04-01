@@ -467,12 +467,18 @@ fn compile_dependency_with_context(
         &own_class_module_index,
         dep_name,
     );
-    // Read full manifest to get native dependency names for {applications} list
-    let dep_hex_dep_names: Vec<String> = manifest::find_manifest_full(dep_root)?
+    // Read full manifest to get dependency names for {applications} list
+    let full_manifest = manifest::find_manifest_full(dep_root)?;
+    let dep_hex_dep_names: Vec<String> = full_manifest
+        .as_ref()
         .map(|m| m.native_dependencies.keys().cloned().collect())
         .unwrap_or_default();
-    // Collect this dep's own BT dependency names for {applications} list
-    let dep_bt_dep_names: Vec<String> = prior_deps.iter().map(|d| d.name.clone()).collect();
+    // Use the manifest's declared BT dependencies (not the full prior_deps
+    // topo-order prefix) so {applications} lists only direct dependencies.
+    let dep_bt_dep_names: Vec<String> = full_manifest
+        .as_ref()
+        .map(|m| m.dependencies.keys().cloned().collect())
+        .unwrap_or_default();
     crate::commands::app_file::generate_app_file(
         &ebin_path,
         &dep_manifest,

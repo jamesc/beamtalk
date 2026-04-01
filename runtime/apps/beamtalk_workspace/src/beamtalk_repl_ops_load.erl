@@ -99,7 +99,16 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     case filelib:is_dir(ProjectEbin) of
         true ->
             _ = code:add_pathz(ProjectEbin),
-            _ = beamtalk_module_activation:load_app_from_ebin(ProjectEbin);
+            case beamtalk_module_activation:load_app_from_ebin(ProjectEbin) of
+                {ok, []} ->
+                    ok;
+                {ok, AppErrors} ->
+                    ?LOG_WARNING(
+                        "Failed to load project .app metadata: ~p",
+                        [AppErrors],
+                        #{domain => [beamtalk, runtime]}
+                    )
+            end;
         false ->
             ok
     end,

@@ -556,7 +556,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             .as_ref()
             .map(|m| m.native_dependencies.keys().cloned().collect())
             .unwrap_or_default();
-        let bt_dep_names: Vec<String> = resolved_deps.iter().map(|d| d.name.clone()).collect();
+        let bt_dep_names: Vec<String> = resolved_deps
+            .iter()
+            .filter(|d| d.is_direct)
+            .map(|d| d.name.clone())
+            .collect();
         generate_package_outputs(
             &build_dir,
             &project_root,

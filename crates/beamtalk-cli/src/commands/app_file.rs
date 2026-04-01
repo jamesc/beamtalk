@@ -509,6 +509,21 @@ mod tests {
     }
 
     #[test]
+    fn test_format_applications_list_with_bt_deps_sorted() {
+        let bt_deps = vec!["yaml".to_string(), "http".to_string()];
+        let result = format_applications_list(&bt_deps, &[]);
+        assert_eq!(result, "kernel, stdlib, http, yaml, beamtalk_runtime");
+    }
+
+    #[test]
+    fn test_format_applications_list_with_bt_and_hex_deps() {
+        let bt_deps = vec!["http".to_string()];
+        let hex_deps = vec!["cowboy".to_string()];
+        let result = format_applications_list(&bt_deps, &hex_deps);
+        assert_eq!(result, "kernel, stdlib, http, cowboy, beamtalk_runtime");
+    }
+
+    #[test]
     fn test_format_app_file_with_hex_deps() {
         let manifest = test_manifest("http", "0.1.0", Some("HTTP package"));
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
