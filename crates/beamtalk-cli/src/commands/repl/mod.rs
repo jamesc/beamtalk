@@ -907,7 +907,10 @@ fn display_sync_diagnostics(response: &ReplResponse) {
 fn sync_tests_then_run(client: &mut ReplClient, test_expr: &str) {
     match client.load_project_opts(".", true) {
         Ok(response) => display_sync_diagnostics(&response),
-        Err(e) => eprintln!("{}", color::paint(color::YELLOW, &format!("Sync warning: {e}"))),
+        Err(e) => eprintln!(
+            "{}",
+            color::paint(color::YELLOW, &format!("Sync warning: {e}"))
+        ),
     }
     eval_and_display(client, test_expr);
 }
