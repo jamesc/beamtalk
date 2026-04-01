@@ -549,8 +549,21 @@ handle_class_crash_recovery(ClassPid, Selector, Action) ->
         {ok, ClassName} ->
             case beamtalk_class_registry:restart_class(ClassName) of
                 {ok, NewPid} ->
-                    %% Retry with the restarted class process.
-                    Action(NewPid);
+                    %% Retry with the restarted class process. Wrap in try/catch
+                    %% so that if the restarted process crashes again immediately,
+                    %% the caller gets a clean error instead of a raw noproc exit.
+                    try
+                        Action(NewPid)
+                    catch
+                        exit:{noproc, _} ->
+                            Error2 = beamtalk_error:new(
+                                class_not_found,
+                                ClassName,
+                                Selector,
+                                <<"Class process crashed again immediately after restart">>
+                            ),
+                            beamtalk_error:raise(Error2)
+                    end;
                 {error, _Reason} ->
                     Error = beamtalk_error:new(
                         class_not_found,
