@@ -21,17 +21,25 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 /// BT-1726: Warn on class references that don't exist in the hierarchy.
 ///
 /// Walks all expressions looking for `ClassReference` nodes whose name is
-/// not found in the `ClassHierarchy`. Skips built-in names (`Erlang`, `Self`)
-/// and type parameters of the enclosing class.
+/// not found in the `ClassHierarchy`. Skips built-in names (`Erlang`, `Self`,
+/// `Nil`, `True`, `False`), type parameters of the enclosing class, and
+/// REPL workspace bindings passed via `known_vars`.
 pub(crate) fn check_unresolved_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let empty_params: Vec<&str> = Vec::new();
 
     // Module-level expressions: no type parameters in scope.
-    walk_stmts(&module.expressions, hierarchy, &empty_params, diagnostics);
+    walk_stmts(
+        &module.expressions,
+        hierarchy,
+        &empty_params,
+        known_vars,
+        diagnostics,
+    );
 
     // Per-class: only that class's type parameters are in scope.
     for class in &module.classes {
@@ -41,7 +49,13 @@ pub(crate) fn check_unresolved_classes(
             .map(|tp| tp.name.name.as_str())
             .collect();
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            walk_stmts(&method.body, hierarchy, &class_type_params, diagnostics);
+            walk_stmts(
+                &method.body,
+                hierarchy,
+                &class_type_params,
+                known_vars,
+                diagnostics,
+            );
         }
     }
 
@@ -51,6 +65,7 @@ pub(crate) fn check_unresolved_classes(
             &standalone.method.body,
             hierarchy,
             &empty_params,
+            known_vars,
             diagnostics,
         );
     }
@@ -61,11 +76,12 @@ fn walk_stmts(
     stmts: &[ExpressionStatement],
     hierarchy: &ClassHierarchy,
     type_param_names: &[&str],
+    known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for stmt in stmts {
         walk_expression(&stmt.expression, &mut |expr| {
-            visit_unresolved_class(expr, hierarchy, type_param_names, diagnostics);
+            visit_unresolved_class(expr, hierarchy, type_param_names, known_vars, diagnostics);
         });
     }
 }
@@ -81,14 +97,18 @@ fn visit_unresolved_class(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
     type_param_names: &[&str],
+    known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Expression::ClassReference { name, span, .. } = expr {
         let class_name = name.name.as_str();
 
-        // Skip builtins, type parameters, and classes that exist.
+        // Skip builtins, type parameters, known REPL bindings, and classes that exist.
+        // Known vars covers REPL workspace bindings like `Workspace` and `Transcript`
+        // which are capitalized variables, not class references.
         if BUILTIN_CLASS_NAMES.contains(&class_name)
             || type_param_names.contains(&class_name)
+            || known_vars.contains(&class_name)
             || hierarchy.has_class(class_name)
         {
             return;
@@ -517,7 +537,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Unresolved class `NonExistent`"));
@@ -537,7 +557,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
 
         assert!(diags.is_empty(), "Builtins should not trigger warnings");
     }
@@ -550,11 +570,33 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
 
         assert!(
             diags.is_empty(),
             "Known classes should not trigger warnings"
+        );
+    }
+
+    #[test]
+    fn test_unresolved_class_skips_known_vars() {
+        // REPL workspace bindings like Workspace and Transcript are capitalized
+        // variables, not class references — they should not trigger warnings.
+        let module = empty_module_with_exprs(vec![class_ref("Workspace"), class_ref("Transcript")]);
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut diags = Vec::new();
+
+        check_unresolved_classes(
+            &module,
+            &hierarchy,
+            &["Workspace", "Transcript"],
+            &mut diags,
+        );
+
+        assert!(
+            diags.is_empty(),
+            "Known REPL variables should not trigger unresolved class warnings"
         );
     }
 
@@ -806,7 +848,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -836,7 +878,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
 
         assert_eq!(
             diags.len(),
