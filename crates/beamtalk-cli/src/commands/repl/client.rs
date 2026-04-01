@@ -352,10 +352,20 @@ impl ReplClient {
     /// Uses `send_request_no_retry` because `load-project` is not idempotent —
     /// a partial load followed by a retry would cause duplicate loads.
     pub(crate) fn load_project(&mut self, path: &str) -> Result<ReplResponse> {
+        self.load_project_opts(path, false)
+    }
+
+    /// Load/sync a project, optionally including test files from `test/`.
+    pub(crate) fn load_project_opts(
+        &mut self,
+        path: &str,
+        include_tests: bool,
+    ) -> Result<ReplResponse> {
         self.inner.send_request::<ReplResponse>(&serde_json::json!({
             "op": "load-project",
             "id": protocol::next_msg_id(),
-            "path": path
+            "path": path,
+            "include_tests": include_tests
         }))
     }
 
