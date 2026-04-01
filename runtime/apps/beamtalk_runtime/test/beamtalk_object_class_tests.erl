@@ -1070,6 +1070,91 @@ new_on_primitive_not_double_wrapped_test_() ->
         end}.
 
 %%====================================================================
+%% BT-742: Package-aware collision warning drain tests
+%%====================================================================
+
+%% Test that draining by qualified name only removes the target package's
+%% warnings, leaving the other package's warnings intact.
+qualified_drain_isolates_packages_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_class_registry:ensure_class_warnings_table(),
+                ets:delete_all_objects(beamtalk_class_warnings),
+
+                %% Record collision warnings for two different packages
+                %% with the same class name 'Parser'.
+                beamtalk_class_registry:record_class_collision_warning(
+                    'Parser', 'bt@json@parser_v1', 'bt@json@parser'
+                ),
+                beamtalk_class_registry:record_class_collision_warning(
+                    'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'
+                ),
+
+                %% Drain only the json package's warnings.
+                JsonWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
+                    {json, 'Parser'}
+                ]),
+                ?assertEqual([{'Parser', 'bt@json@parser_v1', 'bt@json@parser'}], JsonWarnings),
+
+                %% The xml package's warning should still be in the table.
+                XmlWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
+                    {xml, 'Parser'}
+                ]),
+                ?assertEqual([{'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'}], XmlWarnings)
+            end)
+        ]
+    end}.
+
+%% Test that drain_class_warnings_by_names (unqualified) drains ALL
+%% packages for a given class name — backward-compatible behavior.
+unqualified_drain_gets_all_packages_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_class_registry:ensure_class_warnings_table(),
+                ets:delete_all_objects(beamtalk_class_warnings),
+
+                beamtalk_class_registry:record_class_collision_warning(
+                    'Counter', 'bt@pkg_a@counter_v1', 'bt@pkg_a@counter'
+                ),
+                beamtalk_class_registry:record_class_collision_warning(
+                    'Counter', 'bt@pkg_b@counter_v1', 'bt@pkg_b@counter'
+                ),
+
+                %% Unqualified drain should get BOTH packages' warnings.
+                AllWarnings = beamtalk_class_registry:drain_class_warnings_by_names([
+                    'Counter'
+                ]),
+                ?assertEqual(2, length(AllWarnings)),
+
+                %% Table should be empty after the drain.
+                Remaining = beamtalk_class_registry:drain_class_warnings_by_names([
+                    'Counter'
+                ]),
+                ?assertEqual([], Remaining)
+            end)
+        ]
+    end}.
+
+%% Test extract_package_from_module/1 in beamtalk_class_registry.
+extract_package_from_module_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_assertEqual(
+                json, beamtalk_class_registry:extract_package_from_module('bt@json@parser')
+            ),
+            ?_assertEqual(
+                xml, beamtalk_class_registry:extract_package_from_module('bt@xml@parser')
+            ),
+            ?_assertEqual(
+                undefined, beamtalk_class_registry:extract_package_from_module('bt@counter')
+            ),
+            ?_assertEqual(undefined, beamtalk_class_registry:extract_package_from_module(module_a))
+        ]
+    end}.
+
+%%====================================================================
 %% BT-738: Stdlib class shadowing protection tests
 %%====================================================================
 
