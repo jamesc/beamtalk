@@ -158,37 +158,225 @@ The Beamtalk compiler (`beamtalk-core`, written in Rust) runs as an OTP Port man
 
 ## REPL
 
-The REPL connects to a persistent workspace — a detached BEAM node that survives disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md)). Actors keep running between sessions; REPL variable bindings are session-local.
+The Beamtalk REPL is an interactive development environment connected to a persistent workspace — a detached BEAM node that survives disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md)). Actors keep running between sessions; REPL variable bindings are session-local.
 
-```beamtalk
-// Spawn and interact
-counter := Counter spawn
-counter increment
-counter getValue  // => 1
+### Starting the REPL
 
-// Live-patch a method — takes effect on next message send
-Counter >> increment =>
-  Transcript show: "incrementing"
-  self.value := self.value + 1
-
-counter increment  // prints "incrementing", returns 2
+```bash
+beamtalk repl                # Start or reconnect to workspace
+beamtalk repl --foreground   # Start node in foreground (debug mode)
+beamtalk repl --port 9090    # Use a specific port
+beamtalk repl --node mynode  # Use a specific node name
 ```
 
-### REPL `:` Commands
+On startup, the REPL prints the version and a help hint:
 
-`:` commands are thin wrappers around native message sends:
+```
+Beamtalk v0.3.1
+Type :help for available commands, :exit to quit.
 
-| REPL shortcut | Native equivalent |
-|---------------|-------------------|
-| `:load path/to/file.bt` | `Workspace load: "path/to/file.bt"` |
-| `:reload Counter` | `Counter reload` |
-| `:modules` | `Workspace classes` |
-| `:test` | `Workspace test` |
-| `:test CounterTest` | `Workspace test: CounterTest` |
-| `:help Counter` | `Beamtalk help: Counter` |
-| `:help Counter increment` | `Beamtalk help: Counter selector: #increment` |
+>
+```
 
-The native forms work from compiled code, scripts, and actor methods — not just the REPL.
+If a workspace is already running (from a previous session or another terminal), the REPL reconnects to it. All previously loaded classes and running actors are still available.
+
+### Expression Evaluation
+
+The REPL evaluates any Beamtalk expression and prints the result. Variables assigned in one expression persist across subsequent expressions within the same session.
+
+```beamtalk
+> x := 42
+42
+
+> x + 10
+52
+
+> counter := Counter spawn
+#Actor<Counter,0.234.0>
+
+> counter increment
+1
+
+> counter getValue
+1
+```
+
+Actor message sends are **auto-awaited** in the REPL — when you send a message to an actor, the REPL waits for the reply and prints it. In compiled code, you would need to handle the asynchronous response explicitly.
+
+Variable reassignment works as expected:
+
+```beamtalk
+> x := 100
+100
+
+> x + 10
+110
+```
+
+Loop mutations also persist across REPL inputs:
+
+```beamtalk
+> count := 0
+0
+
+> 5 timesRepeat: [count := count + 1]
+5
+
+> count
+5
+```
+
+### Commands Reference
+
+REPL commands start with `:` and provide shortcuts for common operations. Most are thin wrappers around Beamtalk-native message sends ([ADR 0040](ADR/0040-workspace-native-repl-commands.md)), so the same operations work from compiled code, scripts, and actor methods.
+
+#### Code Loading
+
+| Command | Native equivalent | Description |
+|---------|-------------------|-------------|
+| `:load path/to/file.bt` | `Workspace load: "path/to/file.bt"` | Compile and hot-load a `.bt` file |
+| `:load path/to/dir/` | `Workspace load: "path/to/dir/"` | Load all `.bt` files from a directory recursively |
+| `:reload Counter` | `Counter reload` | Recompile a class from its source file |
+| `:reload` | *(reload last loaded file/dir)* | Reload the most recently loaded file or directory |
+| `:sync` / `:s` | `Workspace sync` | Sync workspace with project (requires `beamtalk.toml`) |
+| `:unload Counter` | *(removes class)* | Unload a user class from the workspace |
+
+**`:load`** compiles the file and hot-loads the resulting BEAM module. If a class with the same name already exists, the new code replaces it — live actors pick up the new methods on their next message send.
+
+```beamtalk
+> :load examples/counter.bt
+Loaded: Counter
+
+> c := Counter spawn
+#Actor<Counter,0.234.0>
+
+> c increment
+1
+```
+
+**`:load`** also accepts directories, loading all `.bt` files recursively:
+
+```beamtalk
+> :load src/models/
+Loaded 3 files from src/models/
+```
+
+**`:sync`** loads (or reloads) the entire project defined by `beamtalk.toml` in the current directory. It is incremental — unchanged files are skipped:
+
+```beamtalk
+> :sync
+Reloaded 2 of 5 files
+
+> :s
+Reloaded 0 of 5 files (5 unchanged)
+```
+
+**`:unload`** removes a user class from the workspace. Stdlib classes cannot be unloaded:
+
+```beamtalk
+> :unload MyClass
+ok
+
+> :unload Integer
+ERROR: Cannot remove stdlib class
+```
+
+#### Inspection and Documentation
+
+| Command | Native equivalent | Description |
+|---------|-------------------|-------------|
+| `:help` / `:h` / `:?` | *(none)* | Show REPL help message |
+| `:help Counter` | `Beamtalk help: Counter` | Show class documentation and methods |
+| `:help Counter increment` | `Beamtalk help: Counter selector: #increment` | Show method documentation |
+| `:help Counter class` | *(class-side docs)* | Show class-side methods (spawn, new, reload, ...) |
+| `:help Counter class create:` | *(class-side method docs)* | Show class-side method documentation |
+| `:bindings` / `:b` | *(session-local)* | Show current variable bindings |
+| `:show-codegen <expr>` / `:sc <expr>` | *(REPL-only)* | Show generated Core Erlang for an expression |
+
+**`:help`** provides interactive documentation lookup:
+
+```beamtalk
+> :help Integer
+== Integer < Number ==
+Instance methods:
+  + - * / ...
+
+> :help Integer +
+== Integer >> + ==
+  ...
+
+> :help Integer isPositive
+== Integer >> isPositive ==
+  (inherited from Number)
+  ...
+```
+
+Package-qualified class names are also supported:
+
+```beamtalk
+> :help stdlib@Integer
+== Integer < Number ==
+  ...
+```
+
+**`:bindings`** shows all variables in the current session:
+
+```beamtalk
+> x := 42
+42
+
+> name := "hello"
+hello
+
+> :bindings
+name = hello
+x = 42
+```
+
+**`:show-codegen`** displays the Core Erlang output for any expression, useful for understanding what the compiler generates:
+
+```beamtalk
+> :sc 2 + 3
+'erlang':'+'(2, 3)
+```
+
+#### Testing
+
+| Command | Native equivalent | Description |
+|---------|-------------------|-------------|
+| `:test` / `:t` | `Workspace test` | Run all loaded test classes |
+| `:test CounterTest` | `Workspace test: CounterTest` | Run a specific test class |
+
+```beamtalk
+> :load test/counter_test.bt
+Loaded: CounterTest
+
+> :test CounterTest
+Running 1 test class...
+  ✓ testIncrement
+  ✓ testMultipleIncrements
+2 passed, 0 failed
+```
+
+#### Session Control
+
+| Command | Description |
+|---------|-------------|
+| `:clear` | Clear all variable bindings |
+| `:exit` / `:quit` / `:q` | Exit the REPL (Ctrl+D also works) |
+
+**`:clear`** removes all session-local variable bindings:
+
+```beamtalk
+> x := 42
+42
+
+> :clear
+ok
+
+> x
+ERROR: Undefined variable
+```
 
 ### Multi-line Input
 
@@ -209,30 +397,292 @@ Class definitions with at least one method (`=>`) auto-submit. A blank line is o
 ..>                          ← blank line submits the class
 ```
 
+Multi-line expressions work naturally with blocks, collections, and keyword messages:
+
+```beamtalk
+> [
+..>   :x |
+..>   x * 2
+..> ] value: 21
+42
+
+> #{
+..>   #name => "Alice",
+..>   #age => 30
+..> } at: #name
+Alice
+```
+
 Use **Ctrl+C** to cancel multi-line input without submitting.
+
+### Interactive Class Definitions
+
+Classes can be defined directly at the REPL prompt without writing a `.bt` file:
+
+```beamtalk
+> Actor subclass: InlineCounter
+..>   state: value = 0
+..>   increment => self.value := self.value + 1
+```
+
+Methods can be added or replaced on existing classes using Tonel-style standalone method definitions (`>>`):
+
+```beamtalk
+> InlineCounter >> getValue => self.value
+
+> c := InlineCounter spawn
+#Actor<InlineCounter,0.234.0>
+
+> c increment
+1
+
+> c getValue
+1
+```
+
+Redefining a method replaces it for all future message sends, including on existing actor instances:
+
+```beamtalk
+> InlineCounter >> increment => self.value := self.value + 10
+
+> c2 := InlineCounter spawn
+#Actor<InlineCounter,0.234.0>
+
+> c2 increment
+10
+```
+
+### Hot Reload
+
+When a class is reloaded (via `:load`, `:reload`, or an inline redefinition), existing actor instances pick up the new code on their next message send. State is preserved across the reload.
+
+```beamtalk
+> :load examples/counter.bt
+Loaded: Counter
+
+> c := Counter spawn
+#Actor<Counter,0.234.0>
+
+> c increment
+1
+
+> c increment
+2
+
+// Edit counter.bt to change increment behavior, then:
+> :reload Counter
+Counter
+
+// Existing actor uses new code, state preserved
+> c increment
+12
+```
+
+Class-based reload uses the source file path recorded at load time:
+
+```beamtalk
+> Counter sourceFile
+examples/counter.bt
+
+> Counter reload     // Recompiles from that path
+Counter
+
+> Integer sourceFile // Stdlib classes have no source file
+nil
+
+> Integer reload     // Cannot reload stdlib
+ERROR: Integer has no source file
+```
 
 ### Workspace and Reflection Singletons
 
-Two global objects provide introspection and project operations:
+Two global singleton objects provide introspection and project operations. These are available in the REPL, in compiled code, and via the MCP server.
 
-**`Beamtalk`** — system reflection:
+**`Beamtalk`** (class: `BeamtalkInterface`) — system reflection:
+
+| Method | Description |
+|--------|-------------|
+| `version` | Beamtalk version string |
+| `allClasses` | All registered class names (always up-to-date) |
+| `classNamed: #Counter` | Look up a class by name |
+| `globals` | Snapshot of system namespace as a Dictionary |
+| `help: Counter` | Formatted class documentation |
+| `help: Counter selector: #increment` | Formatted method documentation |
+
 ```beamtalk
-Beamtalk version             // => "0.3.1"
-Beamtalk allClasses          // All registered class names
-Beamtalk classNamed: #Counter // Look up a class by name
-Beamtalk globals             // Snapshot of system namespace
-Beamtalk help: Counter       // Formatted documentation
+> Beamtalk version
+0.3.1
+
+> Beamtalk allClasses
+#(Integer, String, Array, ...)
+
+> Beamtalk classNamed: #Integer
+Integer
+
+> Beamtalk globals
+#{#Integer => Integer, #String => String, ...}
 ```
 
-**`Workspace`** — project operations:
+**`Workspace`** (class: `WorkspaceInterface`) — project operations:
+
+| Method | Description |
+|--------|-------------|
+| `load: "path"` | Compile and hot-load a file or directory |
+| `sync` | Sync workspace with project (`beamtalk.toml`) |
+| `classes` | All loaded user classes |
+| `testClasses` | All loaded test classes |
+| `globals` | Snapshot of project namespace as a Dictionary |
+| `actors` | All live actors |
+| `actorAt: pidString` | Look up an actor by pid string |
+| `actorsOf: Counter` | All live instances of a class |
+| `test` | Run all test classes |
+| `test: CounterTest` | Run a specific test class |
+| `bind: value as: #Name` | Register a value in the workspace namespace |
+| `unbind: #Name` | Remove a workspace binding |
+
 ```beamtalk
-Workspace load: "examples/counter.bt"  // Compile and hot-load
-Workspace classes            // All loaded user classes
-Workspace actors             // All live actors
-Workspace actorsOf: Counter  // All Counter instances
-Workspace test               // Run all test classes
-Workspace test: CounterTest  // Run specific test class
-Workspace bind: myActor as: #MyTool  // Register for later lookup
+> Workspace load: "examples/counter.bt"
+["Counter"]
+
+> Workspace classes
+#(Counter, ...)
+
+> Workspace actors
+#(#Actor<Counter,0.234.0>, ...)
+
+> Workspace actorsOf: Counter
+#(#Actor<Counter,0.234.0>)
+
+> Workspace test
+3 passed, 0 failed
+
+> Workspace bind: myActor as: #MyTool
+nil
+
+> MyTool
+#Actor<Counter,0.234.0>
+
+> Workspace unbind: #MyTool
+nil
+```
+
+### Variable Persistence and Name Resolution
+
+REPL variable bindings are **session-local** — each connected REPL session has its own variable scope. Bindings persist across expressions within the same session but are lost when the session disconnects.
+
+Workspace bindings (via `Workspace bind:as:`) are **workspace-level** — they persist across sessions and are visible to all connected clients.
+
+Name resolution follows a scoped chain:
+
+```
+Session locals  →  Workspace user bindings  →  Workspace globals  →  Beamtalk globals
+  x = 42            MyTool = <actor>            Transcript = ...      Integer = <class>
+  counter = ...                                  Counter = <class>     String = <class>
+```
+
+1. **Session locals** — per-connection variables (`x := 42`), created by `:=` assignment
+2. **Workspace user bindings** — workspace-level names registered via `Workspace bind:as:`
+3. **Workspace globals** — project-level entries (Transcript, loaded classes, singletons)
+4. **Beamtalk globals** — system-level entries (all registered classes, version)
+
+### Common Workflows
+
+#### Load, Edit, Reload, Test
+
+The typical interactive development cycle:
+
+```beamtalk
+> :load src/Counter.bt          // Load the class
+Loaded: Counter
+
+> c := Counter spawn            // Try it out
+#Actor<Counter,0.234.0>
+
+> c increment
+1
+
+// ... edit Counter.bt in your editor ...
+
+> :reload Counter               // Hot-reload the change
+Counter
+
+> c increment                   // Existing actor uses new code
+11
+
+> :load test/CounterTest.bt     // Load tests
+Loaded: CounterTest
+
+> :test CounterTest             // Run tests
+2 passed, 0 failed
+```
+
+#### Project Sync Workflow
+
+For projects with `beamtalk.toml`, use `:sync` to load the whole project:
+
+```beamtalk
+> :sync                         // Initial load
+Reloaded 5 of 5 files
+
+// ... edit files ...
+
+> :s                            // Incremental reload (short alias)
+Reloaded 1 of 5 files (4 unchanged)
+
+> :test                         // Run all tests
+10 passed, 0 failed
+```
+
+#### Prototyping with Inline Classes
+
+Define and iterate on classes without creating files:
+
+```beamtalk
+> Actor subclass: Greeter
+..>   state: name = "World"
+..>   greet => "Hello, " ++ self.name
+
+> g := Greeter spawn
+#Actor<Greeter,0.234.0>
+
+> g greet
+Hello, World
+
+// Add a method
+> Greeter >> greetWith: prefix => prefix ++ " " ++ self.name
+
+> g greetWith: "Hi"
+Hi World
+
+// Replace a method
+> Greeter >> greet => "Hey there, " ++ self.name
+
+> g greet
+Hey there, World
+```
+
+#### Actor Lifecycle Management
+
+Inspect, stop, and kill actors through the workspace:
+
+```beamtalk
+> c := Counter spawn
+#Actor<Counter,0.234.0>
+
+> c isAlive
+true
+
+> Workspace actors              // See all live actors
+#(#Actor<Counter,0.234.0>)
+
+> c stop                        // Graceful shutdown
+ok
+
+> c isAlive
+false
+
+> c stop                        // Idempotent
+ok
 ```
 
 ## MCP Server (AI Agent Interface)
