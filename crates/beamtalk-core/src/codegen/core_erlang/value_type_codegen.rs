@@ -2153,9 +2153,11 @@ impl CoreErlangGenerator {
         // Default case: extension fallback, then superclass delegation (or DNU)
         let not_found_branch: Document<'static> = if has_catch_all_dnu {
             // Class defines DNU — route unknown selectors through it
-            Document::String(format!(
-                "                    call '{mod_name}':'doesNotUnderstand:args:'(Self, Selector, Args)\n"
-            ))
+            docvec![
+                "                    call '",
+                Document::String(mod_name.to_string()),
+                "':'doesNotUnderstand:args:'(Self, Selector, Args)\n",
+            ]
         } else if let Some(ref super_mod) = superclass_mod {
             Document::String(format!(
                 "                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"

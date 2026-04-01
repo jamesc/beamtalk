@@ -2835,9 +2835,13 @@ impl CoreErlangGenerator {
                         .get(1)
                         .cloned()
                         .unwrap_or_else(|| "Arguments".to_string());
-                    return Ok(Document::String(format!(
-                        "call 'beamtalk_erlang_proxy':'dispatch'({selector_param}, {args_param}, Self)"
-                    )));
+                    return Ok(docvec![
+                        "call 'beamtalk_erlang_proxy':'dispatch'(",
+                        Document::String(selector_param),
+                        ", ",
+                        Document::String(args_param),
+                        ", Self)"
+                    ]);
                 }
                 "erlangModuleLookup" => {
                     let params = &self.current_method_params;
@@ -2849,9 +2853,13 @@ impl CoreErlangGenerator {
                         .get(1)
                         .cloned()
                         .unwrap_or_else(|| "Arguments".to_string());
-                    return Ok(Document::String(format!(
-                        "call 'beamtalk_erlang_class':'dispatch'({selector_param}, {args_param}, Self)"
-                    )));
+                    return Ok(docvec![
+                        "call 'beamtalk_erlang_class':'dispatch'(",
+                        Document::String(selector_param),
+                        ", ",
+                        Document::String(args_param),
+                        ", Self)"
+                    ]);
                 }
                 _ => {}
             }
