@@ -388,6 +388,7 @@ impl CoreErlangGenerator {
         &self,
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
+        let module_name_for_log = module_name.clone();
         let doc = docvec![
             "'handle_continue'/2 = fun (Continue, State) ->",
             nest(
@@ -429,7 +430,13 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    "let _ = call 'logger':'error'(~{'msg' => 'initialize failed', 'reason' => InitError}~) in",
+                                                    "let InitErrorMsg = call 'beamtalk_error':'format_safe'(InitError) in",
+                                                    line(),
+                                                    "let InitClassName = call '",
+                                                    Document::Eco(module_name_for_log),
+                                                    "':'class_name'() in",
+                                                    line(),
+                                                    "let _ = call 'logger':'error'(~{'msg' => InitErrorMsg, 'class' => InitClassName, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                                     line(),
                                                     "{'stop', InitError, InitErrState}",
                                                 ]

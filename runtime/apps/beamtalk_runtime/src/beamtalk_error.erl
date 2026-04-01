@@ -23,6 +23,7 @@
     with_hint/2,
     with_details/2,
     format/1,
+    format_safe/1,
     raise/1,
     generate_message/3,
     format_reason/2
@@ -137,6 +138,21 @@ format(#beamtalk_error{kind = does_not_understand} = Error) ->
     format_parts(Enriched#beamtalk_error.message, Enriched#beamtalk_error.hint);
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     format_parts(Message, Hint).
+
+%% @doc Safely format any error term as a human-readable binary.
+%%
+%% If the term is a `#beamtalk_error{}`, uses `format/1` to produce a rich
+%% message with hints. For any other term, falls back to `~0p` formatting.
+%% Never crashes — used by generated `handle_continue` to log initialize failures.
+-spec format_safe(term()) -> binary().
+format_safe(#beamtalk_error{} = Error) ->
+    try
+        format(Error)
+    catch
+        _:_ -> iolist_to_binary(io_lib:format("~0p", [Error]))
+    end;
+format_safe(Term) ->
+    iolist_to_binary(io_lib:format("~0p", [Term])).
 
 %% @private Format message with optional hint.
 -spec format_parts(binary(), binary() | undefined) -> binary().
