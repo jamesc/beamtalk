@@ -61,6 +61,6 @@ TestCase subclass: ErrorMethodTest
     // displayString on an Exception delegates to printString
     self assert: ([
       42 error: "too big"
-    ] on: Exception do: [:e | e displayString]) equals: ([
-      42 error: "too big"
-    ] on: Exception do: [:e | e printString])
+    ] on: Exception do: [:e |
+      e displayString
+    ]) equals: ([42 error: "too big"] on: Exception do: [:e | e printString])

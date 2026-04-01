@@ -366,8 +366,8 @@ responds_to_map(X, Selector) ->
             Class = beamtalk_tagged_map:class_of(X),
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
-                    beamtalk_exception_handler:has_method(Selector)
-                        orelse value_type_responds_to(Class, Selector);
+                    beamtalk_exception_handler:has_method(Selector) orelse
+                        value_type_responds_to(Class, Selector);
                 false ->
                     value_type_responds_to(Class, Selector)
             end;
