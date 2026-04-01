@@ -21,15 +21,11 @@
 
 -export([start_link/0, start_link/1]).
 -export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
--export([find_bt_modules_in_dir/1, activate_project_modules/1]).
--export([sort_modules_by_dependency/2]).
--ifdef(TEST).
--export([is_valid_module_name/1]).
--endif.
+-export([activate_project_modules/1]).
 
-%% Maximum number of project modules activated per startup (BT-747).
-%% Prevents atom table exhaustion if _build/dev/ebin/ contains excessive files.
--define(MAX_PROJECT_MODULES, 1000).
+%% Backwards-compatible re-exports — callers should migrate to
+%% beamtalk_module_activation directly.
+-export([find_bt_modules_in_dir/1, sort_modules_by_dependency/2, is_valid_module_name/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -236,11 +232,11 @@ set_class_variable(ClassName, Obj) ->
             {error, class_not_found}
     end.
 
-%% @private Activate compiled project modules from _build/dev/ebin/ (BT-739).
-%% Scans `{ProjectPath}/_build/dev/ebin/` for `bt@*.beam` files (excluding
-%% `bt@stdlib@*`), sorts them by superclass dependency order (BT-745), loads
-%% each, calls register_class/0, and registers the module with workspace_meta.
-%% Failures are logged but do not abort startup.
+%% @doc Activate compiled project modules from _build/dev/ebin/ (BT-739).
+%%
+%% Delegates to `beamtalk_module_activation:activate_ebin/2` with a callback
+%% that registers modules in workspace_meta and stores source text for
+%% `ClassName >> method => body` support (BT-1174).
 -spec activate_project_modules(binary() | undefined) -> ok.
 activate_project_modules(undefined) ->
     ok;
@@ -248,214 +244,28 @@ activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(Pro
     EbinDir = filename:absname(
         filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])
     ),
-    _ = code:add_pathz(EbinDir),
-    Modules = find_bt_modules_in_dir(EbinDir),
-    Sorted = sort_modules_by_dependency(EbinDir, Modules),
-    lists:foreach(fun activate_project_module/1, Sorted);
+    {ok, Errors} = beamtalk_module_activation:activate_ebin(EbinDir, #{
+        on_activate => fun on_project_module_activated/1
+    }),
+    case Errors of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_WARNING(
+                "Bootstrap: ~b project module(s) failed to activate",
+                [length(Errors)],
+                #{errors => Errors, domain => [beamtalk, runtime]}
+            )
+    end;
 activate_project_modules(_Other) ->
     ok.
 
-%% @doc Scan a directory for bt@*.beam files that are not stdlib modules.
-%% Returns a list of module atoms. Returns [] for missing or unreadable dirs.
-%% Capped at ?MAX_PROJECT_MODULES to guard against atom table exhaustion (BT-747).
-%% Filters eligible filenames first (no atom creation), sorts for deterministic
-%% selection across platforms, then caps before converting to atoms.
--spec find_bt_modules_in_dir(string()) -> [module()].
-find_bt_modules_in_dir(Dir) ->
-    case file:list_dir(Dir) of
-        {ok, Files} ->
-            Eligible = lists:sort(lists:filter(fun is_project_beam_file/1, Files)),
-            Count = length(Eligible),
-            Capped =
-                case Count > ?MAX_PROJECT_MODULES of
-                    true ->
-                        ?LOG_WARNING(
-                            "Bootstrap: too many project modules, capping at limit",
-                            #{
-                                found => Count,
-                                limit => ?MAX_PROJECT_MODULES,
-                                dir => Dir,
-                                domain => [beamtalk, runtime]
-                            }
-                        ),
-                        lists:sublist(Eligible, ?MAX_PROJECT_MODULES);
-                    false ->
-                        Eligible
-                end,
-            lists:filtermap(fun beam_file_to_project_module/1, Capped);
-        {error, _} ->
-            []
-    end.
-
-%% @private Check if a filename is a project beam file (bt@* but not bt@stdlib@*).
-%% This performs no atom creation — used for counting before the cap is applied.
--spec is_project_beam_file(string()) -> boolean().
-is_project_beam_file(File) ->
-    case filename:extension(File) of
-        ".beam" ->
-            ModName = filename:rootname(filename:basename(File)),
-            is_user_class_module(ModName) andalso
-                is_valid_module_name(ModName);
-        _ ->
-            false
-    end.
-
-%% @private Map a filename to a project module atom, or false to skip it.
-%% Validates that the module name contains only characters valid in Beamtalk
-%% module names (alphanumeric, @, _) before calling list_to_atom/1 (BT-747).
-%%
-%% Threat model: filenames come from the filesystem (_build/dev/ebin/), which
-%% may contain arbitrary .beam files from broken builds or malicious content.
-%% Since Erlang atoms are not garbage-collected, calling list_to_atom/1 on
-%% unvalidated filenames risks permanent atom table exhaustion (default limit
-%% 1,048,576 in OTP 26+). Character validation ensures only well-formed
-%% Beamtalk module names are converted to atoms.
--spec beam_file_to_project_module(string()) -> {true, module()} | false.
-beam_file_to_project_module(File) ->
-    case filename:extension(File) of
-        ".beam" ->
-            ModName = filename:rootname(filename:basename(File)),
-            IsProject = is_user_class_module(ModName),
-            case IsProject of
-                true ->
-                    case is_valid_module_name(ModName) of
-                        true ->
-                            {true, list_to_atom(ModName)};
-                        false ->
-                            ?LOG_WARNING(
-                                "Bootstrap: skipping module with invalid name",
-                                #{filename => File, domain => [beamtalk, runtime]}
-                            ),
-                            false
-                    end;
-                false ->
-                    false
-            end;
-        _ ->
-            false
-    end.
-
-%% @private Returns true if ModName is a user-defined class module.
-%% User class modules have the bt@* prefix but exclude bt@stdlib@* stdlib modules.
--spec is_user_class_module(string()) -> boolean().
-is_user_class_module(ModName) ->
-    lists:prefix("bt@", ModName) andalso not lists:prefix("bt@stdlib@", ModName).
-
-%% @doc Validate that a module name contains only characters valid in Beamtalk
-%% module names: alphanumeric (a-z, A-Z, 0-9), @, and _.
--spec is_valid_module_name(string()) -> boolean().
-is_valid_module_name([]) ->
-    false;
-is_valid_module_name(Name) ->
-    lists:all(fun is_valid_module_char/1, Name).
-
-%% @private
--spec is_valid_module_char(char()) -> boolean().
-is_valid_module_char(C) when C >= $a, C =< $z -> true;
-is_valid_module_char(C) when C >= $A, C =< $Z -> true;
-is_valid_module_char(C) when C >= $0, C =< $9 -> true;
-is_valid_module_char($@) -> true;
-is_valid_module_char($_) -> true;
-is_valid_module_char(_) -> false.
-
-%% @private Sort modules by superclass dependency order (BT-745).
-%% Reads the `beamtalk_class` attribute from each BEAM file using beam_lib
-%% to determine {ClassName, SuperclassName}, then topologically sorts so
-%% superclasses are loaded before subclasses. Modules without the attribute
-%% (e.g., older compiled modules) are placed first as they have no known deps.
--spec sort_modules_by_dependency(string(), [module()]) -> [module()].
-sort_modules_by_dependency(_EbinDir, []) ->
-    [];
-sort_modules_by_dependency(EbinDir, Modules) ->
-    {WithClass, WithoutClass} = lists:foldl(
-        fun(Mod, {WC, WOC}) ->
-            case extract_class_info(EbinDir, Mod) of
-                {ok, ClassName, Superclass} ->
-                    {[{Mod, ClassName, Superclass} | WC], WOC};
-                error ->
-                    {WC, [Mod | WOC]}
-            end
-        end,
-        {[], []},
-        Modules
-    ),
-    Sorted = topo_sort(lists:reverse(WithClass)),
-    lists:reverse(WithoutClass) ++ [Mod || {Mod, _, _} <- Sorted].
-
-%% @private Extract class name and superclass from a BEAM file's attributes.
-%% Reads the `beamtalk_class` module attribute without loading the module.
--spec extract_class_info(string(), module()) -> {ok, atom(), atom()} | error.
-extract_class_info(EbinDir, ModuleName) ->
-    BeamFile = filename:join(EbinDir, atom_to_list(ModuleName) ++ ".beam"),
-    case beam_lib:chunks(BeamFile, [attributes]) of
-        {ok, {_, [{attributes, Attrs}]}} ->
-            case proplists:get_value(beamtalk_class, Attrs) of
-                [{ClassName, Superclass}] ->
-                    {ok, ClassName, Superclass};
-                [{ClassName, Superclass} | _] ->
-                    %% Multi-class module: use primary (first) class
-                    {ok, ClassName, Superclass};
-                _ ->
-                    error
-            end;
-        _ ->
-            error
-    end.
-
-%% @private Topologically sort class entries so superclasses come before subclasses.
-%% Same wave-based algorithm as beamtalk_stdlib:topo_sort/1 (BT-745).
--spec topo_sort([{module(), atom(), atom()}]) -> [{module(), atom(), atom()}].
-topo_sort(Entries) ->
-    ClassSet = sets:from_list([Class || {_, Class, _} <- Entries]),
-    topo_sort_waves(Entries, ClassSet, sets:new(), []).
-
--spec topo_sort_waves(
-    [{module(), atom(), atom()}],
-    sets:set(atom()),
-    sets:set(atom()),
-    [{module(), atom(), atom()}]
-) -> [{module(), atom(), atom()}].
-topo_sort_waves([], _ClassSet, _Emitted, Acc) ->
-    lists:reverse(Acc);
-topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
-    {Ready, Deferred} = lists:partition(
-        fun({_Mod, _Class, Super}) ->
-            (not sets:is_element(Super, ClassSet)) orelse sets:is_element(Super, Emitted)
-        end,
-        Remaining
-    ),
-    case Ready of
-        [] ->
-            ?LOG_WARNING(
-                "Bootstrap topo_sort: unresolvable dependencies",
-                #{remaining => [C || {_, C, _} <- Deferred], domain => [beamtalk, runtime]}
-            ),
-            lists:reverse(Acc) ++ Deferred;
-        _ ->
-            NewEmitted = lists:foldl(
-                fun({_, Class, _}, S) -> sets:add_element(Class, S) end, Emitted, Ready
-            ),
-            topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready) ++ Acc)
-    end.
-
-%% @private Ensure a module is loaded, call register_class/0, and track it.
--spec activate_project_module(module()) -> ok.
-activate_project_module(ModuleName) ->
-    case code:ensure_loaded(ModuleName) of
-        {module, ModuleName} ->
-            try_register_class(ModuleName),
-            SourcePath = extract_source_path(ModuleName),
-            beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
-            store_bootstrap_class_source(ModuleName, SourcePath),
-            ?LOG_DEBUG("Bootstrap: activated project module", #{
-                module => ModuleName, domain => [beamtalk, runtime]
-            });
-        {error, Reason} ->
-            ?LOG_WARNING(
-                "Bootstrap: failed to load project module",
-                #{module => ModuleName, reason => Reason, domain => [beamtalk, runtime]}
-            )
-    end.
+%% @private Callback for project module activation.
+%% Registers the module in workspace_meta and stores source text.
+-spec on_project_module_activated({module(), string() | undefined}) -> ok.
+on_project_module_activated({Module, SourcePath}) ->
+    beamtalk_workspace_meta:register_module(Module, SourcePath),
+    store_bootstrap_class_source(Module, SourcePath).
 
 %% @private Read source file content and store per-class in workspace_meta so
 %% that `ClassName >> method => body` works for bootstrap-loaded classes (BT-1174).
@@ -466,7 +276,7 @@ store_bootstrap_class_source(ModuleName, SourcePath) ->
     case file:read_file(SourcePath) of
         {ok, Binary} ->
             Source = binary_to_list(Binary),
-            ClassNames = extract_module_class_names(ModuleName),
+            ClassNames = beamtalk_module_activation:extract_class_names(ModuleName),
             lists:foreach(
                 fun(ClassName) ->
                     beamtalk_workspace_meta:set_class_source(
@@ -487,47 +297,17 @@ store_bootstrap_class_source(ModuleName, SourcePath) ->
             )
     end.
 
-%% @private Extract class name atoms from a loaded module's beamtalk_class attribute.
--spec extract_module_class_names(module()) -> [atom()].
-extract_module_class_names(ModuleName) ->
-    try
-        Attrs = erlang:get_module_info(ModuleName, attributes),
-        Classes = proplists:get_value(beamtalk_class, Attrs, []),
-        [ClassName || {ClassName, _Superclass} <- Classes]
-    catch
-        _:_ -> []
-    end.
+%% @doc Backwards-compatible delegate to beamtalk_module_activation.
+-spec find_bt_modules_in_dir(string()) -> [module()].
+find_bt_modules_in_dir(Dir) ->
+    beamtalk_module_activation:find_bt_modules_in_dir(Dir).
 
-%% @private Extract the .bt source file path from the module's beamtalk_source attribute.
-%% The compiler embeds `beamtalk_source = ["path/to/file.bt"]` in every user module
-%% (BT-845/BT-860). Returns undefined for stdlib modules or older compiled modules.
--spec extract_source_path(module()) -> string() | undefined.
-extract_source_path(ModuleName) ->
-    try
-        Attrs = erlang:get_module_info(ModuleName, attributes),
-        case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path) -> Path;
-            _ -> undefined
-        end
-    catch
-        _:_ -> undefined
-    end.
+%% @doc Backwards-compatible delegate to beamtalk_module_activation.
+-spec sort_modules_by_dependency(string(), [module()]) -> [module()].
+sort_modules_by_dependency(EbinDir, Modules) ->
+    beamtalk_module_activation:sort_modules_by_dependency(EbinDir, Modules).
 
-%% @private Call register_class/0 on a module if it exports one.
--spec try_register_class(module()) -> ok.
-try_register_class(ModuleName) ->
-    case erlang:function_exported(ModuleName, register_class, 0) of
-        true ->
-            try
-                _ = ModuleName:register_class(),
-                ok
-            catch
-                _:Err ->
-                    ?LOG_WARNING(
-                        "Bootstrap: register_class/0 failed",
-                        #{module => ModuleName, error => Err, domain => [beamtalk, runtime]}
-                    )
-            end;
-        false ->
-            ok
-    end.
+%% @doc Backwards-compatible delegate to beamtalk_module_activation.
+-spec is_valid_module_name(string()) -> boolean().
+is_valid_module_name(Name) ->
+    beamtalk_module_activation:is_valid_module_name(Name).
