@@ -60,7 +60,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -73,9 +73,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.27
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.27
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache Rust dependencies
@@ -131,7 +131,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -144,7 +144,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-x86_64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-x86_64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.27
           restore-keys: |
             ${{ runner.os }}-x86_64-erlang-otp-27.0-
 
@@ -201,7 +201,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -214,7 +214,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-arm64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-arm64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.27
           restore-keys: |
             ${{ runner.os }}-arm64-erlang-otp-27.0-
 
@@ -273,7 +273,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          rebar3-version: '3.23'
+          rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Erlang/rebar3 artifacts
@@ -283,7 +283,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.27
           restore-keys: |
             ${{ runner.os }}-erlang-otp-27.0-
 
