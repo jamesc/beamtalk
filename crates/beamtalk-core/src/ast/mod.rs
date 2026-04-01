@@ -66,17 +66,17 @@
 //! # Builder Pattern Convention
 //!
 //! AST nodes use `new()` for basic construction and `with_*()` for variant
-//! constructors (e.g., `InstanceVariable::with_type()`, `Module::with_classes()`).
+//! constructors (e.g., `StateDeclaration::with_type()`, `Module::with_classes()`).
 //! Prefer these constructors over manual struct initialization.
 //!
 //! # Module Organization
 //!
 //! The AST is split into submodules by category:
 //!
-//! - [`expression`] — Expression nodes, literals, identifiers, messages, types
-//! - [`pattern`] — Pattern matching and destructuring
-//! - [`class`] — Class, protocol, and state declarations
-//! - [`method`] — Method definitions and parameters
+//! - `expression` — Expression nodes, literals, identifiers, messages, types
+//! - `pattern` — Pattern matching and destructuring
+//! - `class` — Class, protocol, and state declarations
+//! - `method` — Method definitions and parameters
 
 mod class;
 mod expression;
