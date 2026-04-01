@@ -906,7 +906,14 @@ fn display_sync_diagnostics(response: &ReplResponse) {
 /// pass even when other files fail to compile.
 fn sync_tests_then_run(client: &mut ReplClient, test_expr: &str) {
     match client.load_project_opts(".", true) {
-        Ok(response) => display_sync_diagnostics(&response),
+        Ok(response) => {
+            display_sync_diagnostics(&response);
+            if response.is_error() && response.errors.is_empty() {
+                if let Some(msg) = response.error_message() {
+                    eprintln!("{}", display::format_error(msg));
+                }
+            }
+        }
         Err(e) => eprintln!(
             "{}",
             color::paint(color::YELLOW, &format!("Sync warning: {e}"))
