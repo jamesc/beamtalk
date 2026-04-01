@@ -830,5 +830,5 @@ activate_deps_adds_hex_ebin_paths_test() ->
     end.
 
 activate_dep_ebin_nonexistent_test() ->
-    %% Non-existent dir should be a no-op.
-    ?assertEqual(ok, beamtalk_repl_ops_load:activate_dep_ebin("/nonexistent/path")).
+    %% Non-existent dir should be a no-op (delegated to beamtalk_module_activation).
+    ?assertEqual(ok, beamtalk_module_activation:activate_ebin("/nonexistent/path")).
