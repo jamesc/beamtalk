@@ -22,7 +22,12 @@ setup() ->
             Pid;
         Pid ->
             Pid
-    end.
+    end,
+    %% BT-1768: Ensure ETS tables are owned by the test process (not the first
+    %% class process), so they survive class process death during crash recovery tests.
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table().
 
 teardown(_) ->
     %% Clean up ETS pending load errors table entries (BT-738)
@@ -114,7 +119,9 @@ teardown(_) ->
             beamtalk_class_LocalCallTestClass,
             beamtalk_class_LocalCallKwTestClass,
             beamtalk_class_LocalCallDnuTestClass,
-            beamtalk_class_LocalCallCvarTestClass
+            beamtalk_class_LocalCallCvarTestClass,
+            beamtalk_class_CrashRecoveryTest,
+            beamtalk_class_CrashRecoverySendTest
         ]
     ),
     %% Clean up ETS hierarchy table entries
@@ -126,6 +133,12 @@ teardown(_) ->
     %% BT-737: Clean up collision warnings table entries
     try
         ets:delete_all_objects(beamtalk_class_warnings)
+    catch
+        _:_ -> ok
+    end,
+    %% BT-1768: Clean up pid reverse index entries
+    try
+        ets:delete_all_objects(beamtalk_class_pids)
     catch
         _:_ -> ok
     end,
@@ -1661,3 +1674,117 @@ test_local_call_non_object() ->
         #{error := #beamtalk_error{kind = type_error}},
         beamtalk_object_class:local_call(not_an_object, testSuccess, [])
     ).
+
+%%====================================================================
+%% BT-1768: Class Process Crash Detection and Recovery
+%%====================================================================
+
+%% Test that killing a class process and looking it up via restart_class
+%% produces a new live process.
+crash_recovery_restart_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'CrashRecoveryTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid1} = beamtalk_object_class:start('CrashRecoveryTest', ClassInfo),
+                ?assert(is_process_alive(Pid1)),
+
+                %% Kill the class process (simulates crash)
+                MRef = monitor(process, Pid1),
+                exit(Pid1, kill),
+                receive
+                    {'DOWN', MRef, process, Pid1, _} -> ok
+                after 1000 -> ?assert(false)
+                end,
+                ?assertNot(is_process_alive(Pid1)),
+
+                %% whereis_class returns undefined for the dead process
+                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('CrashRecoveryTest')),
+
+                %% Pid reverse index should still have the mapping
+                ?assertMatch(
+                    {ok, 'CrashRecoveryTest'},
+                    beamtalk_class_registry:class_name_for_pid(Pid1)
+                ),
+
+                %% restart_class should bring it back
+                {ok, Pid2} = beamtalk_class_registry:restart_class('CrashRecoveryTest'),
+                ?assert(is_process_alive(Pid2)),
+                ?assertNotEqual(Pid1, Pid2),
+
+                %% Class is registered again
+                ?assertEqual(Pid2, beamtalk_class_registry:whereis_class('CrashRecoveryTest')),
+
+                %% Class name is accessible on the restarted process
+                ?assertEqual('CrashRecoveryTest', beamtalk_object_class:class_name(Pid2))
+            end)
+        ]
+    end}.
+
+%% Test that class_send auto-recovers when the class process has crashed.
+crash_recovery_class_send_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'CrashRecoverySendTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid1} = beamtalk_object_class:start('CrashRecoverySendTest', ClassInfo),
+                ?assert(is_process_alive(Pid1)),
+
+                %% Kill the class process
+                MRef = monitor(process, Pid1),
+                exit(Pid1, kill),
+                receive
+                    {'DOWN', MRef, process, Pid1, _} -> ok
+                after 1000 -> ?assert(false)
+                end,
+
+                %% class_send with the stale pid should auto-recover.
+                %% The class has no user methods, so any method call will raise
+                %% does_not_understand — but it should NOT raise noproc/timeout.
+                %% It will try the Class chain fallthrough which also raises DNU.
+                ?assertError(
+                    #{error := #beamtalk_error{kind = does_not_understand}},
+                    beamtalk_class_dispatch:class_send(Pid1, someMethod, [])
+                ),
+
+                %% The class should be alive again after the auto-recovery
+                NewPid = beamtalk_class_registry:whereis_class('CrashRecoverySendTest'),
+                ?assertNotEqual(undefined, NewPid),
+                ?assert(is_process_alive(NewPid))
+            end)
+        ]
+    end}.
+
+%% Test that class_name_for_pid returns not_found for unknown pids.
+class_name_for_pid_unknown_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_assertEqual(
+                not_found,
+                beamtalk_class_registry:class_name_for_pid(list_to_pid("<0.99999.0>"))
+            )
+        ]
+    end}.
+
+%% Test that restart_class fails gracefully when the module table has no entry.
+restart_class_no_module_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_assertMatch(
+                {error, {no_module_for_class, 'NonexistentClass'}},
+                beamtalk_class_registry:restart_class('NonexistentClass')
+            )
+        ]
+    end}.
