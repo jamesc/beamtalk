@@ -63,8 +63,12 @@ topo_sort_deep_chain_test() ->
     ],
     Result = beamtalk_module_activation:topo_sort(Entries),
     ?assertEqual(
-        [{mod_a, 'A', 'Object'}, {mod_b, 'B', 'A'},
-         {mod_c, 'C', 'B'}, {mod_d, 'D', 'C'}],
+        [
+            {mod_a, 'A', 'Object'},
+            {mod_b, 'B', 'A'},
+            {mod_c, 'C', 'B'},
+            {mod_d, 'D', 'C'}
+        ],
         Result
     ).
 
@@ -127,7 +131,8 @@ load_app_from_ebin_loads_metadata_test() ->
     TmpDir = create_temp_dir(),
     try
         AppFile = filename:join(TmpDir, "beamtalk_test_fake.app"),
-        AppContent = "{application, beamtalk_test_fake, [{description, \"test\"}, {vsn, \"0.1.0\"}, {modules, []}, {env, [{classes, [#{name => 'FakeClass', module => 'bt@fake@FakeClass', parent => 'Object', package => fake}]}]}]}.",
+        AppContent =
+            "{application, beamtalk_test_fake, [{description, \"test\"}, {vsn, \"0.1.0\"}, {modules, []}, {env, [{classes, [#{name => 'FakeClass', module => 'bt@fake@FakeClass', parent => 'Object', package => fake}]}]}]}.",
         ok = file:write_file(AppFile, AppContent),
         _ = code:add_pathz(TmpDir),
 
@@ -184,7 +189,9 @@ index_of(Elem, [_ | Rest], N) ->
     index_of(Elem, Rest, N + 1).
 
 create_temp_dir() ->
-    Base = filename:join(["/tmp", "bt_activation_test_" ++ integer_to_list(erlang:unique_integer([positive]))]),
+    Base = filename:join([
+        "/tmp", "bt_activation_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ]),
     ok = filelib:ensure_dir(filename:join(Base, "dummy")),
     Base.
 

@@ -287,7 +287,8 @@ try_register_class(Module, Domain) ->
         true ->
             try
                 case Module:register_class() of
-                    ok -> ok;
+                    ok ->
+                        ok;
                     Other ->
                         ?LOG_WARNING(
                             "Unexpected return from register_class/0: ~p",
