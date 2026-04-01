@@ -254,10 +254,24 @@ dispatch(allClasses, [], _Receiver) ->
     Pids = beamtalk_class_registry:all_classes(),
     [beamtalk_object_class:class_name(Pid) || Pid <- Pids];
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
-    %% Look up a class by name, return wrapped class object or nil
+    %% Look up a class by name, return wrapped class object or nil.
+    %% BT-1768: If the class is not registered but has a module table entry,
+    %% the class process crashed — attempt auto-restart.
     case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> nil;
-        Pid -> {beamtalk_object, ClassName, beamtalk_object_class, Pid}
+        undefined ->
+            case beamtalk_class_module_table:lookup(ClassName) of
+                {ok, _Module} ->
+                    case beamtalk_class_registry:restart_class(ClassName) of
+                        {ok, NewPid} ->
+                            {beamtalk_object, ClassName, beamtalk_object_class, NewPid};
+                        {error, _} ->
+                            nil
+                    end;
+                not_found ->
+                    nil
+            end;
+        Pid ->
+            {beamtalk_object, ClassName, beamtalk_object_class, Pid}
     end;
 dispatch(globals, [], _Receiver) ->
     %% Placeholder - global namespace not yet implemented

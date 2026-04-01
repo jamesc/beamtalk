@@ -351,6 +351,7 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table(),
     ok = pg:join(beamtalk_classes, self()),
 
     Superclass = maps:get(superclass, ClassInfo, none),
@@ -392,6 +393,11 @@ init({ClassName, ClassInfo}) ->
     put(beamtalk_class_name, ClassName),
     put(beamtalk_class_module, Module),
     put(beamtalk_class_is_abstract, IsAbstract),
+
+    %% BT-1768: Record pid→classname mapping for crash recovery.
+    %% This entry survives process death, allowing class_send to identify
+    %% which class a dead pid belonged to and attempt auto-restart.
+    beamtalk_class_registry:record_class_pid(self(), ClassName),
 
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
@@ -739,6 +745,9 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
     _ = (catch beamtalk_class_hierarchy_table:delete(ClassName)),
     _ = (catch beamtalk_class_module_table:delete(ClassName)),
+    %% BT-1768: Clean up pid reverse index. Only cleaned on graceful shutdown —
+    %% on crash, the entry intentionally survives for auto-restart recovery.
+    _ = (catch ets:delete(beamtalk_class_pids, self())),
     _ = (catch pg:leave(beamtalk_classes, self())),
     ok.
 

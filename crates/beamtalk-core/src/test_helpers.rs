@@ -28,8 +28,8 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
 #[cfg(any(test, feature = "test"))]
 pub mod test_support {
     use crate::ast::{
-        ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
-        MethodDefinition, Module,
+        ClassDefinition, ClassModifiers, Expression, ExpressionStatement, Identifier,
+        MessageSelector, MethodDefinition, Module,
     };
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
 
@@ -86,8 +86,7 @@ pub mod test_support {
         ClassDefinition::with_modifiers(
             Identifier::new(name, span),
             None,
-            false,
-            false,
+            ClassModifiers::default(),
             Vec::new(),
             Vec::new(),
             span,

@@ -1069,9 +1069,9 @@ mod tests {
     //! Tests for zero-syntax type inference across all expression forms.
     use super::*;
     use crate::ast::{
-        Block, CascadeMessage, ClassDefinition, ClassKind, CommentAttachment, Expression,
-        ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition,
-        MethodKind, Module, ParameterDefinition, Pattern, ProtocolDefinition,
+        Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
+        Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
+        MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern, ProtocolDefinition,
         ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
     };
     use crate::source_analysis::Span;
@@ -2336,11 +2336,13 @@ mod tests {
     #[test]
     fn test_typed_class_warns_on_missing_param_annotation() {
         // typed class with untyped parameter
-        let mut class_def = ClassDefinition::with_modifiers(
+        let class_def = ClassDefinition::with_modifiers(
             ident("StrictCounter"),
             Some(ident("Actor")),
-            false,
-            false,
+            ClassModifiers {
+                is_typed: true,
+                ..Default::default()
+            },
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -2350,7 +2352,6 @@ mod tests {
             )],
             span(),
         );
-        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let mut checker = TypeChecker::new();
@@ -2371,11 +2372,13 @@ mod tests {
     #[test]
     fn test_typed_class_warns_on_missing_return_type() {
         // typed class with method missing return type
-        let mut class_def = ClassDefinition::with_modifiers(
+        let class_def = ClassDefinition::with_modifiers(
             ident("StrictCounter"),
             Some(ident("Actor")),
-            false,
-            false,
+            ClassModifiers {
+                is_typed: true,
+                ..Default::default()
+            },
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Unary("increment".into()),
@@ -2385,7 +2388,6 @@ mod tests {
             )],
             span(),
         );
-        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let mut checker = TypeChecker::new();
@@ -2401,11 +2403,13 @@ mod tests {
     #[test]
     fn test_typed_class_no_warning_when_fully_annotated() {
         // typed class with fully annotated method
-        let mut class_def = ClassDefinition::with_modifiers(
+        let class_def = ClassDefinition::with_modifiers(
             ident("StrictCounter"),
             Some(ident("Actor")),
-            false,
-            false,
+            ClassModifiers {
+                is_typed: true,
+                ..Default::default()
+            },
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -2419,7 +2423,6 @@ mod tests {
             )],
             span(),
         );
-        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let mut checker = TypeChecker::new();
@@ -2441,8 +2444,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Counter"),
             Some(ident("Actor")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -2470,11 +2472,13 @@ mod tests {
     #[test]
     fn test_typed_class_skips_primitive_methods() {
         // typed class with @primitive method — no warnings
-        let mut class_def = ClassDefinition::with_modifiers(
+        let class_def = ClassDefinition::with_modifiers(
             ident("StrictInteger"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers {
+                is_typed: true,
+                ..Default::default()
+            },
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Binary("+".into()),
@@ -2489,7 +2493,6 @@ mod tests {
             )],
             span(),
         );
-        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let mut checker = TypeChecker::new();
@@ -2602,8 +2605,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Account"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("getBalance".into()),
@@ -2638,8 +2640,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Account"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("getBalance".into()),
@@ -2671,8 +2672,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("MyInt"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("value".into()),
@@ -2709,8 +2709,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Counter"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Unary("count".into()),
@@ -2882,8 +2881,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Counter"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -2938,8 +2936,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Counter"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -2992,8 +2989,7 @@ mod tests {
         let parent = ClassDefinition::with_modifiers(
             ident("Base"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -3009,8 +3005,7 @@ mod tests {
         let child = ClassDefinition::with_modifiers(
             ident("Derived"),
             Some(ident("Base")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -3046,8 +3041,7 @@ mod tests {
         let parent = ClassDefinition::with_modifiers(
             ident("Base"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -3063,8 +3057,7 @@ mod tests {
         let child = ClassDefinition::with_modifiers(
             ident("Derived"),
             Some(ident("Base")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -3098,8 +3091,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Account"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("getBalance".into()),
@@ -3182,8 +3174,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Counter"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("count".into()),
@@ -3289,8 +3280,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Calculator"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("compute".into()),
@@ -3348,8 +3338,7 @@ mod tests {
         let class_def = ClassDefinition::with_modifiers(
             ident("Calculator"),
             Some(ident("Object")),
-            false,
-            false,
+            ClassModifiers::default(),
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("compute".into()),
