@@ -15,6 +15,7 @@ pub mod doc;
 pub(crate) mod doc_tests;
 pub mod doctor;
 pub mod fmt;
+pub mod gen_native;
 pub mod lint;
 pub mod logs;
 pub mod manifest;
