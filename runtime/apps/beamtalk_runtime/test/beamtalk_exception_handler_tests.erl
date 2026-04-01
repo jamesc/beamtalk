@@ -429,15 +429,13 @@ dispatch_signal_colon_raises_test() ->
 
 dispatch_unknown_selector_raises_test() ->
     Ex = make_test_exception(),
-    try
-        beamtalk_exception_handler:dispatch('nonExistent', [], Ex),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
-            ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
-            ?assertEqual('nonExistent', Inner#beamtalk_error.selector)
-    end.
+    %% After removing the does_not_understand catch-all (BT-1764),
+    %% unknown selectors cause a function_clause error — the compiled
+    %% bt@stdlib@exception module handles Object-inherited methods.
+    ?assertError(
+        function_clause,
+        beamtalk_exception_handler:dispatch('nonExistent', [], Ex)
+    ).
 
 %%% ===================================================================
 %%% has_method/1 tests — pure

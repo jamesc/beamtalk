@@ -300,14 +300,7 @@ is_future_selector(_) -> false.
 send_tagged_map_fallback(X, Class, Selector, Args) ->
     case beamtalk_exception_handler:is_exception_class(Class) of
         true ->
-            case beamtalk_exception_handler:has_method(Selector) of
-                true ->
-                    beamtalk_exception_handler:dispatch(Selector, Args, X);
-                false ->
-                    %% Fall through to Object hierarchy for inherited methods
-                    %% (e.g. displayString, respondsTo:, etc.)
-                    value_type_send(X, Class, Selector, Args)
-            end;
+            beamtalk_exception_handler:dispatch(Selector, Args, X);
         false ->
             value_type_send(X, Class, Selector, Args)
     end.
@@ -365,11 +358,8 @@ responds_to_map(X, Selector) ->
         undefined ->
             Class = beamtalk_tagged_map:class_of(X),
             case beamtalk_exception_handler:is_exception_class(Class) of
-                true ->
-                    beamtalk_exception_handler:has_method(Selector) orelse
-                        value_type_responds_to(Class, Selector);
-                false ->
-                    value_type_responds_to(Class, Selector)
+                true -> beamtalk_exception_handler:has_method(Selector);
+                false -> value_type_responds_to(Class, Selector)
             end;
         Mod ->
             Mod:has_method(Selector)
@@ -420,22 +410,41 @@ module_for_value(X) when is_port(X) -> 'bt@stdlib@port';
 module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
-        'CompiledMethod' -> 'bt@stdlib@compiled_method';
-        'Set' -> 'bt@stdlib@set';
-        'Stream' -> 'bt@stdlib@stream';
-        'Random' -> 'bt@stdlib@random';
-        'TestCase' -> 'bt@stdlib@test_case';
-        'Regex' -> 'bt@stdlib@regex';
-        'DateTime' -> 'bt@stdlib@date_time';
-        'Timer' -> 'bt@stdlib@timer';
-        'TestResult' -> 'bt@stdlib@test_result';
-        'ErlangModule' -> beamtalk_erlang_proxy;
-        'FileHandle' -> beamtalk_file_handle;
-        'Erlang' -> beamtalk_erlang_class;
-        'BeamtalkInterface' -> 'bt@stdlib@beamtalk_interface';
-        'WorkspaceInterface' -> 'bt@stdlib@workspace_interface';
-        undefined -> 'bt@stdlib@dictionary';
-        _ -> undefined
+        'CompiledMethod' ->
+            'bt@stdlib@compiled_method';
+        'Set' ->
+            'bt@stdlib@set';
+        'Stream' ->
+            'bt@stdlib@stream';
+        'Random' ->
+            'bt@stdlib@random';
+        'TestCase' ->
+            'bt@stdlib@test_case';
+        'Regex' ->
+            'bt@stdlib@regex';
+        'DateTime' ->
+            'bt@stdlib@date_time';
+        'Timer' ->
+            'bt@stdlib@timer';
+        'TestResult' ->
+            'bt@stdlib@test_result';
+        'ErlangModule' ->
+            beamtalk_erlang_proxy;
+        'FileHandle' ->
+            beamtalk_file_handle;
+        'Erlang' ->
+            beamtalk_erlang_class;
+        'BeamtalkInterface' ->
+            'bt@stdlib@beamtalk_interface';
+        'WorkspaceInterface' ->
+            'bt@stdlib@workspace_interface';
+        undefined ->
+            'bt@stdlib@dictionary';
+        Other ->
+            case beamtalk_exception_handler:is_exception_class(Other) of
+                true -> 'bt@stdlib@exception';
+                false -> undefined
+            end
     end;
 module_for_value(_) ->
     undefined.
