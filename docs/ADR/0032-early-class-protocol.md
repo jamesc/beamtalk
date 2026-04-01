@@ -259,8 +259,7 @@ sealed Behaviour subclass: Class
   /// Test whether this is a Class (not a Metaclass).
   sealed isClass => true
 
-  /// Return the metaclass sentinel.
-  /// (Full metaclass tower shipped in ADR 0036)
+  /// Return the metaclass for this class (ADR 0036).
   sealed class => @intrinsic classClass
 ```
 
@@ -419,7 +418,7 @@ The gold standard. Pharo defines a four-class tower: `Behavior → ClassDescript
 - `ClassDescription` (method categorization/protocols, comments) — useful but not needed for the hierarchy bug fix
 - Real metaclass instances — ADR 0013's virtual metaclass approach is sufficient for now
 - `methodDict` returning a real MethodDictionary object — we return selector lists instead
-- `CompiledMethod` objects (`>>` operator, method introspection) — deferred to ADR 0074
+- `CompiledMethod` objects (`>>` operator, method introspection) — shipped in ADR 0033
 - `compile:` (dynamic method compilation from strings)
 - `addSelector:withMethod:` / `removeSelector:` (dynamic method mutation)
 - `allInstances` (already exists via ETS tracking, not part of this ADR)
@@ -544,7 +543,7 @@ Fix BT-721 (make `responds_to_slow` use the flattened table) and BT-510 (synchro
 - **Extensibility foundation**: `Behaviour`/`Class` establish the class protocol in Beamtalk rather than Erlang. All methods are sealed at v0.1 to limit blast radius; unsealing specific methods is a future option as the metaclass tower matures.
 - **Discoverability**: `Counter methods`, `Counter allSuperclasses`, `Counter canUnderstand: #x` are explorable in the REPL
 - **Bug reduction**: `respondsTo:` becomes `self class canUnderstand: selector` — one line, no duplication
-- **Foundation for metaprogramming**: `Behaviour`/`Class` are the base that the full metaclass tower (ADR 0074) builds on
+- **Foundation for metaprogramming**: `Behaviour`/`Class` are the base that the full metaclass tower (ADR 0036) builds on
 - **Principle alignment**: Satisfies Principles 6 (Messages All The Way Down), 8 (Reflection as Primitive), and 11 (Live Patching is a Message Send)
 
 ### Negative
@@ -622,8 +621,8 @@ Prove the core assumption before building the full feature: a class-side message
 
 Not part of this ADR, but enabled by it:
 - `ClassDescription` with method categorization/protocols
-- Full metaclass tower (ADR 0074 Phases 1-5)
-- `CompiledMethod` objects and `>>` operator
+- Full metaclass tower — shipped in ADR 0036
+- `CompiledMethod` objects and `>>` operator — shipped in ADR 0033
 - Dynamic method addition/removal (`addSelector:withMethod:`)
 - Smart dispatch cache: sealed method promotion, hot call site caching based on profiling data
 

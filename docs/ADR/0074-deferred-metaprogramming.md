@@ -56,7 +56,7 @@ thisContext restart      "Re-enter current frame"
 
 **What Beamtalk provides instead:**
 - `StackFrame` value class — post-exception introspection of stack traces with `method`, `moduleName`, `arguments`, `sourceLocation`
-- `Exception stackTrace` returns a list of `StackFrame` objects
+- Caught exceptions respond to `stackTrace`, returning a list of `StackFrame` objects
 - Compile-time method identity is available via `@primitive` metadata
 
 **Impact:** The main Smalltalk use cases for `thisContext` are debuggers and continuations. BEAM debuggers use `int` module tracing instead of stack reification. Continuations are better served by BEAM processes and message passing.

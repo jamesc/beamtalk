@@ -34,7 +34,7 @@ There is no macro system. All code runs at runtime.
 
 These Smalltalk reflection features cannot be implemented on the BEAM VM ([ADR 0074](ADR/0074-deferred-metaprogramming.md)):
 - **`become:`** — BEAM processes have separate heaps; object identity cannot be swapped. Use the proxy pattern (`doesNotUnderstand:` delegation) or registry pattern instead.
-- **`thisContext`** — BEAM does not expose stack frames as first-class objects. Post-exception stack traces are available via `Exception stackTrace` returning `StackFrame` objects.
+- **`thisContext`** — BEAM does not expose stack frames as first-class objects. Post-exception stack traces are available via `e stackTrace` on caught exception objects, returning `StackFrame` values.
 
 ### Classes Are First-Class Values, Not Actors
 
