@@ -73,12 +73,15 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     %% BT-440: Test execution may take a long time; use longer timeout.
+    %% Class methods can do arbitrary I/O (HTTP, file, database), so the default
+    %% must accommodate network latency.  Test selectors get 5 minutes because a
+    %% full suite can run hundreds of tests sequentially.
     Timeout =
         case is_test_execution_selector(Selector) of
             % 5 minutes for test suites
             true -> 300000;
-            % default gen_server timeout
-            false -> 5000
+            % 60 seconds — class methods may do network I/O
+            false -> 60000
         end,
     case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
         {ok, Result} ->
@@ -139,7 +142,7 @@ metaclass_send(Pid, Selector, Args, Self) ->
     %% `self species withAll: x` and similar dynamic class-side sends find
     %% user-defined class methods (e.g. `withAll:`) via the proper handler.
     %% Falls through to the Metaclass chain for built-in messages (`new`, `class`, etc.).
-    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}) of
+    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}, 60000) of
         {ok, Result} ->
             Result;
         {error, not_found} ->
