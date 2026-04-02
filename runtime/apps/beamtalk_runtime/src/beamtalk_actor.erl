@@ -722,7 +722,9 @@ sync_send_remote(ActorPid, Selector, Args) ->
                         {error, {ErlType, ErrorValue}} ->
                             %% Backward compat: safe_dispatch without stacktrace —
                             %% still pass exception class to preserve error kind
-                            error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, []));
+                            error(
+                                beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, [])
+                            );
                         {error, Error} ->
                             error(beamtalk_exception_handler:ensure_wrapped(Error));
                         DirectValue ->
@@ -785,7 +787,11 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                                     );
                                 {error, {ErlType, ErrorValue}} ->
                                     %% Backward compat: preserve exception class
-                                    error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, []));
+                                    error(
+                                        beamtalk_exception_handler:ensure_wrapped(
+                                            ErlType, ErrorValue, []
+                                        )
+                                    );
                                 {error, Error} ->
                                     error(beamtalk_exception_handler:ensure_wrapped(Error));
                                 DirectValue ->
