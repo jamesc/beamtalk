@@ -1813,7 +1813,8 @@ extension_error_propagation_test() ->
     Pid = element(4, Object),
     try
         Result = gen_server:call(Pid, {crashMethod, []}),
-        ?assertMatch({error, {error, extension_crash}}, Result),
+        %% BT-1822: safe_dispatch now includes stacktrace in error tuple
+        ?assertMatch({error, {error, extension_crash, _Stacktrace}}, Result),
         {ok, 0} = gen_server:call(Pid, {getValue, []})
     after
         gen_server:stop(Pid),
