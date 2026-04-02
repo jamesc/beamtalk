@@ -8115,6 +8115,417 @@ fn union_type_param_bounds_mixed_conformance_hints() {
     );
 }
 
+// ---- BT-1834: Generic return type resolution ----
+
+/// BT-1834: List(E) first returns E, resolved to concrete type via substitution.
+#[test]
+fn generic_list_first_returns_element_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    // Simulate a variable typed as List(String)
+    env.set(
+        "names",
+        InferredType::Known {
+            class_name: eco_string("List"),
+            type_args: vec![InferredType::known("String")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(var("names"), MessageSelector::Unary("first".into()), vec![]),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("String"),
+        "List(String) first should return String, got: {result:?}"
+    );
+}
+
+/// BT-1834: List(E) last returns E.
+#[test]
+fn generic_list_last_returns_element_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "nums",
+        InferredType::Known {
+            class_name: eco_string("List"),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(var("nums"), MessageSelector::Unary("last".into()), vec![]),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "List(Integer) last should return Integer, got: {result:?}"
+    );
+}
+
+/// BT-1834: List(E) at: returns E.
+#[test]
+fn generic_list_at_returns_element_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "items",
+        InferredType::Known {
+            class_name: eco_string("List"),
+            type_args: vec![InferredType::known("Float")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("items"),
+            MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
+            vec![int_lit(1)],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("Float"),
+        "List(Float) at: should return Float, got: {result:?}"
+    );
+}
+
+/// BT-1834: Array(E) at: returns E (existing functionality, regression check).
+#[test]
+fn generic_array_at_returns_element_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "arr",
+        InferredType::Known {
+            class_name: eco_string("Array"),
+            type_args: vec![InferredType::known("String")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("arr"),
+            MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
+            vec![int_lit(1)],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("String"),
+        "Array(String) at: should return String, got: {result:?}"
+    );
+}
+
+/// BT-1834: Dictionary(K, V) at: returns V.
+#[test]
+fn generic_dictionary_at_returns_value_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "dict",
+        InferredType::Known {
+            class_name: eco_string("Dictionary"),
+            type_args: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("dict"),
+            MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
+            vec![str_lit("key")],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "Dictionary(String, Integer) at: should return Integer, got: {result:?}"
+    );
+}
+
+/// BT-1834: Nested generics — Dictionary(String, Array(Integer)) at: returns Array(Integer).
+#[test]
+fn generic_nested_dictionary_at_returns_nested_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "nested",
+        InferredType::Known {
+            class_name: eco_string("Dictionary"),
+            type_args: vec![
+                InferredType::known("String"),
+                InferredType::Known {
+                    class_name: eco_string("Array"),
+                    type_args: vec![InferredType::known("Integer")],
+                    provenance: TypeProvenance::Declared(span()),
+                },
+            ],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("nested"),
+            MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
+            vec![str_lit("key")],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    // Should return Array(Integer)
+    match &result {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "Array");
+            assert_eq!(type_args.len(), 1);
+            assert_eq!(
+                type_args[0].as_known().map(EcoString::as_str),
+                Some("Integer")
+            );
+        }
+        other => panic!("Expected Known(Array(Integer)), got: {other:?}"),
+    }
+}
+
+/// BT-1834: Block value returns the last type arg.
+#[test]
+fn generic_block_value_returns_last_type_arg() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    // Block(String) — zero-arg block returning String
+    env.set(
+        "blk",
+        InferredType::Known {
+            class_name: eco_string("Block"),
+            type_args: vec![InferredType::known("String")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(var("blk"), MessageSelector::Unary("value".into()), vec![]),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("String"),
+        "Block(String) value should return String, got: {result:?}"
+    );
+}
+
+/// BT-1834: Block(A, R) value: returns R (last type arg).
+#[test]
+fn generic_block_value_colon_returns_last_type_arg() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    // Block(Integer, String) — one-arg block taking Integer, returning String
+    env.set(
+        "blk",
+        InferredType::Known {
+            class_name: eco_string("Block"),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("String"),
+            ],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("blk"),
+            MessageSelector::Keyword(vec![KeywordPart::new("value:", span())]),
+            vec![int_lit(42)],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("String"),
+        "Block(Integer, String) value: should return String, got: {result:?}"
+    );
+}
+
+/// BT-1834: Unresolvable type params fall back to Dynamic (no regression).
+#[test]
+fn generic_unresolved_type_param_falls_back_to_dynamic() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    // Bare List without type args — first should be Dynamic
+    env.set("plain", InferredType::known("List"));
+
+    let result = checker.infer_expr(
+        &msg_send(var("plain"), MessageSelector::Unary("first".into()), vec![]),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert!(
+        matches!(result, InferredType::Dynamic),
+        "List (no type args) first should fall back to Dynamic, got: {result:?}"
+    );
+}
+
+/// BT-1834: Plain param type inference — inject:into: resolves A from initial arg.
+#[test]
+fn generic_inject_into_resolves_accumulator_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "arr",
+        InferredType::Known {
+            class_name: eco_string("Array"),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    // arr inject: 0 into: [:acc :x | acc + x]
+    // A should be inferred as Integer from the initial value argument
+    let block = Expression::Block(Block::new(
+        vec![
+            crate::ast::BlockParameter::new("acc", span()),
+            crate::ast::BlockParameter::new("x", span()),
+        ],
+        vec![bare(msg_send(
+            var("acc"),
+            MessageSelector::Binary("+".into()),
+            vec![var("x")],
+        ))],
+        span(),
+    ));
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("arr"),
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("inject:", span()),
+                KeywordPart::new("into:", span()),
+            ]),
+            vec![int_lit(0), block],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "inject: 0 into: should return Integer (inferred from initial), got: {result:?}"
+    );
+}
+
+/// BT-1834: List(E) detect: returns E.
+#[test]
+fn generic_list_detect_returns_element_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "strs",
+        InferredType::Known {
+            class_name: eco_string("List"),
+            type_args: vec![InferredType::known("String")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let block = Expression::Block(Block::new(
+        vec![crate::ast::BlockParameter::new("x", span())],
+        vec![bare(msg_send(
+            var("x"),
+            MessageSelector::Binary(">".into()),
+            vec![str_lit("a")],
+        ))],
+        span(),
+    ));
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("strs"),
+            MessageSelector::Keyword(vec![KeywordPart::new("detect:", span())]),
+            vec![block],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("String"),
+        "List(String) detect: should return String, got: {result:?}"
+    );
+}
+
+/// BT-1834: Behaviour superclass returns Behaviour | Nil.
+#[test]
+fn behaviour_superclass_returns_union_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let method = hierarchy.find_method("Behaviour", "superclass");
+    assert!(method.is_some(), "Behaviour should have superclass method");
+    assert_eq!(
+        method.unwrap().return_type.as_deref(),
+        Some("Behaviour | Nil"),
+        "superclass should return Behaviour | Nil"
+    );
+}
+
 // --- BT-1835: Union syntax in builtin param_types ---
 
 #[test]

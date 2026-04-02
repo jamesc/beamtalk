@@ -17,7 +17,7 @@
 /// #(1, 2, 3) first         // => 1
 /// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
 /// ```
-sealed typed Collection subclass: List
+sealed typed Collection subclass: List(E)
 
   /// Create a List from a list (identity — a list is already a List).
   ///
@@ -28,7 +28,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// List class withAll: #(1, 2, 3)   // => #(1, 2, 3)
   /// ```
-  class withAll: list :: List -> List => @primitive "withAll:"
+  class withAll: list :: List -> List(E) => @primitive "withAll:"
 
   /// Create a List from a list. Convenience alias for `withAll:`.
   ///
@@ -36,7 +36,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// List new: #(1, 2, 3)             // => #(1, 2, 3)
   /// ```
-  class new: elements :: List -> List => self withAll: elements
+  class new: elements :: List -> List(E) => self withAll: elements
 
   /// Number of elements in the list.
   ///
@@ -62,7 +62,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) first         // => 1
   /// ```
-  first => @primitive "first"
+  first -> E => @primitive "first"
 
   /// Return all elements except the first (the tail).
   ///
@@ -70,7 +70,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) rest          // => #(2, 3)
   /// ```
-  rest -> List => @primitive "rest"
+  rest -> List(E) => @primitive "rest"
 
   /// Return the last element.
   ///
@@ -78,7 +78,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) last          // => 3
   /// ```
-  last => @primitive "last"
+  last -> E => @primitive "last"
 
   /// Return the element at the given 1-based index.
   ///
@@ -86,7 +86,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(10, 20, 30) at: 2      // => 20
   /// ```
-  at: index :: Integer => @primitive "at:"
+  at: index :: Integer -> E => @primitive "at:"
 
   /// Test if the list contains the given item.
   ///
@@ -95,7 +95,7 @@ sealed typed Collection subclass: List
   /// #(1, 2, 3) includes: 2   // => true
   /// #(1, 2, 3) includes: 9   // => false
   /// ```
-  includes: item :: Object -> Boolean => @primitive "includes:"
+  includes: item :: E -> Boolean => @primitive "includes:"
 
   /// Sort the list in ascending order.
   ///
@@ -103,7 +103,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(3, 1, 2) sort          // => #(1, 2, 3)
   /// ```
-  sort -> List => @primitive "sort"
+  sort -> List(E) => @primitive "sort"
 
   /// Sort the list using a custom comparator block.
   ///
@@ -111,7 +111,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(3, 1, 2) sort: [:a :b | a > b]   // => #(3, 2, 1)
   /// ```
-  sort: comparator :: Block -> List => @primitive "sort:"
+  sort: comparator :: Block(E, E, Boolean) -> List(E) => @primitive "sort:"
 
   /// Reverse the order of elements.
   ///
@@ -119,7 +119,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) reversed      // => #(3, 2, 1)
   /// ```
-  reversed -> List => @primitive "reversed"
+  reversed -> List(E) => @primitive "reversed"
 
   /// Remove duplicate elements.
   ///
@@ -127,7 +127,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 2, 3) unique     // => #(1, 2, 3)
   /// ```
-  unique -> List => @primitive "unique"
+  unique -> List(E) => @primitive "unique"
 
   /// Find the first element for which `block` returns true.
   ///
@@ -135,7 +135,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]   // => 2
   /// ```
-  detect: block :: Block => @primitive "detect:"
+  detect: block :: Block(E, Boolean) -> E => @primitive "detect:"
 
   /// Find the first element matching `block`, or evaluate `default` if none.
   ///
@@ -143,7 +143,8 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]   // => 0
   /// ```
-  detect: block :: Block ifNone: default :: Block => @primitive "detect:ifNone:"
+  detect: block :: Block(E, Boolean) ifNone: default :: Block(E) -> E =>
+    @primitive "detect:ifNone:"
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -151,7 +152,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block -> Nil => @primitive "do:"
+  do: block :: Block(E, Object) -> Nil => @primitive "do:"
 
   /// Collect results of evaluating `block` on each element.
   ///
@@ -159,7 +160,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]   // => #(2, 4, 6)
   /// ```
-  collect: block :: Block -> List => @primitive "collect:"
+  collect: block :: Block(E, R) -> List(R) => @primitive "collect:"
 
   /// Select elements for which `block` returns true.
   ///
@@ -167,7 +168,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]   // => #(3, 4)
   /// ```
-  select: block :: Block -> List => @primitive "select:"
+  select: block :: Block(E, Boolean) -> List(E) => @primitive "select:"
 
   /// Reject elements for which `block` returns true.
   ///
@@ -175,7 +176,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]   // => #(1, 2)
   /// ```
-  reject: block :: Block -> List => @primitive "reject:"
+  reject: block :: Block(E, Boolean) -> List(E) => @primitive "reject:"
 
   /// Reduce the list with an accumulator. Evaluates `block` with accumulator and each element.
   ///
@@ -183,7 +184,8 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) inject: 0 into: [:sum :x | sum + x]   // => 6
   /// ```
-  inject: initial into: block :: Block => @primitive "inject:into:"
+  inject: initial :: A into: block :: Block(A, E, A) -> A =>
+    @primitive "inject:into:"
 
   /// Return the first `n` elements.
   ///
@@ -191,7 +193,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) take: 2          // => #(1, 2)
   /// ```
-  take: n :: Integer -> List => @primitive "take:"
+  take: n :: Integer -> List(E) => @primitive "take:"
 
   /// Return all elements after the first `n`.
   ///
@@ -199,7 +201,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) drop: 2          // => #(3, 4)
   /// ```
-  drop: n :: Integer -> List => @primitive "drop:"
+  drop: n :: Integer -> List(E) => @primitive "drop:"
 
   /// Flatten one level of nested lists.
   ///
@@ -207,7 +209,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(#(1, 2), #(3, 4)) flatten    // => #(1, 2, 3, 4)
   /// ```
-  flatten -> List => @primitive "flatten"
+  flatten -> List(E) => @primitive "flatten"
 
   /// Map each element with `block` then flatten one level.
   ///
@@ -215,7 +217,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2) flatMap: [:x | #(x, x * 10)]   // => #(1, 10, 2, 20)
   /// ```
-  flatMap: block :: Block -> List => @primitive "flatMap:"
+  flatMap: block :: Block(E, List) -> List => @primitive "flatMap:"
 
   /// Count elements for which `block` returns true.
   ///
@@ -223,7 +225,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) count: [:x | x > 2]      // => 2
   /// ```
-  count: block :: Block -> Integer => @primitive "count:"
+  count: block :: Block(E, Boolean) -> Integer => @primitive "count:"
 
   /// Test if any element satisfies `block`.
   ///
@@ -231,7 +233,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) anySatisfy: [:x | x > 2]    // => true
   /// ```
-  anySatisfy: block :: Block -> Boolean => @primitive "anySatisfy:"
+  anySatisfy: block :: Block(E, Boolean) -> Boolean => @primitive "anySatisfy:"
 
   /// Test if all elements satisfy `block`.
   ///
@@ -239,7 +241,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(2, 4, 6) allSatisfy: [:x | x isEven] // => true
   /// ```
-  allSatisfy: block :: Block -> Boolean => @primitive "allSatisfy:"
+  allSatisfy: block :: Block(E, Boolean) -> Boolean => @primitive "allSatisfy:"
 
   /// Concatenate two lists.
   ///
@@ -247,7 +249,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2) ++ #(3, 4)              // => #(1, 2, 3, 4)
   /// ```
-  ++ other :: List -> List => @primitive "++"
+  ++ other :: List(E) -> List(E) => @primitive "++"
 
   /// Return a developer-readable string representation.
   ///
@@ -267,7 +269,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(10, 20, 30, 40) from: 2 to: 3 // => #(20, 30)
   /// ```
-  from: start :: Integer to: end :: Integer -> List => @primitive "from:to:"
+  from: start :: Integer to: end :: Integer -> List(E) => @primitive "from:to:"
 
   /// Return the 1-based index of the first occurrence, or `nil` if not found.
   ///
@@ -292,7 +294,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
   /// ```
-  eachWithIndex: block :: Block -> Nil =>
+  eachWithIndex: block :: Block(E, Integer, Object) -> Nil =>
     self
       inject: 0
       into: [:i :each |
@@ -308,7 +310,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2) zip: #("a", "b")        // => #(#(1, "a"), #(2, "b"))
   /// ```
-  zip: other :: List -> List => @primitive "zip:"
+  zip: other :: List -> List(List) => @primitive "zip:"
 
   /// Group elements by the result of `block` into a Dictionary.
   ///
@@ -324,7 +326,8 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) partition: [:x | x isEven]
   /// ```
-  partition: block :: Block -> List => @primitive "partition:"
+  partition: block :: Block(E, Boolean) -> List(List(E)) =>
+    @primitive "partition:"
 
   /// Take elements from the front while `block` returns true.
   ///
@@ -332,7 +335,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) takeWhile: [:x | x < 3]    // => #(1, 2)
   /// ```
-  takeWhile: block :: Block -> List => @primitive "takeWhile:"
+  takeWhile: block :: Block(E, Boolean) -> List(E) => @primitive "takeWhile:"
 
   /// Drop elements from the front while `block` returns true.
   ///
@@ -340,7 +343,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3, 4) dropWhile: [:x | x < 3]    // => #(3, 4)
   /// ```
-  dropWhile: block :: Block -> List => @primitive "dropWhile:"
+  dropWhile: block :: Block(E, Boolean) -> List(E) => @primitive "dropWhile:"
 
   /// Insert `separator` between each pair of elements.
   ///
@@ -348,7 +351,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) intersperse: 0        // => #(1, 0, 2, 0, 3)
   /// ```
-  intersperse: separator :: Object -> List => @primitive "intersperse:"
+  intersperse: separator :: E -> List(E) => @primitive "intersperse:"
 
   /// Prepend an item to the front of the list in O(1) time (returns a new list).
   ///
@@ -357,7 +360,7 @@ sealed typed Collection subclass: List
   /// #(2, 3) addFirst: 1              // => #(1, 2, 3)
   /// #() addFirst: "x"               // => #("x")
   /// ```
-  addFirst: item :: Object -> List => @primitive "addFirst:"
+  addFirst: item :: E -> List(E) => @primitive "addFirst:"
 
   /// Append an item to the end of the list (returns a new list).
   ///
@@ -365,7 +368,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2) add: 3                   // => #(1, 2, 3)
   /// ```
-  add: item :: Object -> List => @primitive "add:"
+  add: item :: E -> List(E) => @primitive "add:"
 
   /// Return a lazy Stream over the list elements.
   ///
@@ -381,7 +384,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(10, 20, 30) atRandom           // => one of 10, 20, 30
   /// ```
-  atRandom => @primitive "atRandom"
+  atRandom -> E => @primitive "atRandom"
 
   /// Join a list of strings into a single string (no separator).
   ///
