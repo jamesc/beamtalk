@@ -6,7 +6,6 @@
 //! **DDD Context:** CLI
 
 use std::fs;
-use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -91,23 +90,15 @@ pub fn create_workspace(
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
 ///
-/// `otp_app_name` is forwarded to [`start_detached_node`]: when `Some`, the named
+/// `config.otp_app_name` is forwarded to [`start_detached_node`]: when `Some`, the named
 /// OTP application is started inside the workspace after class bootstrap completes,
 /// ensuring all project classes are registered before the supervisor's `init/1` runs.
-#[allow(clippy::too_many_arguments)] // workspace startup requires many independent parameters
 pub fn get_or_start_workspace(
     project_path: &Path,
     workspace_name: Option<&str>,
-    port: u16,
     beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
-    auto_cleanup: bool,
-    max_idle_seconds: Option<u64>,
-    bind_addr: Option<Ipv4Addr>,
-    web_port: Option<u16>,
-    log_level: &str,
-    otp_app_name: Option<&str>,
-    hex_dep_names: &[String],
+    config: &super::WorkspaceConfig<'_>,
 ) -> Result<(NodeInfo, bool, String)> {
     let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
@@ -157,19 +148,7 @@ pub fn get_or_start_workspace(
             std::thread::sleep(Duration::from_millis(EPMD_CONFLICT_RETRY_INTERVAL_MS));
         }
 
-        match start_detached_node(
-            &workspace_id,
-            port,
-            beam_paths,
-            extra_code_paths,
-            auto_cleanup,
-            max_idle_seconds,
-            bind_addr,
-            web_port,
-            log_level,
-            otp_app_name,
-            hex_dep_names,
-        ) {
+        match start_detached_node(&workspace_id, beam_paths, extra_code_paths, config) {
             Ok(node_info) => return Ok((node_info, true, workspace_id)),
             Err(e) => {
                 if attempt < EPMD_CONFLICT_MAX_RETRIES && is_epmd_name_conflict(&workspace_id) {
