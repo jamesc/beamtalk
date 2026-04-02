@@ -20,7 +20,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
-use ecow::EcoString;
+use ecow::{EcoString, eco_format};
 
 use super::{InferredType, TypeChecker, TypeEnv};
 
@@ -314,6 +314,23 @@ impl TypeChecker {
         if actual == expected {
             return true;
         }
+        // Singleton types: #foo is compatible with Symbol (its supertype)
+        // and with itself (already handled by equality above).
+        // Generic type params (K, V, T, etc.) are always compatible (conservative).
+        if expected.starts_with('#') {
+            return actual == "Symbol"
+                || actual == expected
+                || super::is_generic_type_param(actual);
+        }
+        if actual.starts_with('#') {
+            // Singletons are subtypes of Symbol — check if expected is Symbol
+            // or an ancestor of Symbol in the class hierarchy.
+            if super::is_generic_type_param(expected) {
+                return true;
+            }
+            let symbol: EcoString = "Symbol".into();
+            return Self::is_type_compatible(&symbol, expected, hierarchy);
+        }
         // If either type isn't known to the hierarchy, don't warn (conservative)
         if !hierarchy.has_class(actual) || !hierarchy.has_class(expected) {
             return true;
@@ -433,7 +450,7 @@ impl TypeChecker {
             TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
                 Self::resolve_type_annotation(declared)
             }
-            TypeAnnotation::Singleton { .. } => return, // Singleton — not yet supported
+            TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
         };
 
         match &expected {
@@ -612,6 +629,7 @@ impl TypeChecker {
             && receiver_ty.as_str() == "String"
             && arg_ty.as_str() != "String"
             && arg_ty.as_str() != "Symbol"
+            && !arg_ty.starts_with('#')
         {
             // BT-1588: Use hint severity for generic type params (likely false positive)
             let mut diag = if is_generic {
@@ -767,7 +785,7 @@ impl TypeChecker {
     ///
     /// For union declared types (containing `|`), the value is assignable if it's
     /// compatible with any member. For generic types (`Result(Integer, Error)`),
-    /// compares the base type name. Singleton (`#`) types are still permissive.
+    /// compares the base type name. Singleton (`#`) types require an exact match or `Symbol`.
     pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
@@ -776,9 +794,15 @@ impl TypeChecker {
         if value_type == declared_type {
             return true;
         }
-        // Singleton types — permissive until that phase lands
+        // Singleton declared types: value must be the same singleton or Symbol
         if declared_type.starts_with('#') {
-            return true;
+            return value_type == "Symbol" || value_type == declared_type;
+        }
+        // Singleton value types: treat as Symbol for hierarchy assignability
+        // (e.g., #ok is assignable to Object, Symbol | nil, etc.)
+        if value_type.starts_with('#') {
+            let symbol: EcoString = "Symbol".into();
+            return Self::is_assignable_to(&symbol, declared_type, hierarchy);
         }
         // Union declared types: value must be compatible with at least one member
         if declared_type.contains('|') {
