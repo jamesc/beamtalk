@@ -777,6 +777,61 @@ impl TypeChecker {
         }
     }
 
+    /// Warn about typed state fields that have no default value and are not nilable.
+    ///
+    /// `state: name :: String` (no default) may be used uninitialized — emit a warning.
+    /// `state: name :: String | Nil` is fine (nil is valid), as is `state: name :: String = ""`.
+    pub(super) fn check_uninitialized_state(&mut self, class: &crate::ast::ClassDefinition) {
+        // Collect type parameter names — generic fields can't be validated.
+        let type_param_names: Vec<&str> = class
+            .type_params
+            .iter()
+            .map(|tp| tp.name.name.as_str())
+            .collect();
+        for decl in &class.state {
+            let Some(ref type_annotation) = decl.type_annotation else {
+                continue; // No type annotation — nothing to check
+            };
+            if decl.default_value.is_some() {
+                continue; // Has a default — won't be uninitialized
+            }
+            let declared_type = type_annotation.type_name();
+            if type_param_names.contains(&declared_type.as_str()) {
+                continue; // Generic type parameter — skip
+            }
+            if Self::is_nilable_type(type_annotation) {
+                continue; // Nilable union — nil is a valid initial value
+            }
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "State field `{}` declared as {declared_type} has no default value and may be used uninitialized",
+                        decl.name.name
+                    ),
+                    decl.span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!(
+                    "Add a default value (e.g., `state: {} :: {declared_type} = ...`) or make it nilable (`{declared_type} | Nil`)",
+                    decl.name.name
+                )),
+            );
+        }
+    }
+
+    /// Returns true if a type annotation includes `Nil` as a union member,
+    /// making nil a valid value for the field.
+    fn is_nilable_type(annotation: &TypeAnnotation) -> bool {
+        match annotation {
+            TypeAnnotation::Simple(id) => id.name == "Nil",
+            TypeAnnotation::Union { types, .. } => types.iter().any(Self::is_nilable_type),
+            TypeAnnotation::Singleton { .. }
+            | TypeAnnotation::Generic { .. }
+            | TypeAnnotation::FalseOr { .. }
+            | TypeAnnotation::SelfType { .. } => false,
+        }
+    }
+
     /// Returns true if `value_type` is assignable to `declared_type`.
     ///
     /// A type is assignable if it is the same type or a subclass of the declared type.
