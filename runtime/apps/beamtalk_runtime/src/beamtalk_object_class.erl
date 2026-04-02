@@ -302,10 +302,10 @@ has_method(ClassPid, Selector) ->
                             try
                                 ModuleName:has_method(Selector)
                             catch
-                                Class:Reason:ST ->
+                                Kind:Reason:ST ->
                                     ?LOG_DEBUG(
                                         "has_method check failed for ~p:~p: ~p:~p",
-                                        [ModuleName, Selector, Class, Reason],
+                                        [ModuleName, Selector, Kind, Reason],
                                         #{stacktrace => ST, domain => [beamtalk, runtime]}
                                     ),
                                     false
@@ -647,10 +647,10 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                         _ ->
                             ok
                     catch
-                        Class:Reason:ST ->
+                        Kind:Reason:ST ->
                             ?LOG_DEBUG(
                                 "Failed to read __beamtalk_meta from ~p: ~p:~p",
-                                [NewModule, Class, Reason],
+                                [NewModule, Kind, Reason],
                                 #{stacktrace => ST, domain => [beamtalk, runtime]}
                             ),
                             ok
@@ -839,10 +839,10 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
                                 SuperModule = module_name(SuperPid),
                                 has_class_new_in_chain(SuperName, SuperModule, Depth + 1)
                             catch
-                                Class:Reason:ST ->
+                                Kind:Reason:ST ->
                                     ?LOG_DEBUG(
                                         "has_class_new_in_chain failed for ~p: ~p:~p",
-                                        [SuperName, Class, Reason],
+                                        [SuperName, Kind, Reason],
                                         #{stacktrace => ST, domain => [beamtalk, runtime]}
                                     ),
                                     false
