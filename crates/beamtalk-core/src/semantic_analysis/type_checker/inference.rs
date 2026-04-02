@@ -1653,3 +1653,988 @@ impl TypeChecker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{
+        Block, BlockParameter, ExpectCategory, Expression, ExpressionStatement, Identifier,
+        KeywordPart, Literal, MessageSelector, ParameterDefinition, TypeAnnotation,
+    };
+    use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::source_analysis::Span;
+    use ecow::EcoString;
+    use std::collections::HashMap;
+
+    fn span() -> Span {
+        Span::new(0, 1)
+    }
+
+    fn ident(name: &str) -> Identifier {
+        Identifier {
+            name: name.into(),
+            span: span(),
+        }
+    }
+
+    fn var(name: &str) -> Expression {
+        Expression::Identifier(ident(name))
+    }
+
+    fn class_ref(name: &str) -> Expression {
+        Expression::ClassReference {
+            name: ident(name),
+            package: None,
+            span: span(),
+        }
+    }
+
+    fn int_lit(n: i64) -> Expression {
+        Expression::Literal(Literal::Integer(n), span())
+    }
+
+    fn str_lit(s: &str) -> Expression {
+        Expression::Literal(Literal::String(s.into()), span())
+    }
+
+    // ---- infer_literal ----
+
+    #[test]
+    fn infer_literal_integer() {
+        assert_eq!(
+            TypeChecker::infer_literal(&Literal::Integer(42)),
+            InferredType::known("Integer")
+        );
+    }
+
+    #[test]
+    fn infer_literal_float() {
+        assert_eq!(
+            TypeChecker::infer_literal(&Literal::Float(2.5)),
+            InferredType::known("Float")
+        );
+    }
+
+    #[test]
+    fn infer_literal_string() {
+        assert_eq!(
+            TypeChecker::infer_literal(&Literal::String("hello".into())),
+            InferredType::known("String")
+        );
+    }
+
+    #[test]
+    fn infer_literal_symbol() {
+        assert_eq!(
+            TypeChecker::infer_literal(&Literal::Symbol("ok".into())),
+            InferredType::known("Symbol")
+        );
+    }
+
+    #[test]
+    fn infer_literal_character() {
+        assert_eq!(
+            TypeChecker::infer_literal(&Literal::Character('x')),
+            InferredType::known("Character")
+        );
+    }
+
+    #[test]
+    fn infer_literal_list() {
+        assert_eq!(
+            TypeChecker::infer_literal(&Literal::List(vec![])),
+            InferredType::known("List")
+        );
+    }
+
+    // ---- resolve_type_annotation ----
+
+    #[test]
+    fn resolve_simple_type_annotation() {
+        let ann = TypeAnnotation::Simple(ident("Integer"));
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::known("Integer")
+        );
+    }
+
+    #[test]
+    fn resolve_nil_keyword_annotation() {
+        let ann = TypeAnnotation::Simple(ident("nil"));
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::known("UndefinedObject")
+        );
+    }
+
+    #[test]
+    fn resolve_false_keyword_annotation() {
+        let ann = TypeAnnotation::Simple(ident("false"));
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::known("False")
+        );
+    }
+
+    #[test]
+    fn resolve_true_keyword_annotation() {
+        let ann = TypeAnnotation::Simple(ident("true"));
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::known("True")
+        );
+    }
+
+    #[test]
+    fn resolve_generic_type_annotation() {
+        let ann = TypeAnnotation::Generic {
+            base: ident("Result"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("String")),
+            ],
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(type_args[0], InferredType::known("Integer"));
+                assert_eq!(type_args[1], InferredType::known("String"));
+            }
+            other => panic!("Expected Known, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_union_type_annotation() {
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("String")),
+                TypeAnnotation::Simple(ident("nil")),
+            ],
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("UndefinedObject")));
+            }
+            other => panic!("Expected Union, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_false_or_type_annotation() {
+        let ann = TypeAnnotation::FalseOr {
+            inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("Integer")));
+                assert!(members.contains(&InferredType::known("False")));
+            }
+            other => panic!("Expected Union, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_self_type_annotation() {
+        let ann = TypeAnnotation::SelfType { span: span() };
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::Dynamic
+        );
+    }
+
+    #[test]
+    fn resolve_singleton_type_annotation() {
+        let ann = TypeAnnotation::Singleton {
+            name: "north".into(),
+            span: span(),
+        };
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::Dynamic
+        );
+    }
+
+    // ---- resolve_type_name_string ----
+
+    #[test]
+    fn resolve_type_name_string_simple() {
+        assert_eq!(
+            TypeChecker::resolve_type_name_string(&"Integer".into()),
+            InferredType::known("Integer")
+        );
+    }
+
+    #[test]
+    fn resolve_type_name_string_nil_keyword() {
+        assert_eq!(
+            TypeChecker::resolve_type_name_string(&"nil".into()),
+            InferredType::known("UndefinedObject")
+        );
+    }
+
+    #[test]
+    fn resolve_type_name_string_union() {
+        let result = TypeChecker::resolve_type_name_string(&"String | nil".into());
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("UndefinedObject")));
+            }
+            other => panic!("Expected Union, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_type_name_string_three_way_union() {
+        let result = TypeChecker::resolve_type_name_string(&"Integer | String | nil".into());
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 3);
+                assert!(members.contains(&InferredType::known("Integer")));
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("UndefinedObject")));
+            }
+            other => panic!("Expected Union, got {other:?}"),
+        }
+    }
+
+    // ---- detect_narrowing ----
+
+    #[test]
+    fn detect_narrowing_is_nil() {
+        // x isNil
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("isNil".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect isNil");
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("UndefinedObject"));
+        assert!(info.is_nil_check);
+        assert!(info.responded_selector.is_none());
+    }
+
+    #[test]
+    fn detect_narrowing_is_kind_of() {
+        // x isKindOf: Integer
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "isKindOf:".into(),
+                span: span(),
+            }]),
+            arguments: vec![class_ref("Integer")],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect isKindOf:");
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Integer"));
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn detect_narrowing_class_eq() {
+        // x class = String
+        let class_send = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("class".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let expr = Expression::MessageSend {
+            receiver: Box::new(class_send),
+            selector: MessageSelector::Binary("=".into()),
+            arguments: vec![class_ref("String")],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =");
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("String"));
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn detect_narrowing_class_identity_eq() {
+        // x class =:= Float
+        let class_send = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("class".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let expr = Expression::MessageSend {
+            receiver: Box::new(class_send),
+            selector: MessageSelector::Binary("=:=".into()),
+            arguments: vec![class_ref("Float")],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =:=");
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Float"));
+    }
+
+    #[test]
+    fn detect_narrowing_responds_to() {
+        // x respondsTo: #doSomething
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "respondsTo:".into(),
+                span: span(),
+            }]),
+            arguments: vec![Expression::Literal(
+                Literal::Symbol("doSomething".into()),
+                span(),
+            )],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect respondsTo:");
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::Dynamic);
+        assert!(!info.is_nil_check);
+        assert_eq!(info.responded_selector.as_deref(), Some("doSomething"));
+    }
+
+    #[test]
+    fn detect_narrowing_responds_to_non_symbol() {
+        // x respondsTo: someVar (not a symbol literal — should not match)
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "respondsTo:".into(),
+                span: span(),
+            }]),
+            arguments: vec![var("someVar")],
+            is_cast: false,
+            span: span(),
+        };
+        assert!(TypeChecker::detect_narrowing(&expr).is_none());
+    }
+
+    #[test]
+    fn detect_narrowing_no_match() {
+        // x size (not a type-testing pattern)
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("size".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        assert!(TypeChecker::detect_narrowing(&expr).is_none());
+    }
+
+    #[test]
+    fn detect_narrowing_parenthesized_class_eq() {
+        // (x class) = Integer
+        let class_send = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("class".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let parens = Expression::Parenthesized {
+            expression: Box::new(class_send),
+            span: span(),
+        };
+        let expr = Expression::MessageSend {
+            receiver: Box::new(parens),
+            selector: MessageSelector::Binary("=".into()),
+            arguments: vec![class_ref("Integer")],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect (x class) = Type");
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Integer"));
+    }
+
+    // ---- non_nil_type ----
+
+    #[test]
+    fn non_nil_type_removes_nil_from_union() {
+        let ty = InferredType::simple_union(&["String", "nil"]);
+        let result = TypeChecker::non_nil_type(&ty);
+        assert_eq!(result, InferredType::known("String"));
+    }
+
+    #[test]
+    fn non_nil_type_preserves_non_nil_union() {
+        let ty = InferredType::simple_union(&["String", "Integer"]);
+        let result = TypeChecker::non_nil_type(&ty);
+        assert_eq!(result, ty);
+    }
+
+    #[test]
+    fn non_nil_type_all_nil_becomes_dynamic() {
+        // union_of with single member returns the member itself, so build manually
+        let ty = InferredType::Union {
+            members: vec![InferredType::known("UndefinedObject")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let result = TypeChecker::non_nil_type(&ty);
+        assert_eq!(result, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn non_nil_type_known_type_unchanged() {
+        let ty = InferredType::known("Integer");
+        let result = TypeChecker::non_nil_type(&ty);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn non_nil_type_dynamic_unchanged() {
+        let result = TypeChecker::non_nil_type(&InferredType::Dynamic);
+        assert_eq!(result, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn non_nil_type_three_member_union() {
+        let ty = InferredType::simple_union(&["String", "Integer", "nil"]);
+        let result = TypeChecker::non_nil_type(&ty);
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("Integer")));
+            }
+            other => panic!("Expected Union, got {other:?}"),
+        }
+    }
+
+    // ---- extract_variable_name ----
+
+    #[test]
+    fn extract_variable_name_from_ident() {
+        let expr = var("foo");
+        assert_eq!(
+            TypeChecker::extract_variable_name(&expr),
+            Some("foo".into())
+        );
+    }
+
+    #[test]
+    fn extract_variable_name_from_parenthesized() {
+        let expr = Expression::Parenthesized {
+            expression: Box::new(var("bar")),
+            span: span(),
+        };
+        assert_eq!(
+            TypeChecker::extract_variable_name(&expr),
+            Some("bar".into())
+        );
+    }
+
+    #[test]
+    fn extract_variable_name_from_non_ident() {
+        let expr = int_lit(42);
+        assert!(TypeChecker::extract_variable_name(&expr).is_none());
+    }
+
+    // ---- block_has_return ----
+
+    #[test]
+    fn block_has_return_true() {
+        let block = Block::new(
+            vec![],
+            vec![ExpressionStatement::bare(Expression::Return {
+                value: Box::new(int_lit(1)),
+                span: span(),
+            })],
+            span(),
+        );
+        assert!(TypeChecker::block_has_return(&block));
+    }
+
+    #[test]
+    fn block_has_return_false() {
+        let block = Block::new(vec![], vec![ExpressionStatement::bare(int_lit(42))], span());
+        assert!(!TypeChecker::block_has_return(&block));
+    }
+
+    #[test]
+    fn block_has_return_empty() {
+        let block = Block::new(vec![], vec![], span());
+        assert!(!TypeChecker::block_has_return(&block));
+    }
+
+    // ---- split_type_params ----
+
+    #[test]
+    fn split_type_params_simple() {
+        let result = TypeChecker::split_type_params("T, E");
+        assert_eq!(result, vec!["T", "E"]);
+    }
+
+    #[test]
+    fn split_type_params_single() {
+        let result = TypeChecker::split_type_params("Integer");
+        assert_eq!(result, vec!["Integer"]);
+    }
+
+    #[test]
+    fn split_type_params_nested() {
+        let result = TypeChecker::split_type_params("GenResult(A, B), E");
+        assert_eq!(result, vec!["GenResult(A, B)", "E"]);
+    }
+
+    #[test]
+    fn split_type_params_empty() {
+        let result = TypeChecker::split_type_params("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn split_type_params_deeply_nested() {
+        let result = TypeChecker::split_type_params("Outer(Inner(A, B), C), D");
+        assert_eq!(result, vec!["Outer(Inner(A, B), C)", "D"]);
+    }
+
+    // ---- substitute_return_type ----
+
+    #[test]
+    fn substitute_direct_param() {
+        let mut subst = HashMap::new();
+        subst.insert(EcoString::from("T"), InferredType::known("Integer"));
+        let result = TypeChecker::substitute_return_type("T", &subst, &HashMap::new());
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn substitute_method_local_param() {
+        let mut method_subst = HashMap::new();
+        method_subst.insert(EcoString::from("R"), InferredType::known("String"));
+        let result = TypeChecker::substitute_return_type("R", &HashMap::new(), &method_subst);
+        assert_eq!(result, InferredType::known("String"));
+    }
+
+    #[test]
+    fn substitute_method_local_takes_priority() {
+        let mut subst = HashMap::new();
+        subst.insert(EcoString::from("R"), InferredType::known("Integer"));
+        let mut method_subst = HashMap::new();
+        method_subst.insert(EcoString::from("R"), InferredType::known("String"));
+        let result = TypeChecker::substitute_return_type("R", &subst, &method_subst);
+        assert_eq!(result, InferredType::known("String"));
+    }
+
+    #[test]
+    fn substitute_generic_return_type() {
+        let mut subst = HashMap::new();
+        subst.insert(EcoString::from("T"), InferredType::known("Integer"));
+        subst.insert(EcoString::from("E"), InferredType::known("IOError"));
+        let result = TypeChecker::substitute_return_type("Result(T, E)", &subst, &HashMap::new());
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(type_args[0], InferredType::known("Integer"));
+                assert_eq!(type_args[1], InferredType::known("IOError"));
+            }
+            other => panic!("Expected Known, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_no_match_passes_through() {
+        let result =
+            TypeChecker::substitute_return_type("String", &HashMap::new(), &HashMap::new());
+        assert_eq!(result, InferredType::known("String"));
+    }
+
+    #[test]
+    fn substitute_generic_base_extracted() {
+        // When return type is "Array(R)" and R is not in subst, base "Array" is still extracted
+        let result =
+            TypeChecker::substitute_return_type("Array(R)", &HashMap::new(), &HashMap::new());
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Array");
+                assert_eq!(type_args.len(), 1);
+                // R not in subst, so it becomes Known("R")
+                assert_eq!(type_args[0], InferredType::known("R"));
+            }
+            other => panic!("Expected Known, got {other:?}"),
+        }
+    }
+
+    // ---- set_param_types ----
+
+    #[test]
+    fn set_param_types_untyped() {
+        let params = vec![ParameterDefinition::new(ident("x"))];
+        let mut env = TypeEnv::new();
+        TypeChecker::set_param_types(&mut env, &params);
+        assert_eq!(env.get("x"), Some(InferredType::Dynamic));
+    }
+
+    #[test]
+    fn set_param_types_typed() {
+        let params = vec![ParameterDefinition {
+            name: ident("x"),
+            type_annotation: Some(TypeAnnotation::Simple(ident("Integer"))),
+        }];
+        let mut env = TypeEnv::new();
+        TypeChecker::set_param_types(&mut env, &params);
+        assert_eq!(env.get("x"), Some(InferredType::known("Integer")));
+    }
+
+    #[test]
+    fn set_param_types_mixed() {
+        let params = vec![
+            ParameterDefinition {
+                name: ident("x"),
+                type_annotation: Some(TypeAnnotation::Simple(ident("String"))),
+            },
+            ParameterDefinition::new(ident("y")),
+        ];
+        let mut env = TypeEnv::new();
+        TypeChecker::set_param_types(&mut env, &params);
+        assert_eq!(env.get("x"), Some(InferredType::known("String")));
+        assert_eq!(env.get("y"), Some(InferredType::Dynamic));
+    }
+
+    // ---- infer_expr: core expression type inference ----
+
+    #[test]
+    fn infer_expr_integer_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&int_lit(42), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn infer_expr_string_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&str_lit("hello"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("String"));
+    }
+
+    #[test]
+    fn infer_expr_true_identifier() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&var("true"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Boolean"));
+    }
+
+    #[test]
+    fn infer_expr_false_identifier() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&var("false"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Boolean"));
+    }
+
+    #[test]
+    fn infer_expr_nil_identifier() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&var("nil"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("UndefinedObject"));
+    }
+
+    #[test]
+    fn infer_expr_self_identifier() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set("self", InferredType::known("Counter"));
+        let ty = checker.infer_expr(&var("self"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Counter"));
+    }
+
+    #[test]
+    fn infer_expr_env_variable() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set("myVar", InferredType::known("String"));
+        let ty = checker.infer_expr(&var("myVar"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("String"));
+    }
+
+    #[test]
+    fn infer_expr_unknown_var_is_dynamic() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&var("unknownVar"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn infer_expr_class_reference() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let ty = checker.infer_expr(&class_ref("Integer"), &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn infer_expr_assignment_tracks_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::Assignment {
+            target: Box::new(var("x")),
+            value: Box::new(int_lit(42)),
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Integer"));
+        // The variable should now be tracked in the environment
+        assert_eq!(env.get("x"), Some(InferredType::known("Integer")));
+    }
+
+    #[test]
+    fn infer_expr_block_returns_block_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let block = Expression::Block(Block::new(
+            vec![BlockParameter::new("x", span())],
+            vec![ExpressionStatement::bare(int_lit(1))],
+            span(),
+        ));
+        let ty = checker.infer_expr(&block, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Block"));
+    }
+
+    #[test]
+    fn infer_expr_map_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::MapLiteral {
+            pairs: vec![],
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Dictionary"));
+    }
+
+    #[test]
+    fn infer_expr_array_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::ArrayLiteral {
+            elements: vec![int_lit(1), int_lit(2)],
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Array"));
+    }
+
+    #[test]
+    fn infer_expr_list_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::ListLiteral {
+            elements: vec![int_lit(1)],
+            tail: None,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("List"));
+    }
+
+    #[test]
+    fn infer_expr_string_interpolation() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::StringInterpolation {
+            segments: vec![
+                crate::ast::StringSegment::Literal("hello ".into()),
+                crate::ast::StringSegment::Interpolation(var("name")),
+            ],
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("String"));
+    }
+
+    #[test]
+    fn infer_expr_return_propagates_value_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::Return {
+            value: Box::new(str_lit("done")),
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("String"));
+    }
+
+    #[test]
+    fn infer_expr_parenthesized_unwraps() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::Parenthesized {
+            expression: Box::new(int_lit(7)),
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn infer_expr_primitive_is_dynamic() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::Primitive {
+            name: "add".into(),
+            is_quoted: false,
+            is_intrinsic: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn infer_expr_match_is_dynamic() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::Match {
+            value: Box::new(int_lit(1)),
+            arms: vec![],
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(ty, InferredType::Dynamic);
+    }
+
+    // ---- build_substitution_map ----
+
+    #[test]
+    fn build_substitution_map_empty_args() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::build_substitution_map(&hierarchy, "Array", &[]);
+        assert!(result.is_empty());
+    }
+
+    // ---- infer_stmts ----
+
+    #[test]
+    fn infer_stmts_empty_is_dynamic() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let result = checker.infer_stmts(&[], &hierarchy, &mut env, false);
+        assert_eq!(result, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn infer_stmts_returns_last_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let stmts = vec![
+            ExpressionStatement::bare(int_lit(1)),
+            ExpressionStatement::bare(str_lit("hello")),
+        ];
+        let result = checker.infer_stmts(&stmts, &hierarchy, &mut env, false);
+        assert_eq!(result, InferredType::known("String"));
+    }
+
+    #[test]
+    fn infer_stmts_skips_expect_directives() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let stmts = vec![
+            ExpressionStatement::bare(int_lit(42)),
+            ExpressionStatement::bare(Expression::ExpectDirective {
+                category: ExpectCategory::Dnu,
+                span: span(),
+            }),
+        ];
+        // The last non-directive is int_lit(42), so result should be Integer
+        let result = checker.infer_stmts(&stmts, &hierarchy, &mut env, false);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn infer_stmts_stops_at_return() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let stmts = vec![
+            ExpressionStatement::bare(Expression::Return {
+                value: Box::new(int_lit(1)),
+                span: span(),
+            }),
+            ExpressionStatement::bare(str_lit("unreachable")),
+        ];
+        let result = checker.infer_stmts(&stmts, &hierarchy, &mut env, false);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    // ---- is_self_receiver ----
+
+    #[test]
+    fn is_self_receiver_true() {
+        assert!(TypeChecker::is_self_receiver(&var("self")));
+    }
+
+    #[test]
+    fn is_self_receiver_false_for_other_ident() {
+        assert!(!TypeChecker::is_self_receiver(&var("other")));
+    }
+
+    #[test]
+    fn is_self_receiver_false_for_non_ident() {
+        assert!(!TypeChecker::is_self_receiver(&int_lit(1)));
+    }
+}
