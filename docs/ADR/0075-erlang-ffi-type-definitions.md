@@ -80,10 +80,10 @@ At build time, the compiler reads the `abstract_code` chunk from compiled `.beam
 
 **How it works:**
 
-1. An Erlang helper module (`beamtalk_spec_reader.erl`) reads the `abstract_code` chunk via `beam_lib:chunks(File, [abstract_code])`, which contains:
-   - **`{attribute, _, spec, ...}` forms** — function type signatures with named type variables (e.g., `From :: integer()`, `Elem :: T`). Provides both types AND meaningful parameter names.
-   - **`{function, _, Name, Arity, Clauses}` forms** — function clause parameter names as a fallback when spec variable names are generic (e.g., `_` or single-letter). Available in the same chunk.
-   - No `.erl` source parsing needed — `abstract_code` contains everything.
+1. An Erlang helper module (`beamtalk_spec_reader.erl`) reads two chunks in a single `beam_lib:chunks(File, [abstract_code, "Docs"])` call:
+   - **`abstract_code` chunk** — contains `{attribute, _, spec, ...}` forms (function type signatures with named type variables like `From :: integer()`, `Elem :: T`) and `{function, _, Name, Arity, Clauses}` forms (clause param names as fallback). Provides types AND meaningful parameter names.
+   - **`"Docs"` chunk (EEP-48)** — contains per-function documentation strings, examples, and function signatures in the `{docs_v1, ...}` format. Available in OTP 25+ and most Hex packages. Flows to `:help Erlang <module>` and LSP hover.
+   - No `.erl` source parsing needed — both chunks contain everything.
 2. The Rust compiler invokes it via the existing `beamtalk_build_worker` pattern (same mechanism used for `.core` → `.beam` compilation)
 3. The Erlang→Beamtalk type mapping (reverse of `spec_codegen.rs`) converts Erlang abstract type representations to `InferredType` values, using spec variable names as keyword names
 4. Results are cached per module and invalidated when `.beam` file timestamps change
@@ -442,6 +442,16 @@ Only `member` needs human refinement (`Dynamic` → `T`). The keyword names are 
 > Erlang lists reverse: 42
 ⚠️ Warning: lists:reverse/1 parameter 1 expects List(T), got Integer
   (type from stubs/lists.bt:5)
+
+> :help Erlang lists reverse
+  reverse: list :: List(T) -> List(T)
+
+  Returns a list with the elements in List1 in reverse order.
+
+  ## Examples
+    lists:reverse([1, 2, 3, 4]) → [4, 3, 2, 1]
+
+  (from lists.beam EEP-48 docs)
 ```
 
 ### Error Examples
@@ -750,7 +760,7 @@ Basic typed completions ship in Phase 1. This phase adds richer tooling:
 2. **Signature help** — show parameter types as user types arguments
 3. **Go to type definition** — jump to stub file for stub-typed functions
 4. **Diagnostics** — surface type warnings from FFI calls in the editor
-5. **REPL `:help Erlang lists`** — extend `handle_help_topic()` to detect "Erlang <module>" and query `NativeTypeRegistry` for type info and doc comments from stubs
+5. **REPL `:help Erlang lists`** — extend `handle_help_topic()` to detect "Erlang <module>" and query `NativeTypeRegistry` for type signatures and EEP-48 doc strings. `:help Erlang lists reverse` shows the type signature plus the full Erlang doc with examples
 6. **REPL tab completion** — include type signatures in Erlang module completions (complements Phase 1's LSP completions with the same data in the REPL context)
 
 **Components:** `crates/beamtalk-lsp/src/completion_provider.rs` (extended), `crates/beamtalk-lsp/src/hover_provider.rs` (extended), `crates/beamtalk-cli/src/commands/repl/mod.rs` (extended)
