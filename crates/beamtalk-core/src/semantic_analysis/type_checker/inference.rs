@@ -133,6 +133,9 @@ impl TypeChecker {
 
             // Check state default values match declared types
             self.check_state_defaults(class, hierarchy);
+
+            // Warn about typed state fields with no default that aren't nilable
+            self.check_uninitialized_state(class);
         }
 
         // Check standalone method definitions (Tonel-style: `Counter >> increment => ...`)
