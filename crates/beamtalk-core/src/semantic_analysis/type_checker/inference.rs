@@ -800,15 +800,18 @@ impl TypeChecker {
                         &method.defined_in,
                     );
 
-                    // Apply generic substitution if we have type args
-                    if !subst.is_empty() {
-                        let method_subst = Self::infer_method_local_params(
-                            &method,
-                            &arg_types,
-                            &subst,
-                            hierarchy,
-                            &method.defined_in,
-                        );
+                    // Infer method-local type params from arguments (works for
+                    // any parametric param type: Block, Result, Array, etc.)
+                    let method_subst = Self::infer_method_local_params(
+                        &method,
+                        &arg_types,
+                        &subst,
+                        hierarchy,
+                        &method.defined_in,
+                    );
+
+                    // Apply generic substitution if we have type args or method-local params
+                    if !subst.is_empty() || !method_subst.is_empty() {
                         return Self::substitute_return_type(ret_ty, &subst, &method_subst);
                     }
 
@@ -1578,10 +1581,12 @@ impl TypeChecker {
         result
     }
 
-    /// Infer method-local type parameters (like `R` in `map:`) from call-site arguments.
+    /// Infer method-local type parameters from call-site arguments.
     ///
-    /// When a method parameter is annotated as `Block(T, R)`, and `T` is already known
-    /// from the class substitution, the block's actual return type can solve for `R`.
+    /// Extracts type params from ANY parametric parameter type — e.g., `Block(T, R)`,
+    /// `Result(T, E)`, `Array(T)`, `Dictionary(K, V)`. For each declared type parameter
+    /// in the param type, if it is method-local (not a class-level type param and not a
+    /// known class name), it is matched positionally against the argument's actual `type_args`.
     fn infer_method_local_params(
         method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
         arg_types: &[InferredType],
@@ -1608,28 +1613,30 @@ impl TypeChecker {
                 continue;
             };
 
-            // Handle Block(A, B, ..., R) parameter types
-            if param_type.starts_with("Block(") && param_type.ends_with(')') {
-                let inner = &param_type[6..param_type.len() - 1];
-                let block_params = Self::split_type_params(inner);
-                if let Some(last) = block_params.last() {
-                    let last_eco: EcoString = (*last).into();
-                    // If last param is not a class-level type param and not a known class,
-                    // it's a method-local type param (like R)
-                    if !class_type_params.contains(&last_eco) && !hierarchy.has_class(&last_eco) {
-                        // Try to infer R from the block argument's actual return type
-                        // For now, if the arg is a Block expression, infer from its body
-                        // This is a simplified version — blocks are Dynamic unless annotated
-                        if let InferredType::Known {
-                            class_name,
-                            type_args,
-                            ..
-                        } = arg_ty
-                        {
-                            if class_name.as_str() == "Block" && !type_args.is_empty() {
-                                // Block type_args: last is return type
-                                if let Some(ret) = type_args.last() {
-                                    method_subst.insert(last_eco, ret.clone());
+            // Handle any parametric type: TypeName(A, B, ...) parameter types
+            if let Some(open) = param_type.find('(') {
+                if param_type.ends_with(')') {
+                    let declared_base = &param_type[..open];
+                    let inner = &param_type[open + 1..param_type.len() - 1];
+                    let declared_params = Self::split_type_params(inner);
+
+                    // Match against the argument's actual type if it's a Known type
+                    if let InferredType::Known {
+                        class_name: arg_class,
+                        type_args,
+                        ..
+                    } = arg_ty
+                    {
+                        // Verify the base class matches (e.g., Block == Block, Result == Result)
+                        if arg_class.as_str() == declared_base && !type_args.is_empty() {
+                            // Zip declared params with actual type args positionally
+                            for (declared, actual) in declared_params.iter().zip(type_args.iter()) {
+                                let decl_eco: EcoString = (*declared).into();
+                                // Only infer if this is a method-local type param
+                                if !class_type_params.contains(&decl_eco)
+                                    && !hierarchy.has_class(&decl_eco)
+                                {
+                                    method_subst.insert(decl_eco, actual.clone());
                                 }
                             }
                         }

@@ -6521,3 +6521,209 @@ fn e0403_untyped_send_not_checked() {
         "Untyped dynamic send should not emit internal method error, got: {e0403_errors:?}"
     );
 }
+
+// ---- BT-1818: Generalized infer_method_local_params tests ----
+
+/// Add a non-parametric `Processor` class with methods that accept parametric param types.
+///
+/// - `processResult: r :: GenResult(T, E) -> T` — extracts T from a Result argument
+/// - `processArray: a :: Array(T) -> T` — extracts T from an Array argument
+fn add_processor_class(hierarchy: &mut ClassHierarchy) {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+    let info = ClassInfo {
+        name: eco_string("Processor"),
+        superclass: Some(eco_string("Value")),
+        is_sealed: true,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: true,
+        is_native: false,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        methods: vec![
+            MethodInfo {
+                selector: eco_string("processResult:"),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: eco_string("Processor"),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some(eco_string("T")),
+                param_types: vec![Some(eco_string("GenResult(T, E)"))],
+                doc: None,
+            },
+            MethodInfo {
+                selector: eco_string("processArray:"),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: eco_string("Processor"),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some(eco_string("T")),
+                param_types: vec![Some(eco_string("Array(T)"))],
+                doc: None,
+            },
+        ],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+
+    hierarchy.add_from_beam_meta(vec![info]);
+}
+
+/// BT-1818: Block inference still works after generalization (regression).
+/// `map:` on `GenResult(Integer, IOError)` with a `Block(Integer, String)` arg
+/// should infer R=String and return `GenResult(String, IOError)`.
+#[test]
+fn method_local_params_block_regression() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "r",
+        InferredType::Known {
+            class_name: eco_string("GenResult"),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("IOError"),
+            ],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+    // Simulate a block argument with type Block(Integer, String)
+    env.set(
+        "blk",
+        InferredType::Known {
+            class_name: eco_string("Block"),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("String"),
+            ],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result_ty = checker.infer_expr(
+        &msg_send(
+            var("r"),
+            MessageSelector::Keyword(vec![KeywordPart::new("map:", span())]),
+            vec![var("blk")],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    // map: returns GenResult(R, E) where R=String (from block return type), E=IOError
+    match &result_ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "GenResult");
+            assert_eq!(type_args.len(), 2);
+            assert_eq!(
+                type_args[0].as_known().map(EcoString::as_str),
+                Some("String"),
+                "R should be String from block return type"
+            );
+            assert_eq!(
+                type_args[1].as_known().map(EcoString::as_str),
+                Some("IOError"),
+                "E should remain IOError"
+            );
+        }
+        other => panic!("Expected Known type, got: {other:?}"),
+    }
+}
+
+/// BT-1818: Infer method-local params from Result(T, E) argument type.
+/// `processResult:` on non-parametric Processor with `GenResult(Integer, IOError)` arg
+/// should infer T=Integer and return Integer.
+#[test]
+fn method_local_params_from_result_type() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+    add_processor_class(&mut hierarchy);
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("p", InferredType::known("Processor"));
+    env.set(
+        "r",
+        InferredType::Known {
+            class_name: eco_string("GenResult"),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("IOError"),
+            ],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result_ty = checker.infer_expr(
+        &msg_send(
+            var("p"),
+            MessageSelector::Keyword(vec![KeywordPart::new("processResult:", span())]),
+            vec![var("r")],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    assert_eq!(
+        result_ty.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "processResult: with GenResult(Integer, IOError) should return Integer (T), got: {result_ty:?}"
+    );
+}
+
+/// BT-1818: Infer method-local params from Array(T) argument type.
+/// `processArray:` on non-parametric Processor with Array(String) arg
+/// should infer T=String and return String.
+#[test]
+fn method_local_params_from_array_type() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_processor_class(&mut hierarchy);
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("p", InferredType::known("Processor"));
+    env.set(
+        "a",
+        InferredType::Known {
+            class_name: eco_string("Array"),
+            type_args: vec![InferredType::known("String")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result_ty = checker.infer_expr(
+        &msg_send(
+            var("p"),
+            MessageSelector::Keyword(vec![KeywordPart::new("processArray:", span())]),
+            vec![var("a")],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    assert_eq!(
+        result_ty.as_known().map(EcoString::as_str),
+        Some("String"),
+        "processArray: with Array(String) should return String (T), got: {result_ty:?}"
+    );
+}
