@@ -819,7 +819,7 @@ impl TypeChecker {
                     // BT-1834: If the return type is an unresolved type param
                     // (single uppercase letter like E, T, V), fall back to Dynamic
                     // so downstream sends don't get false DNU warnings.
-                    if super::is_generic_type_param(ret_ty) {
+                    if super::is_generic_type_param(ret_ty) && !hierarchy.has_class(ret_ty) {
                         return InferredType::Dynamic;
                     }
 
