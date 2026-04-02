@@ -136,6 +136,7 @@ pub fn infer_types_and_returns(
 /// - Validates message sends against class method tables
 /// - Emits warnings for unknown selectors with hints
 /// - Protocol conformance checking for protocol-typed parameters (ADR 0068 Phase 2b)
+/// - FFI call type inference from `NativeTypeRegistry` (ADR 0075)
 #[derive(Debug)]
 pub struct TypeChecker {
     pub(super) diagnostics: Vec<Diagnostic>,
@@ -154,6 +155,12 @@ pub struct TypeChecker {
     /// requires the tested selector. Set by `check_module_with_protocols`
     /// before running the main type checking pass.
     pub(super) protocol_registry: Option<ProtocolRegistry>,
+    /// Native type registry for FFI call inference (ADR 0075).
+    ///
+    /// When set, enables return type inference and keyword mismatch warnings
+    /// for `Erlang <module> <function>:` calls. Populated from `.beam`
+    /// abstract code at build time.
+    pub(super) native_type_registry: Option<NativeTypeRegistry>,
 }
 
 impl TypeChecker {
@@ -166,6 +173,7 @@ impl TypeChecker {
             method_return_types: HashMap::new(),
             current_package: None,
             protocol_registry: None,
+            native_type_registry: None,
         }
     }
 
@@ -181,7 +189,16 @@ impl TypeChecker {
             method_return_types: HashMap::new(),
             current_package: Some(EcoString::from(package)),
             protocol_registry: None,
+            native_type_registry: None,
         }
+    }
+
+    /// Sets the native type registry for FFI call inference (ADR 0075).
+    ///
+    /// When set, `Erlang <module> <function>:` calls look up return types
+    /// and parameter types in the registry instead of defaulting to `Dynamic`.
+    pub fn set_native_type_registry(&mut self, registry: NativeTypeRegistry) {
+        self.native_type_registry = Some(registry);
     }
 
     /// Returns all diagnostics collected during type checking.

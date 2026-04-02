@@ -8280,3 +8280,505 @@ fn non_union_param_type_unchanged() {
         checker.diagnostics()
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0075: FFI call type inference from NativeTypeRegistry
+// ---------------------------------------------------------------------------
+
+/// Helper: Build an `Erlang <module>` receiver expression.
+/// Uses a different span (10,20) from the outer send so type map lookups are distinct.
+fn erlang_module_recv(module_name: &str) -> Expression {
+    Expression::MessageSend {
+        receiver: Box::new(class_ref("Erlang")),
+        selector: MessageSelector::Unary(module_name.into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(10, 20),
+    }
+}
+
+/// Helper: Build a keyword selector from parts.
+fn keyword_selector(parts: &[&str]) -> MessageSelector {
+    MessageSelector::Keyword(
+        parts
+            .iter()
+            .map(|kw| KeywordPart::new(*kw, span()))
+            .collect(),
+    )
+}
+
+/// Helper: Build a `NativeTypeRegistry` with lists module signatures.
+fn lists_registry() -> NativeTypeRegistry {
+    let mut reg = NativeTypeRegistry::new();
+    reg.register_module(
+        "lists",
+        vec![
+            FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+            },
+            FunctionSignature {
+                name: "seq".to_string(),
+                arity: 2,
+                params: vec![
+                    ParamType {
+                        keyword: Some(ecow::EcoString::from("from")),
+                        type_: InferredType::known("Integer"),
+                    },
+                    ParamType {
+                        keyword: Some(ecow::EcoString::from("to")),
+                        type_: InferredType::known("Integer"),
+                    },
+                ],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+            },
+            FunctionSignature {
+                name: "member".to_string(),
+                arity: 2,
+                params: vec![
+                    ParamType {
+                        keyword: Some(ecow::EcoString::from("elem")),
+                        type_: InferredType::Dynamic,
+                    },
+                    ParamType {
+                        keyword: Some(ecow::EcoString::from("list")),
+                        type_: InferredType::known("List"),
+                    },
+                ],
+                return_type: InferredType::known("Boolean"),
+                provenance: TypeProvenance::Extracted,
+            },
+            FunctionSignature {
+                name: "node".to_string(),
+                arity: 0,
+                params: vec![],
+                return_type: InferredType::known("Symbol"),
+                provenance: TypeProvenance::Extracted,
+            },
+        ],
+    );
+    reg
+}
+
+#[test]
+fn test_ffi_call_returns_typed_result() {
+    // Erlang lists reverse: #(1, 2, 3)
+    // With registry, should infer List (not Dynamic)
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["reverse:"]),
+        vec![Expression::ListLiteral {
+            elements: vec![int_lit(1), int_lit(2), int_lit(3)],
+            tail: None,
+            span: span(),
+        }],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    // Check the type map — the outer message send should have type List
+    let send_type = checker.type_map().get(span());
+    assert_eq!(
+        send_type,
+        Some(&InferredType::known("List")),
+        "FFI call should infer List return type"
+    );
+}
+
+#[test]
+fn test_ffi_call_multi_arg_returns_typed_result() {
+    // Erlang lists seq: 1 to: 10
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["seq:", "to:"]),
+        vec![int_lit(1), int_lit(10)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let send_type = checker.type_map().get(span());
+    assert_eq!(
+        send_type,
+        Some(&InferredType::known("List")),
+        "Multi-arg FFI call should infer List return type"
+    );
+}
+
+#[test]
+fn test_ffi_call_no_registry_falls_back_to_dynamic() {
+    // Without registry, FFI calls should return Dynamic (no regression)
+    // and should not produce any FFI-specific diagnostics.
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["reverse:"]),
+        vec![int_lit(42)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    // No registry set
+    checker.check_module(&module, &hierarchy);
+
+    let ffi_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("FFI keyword")
+                || d.message.contains("expects List")
+                || d.message.contains("lists:")
+        })
+        .collect();
+    assert!(
+        ffi_diags.is_empty(),
+        "Without registry, no FFI-specific diagnostics should be emitted. Got: {ffi_diags:?}"
+    );
+}
+
+#[test]
+fn test_ffi_call_unknown_function_falls_back_to_dynamic() {
+    // Known module, unknown function → Dynamic (no FFI diagnostics)
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["unknown_fn:"]),
+        vec![int_lit(1)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let ffi_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("FFI keyword") || d.message.contains("lists:"))
+        .collect();
+    assert!(
+        ffi_diags.is_empty(),
+        "Unknown function should not produce FFI diagnostics. Got: {ffi_diags:?}"
+    );
+}
+
+#[test]
+fn test_ffi_call_unknown_module_falls_back_to_dynamic() {
+    // Unknown module → Dynamic (no FFI diagnostics)
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("unknown_mod"),
+        keyword_selector(&["foo:"]),
+        vec![int_lit(1)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let ffi_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("FFI keyword") || d.message.contains("unknown_mod:"))
+        .collect();
+    assert!(
+        ffi_diags.is_empty(),
+        "Unknown module should not produce FFI diagnostics. Got: {ffi_diags:?}"
+    );
+}
+
+#[test]
+fn test_ffi_variable_tracking_through_assignment() {
+    // proxy := Erlang lists
+    // proxy reverse: #(1, 2, 3)
+    // → proxy should have type ErlangModule<lists>, reverse should infer List
+    let module = make_module(vec![
+        assign("proxy", erlang_module_recv("lists")),
+        msg_send(
+            var("proxy"),
+            keyword_selector(&["reverse:"]),
+            vec![Expression::ListLiteral {
+                elements: vec![int_lit(1)],
+                tail: None,
+                span: span(),
+            }],
+        ),
+    ]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let send_type = checker.type_map().get(span());
+    assert_eq!(
+        send_type,
+        Some(&InferredType::known("List")),
+        "Variable-tracked FFI call should infer List return type"
+    );
+}
+
+#[test]
+fn test_ffi_keyword_mismatch_warning() {
+    // Erlang lists seq: 1 foo: 10
+    // Should warn: 'foo:' does not match 'to:' for lists:seq/2 parameter 2
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["seq:", "foo:"]),
+        vec![int_lit(1), int_lit(10)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let keyword_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not match"))
+        .collect();
+    assert_eq!(
+        keyword_warnings.len(),
+        1,
+        "Should emit keyword mismatch warning. Diagnostics: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        keyword_warnings[0].message.contains("foo"),
+        "Warning should mention the mismatched keyword 'foo'"
+    );
+    assert!(
+        keyword_warnings[0].message.contains("to"),
+        "Warning should mention the expected keyword 'to'"
+    );
+}
+
+#[test]
+fn test_ffi_keyword_with_suppressed() {
+    // Erlang lists seq: 1 with: 10
+    // `with:` is the universal fallback — should NOT warn
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["seq:", "with:"]),
+        vec![int_lit(1), int_lit(10)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let keyword_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not match"))
+        .collect();
+    assert!(
+        keyword_warnings.is_empty(),
+        "with: fallback should suppress keyword mismatch warning. Got: {keyword_warnings:?}"
+    );
+}
+
+#[test]
+fn test_ffi_keyword_matching_no_warning() {
+    // Erlang lists seq: 1 to: 10
+    // Keywords match — no warning
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["seq:", "to:"]),
+        vec![int_lit(1), int_lit(10)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let keyword_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not match"))
+        .collect();
+    assert!(
+        keyword_warnings.is_empty(),
+        "Matching keywords should not produce a warning. Got: {keyword_warnings:?}"
+    );
+}
+
+#[test]
+fn test_ffi_argument_type_mismatch_warning() {
+    // Erlang lists reverse: 42
+    // reverse expects List, got Integer
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["reverse:"]),
+        vec![int_lit(42)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should emit argument type mismatch warning. Diagnostics: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        type_warnings[0].message.contains("List"),
+        "Warning should mention expected type List"
+    );
+    assert!(
+        type_warnings[0].message.contains("Integer"),
+        "Warning should mention actual type Integer"
+    );
+}
+
+#[test]
+fn test_ffi_argument_dynamic_param_no_warning() {
+    // Erlang lists member: "hello" in: #(1, 2, 3)
+    // member param 1 is Dynamic — should not warn for any argument type
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["member:", "in:"]),
+        vec![
+            str_lit("hello"),
+            Expression::ListLiteral {
+                elements: vec![int_lit(1)],
+                tail: None,
+                span: span(),
+            },
+        ],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Dynamic param type should accept any argument. Got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn test_ffi_dynamic_module_name_falls_back() {
+    // Erlang (someVar) reverse: xs → Dynamic (no static module name)
+    // This is a keyword send on Erlang class, which goes through normal DNU-suppressed path
+    let module = make_module(vec![msg_send(
+        // Simulate Erlang (someVar) — receiver is MessageSend with keyword selector
+        // Actually, `Erlang (someVar)` parses differently.
+        // The parenthesized form is: ClassRef("Erlang") with a keyword/unary send
+        // where the module is dynamic. For our purposes, a non-Unary selector
+        // on Erlang falls through to normal class-side handling.
+        class_ref("Erlang"),
+        keyword_selector(&["reverse:"]),
+        vec![var("xs")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    // Should not crash, and should not produce FFI-specific warnings
+    let ffi_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("FFI keyword") || d.message.contains("expects"))
+        .collect();
+    assert!(
+        ffi_warnings.is_empty(),
+        "Dynamic module name should not produce FFI warnings. Got: {ffi_warnings:?}"
+    );
+}
+
+#[test]
+fn test_ffi_erlang_module_type_in_type_map() {
+    // Erlang lists → should infer ErlangModule<lists> in type map
+    let module = make_module(vec![erlang_module_recv("lists")]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // erlang_module_recv uses span (10,20)
+    let erlang_type = checker.type_map().get(Span::new(10, 20));
+    match erlang_type {
+        Some(InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        }) => {
+            assert_eq!(class_name.as_str(), "ErlangModule");
+            assert_eq!(type_args.len(), 1);
+            if let InferredType::Known {
+                class_name: mod_name,
+                ..
+            } = &type_args[0]
+            {
+                assert_eq!(mod_name.as_str(), "lists");
+            } else {
+                panic!("Expected Known type arg, got: {:?}", type_args[0]);
+            }
+        }
+        other => panic!("Expected ErlangModule<lists> in type map, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_ffi_wrong_arity_falls_back_to_dynamic() {
+    // Erlang lists reverse: a with: b → arity 2, but reverse is arity 1
+    // Should fall back to Dynamic (no FFI type warnings)
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["reverse:", "with:"]),
+        vec![int_lit(1), int_lit(2)],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let ffi_type_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("lists:reverse"))
+        .collect();
+    assert!(
+        ffi_type_diags.is_empty(),
+        "Wrong arity should not produce type check diagnostics. Got: {ffi_type_diags:?}"
+    );
+}
+
+#[test]
+fn test_ffi_member_returns_boolean() {
+    // Erlang lists member: 1 in: myList → Boolean
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["member:", "in:"]),
+        vec![int_lit(1), var("myList")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let send_type = checker.type_map().get(span());
+    assert_eq!(
+        send_type,
+        Some(&InferredType::known("Boolean")),
+        "member should return Boolean"
+    );
+}
