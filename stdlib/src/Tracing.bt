@@ -144,7 +144,7 @@ sealed Object subclass: Tracing
   /// // Tracing tracesFor: myCounter
   /// // => _
   /// ```
-  class sealed tracesFor: actor :: Object -> List =>
+  class sealed tracesFor: actor :: Actor -> List =>
     (Erlang beamtalk_tracing) tracesFor: actor
 
   /// Trace events for a specific actor + method.
@@ -154,7 +154,7 @@ sealed Object subclass: Tracing
   /// // Tracing tracesFor: myCounter selector: #increment
   /// // => _
   /// ```
-  class sealed tracesFor: actor :: Object selector: sel :: Symbol -> List =>
+  class sealed tracesFor: actor :: Actor selector: sel :: Symbol -> List =>
     (Erlang beamtalk_tracing) tracesFor: actor selector: sel
 
   // === Aggregate stats ===
@@ -176,7 +176,7 @@ sealed Object subclass: Tracing
   /// // Tracing statsFor: myCounter
   /// // => _
   /// ```
-  class sealed statsFor: actor :: Object -> Dictionary =>
+  class sealed statsFor: actor :: Actor -> Dictionary =>
     (Erlang beamtalk_tracing) statsFor: actor
 
   // === Analysis (computed from aggregates) ===
@@ -231,7 +231,7 @@ sealed Object subclass: Tracing
   /// // Tracing healthFor: myCounter
   /// // => _
   /// ```
-  class sealed healthFor: actor :: Object -> Dictionary =>
+  class sealed healthFor: actor :: Actor -> Dictionary =>
     (Erlang beamtalk_tracing) healthFor: actor
 
   /// VM overview: scheduler count, memory breakdown, process count, run queue lengths.

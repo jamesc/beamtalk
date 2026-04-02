@@ -44,7 +44,7 @@ sealed typed Collection subclass: Binary
   /// Binary deserialize: (Binary serialize: #(1, 2, 3))
   /// // => _
   /// ```
-  class sealed deserialize: binary :: Object -> Object =>
+  class sealed deserialize: binary :: Binary -> Object =>
     (Erlang beamtalk_binary) deserialize: binary
 
   /// Convert an iolist to a flat binary (class method).
@@ -81,7 +81,7 @@ sealed typed Collection subclass: Binary
   /// result first    // => 42
   /// result second   // => bytes consumed
   /// ```
-  class sealed deserializeWithUsed: binary :: Object -> Object =>
+  class sealed deserializeWithUsed: binary :: Binary -> Object =>
     (Erlang beamtalk_binary) deserializeWithUsed: binary
 
   // ═══════════════════════════════════════════════════════════════════
