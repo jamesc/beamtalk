@@ -13,7 +13,7 @@
 /// (Stream on: #(1, 2, 3)) asList       // => #(1, 2, 3)
 /// ((Stream from: 1) select: [:n | n isEven]) take: 3  // => #(2, 4, 6)
 /// ```
-sealed Object subclass: Stream
+sealed typed Object subclass: Stream
 
   /// Use 'Stream on: collection' or 'Stream from: start' to create a Stream.
   class new: _ :: Object -> Nil =>
@@ -105,7 +105,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
   /// ```
-  inject: initial into: block :: Block =>
+  inject: initial :: Object into: block :: Block -> Object =>
     (Erlang beamtalk_stream)
       inject: self
       init: initial
@@ -117,7 +117,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
   /// ```
-  detect: predicate :: Block =>
+  detect: predicate :: Block -> Object =>
     (Erlang beamtalk_stream) detect: self with: predicate
 
   /// Materialize entire stream to a List (terminal).

@@ -51,7 +51,7 @@
 /// Tracing clear
 /// // => nil
 /// ```
-sealed Object subclass: Tracing
+sealed typed Object subclass: Tracing
 
   // === Trace context ===
 

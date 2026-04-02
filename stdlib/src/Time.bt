@@ -12,7 +12,7 @@
 /// Time nowMs   // => _
 /// Time nowUs   // => _
 /// ```
-sealed Object subclass: Time
+sealed typed Object subclass: Time
 
   /// Current time in seconds since the Unix epoch.
   ///

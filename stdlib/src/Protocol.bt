@@ -18,7 +18,7 @@
 /// Protocol isProtocol: #Printable         // => true
 /// Protocol allProtocols                   // => [#Printable, #Comparable, ...]
 /// ```
-sealed Object subclass: Protocol
+sealed typed Object subclass: Protocol
 
   /// Return the required method selectors for a protocol.
   ///

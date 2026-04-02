@@ -20,7 +20,7 @@
 /// `Erlang` uses `@intrinsic` on `doesNotUnderstand:args:` so the compiler
 /// generates inline proxy construction rather than routing through a
 /// gen_server process. See ADR 0028 §1.
-sealed ProtoObject subclass: Erlang
+sealed typed ProtoObject subclass: Erlang
 
   /// Look up an Erlang module by name, returning an ErlangModule proxy.
   ///

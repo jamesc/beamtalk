@@ -36,7 +36,7 @@
 ///
 /// @see Exception (for exception-based error handling)
 /// @see Error (for exception subclass with reason codes)
-sealed Value subclass: Result(T, E)
+sealed typed Value subclass: Result(T, E)
   field: okValue :: T = nil
   field: errReason :: E = nil
   field: isOk :: Boolean = true
@@ -51,7 +51,7 @@ sealed Value subclass: Result(T, E)
   /// Result ok: "hello"     // => Result ok: "hello"
   /// Result ok: nil         // => Result ok: nil
   /// ```
-  class ok: value -> Result => (Erlang beamtalk_result) ok: value
+  class ok: value :: Object -> Result => (Erlang beamtalk_result) ok: value
 
   /// Create a failed Result wrapping an error reason (class method).
   ///
@@ -65,7 +65,8 @@ sealed Value subclass: Result(T, E)
   /// Result error: Error new    // => Result error: <Error>
   /// ```
   /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
-  class error: reason -> Result => (Erlang beamtalk_result) makeError: reason
+  class error: reason :: Object -> Result =>
+    (Erlang beamtalk_result) makeError: reason
 
   /// Evaluate a block and return a Result (class method).
   ///

@@ -20,7 +20,7 @@
 /// - `node`               → `erlang:node()`            (unary → zero-arg call)
 ///
 /// See ADR 0028 §1 for full mapping rules.
-sealed ProtoObject subclass: ErlangModule
+sealed typed ProtoObject subclass: ErlangModule
 
   /// Forward an unknown message as an Erlang function call on the proxied module.
   ///

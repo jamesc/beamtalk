@@ -21,7 +21,7 @@
 /// Logger setLevel: #debug
 /// // => nil
 /// ```
-sealed Object subclass: Logger
+sealed typed Object subclass: Logger
 
   /// Log a message at info level.
   ///

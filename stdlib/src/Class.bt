@@ -16,7 +16,7 @@
 /// Counter printString  // => "Counter"
 /// Counter isClass      // => true
 /// ```
-sealed Behaviour subclass: Class
+sealed typed Behaviour subclass: Class
 
   /// Return the name of the class as a Symbol.
   ///

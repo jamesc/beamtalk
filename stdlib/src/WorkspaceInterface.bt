@@ -17,11 +17,11 @@
 /// WorkspaceInterface current actorAt: "<0.132.0>"
 /// WorkspaceInterface current actorsOf: Counter
 /// ```
-sealed Object subclass: WorkspaceInterface
+sealed typed Object subclass: WorkspaceInterface
   classState: current :: WorkspaceInterface | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current => self.current
+  class current -> Object => self.current
 
   /// Set the current singleton instance.
   class current: instance :: WorkspaceInterface -> Nil =>
@@ -162,7 +162,8 @@ sealed Object subclass: WorkspaceInterface
   /// Workspace supervisor                  // => #Supervisor<AppSup, <0.200.0>>
   /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
   /// ```
-  supervisor => (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
+  supervisor -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
 
   /// Start and attach a supervisor to the workspace supervision tree.
   ///
