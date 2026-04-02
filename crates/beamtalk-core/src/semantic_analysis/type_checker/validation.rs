@@ -25,6 +25,54 @@ use ecow::{EcoString, eco_format};
 use super::{InferredType, TypeChecker, TypeEnv};
 
 impl TypeChecker {
+    /// Classify how well a union's known members match a predicate.
+    ///
+    /// Returns `None` if any member is Dynamic (conservative skip).
+    /// Otherwise returns the count of members that satisfy `pred` and the total.
+    fn classify_union_members<F>(
+        members: &[InferredType],
+        pred: F,
+    ) -> Option<(usize, usize, Vec<&EcoString>)>
+    where
+        F: Fn(&EcoString) -> bool,
+    {
+        let known_members: Vec<&EcoString> = members.iter().filter_map(|m| m.as_known()).collect();
+        if known_members.len() < members.len() {
+            return None; // Contains Dynamic — skip
+        }
+        let compatible = known_members.iter().filter(|m| pred(m)).count();
+        let incompatible: Vec<&EcoString> =
+            known_members.iter().filter(|m| !pred(m)).copied().collect();
+        Some((compatible, known_members.len(), incompatible))
+    }
+
+    /// Collect deduplicated missing protocol methods across union members.
+    fn collect_missing_protocol_methods(
+        members: &[InferredType],
+        protocol: &str,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> String {
+        let mut all_missing: Vec<EcoString> = Vec::new();
+        for member in members {
+            if let Some(name) = member.as_known() {
+                if let Err(missing) = protocol_registry.check_conformance(name, protocol, hierarchy)
+                {
+                    for m in &missing {
+                        if !all_missing.iter().any(|existing| existing == m) {
+                            all_missing.push(m.clone());
+                        }
+                    }
+                }
+            }
+        }
+        all_missing
+            .iter()
+            .map(|s| format!("'{s}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     /// Check a class-side message send (e.g., `Counter spawn`, `Object new`).
     ///
     /// When `arg_types` is non-empty and the class has type parameters,
@@ -379,47 +427,94 @@ impl TypeChecker {
             let Some(expected_ty) = expected else {
                 continue;
             };
-            let InferredType::Known {
-                class_name: actual_ty,
-                ..
-            } = arg_ty
-            else {
-                continue; // Dynamic or Union arguments — skip (conservative)
-            };
-            if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
-                let param_pos = i + 1;
-                // BT-1588: Use hint severity for generic type params (likely false positive)
-                let is_generic = super::is_generic_type_param(actual_ty);
-                let mut diag = if is_generic {
-                    Diagnostic::hint(
-                        format!(
-                            "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
-                        ),
-                        span,
-                    )
-                    .with_hint(format!(
-                        "This is likely a false positive — `{actual_ty}` is a generic type parameter that may be {expected_ty} at runtime. \
-                         Use `@expect type` to suppress"
-                    ))
-                } else {
-                    Diagnostic::warning(
-                        format!(
-                            "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
-                        ),
-                        span,
-                    )
-                    .with_hint(format!("Expected {expected_ty} (or a subclass), got {actual_ty}"))
-                };
-                // BT-1588: Attach origin note if available
-                if let (Some(exprs), Some(e)) = (arg_exprs, env) {
-                    if let Some(Expression::Identifier(ident)) = exprs.get(i) {
-                        if let Some(origin) = e.get_origin(&ident.name) {
-                            diag = diag.with_note(origin.description.clone(), Some(origin.span));
+            match arg_ty {
+                InferredType::Known {
+                    class_name: actual_ty,
+                    ..
+                } => {
+                    if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                        let param_pos = i + 1;
+                        // BT-1588: Use hint severity for generic type params (likely false positive)
+                        let is_generic = super::is_generic_type_param(actual_ty);
+                        let mut diag = if is_generic {
+                            Diagnostic::hint(
+                                format!(
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                                ),
+                                span,
+                            )
+                            .with_hint(format!(
+                                "This is likely a false positive — `{actual_ty}` is a generic type parameter that may be {expected_ty} at runtime. \
+                                 Use `@expect type` to suppress"
+                            ))
+                        } else {
+                            Diagnostic::warning(
+                                format!(
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                                ),
+                                span,
+                            )
+                            .with_hint(format!("Expected {expected_ty} (or a subclass), got {actual_ty}"))
+                        };
+                        // BT-1588: Attach origin note if available
+                        if let (Some(exprs), Some(e)) = (arg_exprs, env) {
+                            if let Some(Expression::Identifier(ident)) = exprs.get(i) {
+                                if let Some(origin) = e.get_origin(&ident.name) {
+                                    diag = diag
+                                        .with_note(origin.description.clone(), Some(origin.span));
+                                }
+                            }
                         }
+                        self.diagnostics
+                            .push(diag.with_category(DiagnosticCategory::Type));
                     }
                 }
-                self.diagnostics
-                    .push(diag.with_category(DiagnosticCategory::Type));
+                InferredType::Union { members, .. } => {
+                    // BT-1832: Check all union members against the expected type.
+                    let Some((compat, total, incompatible)) =
+                        Self::classify_union_members(members, |m| {
+                            Self::is_type_compatible(m, expected_ty, hierarchy)
+                        })
+                    else {
+                        continue; // Contains Dynamic — skip
+                    };
+                    if compat == total {
+                        continue; // All match → pass
+                    }
+                    let param_pos = i + 1;
+                    let union_display = arg_ty
+                        .display_name()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    let mut diag = if compat == 0 {
+                        Diagnostic::warning(
+                            format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {union_display}"),
+                            span,
+                        )
+                        .with_hint(format!("No member of {union_display} is compatible with {expected_ty}"))
+                    } else {
+                        let list = incompatible
+                            .iter()
+                            .map(|m| m.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        Diagnostic::hint(
+                            format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {union_display}"),
+                            span,
+                        )
+                        .with_hint(format!("Some members of the union are not compatible with {expected_ty}: {list}"))
+                    };
+                    if let (Some(exprs), Some(e)) = (arg_exprs, env) {
+                        if let Some(Expression::Identifier(ident)) = exprs.get(i) {
+                            if let Some(origin) = e.get_origin(&ident.name) {
+                                diag =
+                                    diag.with_note(origin.description.clone(), Some(origin.span));
+                            }
+                        }
+                    }
+                    self.diagnostics
+                        .push(diag.with_category(DiagnosticCategory::Type));
+                }
+                InferredType::Dynamic => {} // Dynamic arguments — skip (conservative)
             }
         }
     }
@@ -707,33 +802,70 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
     ) {
-        let InferredType::Known {
-            class_name: value_type,
-            ..
-        } = value_ty
-        else {
-            return; // Dynamic or Union values — skip (conservative)
-        };
         let Some(InferredType::Known { class_name, .. }) = env.get("self") else {
             return;
         };
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
             return; // No type annotation on this field
         };
-        if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
-            self.diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
-                        field.name
-                    ),
-                    span,
-                )
-                .with_category(DiagnosticCategory::Type)
-                .with_hint(format!(
-                    "Expected {declared_type} but assigning {value_type}"
-                )),
-            );
+        match value_ty {
+            InferredType::Known {
+                class_name: value_type,
+                ..
+            } => {
+                if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
+                                field.name
+                            ),
+                            span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!(
+                            "Expected {declared_type} but assigning {value_type}"
+                        )),
+                    );
+                }
+            }
+            InferredType::Union { members, .. } => {
+                // BT-1832: Check all union members against the declared field type.
+                let Some((compat, total, incompatible)) =
+                    Self::classify_union_members(members, |m| {
+                        Self::is_assignable_to(m, &declared_type, hierarchy)
+                    })
+                else {
+                    return; // Contains Dynamic — skip
+                };
+                if compat == total {
+                    return; // All match → pass
+                }
+                let union_display = value_ty
+                    .display_name()
+                    .unwrap_or_else(|| EcoString::from("Dynamic"));
+                let diag = if compat == 0 {
+                    Diagnostic::warning(
+                        format!("Type mismatch: field `{}` declared as {declared_type}, got {union_display}", field.name),
+                        span,
+                    )
+                    .with_hint(format!("No member of {union_display} is compatible with {declared_type}"))
+                } else {
+                    let list = incompatible
+                        .iter()
+                        .map(|m| m.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Diagnostic::hint(
+                        format!("Type mismatch: field `{}` declared as {declared_type}, got {union_display}", field.name),
+                        span,
+                    )
+                    .with_hint(format!("Some members of the union are not compatible with {declared_type}: {list}"))
+                };
+                self.diagnostics
+                    .push(diag.with_category(DiagnosticCategory::Type));
+            }
+            InferredType::Dynamic => {} // Dynamic values — skip (conservative)
         }
     }
 
@@ -1088,15 +1220,15 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
+        // Extract base protocol name for generic protocols (e.g., "Enumerable(T)" → "Enumerable")
+        let base_protocol = if let Some(open) = expected_protocol.find('(') {
+            &expected_protocol[..open]
+        } else {
+            expected_protocol
+        };
+
         match arg_type {
             InferredType::Known { class_name, .. } => {
-                // Extract base protocol name for generic protocols
-                let base_protocol = if let Some(open) = expected_protocol.find('(') {
-                    &expected_protocol[..open]
-                } else {
-                    expected_protocol
-                };
-
                 let Some(_protocol) = protocol_registry.get(base_protocol) else {
                     return; // Not a protocol — handled by normal type checking
                 };
@@ -1123,13 +1255,6 @@ impl TypeChecker {
                 }
             }
             InferredType::Dynamic => {
-                // Cannot verify conformance for Dynamic values — emit informational warning
-                let base_protocol = if let Some(open) = expected_protocol.find('(') {
-                    &expected_protocol[..open]
-                } else {
-                    expected_protocol
-                };
-
                 if protocol_registry.has_protocol(base_protocol) {
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -1141,8 +1266,56 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Union { .. } => {
-                // Union types — skip for now (Phase 2 extension)
+            InferredType::Union { members, .. } => {
+                if protocol_registry.get(base_protocol).is_none() {
+                    return; // Not a protocol — handled by normal type checking
+                }
+                let Some((compat, total, non_conforming)) =
+                    Self::classify_union_members(members, |m| {
+                        protocol_registry
+                            .check_conformance(m, base_protocol, hierarchy)
+                            .is_ok()
+                    })
+                else {
+                    return; // Contains Dynamic — skip
+                };
+                if compat == total {
+                    return; // All conform → pass
+                }
+                let union_display = arg_type
+                    .display_name()
+                    .unwrap_or_else(|| EcoString::from("Dynamic"));
+                let diag = if compat == 0 {
+                    // Collect missing methods across all members
+                    let all_missing = Self::collect_missing_protocol_methods(
+                        members,
+                        base_protocol,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                    Diagnostic::warning(
+                        format!("{union_display} does not conform to protocol {base_protocol}"),
+                        span,
+                    )
+                    .with_hint(format!(
+                        "No member conforms — missing required method(s): {all_missing}"
+                    ))
+                } else {
+                    let list = non_conforming
+                        .iter()
+                        .map(|m| m.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Diagnostic::hint(
+                        format!(
+                            "Not all members of {union_display} conform to protocol {base_protocol}"
+                        ),
+                        span,
+                    )
+                    .with_hint(format!("Non-conforming member(s): {list}"))
+                };
+                self.diagnostics
+                    .push(diag.with_category(DiagnosticCategory::Type));
             }
         }
     }
@@ -1240,9 +1413,53 @@ impl TypeChecker {
                         }
                     }
                 }
+                InferredType::Union { members, .. } => {
+                    // BT-1832: Check all union members against the bound protocol.
+                    let Some((compat, total, non_conforming)) =
+                        Self::classify_union_members(members, |m| {
+                            protocol_registry
+                                .check_conformance(m, bound_protocol, hierarchy)
+                                .is_ok()
+                        })
+                    else {
+                        continue; // Contains Dynamic — skip
+                    };
+                    if compat == total {
+                        continue; // All conform → pass
+                    }
+                    let param_name = param_names.get(i).map_or("?", |p| p.as_str());
+                    let union_display = arg
+                        .display_name()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    let diag = if compat == 0 {
+                        let missing = Self::collect_missing_protocol_methods(
+                            members,
+                            bound_protocol,
+                            hierarchy,
+                            protocol_registry,
+                        );
+                        Diagnostic::warning(
+                            format!("Type argument {union_display} for {param_name} in {class_name} does not conform to {bound_protocol}"),
+                            span,
+                        )
+                        .with_hint(format!("No member of {union_display} conforms — missing required method(s): {missing}"))
+                    } else {
+                        let list = non_conforming
+                            .iter()
+                            .map(|m| m.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        Diagnostic::hint(
+                            format!("Type argument {union_display} for {param_name} in {class_name}: not all members conform to {bound_protocol}"),
+                            span,
+                        )
+                        .with_hint(format!("Non-conforming member(s): {list}"))
+                    };
+                    self.diagnostics
+                        .push(diag.with_category(DiagnosticCategory::Type));
+                }
                 // Dynamic values: can't verify bounds (skip silently).
-                // Union types: deferred to future phase.
-                InferredType::Dynamic | InferredType::Union { .. } => {}
+                InferredType::Dynamic => {}
             }
         }
     }
