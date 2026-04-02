@@ -87,6 +87,11 @@ TestCase subclass: TestCaseAssertionTest
     value := self assertOk: (Result ok: 42)
     self assert: value equals: 42
 
+  testAssertOkTypedReturnUsedInArithmetic =>
+    // assertOk: returns T (not Object), so arithmetic works without warnings
+    value := self assertOk: (Result ok: 42)
+    self assert: value + 1 equals: 43
+
   testAssertOkPassWithStringValue =>
     // assertOk: works with any value type
     value := self assertOk: (Result ok: "hello")
