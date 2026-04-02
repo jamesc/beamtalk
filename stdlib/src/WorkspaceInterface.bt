@@ -138,7 +138,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  bind: value as: bindingName :: Symbol -> Nil =>
+  bind: value :: Object as: bindingName :: Symbol -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) bind: value as: bindingName
 
   /// Remove a registered name from the workspace namespace.

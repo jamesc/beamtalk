@@ -31,7 +31,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:x | x * 2] value: 3     // => 6
   /// ```
-  value: arg => @intrinsic blockValue1
+  value: arg :: Object => @intrinsic blockValue1
 
   /// Evaluate a two-argument block.
   ///
@@ -39,7 +39,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:a :b | a + b] value: 3 value: 4   // => 7
   /// ```
-  value: arg1 value: arg2 => @intrinsic blockValue2
+  value: arg1 :: Object value: arg2 :: Object => @intrinsic blockValue2
 
   /// Evaluate a three-argument block.
   ///
@@ -47,7 +47,8 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:a :b :c | a + b + c] value: 1 value: 2 value: 3   // => 6
   /// ```
-  value: arg1 value: arg2 value: arg3 => @intrinsic blockValue3
+  value: arg1 :: Object value: arg2 :: Object value: arg3 :: Object =>
+    @intrinsic blockValue3
 
   /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to true.
   ///
@@ -79,7 +80,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [1 / 0] on: Error do: [:e | e message]
   /// ```
-  on: exClass do: handler :: Block => @intrinsic onDo
+  on: exClass :: Object do: handler :: Block => @intrinsic onDo
 
   /// Evaluate the block, then always evaluate `cleanupBlock` (even on exception).
   ///
