@@ -39,7 +39,7 @@ Object subclass: Value
   /// ```beamtalk
   /// Point new              // => Point(x: 0, y: 0)
   /// ```
-  class sealed new => @intrinsic basicNew
+  class sealed new -> Self => @intrinsic basicNew
 
   /// Create a new instance with initialization arguments.
   ///
@@ -47,7 +47,7 @@ Object subclass: Value
   /// ```beamtalk
   /// Point new: #{#x => 3, #y => 4}
   /// ```
-  class sealed new: initArgs => @intrinsic basicNewWith
+  class sealed new: initArgs -> Self => @intrinsic basicNewWith
 
   /// Return a developer-readable string representation showing fields.
   ///

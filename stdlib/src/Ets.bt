@@ -104,7 +104,7 @@ Object subclass: Ets
   /// ```beamtalk
   /// cache at: "key"        // => value or nil
   /// ```
-  at: key => (Erlang beamtalk_ets) lookup: self key: key
+  at: key :: Object => (Erlang beamtalk_ets) lookup: self key: key
 
   /// Insert or replace a key-value pair. Returns `nil`.
   ///
@@ -118,7 +118,7 @@ Object subclass: Ets
   /// ```beamtalk
   /// cache at: "counter" put: 1
   /// ```
-  at: key put: value -> Nil =>
+  at: key :: Object put: value :: Object -> Nil =>
     (Erlang beamtalk_ets)
       insert: self
       key: key
@@ -134,7 +134,7 @@ Object subclass: Ets
   /// cache at: "missing" ifAbsent: [0]    // => 0
   /// cache at: "key"     ifAbsent: [0]    // => stored value
   /// ```
-  at: key ifAbsent: block :: Block =>
+  at: key :: Object ifAbsent: block :: Block =>
     (Erlang beamtalk_ets)
       lookupIfAbsent: self
       key: key
@@ -146,7 +146,7 @@ Object subclass: Ets
   /// ```beamtalk
   /// cache includesKey: "key"    // => true or false
   /// ```
-  includesKey: key -> Boolean =>
+  includesKey: key :: Object -> Boolean =>
     (Erlang beamtalk_ets) includesKey: self key: key
 
   /// Remove the entry for `key`. Returns `nil`. Idempotent if key is absent.
@@ -155,7 +155,8 @@ Object subclass: Ets
   /// ```beamtalk
   /// cache removeKey: "oldKey"
   /// ```
-  removeKey: key -> Nil => (Erlang beamtalk_ets) removeKey: self key: key
+  removeKey: key :: Object -> Nil =>
+    (Erlang beamtalk_ets) removeKey: self key: key
 
   /// Return all keys in the table as a `List`.
   ///
