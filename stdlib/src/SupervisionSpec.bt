@@ -71,7 +71,7 @@ Value subclass: SupervisionSpec
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SupervisionSpec id: #primary actorClass: Counter restart: #permanent args: nil
+  /// SupervisionSpec id: #primary actorClass: Counter restart: #permanent args: nil shutdown: 5000
   ///   // printString => "SupervisionSpec(Counter, id: #primary, restart: #permanent)"
   /// ```
   printString -> String =>
