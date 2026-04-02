@@ -798,9 +798,10 @@ impl TypeChecker {
         // when the class has a mix of defaulted and undefaulted typed fields. If NO
         // typed fields have defaults, the class is factory-constructed (spawnWith:/new:)
         // and all fields are set by the factory — warning would be a false positive.
-        let has_any_typed_default = class.state.iter().any(|d| {
-            d.type_annotation.is_some() && d.default_value.is_some()
-        });
+        let has_any_typed_default = class
+            .state
+            .iter()
+            .any(|d| d.type_annotation.is_some() && d.default_value.is_some());
         if !has_any_typed_default {
             return; // All-factory class — no warnings
         }
