@@ -132,11 +132,30 @@ format_msg_structured({Format, Args}, _Meta) ->
 -spec extract_report_fields(map(), map()) ->
     {binary(), [{binary(), term()}]} | undefined.
 extract_report_fields(#{label := {gen_server, terminate}, name := Name, reason := Reason}, _Meta) ->
-    Msg = safe_to_binary(io_lib:format("gen_server ~tp terminated", [Name])),
+    Msg = format_reason_with_bt_error(
+        io_lib:format("gen_server ~tp terminated", [Name]), Reason
+    ),
     Fields = [
         {<<"report_type">>, <<"gen_server_terminate">>},
         {<<"name">>, safe_to_binary(io_lib:format("~tp", [Name]))},
         {<<"reason">>, safe_to_binary(io_lib:format("~tp", [Reason]))}
+    ],
+    {Msg, Fields};
+extract_report_fields(
+    #{label := {supervisor, progress}, report := Report}, _Meta
+) when is_list(Report) ->
+    %% OTP supervisor format: data in proplist under `report` key
+    Sup = proplists:get_value(supervisor, Report, unknown),
+    Started = proplists:get_value(started, Report, []),
+    ChildId =
+        case Started of
+            L when is_list(L) -> proplists:get_value(id, L, unknown);
+            _ -> unknown
+        end,
+    Msg = safe_to_binary(io_lib:format("Supervisor: ~tp. Started: id=~tp.", [Sup, ChildId])),
+    Fields = [
+        {<<"report_type">>, <<"supervisor_progress">>},
+        {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))}
     ],
     {Msg, Fields};
 extract_report_fields(
@@ -147,20 +166,67 @@ extract_report_fields(
             L when is_list(L) -> proplists:get_value(id, L, unknown);
             _ -> unknown
         end,
-    Msg = safe_to_binary(io_lib:format("supervisor ~tp started child ~tp", [Sup, ChildId])),
+    Msg = safe_to_binary(io_lib:format("Supervisor: ~tp. Started: id=~tp.", [Sup, ChildId])),
     Fields = [
         {<<"report_type">>, <<"supervisor_progress">>},
         {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))}
     ],
     {Msg, Fields};
 extract_report_fields(
-    #{label := {supervisor, child_terminated}, supervisor := Sup, reason := Reason}, _Meta
-) ->
-    Msg = safe_to_binary(io_lib:format("supervisor ~tp child terminated: ~tp", [Sup, Reason])),
+    #{label := {supervisor, child_terminated}, report := Report}, _Meta
+) when is_list(Report) ->
+    %% OTP supervisor format: data is in a proplist under `report` key
+    Sup = proplists:get_value(supervisor, Report, unknown),
+    Reason = proplists:get_value(reason, Report, unknown),
+    Offender = proplists:get_value(offender, Report, []),
+    ChildId =
+        case Offender of
+            L when is_list(L) -> proplists:get_value(id, L, unknown);
+            _ -> unknown
+        end,
+    Msg = format_reason_with_bt_error(
+        io_lib:format("Supervisor: ~tp child ~tp terminated", [Sup, ChildId]), Reason
+    ),
     Fields = [
         {<<"report_type">>, <<"supervisor_child_terminated">>},
         {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))},
-        {<<"reason">>, safe_to_binary(io_lib:format("~tp", [Reason]))}
+        {<<"reason">>, format_reason_concise(Reason)}
+    ],
+    {Msg, Fields};
+extract_report_fields(
+    #{
+        label := {supervisor, child_terminated},
+        supervisor := Sup,
+        reason := Reason,
+        offender := Offender
+    },
+    _Meta
+) ->
+    %% Fallback: top-level keys (used by tests / older OTP)
+    ChildId =
+        case Offender of
+            L when is_list(L) -> proplists:get_value(id, L, unknown);
+            _ -> unknown
+        end,
+    Msg = format_reason_with_bt_error(
+        io_lib:format("Supervisor: ~tp child ~tp terminated", [Sup, ChildId]), Reason
+    ),
+    Fields = [
+        {<<"report_type">>, <<"supervisor_child_terminated">>},
+        {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))},
+        {<<"reason">>, format_reason_concise(Reason)}
+    ],
+    {Msg, Fields};
+extract_report_fields(
+    #{label := {supervisor, child_terminated}, supervisor := Sup, reason := Reason}, _Meta
+) ->
+    Msg = format_reason_with_bt_error(
+        io_lib:format("Supervisor: ~tp child terminated", [Sup]), Reason
+    ),
+    Fields = [
+        {<<"report_type">>, <<"supervisor_child_terminated">>},
+        {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))},
+        {<<"reason">>, format_reason_concise(Reason)}
     ],
     {Msg, Fields};
 extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta) when
@@ -176,6 +242,37 @@ extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta)
     {Msg, Fields};
 extract_report_fields(_Report, _Meta) ->
     undefined.
+
+%% @doc Build a human-readable message, appending any beamtalk error found in
+%% the OTP crash reason. Falls back to the raw reason if no beamtalk error.
+-spec format_reason_with_bt_error(iolist(), term()) -> binary().
+format_reason_with_bt_error(Prefix, Reason) ->
+    try
+        case beamtalk_error:extract_beamtalk_error(Reason, 4) of
+            undefined ->
+                safe_to_binary(io_lib:format("~ts: ~tp", [Prefix, Reason]));
+            BtError ->
+                BtMsg = beamtalk_error:format(BtError),
+                safe_to_binary(io_lib:format("~ts: ~ts", [Prefix, BtMsg]))
+        end
+    catch
+        _:_ -> safe_to_binary(io_lib:format("~ts: ~tp", [Prefix, Reason]))
+    end.
+
+%% @doc Format a crash reason concisely for the "reason" JSON field.
+%% Extracts beamtalk error message if present, otherwise uses ~tp.
+-spec format_reason_concise(term()) -> binary().
+format_reason_concise(Reason) ->
+    try
+        case beamtalk_error:extract_beamtalk_error(Reason, 4) of
+            undefined ->
+                safe_to_binary(io_lib:format("~tp", [Reason]));
+            BtError ->
+                beamtalk_error:format(BtError)
+        end
+    catch
+        _:_ -> safe_to_binary(io_lib:format("~tp", [Reason]))
+    end.
 
 %% @doc Format a report using the report callback or fallback.
 -spec format_report_fallback(term(), map()) -> binary().

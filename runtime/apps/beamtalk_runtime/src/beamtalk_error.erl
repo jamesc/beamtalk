@@ -183,12 +183,13 @@ format_safe(Reason, Stacktrace) ->
 %% @doc Recursively search a term for a `#beamtalk_error{}` record.
 %% Depth-limited to avoid traversing enormous state maps.
 -spec extract_beamtalk_error(term(), non_neg_integer()) -> #beamtalk_error{} | undefined.
-extract_beamtalk_error(_Term, 0) ->
-    undefined;
+%% Direct matches succeed at any depth — depth only limits further recursion
 extract_beamtalk_error(#beamtalk_error{} = E, _Depth) ->
     E;
 extract_beamtalk_error(#{error := #beamtalk_error{} = E}, _Depth) ->
     E;
+extract_beamtalk_error(_Term, 0) ->
+    undefined;
 extract_beamtalk_error(T, Depth) when is_tuple(T) ->
     extract_from_tuple(T, 1, tuple_size(T), Depth - 1);
 extract_beamtalk_error([H | T], Depth) ->
