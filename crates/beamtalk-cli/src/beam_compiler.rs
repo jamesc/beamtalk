@@ -1921,18 +1921,22 @@ end
         let cache = TypeCache::new(cache_dir);
 
         let specs_line = "beamtalk-specs-module:lists:[#{arity => 1,name => <<\"reverse\">>,params => [#{name => <<\"list\">>,type => <<\"List\">>}],return_type => <<\"List\">>}]";
-        cache.store("lists", 12345, specs_line);
+        cache.store("lists", 12345, 0, specs_line);
 
         // Cache hit with matching mtime
-        let result = cache.lookup("lists", 12345);
+        let result = cache.lookup("lists", 12345, 0);
         assert_eq!(result, Some(specs_line.to_string()));
 
-        // Cache miss with different mtime
-        let result = cache.lookup("lists", 99999);
+        // Cache miss with different mtime (seconds)
+        let result = cache.lookup("lists", 99999, 0);
         assert!(result.is_none(), "Different mtime should be a cache miss");
 
+        // Cache miss with different mtime (nanos only)
+        let result = cache.lookup("lists", 12345, 1);
+        assert!(result.is_none(), "Different nanos should be a cache miss");
+
         // Cache miss for unknown module
-        let result = cache.lookup("maps", 12345);
+        let result = cache.lookup("maps", 12345, 0);
         assert!(result.is_none(), "Unknown module should be a cache miss");
     }
 
@@ -1942,13 +1946,13 @@ end
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
         let cache = TypeCache::new(cache_dir);
 
-        cache.store("lists", 100, "line1");
-        assert_eq!(cache.lookup("lists", 100), Some("line1".to_string()));
+        cache.store("lists", 100, 0, "line1");
+        assert_eq!(cache.lookup("lists", 100, 0), Some("line1".to_string()));
 
         // Overwrite with new mtime
-        cache.store("lists", 200, "line2");
-        assert!(cache.lookup("lists", 100).is_none());
-        assert_eq!(cache.lookup("lists", 200), Some("line2".to_string()));
+        cache.store("lists", 200, 0, "line2");
+        assert!(cache.lookup("lists", 100, 0).is_none());
+        assert_eq!(cache.lookup("lists", 200, 0), Some("line2".to_string()));
     }
 
     #[test]
@@ -1957,8 +1961,8 @@ end
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
         let cache = TypeCache::new(cache_dir);
 
-        cache.store("no_specs", 100, "");
-        assert_eq!(cache.lookup("no_specs", 100), Some(String::new()));
+        cache.store("no_specs", 100, 0, "");
+        assert_eq!(cache.lookup("no_specs", 100, 0), Some(String::new()));
     }
 
     #[test]
