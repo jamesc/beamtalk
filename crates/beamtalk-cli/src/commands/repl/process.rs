@@ -22,17 +22,11 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 ///
 /// The BEAM process's working directory is set to `project_root` so that
 /// relative file paths (e.g., `File lines: "data.csv"`) resolve correctly.
-///
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // BEAM node startup involves many sequential setup steps
 pub(crate) fn start_beam_node(
-    port: u16,
     node_name: Option<&String>,
     project_root: &Path,
-    bind_addr: Option<std::net::Ipv4Addr>,
-    web_port: Option<u16>,
-    log_level: &str,
-    otp_app_name: Option<&str>,
-    hex_dep_names: &[String],
+    config: &crate::commands::workspace::WorkspaceConfig<'_>,
 ) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
@@ -63,7 +57,10 @@ pub(crate) fn start_beam_node(
         ));
     }
 
-    info!("Starting BEAM node with REPL backend on port {port}...");
+    info!(
+        "Starting BEAM node with REPL backend on port {}...",
+        config.port
+    );
 
     // Warn if stdlib is not compiled (directory may exist without .beam files)
     if !repl_startup::has_beam_files(&paths.stdlib_ebin) {
@@ -82,22 +79,22 @@ pub(crate) fn start_beam_node(
             ));
         }
         repl_startup::build_eval_cmd_with_node(
-            port,
+            config.port,
             name,
-            bind_addr,
-            web_port,
-            log_level,
-            otp_app_name,
-            hex_dep_names,
+            config.bind_addr,
+            config.web_port,
+            config.log_level,
+            config.otp_app_name,
+            config.hex_dep_names,
         )
     } else {
         repl_startup::build_eval_cmd(
-            port,
-            bind_addr,
-            web_port,
-            log_level,
-            otp_app_name,
-            hex_dep_names,
+            config.port,
+            config.bind_addr,
+            config.web_port,
+            config.log_level,
+            config.otp_app_name,
+            config.hex_dep_names,
         )
     };
 

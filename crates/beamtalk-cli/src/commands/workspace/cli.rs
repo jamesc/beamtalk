@@ -298,7 +298,6 @@ fn run_create(name: &str) -> Result<()> {
 ///
 /// Loads runtime beam paths, starts a detached BEAM node, and outputs
 /// workspace ID, port, and node name for scripting/CI use.
-#[allow(clippy::too_many_arguments)]
 fn run_create_background(
     name: &str,
     port: u16,
@@ -357,20 +356,19 @@ fn run_create_background(
     let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
     let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    let (node_info, _is_new, workspace_id) = get_or_start_workspace(
-        &project_root,
-        Some(name),
+    let config = super::WorkspaceConfig {
         port,
-        &paths,
-        &[],
-        !persistent,
-        idle_timeout,
-        Some(bind_addr),
+        bind_addr: Some(bind_addr),
         web_port,
-        "info",
-        None,
-        &[], // No hex deps for standalone workspace CLI
-    )?;
+        auto_cleanup: !persistent,
+        max_idle_seconds: idle_timeout,
+        log_level: "info",
+        otp_app_name: None,
+        hex_dep_names: &[], // No hex deps for standalone workspace CLI
+    };
+
+    let (node_info, _is_new, workspace_id) =
+        get_or_start_workspace(&project_root, Some(name), &paths, &[], &config)?;
 
     println!("Workspace '{workspace_id}' started");
     println!("Node:      {}", node_info.node_name);

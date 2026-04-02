@@ -431,16 +431,18 @@ pub fn run(
         // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
         let hex_dep_names = collect_hex_dep_names_for_project(&project_root)?;
 
-        let mut child = start_beam_node(
+        let fg_config = workspace::WorkspaceConfig {
             port,
-            node_name.as_ref(),
-            &project_root,
-            Some(bind_addr),
+            bind_addr: Some(bind_addr),
             web_port,
+            auto_cleanup: false,    // not applicable in foreground mode
+            max_idle_seconds: None, // not applicable in foreground mode
             log_level,
-            otp_app_name.as_deref(),
-            &hex_dep_names,
-        )?;
+            otp_app_name: otp_app_name.as_deref(),
+            hex_dep_names: &hex_dep_names,
+        };
+
+        let mut child = start_beam_node(node_name.as_ref(), &project_root, &fg_config)?;
 
         // Discover the actual port from the BEAM node's stdout.
         // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
@@ -493,19 +495,23 @@ pub fn run(
         // create/update beamtalk.lock with resolved native packages.
         let hex_dep_names = collect_hex_dep_names_for_project(&project_root)?;
 
+        let ws_config = workspace::WorkspaceConfig {
+            port,
+            bind_addr: Some(bind_addr),
+            web_port,
+            auto_cleanup: !persistent, // auto_cleanup is opposite of persistent flag
+            max_idle_seconds: timeout,
+            log_level,
+            otp_app_name: otp_app_name.as_deref(),
+            hex_dep_names: &hex_dep_names,
+        };
+
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
             workspace_name,
-            port,
             &paths,
             &extra_code_paths,
-            !persistent, // auto_cleanup is opposite of persistent flag
-            timeout,
-            Some(bind_addr),
-            web_port,
-            log_level,
-            otp_app_name.as_deref(),
-            &hex_dep_names,
+            &ws_config,
         )?;
 
         let actual_port = node_info.port;

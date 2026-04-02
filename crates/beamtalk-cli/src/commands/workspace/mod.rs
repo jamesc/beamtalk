@@ -70,6 +70,32 @@ pub use storage::{
     workspace_exists,
 };
 
+/// Shared configuration parameters for workspace startup.
+///
+/// Consolidates the cohesive set of parameters that flow through
+/// `get_or_start_workspace` → `start_detached_node` → `build_workspace_eval_cmd`
+/// and into the REPL's `start_beam_node`. Eliminates `clippy::too_many_arguments`
+/// suppressions on those functions.
+#[derive(Debug, Clone)]
+pub struct WorkspaceConfig<'a> {
+    /// TCP port for the workspace WebSocket server (0 = OS-assigned).
+    pub port: u16,
+    /// Network bind address for the WebSocket server.
+    pub bind_addr: Option<std::net::Ipv4Addr>,
+    /// Port for the web interface (None = disabled).
+    pub web_port: Option<u16>,
+    /// Whether the workspace should auto-stop when all clients disconnect.
+    pub auto_cleanup: bool,
+    /// Maximum idle seconds before auto-stop (None = use environment or default).
+    pub max_idle_seconds: Option<u64>,
+    /// OTP logger level for the workspace node.
+    pub log_level: &'a str,
+    /// OTP application to start after workspace bootstrap (e.g. project app).
+    pub otp_app_name: Option<&'a str>,
+    /// Hex dependency names whose OTP apps should be started before the project app.
+    pub hex_dep_names: &'a [String],
+}
+
 /// Resolve a workspace ID from a project path and optional name.
 ///
 /// Convenience wrapper around [`workspace_id_for`] for callers
@@ -1036,6 +1062,17 @@ mod tests {
         let paths = beam_dirs_for_tests();
         let project_path = std::env::current_dir().unwrap();
 
+        let config = WorkspaceConfig {
+            port: 0,
+            bind_addr: None,
+            web_port: None,
+            auto_cleanup: false,
+            max_idle_seconds: Some(60),
+            log_level: "info",
+            otp_app_name: None,
+            hex_dep_names: &[],
+        };
+
         let mut last_err = None;
         for attempt in 0..3_usize {
             // Each attempt gets its own workspace ID so epmd node names never
@@ -1049,19 +1086,7 @@ mod tests {
             let tw = TestWorkspace::new(&format!("{prefix}{attempt_suffix}"));
             let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-            match start_detached_node(
-                &tw.id,
-                0,
-                &paths,
-                &[],
-                false,
-                Some(60),
-                None,
-                None,
-                "info",
-                None,
-                &[],
-            ) {
+            match start_detached_node(&tw.id, &paths, &[], &config) {
                 Ok(node_info) => {
                     let guard = NodeGuard::new(&node_info);
                     return (tw, node_info, guard);
@@ -1190,6 +1215,16 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
 
         let paths = beam_dirs_for_tests();
+        let config = WorkspaceConfig {
+            port: 0,
+            bind_addr: None,
+            web_port: None,
+            auto_cleanup: false,
+            max_idle_seconds: Some(60),
+            log_level: "info",
+            otp_app_name: None,
+            hex_dep_names: &[],
+        };
 
         // Step 1: First call creates workspace and starts node.
         // Retry up to 3 times for transient WS health-check failures on loaded
@@ -1200,20 +1235,7 @@ mod tests {
             let mut last_err = None;
             let mut result = None;
             for attempt in 0..3_usize {
-                match get_or_start_workspace(
-                    &project_path,
-                    Some(&tw.id),
-                    0,
-                    &paths,
-                    &[],
-                    false,
-                    Some(60),
-                    None,
-                    None,   // web_port
-                    "info", // log_level
-                    None,   // otp_app_name
-                    &[],    // hex_dep_names
-                ) {
+                match get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config) {
                     Ok(r) => {
                         result = Some(r);
                         break;
@@ -1244,21 +1266,9 @@ mod tests {
         );
 
         // Step 2: Second call reconnects to existing node
-        let (info2, started2, id2) = get_or_start_workspace(
-            &project_path,
-            Some(&tw.id),
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,   // web_port
-            "info", // log_level
-            None,   // otp_app_name
-            &[],    // hex_dep_names
-        )
-        .expect("reconnect should succeed");
+        let (info2, started2, id2) =
+            get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config)
+                .expect("reconnect should succeed");
         assert!(!started2, "second call should reuse existing node");
         assert_eq!(id2, tw.id);
         assert_eq!(info2.pid, info1.pid, "should return same PID");
@@ -1281,20 +1291,7 @@ mod tests {
             let mut last_err = None;
             let mut result = None;
             for attempt in 0..3_usize {
-                match get_or_start_workspace(
-                    &project_path,
-                    Some(&tw.id),
-                    0,
-                    &paths,
-                    &[],
-                    false,
-                    Some(60),
-                    None,
-                    None,   // web_port
-                    "info", // log_level
-                    None,   // otp_app_name
-                    &[],    // hex_dep_names
-                ) {
+                match get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config) {
                     Ok(r) => {
                         result = Some(r);
                         break;
@@ -1358,21 +1355,18 @@ mod tests {
                 let tw_id = tw.id.clone();
                 let paths = Arc::clone(&paths);
                 thread::spawn(move || {
+                    let config = WorkspaceConfig {
+                        port: 0,
+                        bind_addr: None,
+                        web_port: None,
+                        auto_cleanup: false,
+                        max_idle_seconds: Some(60),
+                        log_level: "info",
+                        otp_app_name: None,
+                        hex_dep_names: &[],
+                    };
                     barrier.wait();
-                    get_or_start_workspace(
-                        &project_path,
-                        Some(&tw_id),
-                        0,
-                        &paths,
-                        &[],
-                        false,
-                        Some(60),
-                        None,
-                        None,   // web_port
-                        "info", // log_level
-                        None,   // otp_app_name
-                        &[],    // hex_dep_names
-                    )
+                    get_or_start_workspace(&project_path, Some(&tw_id), &paths, &[], &config)
                 })
             })
             .collect();
@@ -1445,21 +1439,20 @@ mod tests {
 
         let paths = beam_dirs_for_tests();
 
+        let config = WorkspaceConfig {
+            port: 0,
+            bind_addr: None,
+            web_port: None,
+            auto_cleanup: false,
+            max_idle_seconds: Some(60),
+            log_level: "info",
+            otp_app_name: None,
+            hex_dep_names: &[],
+        };
+
         // Step 1: Start a node to get a real port, then kill it without cleanup.
-        let first_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,
-            "info",
-            None,
-            &[],
-        )
-        .expect("first start should succeed");
+        let first_info =
+            start_detached_node(&tw.id, &paths, &[], &config).expect("first start should succeed");
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
 
@@ -1483,21 +1476,9 @@ mod tests {
         // so it calls `start_detached_node` directly (not via cleanup_stale_node_info).
         // The stale port file must be deleted before discovery, otherwise the loop
         // reads stale_port immediately and wait_for_tcp_ready times out.
-        let (new_info, started, _) = get_or_start_workspace(
-            &project_path,
-            Some(&tw.id),
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,
-            "info",
-            None,
-            &[],
-        )
-        .expect("restart with stale port file should succeed without timing out");
+        let (new_info, started, _) =
+            get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config)
+                .expect("restart with stale port file should succeed without timing out");
         let _guard = NodeGuard::new(&new_info);
 
         assert!(started, "should have started a new node");
@@ -1533,21 +1514,20 @@ mod tests {
 
         let paths = beam_dirs_for_tests();
 
+        let config = WorkspaceConfig {
+            port: 0,
+            bind_addr: None,
+            web_port: None,
+            auto_cleanup: false,
+            max_idle_seconds: Some(60),
+            log_level: "info",
+            otp_app_name: None,
+            hex_dep_names: &[],
+        };
+
         // Step 1: Start a node to produce real runtime files, then kill it.
-        let first_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,
-            "info",
-            None,
-            &[],
-        )
-        .expect("first start should succeed");
+        let first_info =
+            start_detached_node(&tw.id, &paths, &[], &config).expect("first start should succeed");
         kill_node_raw(&first_info);
 
         // Step 2: Write a `starting` tombstone to simulate a partial startup that
@@ -1564,21 +1544,9 @@ mod tests {
 
         // Step 3: Start a new node.  The tombstone must be detected, all stale
         // files cleaned, and startup must succeed.
-        let (new_info, started, _) = get_or_start_workspace(
-            &project_path,
-            Some(&tw.id),
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,
-            "info",
-            None,
-            &[],
-        )
-        .expect("restart with tombstone present should succeed");
+        let (new_info, started, _) =
+            get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config)
+                .expect("restart with tombstone present should succeed");
         let _guard = NodeGuard::new(&new_info);
 
         assert!(started, "should have started a new node");

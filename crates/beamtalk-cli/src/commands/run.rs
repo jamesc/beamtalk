@@ -317,19 +317,23 @@ fn run_package_as_otp_application(
     let extra_code_paths = beam_env.code_paths_std();
     let ebin_dir: PathBuf = layout.ebin_dir().into_std_path_buf();
 
+    let ws_config = workspace::WorkspaceConfig {
+        port: 0,                // ephemeral port: OS assigns
+        bind_addr: None,        // loopback default
+        web_port: None,         // disabled
+        auto_cleanup: false,    // persistent (not auto_cleanup)
+        max_idle_seconds: None, // use workspace default
+        log_level: "info",
+        otp_app_name: Some(&pkg.name),
+        hex_dep_names: &beam_env.otp_apps,
+    };
+
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
         None,
-        0, // ephemeral port: OS assigns
         &paths,
         &extra_code_paths,
-        false,  // persistent (not auto_cleanup)
-        None,   // max_idle_seconds: use workspace default
-        None,   // bind_addr: loopback default
-        None,   // web_port
-        "info", // log_level
-        Some(&pkg.name),
-        &beam_env.otp_apps,
+        &ws_config,
     )?;
 
     if !is_new {

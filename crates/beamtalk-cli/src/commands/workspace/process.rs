@@ -10,7 +10,7 @@
 //!
 //! **DDD Context:** CLI
 
-use std::net::{Ipv4Addr, TcpStream};
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -98,24 +98,16 @@ const LIVENESS_CHECK_INTERVAL: usize = 25;
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
 ///
-/// If `otp_app_name` is `Some(name)`, `application:ensure_all_started(name)` is
+/// If `config.otp_app_name` is `Some(name)`, `application:ensure_all_started(name)` is
 /// inserted into the eval sequence after the workspace supervisor starts but before
 /// the REPL port is queried. This guarantees all project classes are registered
 /// before the OTP supervisor tree is brought up (BT-1319).
-#[allow(clippy::too_many_arguments)] // workspace node startup requires many independent parameters
 #[allow(clippy::too_many_lines)] // eval command construction is necessarily verbose
 pub fn start_detached_node(
     workspace_id: &str,
-    port: u16,
     beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
-    auto_cleanup: bool,
-    max_idle_seconds: Option<u64>,
-    bind_addr: Option<Ipv4Addr>,
-    web_port: Option<u16>,
-    log_level: &str,
-    otp_app_name: Option<&str>,
-    hex_dep_names: &[String],
+    config: &super::WorkspaceConfig<'_>,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -124,7 +116,7 @@ pub fn start_detached_node(
     let cookie = read_workspace_cookie(workspace_id)?;
 
     // Determine idle timeout (explicit arg > environment variable > default)
-    let idle_timeout = max_idle_seconds.unwrap_or_else(|| {
+    let idle_timeout = config.max_idle_seconds.unwrap_or_else(|| {
         std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -172,20 +164,20 @@ pub fn start_detached_node(
     let pid_file_path_str = pid_file_path_str.replace('\\', "\\\\");
 
     // Format bind address as Erlang tuple for cowboy socket_opts
-    let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(bind_addr);
+    let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(config.bind_addr);
 
     // Format web_port for Erlang (BT-689)
-    let web_port_erl = match web_port {
+    let web_port_erl = match config.web_port {
         Some(p) => p.to_string(),
         None => "undefined".to_string(),
     };
 
     // ADR 0072 (BT-1724): Start hex dep OTP applications before the OTP app supervisor.
-    let hex_deps_start = beamtalk_cli::repl_startup::hex_deps_start_fragment(hex_dep_names);
+    let hex_deps_start = beamtalk_cli::repl_startup::hex_deps_start_fragment(config.hex_dep_names);
 
     // If an OTP app name is provided, start it after workspace bootstrap so that
     // all project classes are registered before the OTP supervisor's init/1 runs (BT-1319).
-    let otp_app_start = match otp_app_name {
+    let otp_app_start = match config.otp_app_name {
         Some(name) => format!("{{ok, _}} = application:ensure_all_started({name}), "),
         None => String::new(),
     };
@@ -194,12 +186,12 @@ pub fn start_detached_node(
         &pid_file_path_str,
         workspace_id,
         &project_path_str,
-        port,
+        config.port,
         &web_port_erl,
         &bind_addr_erl,
-        auto_cleanup,
+        config.auto_cleanup,
         idle_timeout,
-        log_level,
+        config.log_level,
         &hex_deps_start,
         &otp_app_start,
     );
@@ -308,7 +300,7 @@ pub fn start_detached_node(
     // Read actual port from port file (written by beamtalk_repl_server after binding).
     // This is essential when port=0 is used (OS assigns ephemeral port).
     // Retry a few times since the BEAM node may still be initializing.
-    let (actual_port, nonce) = if port == 0 {
+    let (actual_port, nonce) = if config.port == 0 {
         let mut discovered = None;
         for attempt in 0..PORT_DISCOVERY_MAX_RETRIES {
             if let Some(port_nonce) = read_port_file(workspace_id)? {
@@ -342,7 +334,7 @@ pub fn start_detached_node(
     } else {
         match read_port_file(workspace_id)? {
             Some((p, n)) => (p, n),
-            None => (port, None),
+            None => (config.port, None),
         }
     };
 
@@ -353,7 +345,7 @@ pub fn start_detached_node(
         pid,
         start_time,
         nonce,
-        bind_addr: bind_addr.map(|a| a.to_string()),
+        bind_addr: config.bind_addr.map(|a| a.to_string()),
     };
 
     // Wait for WebSocket health endpoint to be fully ready before returning.
