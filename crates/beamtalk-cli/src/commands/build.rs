@@ -224,6 +224,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
+    // ADR 0075 Phase 1: Extract type specs from OTP .beam files on the code
+    // path. Results are cached in _build/type_cache/ — incremental builds
+    // read zero .beam files when the cache is fresh.
+    extract_type_specs(&env);
+
     Ok(())
 }
 
@@ -800,6 +805,54 @@ fn post_process_package_artifacts(
     )?;
 
     Ok(())
+}
+
+/// ADR 0075 Phase 1: Extract type specs from OTP `.beam` files and cache them.
+///
+/// Non-fatal: if spec extraction fails (e.g., runtime not compiled), the build
+/// succeeds without type information. The LSP will still provide untyped
+/// completions in that case.
+///
+/// Only runs in package mode (when `beamtalk.toml` exists) — single-file builds
+/// don't create the `_build/` directory.
+fn extract_type_specs(env: &BuildEnvironment) {
+    use crate::beam_compiler;
+
+    // Skip in single-file mode — no _build/ directory to cache into.
+    if env.pkg_manifest().is_none() {
+        return;
+    }
+
+    let cache_dir = env.layout.type_cache_dir();
+
+    // Discover OTP .beam files on the code path
+    let beam_files = match beam_compiler::discover_otp_beam_files() {
+        Ok(files) => files,
+        Err(e) => {
+            debug!("Skipping type spec extraction: {e}");
+            return;
+        }
+    };
+
+    if beam_files.is_empty() {
+        debug!("No OTP .beam files found for type spec extraction");
+        return;
+    }
+
+    match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
+        Ok(registry) => {
+            if registry.module_count() > 0 {
+                info!(
+                    modules = registry.module_count(),
+                    functions = registry.function_count(),
+                    "Extracted Erlang FFI type specs"
+                );
+            }
+        }
+        Err(e) => {
+            debug!("Type spec extraction failed (non-fatal): {e}");
+        }
+    }
 }
 
 /// Collected build outputs needed for OTP application packaging.

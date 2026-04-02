@@ -191,6 +191,60 @@ impl Backend {
         None
     }
 
+    /// Loads the type cache from `_build/type_cache/` in workspace roots.
+    ///
+    /// ADR 0075 Phase 1: Reads cached spec protocol lines and populates the
+    /// `NativeTypeRegistry` in the language service. This provides typed
+    /// completions for Erlang FFI calls (e.g., `reverse: list :: List -> List`).
+    async fn load_type_cache(&self, roots: &[PathBuf]) {
+        use beamtalk_core::semantic_analysis::type_checker::{
+            NativeTypeRegistry, parse_specs_line,
+        };
+
+        let roots_owned: Vec<PathBuf> = roots.to_vec();
+        let registry = tokio::task::spawn_blocking(move || {
+            let mut registry = NativeTypeRegistry::new();
+            for root in &roots_owned {
+                let cache_dir = root.join("_build").join("type_cache");
+                if !cache_dir.is_dir() {
+                    continue;
+                }
+                let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let Ok(content) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    // Extract specs_line from the JSON cache entry.
+                    // Format: {"beam_mtime_secs":N,"specs_line":"..."}
+                    if let Some(line) = extract_specs_line_from_cache(&content) {
+                        if !line.is_empty() {
+                            parse_specs_line(&line, &mut registry);
+                        }
+                    }
+                }
+            }
+            registry
+        })
+        .await
+        .unwrap_or_default();
+
+        if registry.module_count() > 0 {
+            debug!(
+                "Loaded {} modules ({} functions) from type cache",
+                registry.module_count(),
+                registry.function_count()
+            );
+            let mut svc = self.service.lock().expect("service lock poisoned");
+            svc.set_native_types(registry);
+        }
+    }
+
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
         let loaded = tokio::task::spawn_blocking(move || collect_preload_files(config))
             .await
@@ -424,8 +478,10 @@ impl LanguageServer for Backend {
                 .expect("preload_config lock poisoned");
             preload_config.take()
         };
-        if let Some(config) = preload_config {
-            self.preload_workspace_source_files(config).await;
+        if let Some(ref config) = preload_config {
+            self.preload_workspace_source_files(config.clone()).await;
+            // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
+            self.load_type_cache(&config.roots).await;
         }
 
         debug!("beamtalk-lsp initialized");
@@ -1305,6 +1361,43 @@ fn position_to_offset(pos: tower_lsp::lsp_types::Position, source: &str) -> usiz
     source.len()
 }
 
+/// Extracts the `specs_line` value from a type cache JSON entry.
+///
+/// The cache format is `{"beam_mtime_secs":N,"specs_line":"..."}`.
+/// This is a simple key-value extraction — we don't need a full JSON parser.
+fn extract_specs_line_from_cache(json: &str) -> Option<String> {
+    // Look for "specs_line":" and extract until the closing unescaped "
+    let key = "\"specs_line\":\"";
+    let start = json.find(key)? + key.len();
+    let remaining = &json[start..];
+
+    // Find the end of the JSON string value, handling escaped quotes
+    let mut result = String::new();
+    let mut chars = remaining.chars();
+    loop {
+        match chars.next()? {
+            '\\' => {
+                // Handle escape sequences
+                match chars.next()? {
+                    '"' => result.push('"'),
+                    '\\' => result.push('\\'),
+                    'n' => result.push('\n'),
+                    'r' => result.push('\r'),
+                    't' => result.push('\t'),
+                    other => {
+                        result.push('\\');
+                        result.push(other);
+                    }
+                }
+            }
+            '"' => break, // End of string value
+            c => result.push(c),
+        }
+    }
+
+    Some(result)
+}
+
 /// Converts a beamtalk `Diagnostic` to an LSP `Diagnostic`.
 fn to_lsp_diagnostic(
     diag: &beamtalk_core::language_service::Diagnostic,
@@ -1961,5 +2054,40 @@ mod tests {
                 "roundtrip failed for offset {byte_offset}"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Type cache JSON parsing (ADR 0075)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_specs_line_from_cache_basic() {
+        let json = r#"{"beam_mtime_secs":12345,"specs_line":"beamtalk-specs-module:lists:[#{arity => 1}]"}"#;
+        let result = extract_specs_line_from_cache(json);
+        assert_eq!(
+            result.as_deref(),
+            Some("beamtalk-specs-module:lists:[#{arity => 1}]")
+        );
+    }
+
+    #[test]
+    fn extract_specs_line_from_cache_empty() {
+        let json = r#"{"beam_mtime_secs":100,"specs_line":""}"#;
+        let result = extract_specs_line_from_cache(json);
+        assert_eq!(result.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn extract_specs_line_from_cache_with_escaped_quotes() {
+        let json = r#"{"beam_mtime_secs":100,"specs_line":"name => <<\"reverse\">>"}"#;
+        let result = extract_specs_line_from_cache(json);
+        assert_eq!(result.as_deref(), Some(r#"name => <<"reverse">>"#));
+    }
+
+    #[test]
+    fn extract_specs_line_from_cache_missing_key() {
+        let json = r#"{"beam_mtime_secs":100}"#;
+        let result = extract_specs_line_from_cache(json);
+        assert!(result.is_none());
     }
 }

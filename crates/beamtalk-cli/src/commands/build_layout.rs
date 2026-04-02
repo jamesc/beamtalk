@@ -67,6 +67,13 @@ impl BuildLayout {
         self.native_dir().join("default").join("lib")
     }
 
+    // ── Type cache (ADR 0075) ─────────────────────────────────────────
+
+    /// `_build/type_cache/` — cached Erlang FFI type specs.
+    pub fn type_cache_dir(&self) -> Utf8PathBuf {
+        self.project_root.join("_build").join("type_cache")
+    }
+
     // ── Dependencies ─────────────────────────────────────────────────
 
     /// `_build/deps/` — top-level dependency directory.
@@ -125,6 +132,15 @@ mod tests {
         assert_eq!(
             layout.rebar_lib_dir(),
             "/home/user/my_app/_build/dev/native/default/lib"
+        );
+    }
+
+    #[test]
+    fn test_type_cache_dir() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.type_cache_dir(),
+            "/home/user/my_app/_build/type_cache"
         );
     }
 
