@@ -98,7 +98,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Proposed | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Proposed | 2026-03-29 |
 | [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted | 2026-04-01 |
-| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Proposed | 2026-04-02 |
+| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Accepted | 2026-04-02 |
 
 ## Creating New ADRs
 
