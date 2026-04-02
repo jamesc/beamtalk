@@ -175,37 +175,40 @@ ring_buffer_eviction_test_() ->
                 %% Clear any events from other tests to start clean
                 beamtalk_trace_store:clear(),
 
-                %% Set a small max for testing
+                %% Set a small max for testing; restore in `after`
+                %% so a failing assertion doesn't leave max_events=50
+                %% for subsequent tests.
                 beamtalk_trace_store:max_events(MaxEvents),
-                ?assertEqual(MaxEvents, beamtalk_trace_store:max_events()),
+                try
+                    ?assertEqual(MaxEvents, beamtalk_trace_store:max_events()),
 
-                %% Enable tracing and insert more than max
-                beamtalk_trace_store:enable(),
-                TestPid = self(),
-                lists:foreach(
-                    fun(I) ->
-                        beamtalk_trace_store:record_trace_event(
-                            TestPid, 'Counter', increment, sync, I * 100, ok, #{}, stop
-                        )
-                    end,
-                    lists:seq(1, InsertCount)
-                ),
+                    %% Enable tracing and insert more than max
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    lists:foreach(
+                        fun(I) ->
+                            beamtalk_trace_store:record_trace_event(
+                                TestPid, 'Counter', increment, sync, I * 100, ok, #{}, stop
+                            )
+                        end,
+                        lists:seq(1, InsertCount)
+                    ),
 
-                %% Trigger sweep and wait for it to complete.
-                %% sys:get_state/1 forces a round-trip through the
-                %% gen_server mailbox, ensuring the sweep_eviction
-                %% message has been processed.
-                beamtalk_trace_store ! sweep_eviction,
-                sys:get_state(beamtalk_trace_store),
+                    %% Trigger sweep and wait for it to complete.
+                    %% sys:get_state/1 forces a round-trip through the
+                    %% gen_server mailbox, ensuring the sweep_eviction
+                    %% message has been processed.
+                    beamtalk_trace_store ! sweep_eviction,
+                    sys:get_state(beamtalk_trace_store),
 
-                %% After sweep, exactly ExpectedAfterSweep events
-                %% should remain for our pid. Filter by TestPid to
-                %% avoid interference from concurrent test suites.
-                PostSweep = beamtalk_trace_store:get_traces(TestPid),
-                ?assertEqual(ExpectedAfterSweep, length(PostSweep)),
-
-                %% Reset max_events to default
-                beamtalk_trace_store:max_events(100000)
+                    %% After sweep, exactly ExpectedAfterSweep events
+                    %% should remain for our pid. Filter by TestPid to
+                    %% avoid interference from concurrent test suites.
+                    PostSweep = beamtalk_trace_store:get_traces(TestPid),
+                    ?assertEqual(ExpectedAfterSweep, length(PostSweep))
+                after
+                    beamtalk_trace_store:max_events(100000)
+                end
             end)
         ]
     end}.
