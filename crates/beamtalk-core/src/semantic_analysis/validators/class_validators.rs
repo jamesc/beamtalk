@@ -922,6 +922,293 @@ fn check_keyword_for_kind(
     }
 }
 
+// ── BT-1793: Actor field mutation inside block closures ─────────────────────
+
+/// BT-1793: Error when an Actor method contains `self.field := expr` inside a
+/// block closure that is NOT compiled with state threading.
+///
+/// State-threading selectors (`do:`, `collect:`, `whileTrue:`, etc.) and inline
+/// conditionals (`ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`) compile their block
+/// arguments with proper Actor state threading. All other message sends compile
+/// blocks as plain closures where `State0`/`State1` variables are not in scope,
+/// producing invalid Core Erlang (`core_lint: unbound_var`).
+///
+/// This check detects the pattern and emits a clear compile-time error instead
+/// of letting it fail at the Core Erlang stage.
+pub(crate) fn check_actor_field_mutation_in_closure(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if hierarchy.resolve_class_kind(class_name) != ClassKind::Actor {
+            continue;
+        }
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for stmt in &method.body {
+                check_expr_for_unsafe_field_mutation(&stmt.expression, class_name, diagnostics);
+            }
+        }
+    }
+    // Also check standalone method definitions (Tonel-style).
+    for standalone in &module.method_definitions {
+        let class_name = standalone.class_name.name.as_str();
+        if hierarchy.resolve_class_kind(class_name) != ClassKind::Actor {
+            continue;
+        }
+        for stmt in &standalone.method.body {
+            check_expr_for_unsafe_field_mutation(&stmt.expression, class_name, diagnostics);
+        }
+    }
+}
+
+/// Builds the diagnostic for an unsafe field mutation in a block closure.
+///
+/// Shared by both `MessageSend` and `Cascade` branches to keep the error
+/// message, hint, and field formatting in one place.
+fn emit_unsafe_field_mutation_diagnostic(
+    field_writes: &std::collections::HashSet<String>,
+    sel_name: &str,
+    class_name: &str,
+    block_span: crate::source_analysis::Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut fields: Vec<_> = field_writes.iter().cloned().collect();
+    fields.sort();
+    let verb = if fields.len() == 1 { "is" } else { "are" };
+    diagnostics.push(
+        Diagnostic::error(
+            format!(
+                "Cannot mutate Actor state inside a closure — \
+                 `self.{}` {verb} assigned inside a block passed to `{}` \
+                 on Actor `{}`",
+                fields.join("`, `self."),
+                sel_name,
+                class_name,
+            ),
+            block_span,
+        )
+        .with_hint(
+            "Move the state assignment to the method body. \
+             Use the check-then-unwrap pattern: \
+             `result isError ifTrue: [^Result error: ...]. \
+             self.field := result unwrap`",
+        ),
+    );
+}
+
+/// Recursively walks an expression tree looking for block arguments to
+/// non-state-threading, non-self message sends that contain field mutations.
+///
+/// Three kinds of message sends safely handle field mutations in block arguments:
+/// 1. **Self-sends** (`self foo: [...]`) — blocks are promoted to Tier 2 by
+///    `DispatchCodegen`, threading actor State as `StateAcc`.
+/// 2. **State-threading selectors** (`do:`, `collect:`, `whileTrue:`, etc.) —
+///    codegen generates inline state threading regardless of receiver.
+/// 3. **Inline conditionals** (`ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`) —
+///    compiled inline so State variables stay in scope. (These are included
+///    in the state-threading selector list.)
+///
+/// Any other combination (non-self receiver + non-state-threading selector)
+/// compiles the block as a plain closure where `State0`/`State1` are unbound.
+///
+/// **Nested blocks:** `analyze_block` propagates `field_writes` from nested
+/// blocks into the outer analysis (see BT-478). This means nested patterns like
+/// `result andThen: [:r | r map: [:x | self.val := x]]` will produce a
+/// diagnostic for *both* the outer `andThen:` block and the inner `map:` block.
+/// This is intentional — each unsafe closure boundary is flagged independently.
+#[allow(clippy::too_many_lines)] // Exhaustive match over Expression variants
+fn check_expr_for_unsafe_field_mutation(
+    expr: &Expression,
+    class_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            // Recurse into receiver
+            check_expr_for_unsafe_field_mutation(receiver, class_name, diagnostics);
+
+            let sel_name = selector.name();
+            let is_self_send = matches!(
+                receiver.as_ref(),
+                Expression::Identifier(id) if id.name == "self"
+            );
+            let is_state_threading =
+                crate::state_threading_selectors::is_state_threading_keyword_selector(&sel_name);
+
+            // Safe if either self-send (Tier 2 promotion) or state-threading selector
+            let is_safe = is_self_send || is_state_threading;
+
+            for arg in arguments {
+                if is_safe {
+                    // Safe context — recurse into block bodies for nested unsafe sends
+                    if let Expression::Block(block) = arg {
+                        for stmt in &block.body {
+                            check_expr_for_unsafe_field_mutation(
+                                &stmt.expression,
+                                class_name,
+                                diagnostics,
+                            );
+                        }
+                    } else {
+                        check_expr_for_unsafe_field_mutation(arg, class_name, diagnostics);
+                    }
+                } else {
+                    // Unsafe context: non-self, non-state-threading selector.
+                    // Check if any block argument has field writes.
+                    if let Expression::Block(block) = arg {
+                        let analysis = crate::semantic_analysis::block_facts::analyze_block(block);
+                        if !analysis.field_writes.is_empty() {
+                            emit_unsafe_field_mutation_diagnostic(
+                                &analysis.field_writes,
+                                &sel_name,
+                                class_name,
+                                block.span,
+                                diagnostics,
+                            );
+                        }
+                        // Still recurse into the block body for other nested issues
+                        for stmt in &block.body {
+                            check_expr_for_unsafe_field_mutation(
+                                &stmt.expression,
+                                class_name,
+                                diagnostics,
+                            );
+                        }
+                    } else {
+                        check_expr_for_unsafe_field_mutation(arg, class_name, diagnostics);
+                    }
+                }
+            }
+        }
+
+        // Recurse into other expression types
+        Expression::Assignment { target, value, .. } => {
+            check_expr_for_unsafe_field_mutation(target, class_name, diagnostics);
+            check_expr_for_unsafe_field_mutation(value, class_name, diagnostics);
+        }
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+            check_expr_for_unsafe_field_mutation(value, class_name, diagnostics);
+        }
+        Expression::Block(block) => {
+            // Standalone block (not an argument to a message send) — recurse
+            // into body. The block itself isn't in a message send context so
+            // we don't check for field_writes here.
+            for stmt in &block.body {
+                check_expr_for_unsafe_field_mutation(&stmt.expression, class_name, diagnostics);
+            }
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            check_expr_for_unsafe_field_mutation(receiver, class_name, diagnostics);
+            let is_self_cascade = matches!(
+                receiver.as_ref(),
+                Expression::Identifier(id) if id.name == "self"
+            );
+            for msg in messages {
+                let sel_name = msg.selector.name();
+                let is_state_threading =
+                    crate::state_threading_selectors::is_state_threading_keyword_selector(
+                        &sel_name,
+                    );
+                let is_safe = is_self_cascade || is_state_threading;
+                for arg in &msg.arguments {
+                    if is_safe {
+                        if let Expression::Block(block) = arg {
+                            for stmt in &block.body {
+                                check_expr_for_unsafe_field_mutation(
+                                    &stmt.expression,
+                                    class_name,
+                                    diagnostics,
+                                );
+                            }
+                        } else {
+                            check_expr_for_unsafe_field_mutation(arg, class_name, diagnostics);
+                        }
+                    } else if let Expression::Block(block) = arg {
+                        let analysis = crate::semantic_analysis::block_facts::analyze_block(block);
+                        if !analysis.field_writes.is_empty() {
+                            emit_unsafe_field_mutation_diagnostic(
+                                &analysis.field_writes,
+                                &sel_name,
+                                class_name,
+                                block.span,
+                                diagnostics,
+                            );
+                        }
+                        for stmt in &block.body {
+                            check_expr_for_unsafe_field_mutation(
+                                &stmt.expression,
+                                class_name,
+                                diagnostics,
+                            );
+                        }
+                    } else {
+                        check_expr_for_unsafe_field_mutation(arg, class_name, diagnostics);
+                    }
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            check_expr_for_unsafe_field_mutation(expression, class_name, diagnostics);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            check_expr_for_unsafe_field_mutation(receiver, class_name, diagnostics);
+        }
+        Expression::Match { value, arms, .. } => {
+            check_expr_for_unsafe_field_mutation(value, class_name, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    check_expr_for_unsafe_field_mutation(guard, class_name, diagnostics);
+                }
+                check_expr_for_unsafe_field_mutation(&arm.body, class_name, diagnostics);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                check_expr_for_unsafe_field_mutation(&pair.key, class_name, diagnostics);
+                check_expr_for_unsafe_field_mutation(&pair.value, class_name, diagnostics);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                check_expr_for_unsafe_field_mutation(elem, class_name, diagnostics);
+            }
+            if let Some(t) = tail {
+                check_expr_for_unsafe_field_mutation(t, class_name, diagnostics);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                check_expr_for_unsafe_field_mutation(elem, class_name, diagnostics);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                    check_expr_for_unsafe_field_mutation(e, class_name, diagnostics);
+                }
+            }
+        }
+        // Leaf nodes
+        Expression::Literal(..)
+        | Expression::Identifier(_)
+        | Expression::ClassReference { .. }
+        | Expression::Primitive { .. }
+        | Expression::Super(_)
+        | Expression::Error { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1514,5 +1801,224 @@ mod tests {
         );
         assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("field:"));
+    }
+
+    // ── BT-1793: Actor field mutation in closure tests ──────────────────────
+
+    #[test]
+    fn actor_field_mutation_in_map_block_errors() {
+        // self.proc := p inside a map: block on an Actor should error
+        let src = "\
+Actor subclass: MyActor
+  state: proc = nil
+
+  launch =>
+    result := nil
+    result map: [:p | self.proc := p]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for field mutation in map: block, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].severity == Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("Cannot mutate Actor state"),
+            "Unexpected message: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].message.contains("proc"));
+        assert!(
+            diagnostics[0].message.contains("is assigned"),
+            "Single field should use 'is assigned', got: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].hint.is_some());
+    }
+
+    #[test]
+    fn actor_multi_field_mutation_uses_plural_verb() {
+        // Two field mutations in one block should produce "are assigned"
+        let src = "\
+Actor subclass: Multi
+  state: a = 0
+  state: b = 0
+
+  run =>
+    result := nil
+    result map: [:x |
+      self.a := x
+      self.b := x
+    ]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0].message.contains("are assigned"),
+            "Multiple fields should use 'are assigned', got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn actor_field_mutation_in_do_block_no_error() {
+        // do: is a state-threading selector — field mutations should be allowed
+        let src = "\
+Actor subclass: Counter
+  state: count = 0
+
+  process: items =>
+    items do: [:item | self.count := self.count + 1]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors for field mutation in do: block, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn actor_field_mutation_in_iftrue_block_no_error() {
+        // ifTrue: is an inline conditional — field mutations should be allowed
+        let src = "\
+Actor subclass: Toggler
+  state: active = false
+
+  activate =>
+    self.active ifFalse: [self.active := true]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors for field mutation in ifFalse: block, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn value_class_field_mutation_in_closure_no_error() {
+        // Value classes don't use Actor state threading — not affected by this check
+        let src = "\
+Value subclass: Wrapper
+  field: data = nil
+
+  transform =>
+    result := nil
+    result map: [:x | self.data := x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors for Value class, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn actor_field_mutation_in_method_body_no_error() {
+        // Direct field mutation in method body (not inside a block) is fine
+        let src = "\
+Actor subclass: Setter
+  state: value = nil
+
+  set: v =>
+    self.value := v";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors for direct field mutation, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn actor_nested_field_mutation_in_unsafe_closure_errors() {
+        // Field mutation nested inside a block passed to a non-safe selector
+        let src = "\
+Actor subclass: Nested
+  state: val = 0
+
+  process =>
+    result := nil
+    result andThen: [:r |
+      r map: [:x | self.val := x]
+    ]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        // Both the outer andThen: block (field_writes propagated from nested) and
+        // the inner map: block should be flagged — analyze_block intentionally
+        // propagates field_writes so each unsafe closure boundary is reported.
+        assert!(
+            diagnostics.len() >= 2,
+            "Expected at least 2 errors for nested field mutation in unsafe closures, got: {diagnostics:?}"
+        );
+        assert!(diagnostics.iter().all(|d| d.severity == Severity::Error));
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("andThen:")),
+            "Expected one diagnostic to mention andThen:, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("map:")),
+            "Expected one diagnostic to mention map:, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn actor_field_mutation_via_self_send_hom_no_error() {
+        // Self-sends promote blocks to Tier 2 — field mutations are safe
+        let src = "\
+Actor subclass: HomActor
+  state: sum = 0
+
+  applyAll: aBlock =>
+    #(1, 2, 3) do: [:x | aBlock value: x]
+
+  run =>
+    self applyAll: [:x | self.sum := self.sum + x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors for self-send HOM, got: {diagnostics:?}"
+        );
     }
 }

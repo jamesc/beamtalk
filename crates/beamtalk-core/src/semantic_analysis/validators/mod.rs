@@ -25,9 +25,10 @@ mod visibility_validators;
 // Re-export all validators so callers don't need to know the submodule structure.
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
-    check_abstract_instantiation, check_actor_new_usage, check_cast_on_value_type,
-    check_class_variable_access, check_data_keyword_class_kind, check_new_field_names,
-    check_object_new_usage, check_value_nil_return, check_value_slot_assignment,
+    check_abstract_instantiation, check_actor_field_mutation_in_closure, check_actor_new_usage,
+    check_cast_on_value_type, check_class_variable_access, check_data_keyword_class_kind,
+    check_new_field_names, check_object_new_usage, check_value_nil_return,
+    check_value_slot_assignment,
 };
 pub(crate) use lint_validators::{
     check_effect_free_statements, check_empty_method_bodies, check_literal_boolean_condition,

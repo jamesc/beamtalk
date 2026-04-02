@@ -431,6 +431,12 @@ fn analyse_full(
     );
     // BT-919: Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
+    // BT-1793: Reject actor state mutation inside non-state-threading block closures
+    validators::check_actor_field_mutation_in_closure(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // BT-950: Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
     // BT-955: Warn on literal boolean conditions (always true / always false)
