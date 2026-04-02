@@ -301,7 +301,20 @@ Erlang lists seq: 1 with: 10      // ✅ same positional check — keywords don'
 Erlang lists seq: "a" to: 10      // ⚠️ param 1 expects Integer, got String
 ```
 
-The keyword names in stubs (`from:`, `to:`) are **documentation and LSP hints** — they appear in completions and hover to guide users toward the preferred keyword form, but the type checker does not warn on keyword mismatches. This is consistent with ADR 0028's design: keywords after the first are arbitrary at the FFI boundary.
+**Keyword mismatch warning (footgun prevention):**
+
+FFI calls are positional — a fundamental difference from normal Beamtalk dispatch where keyword names ARE the method identity. To prevent users from assuming keyword-name matching at the FFI boundary, the type checker emits a warning when call-site keywords don't match the stub declaration:
+
+```beamtalk
+> Erlang lists seq: 1 foo: 10
+  ⚠️ Warning: FFI keyword 'foo:' does not match stub declaration 'to:' for lists:seq/2 parameter 2
+    Hint: FFI calls are positional — keyword names don't affect dispatch.
+    Preferred form: Erlang lists seq: <from> to: <to>
+```
+
+This warning is suppressed for the universal `with:` fallback (ADR 0028's established convention) — `Erlang lists seq: 1 with: 10` does not warn.
+
+The warning teaches users that FFI dispatch differs from Beamtalk method dispatch, and nudges them toward the stub-declared keyword form for readability. The keyword names in stubs appear in LSP completions and hover to guide users toward the preferred form.
 
 **Module identity tracking:**
 
