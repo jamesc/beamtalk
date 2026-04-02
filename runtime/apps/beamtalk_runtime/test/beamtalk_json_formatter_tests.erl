@@ -157,7 +157,9 @@ format_gen_server_terminate_report_test() ->
         meta => #{time => erlang:system_time(microsecond)}
     },
     Decoded = decode_event(Event),
-    ?assertMatch(<<"gen_server my_server terminated">>, maps:get(<<"msg">>, Decoded)),
+    %% Msg now includes the reason for context
+    MsgBin = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(MsgBin, <<"gen_server my_server terminated">>)),
     ?assertEqual(<<"gen_server_terminate">>, maps:get(<<"report_type">>, Decoded)),
     ?assert(maps:is_key(<<"reason">>, Decoded)),
     %% Should infer domain as "otp"
@@ -178,7 +180,7 @@ format_supervisor_progress_report_test() ->
         meta => #{time => erlang:system_time(microsecond)}
     },
     Decoded = decode_event(Event),
-    ?assert(binary:match(maps:get(<<"msg">>, Decoded), <<"supervisor">>) =/= nomatch),
+    ?assert(binary:match(maps:get(<<"msg">>, Decoded), <<"Supervisor">>) =/= nomatch),
     ?assertEqual(<<"supervisor_progress">>, maps:get(<<"report_type">>, Decoded)),
     ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)),
     %% Supervisor name goes in "name" field, not "mfa"

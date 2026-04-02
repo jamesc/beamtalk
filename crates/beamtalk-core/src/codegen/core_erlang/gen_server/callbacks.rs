@@ -377,10 +377,10 @@ impl CoreErlangGenerator {
     ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
     ///                     {'noreply', InitNewState}
     ///                 <{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->
-    ///                     let _ = call 'logger':'error'(...stacktrace => InitStacktrace...) in
+    ///                     let _ = call 'logger':'error'(Msg, #{stacktrace => ...}) in
     ///                     {'stop', {InitType, InitReason, InitStacktrace}, InitErrState}
     ///                 <{'error', InitError, InitErrState2}> when 'true' ->
-    ///                     let _ = call 'logger':'error'(...) in
+    ///                     let _ = call 'logger':'error'(Msg, #{...}) in
     ///                     {'stop', InitError, InitErrState2}
     ///             end
     ///         <_> when 'true' -> {'noreply', State}
@@ -434,13 +434,13 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    "let InitErrorMsg = call 'beamtalk_error':'format_safe'({InitType, InitReason}) in",
+                                                    "let InitErrorMsg = call 'beamtalk_error':'format_safe'({InitType, InitReason}, InitStacktrace) in",
                                                     line(),
                                                     "let InitClassName = call '",
                                                     Document::Eco(module_name_for_log.clone()),
                                                     "':'class_name'() in",
                                                     line(),
-                                                    "let _ = call 'logger':'error'(~{'msg' => InitErrorMsg, 'class' => InitClassName, 'reason' => {InitType, InitReason}, 'stacktrace' => InitStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
+                                                    "let _ = call 'logger':'error'(InitErrorMsg, ~{'class' => InitClassName, 'reason' => {InitType, InitReason}, 'stacktrace' => InitStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                                     line(),
                                                     "{'stop', {InitType, InitReason, InitStacktrace}, InitErrState}",
                                                 ]
@@ -458,7 +458,7 @@ impl CoreErlangGenerator {
                                                     Document::Eco(module_name_for_log),
                                                     "':'class_name'() in",
                                                     line(),
-                                                    "let _ = call 'logger':'error'(~{'msg' => InitErrorMsg2, 'class' => InitClassName2, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
+                                                    "let _ = call 'logger':'error'(InitErrorMsg2, ~{'class' => InitClassName2, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                                     line(),
                                                     "{'stop', InitError, InitErrState2}",
                                                 ]
@@ -560,7 +560,9 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            "let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace}~)",
+                            "let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in",
+                            line(),
+                            "let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
                             line(),
                             "in {'noreply', State}",
                         ]
@@ -572,7 +574,9 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            "let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)",
+                            "let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in",
+                            line(),
+                            "let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
                             line(),
                             "in {'noreply', State}",
                         ]
@@ -739,7 +743,7 @@ impl CoreErlangGenerator {
     ///     case call 'Module':'safe_dispatch'('handleInfo:', [Msg], State) of
     ///         <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
     ///         <{'error', {_InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->
-    ///             let _Log = call 'logger':'warning'(~{'handleInfo_error' => InfoReason, 'stacktrace' => InfoStacktrace}~)
+    ///             let _Log = call 'logger':'warning'(Msg, #{stacktrace => InfoStacktrace, ...})
     ///             in {'noreply', State}
     ///         <_Other> when 'true' -> {'noreply', State}
     ///     end
@@ -786,7 +790,9 @@ impl CoreErlangGenerator {
                                     INDENT,
                                     docvec![
                                         line(),
-                                        "let _Log = call 'logger':'warning'(~{'handleInfo_error' => {InfoType, InfoReason}, 'stacktrace' => InfoStacktrace}~)",
+                                        "let InfoErrMsg = call 'beamtalk_error':'format_safe'({InfoType, InfoReason}, InfoStacktrace) in",
+                                        line(),
+                                        "let _Log = call 'logger':'warning'(InfoErrMsg, ~{'selector' => 'handleInfo:', 'reason' => {InfoType, InfoReason}, 'stacktrace' => InfoStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
                                         line(),
                                         "in {'noreply', State}",
                                     ]
@@ -798,7 +804,9 @@ impl CoreErlangGenerator {
                                     INDENT,
                                     docvec![
                                         line(),
-                                        "let _Log = call 'logger':'warning'(~{'handleInfo_error' => InfoError}~)",
+                                        "let InfoErrMsg2 = call 'beamtalk_error':'format_safe'(InfoError) in",
+                                        line(),
+                                        "let _Log = call 'logger':'warning'(InfoErrMsg2, ~{'selector' => 'handleInfo:', 'reason' => InfoError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
                                         line(),
                                         "in {'noreply', State}",
                                     ]

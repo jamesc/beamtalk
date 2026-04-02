@@ -24,6 +24,8 @@
     with_details/2,
     format/1,
     format_safe/1,
+    format_safe/2,
+    extract_beamtalk_error/2,
     raise/1,
     generate_message/3,
     format_reason/2
@@ -153,6 +155,61 @@ format_safe(#beamtalk_error{} = Error) ->
     end;
 format_safe(Term) ->
     iolist_to_binary(io_lib:format("~0p", [Term])).
+
+%% @doc Safely format an error term, searching the stacktrace for a
+%% `#beamtalk_error{}` if the primary reason is not informative (e.g.,
+%% `{error, function_clause}`).
+%%
+%% Used by generated `handle_continue` to produce useful log messages even
+%% when the Erlang-level reason is a raw function_clause or case_clause.
+-spec format_safe(term(), term()) -> binary().
+format_safe(#beamtalk_error{} = Error, _Stacktrace) ->
+    format_safe(Error);
+format_safe(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Error}, _Stacktrace) ->
+    format_safe(Error);
+format_safe(Reason, Stacktrace) ->
+    %% Try to extract a beamtalk_error from the stacktrace args
+    case extract_beamtalk_error(Stacktrace, 4) of
+        undefined ->
+            %% Also try the reason itself (may be nested)
+            case extract_beamtalk_error(Reason, 3) of
+                undefined -> format_safe(Reason);
+                Error -> format_safe(Error)
+            end;
+        Error ->
+            format_safe(Error)
+    end.
+
+%% @doc Recursively search a term for a `#beamtalk_error{}` record.
+%% Depth-limited to avoid traversing enormous state maps.
+-spec extract_beamtalk_error(term(), non_neg_integer()) -> #beamtalk_error{} | undefined.
+%% Direct matches succeed at any depth — depth only limits further recursion
+extract_beamtalk_error(#beamtalk_error{} = E, _Depth) ->
+    E;
+extract_beamtalk_error(#{error := #beamtalk_error{} = E}, _Depth) ->
+    E;
+extract_beamtalk_error(_Term, 0) ->
+    undefined;
+extract_beamtalk_error(T, Depth) when is_tuple(T) ->
+    extract_from_tuple(T, 1, tuple_size(T), Depth - 1);
+extract_beamtalk_error([H | T], Depth) ->
+    case extract_beamtalk_error(H, Depth - 1) of
+        undefined -> extract_beamtalk_error(T, Depth);
+        Found -> Found
+    end;
+extract_beamtalk_error(_, _Depth) ->
+    undefined.
+
+%% @private Scan tuple elements for a beamtalk_error.
+-spec extract_from_tuple(tuple(), pos_integer(), non_neg_integer(), non_neg_integer()) ->
+    #beamtalk_error{} | undefined.
+extract_from_tuple(_T, I, Size, _Depth) when I > Size ->
+    undefined;
+extract_from_tuple(T, I, Size, Depth) ->
+    case extract_beamtalk_error(element(I, T), Depth) of
+        undefined -> extract_from_tuple(T, I + 1, Size, Depth);
+        Found -> Found
+    end.
 
 %% @private Format message with optional hint.
 -spec format_parts(binary(), binary() | undefined) -> binary().
