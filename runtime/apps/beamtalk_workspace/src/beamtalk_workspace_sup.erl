@@ -320,6 +320,13 @@ do_setup_file_logger(WorkspaceId) ->
                     logger:set_primary_config(level, Level),
                     case logger:add_handler(beamtalk_file_log, logger_std_h, HandlerConfig) of
                         ok ->
+                            %% Suppress redundant proc_lib crash reports for beamtalk
+                            %% actors — they just say "process crash: unknown" and add
+                            %% nothing beyond the gen_server/supervisor reports.
+                            logger:add_primary_filter(
+                                beamtalk_suppress_proc_lib_crash,
+                                {fun beamtalk_log_filter:filter_proc_lib_crash/2, []}
+                            ),
                             ?LOG_INFO("Workspace log file: ~s", [LogFile], #{
                                 domain => [beamtalk, runtime]
                             }),
