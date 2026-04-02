@@ -374,6 +374,14 @@ impl TypeChecker {
         if actual == expected {
             return true;
         }
+        // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
+        // If expected contains `|`, split into members and check if actual matches any.
+        if expected.contains(" | ") {
+            return expected.split(" | ").any(|member| {
+                let member_eco: EcoString = member.trim().into();
+                Self::is_type_compatible(actual, &member_eco, hierarchy)
+            });
+        }
         // Singleton types: #foo is compatible with Symbol (its supertype)
         // and with itself (already handled by equality above).
         // Generic type params (K, V, T, etc.) are always compatible (conservative).

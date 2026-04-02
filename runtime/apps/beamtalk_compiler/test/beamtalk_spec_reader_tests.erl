@@ -1,9 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_spec_reader (ADR 0075, Phase 0 spike).
+%% @doc Tests for beamtalk_spec_reader (ADR 0075, Phase 1).
 %%
-%% Tests spec extraction from `.beam` files and Erlang→Beamtalk type mapping.
+%% Tests spec extraction from `.beam` files, Erlang→Beamtalk type mapping,
+%% multi-clause spec handling, and batch processing.
 
 -module(beamtalk_spec_reader_tests).
 
@@ -146,6 +147,71 @@ map_type_var_test() ->
 map_type_atom_literal_test() ->
     ?assertEqual(<<"Symbol">>, beamtalk_spec_reader:map_type({atom, 0, ok})).
 
+map_type_iodata_test() ->
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({type, 0, iodata, []})).
+
+map_type_iolist_test() ->
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({type, 0, iolist, []})).
+
+map_type_node_test() ->
+    ?assertEqual(<<"Symbol">>, beamtalk_spec_reader:map_type({type, 0, node, []})).
+
+map_type_module_test() ->
+    ?assertEqual(<<"Symbol">>, beamtalk_spec_reader:map_type({type, 0, module, []})).
+
+map_type_char_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, char, []})).
+
+map_type_byte_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, byte, []})).
+
+map_type_string_test() ->
+    ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, string, []})).
+
+map_type_range_test() ->
+    ?assertEqual(
+        <<"Integer">>,
+        beamtalk_spec_reader:map_type({type, 0, range, [{integer, 0, 1}, {integer, 0, 10}]})
+    ).
+
+map_type_remote_type_test() ->
+    ?assertEqual(
+        <<"Dynamic">>,
+        beamtalk_spec_reader:map_type({remote_type, 0, [{atom, 0, sets}, {atom, 0, set}, []]})
+    ).
+
+map_type_user_type_test() ->
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({user_type, 0, my_type, []})).
+
+map_type_annotated_test() ->
+    ?assertEqual(
+        <<"Integer">>,
+        beamtalk_spec_reader:map_type(
+            {ann_type, 0, [{var, 0, 'X'}, {type, 0, integer, []}]}
+        )
+    ).
+
+map_type_integer_literal_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({integer, 0, 42})).
+
+map_type_neg_integer_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, neg_integer, []})).
+
+map_type_nonempty_list_test() ->
+    ?assertEqual(
+        <<"List">>,
+        beamtalk_spec_reader:map_type({type, 0, nonempty_list, [{type, 0, integer, []}]})
+    ).
+
+%% Union types — map_type returns the first branch (simplified at this level)
+map_type_union_test() ->
+    ?assertEqual(
+        <<"Integer">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{type, 0, integer, []}, {type, 0, float, []}]}
+        )
+    ).
+
 %%% ---------------------------------------------------------------
 %%% extract_param_names/1 — parameter name extraction
 %%% ---------------------------------------------------------------
@@ -243,6 +309,234 @@ extract_specs_skips_non_spec_forms_test() ->
     ?assertEqual([], Result).
 
 %%% ---------------------------------------------------------------
+%%% Multi-clause specs — union of return types
+%%% ---------------------------------------------------------------
+
+%% Multi-clause spec: two clauses with different return types produce a union.
+multi_clause_different_returns_test() ->
+    %% -spec baz(integer()) -> boolean()
+    %%         ; (float()) -> atom().
+    Forms = [
+        {attribute, 1, spec,
+            {{baz, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, integer, []}]},
+                    {type, 2, boolean, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [{type, 3, float, []}]},
+                    {type, 3, atom, []}
+                ]}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(1, length(Result)),
+    [Spec] = Result,
+    ?assertEqual(<<"baz">>, maps:get(name, Spec)),
+    ?assertEqual(1, maps:get(arity, Spec)),
+    %% Return type is union of both clauses
+    ?assertEqual(<<"Boolean | Symbol">>, maps:get(return_type, Spec)),
+    %% Params come from first clause
+    [Param] = maps:get(params, Spec),
+    ?assertEqual(<<"Integer">>, maps:get(type, Param)).
+
+%% Multi-clause spec: same return types collapse to a single type.
+multi_clause_same_returns_test() ->
+    %% -spec qux(integer()) -> boolean()
+    %%         ; (float()) -> boolean().
+    Forms = [
+        {attribute, 1, spec,
+            {{qux, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, integer, []}]},
+                    {type, 2, boolean, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [{type, 3, float, []}]},
+                    {type, 3, boolean, []}
+                ]}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Spec] = Result,
+    %% Duplicate return types are deduped
+    ?assertEqual(<<"Boolean">>, maps:get(return_type, Spec)).
+
+%% Multi-clause with bounded_fun and plain fun clauses.
+multi_clause_mixed_bounded_test() ->
+    %% -spec mixed(X) -> X when X :: integer()
+    %%           ; (binary()) -> boolean().
+    Forms = [
+        {attribute, 1, spec,
+            {{mixed, 1}, [
+                {type, 2, bounded_fun, [
+                    {type, 2, 'fun', [
+                        {type, 2, product, [{var, 2, 'X'}]},
+                        {var, 2, 'X'}
+                    ]},
+                    [
+                        {type, 2, constraint, [
+                            {atom, 2, is_subtype},
+                            [{var, 2, 'X'}, {type, 2, integer, []}]
+                        ]}
+                    ]
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [{type, 3, binary, []}]},
+                    {type, 3, boolean, []}
+                ]}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Spec] = Result,
+    ?assertEqual(<<"Integer | Boolean">>, maps:get(return_type, Spec)),
+    %% Params from first (bounded) clause
+    [Param] = maps:get(params, Spec),
+    ?assertEqual(<<"x">>, maps:get(name, Param)).
+
+%% All unrecognizable clauses fall back to positional params + Dynamic.
+multi_clause_all_unrecognized_test() ->
+    Forms = [
+        {attribute, 1, spec,
+            {{weird, 2}, [
+                {unknown_clause_form, 2},
+                {another_unknown, 3}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Spec] = Result,
+    ?assertEqual(<<"weird">>, maps:get(name, Spec)),
+    ?assertEqual(2, maps:get(arity, Spec)),
+    ?assertEqual(<<"Dynamic">>, maps:get(return_type, Spec)),
+    Params = maps:get(params, Spec),
+    ?assertEqual(2, length(Params)),
+    [P1, P2] = Params,
+    ?assertEqual(<<"arg1">>, maps:get(name, P1)),
+    ?assertEqual(<<"arg2">>, maps:get(name, P2)).
+
+%% Zero-arity function spec.
+zero_arity_spec_test() ->
+    Forms = [
+        {attribute, 1, spec,
+            {{now, 0}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, []},
+                    {type, 2, integer, []}
+                ]}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Spec] = Result,
+    ?assertEqual(<<"now">>, maps:get(name, Spec)),
+    ?assertEqual(0, maps:get(arity, Spec)),
+    ?assertEqual(<<"Integer">>, maps:get(return_type, Spec)),
+    ?assertEqual([], maps:get(params, Spec)).
+
+%%% ---------------------------------------------------------------
+%%% merge_return_types/1
+%%% ---------------------------------------------------------------
+
+merge_return_types_empty_test() ->
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:merge_return_types([])).
+
+merge_return_types_single_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:merge_return_types([<<"Integer">>])).
+
+merge_return_types_multiple_distinct_test() ->
+    ?assertEqual(
+        <<"Integer | Boolean">>,
+        beamtalk_spec_reader:merge_return_types([<<"Integer">>, <<"Boolean">>])
+    ).
+
+merge_return_types_dedup_test() ->
+    ?assertEqual(
+        <<"Integer">>,
+        beamtalk_spec_reader:merge_return_types([<<"Integer">>, <<"Integer">>])
+    ).
+
+merge_return_types_dedup_preserves_order_test() ->
+    ?assertEqual(
+        <<"Integer | Boolean">>,
+        beamtalk_spec_reader:merge_return_types([<<"Integer">>, <<"Boolean">>, <<"Integer">>])
+    ).
+
+merge_return_types_three_types_test() ->
+    ?assertEqual(
+        <<"Integer | Boolean | String">>,
+        beamtalk_spec_reader:merge_return_types([<<"Integer">>, <<"Boolean">>, <<"String">>])
+    ).
+
+%%% ---------------------------------------------------------------
+%%% read_specs_batch/1 — batch processing
+%%% ---------------------------------------------------------------
+
+%% Batch processing multiple OTP modules succeeds.
+read_specs_batch_multiple_test() ->
+    ListsBeam = code:which(lists),
+    MapsBeam = code:which(maps),
+    ?assertNotEqual(non_existing, ListsBeam),
+    ?assertNotEqual(non_existing, MapsBeam),
+    Results = beamtalk_spec_reader:read_specs_batch([ListsBeam, MapsBeam]),
+    ?assertEqual(2, length(Results)),
+    %% Check structure of each result
+    lists:foreach(
+        fun({ModName, {ok, Specs}}) ->
+            ?assert(is_binary(ModName)),
+            ?assert(is_list(Specs)),
+            ?assert(length(Specs) > 0)
+        end,
+        Results
+    ).
+
+%% Batch processing with a nonexistent file returns error for that file.
+read_specs_batch_with_error_test() ->
+    ListsBeam = code:which(lists),
+    ?assertNotEqual(non_existing, ListsBeam),
+    Results = beamtalk_spec_reader:read_specs_batch([
+        ListsBeam, "/nonexistent/fake.beam"
+    ]),
+    ?assertEqual(2, length(Results)),
+    %% First should succeed
+    {<<"lists">>, {ok, ListsSpecs}} = lists:nth(1, Results),
+    ?assert(length(ListsSpecs) > 0),
+    %% Second should fail
+    {<<"fake">>, {error, _}} = lists:nth(2, Results).
+
+%% Batch processing empty list returns empty list.
+read_specs_batch_empty_test() ->
+    Results = beamtalk_spec_reader:read_specs_batch([]),
+    ?assertEqual([], Results).
+
+%% Batch result module names are correct binaries.
+read_specs_batch_module_names_test() ->
+    ListsBeam = code:which(lists),
+    Results = beamtalk_spec_reader:read_specs_batch([ListsBeam]),
+    [{ModName, _}] = Results,
+    ?assertEqual(<<"lists">>, ModName).
+
+%%% ---------------------------------------------------------------
+%%% Remote spec form (module:function/arity)
+%%% ---------------------------------------------------------------
+
+extract_specs_remote_spec_test() ->
+    %% Remote spec: {attribute, _, spec, {{Module, Name, Arity}, Clauses}}
+    Forms = [
+        {attribute, 1, spec,
+            {{other_mod, remote_fn, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, integer, []}]},
+                    {type, 2, atom, []}
+                ]}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(1, length(Result)),
+    [Spec] = Result,
+    ?assertEqual(<<"remote_fn">>, maps:get(name, Spec)),
+    ?assertEqual(1, maps:get(arity, Spec)),
+    ?assertEqual(<<"Symbol">>, maps:get(return_type, Spec)).
+
+%%% ---------------------------------------------------------------
 %%% Graceful fallback — .beam without debug_info
 %%% ---------------------------------------------------------------
 
@@ -268,6 +562,30 @@ read_specs_no_debug_info_test() ->
     after
         cleanup_tmp_dir(TmpDir)
     end.
+
+%%% ---------------------------------------------------------------
+%%% Edge cases from ADR 0075
+%%% ---------------------------------------------------------------
+
+%% opaque types map to Dynamic
+map_type_opaque_via_user_type_test() ->
+    %% Opaque types appear as user_type in abstract code
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({user_type, 0, opaque_type, []})).
+
+%% Typed map (#{key := Type}) maps to Dictionary
+map_type_typed_map_test() ->
+    ?assertEqual(
+        <<"Dictionary">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, map, [
+                {type, 0, map_field_exact, [{atom, 0, key}, {type, 0, integer, []}]}
+            ]}
+        )
+    ).
+
+%% Unknown/unrecognized type forms map to Dynamic
+map_type_unknown_form_test() ->
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({unknown_form, 0, something})).
 
 %%% ---------------------------------------------------------------
 %%% Helpers
