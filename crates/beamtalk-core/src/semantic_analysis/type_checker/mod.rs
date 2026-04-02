@@ -26,12 +26,14 @@ use ecow::EcoString;
 use std::collections::HashMap;
 
 mod inference;
+pub mod native_type_registry;
 mod protocol;
 #[cfg(test)]
 mod tests;
 mod types;
 mod validation;
 
+pub use native_type_registry::NativeTypeRegistry;
 pub(in crate::semantic_analysis) use types::is_generic_type_param;
 pub use types::{InferredType, TypeProvenance};
 

@@ -33,6 +33,7 @@ use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
 use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::semantic_analysis::type_checker::TypeMap;
+use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use crate::semantic_analysis::{ClassHierarchy, InferredType};
 use ecow::EcoString;
 use std::collections::HashSet;
@@ -121,7 +122,7 @@ enum ClassContext<'a> {
 /// let (module, _) = parse(tokens);
 /// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 ///
-/// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
+/// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
 /// assert!(!completions.is_empty());
 /// // Should include keywords like "self", "true", "false"
 /// assert!(completions.iter().any(|c| c.label == "self"));
@@ -133,6 +134,7 @@ pub fn compute_completions(
     position: Position,
     hierarchy: &ClassHierarchy,
     current_package: Option<&str>,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
     let offset = match position.to_offset(source) {
@@ -149,7 +151,9 @@ pub fn compute_completions(
 
     // Check for Erlang module context first — if we're completing
     // after "Erlang" or "Erlang <module>", return specialized completions
-    if let Some(erlang_completions) = compute_erlang_completions(module, source, offset) {
+    if let Some(erlang_completions) =
+        compute_erlang_completions(module, source, offset, native_types)
+    {
         return erlang_completions;
     }
 
@@ -213,6 +217,7 @@ fn compute_erlang_completions(
     module: &Module,
     source: &str,
     offset: u32,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<Vec<Completion>> {
     // Look for the Erlang context by examining the text before the cursor
     let text_before = &source[..offset as usize];
@@ -227,11 +232,24 @@ fn compute_erlang_completions(
             for &(name, arity) in module_info.exports {
                 let selector = erlang_modules::export_to_selector(name, arity);
                 if seen.insert(selector.clone()) {
-                    let detail = erlang_modules::export_detail(module_info.name, name, arity);
-                    let doc = format!(
-                        "Erlang function `{module_name}:{name}/{arity}`",
-                        module_name = module_info.name
-                    );
+                    // ADR 0075: Use native type registry for typed detail when available
+                    let (detail, doc) = if let Some(sig) =
+                        native_types.and_then(|r| r.lookup(erlang_module, name, arity))
+                    {
+                        let typed_detail = sig.display_signature();
+                        let doc = format!(
+                            "Erlang function `{module_name}:{name}/{arity}`\n\n`{typed_detail}`",
+                            module_name = module_info.name,
+                        );
+                        (typed_detail, doc)
+                    } else {
+                        let detail = erlang_modules::export_detail(module_info.name, name, arity);
+                        let doc = format!(
+                            "Erlang function `{module_name}:{name}/{arity}`",
+                            module_name = module_info.name
+                        );
+                        (detail, doc)
+                    };
                     completions.push(
                         Completion::new(selector.as_str(), CompletionKind::Function)
                             .with_detail(detail)
@@ -1124,7 +1142,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_completions(&module, source, position, &hierarchy, current_package)
+        compute_completions(&module, source, position, &hierarchy, current_package, None)
     }
 
     #[test]
@@ -1245,7 +1263,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let completions =
-            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
 
         // Should include inherited Actor methods (spawn)
         assert!(
@@ -1273,8 +1291,14 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position at the method body (after "=> ")
-        let completions =
-            compute_completions(&module, source, Position::new(3, 17), &hierarchy, None);
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(3, 17),
+            &hierarchy,
+            None,
+            None,
+        );
 
         // Should include the class's own method
         assert!(
@@ -1296,8 +1320,14 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position inside the method body
-        let completions =
-            compute_completions(&module, source, Position::new(3, 17), &hierarchy, None);
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(3, 17),
+            &hierarchy,
+            None,
+            None,
+        );
 
         // Should include state variable as field completion
         assert!(
@@ -1316,7 +1346,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let completions =
-            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
 
         // Should include user-defined class
         assert!(
@@ -1342,8 +1372,14 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position inside the class method body (line 3, after "=> ")
-        let completions =
-            compute_completions(&module, source, Position::new(3, 22), &hierarchy, None);
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(3, 22),
+            &hierarchy,
+            None,
+            None,
+        );
 
         // Should include the class method itself
         assert!(
@@ -1364,7 +1400,7 @@ mod tests {
         // but completions at any position include all module methods)
         // Use Position(0, 0) which is before class keyword
         let completions =
-            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
 
         // Should include class-side methods from module classes
         assert!(
@@ -1704,6 +1740,46 @@ mod tests {
     }
 
     #[test]
+    fn erlang_completions_show_types_from_native_registry() {
+        // ADR 0075 spike: verify typed completions when NativeTypeRegistry is provided
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            NativeFunctionType, NativeParam, NativeTypeRegistry,
+        };
+
+        let source = "Erlang lists ";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![NativeFunctionType {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![NativeParam {
+                    name: "list".to_string(),
+                    type_name: "List".to_string(),
+                }],
+                return_type: "List".to_string(),
+            }],
+        );
+
+        #[expect(clippy::cast_possible_truncation, reason = "test source < 4GB")]
+        let position = Position::new(0, source.len() as u32);
+        let completions =
+            compute_completions(&module, source, position, &hierarchy, None, Some(&registry));
+
+        let reverse = completions.iter().find(|c| c.label == "reverse:");
+        assert!(reverse.is_some(), "Should find reverse: completion");
+        let detail = reverse.unwrap().detail.as_deref().unwrap_or("");
+        assert_eq!(
+            detail, "reverse: list :: List -> List",
+            "Detail should show typed signature from NativeTypeRegistry"
+        );
+    }
+
+    #[test]
     fn detect_erlang_module_context_basic() {
         assert_eq!(detect_erlang_module_context("Erlang lists"), Some("lists"));
         assert_eq!(detect_erlang_module_context("Erlang maps"), Some("maps"));
@@ -2006,8 +2082,14 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        let completions =
-            compute_completions(&module, source, Position::new(3, 19), &hierarchy, None);
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(3, 19),
+            &hierarchy,
+            None,
+            None,
+        );
         assert!(
             !completions.iter().any(|c| c.label == "delegate"),
             "delegate should be excluded for non-native actors"
@@ -2023,8 +2105,14 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Position inside the method body (on "del" partial text)
-        let completions =
-            compute_completions(&module, source, Position::new(3, 13), &hierarchy, None);
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(3, 13),
+            &hierarchy,
+            None,
+            None,
+        );
         assert!(
             completions.iter().any(|c| c.label == "delegate"),
             "delegate should be included for native actors"
@@ -2070,6 +2158,7 @@ mod tests {
             Position::new(0, 0),
             &hierarchy,
             Some("my_pkg"),
+            None,
         );
         assert!(
             !completions.iter().any(|c| c.label == "SecretHelper"),
@@ -2113,6 +2202,7 @@ mod tests {
             Position::new(0, 0),
             &hierarchy,
             Some("my_pkg"),
+            None,
         );
         assert!(
             completions.iter().any(|c| c.label == "InternalHelper"),
@@ -2151,7 +2241,7 @@ mod tests {
 
         // No package context (REPL/script): internal classes still visible
         let completions =
-            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
         assert!(
             completions.iter().any(|c| c.label == "InternalHelper"),
             "Internal class should be visible when no package context"
@@ -2363,6 +2453,7 @@ mod tests {
             Position::new(2, 8),
             &hierarchy,
             Some("my_pkg"),
+            None,
         );
         assert!(
             completions.iter().any(|c| c.label == "publicMethod"),

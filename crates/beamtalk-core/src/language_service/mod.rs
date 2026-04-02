@@ -610,6 +610,7 @@ impl LanguageService for SimpleLanguageService {
             position,
             self.project_index.hierarchy(),
             current_package.as_deref(),
+            None,
         )
     }
 
