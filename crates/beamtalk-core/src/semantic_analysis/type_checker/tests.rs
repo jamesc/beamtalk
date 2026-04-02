@@ -8114,3 +8114,169 @@ fn union_type_param_bounds_mixed_conformance_hints() {
             .contains("not all members conform to HasSortKey")
     );
 }
+
+// --- BT-1835: Union syntax in builtin param_types ---
+
+#[test]
+fn union_param_type_integer_compatible() {
+    // Integer arg to "Integer | Symbol" param → no warning
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "setTimeout:",
+        1,
+        vec![Some("Integer | Symbol".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
+        vec![int_lit(42)],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Integer should be compatible with 'Integer | Symbol', got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn union_param_type_symbol_compatible() {
+    // Symbol arg to "Integer | Symbol" param → no warning
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "setTimeout:",
+        1,
+        vec![Some("Integer | Symbol".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
+        vec![sym_lit("infinity")],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Symbol should be compatible with 'Integer | Symbol', got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn union_param_type_incompatible_warns() {
+    // String arg to "Integer | Symbol" param → warning
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "setTimeout:",
+        1,
+        vec![Some("Integer | Symbol".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
+        vec![str_lit("bad")],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "String should be incompatible with 'Integer | Symbol', got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn union_param_type_subclass_compatible() {
+    // Integer is a subclass of Number, so Integer arg to "Number | Symbol" should pass
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "setTimeout:",
+        1,
+        vec![Some("Number | Symbol".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
+        vec![int_lit(42)],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Integer should be compatible with 'Number | Symbol' (subclass of Number), got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn non_union_param_type_unchanged() {
+    // Non-union expected type still works as before: String arg to Integer param → warning
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "deposit:",
+        1,
+        vec![Some("Integer".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+        vec![str_lit("bad")],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Non-union type checking should still work, got: {:?}",
+        checker.diagnostics()
+    );
+}
