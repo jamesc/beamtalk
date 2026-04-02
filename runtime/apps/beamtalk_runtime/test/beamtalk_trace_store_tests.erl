@@ -163,9 +163,21 @@ ring_buffer_eviction_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
+                MaxEvents = 50,
+                %% Insert exactly 55 events: one sweep removes 10%
+                %% (55 * 10 div 100 = 5), leaving exactly 50 = MaxEvents.
+                %% This makes further sweeps no-ops (50 > 50 is false),
+                %% so the result is stable regardless of whether the
+                %% periodic 1s sweep timer also fires.
+                InsertCount = 55,
+                ExpectedAfterSweep = InsertCount - (InsertCount * 10 div 100),
+
+                %% Clear any events from other tests to start clean
+                beamtalk_trace_store:clear(),
+
                 %% Set a small max for testing
-                beamtalk_trace_store:max_events(50),
-                ?assertEqual(50, beamtalk_trace_store:max_events()),
+                beamtalk_trace_store:max_events(MaxEvents),
+                ?assertEqual(MaxEvents, beamtalk_trace_store:max_events()),
 
                 %% Enable tracing and insert more than max
                 beamtalk_trace_store:enable(),
@@ -176,20 +188,21 @@ ring_buffer_eviction_test_() ->
                             TestPid, 'Counter', increment, sync, I * 100, ok, #{}, stop
                         )
                     end,
-                    lists:seq(1, 60)
+                    lists:seq(1, InsertCount)
                 ),
 
-                %% Should have 60 events before sweep
-                PreSweep = beamtalk_trace_store:get_traces(),
-                ?assertEqual(60, length(PreSweep)),
-
-                %% Trigger sweep by sending the message directly
+                %% Trigger sweep and wait for it to complete.
+                %% sys:get_state/1 forces a round-trip through the
+                %% gen_server mailbox, ensuring the sweep_eviction
+                %% message has been processed.
                 beamtalk_trace_store ! sweep_eviction,
-                timer:sleep(50),
+                sys:get_state(beamtalk_trace_store),
 
-                %% After sweep, oldest 10% (6 events) should be deleted
-                PostSweep = beamtalk_trace_store:get_traces(),
-                ?assertEqual(54, length(PostSweep)),
+                %% After sweep, exactly ExpectedAfterSweep events
+                %% should remain for our pid. Filter by TestPid to
+                %% avoid interference from concurrent test suites.
+                PostSweep = beamtalk_trace_store:get_traces(TestPid),
+                ?assertEqual(ExpectedAfterSweep, length(PostSweep)),
 
                 %% Reset max_events to default
                 beamtalk_trace_store:max_events(100000)
