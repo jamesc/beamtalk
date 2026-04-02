@@ -963,6 +963,41 @@ pub(crate) fn check_actor_field_mutation_in_closure(
     }
 }
 
+/// Builds the diagnostic for an unsafe field mutation in a block closure.
+///
+/// Shared by both `MessageSend` and `Cascade` branches to keep the error
+/// message, hint, and field formatting in one place.
+fn emit_unsafe_field_mutation_diagnostic(
+    field_writes: &std::collections::HashSet<String>,
+    sel_name: &str,
+    class_name: &str,
+    block_span: crate::source_analysis::Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut fields: Vec<_> = field_writes.iter().cloned().collect();
+    fields.sort();
+    let verb = if fields.len() == 1 { "is" } else { "are" };
+    diagnostics.push(
+        Diagnostic::error(
+            format!(
+                "Cannot mutate Actor state inside a closure — \
+                 `self.{}` {verb} assigned inside a block passed to `{}` \
+                 on Actor `{}`",
+                fields.join("`, `self."),
+                sel_name,
+                class_name,
+            ),
+            block_span,
+        )
+        .with_hint(
+            "Move the state assignment to the method body. \
+             Use the check-then-unwrap pattern: \
+             `result isError ifTrue: [^Result error: ...]. \
+             self.field := result unwrap`",
+        ),
+    );
+}
+
 /// Recursively walks an expression tree looking for block arguments to
 /// non-state-threading, non-self message sends that contain field mutations.
 ///
@@ -977,6 +1012,12 @@ pub(crate) fn check_actor_field_mutation_in_closure(
 ///
 /// Any other combination (non-self receiver + non-state-threading selector)
 /// compiles the block as a plain closure where `State0`/`State1` are unbound.
+///
+/// **Nested blocks:** `analyze_block` propagates `field_writes` from nested
+/// blocks into the outer analysis (see BT-478). This means nested patterns like
+/// `result andThen: [:r | r map: [:x | self.val := x]]` will produce a
+/// diagnostic for *both* the outer `andThen:` block and the inner `map:` block.
+/// This is intentional — each unsafe closure boundary is flagged independently.
 #[allow(clippy::too_many_lines)] // Exhaustive match over Expression variants
 fn check_expr_for_unsafe_field_mutation(
     expr: &Expression,
@@ -1024,27 +1065,12 @@ fn check_expr_for_unsafe_field_mutation(
                     if let Expression::Block(block) = arg {
                         let analysis = crate::semantic_analysis::block_facts::analyze_block(block);
                         if !analysis.field_writes.is_empty() {
-                            let mut fields: Vec<_> =
-                                analysis.field_writes.iter().cloned().collect();
-                            fields.sort();
-                            diagnostics.push(
-                                Diagnostic::error(
-                                    format!(
-                                        "Cannot mutate Actor state inside a closure — \
-                                         `self.{}` is assigned inside a block passed to `{}` \
-                                         on Actor `{}`",
-                                        fields.join("`, `self."),
-                                        sel_name,
-                                        class_name,
-                                    ),
-                                    block.span,
-                                )
-                                .with_hint(
-                                    "Move the state assignment to the method body. \
-                                     Use the check-then-unwrap pattern: \
-                                     `result isError ifTrue: [^Result error: ...]. \
-                                     self.field := result unwrap`",
-                                ),
+                            emit_unsafe_field_mutation_diagnostic(
+                                &analysis.field_writes,
+                                &sel_name,
+                                class_name,
+                                block.span,
+                                diagnostics,
                             );
                         }
                         // Still recurse into the block body for other nested issues
@@ -1109,27 +1135,12 @@ fn check_expr_for_unsafe_field_mutation(
                     } else if let Expression::Block(block) = arg {
                         let analysis = crate::semantic_analysis::block_facts::analyze_block(block);
                         if !analysis.field_writes.is_empty() {
-                            let mut fields: Vec<_> =
-                                analysis.field_writes.iter().cloned().collect();
-                            fields.sort();
-                            diagnostics.push(
-                                Diagnostic::error(
-                                    format!(
-                                        "Cannot mutate Actor state inside a closure — \
-                                         `self.{}` is assigned inside a block passed to `{}` \
-                                         on Actor `{}`",
-                                        fields.join("`, `self."),
-                                        sel_name,
-                                        class_name,
-                                    ),
-                                    block.span,
-                                )
-                                .with_hint(
-                                    "Move the state assignment to the method body. \
-                                     Use the check-then-unwrap pattern: \
-                                     `result isError ifTrue: [^Result error: ...]. \
-                                     self.field := result unwrap`",
-                                ),
+                            emit_unsafe_field_mutation_diagnostic(
+                                &analysis.field_writes,
+                                &sel_name,
+                                class_name,
+                                block.span,
+                                diagnostics,
                             );
                         }
                         for stmt in &block.body {
@@ -1823,7 +1834,41 @@ Actor subclass: MyActor
             diagnostics[0].message
         );
         assert!(diagnostics[0].message.contains("proc"));
+        assert!(
+            diagnostics[0].message.contains("is assigned"),
+            "Single field should use 'is assigned', got: {}",
+            diagnostics[0].message
+        );
         assert!(diagnostics[0].hint.is_some());
+    }
+
+    #[test]
+    fn actor_multi_field_mutation_uses_plural_verb() {
+        // Two field mutations in one block should produce "are assigned"
+        let src = "\
+Actor subclass: Multi
+  state: a = 0
+  state: b = 0
+
+  run =>
+    result := nil
+    result map: [:x |
+      self.a := x
+      self.b := x
+    ]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0].message.contains("are assigned"),
+            "Multiple fields should use 'are assigned', got: {}",
+            diagnostics[0].message
+        );
     }
 
     #[test]
@@ -1934,13 +1979,22 @@ Actor subclass: Nested
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_actor_field_mutation_in_closure(&module, &hierarchy, &mut diagnostics);
-        // Both the outer andThen: block (which propagates field_writes from nested)
-        // and the inner map: block should be flagged
+        // Both the outer andThen: block (field_writes propagated from nested) and
+        // the inner map: block should be flagged — analyze_block intentionally
+        // propagates field_writes so each unsafe closure boundary is reported.
         assert!(
-            !diagnostics.is_empty(),
-            "Expected errors for nested field mutation in unsafe closures, got none"
+            diagnostics.len() >= 2,
+            "Expected at least 2 errors for nested field mutation in unsafe closures, got: {diagnostics:?}"
         );
         assert!(diagnostics.iter().all(|d| d.severity == Severity::Error));
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("andThen:")),
+            "Expected one diagnostic to mention andThen:, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("map:")),
+            "Expected one diagnostic to mention map:, got: {diagnostics:?}"
+        );
     }
 
     #[test]
