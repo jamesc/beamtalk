@@ -293,6 +293,28 @@ impl ProtocolRegistry {
         self.protocols.iter()
     }
 
+    /// Finds protocols that require a given selector (instance methods only).
+    ///
+    /// Used by `respondsTo:` narrowing (ADR 0068 Phase 2e) to refine the
+    /// narrowed type from `Dynamic` to a specific protocol when exactly one
+    /// protocol in the registry requires the tested selector. Returns `None`
+    /// if zero or multiple protocols match (ambiguous — fall back to Dynamic).
+    #[must_use]
+    pub fn find_unique_protocol_for_selector(&self, selector: &str) -> Option<&EcoString> {
+        let mut found: Option<&EcoString> = None;
+        for (name, info) in &self.protocols {
+            let selectors = info.all_required_selectors(self);
+            if selectors.iter().any(|s| s.as_str() == selector) {
+                if found.is_some() {
+                    // Ambiguous — multiple protocols require this selector
+                    return None;
+                }
+                found = Some(name);
+            }
+        }
+        found
+    }
+
     /// Check if a class conforms to a protocol.
     ///
     /// Implements the three-tier conformance model from ADR 0068:
