@@ -80,10 +80,10 @@ At build time, the compiler reads the `abstract_code` chunk from compiled `.beam
 
 **How it works:**
 
-1. An Erlang helper module (`beamtalk_spec_reader.erl`) reads two chunks in a single `beam_lib:chunks(File, [abstract_code, "Docs"])` call:
+1. An Erlang helper module (`beamtalk_spec_reader.erl`) reads the `abstract_code` chunk via `beam_lib:chunks(File, [abstract_code])`:
    - **`abstract_code` chunk** — contains `{attribute, _, spec, ...}` forms (function type signatures with named type variables like `From :: integer()`, `Elem :: T`) and `{function, _, Name, Arity, Clauses}` forms (clause param names as fallback). Provides types AND meaningful parameter names.
-   - **`"Docs"` chunk (EEP-48)** — contains per-function documentation strings, examples, and function signatures in the `{docs_v1, ...}` format. Available in OTP 25+ and most Hex packages. Flows to `:help Erlang <module>` and LSP hover.
-   - No `.erl` source parsing needed — both chunks contain everything.
+   - No `.erl` source parsing needed — `abstract_code` contains everything needed for type checking.
+   - **EEP-48 docs are read separately at runtime** (not at build time) — see "Documentation" below.
 2. The Rust compiler invokes it via the existing `beamtalk_build_worker` pattern (same mechanism used for `.core` → `.beam` compilation)
 3. The Erlang→Beamtalk type mapping (reverse of `spec_codegen.rs`) converts Erlang abstract type representations to `InferredType` values, using spec variable names as keyword names
 4. Results are cached per module and invalidated when `.beam` file timestamps change
@@ -181,6 +181,30 @@ The most common Erlang return pattern — `{ok, Value} | {error, Reason}` — ma
 3. Give users `map:`, `andThen:`, and full `Result` combinators on FFI return values
 
 This is a meaningful change to the FFI's "transparent interop" principle (ADR 0028) and involves runtime, codegen, and type system changes — hence a separate ADR rather than a row in this table. Until that ADR lands, `{ok, T} | {error, E}` specs map to `Tuple` and users use `isOk`/`unwrap` from the Tuple class.
+
+### Documentation: EEP-48 Docs Read at Runtime
+
+EEP-48 documentation (per-function docs with examples) is read **dynamically at runtime**, not extracted at build time. A single Erlang module (`beamtalk_native_docs`) reads the `"Docs"` chunk from `.beam` files on demand:
+
+```erlang
+%% beamtalk_native_docs:lookup(lists, reverse, 1) →
+%% #{doc => <<"Returns a list with elements in reverse order...">>,
+%%   sig => <<"reverse(List1)">>,
+%%   examples => <<"lists:reverse([1,2,3]) → [3,2,1]">>}
+```
+
+Three consumers share one codepath:
+- **REPL `:help Erlang lists reverse`** — calls `beamtalk_native_docs:lookup/3` directly
+- **LSP hover** — sends a workspace request over WebSocket, which calls the same module
+- **MCP tools** — same WebSocket path
+
+**Why runtime, not build time:**
+- Docs are only needed when someone asks — no reason to pay the cost on every build
+- Reading one module's Docs chunk is fast (~1ms)
+- Always fresh — OTP updates between builds are reflected immediately without a rebuild
+- No Rust-side parsing needed — the Erlang runtime has native access to `beam_lib`
+
+EEP-48 docs are available in OTP 25+ and most Hex packages. When the `"Docs"` chunk is absent, `:help` falls back to showing only the type signature from `NativeTypeRegistry`.
 
 ### Layer 2: Stub Override Files (`.bt` in `stubs/`)
 
@@ -754,16 +778,17 @@ $ beamtalk generate stubs --native-dir native/
 
 ### Phase 4: Advanced LSP and REPL Integration
 
-Basic typed completions ship in Phase 1. This phase adds richer tooling:
+Basic typed completions ship in Phase 1. This phase adds richer tooling and runtime doc support:
 
-1. **Hover info** — display type signature and doc comment from stub file on hover
-2. **Signature help** — show parameter types as user types arguments
-3. **Go to type definition** — jump to stub file for stub-typed functions
-4. **Diagnostics** — surface type warnings from FFI calls in the editor
-5. **REPL `:help Erlang lists`** — extend `handle_help_topic()` to detect "Erlang <module>" and query `NativeTypeRegistry` for type signatures and EEP-48 doc strings. `:help Erlang lists reverse` shows the type signature plus the full Erlang doc with examples
-6. **REPL tab completion** — include type signatures in Erlang module completions (complements Phase 1's LSP completions with the same data in the REPL context)
+1. **`beamtalk_native_docs.erl`** — runtime module that reads EEP-48 `"Docs"` chunks from `.beam` files on demand. Single codepath shared by REPL, LSP, and MCP
+2. **REPL `:help Erlang lists`** — extend `handle_help_topic()` to detect "Erlang <module>" and show type signatures from `NativeTypeRegistry` plus EEP-48 docs from `beamtalk_native_docs`. `:help Erlang lists reverse` shows the type signature plus the full Erlang doc with examples
+3. **REPL tab completion** — include type signatures in Erlang module completions (complements Phase 1's LSP completions with the same data in the REPL context)
+4. **LSP hover** — display type signature (from `NativeTypeRegistry`) and EEP-48 doc (requested from workspace runtime via WebSocket) on hover
+5. **LSP signature help** — show parameter types as user types arguments
+6. **LSP go to type definition** — jump to stub file for stub-typed functions
+7. **LSP diagnostics** — surface type warnings from FFI calls in the editor
 
-**Components:** `crates/beamtalk-lsp/src/completion_provider.rs` (extended), `crates/beamtalk-lsp/src/hover_provider.rs` (extended), `crates/beamtalk-cli/src/commands/repl/mod.rs` (extended)
+**Components:** `runtime/apps/beamtalk_runtime/src/beamtalk_native_docs.erl` (new), `crates/beamtalk-cli/src/commands/repl/mod.rs` (extended), `crates/beamtalk-lsp/src/completion_provider.rs` (extended), `crates/beamtalk-lsp/src/hover_provider.rs` (extended)
 
 ### Future Work
 
