@@ -323,7 +323,8 @@ do_setup_file_logger(WorkspaceId) ->
                             %% Suppress redundant proc_lib crash reports for beamtalk
                             %% actors — they just say "process crash: unknown" and add
                             %% nothing beyond the gen_server/supervisor reports.
-                            logger:add_primary_filter(
+                            logger:add_handler_filter(
+                                beamtalk_file_log,
                                 beamtalk_suppress_proc_lib_crash,
                                 {fun beamtalk_log_filter:filter_proc_lib_crash/2, []}
                             ),
