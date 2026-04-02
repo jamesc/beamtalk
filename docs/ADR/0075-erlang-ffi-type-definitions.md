@@ -286,8 +286,22 @@ When the type checker encounters a message send on `ErlangModule`:
 1. Extract the module name from the proxy receiver
 2. Extract the function name from the first keyword and count arguments for arity
 3. Look up `(module, function, arity)` in `NativeTypeRegistry`
-4. If found: check argument types against `params`, return the declared `return_type`
+4. If found: check argument types **positionally** against `params`, return the declared `return_type`
 5. If not found: return `Dynamic` (same as today — no regression)
+
+**Positional matching — keyword names are not checked:**
+
+Erlang FFI calls are positional (ADR 0028 §1 — keywords are stripped, only argument order matters). The type checker matches by `(module, function, arity)` and checks parameter types by position, regardless of the keywords used at the call site:
+
+```beamtalk
+// Stub declares: seq: from :: Integer to: to :: Integer -> List(Integer)
+
+Erlang lists seq: 1 to: 10        // ✅ param 1 = Integer, param 2 = Integer
+Erlang lists seq: 1 with: 10      // ✅ same positional check — keywords don't matter
+Erlang lists seq: "a" to: 10      // ⚠️ param 1 expects Integer, got String
+```
+
+The keyword names in stubs (`from:`, `to:`) are **documentation and LSP hints** — they appear in completions and hover to guide users toward the preferred keyword form, but the type checker does not warn on keyword mismatches. This is consistent with ADR 0028's design: keywords after the first are arbitrary at the FFI boundary.
 
 **Module identity tracking:**
 
