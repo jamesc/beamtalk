@@ -64,6 +64,7 @@ pub use value_objects::{
 mod property_tests;
 
 use crate::ast::{Expression, Identifier, Module, TypeAnnotation};
+use crate::semantic_analysis::type_checker::NativeTypeRegistry;
 use crate::source_analysis::Span;
 use camino::Utf8PathBuf;
 use std::collections::HashMap;
@@ -135,6 +136,8 @@ pub struct SimpleLanguageService {
     files: HashMap<Utf8PathBuf, FileData>,
     /// Cross-file project index (merged class hierarchy).
     project_index: ProjectIndex,
+    /// Native type registry for Erlang FFI typed completions (ADR 0075).
+    native_types: Option<NativeTypeRegistry>,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +157,7 @@ impl SimpleLanguageService {
         Self {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
+            native_types: None,
         }
     }
 
@@ -166,7 +170,23 @@ impl SimpleLanguageService {
         Self {
             files: HashMap::new(),
             project_index,
+            native_types: None,
         }
+    }
+
+    /// Sets the native type registry for Erlang FFI typed completions.
+    ///
+    /// ADR 0075 Phase 1: When set, `Erlang <module>` completions display
+    /// typed signatures (e.g., `reverse: list :: List -> List`) instead of
+    /// just arity information.
+    pub fn set_native_types(&mut self, registry: NativeTypeRegistry) {
+        self.native_types = Some(registry);
+    }
+
+    /// Returns a reference to the native type registry, if set.
+    #[must_use]
+    pub fn native_types(&self) -> Option<&NativeTypeRegistry> {
+        self.native_types.as_ref()
     }
 
     /// Returns a reference to the project index.
@@ -604,13 +624,14 @@ impl LanguageService for SimpleLanguageService {
         let current_package = self.project_index.package_for_file(file);
 
         // Use project-wide hierarchy for completions (cross-file class awareness)
+        // ADR 0075: Pass native type registry for typed Erlang FFI completions
         crate::queries::completion_provider::compute_completions(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
             current_package.as_deref(),
-            None,
+            self.native_types.as_ref(),
         )
     }
 
@@ -1486,5 +1507,66 @@ mod tests {
         assert!(refs.len() >= 2);
         assert!(refs.iter().any(|r| r.file == file_a));
         assert!(refs.iter().any(|r| r.file == file_b));
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0075: NativeTypeRegistry integration
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn completions_use_native_type_registry() {
+        use crate::semantic_analysis::type_checker::{
+            FunctionSignature, InferredType, ParamType, TypeProvenance,
+        };
+
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        service.update_file(file.clone(), "Erlang lists ".to_string());
+
+        // Without registry: completions should still work (untyped)
+        let completions = service.completions(&file, Position::new(0, 13));
+        let reverse_untyped = completions.iter().find(|c| c.label == "reverse:");
+        assert!(
+            reverse_untyped.is_some(),
+            "Should find reverse: without registry"
+        );
+
+        // With registry: completions should show typed signatures
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+            }],
+        );
+        service.set_native_types(registry);
+
+        let completions = service.completions(&file, Position::new(0, 13));
+        let reverse_typed = completions.iter().find(|c| c.label == "reverse:");
+        assert!(
+            reverse_typed.is_some(),
+            "Should find reverse: with registry"
+        );
+        let detail = reverse_typed.unwrap().detail.as_deref().unwrap_or("");
+        assert_eq!(
+            detail, "reverse: list :: List -> List",
+            "Should show typed signature from NativeTypeRegistry"
+        );
+    }
+
+    #[test]
+    fn set_and_get_native_types() {
+        let mut service = SimpleLanguageService::new();
+        assert!(service.native_types().is_none());
+
+        service.set_native_types(NativeTypeRegistry::new());
+        assert!(service.native_types().is_some());
     }
 }
