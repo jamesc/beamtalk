@@ -180,7 +180,7 @@ format_safe(Reason, Stacktrace) ->
             format_safe(Error)
     end.
 
-%% @private Recursively search a term for a `#beamtalk_error{}` record.
+%% @doc Recursively search a term for a `#beamtalk_error{}` record.
 %% Depth-limited to avoid traversing enormous state maps.
 -spec extract_beamtalk_error(term(), non_neg_integer()) -> #beamtalk_error{} | undefined.
 extract_beamtalk_error(_Term, 0) ->
