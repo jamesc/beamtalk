@@ -187,7 +187,8 @@ impl CoreErlangGenerator {
     /// to the caller rather than crashing the actor instance.
     ///
     /// Note: Core Erlang try expression uses simple variable patterns (not case-style).
-    /// Stacktrace is captured but not returned to caller to prevent information leakage.
+    /// BT-1822: Stacktrace is captured and returned in the error tuple so crash
+    /// reports and caller-side re-raises preserve full diagnostic information.
     ///
     /// # Generated Code
     ///
@@ -196,8 +197,8 @@ impl CoreErlangGenerator {
     ///     let Self = call 'beamtalk_actor':'make_self'(State) in
     ///     try call 'module':'dispatch'(Selector, Args, Self, State)
     ///     of Result -> Result
-    ///     catch <Type, Error, _Stacktrace> ->
-    ///         {'error', {Type, Error}, State}
+    ///     catch <Type, Error, Stacktrace> ->
+    ///         {'error', {Type, Error, Stacktrace}, State}
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(
@@ -223,8 +224,8 @@ impl CoreErlangGenerator {
                     line(),
                     "of Result -> Result",
                     line(),
-                    // Capture but don't return stacktrace to prevent information leakage
-                    "catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}",
+                    // BT-1822: Capture stacktrace and return in error tuple for diagnostics
+                    "catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}",
                 ]
             ),
             "\n\n",

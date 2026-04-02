@@ -376,9 +376,9 @@ impl CoreErlangGenerator {
     ///             case call 'module':'safe_dispatch'('initialize', [], State) of
     ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
     ///                     {'noreply', InitNewState}
-    ///                 <{'error', InitError, InitErrState}> when 'true' ->
-    ///                     let _ = call 'logger':'error'(...) in
-    ///                     {'stop', InitError, InitErrState}
+    ///                 <{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->
+    ///                     let _ = call 'logger':'error'(...stacktrace => InitStacktrace...) in
+    ///                     {'stop', {InitType, InitReason, InitStacktrace}, InitErrState}
     ///             end
     ///         <_> when 'true' -> {'noreply', State}
     ///     end
@@ -425,20 +425,21 @@ impl CoreErlangGenerator {
                                                 docvec![line(), "{'noreply', InitNewState}"]
                                             ),
                                             line(),
-                                            "<{'error', InitError, InitErrState}> when 'true' ->",
+                                            // BT-1822: Destructure error triple to capture stacktrace
+                                            "<{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->",
                                             nest(
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    "let InitErrorMsg = call 'beamtalk_error':'format_safe'(InitError) in",
+                                                    "let InitErrorMsg = call 'beamtalk_error':'format_safe'({InitType, InitReason}) in",
                                                     line(),
                                                     "let InitClassName = call '",
                                                     Document::Eco(module_name_for_log),
                                                     "':'class_name'() in",
                                                     line(),
-                                                    "let _ = call 'logger':'error'(~{'msg' => InitErrorMsg, 'class' => InitClassName, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
+                                                    "let _ = call 'logger':'error'(~{'msg' => InitErrorMsg, 'class' => InitClassName, 'reason' => {InitType, InitReason}, 'stacktrace' => InitStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                                     line(),
-                                                    "{'stop', InitError, InitErrState}",
+                                                    "{'stop', {InitType, InitReason, InitStacktrace}, InitErrState}",
                                                 ]
                                             ),
                                         ]
@@ -532,12 +533,13 @@ impl CoreErlangGenerator {
                     nest(INDENT, docvec![line(), "{'noreply', CastNewState}"]),
                     line(),
                     // BT-943: Log error but don't crash — caller expects no reply
-                    "<{'error', CastError, _CastState}> when 'true' ->",
+                    // BT-1822: Destructure error triple to log stacktrace
+                    "<{'error', {_CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->",
                     nest(
                         INDENT,
                         docvec![
                             line(),
-                            "let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)",
+                            "let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastReason, 'stacktrace' => CastStacktrace}~)",
                             line(),
                             "in {'noreply', State}",
                         ]
@@ -674,12 +676,12 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![line(), "{'reply', {'ok', Result}, NewState}",]
                     ),
-                    // Error case: return {error, Error}
+                    // Error case: return {error, Error} with stacktrace (BT-1822)
                     line(),
-                    "<{'error', Error, NewState}> when 'true' ->",
+                    "<{'error', Error, ErrState}> when 'true' ->",
                     nest(
                         INDENT,
-                        docvec![line(), "{'reply', {'error', Error}, NewState}",]
+                        docvec![line(), "{'reply', {'error', Error}, ErrState}",]
                     ),
                 ]
             ),
@@ -703,8 +705,8 @@ impl CoreErlangGenerator {
     /// 'handle_info'/2 = fun (Msg, State) ->
     ///     case call 'Module':'safe_dispatch'('handleInfo:', [Msg], State) of
     ///         <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
-    ///         <{'error', Error, _ErrState}> when 'true' ->
-    ///             let _Log = call 'logger':'warning'(~{'handleInfo_error' => Error}~)
+    ///         <{'error', {_InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->
+    ///             let _Log = call 'logger':'warning'(~{'handleInfo_error' => InfoReason, 'stacktrace' => InfoStacktrace}~)
     ///             in {'noreply', State}
     ///         <_Other> when 'true' -> {'noreply', State}
     ///     end
@@ -745,12 +747,13 @@ impl CoreErlangGenerator {
                                 "<{'reply', _Result, NewState}> when 'true' ->",
                                 nest(INDENT, docvec![line(), "{'noreply', NewState}",]),
                                 line(),
-                                "<{'error', Error, _ErrState}> when 'true' ->",
+                                // BT-1822: Destructure error triple to log stacktrace
+                                "<{'error', {_InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->",
                                 nest(
                                     INDENT,
                                     docvec![
                                         line(),
-                                        "let _Log = call 'logger':'warning'(~{'handleInfo_error' => Error}~)",
+                                        "let _Log = call 'logger':'warning'(~{'handleInfo_error' => InfoReason, 'stacktrace' => InfoStacktrace}~)",
                                         line(),
                                         "in {'noreply', State}",
                                     ]

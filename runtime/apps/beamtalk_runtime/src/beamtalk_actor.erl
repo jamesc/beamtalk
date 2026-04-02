@@ -686,10 +686,11 @@ sync_send_remote(ActorPid, Selector, Args) ->
                     %% BT-918: Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
                     %% Unwrap here so callers receive the value directly.
                     %%
-                    %% The {error, Error} case has two sub-forms due to the safe_dispatch layer:
-                    %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
-                    %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
-                    %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
+                    %% The {error, Error} case has three sub-forms due to the safe_dispatch layer:
+                    %%   1. Error = {ErlType, Value, Stacktrace} — BT-1822: with captured stacktrace
+                    %%   2. Error = {ErlType, Value} — backward compat: without stacktrace
+                    %%   3. Error = other term — e.g. #beamtalk_error{} from dispatch_user_method
+                    %% We re-raise all forms as Erlang exceptions so the caller sees them correctly.
                     PropCtx = get_sync_propagated_ctx(),
                     %% BT-1325 Layer 2: Check for transitive cycles before gen_server:call.
                     %% If ActorPid is already in the call stack, this send would deadlock.
@@ -709,8 +710,16 @@ sync_send_remote(ActorPid, Selector, Args) ->
                     case CallResult of
                         {ok, Result} ->
                             {Result, Metadata#{outcome => ok}};
+                        {error, {ErlType, ErrorValue, Stacktrace}} ->
+                            %% BT-1822: safe_dispatch caught an Erlang exception with stacktrace;
+                            %% re-raise with full type/stacktrace context
+                            error(
+                                beamtalk_exception_handler:ensure_wrapped(
+                                    ErlType, ErrorValue, Stacktrace
+                                )
+                            );
                         {error, {_ErlType, ErrorValue}} ->
-                            %% safe_dispatch caught an Erlang exception; re-raise the actual value
+                            %% Backward compat: safe_dispatch without stacktrace
                             error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
                         {error, Error} ->
                             error(beamtalk_exception_handler:ensure_wrapped(Error));
@@ -765,6 +774,13 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                             case gen_server:call(ActorPid, {Selector, Args, PropCtx}, Timeout) of
                                 {ok, Result} ->
                                     {Result, Metadata#{outcome => ok}};
+                                {error, {ErlType, ErrorValue, Stacktrace}} ->
+                                    %% BT-1822: safe_dispatch with stacktrace
+                                    error(
+                                        beamtalk_exception_handler:ensure_wrapped(
+                                            ErlType, ErrorValue, Stacktrace
+                                        )
+                                    );
                                 {error, {_ErlType, ErrorValue}} ->
                                     error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
                                 {error, Error} ->
@@ -837,6 +853,10 @@ unwrap_dispatch_result({reply, Result, NewState}) ->
 unwrap_dispatch_result({noreply, NewState}) ->
     put('$bt_actor_state', NewState),
     nil;
+unwrap_dispatch_result({error, {ErlType, ErrorValue, Stacktrace}, NewState}) ->
+    %% BT-1822: safe_dispatch with stacktrace
+    put('$bt_actor_state', NewState),
+    error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, Stacktrace));
 unwrap_dispatch_result({error, Reason, NewState}) ->
     put('$bt_actor_state', NewState),
     error(beamtalk_exception_handler:ensure_wrapped(Reason)).
