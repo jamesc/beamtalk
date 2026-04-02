@@ -35,7 +35,7 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder name: #Counter
   /// ```
-  name: aSymbol => self.className := aSymbol
+  name: aSymbol :: Symbol -> Nil => self.className := aSymbol
 
   /// Set the superclass reference.
   ///
@@ -43,7 +43,7 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder superclass: Object
   /// ```
-  superclass: aClass => self.superclassRef := aClass
+  superclass: aClass :: Object -> Nil => self.superclassRef := aClass
 
   /// Set all fields at once (used by codegen).
   ///
@@ -51,7 +51,7 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder fields: #{ #count => 0 }
   /// ```
-  fields: aDict => self.fieldSpecs := aDict
+  fields: aDict :: Dictionary -> Nil => self.fieldSpecs := aDict
 
   /// Set all methods at once (used by codegen).
   ///
@@ -59,7 +59,7 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder methods: #{ #increment => fun }
   /// ```
-  methods: aDict => self.methodSpecs := aDict
+  methods: aDict :: Dictionary -> Nil => self.methodSpecs := aDict
 
   /// Add a single field with a default value.
   ///
@@ -67,7 +67,7 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder addField: #name default: 'Rex'
   /// ```
-  addField: aName default: aValue =>
+  addField: aName :: Symbol default: aValue :: Object -> Nil =>
     self.fieldSpecs := self.fieldSpecs at: aName put: aValue
 
   /// Apply a class modifier (#abstract, #sealed, #typed, #internal).
@@ -76,7 +76,8 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder modifier: #sealed
   /// ```
-  modifier: aSymbol => self.modifiers := self.modifiers add: aSymbol
+  modifier: aSymbol :: Symbol -> Nil =>
+    self.modifiers := self.modifiers add: aSymbol
 
   /// Set the backing Erlang module for a native Actor class.
   ///
@@ -87,7 +88,8 @@ Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder native: #beamtalk_subprocess
   /// ```
-  native: anErlangModule => self.backingModule := anErlangModule
+  native: anErlangModule :: Symbol -> Nil =>
+    self.backingModule := anErlangModule
 
   /// Register the class with the runtime and return the new class object.
   /// Stops the builder process after registration — the builder is
@@ -97,4 +99,4 @@ Actor subclass: ClassBuilder
   /// methods into the class gen_server. If the class already exists (hot
   /// reload), updates the existing gen_server state via `update_class/2`
   /// rather than failing.
-  register => @intrinsic classBuilderRegister
+  register -> Object => @intrinsic classBuilderRegister
