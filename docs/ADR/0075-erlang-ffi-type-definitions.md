@@ -167,6 +167,7 @@ Note: `Elem :: T` with no constraint maps to `Dynamic` — correct but imprecise
 
 | Erlang pattern | Beamtalk mapping | Rationale |
 |----------------|------------------|-----------|
+| `{ok, T} \| {error, E}` | `Tuple` (see note below) | Requires separate ADR for `Result(T, E)` conversion |
 | `term()` / `any()` | `Dynamic` | No useful type info |
 | `non_neg_integer()` | `Integer` | Beamtalk has no subrange types (yet) |
 | `iodata()` / `iolist()` | `Dynamic` | Recursive type, no Beamtalk equivalent |
@@ -175,6 +176,16 @@ Note: `Elem :: T` with no constraint maps to `Dynamic` — correct but imprecise
 | `no_return()` | `Dynamic` | Functions that never return (throw/exit) |
 | `map()` (untyped) | `Dictionary` | Beamtalk equivalent |
 | `#{key := Type}` | `Dictionary` | Typed map keys not yet supported in Beamtalk |
+
+**`{ok, T} | {error, E}` → `Result(T, E)` conversion (future ADR):**
+
+The most common Erlang return pattern — `{ok, Value} | {error, Reason}` — maps to `Tuple` in this ADR, which loses the inner types. The preferred direction is a **separate ADR** for ok/error tuple → `Result(T, E)` conversion at the FFI boundary, following the same pattern as charlist → String coercion (BT-1127). This would:
+
+1. Convert `{ok, V}` → `Result ok: V` and `{error, R}` → `Result error: R` in the proxy at runtime
+2. Map the Erlang spec `{ok, binary()} | {error, posix()}` → `Result(String, Symbol)` in auto-extract
+3. Give users `map:`, `andThen:`, and full `Result` combinators on FFI return values
+
+This is a meaningful change to the FFI's "transparent interop" principle (ADR 0028) and involves runtime, codegen, and type system changes — hence a separate ADR rather than a row in this table. Until that ADR lands, `{ok, T} | {error, E}` specs map to `Tuple` and users use `isOk`/`unwrap` from the Tuple class.
 
 ### Layer 2: Stub Override Files (`.bt` in `stubs/`)
 
