@@ -272,6 +272,43 @@ Compile and load Beamtalk source from an inline string (no file path needed). Us
 {"id": "msg-005", "error": "Parse error: unexpected token...", "status": ["done", "error"]}
 ```
 
+#### `load-project` — Sync Project Files
+
+Incrementally compile and load all `.bt` and native `.erl` files in a Beamtalk project directory (one containing `beamtalk.toml`). This is the protocol operation behind the `:sync` / `:s` REPL command and the `Workspace sync` method. Files are loaded in dependency order; unchanged files (by mtime) are skipped unless `force` is set.
+
+**Request:**
+```json
+{"op": "load-project", "id": "msg-006", "path": "."}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `path` | string | no | `"."` | Directory containing `beamtalk.toml` |
+| `include_tests` | boolean | no | `false` | Also load files under the `test/` directory |
+| `force` | boolean | no | `false` | Recompile all files regardless of mtime |
+
+**Response (success):**
+```json
+{
+  "id": "msg-006",
+  "classes": ["Counter", "Greeter"],
+  "errors": [],
+  "summary": "Reloaded 2 of 5 files",
+  "status": ["done"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `classes` | string[] | Names of classes that were (re)loaded |
+| `errors` | object[] | Structured per-file errors (empty on full success) |
+| `summary` | string | Human-readable one-line summary |
+
+**Response (no `beamtalk.toml`):**
+```json
+{"id": "msg-006", "error": "file_not_found: No beamtalk.toml found in: /tmp/foo", "status": ["done", "error"]}
+```
+
 #### `reload` — Hot Reload Module
 
 Reload a previously loaded module (requires `path` parameter).
@@ -569,7 +606,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `docs`, `load-file`, `load-source`, `reload`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `modules`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `docs`, `load-file`, `load-source`, `load-project`, `reload`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `modules`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
 
 #### `health` — Health Probe
 
@@ -711,6 +748,7 @@ The protocol is implemented in:
 |------|-------------|
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | WebSocket server and request dispatch |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | Load/reload/unload/modules/load-project op handlers |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl` | Session state bridge |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |
@@ -718,5 +756,6 @@ The protocol is implemented in:
 ## References
 
 - [ADR 0004: Persistent Workspace Management](ADR/0004-persistent-workspace-management.md)
+- [ADR 0040: Workspace Native REPL Commands](ADR/0040-workspace-native-repl-commands.md)
 - [Clojure nREPL](https://nrepl.org/nrepl/design/overview.html)
 - [Jupyter Kernel Protocol](https://jupyter-client.readthedocs.io/en/stable/messaging.html)
