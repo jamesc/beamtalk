@@ -2433,12 +2433,22 @@ fn test_union_type_annotation_no_false_positive() {
 
 #[test]
 fn test_uninitialized_typed_state_warns() {
-    // state: name :: String (no default) → warning
-    let state = vec![StateDeclaration::with_type(
-        ident("name"),
-        TypeAnnotation::simple("String", span()),
-        span(),
-    )];
+    // Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
+    // The sibling-default heuristic triggers: warns on `name` since the class has
+    // at least one typed field with a default (lifecycle-nil pattern).
+    let state = vec![
+        StateDeclaration::with_type(
+            ident("name"),
+            TypeAnnotation::simple("String", span()),
+            span(),
+        ),
+        StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        ),
+    ];
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
@@ -2457,6 +2467,39 @@ fn test_uninitialized_typed_state_warns() {
     );
     assert!(warnings[0].message.contains("name"));
     assert!(warnings[0].message.contains("String"));
+}
+
+#[test]
+fn test_all_factory_fields_no_warn() {
+    // All-factory class: all typed fields have no default → no warnings.
+    // Sibling-default heuristic: if no typed field has a default, the class
+    // is factory-constructed (spawnWith:/new:) — suppress warnings.
+    let state = vec![
+        StateDeclaration::with_type(
+            ident("name"),
+            TypeAnnotation::simple("String", span()),
+            span(),
+        ),
+        StateDeclaration::with_type(
+            ident("config"),
+            TypeAnnotation::simple("Dictionary", span()),
+            span(),
+        ),
+    ];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "All-factory class should not warn about uninitialized fields, got: {warnings:?}"
+    );
 }
 
 #[test]
