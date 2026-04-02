@@ -55,7 +55,13 @@ logging_config_test_() ->
             fun enableDebug_invalid_type_returns_error/0,
             fun disableAllDebug_clears_class_and_actor/0,
             fun loggerInfo_includes_class_and_actor/0,
-            fun debugTargets_includes_mcp/0
+            fun debugTargets_includes_mcp/0,
+            fun disableDebug_invalid_symbol_returns_error/0,
+            fun disableDebug_invalid_type_returns_error/0,
+            fun disableDebug_not_enabled_domain_succeeds/0,
+            fun logLevel_all_valid_levels_accepted/0,
+            fun ensure_table_idempotent/0,
+            fun loggerInfo_includes_level_and_format/0
         ]}.
 
 %%====================================================================
@@ -309,6 +315,43 @@ loggerInfo_includes_class_and_actor() ->
 debugTargets_includes_mcp() ->
     Targets = beamtalk_logging_config:debugTargets(),
     ?assert(lists:member(mcp, Targets)).
+
+disableDebug_invalid_symbol_returns_error() ->
+    Result = beamtalk_logging_config:disableDebug(nonexistent),
+    ?assertMatch(#beamtalk_error{kind = type_error}, Result).
+
+disableDebug_invalid_type_returns_error() ->
+    Result = beamtalk_logging_config:disableDebug(42),
+    ?assertMatch(#beamtalk_error{kind = type_error}, Result).
+
+disableDebug_not_enabled_domain_succeeds() ->
+    %% Disabling a domain target that was never enabled should succeed silently
+    beamtalk_logging_config:disableAllDebug(),
+    ?assertEqual(nil, beamtalk_logging_config:disableDebug(runtime)).
+
+logLevel_all_valid_levels_accepted() ->
+    OrigLevel = beamtalk_logging_config:logLevel(),
+    ValidLevels = [emergency, alert, critical, error, warning, notice, info, debug],
+    lists:foreach(
+        fun(Level) ->
+            ?assertEqual(nil, beamtalk_logging_config:logLevel(Level)),
+            ?assertEqual(Level, beamtalk_logging_config:logLevel())
+        end,
+        ValidLevels
+    ),
+    beamtalk_logging_config:logLevel(OrigLevel).
+
+ensure_table_idempotent() ->
+    %% Calling ensure_table multiple times should not error
+    ?assertEqual(ok, beamtalk_logging_config:ensure_table()),
+    ?assertEqual(ok, beamtalk_logging_config:ensure_table()).
+
+loggerInfo_includes_level_and_format() ->
+    Info = beamtalk_logging_config:loggerInfo(),
+    %% Should contain "Log level:" and "Format:" substrings
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Log level:">>)),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Format:">>)),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Active debug targets:">>)).
 
 %%====================================================================
 %% MCP signal file tests
