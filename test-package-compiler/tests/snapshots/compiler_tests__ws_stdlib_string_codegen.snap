@@ -110,6 +110,11 @@ module 'ws_stdlib_string' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
                     let InitClassName = call 'ws_stdlib_string':'class_name'() in
                     let _ = call 'logger':'error'(~{'msg' => InitErrorMsg, 'class' => InitClassName, 'reason' => {InitType, InitReason}, 'stacktrace' => InitStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in
                     {'stop', {InitType, InitReason, InitStacktrace}, InitErrState}
+                <{'error', InitError, InitErrState2}> when 'true' ->
+                    let InitErrorMsg2 = call 'beamtalk_error':'format_safe'(InitError) in
+                    let InitClassName2 = call 'ws_stdlib_string':'class_name'() in
+                    let _ = call 'logger':'error'(~{'msg' => InitErrorMsg2, 'class' => InitClassName2, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in
+                    {'stop', InitError, InitErrState2}
             end
         <_> when 'true' -> {'noreply', State}
     end
@@ -132,8 +137,11 @@ module 'ws_stdlib_string' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
             case _CastDispatchResult of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
                     {'noreply', CastNewState}
-                <{'error', {_CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
-                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastReason, 'stacktrace' => CastStacktrace}~)
+                <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
+                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace}~)
+                    in {'noreply', State}
+                <{'error', CastError, _CastState2}> when 'true' ->
+                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)
                     in {'noreply', State}
             end
         <{'cast', CastSelector, CastArgs}> when 'true' ->
@@ -150,8 +158,11 @@ module 'ws_stdlib_string' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
             case _CastDispatchResult of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
                     {'noreply', CastNewState}
-                <{'error', {_CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
-                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastReason, 'stacktrace' => CastStacktrace}~)
+                <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
+                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace}~)
+                    in {'noreply', State}
+                <{'error', CastError, _CastState2}> when 'true' ->
+                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)
                     in {'noreply', State}
             end
         <_> when 'true' -> {'noreply', State}

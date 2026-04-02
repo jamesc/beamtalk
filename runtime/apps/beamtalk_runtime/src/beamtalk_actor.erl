@@ -719,9 +719,10 @@ sync_send_remote(ActorPid, Selector, Args) ->
                                     ErlType, ErrorValue, Stacktrace
                                 )
                             );
-                        {error, {_ErlType, ErrorValue}} ->
-                            %% Backward compat: safe_dispatch without stacktrace
-                            error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
+                        {error, {ErlType, ErrorValue}} ->
+                            %% Backward compat: safe_dispatch without stacktrace —
+                            %% still pass exception class to preserve error kind
+                            error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, []));
                         {error, Error} ->
                             error(beamtalk_exception_handler:ensure_wrapped(Error));
                         DirectValue ->
@@ -782,8 +783,9 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                                             ErlType, ErrorValue, Stacktrace
                                         )
                                     );
-                                {error, {_ErlType, ErrorValue}} ->
-                                    error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
+                                {error, {ErlType, ErrorValue}} ->
+                                    %% Backward compat: preserve exception class
+                                    error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, []));
                                 {error, Error} ->
                                     error(beamtalk_exception_handler:ensure_wrapped(Error));
                                 DirectValue ->
@@ -858,6 +860,10 @@ unwrap_dispatch_result({error, {ErlType, ErrorValue, Stacktrace}, NewState}) ->
     %% BT-1822: safe_dispatch with stacktrace
     put('$bt_actor_state', NewState),
     error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, Stacktrace));
+unwrap_dispatch_result({error, {ErlType, ErrorValue}, NewState}) ->
+    %% Backward compat: preserve exception class without stacktrace
+    put('$bt_actor_state', NewState),
+    error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, []));
 unwrap_dispatch_result({error, Reason, NewState}) ->
     put('$bt_actor_state', NewState),
     error(beamtalk_exception_handler:ensure_wrapped(Reason)).
