@@ -239,7 +239,7 @@ declare native: lists
 - No `stub_parser.rs` — eliminated entirely
 - Syntax highlighting works in any editor with `.bt` support
 - LSP features (completions, hover, go-to-definition) work on stub files for free
-- `stub-gen` output is valid Beamtalk that users can open, read, and edit with full tooling
+- ``generate stubs`` output is valid Beamtalk that users can open, read, and edit with full tooling
 - Doc comments (`///`) use the existing doc comment parser
 
 **What stubs are NOT:**
@@ -270,7 +270,7 @@ Note: project-local stubs take highest precedence because the user should always
 
 ### Type Checker Integration
 
-The type checker gains an `NativeTypeRegistry` that stores resolved function signatures:
+The type checker gains a `NativeTypeRegistry` that stores resolved function signatures:
 
 ```rust
 /// Registry of Erlang function type signatures, populated at build time.
@@ -481,7 +481,7 @@ TypeScript's approach is the closest analogy. Libraries written in TypeScript au
 **What we adopt:**
 - Two-tier model: auto-generated baseline + hand-curated overrides
 - Resolution chain with clear precedence (package types > `@types` > inferred)
-- `stub-gen` tool analogous to `tsc --declaration`
+- ``generate stubs`` tool analogous to `tsc --declaration`
 
 **What we adapt:**
 - We auto-extract from `.beam` specs instead of requiring everything to be hand-written. TypeScript has no equivalent of `-spec` in JavaScript — they must start from scratch. We have a rich starting point.
@@ -578,14 +578,14 @@ Dialyzer builds a Persistent Lookup Table with success typings — types inferre
 | **Operator** | "Types always match the actual OTP version deployed — no version drift, no surprises" |
 | **Language designer** | "Minimal surface area — one mechanism, no new file format to design and maintain" |
 
-**Why we don't choose this:** Auto-extract is limited by what Erlang specs express. `term()` maps to `Dynamic`. Keyword names are lost (everything is `with:`). The type quality ceiling is too low for a great developer experience on commonly-used modules.
+**Why we don't choose this:** Auto-extract is limited by what Erlang specs express. `term()` maps to `Dynamic` — and for the ~20 most-used OTP modules, `Dynamic` on key parameters (e.g., `ets:lookup/2`, `lists:member/2`) is genuinely unhelpful. Source+beam auto-extract provides meaningful keyword names, but cannot tighten `term()` types. Curated stubs for the high-traffic modules close this gap.
 
 ### Tension Points
 
-- **Newcomers and BEAM veterans** both prefer auto-extract — it requires zero effort. But **Smalltalk purists** want meaningful keyword names, which only stubs provide.
+- **Newcomers and BEAM veterans** both prefer auto-extract — it requires zero effort. Source+beam auto-extract largely satisfies **Smalltalk purists** too (meaningful keyword names from Erlang source). The remaining gap is `term()` → `Dynamic` on heavily-used functions.
 - **Operators** are split: auto-extract guarantees OTP version match, but stubs are deterministic and cacheable.
-- **Language designers** worry about two-mechanism complexity, but acknowledge that neither layer alone is sufficient.
-- The hybrid resolves these tensions: auto-extract for breadth, stubs for depth.
+- **Language designers** worry about two-mechanism complexity, but acknowledge that auto-extract alone can't fix `term()` specs.
+- The hybrid resolves these tensions: auto-extract for breadth (with good keyword names from source), stubs for depth (tightening `Dynamic` on critical OTP functions).
 
 ## Alternatives Considered
 
@@ -644,7 +644,7 @@ Read inferred types from Dialyzer's PLT files to supplement missing `-spec` anno
 - **Imprecise auto-extracted types** — `term()` → `Dynamic` means some functions get no useful type info from auto-extract alone (mitigated by source-derived parameter names making the output more useful even with `Dynamic` params)
 - **Stub maintenance** — curated OTP stubs must be updated when OTP adds/changes functions (mitigated by `generate stubs` tool and version drift detection). Scope is limited: only ~20 compiler-distributed OTP stubs and package-local native stubs. Hex dep types come from auto-extract — no maintenance needed
 - **New parse form** — `declare native:` is a new top-level form, though it reuses the existing protocol signature parser and requires no separate parser
-- **Trust boundary** — stubs can declare incorrect types; the compiler trusts them. Incorrect stubs cause false diagnostics (mitigated by `stub-gen` producing correct starting points)
+- **Trust boundary** — stubs can declare incorrect types; the compiler trusts them. Incorrect stubs cause false diagnostics (mitigated by ``generate stubs`` producing correct starting points)
 - **`+debug_info` dependency** — auto-extraction only works for `.beam` files compiled with `+debug_info`. Release-stripped packages and some precompiled Hex deps fall through to `Dynamic` (mitigated by stub files for important packages)
 - **Cold build cost** — first build must read `abstract_code` from `.beam` files and parse `.erl` source for parameter names across all modules on the code path. For large dependency graphs (200+ modules), this may add several seconds. Mitigation: (a) results are cached in `_build/type_cache/` and invalidated by file timestamp changes — incremental builds have zero extraction overhead; (b) source parsing is lightweight (function heads only, not full compilation); (c) extraction can run in parallel across modules via the build worker pool
 - **Hot code reload staleness** — `NativeTypeRegistry` is populated at build time. If an Erlang module is hot-reloaded mid-session with changed specs, the registry is stale until the next `beamtalk build`. This is a known limitation — type info is compile-time, dispatch is runtime. Consistent with ADR 0025's "compile-time only" principle
@@ -766,6 +766,6 @@ No existing behavior changes. This is purely additive:
 - No changes to runtime, codegen, or existing syntax
 
 ## References
-- Related issues: BT-1823
+- Related issues: BT-1823, BT-1838 (ok/error → Result conversion — future ADR)
 - Related ADRs: ADR 0025 (gradual typing — the type system this plugs into), ADR 0028 (BEAM interop — the FFI mechanism this types), ADR 0055 (Erlang-backed classes — related FFI pattern), ADR 0068 (parametric types — generic type params in stubs), ADR 0070 (package namespaces — stub distribution via packages), ADR 0072 (user Erlang sources — native code that needs stubs)
 - External: [TypeScript Declaration Files](https://www.typescriptlang.org/docs/handbook/declaration-files/introduction.html), [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped), [Gleam External Functions](https://gleam.run/book/tour/external-functions.html), [Kotlin cinterop](https://kotlinlang.org/docs/native-c-interop.html)
