@@ -246,6 +246,7 @@ declare native: lists
 - Not classes — no `ClassHierarchy` entry, no `ClassInfo`, no superclass chain
 - Not loadable — `Workspace load:` ignores `stubs/` directory; stubs never produce `.beam` files
 - Not instantiable — `declare native:` is a type-only construct, not an object
+- **Not valid in `src/`** — a `declare native:` form in `src/` is a compile error: `"declare native: is only valid in stubs/ directory"`. This prevents users from accidentally mixing type declarations with compilable code
 
 **Override semantics:**
 
