@@ -181,8 +181,8 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
         Result = erlang:apply(Module, FunName, Args),
         coerce_charlist_result(Result)
     catch
-        error:#{error := #beamtalk_error{}} = Wrapped:_ ->
-            error(Wrapped);
+        error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
+            erlang:raise(error, Wrapped, WrappedStack);
         error:undef:_Stack ->
             %% TOCTOU: function unloaded between export check and apply
             raise_undef_error(Module, FunName, length(Args), OrigSelector);
@@ -196,8 +196,8 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
                     catch
                         error:badarg:Stack2 ->
                             raise_badarg_error(Module, FunName, OrigSelector, Stack2);
-                        error:#{error := #beamtalk_error{}} = Wrapped2:_ ->
-                            error(Wrapped2);
+                        error:#{error := #beamtalk_error{}} = Wrapped2:WrappedStack2 ->
+                            erlang:raise(error, Wrapped2, WrappedStack2);
                         error:undef:_Stack2 ->
                             raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector)
                     end;

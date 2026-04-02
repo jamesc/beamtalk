@@ -135,11 +135,11 @@ activate_module(Module, Opts) ->
                             try
                                 Callback({Module, SourcePath})
                             catch
-                                Class:Reason ->
+                                Class:Reason:Stacktrace ->
                                     ?LOG_WARNING(
                                         "on_activate callback failed for ~p: ~p:~p",
                                         [Module, Class, Reason],
-                                        #{domain => Domain}
+                                        #{stacktrace => Stacktrace, domain => Domain}
                                     )
                             end;
                         error ->
@@ -248,7 +248,13 @@ extract_source_path(ModuleName) ->
             _ -> undefined
         end
     catch
-        _:_ -> undefined
+        Class:Reason:Stacktrace ->
+            ?LOG_DEBUG(
+                "Failed to extract source path from ~p: ~p:~p",
+                [ModuleName, Class, Reason],
+                #{stacktrace => Stacktrace, domain => [beamtalk, runtime]}
+            ),
+            undefined
     end.
 
 %% @doc Extract class name atoms from a loaded module's `beamtalk_class` attribute.
@@ -259,7 +265,13 @@ extract_class_names(ModuleName) ->
         Classes = proplists:get_value(beamtalk_class, Attrs, []),
         [ClassName || {ClassName, _Superclass} <- Classes]
     catch
-        _:_ -> []
+        Class:Reason:Stacktrace ->
+            ?LOG_DEBUG(
+                "Failed to extract class names from ~p: ~p:~p",
+                [ModuleName, Class, Reason],
+                #{stacktrace => Stacktrace, domain => [beamtalk, runtime]}
+            ),
+            []
     end.
 
 %% @doc Load the OTP `.app` file from an ebin directory.
