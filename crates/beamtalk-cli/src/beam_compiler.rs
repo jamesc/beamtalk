@@ -32,7 +32,7 @@
 //! ```
 
 use beamtalk_core::semantic_analysis::type_checker::{
-    is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line, NativeTypeRegistry,
+    NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
 };
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
