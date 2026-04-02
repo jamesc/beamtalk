@@ -163,16 +163,73 @@ fn detect_orphaned_beams(
     orphaned
 }
 
+/// Resolved environment for a build: source files, project root, manifest, and
+/// build directory. Produced by [`setup_build_environment`].
+struct BuildEnvironment {
+    /// All `.bt` source files discovered for this build.
+    source_files: Vec<Utf8PathBuf>,
+    /// The project root directory (directory input or parent of file input).
+    project_root: Utf8PathBuf,
+    /// The fully parsed manifest, if `beamtalk.toml` exists.
+    full_manifest: Option<manifest::ParsedManifest>,
+    /// The build layout helper for computing standard paths.
+    layout: BuildLayout,
+    /// The output directory for compiled artifacts (ebin/ or build/).
+    build_dir: Utf8PathBuf,
+    /// The `src/` directory if it exists, used for relative module path computation.
+    source_root: Option<Utf8PathBuf>,
+}
+
+impl BuildEnvironment {
+    /// Convenience accessor for the package manifest, if present.
+    fn pkg_manifest(&self) -> Option<&manifest::PackageManifest> {
+        self.full_manifest.as_ref().map(|m| &m.package)
+    }
+}
+
+/// Resolved dependencies and their associated metadata. Produced by
+/// [`resolve_and_validate_dependencies`].
+struct DependencyContext {
+    /// The resolved dependency list (empty for non-package builds).
+    resolved_deps: Vec<super::deps::path::ResolvedDependency>,
+    /// Whether native hex dependencies exist in the dependency graph.
+    has_native_deps: bool,
+}
+
+/// Results from the two compilation passes (class index + source compilation).
+/// Produced by [`execute_build_passes`].
+struct BuildPassesResult {
+    /// All module names (both compiled and unchanged), needed for .app generation.
+    module_names: Vec<String>,
+    /// File-to-module mapping for all source files.
+    file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)>,
+    /// Class hierarchy context used for post-processing (app file generation, etc.).
+    hierarchy: ClassHierarchyContext,
+    /// Native compilation result, if native Erlang sources were compiled.
+    native_result: Option<Rebar3Result>,
+}
+
 /// Build beamtalk source files.
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
 ///
 /// When `force` is false, per-file change detection compares `.bt` source mtimes
 /// against `.beam` output mtimes and only recompiles changed files.
-#[allow(clippy::too_many_lines)]
 #[instrument(skip_all, fields(path = %path))]
-pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bool) -> Result<()> {
+pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
+
+    let env = setup_build_environment(path)?;
+    let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
+    let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
+    post_process_package_artifacts(&env, &dep_ctx, &passes)?;
+
+    Ok(())
+}
+
+/// Phase 1-3: Discover source files, resolve the project root and manifest,
+/// and create the build output directory.
+fn setup_build_environment(path: &str) -> Result<BuildEnvironment> {
     let source_path = Utf8PathBuf::from(path);
 
     // Find source files
@@ -198,8 +255,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // Look for package manifest (full parse includes dependencies for
     // transitive dep tracking — ADR 0070 Phase 3)
     let full_manifest = manifest::find_manifest_full(&project_root)?;
-    let pkg_manifest = full_manifest.as_ref().map(|m| &m.package);
-    if let Some(pkg) = pkg_manifest {
+    if let Some(pkg) = full_manifest.as_ref().map(|m| &m.package) {
         info!(name = %pkg.name, version = %pkg.version, "Found package manifest");
         debug!(?pkg, "Package manifest details");
     } else {
@@ -209,7 +265,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // Create build directory relative to project root
     // ADR 0026 §5: Package mode outputs to _build/dev/ebin/, single-file mode keeps build/
     let layout = BuildLayout::new(&project_root);
-    let build_dir = if pkg_manifest.is_some() {
+    let build_dir = if full_manifest.is_some() {
         layout.ebin_dir()
     } else {
         project_root.join("build")
@@ -220,11 +276,35 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         .into_diagnostic()
         .wrap_err("Failed to create build directory")?;
 
+    // Determine the source root for computing relative module paths
+    let src_dir = project_root.join("src");
+    let source_root = if src_dir.exists() {
+        Some(src_dir)
+    } else {
+        None
+    };
+
+    Ok(BuildEnvironment {
+        source_files,
+        project_root,
+        full_manifest,
+        layout,
+        build_dir,
+        source_root,
+    })
+}
+
+/// Phase 4: Resolve transitive dependencies, check for native module collisions,
+/// and determine whether native hex dependencies exist in the graph.
+fn resolve_and_validate_dependencies(
+    env: &BuildEnvironment,
+    options: &beamtalk_core::CompilerOptions,
+) -> Result<DependencyContext> {
     // ADR 0070 Phase 1: Resolve and compile dependencies when needed.
     // Uses staleness detection: no-op when lockfile is fresh and deps are compiled.
     // Otherwise resolves the full transitive graph in topological order.
-    let resolved_deps = if pkg_manifest.is_some() {
-        super::deps::ensure_deps_resolved(&project_root, options)?
+    let resolved_deps = if env.pkg_manifest().is_some() {
+        super::deps::ensure_deps_resolved(&env.project_root, options)?
     } else {
         Vec::new()
     };
@@ -232,15 +312,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // ADR 0072 Phase 1: Check for native Erlang module name collisions across
     // packages before compilation. BEAM has a flat module namespace — only one
     // version of any module can be loaded, so duplicates must be caught early.
-    if let Some(pkg) = pkg_manifest {
-        check_native_module_collisions(&project_root, &pkg.name, &resolved_deps)?;
+    if let Some(pkg) = env.pkg_manifest() {
+        check_native_module_collisions(&env.project_root, &pkg.name, &resolved_deps)?;
     }
 
     // ADR 0072: Determine whether native hex deps exist (needed to choose
     // the compilation path later). The actual native compilation is deferred
     // until after Pass 1 so we can generate the beamtalk_classes.hrl header
     // (BT-1730) that native .erl files can include.
-    let has_native_deps = full_manifest
+    let has_native_deps = env
+        .full_manifest
         .as_ref()
         .is_some_and(|m| !m.native_dependencies.is_empty())
         || resolved_deps
@@ -256,55 +337,91 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
                 Ok(acc || !m.native_dependencies.is_empty())
             })?;
 
-    // Determine the source root for computing relative module paths
-    let src_dir = project_root.join("src");
-    let source_root = if src_dir.exists() {
-        Some(src_dir)
-    } else {
-        None
-    };
+    Ok(DependencyContext {
+        resolved_deps,
+        has_native_deps,
+    })
+}
+
+/// Results from Pass 1: class index building and dependency merging.
+struct ClassIndexResult {
+    /// Merged class-to-module index (source + dependency classes).
+    class_module_index: HashMap<String, String>,
+    /// Class-to-superclass index.
+    class_superclass_index: HashMap<String, String>,
+    /// Unified collection of all `ClassInfo` from source and dependency classes.
+    all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Dependency registry for cross-package collision detection.
+    dep_registry: beamtalk_core::semantic_analysis::DependencyRegistry,
+    /// Cached ASTs from incremental Pass 1, keyed by source file path.
+    cached_asts: HashMap<Utf8PathBuf, CachedAst>,
+    /// Whether the manifest changed, forcing Pass 2 recompilation.
+    force_pass2: bool,
+}
+
+/// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
+///
+/// Computes module names for all source files, builds the class-to-module and
+/// class-to-superclass indexes, merges dependency class indexes, and validates
+/// stdlib reservation violations.
+fn build_class_index(
+    env: &BuildEnvironment,
+    dep_ctx: &DependencyContext,
+    options: &beamtalk_core::CompilerOptions,
+    force: bool,
+) -> Result<ClassIndexResult> {
+    let pkg_manifest = env.pkg_manifest();
 
     // Pass 1: compute module names and build the class → module index.
     // This allows later files to resolve cross-file class references (including
     // classes in package subdirectories) during code generation.
     // BT-1683: Use incremental cache to skip unchanged files in Pass 1.
-    let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
     let manifest_path = if pkg_manifest.is_some() {
-        let p = project_root.join("beamtalk.toml");
+        let p = env.project_root.join("beamtalk.toml");
         if p.exists() { Some(p) } else { None }
     } else {
         None
     };
-    let (mut class_module_index, class_superclass_index, source_class_infos, cached_asts) =
-        if let Some(pkg) = pkg_manifest {
-            let result = super::build_cache::incremental_build_class_module_index(
-                &source_files,
-                source_root.as_deref(),
-                &pkg.name,
-                &build_dir,
-                manifest_path.as_deref(),
-                force,
-            )?;
-            // If the manifest changed, force Pass 2 recompilation too —
-            // .bt files may be unchanged but semantics depend on the manifest.
-            if result.manifest_invalidated {
-                force = true;
-            }
-            (
-                result.class_module_index,
-                result.class_superclass_index,
-                result.all_class_infos,
-                result.cached_asts,
-            )
-        } else {
-            (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
-        };
+    let (
+        mut class_module_index,
+        class_superclass_index,
+        source_class_infos,
+        cached_asts,
+        force_pass2,
+    ) = if let Some(pkg) = pkg_manifest {
+        let result = super::build_cache::incremental_build_class_module_index(
+            &env.source_files,
+            env.source_root.as_deref(),
+            &pkg.name,
+            &env.build_dir,
+            manifest_path.as_deref(),
+            force,
+        )?;
+        // If the manifest changed, force Pass 2 recompilation too —
+        // .bt files may be unchanged but semantics depend on the manifest.
+        (
+            result.class_module_index,
+            result.class_superclass_index,
+            result.all_class_infos,
+            result.cached_asts,
+            result.manifest_invalidated,
+        )
+    } else {
+        (
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+            HashMap::new(),
+            false,
+        )
+    };
 
     // ADR 0070: Merge dependency class indexes into the main package's indexes
     // so cross-package class references resolve during compilation.
     // Also build a DependencyRegistry for collision detection (Phase 3).
     // BT-1654: Track direct vs transitive dependencies for W0302 warnings.
-    let dep_infos: Vec<beamtalk_core::semantic_analysis::DepInfo> = resolved_deps
+    let dep_infos: Vec<beamtalk_core::semantic_analysis::DepInfo> = dep_ctx
+        .resolved_deps
         .iter()
         .map(|dep| beamtalk_core::semantic_analysis::DepInfo {
             name: dep.name.clone(),
@@ -319,7 +436,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // Collect dependency ClassInfo separately, then merge with source ClassInfo
     // via collect_all_class_infos (BT-1733).
     let mut dep_class_infos = Vec::new();
-    for dep in &resolved_deps {
+    for dep in &dep_ctx.resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
             debug!(
                 dep = %dep.name,
@@ -339,53 +456,88 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // BT-1653 / ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
     // Dependencies must not export classes with stdlib-reserved names.
     if !dep_registry.is_empty() && !options.stdlib_mode {
-        let mut reservation_diags = Vec::new();
-        beamtalk_core::semantic_analysis::check_stdlib_reservation(
-            &dep_registry,
-            &mut reservation_diags,
-        );
-        if !reservation_diags.is_empty() {
-            let has_errors = reservation_diags
-                .iter()
-                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
-            if has_errors {
-                // Collect all error messages for reporting
-                let messages: Vec<String> = reservation_diags
-                    .iter()
-                    .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
-                    .map(|d| {
-                        if let Some(ref hint) = d.hint {
-                            format!("{}\n  help: {}", d.message, hint)
-                        } else {
-                            d.message.to_string()
-                        }
-                    })
-                    .collect();
-                miette::bail!("{}", messages.join("\n"));
-            }
-        }
+        check_stdlib_reservations(&dep_registry)?;
     }
+
+    Ok(ClassIndexResult {
+        class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        dep_registry,
+        cached_asts,
+        force_pass2,
+    })
+}
+
+/// Check that no dependency exports classes with stdlib-reserved names.
+fn check_stdlib_reservations(
+    dep_registry: &beamtalk_core::semantic_analysis::DependencyRegistry,
+) -> Result<()> {
+    let mut reservation_diags = Vec::new();
+    beamtalk_core::semantic_analysis::check_stdlib_reservation(
+        dep_registry,
+        &mut reservation_diags,
+    );
+    if reservation_diags.is_empty() {
+        return Ok(());
+    }
+    let has_errors = reservation_diags
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    if has_errors {
+        let messages: Vec<String> = reservation_diags
+            .iter()
+            .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+            .map(|d| {
+                if let Some(ref hint) = d.hint {
+                    format!("{}\n  help: {}", d.message, hint)
+                } else {
+                    d.message.to_string()
+                }
+            })
+            .collect();
+        miette::bail!("{}", messages.join("\n"));
+    }
+    Ok(())
+}
+
+/// Compile native Erlang sources (native/*.erl and hex dependencies).
+///
+/// Runs after Pass 1 so the generated `beamtalk_classes.hrl` header is available
+/// for native `.erl` files to include. Also validates that native files don't
+/// contain hardcoded `bt@<pkg>@` references.
+fn compile_native_sources(
+    env: &BuildEnvironment,
+    dep_ctx: &DependencyContext,
+    class_module_index: &HashMap<String, String>,
+) -> Result<Option<Rebar3Result>> {
+    let pkg_manifest = env.pkg_manifest();
 
     // BT-1730: Generate beamtalk_classes.hrl before native Erlang compilation.
     // This header provides ?BT_CLASS_MODULE macros so native .erl files can
     // reference Beamtalk class modules without hardcoding bt@<pkg>@<class> atoms.
     if pkg_manifest.is_some() {
-        let hrl_dir = layout.native_include_dir();
-        generate_class_header(&hrl_dir, &class_module_index)?;
+        let hrl_dir = env.layout.native_include_dir();
+        generate_class_header(&hrl_dir, class_module_index)?;
     }
 
     // ADR 0072: Compile native Erlang sources after Pass 1.
     // Native modules must be compiled before .bt files (Pass 2) because .bt
     // files may reference them via `(Erlang module)` FFI or `native:` annotations.
     // Moved after Pass 1 so the generated beamtalk_classes.hrl is available.
-    let native_result = if pkg_manifest.is_some() && has_native_deps {
+    let native_result = if pkg_manifest.is_some() && dep_ctx.has_native_deps {
         // Path B: rebar3 handles both hex deps and native/*.erl
-        let native_deps = &full_manifest.as_ref().unwrap().native_dependencies;
+        let native_deps = &env.full_manifest.as_ref().unwrap().native_dependencies;
 
         // Aggregate native dependencies from all packages in the dependency graph
-        let aggregated = aggregate_native_dependencies(native_deps, &resolved_deps);
+        let aggregated = aggregate_native_dependencies(native_deps, &dep_ctx.resolved_deps);
 
-        let rebar3_result = compile_with_rebar3(&project_root, &aggregated, false, &resolved_deps)?;
+        let rebar3_result = compile_with_rebar3(
+            &env.project_root,
+            &aggregated,
+            false,
+            &dep_ctx.resolved_deps,
+        )?;
         eprintln!(
             "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
             aggregated.len(),
@@ -396,10 +548,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         // Path A: compile native/*.erl directly via erlc (no hex deps).
         // Uses compile_native_erlang_with_deps to also compile transitive
         // BT dependency native sources (same as Path B's post-rebar3 step).
-        let native_ebin = compile_native_erlang_with_deps(&project_root, &resolved_deps)?;
+        let native_ebin =
+            compile_native_erlang_with_deps(&env.project_root, &dep_ctx.resolved_deps)?;
         let module_names = {
             use crate::beam_compiler::discover_native_modules;
-            discover_native_modules(&project_root)?
+            discover_native_modules(&env.project_root)?
         };
         match native_ebin {
             Some(ebin) => Some(Rebar3Result {
@@ -420,10 +573,24 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // Warns at compile time so moving a class between packages doesn't cause
     // silent runtime failures.
     if let Some(pkg) = pkg_manifest {
-        validate_native_class_references(&project_root, &pkg.name, &class_module_index)?;
+        validate_native_class_references(&env.project_root, &pkg.name, class_module_index)?;
     }
 
-    for file in &source_files {
+    Ok(native_result)
+}
+
+/// Compute file-module-core triples for all source files.
+///
+/// For each `.bt` source file, computes the Erlang module name (using the
+/// package naming convention for package builds) and the corresponding
+/// `.core` output path.
+fn compute_file_module_pairs(
+    env: &BuildEnvironment,
+) -> Result<Vec<(Utf8PathBuf, String, Utf8PathBuf)>> {
+    let pkg_manifest = env.pkg_manifest();
+    let mut pairs = Vec::new();
+
+    for file in &env.source_files {
         let stem = file
             .file_stem()
             .ok_or_else(|| miette::miette!("File '{}' has no name", file))?;
@@ -439,7 +606,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         // ADR 0026: Package mode uses bt@{package}@{relative_path} naming
         // ADR 0016: Single-file mode uses bt@{module} naming
         let module_name = if let Some(pkg) = pkg_manifest {
-            let relative_module = compute_relative_module(file, source_root.as_deref())?;
+            let relative_module = compute_relative_module(file, env.source_root.as_deref())?;
             format!("bt@{}@{}", pkg.name, relative_module)
         } else {
             format!(
@@ -447,13 +614,71 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
                 beamtalk_core::codegen::core_erlang::to_module_name(stem)
             )
         };
-        let core_file = build_dir.join(format!("{module_name}.core"));
-        file_module_pairs.push((file.clone(), module_name, core_file));
+        let core_file = env.build_dir.join(format!("{module_name}.core"));
+        pairs.push((file.clone(), module_name, core_file));
     }
+
+    Ok(pairs)
+}
+
+/// Compile Core Erlang files to BEAM bytecode, reporting incremental build
+/// status to the user.
+fn compile_to_beam(
+    build_dir: &Utf8Path,
+    core_files: &[Utf8PathBuf],
+    changed_count: usize,
+    unchanged_count: usize,
+    total_files: usize,
+) -> Result<()> {
+    // Report incremental build status.
+    if core_files.is_empty() {
+        eprintln!("All {total_files} files unchanged — nothing to compile");
+        info!("All files up-to-date — nothing to compile");
+    } else if unchanged_count > 0 {
+        eprintln!("Compiling {changed_count} of {total_files} files ({unchanged_count} unchanged)");
+        info!(count = core_files.len(), "Compiling changed files to BEAM");
+    } else {
+        eprintln!("Compiling {total_files} files");
+        info!(count = core_files.len(), "Compiling changed files to BEAM");
+    }
+
+    // Compile Core Erlang to BEAM (no-op if nothing changed).
+    let beam_count = if core_files.is_empty() {
+        0
+    } else {
+        let compiler = BeamCompiler::new(build_dir.to_path_buf());
+        let beam_files = compiler
+            .compile_batch(core_files)
+            .wrap_err("Failed to compile Core Erlang to BEAM")?;
+        beam_files.len()
+    };
+
+    info!(
+        beam_count,
+        skipped = unchanged_count,
+        "Build completed successfully"
+    );
+    Ok(())
+}
+
+/// Phase 5-8: Build the class index (Pass 1), merge dependency indexes,
+/// compile changed source files (Pass 2), and compile Core Erlang to BEAM.
+fn execute_build_passes(
+    env: &BuildEnvironment,
+    options: &beamtalk_core::CompilerOptions,
+    dep_ctx: &DependencyContext,
+    force: bool,
+) -> Result<BuildPassesResult> {
+    let index = build_class_index(env, dep_ctx, options, force)?;
+    let force = if index.force_pass2 { true } else { force };
+
+    let native_result = compile_native_sources(env, dep_ctx, &index.class_module_index)?;
+
+    let file_module_pairs = compute_file_module_pairs(env)?;
 
     // BT-1682: Per-file change detection — only recompile files whose source
     // is newer than the corresponding .beam output.
-    let changes = detect_changes(&source_files, &build_dir, &file_module_pairs, force);
+    let changes = detect_changes(&env.source_files, &env.build_dir, &file_module_pairs, force);
 
     // Warn about orphaned .beam files (source deleted but .beam remains)
     for orphan in &changes.orphaned_beam_files {
@@ -473,28 +698,29 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // Pass 2: compile each file with the full class → module index.
     // BT-1544: Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
     // BT-1682: Only compile files that have changed since last build.
-    let mut cached_asts = cached_asts;
+    let mut cached_asts = index.cached_asts;
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
-    let registry_ref = if dep_registry.is_empty() {
-        None
-    } else {
-        Some(&dep_registry)
-    };
-    let strict_deps = full_manifest
+    let strict_deps = env
+        .full_manifest
         .as_ref()
         .is_some_and(|m| m.package.strict_deps);
+
+    let registry_ref = if index.dep_registry.is_empty() {
+        None
+    } else {
+        Some(&index.dep_registry)
+    };
     let compile_ctx = CompileContext {
         hierarchy: ClassHierarchyContext {
-            class_module_index: class_module_index.clone(),
-            class_superclass_index: class_superclass_index.clone(),
-            pre_loaded_classes: all_class_infos.clone(),
+            class_module_index: index.class_module_index.clone(),
+            class_superclass_index: index.class_superclass_index.clone(),
+            pre_loaded_classes: index.all_class_infos.clone(),
         },
         dep_registry: registry_ref,
         strict_deps,
     };
     for (file, module_name, core_file) in &file_module_pairs {
-        // Always track module names for .app generation
         module_names.push(module_name.clone());
 
         if !changed_set.contains(file.as_path()) {
@@ -507,74 +733,71 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         core_files.push(core_file.clone());
     }
 
-    // Report incremental build status to the user.
-    let total_files = file_module_pairs.len();
-    let changed_count = changes.changed_files.len();
-    let unchanged_count = changes.unchanged_files.len();
+    compile_to_beam(
+        &env.build_dir,
+        &core_files,
+        changes.changed_files.len(),
+        changes.unchanged_files.len(),
+        file_module_pairs.len(),
+    )?;
 
-    if core_files.is_empty() {
-        eprintln!("All {total_files} files unchanged — nothing to compile");
-        info!("All files up-to-date — nothing to compile");
-    } else if unchanged_count > 0 {
-        eprintln!("Compiling {changed_count} of {total_files} files ({unchanged_count} unchanged)");
-        info!(count = core_files.len(), "Compiling changed files to BEAM");
-    } else {
-        eprintln!("Compiling {total_files} files");
-        info!(count = core_files.len(), "Compiling changed files to BEAM");
-    }
+    Ok(BuildPassesResult {
+        module_names,
+        file_module_pairs,
+        hierarchy: compile_ctx.hierarchy,
+        native_result,
+    })
+}
 
-    let beam_files = if core_files.is_empty() {
-        Vec::new()
-    } else {
-        let compiler = BeamCompiler::new(build_dir.clone());
-        compiler
-            .compile_batch(&core_files)
-            .wrap_err("Failed to compile Core Erlang to BEAM")?
+/// Phase 9: Clean stale artifacts and generate OTP application outputs
+/// (.app file, corpus, supervisor callback) for package builds.
+fn post_process_package_artifacts(
+    env: &BuildEnvironment,
+    dep_ctx: &DependencyContext,
+    passes: &BuildPassesResult,
+) -> Result<()> {
+    let Some(pkg) = env.pkg_manifest() else {
+        return Ok(());
     };
 
-    info!(
-        beam_count = beam_files.len(),
-        skipped = changes.unchanged_files.len(),
-        "Build completed successfully"
-    );
-
-    // ADR 0026 §3: Package mode post-processing — clean stale artifacts and generate .app
-    if let Some(pkg) = pkg_manifest {
-        // BT-1682: For stale artifact cleanup, we need ALL expected .beam files
-        // (both newly compiled and unchanged), not just the ones from this build.
-        let all_expected_beams: Vec<Utf8PathBuf> = file_module_pairs
-            .iter()
-            .map(|(_, module_name, _)| build_dir.join(format!("{module_name}.beam")))
-            .collect();
-        clean_stale_artifacts(&build_dir, &all_expected_beams, &pkg.name)?;
-        let native_module_names: Vec<String> = native_result
-            .as_ref()
-            .map(|r| r.module_names.clone())
-            .unwrap_or_default();
-        // ADR 0072 §7: Direct hex dep names for the {applications, [...]} list
-        let hex_dep_names: Vec<String> = full_manifest
-            .as_ref()
-            .map(|m| m.native_dependencies.keys().cloned().collect())
-            .unwrap_or_default();
-        let bt_dep_names: Vec<String> = resolved_deps
-            .iter()
-            .filter(|d| d.is_direct)
-            .map(|d| d.name.clone())
-            .collect();
-        generate_package_outputs(
-            &build_dir,
-            &project_root,
-            pkg,
-            &compile_ctx.hierarchy,
-            &PackageBuildOutputs {
-                module_names: &module_names,
-                native_module_names: &native_module_names,
-                bt_dep_names: &bt_dep_names,
-                hex_dep_names: &hex_dep_names,
-                source_files: &source_files,
-            },
-        )?;
-    }
+    // BT-1682: For stale artifact cleanup, we need ALL expected .beam files
+    // (both newly compiled and unchanged), not just the ones from this build.
+    let all_expected_beams: Vec<Utf8PathBuf> = passes
+        .file_module_pairs
+        .iter()
+        .map(|(_, module_name, _)| env.build_dir.join(format!("{module_name}.beam")))
+        .collect();
+    clean_stale_artifacts(&env.build_dir, &all_expected_beams, &pkg.name)?;
+    let native_module_names: Vec<String> = passes
+        .native_result
+        .as_ref()
+        .map(|r| r.module_names.clone())
+        .unwrap_or_default();
+    // ADR 0072 §7: Direct hex dep names for the {applications, [...]} list
+    let hex_dep_names: Vec<String> = env
+        .full_manifest
+        .as_ref()
+        .map(|m| m.native_dependencies.keys().cloned().collect())
+        .unwrap_or_default();
+    let bt_dep_names: Vec<String> = dep_ctx
+        .resolved_deps
+        .iter()
+        .filter(|d| d.is_direct)
+        .map(|d| d.name.clone())
+        .collect();
+    generate_package_outputs(
+        &env.build_dir,
+        &env.project_root,
+        pkg,
+        &passes.hierarchy,
+        &PackageBuildOutputs {
+            module_names: &passes.module_names,
+            native_module_names: &native_module_names,
+            bt_dep_names: &bt_dep_names,
+            hex_dep_names: &hex_dep_names,
+            source_files: &env.source_files,
+        },
+    )?;
 
     Ok(())
 }
