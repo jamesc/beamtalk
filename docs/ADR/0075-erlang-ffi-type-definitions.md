@@ -687,6 +687,18 @@ Build the full Erlang spec reader, Rust integration, and typed LSP completions �
 
 **Components:** `beamtalk_spec_reader.erl` (new), `crates/beamtalk-core/src/semantic_analysis/type_checker/native_types.rs` (new), `beam_compiler.rs` (extended), `inference.rs` (extended), `completion_provider.rs` (extended)
 
+### Gate: Evaluate Auto-Extract Quality
+
+**Before proceeding to Phase 2**, evaluate whether auto-extract alone is sufficient:
+
+1. Run auto-extract against the full OTP installation and the stdlib's Hex dependencies (cowboy, gun, etc.)
+2. Review the generated types for the 20 most-used modules — how many functions have useful types vs `Dynamic`?
+3. Review keyword name quality from source — are the auto-derived names readable?
+4. Collect real-world feedback: use the typed LSP in daily development for a sprint
+5. Identify which specific functions (if any) need `Dynamic` tightened via stubs
+
+**Decision point:** If auto-extract quality is high enough (>90% of commonly-called functions have useful types and keyword names), Phase 2 (stubs) can be deferred indefinitely. Proceed to Phase 3 (CLI cleanup) and Phase 4 (REPL devex) regardless — they don't depend on stubs.
+
 ### Phase 2: `declare native:` Parse Form and Stub Files
 
 1. **`declare native:` top-level form** — add to the existing parser as a new top-level declaration (alongside class and protocol definitions). Parses `declare native: <ident>` header, then reuses the existing protocol method signature parser for the body. No separate `stub_parser.rs` needed
