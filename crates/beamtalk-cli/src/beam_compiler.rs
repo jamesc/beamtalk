@@ -1034,6 +1034,10 @@ pub(crate) fn compile_source_with_bindings(
 struct TypeCacheEntry {
     /// Unix timestamp (seconds since epoch) of the `.beam` file when specs were extracted.
     beam_mtime_secs: u64,
+    /// Sub-second nanoseconds of the `.beam` file's modification time.
+    /// Combined with `beam_mtime_secs` to avoid cache collisions on rapid rewrites.
+    #[serde(default)]
+    beam_mtime_nanos: u32,
     /// The raw `beamtalk-specs-module:...` protocol line (without newline).
     /// Empty string if the module had no specs or an error occurred.
     specs_line: String,
@@ -1067,11 +1071,11 @@ impl TypeCache {
     ///
     /// Returns `Some(specs_line)` if the cache is fresh (`.beam` mtime matches),
     /// or `None` if the cache is stale or missing.
-    fn lookup(&self, module_name: &str, beam_mtime_secs: u64) -> Option<String> {
+    fn lookup(&self, module_name: &str, beam_mtime_secs: u64, beam_mtime_nanos: u32) -> Option<String> {
         let path = self.cache_path(module_name);
         let content = std::fs::read_to_string(path.as_std_path()).ok()?;
         let entry: TypeCacheEntry = serde_json::from_str(&content).ok()?;
-        if entry.beam_mtime_secs == beam_mtime_secs {
+        if entry.beam_mtime_secs == beam_mtime_secs && entry.beam_mtime_nanos == beam_mtime_nanos {
             Some(entry.specs_line)
         } else {
             None
@@ -1079,13 +1083,14 @@ impl TypeCache {
     }
 
     /// Writes a cache entry for the given module.
-    fn store(&self, module_name: &str, beam_mtime_secs: u64, specs_line: &str) {
+    fn store(&self, module_name: &str, beam_mtime_secs: u64, beam_mtime_nanos: u32, specs_line: &str) {
         if let Err(e) = std::fs::create_dir_all(self.cache_dir.as_std_path()) {
             debug!("Failed to create type cache dir: {e}");
             return;
         }
         let entry = TypeCacheEntry {
             beam_mtime_secs,
+            beam_mtime_nanos,
             specs_line: specs_line.to_string(),
         };
         let path = self.cache_path(module_name);
@@ -1143,9 +1148,9 @@ pub fn extract_beam_specs(
 
     for beam_file in beam_files {
         let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
-        let mtime_secs = beam_mtime_secs(beam_file);
+        let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
 
-        if let Some(specs_line) = cache.lookup(module_name, mtime_secs) {
+        if let Some(specs_line) = cache.lookup(module_name, mtime_secs, mtime_nanos) {
             if !specs_line.is_empty() {
                 parse_specs_line(&specs_line, &mut registry);
             }
@@ -1176,18 +1181,32 @@ pub fn extract_beam_specs(
     let new_lines = extract_specs_via_build_worker(&cache_misses)?;
 
     // Phase 3: Parse results and update cache.
+    // Build a set of modules that produced output to identify negative-cache candidates.
+    let mut seen_modules: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (module_name, specs_line) in &new_lines {
+        seen_modules.insert(module_name.clone());
         // Find the mtime for caching.
         let beam_file = cache_misses.iter().find(|f| {
             f.file_stem()
                 .is_some_and(|stem| stem == module_name.as_str())
         });
-        let mtime_secs = beam_file.map_or(0, |f| beam_mtime_secs(f));
+        let (mtime_secs, mtime_nanos) = beam_file.map_or((0, 0), |f| beam_mtime(f));
 
         if !specs_line.is_empty() {
             parse_specs_line(specs_line, &mut registry);
         }
-        cache.store(module_name, mtime_secs, specs_line);
+        cache.store(module_name, mtime_secs, mtime_nanos, specs_line);
+    }
+
+    // Negative cache: modules that were sent for extraction but produced no output
+    // (e.g., no debug_info, no specs). Cache them with empty specs_line to avoid
+    // re-extracting on every build.
+    for beam_file in &cache_misses {
+        let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
+        if !seen_modules.contains(module_name) {
+            let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
+            cache.store(module_name, mtime_secs, mtime_nanos, "");
+        }
     }
 
     info!(
@@ -1201,13 +1220,14 @@ pub fn extract_beam_specs(
     Ok(registry)
 }
 
-/// Returns the modification time of a `.beam` file as seconds since Unix epoch.
-fn beam_mtime_secs(path: &Utf8Path) -> u64 {
+/// Returns the modification time of a `.beam` file as `(seconds, nanoseconds)`
+/// since Unix epoch. Sub-second precision avoids cache collisions on rapid rewrites.
+fn beam_mtime(path: &Utf8Path) -> (u64, u32) {
     std::fs::metadata(path.as_std_path())
         .ok()
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs())
+        .map_or((0, 0), |d| (d.as_secs(), d.subsec_nanos()))
 }
 
 /// Extracts specs from `.beam` files by spawning a `beamtalk_build_worker` BEAM
@@ -1371,9 +1391,13 @@ fn read_specs_protocol(
 ///
 /// Returns an error if `erl` cannot be invoked to discover the OTP lib directory.
 pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
-    // Use `erl -noshell -eval '...'` to find the OTP lib directory.
+    // Use `erl -noshell -noinput -eval '...'` to find the OTP lib directory.
+    // We clear the environment to avoid user-specific Erlang config affecting the probe.
     let output = Command::new("erl")
         .arg("-noshell")
+        .arg("-noinput")
+        .arg("-boot")
+        .arg("no_dot_erlang")
         .arg("-eval")
         .arg("io:format(\"~s\", [code:lib_dir()]), halt().")
         .output()
@@ -1381,11 +1405,14 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
         .wrap_err("Failed to run erl to discover OTP lib directory")?;
 
     if !output.status.success() {
+        let stderr_msg = String::from_utf8_lossy(&output.stderr);
+        warn!("erl probe failed (exit {}): {}", output.status, stderr_msg.trim());
         return Ok(Vec::new());
     }
 
     let lib_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if lib_dir.is_empty() {
+        warn!("erl probe returned empty lib_dir");
         return Ok(Vec::new());
     }
 
@@ -1943,8 +1970,9 @@ end
     }
 
     #[test]
-    fn beam_mtime_secs_nonexistent() {
-        let mtime = beam_mtime_secs(Utf8Path::new("/nonexistent/foo.beam"));
-        assert_eq!(mtime, 0, "Nonexistent file should return 0");
+    fn beam_mtime_nonexistent() {
+        let (secs, nanos) = beam_mtime(Utf8Path::new("/nonexistent/foo.beam"));
+        assert_eq!(secs, 0, "Nonexistent file should return 0 seconds");
+        assert_eq!(nanos, 0, "Nonexistent file should return 0 nanos");
     }
 }
