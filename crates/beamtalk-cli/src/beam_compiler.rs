@@ -374,7 +374,6 @@ impl BeamCompiler {
     ///   INPUT:  Erlang term: `{OutputDir, [CoreFile1, CoreFile2, ...]}`
     ///   OUTPUT: `beamtalk-compile-module:<name>` per module, then
     ///           `beamtalk-compile-result-ok` or `beamtalk-compile-result-error`
-    #[allow(clippy::too_many_lines)] // protocol state machine with stdio/stderr handling
     fn drive_compilation_protocol(
         &self,
         child: &mut std::process::Child,
@@ -393,43 +392,8 @@ impl BeamCompiler {
             .take()
             .ok_or_else(|| miette::miette!("Failed to capture compiler stderr"))?;
 
-        // Prepare input: {OutputDir, [CoreFile1, CoreFile2, ...]}
-        // Use absolute paths since escript runs from temp_dir
-        let abs_output_dir = std::fs::canonicalize(&self.output_dir)
-            .into_diagnostic()
-            .wrap_err_with(|| {
-                format!(
-                    "Failed to canonicalize output directory '{}'",
-                    self.output_dir
-                )
-            })?;
-        let abs_output_dir_str = abs_output_dir.to_string_lossy();
-
-        let core_files_str: Vec<String> = core_files
-            .iter()
-            .map(|p| {
-                // Canonicalize each core file path to absolute
-                // Since we require output_dir to exist (it gets canonicalized above),
-                // core files should also exist and be canonicalizable
-                match std::fs::canonicalize(p.as_std_path()) {
-                    Ok(abs_path) => {
-                        format!("\"{}\"", escape_erlang_string(&abs_path.to_string_lossy()))
-                    }
-                    Err(e) => {
-                        // Log warning but continue - file may still be found if cwd is correct
-                        warn!("Failed to canonicalize '{}': {}. Using path as-is.", p, e);
-                        format!("\"{}\"", escape_erlang_string(p.as_str()))
-                    }
-                }
-            })
-            .collect();
-        let input = format!(
-            "{{\"{}\",[{}]}}.\n",
-            escape_erlang_string(&abs_output_dir_str),
-            core_files_str.join(",")
-        );
-
-        // Send input to compiler
+        // Send formatted input to compiler and close stdin
+        let input = format_compilation_input(&self.output_dir, core_files)?;
         stdin
             .write_all(input.as_bytes())
             .into_diagnostic()
@@ -450,34 +414,8 @@ impl BeamCompiler {
         });
 
         // Read stdout for compilation results
-        let reader = BufReader::new(stdout);
-        let mut compiled_modules = Vec::new();
-        let mut compilation_ok = false;
-
-        for line in reader.lines() {
-            let line = line.into_diagnostic()?;
-            if line.starts_with("beamtalk-compile-module:") {
-                let module_name = line
-                    .strip_prefix("beamtalk-compile-module:")
-                    .ok_or_else(|| miette::miette!("Invalid compile output format"))?;
-
-                if module_name.is_empty() {
-                    miette::bail!("Compilation produced module with empty name");
-                }
-
-                // Validate module name to prevent path traversal
-                if !is_valid_module_name(module_name) {
-                    miette::bail!("Compilation produced module with invalid name: {module_name}");
-                }
-
-                let beam_file = self.output_dir.join(format!("{module_name}.beam"));
-                compiled_modules.push(beam_file);
-            } else if line == "beamtalk-compile-result-ok" {
-                compilation_ok = true;
-            } else if line == "beamtalk-compile-result-error" {
-                compilation_ok = false;
-            }
-        }
+        let (compiled_modules, compilation_ok) =
+            self.read_compilation_output(BufReader::new(stdout))?;
 
         // Wait for stderr thread to complete and collect error messages
         let error_messages = stderr_rx.recv().unwrap_or_else(|_| Vec::new());
@@ -506,6 +444,82 @@ impl BeamCompiler {
         );
         Ok(compiled_modules)
     }
+
+    /// Read and parse compilation output from the compiler's stdout.
+    ///
+    /// Parses `beamtalk-compile-module:<name>` lines to collect compiled module
+    /// paths and the final `beamtalk-compile-result-ok` / `beamtalk-compile-result-error`
+    /// status line.
+    fn read_compilation_output(
+        &self,
+        reader: BufReader<std::process::ChildStdout>,
+    ) -> Result<(Vec<Utf8PathBuf>, bool)> {
+        let mut compiled_modules = Vec::new();
+        let mut compilation_ok = false;
+
+        for line in reader.lines() {
+            let line = line.into_diagnostic()?;
+            if line.starts_with("beamtalk-compile-module:") {
+                let module_name = line
+                    .strip_prefix("beamtalk-compile-module:")
+                    .ok_or_else(|| miette::miette!("Invalid compile output format"))?;
+
+                if module_name.is_empty() {
+                    miette::bail!("Compilation produced module with empty name");
+                }
+
+                // Validate module name to prevent path traversal
+                if !is_valid_module_name(module_name) {
+                    miette::bail!("Compilation produced module with invalid name: {module_name}");
+                }
+
+                let beam_file = self.output_dir.join(format!("{module_name}.beam"));
+                compiled_modules.push(beam_file);
+            } else if line == "beamtalk-compile-result-ok" {
+                compilation_ok = true;
+            } else if line == "beamtalk-compile-result-error" {
+                compilation_ok = false;
+            }
+        }
+
+        Ok((compiled_modules, compilation_ok))
+    }
+}
+
+/// Format the Erlang term input for the compilation protocol.
+///
+/// Produces `{OutputDir, [CoreFile1, CoreFile2, ...]}.\n` with absolute,
+/// Erlang-escaped paths. Uses absolute paths since escript runs from `temp_dir`.
+fn format_compilation_input(
+    output_dir: &Utf8PathBuf,
+    core_files: &[Utf8PathBuf],
+) -> Result<String> {
+    let abs_output_dir = std::fs::canonicalize(output_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to canonicalize output directory '{output_dir}'"))?;
+    let abs_output_dir_str = abs_output_dir.to_string_lossy();
+
+    let core_files_str: Vec<String> = core_files
+        .iter()
+        .map(|p| {
+            match std::fs::canonicalize(p.as_std_path()) {
+                Ok(abs_path) => {
+                    format!("\"{}\"", escape_erlang_string(&abs_path.to_string_lossy()))
+                }
+                Err(e) => {
+                    // Log warning but continue - file may still be found if cwd is correct
+                    warn!("Failed to canonicalize '{}': {}. Using path as-is.", p, e);
+                    format!("\"{}\"", escape_erlang_string(p.as_str()))
+                }
+            }
+        })
+        .collect();
+
+    Ok(format!(
+        "{{\"{}\",[{}]}}.\n",
+        escape_erlang_string(&abs_output_dir_str),
+        core_files_str.join(",")
+    ))
 }
 
 /// Discover native Erlang module names from a package's `native/` directory
