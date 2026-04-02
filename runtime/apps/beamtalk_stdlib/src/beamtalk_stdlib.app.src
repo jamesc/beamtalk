@@ -38,7 +38,7 @@
             #{name => 'Integer', module => 'bt@stdlib@integer', parent => 'Number', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Interval', module => 'bt@stdlib@interval', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Json', module => 'bt@stdlib@json', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
-            #{name => 'List', module => 'bt@stdlib@list', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'List', module => 'bt@stdlib@list', parent => 'Collection', package => 'stdlib', kind => object, type_params => ['E']},
             #{name => 'Logger', module => 'bt@stdlib@logger', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Metaclass', module => 'bt@stdlib@metaclass', parent => 'Class', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Number', module => 'bt@stdlib@number', parent => 'Value', package => 'stdlib', kind => value, type_params => []},

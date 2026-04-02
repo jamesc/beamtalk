@@ -816,6 +816,13 @@ impl TypeChecker {
                         return Self::substitute_return_type(ret_ty, &subst, &method_subst);
                     }
 
+                    // BT-1834: If the return type is an unresolved type param
+                    // (single uppercase letter like E, T, V), fall back to Dynamic
+                    // so downstream sends don't get false DNU warnings.
+                    if super::is_generic_type_param(ret_ty) {
+                        return InferredType::Dynamic;
+                    }
+
                     // BT-1576: If the return type is a generic like "Array(R)",
                     // extract the base class name so completion/chain resolution works.
                     if let Some(open) = ret_ty.find('(') {
@@ -823,6 +830,19 @@ impl TypeChecker {
                     }
                     return InferredType::known(ret_ty.clone());
                 }
+            }
+
+            // BT-1834: Block value/value:/value:value: — return the last type arg.
+            // Block is variadic: Block(R), Block(A, R), Block(A, B, R), etc.
+            // The convention is that the last type arg is always the return type.
+            if class_name == "Block"
+                && !type_args.is_empty()
+                && matches!(
+                    selector_name.as_str(),
+                    "value" | "value:" | "value:value:" | "value:value:value:"
+                )
+            {
+                return type_args.last().unwrap().clone();
             }
 
             // BT-1047: Fall back to return types inferred earlier in this same pass.
@@ -1576,6 +1596,11 @@ impl TypeChecker {
             };
         }
 
+        // BT-1834: Unresolved bare type param (single uppercase letter) → Dynamic
+        if super::is_generic_type_param(&ret_eco) {
+            return InferredType::Dynamic;
+        }
+
         // Not a type param — return as-is
         InferredType::known(ret_eco)
     }
@@ -1637,6 +1662,17 @@ impl TypeChecker {
             let Some(arg_ty) = arg_types.get(i) else {
                 continue;
             };
+
+            // BT-1834: Handle plain (non-parametric) type param parameters.
+            // e.g., `inject: initial :: A` — if A is method-local, map it to the arg type.
+            if super::is_generic_type_param(param_type) {
+                let param_eco: EcoString = param_type.clone();
+                if !class_type_params.contains(&param_eco) && !hierarchy.has_class(&param_eco) {
+                    if let InferredType::Known { .. } = arg_ty {
+                        method_subst.insert(param_eco, arg_ty.clone());
+                    }
+                }
+            }
 
             // Handle any parametric type: TypeName(A, B, ...) parameter types
             if let Some(open) = param_type.find('(') {
@@ -2308,6 +2344,7 @@ mod tests {
     #[test]
     fn substitute_generic_base_extracted() {
         // When return type is "Array(R)" and R is not in subst, base "Array" is still extracted
+        // BT-1834: Unresolved type param R falls back to Dynamic instead of Known("R")
         let result =
             TypeChecker::substitute_return_type("Array(R)", &HashMap::new(), &HashMap::new());
         match result {
@@ -2318,8 +2355,8 @@ mod tests {
             } => {
                 assert_eq!(class_name.as_str(), "Array");
                 assert_eq!(type_args.len(), 1);
-                // R not in subst, so it becomes Known("R")
-                assert_eq!(type_args[0], InferredType::known("R"));
+                // R not in subst → Dynamic (BT-1834)
+                assert_eq!(type_args[0], InferredType::Dynamic);
             }
             other => panic!("Expected Known, got {other:?}"),
         }

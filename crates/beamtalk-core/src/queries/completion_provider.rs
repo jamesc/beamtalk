@@ -2055,12 +2055,12 @@ mod tests {
     #[test]
     fn resolve_expression_type_keyword_send_inject_returns_type_param() {
         // #[1, 2, 3] inject: 0 into: [...] — inject:into: returns type param A
-        // BT-1576: With generic annotations, inject:into: has return type "A"
-        // (a type param). Without substitution context, this resolves to "A".
+        // BT-1834: A is now resolved from the initial value argument (0 :: Integer)
+        // via plain param type inference, so the return type is Integer.
         let hierarchy = ClassHierarchy::with_builtins();
         let result =
             resolve_expression_type("#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]", &hierarchy);
-        assert_eq!(result.as_deref(), Some("A"));
+        assert_eq!(result.as_deref(), Some("Integer"));
     }
 
     #[test]

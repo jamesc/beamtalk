@@ -50,7 +50,7 @@ abstract Object subclass: Behaviour
   /// Counter superclass      // => Actor (as class object)
   /// ProtoObject superclass  // => nil
   /// ```
-  sealed superclass => @primitive "classSuperclass"
+  sealed superclass -> Behaviour | Nil => @primitive "classSuperclass"
 
   /// Return all superclasses in order from immediate parent to root.
   ///
@@ -155,7 +155,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter whichClassIncludesSelector: #class  // => ProtoObject
   /// ```
-  sealed whichClassIncludesSelector: selector :: Symbol =>
+  sealed whichClassIncludesSelector: selector :: Symbol -> Behaviour | Nil =>
     (self includesSelector: selector) ifTrue: [^self]
     self allSuperclasses detect: [:c |
       c includesSelector: selector
