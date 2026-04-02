@@ -345,7 +345,6 @@ fn compile_dependency(
 /// The `prior_deps` parameter provides class module indexes from dependencies
 /// that have already been compiled (in topological order), allowing this
 /// dependency's source to reference classes from its own dependencies.
-#[allow(clippy::too_many_lines)] // Step-by-step compilation pipeline — splitting would obscure the flow
 fn compile_dependency_with_context(
     project_root: &Utf8Path,
     dep_root: &Utf8Path,
@@ -411,10 +410,7 @@ fn compile_dependency_with_context(
         }
     }
 
-    // Compile each source file
-    let mut core_files = Vec::new();
-    let mut module_names = Vec::new();
-    let mut cached_asts = cached_asts;
+    // Compile .bt sources to .core files
     let compile_ctx = crate::beam_compiler::CompileContext {
         hierarchy: crate::beam_compiler::ClassHierarchyContext {
             class_module_index: class_module_index.clone(),
@@ -425,7 +421,54 @@ fn compile_dependency_with_context(
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
     };
 
-    for file in &source_files {
+    let (core_files, module_names) = compile_sources_to_core(
+        &source_files,
+        source_root.as_deref(),
+        dep_name,
+        &ebin_path,
+        options,
+        &compile_ctx,
+        cached_asts,
+    )?;
+
+    // Batch compile Core Erlang to BEAM
+    let compiler = crate::beam_compiler::BeamCompiler::new(ebin_path.clone());
+    compiler
+        .compile_batch(&core_files)
+        .wrap_err_with(|| format!("Failed to compile dependency '{dep_name}' to BEAM bytecode"))?;
+
+    // Generate .app file and corpus
+    generate_dependency_app_file(
+        dep_root,
+        dep_name,
+        &ebin_path,
+        &module_names,
+        &all_class_infos,
+        &own_class_module_index,
+        &source_files,
+    )?;
+
+    info!(dep = %dep_name, "Dependency compiled successfully");
+
+    Ok((ebin_path, own_class_module_index))
+}
+
+/// Compile each source file in a dependency to Core Erlang.
+///
+/// Returns the list of `.core` file paths and corresponding BEAM module names.
+fn compile_sources_to_core(
+    source_files: &[Utf8PathBuf],
+    source_root: Option<&Utf8Path>,
+    dep_name: &str,
+    ebin_path: &Utf8PathBuf,
+    options: &beamtalk_core::CompilerOptions,
+    compile_ctx: &crate::beam_compiler::CompileContext,
+    mut cached_asts: HashMap<Utf8PathBuf, crate::commands::build::CachedAst>,
+) -> Result<(Vec<Utf8PathBuf>, Vec<String>)> {
+    let mut core_files = Vec::new();
+    let mut module_names = Vec::new();
+
+    for file in source_files {
         let stem = file
             .file_stem()
             .ok_or_else(|| miette::miette!("File '{}' has no name", file))?;
@@ -439,8 +482,7 @@ fn compile_dependency_with_context(
             );
         }
 
-        let relative_module =
-            crate::commands::build::compute_relative_module(file, source_root.as_deref())?;
+        let relative_module = crate::commands::build::compute_relative_module(file, source_root)?;
         let module_name = format!("bt@{dep_name}@{relative_module}");
         let core_file = ebin_path.join(format!("{module_name}.core"));
 
@@ -451,7 +493,7 @@ fn compile_dependency_with_context(
             &core_file,
             options,
             &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
-            &compile_ctx,
+            compile_ctx,
             cached,
         )?;
 
@@ -459,17 +501,23 @@ fn compile_dependency_with_context(
         module_names.push(module_name);
     }
 
-    // Batch compile Core Erlang to BEAM
-    let compiler = crate::beam_compiler::BeamCompiler::new(ebin_path.clone());
-    compiler
-        .compile_batch(&core_files)
-        .wrap_err_with(|| format!("Failed to compile dependency '{dep_name}' to BEAM bytecode"))?;
+    Ok((core_files, module_names))
+}
 
-    // Generate .app file for the dependency
+/// Generate the `.app` file and MCP corpus for a compiled dependency.
+fn generate_dependency_app_file(
+    dep_root: &Utf8Path,
+    dep_name: &str,
+    ebin_path: &Utf8PathBuf,
+    module_names: &[String],
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    own_class_module_index: &HashMap<String, String>,
+    source_files: &[Utf8PathBuf],
+) -> Result<()> {
     let dep_manifest = manifest::parse_manifest(&dep_root.join("beamtalk.toml"))?;
     let class_metadata = crate::commands::build::build_class_metadata(
-        &all_class_infos,
-        &own_class_module_index,
+        all_class_infos,
+        own_class_module_index,
         dep_name,
     );
     // Read full manifest to get dependency names for {applications} list
@@ -485,9 +533,9 @@ fn compile_dependency_with_context(
         .map(|m| m.dependencies.keys().cloned().collect())
         .unwrap_or_default();
     crate::commands::app_file::generate_app_file(
-        &ebin_path,
+        ebin_path,
         &dep_manifest,
-        &module_names,
+        module_names,
         &class_metadata,
         None,
         // TODO(ADR 0072): Wire up native module discovery for path dependencies
@@ -498,17 +546,15 @@ fn compile_dependency_with_context(
 
     // BT-1722: Generate per-package corpus files for MCP discovery.
     // Place corpus alongside the dep's ebin dir (in _build/deps/{name}/).
-    let corpus_dir = ebin_path.parent().unwrap_or(&ebin_path);
+    let corpus_dir = ebin_path.parent().unwrap_or(ebin_path);
     crate::commands::build::generate_package_corpus(
         corpus_dir,
         dep_name,
-        &all_class_infos,
-        &source_files,
+        all_class_infos,
+        source_files,
     )?;
 
-    info!(dep = %dep_name, "Dependency compiled successfully");
-
-    Ok((ebin_path, own_class_module_index))
+    Ok(())
 }
 
 /// Build a class module index for a dependency without compiling.

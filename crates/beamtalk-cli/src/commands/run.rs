@@ -105,20 +105,12 @@ fn ensure_runtime_built(
     Ok(())
 }
 
-/// Run a package script: start a run-mode workspace and call `ClassName>>selector`.
+/// Validate class name and selector for script mode.
 ///
-/// Starts a fresh run-mode workspace (no REPL server, not registered in
-/// `~/.beamtalk/workspaces/`), bootstraps all project classes, dispatches the
-/// class message, and exits when it returns.
-#[allow(clippy::too_many_lines)] // code path setup for native + deps makes this slightly over limit
-fn run_script(
-    project_root: &Utf8PathBuf,
-    _pkg: &manifest::PackageManifest,
-    class_name: &str,
-    selector: &str,
-) -> Result<()> {
-    // Validate class name: Beamtalk class names are UpperCamelCase identifiers.
-    // Full validation is required because the name is injected into an Erlang -eval string.
+/// Beamtalk class names must be `UpperCamelCase` identifiers. Selectors must be
+/// unary (keyword selectors with `:` are not supported in the CLI form).
+/// Both are injected into Erlang `-eval` strings, so full validation is required.
+fn validate_class_and_selector(class_name: &str, selector: &str) -> Result<()> {
     if class_name.is_empty()
         || !class_name.chars().next().is_some_and(char::is_uppercase)
         || class_name.chars().any(|c| !c.is_alphanumeric() && c != '_')
@@ -129,9 +121,6 @@ fn run_script(
         );
     }
 
-    // Validate selector: unary selectors are simple identifiers (keyword selectors
-    // with ':' are not supported in the CLI form — wrap them in a unary entry point).
-    // Full validation required: selector is injected into an Erlang -eval string.
     // Erlang unquoted atoms must start with a lowercase letter; an uppercase first
     // character would be parsed as a variable reference, causing a confusing error.
     if selector.is_empty()
@@ -149,9 +138,19 @@ fn run_script(
         );
     }
 
-    info!(class = %class_name, selector = %selector, "Running script");
+    Ok(())
+}
 
-    // Build the project
+/// Prepare the BEAM environment and eval arguments for script mode.
+///
+/// Builds the project, discovers the runtime layout, constructs the BEAM
+/// code-path arguments and the `-eval` command string for the run-mode
+/// workspace startup.
+fn prepare_eval_environment(
+    project_root: &Utf8PathBuf,
+    class_name: &str,
+    selector: &str,
+) -> Result<Vec<OsString>> {
     println!("Building...");
     super::build::build(
         project_root.as_str(),
@@ -169,13 +168,6 @@ fn run_script(
     // and OTP app names. All commands use BeamEnvironment instead of ad-hoc assembly.
     let beam_env = BeamEnvironment::from_layout(&layout, project_root)?;
 
-    println!("\nRunning {class_name}>>{selector}...");
-
-    // Build run-mode eval command:
-    // 1. Start beamtalk_workspace application
-    // 2. Start workspace supervisor in run mode (repl=false, no TCP server, not registered)
-    // 3. Look up class in registry and dispatch the message
-    // 4. Halt when done
     let project_path_escaped =
         crate::beam_compiler::escape_erlang_string(&project_root.canonicalize().map_or_else(
             |_| project_root.to_string(),
@@ -201,6 +193,28 @@ fn run_script(
 
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
+
+    Ok(args)
+}
+
+/// Run a package script: start a run-mode workspace and call `ClassName>>selector`.
+///
+/// Starts a fresh run-mode workspace (no REPL server, not registered in
+/// `~/.beamtalk/workspaces/`), bootstraps all project classes, dispatches the
+/// class message, and exits when it returns.
+fn run_script(
+    project_root: &Utf8PathBuf,
+    _pkg: &manifest::PackageManifest,
+    class_name: &str,
+    selector: &str,
+) -> Result<()> {
+    validate_class_and_selector(class_name, selector)?;
+
+    info!(class = %class_name, selector = %selector, "Running script");
+
+    let args = prepare_eval_environment(project_root, class_name, selector)?;
+
+    println!("\nRunning {class_name}>>{selector}...");
 
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell")

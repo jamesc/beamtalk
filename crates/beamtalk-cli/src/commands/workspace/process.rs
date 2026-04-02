@@ -95,26 +95,15 @@ const WS_HEALTH_MAX_DELAY_MS: u64 = 2000;
 /// loop uses its own fixed liveness-check interval.
 const LIVENESS_CHECK_INTERVAL: usize = 25;
 
-/// Start a detached BEAM node for a workspace.
-/// Returns the `NodeInfo` for the started node.
+/// Prepare workspace paths and the eval command string for a detached node.
 ///
-/// If `config.otp_app_name` is `Some(name)`, `application:ensure_all_started(name)` is
-/// inserted into the eval sequence after the workspace supervisor starts but before
-/// the REPL port is queried. This guarantees all project classes are registered
-/// before the OTP supervisor tree is brought up (BT-1319).
-#[allow(clippy::too_many_lines)] // eval command construction is necessarily verbose
-pub fn start_detached_node(
+/// Resolves the project path, cleans up stale runtime files, writes the
+/// startup tombstone, and formats all Erlang-specific strings (bind address,
+/// web port, hex deps, OTP app start). Returns the eval command and project path.
+fn prepare_workspace_paths(
     workspace_id: &str,
-    beam_paths: &BeamPaths,
-    extra_code_paths: &[PathBuf],
     config: &super::WorkspaceConfig<'_>,
-) -> Result<NodeInfo> {
-    // Generate node name
-    let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
-
-    // Read cookie
-    let cookie = read_workspace_cookie(workspace_id)?;
-
+) -> Result<(String, PathBuf)> {
     // Determine idle timeout (explicit arg > environment variable > default)
     let idle_timeout = config.max_idle_seconds.unwrap_or_else(|| {
         std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
@@ -153,8 +142,6 @@ pub fn start_detached_node(
     })?;
 
     // Compute the PID file path so the BEAM node can write its own PID for reliable discovery.
-    // This avoids flaky process-list scanning via sysinfo (which can miss newly-forked processes
-    // on loaded CI runners). The workspace dir is guaranteed to exist before we start the node.
     let pid_file_path = workspace_dir(workspace_id)?.join("pid");
     let pid_file_path_str = pid_file_path
         .to_str()
@@ -196,22 +183,21 @@ pub fn start_detached_node(
         &otp_app_start,
     );
 
-    // Write cookie to args file (BT-726: not visible in `ps aux`)
-    let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
+    Ok((eval_cmd, project_path))
+}
 
-    // Redirect BEAM node stderr to a log file for crash diagnostics.
-    // On startup failure the log will contain OTP crash reports or error_logger output.
+/// Configure startup logging for a detached BEAM node.
+///
+/// Redirects the command's stderr to a workspace log file for crash diagnostics.
+/// If the log file cannot be opened, falls back to `/dev/null` (the default).
+/// Also configures the OTP kernel logger to write to stderr (BT-1431).
+///
+/// Returns the log file path and whether logging was successfully enabled.
+fn configure_startup_logging(
+    cmd: &mut std::process::Command,
+    workspace_id: &str,
+) -> Result<(PathBuf, bool)> {
     let startup_log_path = workspace_dir(workspace_id)?.join("startup.log");
-
-    // Start detached BEAM node
-    let mut cmd = build_detached_node_command(
-        &node_name,
-        &cookie_args_file,
-        beam_paths,
-        extra_code_paths,
-        &eval_cmd,
-        &project_path,
-    );
 
     // Override the default /dev/null stderr with a workspace log file.
     // Errors opening the log file are non-fatal — we fall back to /dev/null.
@@ -244,6 +230,43 @@ pub fn start_detached_node(
     cmd.arg("-kernel")
         .arg("logger")
         .arg(beamtalk_cli::repl_startup::KERNEL_LOGGER_STDERR);
+
+    Ok((startup_log_path, startup_log_enabled))
+}
+
+/// Start a detached BEAM node for a workspace.
+/// Returns the `NodeInfo` for the started node.
+///
+/// If `config.otp_app_name` is `Some(name)`, `application:ensure_all_started(name)` is
+/// inserted into the eval sequence after the workspace supervisor starts but before
+/// the REPL port is queried. This guarantees all project classes are registered
+/// before the OTP supervisor tree is brought up (BT-1319).
+pub fn start_detached_node(
+    workspace_id: &str,
+    beam_paths: &BeamPaths,
+    extra_code_paths: &[PathBuf],
+    config: &super::WorkspaceConfig<'_>,
+) -> Result<NodeInfo> {
+    let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
+    let cookie = read_workspace_cookie(workspace_id)?;
+
+    let (eval_cmd, project_path) = prepare_workspace_paths(workspace_id, config)?;
+
+    // Write cookie to args file (BT-726: not visible in `ps aux`)
+    let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
+
+    // Start detached BEAM node
+    let mut cmd = build_detached_node_command(
+        &node_name,
+        &cookie_args_file,
+        beam_paths,
+        extra_code_paths,
+        &eval_cmd,
+        &project_path,
+    );
+
+    let (startup_log_path, startup_log_enabled) =
+        configure_startup_logging(&mut cmd, workspace_id)?;
 
     let child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
