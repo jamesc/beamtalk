@@ -49,7 +49,7 @@ This is the **single largest gap** in typed coverage. A codebase that is fully t
    | `nil` | `Nil` |
    | `term()` / `any()` | `Dynamic` |
 
-2. **`beam_lib:chunks/2`** is already used in `beamtalk_module_activation.erl` to read BEAM file attributes. The same mechanism reads `-spec` attributes.
+2. **`beam_lib:chunks/2`** is already used in `beamtalk_module_activation.erl` to read BEAM file attributes. The same API reads `-spec` attributes from the `abstract_code` chunk (available when modules are compiled with `+debug_info`, which is the default for OTP, rebar3, and Beamtalk's own `compile.escript`).
 
 3. **EEP-48 doc chunks** are already post-processed from `.beam` files (ADR 0008) — the build pipeline already does BEAM chunk extraction.
 
@@ -80,10 +80,29 @@ At build time, the compiler reads `-spec` attributes from compiled `.beam` files
 
 **How it works:**
 
-1. An Erlang helper module (`beamtalk_spec_reader.erl`) reads specs via `beam_lib:chunks(File, [attributes])` and emits them as a structured Erlang term
+1. An Erlang helper module (`beamtalk_spec_reader.erl`) reads specs from the `abstract_code` chunk via `beam_lib:chunks(File, [abstract_code])` and extracts `{attribute, _, spec, ...}` forms. This chunk is present when `.beam` files are compiled with `+debug_info` (the default for OTP, rebar3, and Beamtalk's own compiler — see `+debug_info` section below)
 2. The Rust compiler invokes it via the existing `beamtalk_build_worker` pattern (same mechanism used for `.core` → `.beam` compilation)
 3. The Erlang→Beamtalk type mapping (reverse of `spec_codegen.rs`) converts Erlang abstract type representations to `InferredType` values
 4. Results are cached per module and invalidated when `.beam` file timestamps change
+
+**`+debug_info` dependency:**
+
+Spec extraction requires the `abstract_code` chunk, which is only present in `.beam` files compiled with `+debug_info`. This is widely available but not universal:
+
+| Source | `+debug_info` by default? | Notes |
+|--------|--------------------------|-------|
+| OTP modules | Yes | Shipped with debug info since OTP 14+ |
+| rebar3 deps | Yes | `{erl_opts, [debug_info]}` is rebar3's default |
+| Beamtalk native `.erl` | Yes | `compile.escript` includes `debug_info` |
+| Mix deps (dev) | Yes | Mix includes `debug_info` by default |
+| Mix release builds | **No** | `mix release` strips debug info since Elixir 1.9 |
+| Hex packages (precompiled) | Varies | Some strip for size optimization |
+
+**Policy:** When a `.beam` file lacks `abstract_code`, the spec reader returns no specs for that module — it silently falls through to `Dynamic` (layer 5 in the resolution chain). The build emits a one-time info-level diagnostic: `"Note: <module>.beam has no debug_info — auto-extracted types unavailable. Add a .d.bt stub for type coverage."` This is not a warning (it's expected for some packages) but gives users a path forward.
+
+**Important:** This limitation only affects auto-extraction. Curated `.d.bt` stubs work regardless of `+debug_info` — they are the recommended path for packages known to strip debug info.
+
+**Beamtalk-compiled `.beam` files:** Note that Beamtalk compiles via Core Erlang, and Core Erlang compilation does not preserve `-spec` attributes in the `abstract_code` chunk (documented in `validate_specs.escript`). However, this is not a problem: Beamtalk-compiled modules already have full type information in the Beamtalk type checker via `ClassHierarchy` — auto-extraction targets *foreign* (non-Beamtalk) `.beam` files.
 
 **Example — what auto-extraction provides:**
 
@@ -166,7 +185,7 @@ declare ErlangModule: lists
 - `declare ErlangModule: <atom>` — names the Erlang module being typed
 - Each line declares a function with Beamtalk-style keyword syntax and type annotations
 - First keyword = Erlang function name, subsequent keywords provide meaningful parameter names
-- Type parameters (e.g., `T`, `A`, `B`, `Acc`) work the same as in Beamtalk generics (ADR 0068)
+- Type parameters (e.g., `T`, `A`, `B`, `Acc`) are **method-scoped** — each function declaration introduces its own type variables, universally quantified per call. This differs from ADR 0068's class-level type params (e.g., `Result(T, E)`) which are positional and declared at the class site. Stub type params are more like Hindley-Milner `forall` — `reverse: list :: List(T) -> List(T)` means "for any type T, given a List(T), returns a List(T)." The type checker needs a per-call substitution pass for these, separate from the class-level generic substitution in ADR 0068
 - `///` doc comments flow to LSP hover — they supplement (not replace) Erlang docs
 - Functions not listed fall through to auto-extracted types
 - Multiple arity variants are separate declarations
@@ -221,6 +240,18 @@ When the type checker encounters a message send on `ErlangModule`:
 3. Look up `(module, function, arity)` in `ErlangTypeRegistry`
 4. If found: check argument types against `params`, return the declared `return_type`
 5. If not found: return `Dynamic` (same as today — no regression)
+
+**Module identity tracking:**
+
+The type checker must know *which* Erlang module a proxy represents to look up types. This works for two patterns:
+
+- **Static inline chains** (`Erlang lists reverse: xs`): The compiler can see the module name `lists` directly in the AST. The `@intrinsic erlangModuleLookup` produces an `ErlangModule` with a known module name. The type checker infers `ErlangModule<lists>` — a `Known` type with the module name carried as a type argument (analogous to `List(Integer)`).
+
+- **Variable-stored proxies** (`proxy := Erlang lists; proxy reverse: xs`): The type checker tracks the module identity through the assignment. `proxy` gets type `ErlangModule<lists>` from the right-hand side. Subsequent sends on `proxy` can look up the module name from the type.
+
+- **Dynamic module names** (`proxy := Erlang (someVariable); proxy reverse: xs`): When the module name is a runtime value, the type checker cannot determine which module to look up. These fall back to `Dynamic` — the same behavior as today. This is consistent with ADR 0025's principle: "if the compiler can't determine a single type, it falls back to Dynamic."
+
+This requires extending `ErlangModule`'s type representation from a simple `Known { class_name: "ErlangModule" }` to `Known { class_name: "ErlangModule", type_args: [Known("lists")] }` — using the existing generic type infrastructure from ADR 0068. The module name becomes a phantom type parameter.
 
 **Diagnostics from typed FFI calls:**
 
@@ -509,7 +540,7 @@ Read inferred types from Dialyzer's PLT files to supplement missing `-spec` anno
 ### Positive
 - **Immediate baseline typing** for all specced Erlang functions — zero manual work via auto-extract
 - **High-quality typing** for commonly-used OTP modules via curated stubs
-- **Meaningful keyword names** in stubs make FFI calls more readable (`seq: from to:` vs `seq: with:`)
+- **Meaningful keyword names** in stubs improve documentation and LSP display (`seq: from to:` vs `seq: with:`). Note: keyword names in stubs are a **documentation feature** — the type checker matches by arity, not keyword names, because keyword names are stripped at dispatch (ADR 0028). `Erlang lists seq: 1 to: 10` and `Erlang lists seq: 1 with: 10` both resolve to the same `seq/2` stub entry
 - **LSP integration** — typed completions, hover info, and signature help for Erlang modules
 - **Compile-time FFI warnings** — catch type mismatches before runtime
 - **Extensible** — packages can bundle stubs for their native Erlang code
@@ -523,6 +554,9 @@ Read inferred types from Dialyzer's PLT files to supplement missing `-spec` anno
 - **Stub maintenance** — curated OTP stubs must be updated when OTP adds/changes functions (mitigated by `stub-gen` tool and version drift detection)
 - **New file format** — `.d.bt` is a new parser target, adding compiler surface area
 - **Trust boundary** — stubs can declare incorrect types; the compiler trusts them. Incorrect stubs cause false diagnostics (mitigated by `stub-gen` producing correct starting points)
+- **`+debug_info` dependency** — auto-extraction only works for `.beam` files compiled with `+debug_info`. Release-stripped packages and some precompiled Hex deps fall through to `Dynamic` (mitigated by `.d.bt` stubs for important packages)
+- **Cold build cost** — first build must read `abstract_code` from all `.beam` files on the code path. For large dependency graphs (200+ modules), this may add several seconds. Results are cached in `_build/type_cache/` and invalidated by `.beam` timestamp changes — incremental builds have zero extraction overhead
+- **Hot code reload staleness** — `ErlangTypeRegistry` is populated at build time. If an Erlang module is hot-reloaded mid-session with changed specs, the registry is stale until the next `beamtalk build`. This is a known limitation — type info is compile-time, dispatch is runtime. Consistent with ADR 0025's "compile-time only" principle
 
 ### Neutral
 - Auto-extracted types have `TypeProvenance::Extracted` — diagnostics show the source
@@ -532,12 +566,26 @@ Read inferred types from Dialyzer's PLT files to supplement missing `-spec` anno
 
 ## Implementation
 
+### Phase 0: Spec Extraction Spike
+
+Validate the core assumption before building full infrastructure. ADR 0028 explicitly deferred this: "Requires a spike first."
+
+1. Write `beamtalk_spec_reader.erl` that reads `abstract_code` from a single `.beam` file and extracts spec forms
+2. Run it against `lists.beam` and `maps.beam` from the user's OTP installation — verify specs are present and parseable
+3. Implement a minimal Erlang→Beamtalk type mapping for the extracted specs (just the core types: `integer()`, `list()`, `binary()`, `boolean()`, `atom()`)
+4. Wire one end-to-end lookup: `Erlang lists reverse: #(1, 2, 3)` should resolve to return type `List` in the type checker
+5. Verify against `.beam` files with and without `+debug_info` — confirm graceful fallback to `Dynamic`
+
+**Validates:** `abstract_code` chunk availability, spec format parsing, type mapping correctness, build worker integration.
+
+**Components:** `beamtalk_spec_reader.erl` (new), minimal `ErlangTypeRegistry` prototype, one type checker test
+
 ### Phase 1: Auto-Extract Infrastructure
 
-Build the Erlang spec reader and Rust integration:
+Build the full Erlang spec reader and Rust integration:
 
-1. **`beamtalk_spec_reader.erl`** — Erlang module that reads `-spec` attributes from `.beam` files via `beam_lib:chunks/2` and emits structured terms
-2. **Erlang→Beamtalk type mapping** — Rust module that converts Erlang abstract type representations to `InferredType` values (reverse of `spec_codegen.rs`)
+1. **`beamtalk_spec_reader.erl`** — Extend the Phase 0 spike to handle all Erlang type forms, batch-process multiple modules, and emit results as structured terms via the build worker protocol
+2. **Erlang→Beamtalk type mapping** — Rust module that converts the full range of Erlang abstract type representations to `InferredType` values (reverse of `spec_codegen.rs`), including generic type variables, union types, and the edge cases table above
 3. **`ErlangTypeRegistry`** — new struct in the type checker that stores resolved function signatures
 4. **Build integration** — invoke spec reader during `beamtalk build`, cache results per module
 5. **Type checker integration** — look up FFI call types in the registry during inference
@@ -563,6 +611,8 @@ Build the Erlang spec reader and Rust integration:
 **Components:** `crates/beamtalk-cli/src/commands/stub_gen.rs` (new), `crates/beamtalk-cli/src/commands/build.rs` (extended), `beamtalk.toml` schema (extended)
 
 ### Phase 4: LSP Integration
+
+Note: basic typed completions can optionally be pulled into Phase 1 or 2 since `ErlangTypeRegistry` is available as soon as auto-extract ships. The full LSP phase below covers the complete integration.
 
 1. **Typed completions** for `Erlang <module>` — show function signatures with types
 2. **Hover info** — display type signature and doc comment from `.d.bt` on hover
