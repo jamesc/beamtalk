@@ -170,6 +170,18 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
     ) {
         if !hierarchy.has_class(class_name) {
+            // BT-1833: If the type is a protocol (from respondsTo: narrowing),
+            // validate the selector against the protocol's required methods.
+            if let Some(ref registry) = self.protocol_registry {
+                if let Some(proto_info) = registry.get(class_name) {
+                    let required = proto_info.all_required_selectors(registry);
+                    if !required.iter().any(|s| s.as_str() == selector) {
+                        self.emit_unknown_selector_warning(
+                            class_name, selector, span, hierarchy, false,
+                        );
+                    }
+                }
+            }
             return;
         }
 

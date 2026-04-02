@@ -5339,6 +5339,335 @@ fn test_responds_to_protocol_inference() {
     );
 }
 
+// ---- BT-1833: respondsTo: narrows to protocol type ----
+
+/// Helper: build a protocol module with a single protocol requiring a single selector.
+fn make_protocol_module(
+    protocol_name: &str,
+    required_selector: &str,
+) -> (Module, ProtocolRegistry, ClassHierarchy) {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let proto_def = ProtocolDefinition {
+        name: ident(protocol_name),
+        type_params: vec![],
+        extending: None,
+        method_signatures: vec![ProtocolMethodSignature {
+            selector: MessageSelector::Unary(required_selector.into()),
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(ident("String"))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_method_signatures: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let module = Module {
+        protocols: vec![proto_def],
+        ..Module::new(vec![], span())
+    };
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&module, &hierarchy);
+    assert!(diags.is_empty());
+    (module, registry, hierarchy)
+}
+
+#[test]
+fn test_responds_to_narrows_to_protocol_type() {
+    // When `x respondsTo: #asString` with a Printable protocol requiring asString,
+    // the true-branch should narrow x to Printable (not Dynamic).
+    let (_, registry, hierarchy) = make_protocol_module("Printable", "asString");
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #asString) ifTrue: [x asString]
+                if_true(
+                    responds_to("x", "asString"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("asString".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // asString is a valid method on Printable protocol, so no DNU warning
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (x narrowed to Printable), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_no_protocol_match_falls_back_to_dynamic() {
+    // When `x respondsTo: #unknownMethod` and no protocol requires that selector,
+    // the narrowing should fall back to Dynamic (no warnings in true block).
+    let (_, registry, hierarchy) = make_protocol_module("Printable", "asString");
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #unknownMethod) ifTrue: [x unknownMethod]
+                if_true(
+                    responds_to("x", "unknownMethod"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownMethod".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // Dynamic suppresses DNU, so no warning in the true block
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (x narrowed to Dynamic), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_protocol_narrows_validates_methods() {
+    // When narrowed to Printable, sending a method NOT on the protocol should warn.
+    let (_, registry, hierarchy) = make_protocol_module("Printable", "asString");
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #asString) ifTrue: [x nonExistentMethod]
+                if_true(
+                    responds_to("x", "asString"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("nonExistentMethod".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // Printable only has asString — nonExistentMethod should warn
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu_warnings.len(),
+        1,
+        "Expected 1 DNU warning for nonExistentMethod on Printable, got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_ambiguous_protocols_falls_back_to_dynamic() {
+    // When multiple protocols require the same selector, fall back to Dynamic.
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // Create two protocols both requiring 'asString'
+    let proto1 = ProtocolDefinition {
+        name: ident("Printable"),
+        type_params: vec![],
+        extending: None,
+        method_signatures: vec![ProtocolMethodSignature {
+            selector: MessageSelector::Unary("asString".into()),
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(ident("String"))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_method_signatures: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let proto2 = ProtocolDefinition {
+        name: ident("Displayable"),
+        type_params: vec![],
+        extending: None,
+        method_signatures: vec![ProtocolMethodSignature {
+            selector: MessageSelector::Unary("asString".into()),
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(ident("String"))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_method_signatures: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let proto_module = Module {
+        protocols: vec![proto1, proto2],
+        ..Module::new(vec![], span())
+    };
+    let mut registry = ProtocolRegistry::new();
+    registry.register_module(&proto_module, &hierarchy);
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #asString) ifTrue: [x unknownMethod]
+                if_true(
+                    responds_to("x", "asString"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownMethod".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // With ambiguous protocols, x stays Dynamic — no DNU warning for unknownMethod
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (ambiguous protocols → Dynamic), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_without_protocol_registry_stays_dynamic() {
+    // When check_module is called without protocols (no registry),
+    // respondsTo: narrowing stays Dynamic (backward compatible).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![if_true(
+                responds_to("x", "customMethod"),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("customMethod".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    // Use check_module (no protocol registry) — should still work
+    checker.check_module(&module, &hierarchy);
+
+    // Dynamic suppresses DNU, so no warning
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (Dynamic narrowing, no registry), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_find_unique_protocol_for_selector() {
+    // Unit test for the ProtocolRegistry helper method.
+    let (_, registry, _) = make_protocol_module("Printable", "asString");
+
+    // Unique match: asString → Printable
+    let result = registry.find_unique_protocol_for_selector("asString");
+    assert_eq!(
+        result.map(EcoString::as_str),
+        Some("Printable"),
+        "asString should uniquely match Printable"
+    );
+
+    // No match: unknownSelector → None
+    let result = registry.find_unique_protocol_for_selector("unknownSelector");
+    assert!(
+        result.is_none(),
+        "unknownSelector should not match any protocol"
+    );
+}
+
 // ---- BT-1577: Generic inheritance tests ----
 
 /// Build `GenCollection(E)` with method `first` returning `E`, `size` returning `Integer`.
