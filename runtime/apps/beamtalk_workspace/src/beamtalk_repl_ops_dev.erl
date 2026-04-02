@@ -1677,8 +1677,8 @@ base_ops() ->
         },
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"load-project">> => #{
-            <<"params">> => [<<"path">>],
-            <<"optional">> => [<<"include_tests">>, <<"force">>]
+            <<"params">> => [],
+            <<"optional">> => [<<"path">>, <<"include_tests">>, <<"force">>]
         },
         <<"reload">> => #{
             <<"params">> => [],
