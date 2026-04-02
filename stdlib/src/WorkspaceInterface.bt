@@ -21,7 +21,7 @@ sealed typed Object subclass: WorkspaceInterface
   classState: current :: WorkspaceInterface | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> Object => self.current
+  class current => self.current
 
   /// Set the current singleton instance.
   class current: instance :: WorkspaceInterface -> Nil =>

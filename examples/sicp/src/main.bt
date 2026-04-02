@@ -12,6 +12,7 @@ Value subclass: Main
     env := ev defaultEnv
 
     eval := [:src | printer print: (ev eval: (reader read: src) in: env)]
+    @expect dnu
     (WorkspaceInterface current) bind: eval as: #eval
 
     self showCr: "Run: eval value: ""(* 6 7)""."
