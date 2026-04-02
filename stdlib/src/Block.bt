@@ -105,4 +105,4 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args :: List => @primitive "valueWithArguments:"
+  valueWithArguments: args :: List -> Object => @primitive "valueWithArguments:"

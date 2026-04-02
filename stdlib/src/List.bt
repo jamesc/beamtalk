@@ -376,7 +376,7 @@ sealed typed Collection subclass: List(E)
   /// ```beamtalk
   /// (#(1, 2, 3) stream) asList       // => #(1, 2, 3)
   /// ```
-  stream -> Stream => @primitive "stream"
+  stream -> Stream(E) => @primitive "stream"
 
   /// Return a random element from the list.
   ///

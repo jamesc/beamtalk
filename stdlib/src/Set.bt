@@ -150,4 +150,4 @@ sealed typed Collection subclass: Set(E)
   /// ```beamtalk
   /// ((Set new add: 1) stream) asList   // => #(1)
   /// ```
-  stream -> Stream => @primitive "stream"
+  stream -> Stream(E) => @primitive "stream"

@@ -1572,6 +1572,22 @@ impl TypeChecker {
             return resolved.clone();
         }
 
+        // BT-1836: Handle union return types like "E | Nil" — substitute each member
+        if ret_ty.contains(" | ") {
+            let members: Vec<InferredType> = ret_ty
+                .split(" | ")
+                .map(|m| Self::substitute_return_type(m.trim(), subst, method_local_subst))
+                .collect();
+            // If all members resolved to the same type, collapse
+            if members.len() == 1 {
+                return members.into_iter().next().unwrap();
+            }
+            return InferredType::Union {
+                members,
+                provenance: super::TypeProvenance::Substituted(Span::default()),
+            };
+        }
+
         // Check for generic return type like "Result(R, E)"
         if let Some(open) = ret_ty.find('(') {
             let base = &ret_ty[..open];
@@ -1609,7 +1625,7 @@ impl TypeChecker {
     ///
     /// `"T, E"` → `["T", "E"]`
     /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
-    fn split_type_params(s: &str) -> Vec<&str> {
+    pub(super) fn split_type_params(s: &str) -> Vec<&str> {
         let mut result = Vec::new();
         let mut depth = 0;
         let mut start = 0;
@@ -3207,6 +3223,40 @@ mod tests {
                 assert_eq!(type_args[1], InferredType::known("Error"));
             }
             other => panic!("Expected Known Result(Array(Integer), Error), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_return_type_union_with_type_param() {
+        // BT-1836: "E | Nil" with E=Integer should produce Union(Integer, Nil)
+        let mut subst = HashMap::new();
+        subst.insert(EcoString::from("E"), InferredType::known("Integer"));
+        let result = TypeChecker::substitute_return_type("E | Nil", &subst, &HashMap::new());
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(members[0], InferredType::known("Integer"));
+                assert_eq!(members[1], InferredType::known("Nil"));
+            }
+            other => panic!("Expected Union(Integer, Nil), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_return_type_union_no_params() {
+        // "Behaviour | Nil" with no substitutions should pass through as Union
+        let result = TypeChecker::substitute_return_type(
+            "Behaviour | Nil",
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(members[0], InferredType::known("Behaviour"));
+                assert_eq!(members[1], InferredType::known("Nil"));
+            }
+            other => panic!("Expected Union(Behaviour, Nil), got {other:?}"),
         }
     }
 }
