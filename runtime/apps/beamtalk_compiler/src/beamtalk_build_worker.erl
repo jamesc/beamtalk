@@ -10,12 +10,21 @@
 %% to compile Core Erlang to BEAM bytecode without temporary files.
 %% Includes `debug_info' for hot code reload support.
 %%
-%% Protocol (identical to compile.escript):
-%%   INPUT:  Erlang term on stdin: {OutputDir, [CoreFile1, CoreFile2, ...]}
-%%   OUTPUT: "beamtalk-compile-module:<module_name>" for each compiled module
-%%           "beamtalk-compile-result-ok" on success
-%%           "beamtalk-compile-result-error" on failure
-%%           Compilation errors/warnings printed to stderr
+%% Also supports spec reading for ADR 0075 (Erlang FFI Type Definitions).
+%%
+%% Protocol:
+%%   INPUT:  Erlang term on stdin, one of:
+%%     {OutputDir, [CoreFile1, CoreFile2, ...]}  — compile Core Erlang
+%%     {read_specs, [BeamFile1, BeamFile2, ...]} — read specs from .beam files
+%%   OUTPUT (compile):
+%%     "beamtalk-compile-module:<module_name>" for each compiled module
+%%     "beamtalk-compile-result-ok" on success
+%%     "beamtalk-compile-result-error" on failure
+%%     Compilation errors/warnings printed to stderr
+%%   OUTPUT (read_specs):
+%%     "beamtalk-specs-module:<module_name>:<erlang_term>" per module
+%%     "beamtalk-specs-result-ok" on success
+%%     "beamtalk-specs-result-error" on failure
 
 -module(beamtalk_build_worker).
 
@@ -25,7 +34,8 @@
 -export([
     compile_core_erlang/1,
     compile_core_file/2,
-    compile_modules/2
+    compile_modules/2,
+    handle_read_specs/1
 ]).
 -endif.
 
@@ -46,6 +56,8 @@ compile_loop() ->
             case erl_scan:string(Chars) of
                 {ok, Tokens, _} ->
                     case erl_parse:parse_term(Tokens) of
+                        {ok, {read_specs, BeamFiles}} ->
+                            handle_read_specs(BeamFiles);
                         {ok, {OutDir, CoreFiles}} ->
                             case compile_modules(OutDir, CoreFiles) of
                                 {ok, ModuleNames} ->
@@ -71,6 +83,47 @@ compile_loop() ->
                     io:put_chars("beamtalk-compile-result-error\n")
             end,
             compile_loop()
+    end.
+
+%% Handle {read_specs, BeamFiles} command via beamtalk_spec_reader.
+%%
+%% Emits one line per module: "beamtalk-specs-module:<module>:<erlang_term>"
+%% where <erlang_term> is a printable Erlang term of the spec list.
+%% Ends with "beamtalk-specs-result-ok" or "beamtalk-specs-result-error".
+handle_read_specs(BeamFiles) ->
+    try
+        Results = beamtalk_spec_reader:read_specs_batch(BeamFiles),
+        lists:foreach(
+            fun
+                ({ModName, {ok, Specs}}) ->
+                    %% Encode specs as an Erlang term string on one line
+                    TermStr = io_lib:format("~0tp", [Specs]),
+                    io:put_chars([
+                        "beamtalk-specs-module:",
+                        ModName,
+                        ":",
+                        TermStr,
+                        "\n"
+                    ]);
+                ({ModName, {error, Reason}}) ->
+                    io:put_chars(
+                        standard_error,
+                        io_lib:format("Warning: ~s: ~tp~n", [ModName, Reason])
+                    )
+            end,
+            Results
+        ),
+        io:put_chars("beamtalk-specs-result-ok\n")
+    catch
+        Class:Reason:Stack ->
+            io:put_chars(
+                standard_error,
+                io_lib:format(
+                    "Error reading specs: ~tp:~tp~n~tp~n",
+                    [Class, Reason, Stack]
+                )
+            ),
+            io:put_chars("beamtalk-specs-result-error\n")
     end.
 
 compile_modules(OutDir, CoreFiles) ->
