@@ -73,10 +73,10 @@ tc := TypedCounter spawn
 :complete #[1, 2, 3] collect: [:x | x * 2]
 // => INCLUDES:size
 
-// `#[1, 2, 3] inject: 0 into: [...] <TAB>` — inject:into: has no return-type annotation → graceful
-// fallback, no completions.
+// `#[1, 2, 3] inject: 0 into: [...] <TAB>` — BT-1834: inject:into: resolves accumulator type A
+// from initial value (0 → Integer), so completions show Integer methods.
 :complete #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]
-// =>
+// => INCLUDES:isEven
 
 // `myList collect: [:x | x] <TAB>` — myList is untyped (Dynamic) → graceful fallback.
 :complete myList collect: [:x | x]

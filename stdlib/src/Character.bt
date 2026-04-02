@@ -13,7 +13,7 @@
 /// $A asInteger             // => 65
 /// $a isLetter              // => true
 /// ```
-sealed Integer subclass: Character
+sealed typed Integer subclass: Character
 
   /// Create a Character from a Unicode codepoint integer (class method).
   ///

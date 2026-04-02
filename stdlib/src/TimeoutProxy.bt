@@ -35,7 +35,7 @@
 /// configured timeout via `perform:withArguments:timeout:`.
 ///
 /// @see Actor#withTimeout:
-Actor subclass: TimeoutProxy
+typed Actor subclass: TimeoutProxy
   state: target :: Actor | Nil = nil
   state: timeoutMs :: Integer | Symbol = 5000
 

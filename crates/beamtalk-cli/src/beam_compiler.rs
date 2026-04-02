@@ -31,13 +31,18 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+use beamtalk_core::semantic_analysis::type_checker::{
+    NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
+};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
+use std::time::SystemTime;
 use tracing::{debug, error, info, instrument, warn};
 
 /// Embedded compile.escript for batch compilation.
@@ -1016,6 +1021,457 @@ pub(crate) fn compile_source_with_bindings(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Type cache: persists spec extraction results per Erlang module (ADR 0075)
+// ---------------------------------------------------------------------------
+
+/// Cache entry for a single Erlang module's spec extraction result.
+///
+/// Stores the raw protocol line (as emitted by `beamtalk_build_worker`) alongside
+/// the `.beam` file's modification time. On subsequent builds, the cache is hit
+/// when the `.beam` mtime matches — avoiding a round-trip to the BEAM node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TypeCacheEntry {
+    /// Unix timestamp (seconds since epoch) of the `.beam` file when specs were extracted.
+    beam_mtime_secs: u64,
+    /// Sub-second nanoseconds of the `.beam` file's modification time.
+    /// Combined with `beam_mtime_secs` to avoid cache collisions on rapid rewrites.
+    #[serde(default)]
+    beam_mtime_nanos: u32,
+    /// The raw `beamtalk-specs-module:...` protocol line (without newline).
+    /// Empty string if the module had no specs or an error occurred.
+    specs_line: String,
+}
+
+/// Manages the `_build/type_cache/` directory for incremental spec extraction.
+///
+/// Each Erlang module gets a JSON file `<module>.json` containing the cached
+/// protocol line and the `.beam` file's mtime. On cache hit (matching mtime),
+/// the protocol line is replayed into the `NativeTypeRegistry` without spawning
+/// a BEAM node.
+#[derive(Debug)]
+struct TypeCache {
+    cache_dir: Utf8PathBuf,
+}
+
+impl TypeCache {
+    /// Creates a new type cache rooted at the given directory.
+    ///
+    /// The directory is created lazily on first write.
+    pub fn new(cache_dir: Utf8PathBuf) -> Self {
+        Self { cache_dir }
+    }
+
+    /// Returns the cache file path for a given Erlang module name.
+    fn cache_path(&self, module_name: &str) -> Utf8PathBuf {
+        self.cache_dir.join(format!("{module_name}.json"))
+    }
+
+    /// Checks if the cache entry for `module_name` is still valid.
+    ///
+    /// Returns `Some(specs_line)` if the cache is fresh (`.beam` mtime matches),
+    /// or `None` if the cache is stale or missing.
+    fn lookup(
+        &self,
+        module_name: &str,
+        beam_mtime_secs: u64,
+        beam_mtime_nanos: u32,
+    ) -> Option<String> {
+        let path = self.cache_path(module_name);
+        let content = std::fs::read_to_string(path.as_std_path()).ok()?;
+        let entry: TypeCacheEntry = serde_json::from_str(&content).ok()?;
+        if entry.beam_mtime_secs == beam_mtime_secs && entry.beam_mtime_nanos == beam_mtime_nanos {
+            Some(entry.specs_line)
+        } else {
+            None
+        }
+    }
+
+    /// Writes a cache entry for the given module.
+    fn store(
+        &self,
+        module_name: &str,
+        beam_mtime_secs: u64,
+        beam_mtime_nanos: u32,
+        specs_line: &str,
+    ) {
+        if let Err(e) = std::fs::create_dir_all(self.cache_dir.as_std_path()) {
+            debug!("Failed to create type cache dir: {e}");
+            return;
+        }
+        let entry = TypeCacheEntry {
+            beam_mtime_secs,
+            beam_mtime_nanos,
+            specs_line: specs_line.to_string(),
+        };
+        let path = self.cache_path(module_name);
+        match serde_json::to_string(&entry) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(path.as_std_path(), json) {
+                    debug!("Failed to write type cache for {module_name}: {e}");
+                }
+            }
+            Err(e) => debug!("Failed to serialize type cache for {module_name}: {e}"),
+        }
+    }
+}
+
+/// Extracts type specs from `.beam` files and populates a `NativeTypeRegistry`.
+///
+/// Uses the `beamtalk_build_worker` `{read_specs, ...}` protocol to extract
+/// `-spec` attributes from `.beam` files in batch. Results are cached in
+/// `cache_dir` (typically `_build/type_cache/`) keyed by module name and
+/// `.beam` mtime — incremental builds read zero `.beam` files on cache hit.
+///
+/// # Protocol
+///
+/// Sends `{read_specs, [BeamFile1, BeamFile2, ...]}.` to the build worker.
+/// Reads `beamtalk-specs-module:<module>:<erlang_term>` lines and a final
+/// `beamtalk-specs-result-ok` or `beamtalk-specs-result-error`.
+///
+/// # Arguments
+///
+/// * `beam_files` - List of `.beam` file paths to extract specs from
+/// * `cache_dir` - Directory for caching results (e.g., `_build/type_cache/`)
+///
+/// # Returns
+///
+/// A populated `NativeTypeRegistry` on success.
+///
+/// # Errors
+///
+/// Returns an error if the build worker cannot be started (runtime not compiled).
+#[instrument(skip_all, fields(beam_count = beam_files.len()))]
+pub fn extract_beam_specs(
+    beam_files: &[Utf8PathBuf],
+    cache_dir: &Utf8Path,
+) -> Result<NativeTypeRegistry> {
+    if beam_files.is_empty() {
+        return Ok(NativeTypeRegistry::new());
+    }
+
+    let cache = TypeCache::new(cache_dir.to_path_buf());
+    let mut registry = NativeTypeRegistry::new();
+
+    // Phase 1: Check cache, partition into hits and misses.
+    let mut cache_misses = Vec::new();
+    let mut cache_hit_count = 0;
+
+    for beam_file in beam_files {
+        let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
+        let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
+
+        if let Some(specs_line) = cache.lookup(module_name, mtime_secs, mtime_nanos) {
+            if !specs_line.is_empty() {
+                parse_specs_line(&specs_line, &mut registry);
+            }
+            cache_hit_count += 1;
+        } else {
+            cache_misses.push(beam_file.clone());
+        }
+    }
+
+    if cache_hit_count > 0 {
+        debug!(
+            cache_hits = cache_hit_count,
+            cache_misses = cache_misses.len(),
+            "Type cache results"
+        );
+    }
+
+    if cache_misses.is_empty() {
+        info!(
+            modules = registry.module_count(),
+            functions = registry.function_count(),
+            "Type specs loaded from cache (zero .beam files read)"
+        );
+        return Ok(registry);
+    }
+
+    // Phase 2: Extract specs from cache misses via build worker.
+    let new_lines = extract_specs_via_build_worker(&cache_misses)?;
+
+    // Phase 3: Parse results and update cache.
+    // Build a set of modules that produced output to identify negative-cache candidates.
+    let mut seen_modules: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (module_name, specs_line) in &new_lines {
+        seen_modules.insert(module_name.clone());
+        // Find the mtime for caching.
+        let beam_file = cache_misses.iter().find(|f| {
+            f.file_stem()
+                .is_some_and(|stem| stem == module_name.as_str())
+        });
+        let (mtime_secs, mtime_nanos) = beam_file.map_or((0, 0), |f| beam_mtime(f));
+
+        if !specs_line.is_empty() {
+            parse_specs_line(specs_line, &mut registry);
+        }
+        cache.store(module_name, mtime_secs, mtime_nanos, specs_line);
+    }
+
+    // Negative cache: modules that were sent for extraction but produced no output
+    // (e.g., no debug_info, no specs). Cache them with empty specs_line to avoid
+    // re-extracting on every build.
+    for beam_file in &cache_misses {
+        let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
+        if !seen_modules.contains(module_name) {
+            let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
+            cache.store(module_name, mtime_secs, mtime_nanos, "");
+        }
+    }
+
+    info!(
+        modules = registry.module_count(),
+        functions = registry.function_count(),
+        cache_hits = cache_hit_count,
+        extracted = new_lines.len(),
+        "Type spec extraction complete"
+    );
+
+    Ok(registry)
+}
+
+/// Returns the modification time of a `.beam` file as `(seconds, nanoseconds)`
+/// since Unix epoch. Sub-second precision avoids cache collisions on rapid rewrites.
+fn beam_mtime(path: &Utf8Path) -> (u64, u32) {
+    std::fs::metadata(path.as_std_path())
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map_or((0, 0), |d| (d.as_secs(), d.subsec_nanos()))
+}
+
+/// Extracts specs from `.beam` files by spawning a `beamtalk_build_worker` BEAM
+/// node and sending the `{read_specs, [...]}` command.
+///
+/// Returns a list of `(module_name, specs_line)` pairs. The `specs_line` is the
+/// raw protocol line for successful modules, or an empty string for modules that
+/// had errors (`no_debug_info`, etc.).
+fn extract_specs_via_build_worker(beam_files: &[Utf8PathBuf]) -> Result<Vec<(String, String)>> {
+    let mut child = spawn_build_worker_for_specs()?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| miette::miette!("Failed to capture spec extraction stdin"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| miette::miette!("Failed to capture spec extraction stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| miette::miette!("Failed to capture spec extraction stderr"))?;
+
+    // Format and send the {read_specs, [BeamFile1, ...]}. input
+    let file_list: Vec<String> = beam_files
+        .iter()
+        .map(|p| {
+            let abs = std::fs::canonicalize(p.as_std_path())
+                .unwrap_or_else(|_| p.as_std_path().to_path_buf());
+            format!("\"{}\"", escape_erlang_string(&abs.to_string_lossy()))
+        })
+        .collect();
+    let input = format!("{{read_specs,[{}]}}.\n", file_list.join(","));
+
+    stdin
+        .write_all(input.as_bytes())
+        .into_diagnostic()
+        .wrap_err("Failed to write to spec extraction stdin")?;
+    drop(stdin);
+
+    let results = read_specs_protocol(stdout, stderr)?;
+
+    let _ = child.wait();
+    Ok(results)
+}
+
+/// Spawns a `beamtalk_build_worker` BEAM node for spec extraction.
+fn spawn_build_worker_for_specs() -> Result<std::process::Child> {
+    use beamtalk_cli::repl_startup;
+
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|_| {
+        miette::miette!(
+            "Spec extraction requires the Beamtalk runtime.\n\
+             Build the runtime first: cd runtime && rebar3 compile"
+        )
+    })?;
+
+    let runtime_dir = runtime_dir
+        .canonicalize()
+        .into_diagnostic()
+        .wrap_err("Failed to resolve runtime directory for spec extraction")?;
+
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+    if !paths
+        .compiler_ebin
+        .join("beamtalk_build_worker.beam")
+        .exists()
+    {
+        return Err(miette::miette!(
+            "Spec extraction requires beamtalk_build_worker module.\n\
+             Rebuild: cd runtime && rebar3 compile"
+        ));
+    }
+
+    #[cfg(windows)]
+    let compiler_path = paths.compiler_ebin.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let compiler_path = paths.compiler_ebin.display().to_string();
+
+    let pa_args = vec!["-pa".to_string(), compiler_path];
+    let temp_dir = std::env::temp_dir();
+
+    Command::new("erl")
+        .arg("-noshell")
+        .arg("-mode")
+        .arg("minimal")
+        .arg("-boot")
+        .arg("no_dot_erlang")
+        .arg("-kernel")
+        .arg("logger")
+        .arg(repl_startup::KERNEL_LOGGER_STDERR)
+        .args(&pa_args)
+        .arg("-s")
+        .arg("beamtalk_build_worker")
+        .arg("main")
+        .current_dir(&temp_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .into_diagnostic()
+        .wrap_err("Failed to start BEAM node for spec extraction")
+}
+
+/// Reads the `beamtalk-specs-module:` protocol lines from the build worker's stdout.
+///
+/// Returns `(module_name, raw_protocol_line)` pairs for each module.
+fn read_specs_protocol(
+    stdout: std::process::ChildStdout,
+    stderr: std::process::ChildStderr,
+) -> Result<Vec<(String, String)>> {
+    // Read stderr in background to avoid deadlock
+    let stderr_thread = thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            if !line.is_empty() {
+                debug!(target: "spec_reader_stderr", "{}", line);
+            }
+        }
+    });
+
+    let reader = BufReader::new(stdout);
+    let mut results = Vec::new();
+    let mut success = false;
+
+    for line in reader.lines() {
+        let line = line.into_diagnostic()?;
+        if is_specs_line(&line) {
+            if let Some(rest) = line.strip_prefix("beamtalk-specs-module:") {
+                if let Some(colon_pos) = rest.find(':') {
+                    let module_name = rest[..colon_pos].to_string();
+                    results.push((module_name, line.clone()));
+                }
+            }
+        } else if is_specs_result_ok(&line) {
+            success = true;
+        } else if is_specs_result_error(&line) {
+            warn!("Spec extraction reported errors (some modules may lack type info)");
+            success = true;
+        }
+    }
+
+    let _ = stderr_thread.join();
+
+    if !success {
+        warn!("Spec extraction did not receive a result line — partial results may be used");
+    }
+
+    Ok(results)
+}
+
+/// Discovers `.beam` files on the OTP code path.
+///
+/// Returns absolute paths to all `.beam` files in common OTP library ebin
+/// directories (`stdlib`, `kernel`, etc.). Used to find modules available
+/// for spec extraction.
+///
+/// # Errors
+///
+/// Returns an error if `erl` cannot be invoked to discover the OTP lib directory.
+pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
+    // Use `erl -noshell -noinput -eval '...'` to find the OTP lib directory.
+    // We clear the environment to avoid user-specific Erlang config affecting the probe.
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-boot")
+        .arg("no_dot_erlang")
+        .arg("-eval")
+        .arg("io:format(\"~s\", [code:lib_dir()]), halt().")
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erl to discover OTP lib directory")?;
+
+    if !output.status.success() {
+        let stderr_msg = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            "erl probe failed (exit {}): {}",
+            output.status,
+            stderr_msg.trim()
+        );
+        return Ok(Vec::new());
+    }
+
+    let lib_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if lib_dir.is_empty() {
+        warn!("erl probe returned empty lib_dir");
+        return Ok(Vec::new());
+    }
+
+    // Collect .beam files from common OTP application ebin directories.
+    // Each app lives in `lib_dir/<app>-<version>/ebin/`.
+    let common_apps = [
+        "stdlib", "kernel", "crypto", "ssl", "inets", "mnesia", "os_mon",
+    ];
+
+    let mut beam_files = Vec::new();
+    let lib_path = std::path::Path::new(&lib_dir);
+    if let Ok(entries) = std::fs::read_dir(lib_path) {
+        for entry in entries.flatten() {
+            let dir_name = entry.file_name();
+            let dir_name_str = dir_name.to_string_lossy();
+            // Check if this directory matches one of our common apps (e.g., "stdlib-5.2")
+            let matches_app = common_apps.iter().any(|app| {
+                dir_name_str.starts_with(app)
+                    && dir_name_str.as_bytes().get(app.len()) == Some(&b'-')
+            });
+            if !matches_app {
+                continue;
+            }
+            let ebin_dir = entry.path().join("ebin");
+            if !ebin_dir.is_dir() {
+                continue;
+            }
+            if let Ok(ebin_entries) = std::fs::read_dir(&ebin_dir) {
+                for file in ebin_entries.flatten() {
+                    let path = file.path();
+                    if path.extension().is_some_and(|e| e == "beam") {
+                        if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                            beam_files.push(utf8);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    debug!(count = beam_files.len(), "Discovered OTP .beam files");
+    Ok(beam_files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1467,5 +1923,75 @@ end
             result.is_empty(),
             "Empty native/ dir should return empty vec"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // TypeCache tests (ADR 0075)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn type_cache_store_and_lookup() {
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir);
+
+        let specs_line = "beamtalk-specs-module:lists:[#{arity => 1,name => <<\"reverse\">>,params => [#{name => <<\"list\">>,type => <<\"List\">>}],return_type => <<\"List\">>}]";
+        cache.store("lists", 12345, 0, specs_line);
+
+        // Cache hit with matching mtime
+        let result = cache.lookup("lists", 12345, 0);
+        assert_eq!(result, Some(specs_line.to_string()));
+
+        // Cache miss with different mtime (seconds)
+        let result = cache.lookup("lists", 99999, 0);
+        assert!(result.is_none(), "Different mtime should be a cache miss");
+
+        // Cache miss with different mtime (nanos only)
+        let result = cache.lookup("lists", 12345, 1);
+        assert!(result.is_none(), "Different nanos should be a cache miss");
+
+        // Cache miss for unknown module
+        let result = cache.lookup("maps", 12345, 0);
+        assert!(result.is_none(), "Unknown module should be a cache miss");
+    }
+
+    #[test]
+    fn type_cache_invalidates_on_mtime_change() {
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir);
+
+        cache.store("lists", 100, 0, "line1");
+        assert_eq!(cache.lookup("lists", 100, 0), Some("line1".to_string()));
+
+        // Overwrite with new mtime
+        cache.store("lists", 200, 0, "line2");
+        assert!(cache.lookup("lists", 100, 0).is_none());
+        assert_eq!(cache.lookup("lists", 200, 0), Some("line2".to_string()));
+    }
+
+    #[test]
+    fn type_cache_handles_empty_specs_line() {
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir);
+
+        cache.store("no_specs", 100, 0, "");
+        assert_eq!(cache.lookup("no_specs", 100, 0), Some(String::new()));
+    }
+
+    #[test]
+    fn extract_beam_specs_empty_input() {
+        let result = extract_beam_specs(&[], Utf8Path::new("/tmp/nonexistent"));
+        assert!(result.is_ok());
+        let registry = result.unwrap();
+        assert_eq!(registry.module_count(), 0);
+    }
+
+    #[test]
+    fn beam_mtime_nonexistent() {
+        let (secs, nanos) = beam_mtime(Utf8Path::new("/nonexistent/foo.beam"));
+        assert_eq!(secs, 0, "Nonexistent file should return 0 seconds");
+        assert_eq!(nanos, 0, "Nonexistent file should return 0 nanos");
     }
 }

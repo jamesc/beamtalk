@@ -709,6 +709,25 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods
         if let Expression::ClassReference { name, .. } = receiver {
             let class_name = &name.name;
+
+            // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
+            // to enable FFI call type inference on the outer message send.
+            if class_name == "Erlang" {
+                if let MessageSelector::Unary(module_name) = selector {
+                    // Static module name: `Erlang lists` → ErlangModule<lists>
+                    return InferredType::Known {
+                        class_name: EcoString::from("ErlangModule"),
+                        type_args: vec![InferredType::Known {
+                            class_name: module_name.clone(),
+                            type_args: vec![],
+                            provenance: super::TypeProvenance::Inferred(span),
+                        }],
+                        provenance: super::TypeProvenance::Inferred(span),
+                    };
+                }
+                // Dynamic module: `Erlang (someVar)` — fall through to Dynamic
+            }
+
             self.check_argument_types(
                 class_name,
                 &selector_name,
@@ -757,6 +776,21 @@ impl TypeChecker {
                     );
                 }
                 return InferredType::Dynamic;
+            }
+
+            // ADR 0075: FFI call type inference for ErlangModule<module_name>.
+            // When the receiver is typed as ErlangModule with a known module name
+            // (from `Erlang lists` or a variable assigned from one), extract the
+            // Erlang function name and arity, then look up in NativeTypeRegistry.
+            if class_name == "ErlangModule" {
+                return self.infer_ffi_call(
+                    type_args,
+                    selector,
+                    &selector_name,
+                    arguments,
+                    &arg_types,
+                    span,
+                );
             }
 
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
@@ -816,6 +850,13 @@ impl TypeChecker {
                         return Self::substitute_return_type(ret_ty, &subst, &method_subst);
                     }
 
+                    // BT-1834: If the return type is an unresolved type param
+                    // (single uppercase letter like E, T, V), fall back to Dynamic
+                    // so downstream sends don't get false DNU warnings.
+                    if super::is_generic_type_param(ret_ty) && !hierarchy.has_class(ret_ty) {
+                        return InferredType::Dynamic;
+                    }
+
                     // BT-1576: If the return type is a generic like "Array(R)",
                     // extract the base class name so completion/chain resolution works.
                     if let Some(open) = ret_ty.find('(') {
@@ -823,6 +864,19 @@ impl TypeChecker {
                     }
                     return InferredType::known(ret_ty.clone());
                 }
+            }
+
+            // BT-1834: Block value/value:/value:value: — return the last type arg.
+            // Block is variadic: Block(R), Block(A, R), Block(A, B, R), etc.
+            // The convention is that the last type arg is always the return type.
+            if class_name == "Block"
+                && !type_args.is_empty()
+                && matches!(
+                    selector_name.as_str(),
+                    "value" | "value:" | "value:value:" | "value:value:value:"
+                )
+            {
+                return type_args.last().unwrap().clone();
             }
 
             // BT-1047: Fall back to return types inferred earlier in this same pass.
@@ -841,6 +895,183 @@ impl TypeChecker {
         }
 
         InferredType::Dynamic
+    }
+
+    /// Infer the return type of an FFI call on an `ErlangModule<module_name>` receiver.
+    ///
+    /// Extracts the Erlang module name from the `type_args`, the function name from
+    /// the first keyword of the selector, and the arity from argument count. Looks
+    /// up `(module, function, arity)` in `NativeTypeRegistry` and returns the
+    /// declared return type, or `Dynamic` if not found.
+    ///
+    /// Also emits keyword mismatch warnings when call-site keywords don't match
+    /// the registry's declared parameter names (ADR 0075 — footgun prevention).
+    ///
+    /// **References:** ADR 0075 — Type Checker Integration, Keyword mismatch warning
+    fn infer_ffi_call(
+        &mut self,
+        receiver_type_args: &[InferredType],
+        selector: &MessageSelector,
+        selector_name: &EcoString,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+        span: Span,
+    ) -> InferredType {
+        // Extract the module name from the receiver's type args.
+        // ErlangModule<lists> → module_name = "lists"
+        let Some(InferredType::Known {
+            class_name: module_name,
+            ..
+        }) = receiver_type_args.first()
+        else {
+            return InferredType::Dynamic; // Dynamic module name
+        };
+
+        // Extract the Erlang function name from the selector.
+        // For `reverse: xs` → function = "reverse", arity = 1
+        // For `seq: 1 to: 10` → function = "seq", arity = 2
+        let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
+
+        // Look up in the native type registry.
+        // Clone the signature to release the borrow on self before emitting diagnostics.
+        let sig = self
+            .native_type_registry
+            .as_ref()
+            .and_then(|reg| reg.lookup(module_name, &function_name, arity))
+            .cloned();
+
+        let Some(sig) = sig else {
+            return InferredType::Dynamic;
+        };
+
+        // Emit keyword mismatch warnings (ADR 0075 footgun prevention)
+        self.check_ffi_keyword_mismatch(module_name, &function_name, arity, selector, &sig, span);
+
+        // Check argument types positionally against declared params
+        self.check_ffi_argument_types(module_name, &function_name, &sig, arg_types, span);
+
+        sig.return_type
+    }
+
+    /// Extracts the Erlang function name and arity from a selector and arguments.
+    ///
+    /// For keyword selectors like `seq: 1 to: 10`, the function name is the first
+    /// keyword ("seq") and the arity is the argument count.
+    /// For unary selectors like `reverse`, the function name is the selector and
+    /// arity is 0 (nullary Erlang call).
+    fn extract_ffi_function_info(
+        selector_name: &EcoString,
+        arguments: &[Expression],
+    ) -> (String, u8) {
+        // The selector_name for keyword messages is "reverse:" or "seq:to:"
+        // The Erlang function name is the first keyword without the colon
+        let function_name = selector_name
+            .split(':')
+            .next()
+            .unwrap_or(selector_name.as_str())
+            .to_string();
+
+        let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
+        (function_name, arity)
+    }
+
+    /// Checks argument types against declared parameter types in an FFI signature.
+    ///
+    /// Types are matched positionally (ADR 0075 — FFI calls are positional).
+    fn check_ffi_argument_types(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        sig: &super::native_type_registry::FunctionSignature,
+        arg_types: &[InferredType],
+        span: Span,
+    ) {
+        for (i, (param, arg_ty)) in sig.params.iter().zip(arg_types.iter()).enumerate() {
+            // Skip Dynamic args — we don't know the type
+            if matches!(arg_ty, InferredType::Dynamic) {
+                continue;
+            }
+            // Skip Dynamic param types — anything is accepted
+            if matches!(param.type_, InferredType::Dynamic) {
+                continue;
+            }
+
+            if let (
+                InferredType::Known {
+                    class_name: expected,
+                    ..
+                },
+                InferredType::Known {
+                    class_name: actual, ..
+                },
+            ) = (&param.type_, arg_ty)
+            {
+                if expected != actual {
+                    let param_pos = i + 1;
+                    let fallback_label = format!("parameter {param_pos}");
+                    let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
+                    self.diagnostics.push(Diagnostic::warning(
+                        format!(
+                            "{module_name}:{function_name}/{arity} {param_label} expects {expected}, got {actual}",
+                            arity = sig.arity,
+                        ),
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Emits a warning when call-site keywords don't match the registry's declared
+    /// parameter names (ADR 0075 — keyword mismatch warning).
+    ///
+    /// Suppressed for the universal `with:` fallback (ADR 0028 convention).
+    fn check_ffi_keyword_mismatch(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        arity: u8,
+        selector: &MessageSelector,
+        sig: &super::native_type_registry::FunctionSignature,
+        span: Span,
+    ) {
+        let MessageSelector::Keyword(parts) = selector else {
+            return; // Unary/binary — no keyword mismatch possible
+        };
+
+        // Compare each keyword (except the first, which IS the function name)
+        // against the declared parameter names (starting from index 1).
+        for (i, part) in parts.iter().enumerate().skip(1) {
+            let call_keyword = part.keyword.trim_end_matches(':');
+
+            // Suppress warning for universal `with:` fallback (ADR 0028)
+            if call_keyword == "with" {
+                continue;
+            }
+
+            // Check against the declared keyword at this position
+            if let Some(param) = sig.params.get(i) {
+                if let Some(ref declared_keyword) = param.keyword {
+                    if call_keyword != declared_keyword.as_str() {
+                        let param_pos = i + 1;
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "FFI keyword '{call_keyword}:' does not match declaration '{declared_keyword}:' \
+                                     for {module_name}:{function_name}/{arity} parameter {param_pos}"
+                                ),
+                                span,
+                            )
+                            .with_hint(format!(
+                                "FFI calls are positional — keyword names don't affect dispatch. \
+                                 Preferred form: {}",
+                                sig.display_signature(),
+                            )),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Returns true if the expression is `self` (direct identifier reference).
@@ -1552,6 +1783,22 @@ impl TypeChecker {
             return resolved.clone();
         }
 
+        // BT-1836: Handle union return types like "E | Nil" — substitute each member
+        if ret_ty.contains(" | ") {
+            let members: Vec<InferredType> = ret_ty
+                .split(" | ")
+                .map(|m| Self::substitute_return_type(m.trim(), subst, method_local_subst))
+                .collect();
+            // If all members resolved to the same type, collapse
+            if members.len() == 1 {
+                return members.into_iter().next().unwrap();
+            }
+            return InferredType::Union {
+                members,
+                provenance: super::TypeProvenance::Substituted(Span::default()),
+            };
+        }
+
         // Check for generic return type like "Result(R, E)"
         if let Some(open) = ret_ty.find('(') {
             let base = &ret_ty[..open];
@@ -1576,6 +1823,11 @@ impl TypeChecker {
             };
         }
 
+        // BT-1834: Unresolved bare type param (single uppercase letter) → Dynamic
+        if super::is_generic_type_param(&ret_eco) {
+            return InferredType::Dynamic;
+        }
+
         // Not a type param — return as-is
         InferredType::known(ret_eco)
     }
@@ -1584,7 +1836,7 @@ impl TypeChecker {
     ///
     /// `"T, E"` → `["T", "E"]`
     /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
-    fn split_type_params(s: &str) -> Vec<&str> {
+    pub(super) fn split_type_params(s: &str) -> Vec<&str> {
         let mut result = Vec::new();
         let mut depth = 0;
         let mut start = 0;
@@ -1637,6 +1889,17 @@ impl TypeChecker {
             let Some(arg_ty) = arg_types.get(i) else {
                 continue;
             };
+
+            // BT-1834: Handle plain (non-parametric) type param parameters.
+            // e.g., `inject: initial :: A` — if A is method-local, map it to the arg type.
+            if super::is_generic_type_param(param_type) {
+                let param_eco: EcoString = param_type.clone();
+                if !class_type_params.contains(&param_eco) && !hierarchy.has_class(&param_eco) {
+                    if let InferredType::Known { .. } = arg_ty {
+                        method_subst.insert(param_eco, arg_ty.clone());
+                    }
+                }
+            }
 
             // Handle any parametric type: TypeName(A, B, ...) parameter types
             if let Some(open) = param_type.find('(') {
@@ -2308,6 +2571,7 @@ mod tests {
     #[test]
     fn substitute_generic_base_extracted() {
         // When return type is "Array(R)" and R is not in subst, base "Array" is still extracted
+        // BT-1834: Unresolved type param R falls back to Dynamic instead of Known("R")
         let result =
             TypeChecker::substitute_return_type("Array(R)", &HashMap::new(), &HashMap::new());
         match result {
@@ -2318,8 +2582,8 @@ mod tests {
             } => {
                 assert_eq!(class_name.as_str(), "Array");
                 assert_eq!(type_args.len(), 1);
-                // R not in subst, so it becomes Known("R")
-                assert_eq!(type_args[0], InferredType::known("R"));
+                // R not in subst → Dynamic (BT-1834)
+                assert_eq!(type_args[0], InferredType::Dynamic);
             }
             other => panic!("Expected Known, got {other:?}"),
         }
@@ -3170,6 +3434,40 @@ mod tests {
                 assert_eq!(type_args[1], InferredType::known("Error"));
             }
             other => panic!("Expected Known Result(Array(Integer), Error), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_return_type_union_with_type_param() {
+        // BT-1836: "E | Nil" with E=Integer should produce Union(Integer, Nil)
+        let mut subst = HashMap::new();
+        subst.insert(EcoString::from("E"), InferredType::known("Integer"));
+        let result = TypeChecker::substitute_return_type("E | Nil", &subst, &HashMap::new());
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(members[0], InferredType::known("Integer"));
+                assert_eq!(members[1], InferredType::known("Nil"));
+            }
+            other => panic!("Expected Union(Integer, Nil), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_return_type_union_no_params() {
+        // "Behaviour | Nil" with no substitutions should pass through as Union
+        let result = TypeChecker::substitute_return_type(
+            "Behaviour | Nil",
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(members[0], InferredType::known("Behaviour"));
+                assert_eq!(members[1], InferredType::known("Nil"));
+            }
+            other => panic!("Expected Union(Behaviour, Nil), got {other:?}"),
         }
     }
 }

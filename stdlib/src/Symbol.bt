@@ -16,7 +16,7 @@
 /// #hello asString        // => "hello"
 /// #hello = #hello        // => true
 /// ```
-sealed Object subclass: Symbol
+sealed typed Object subclass: Symbol
 
   /// Convert the symbol to a string.
   ///

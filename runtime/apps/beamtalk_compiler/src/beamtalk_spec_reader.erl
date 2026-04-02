@@ -5,14 +5,16 @@
 %%
 %% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
-%% Phase 0 spike for ADR 0075: Erlang FFI Type Definitions.
+%% ADR 0075: Erlang FFI Type Definitions (Phase 1).
 %%
 %% Extracts spec forms and spec variable names from the `abstract_code` chunk
 %% of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
 %%
-%% Protocol (stdin/stdout term format):
-%%   INPUT:  Erlang term: `{read_specs, BeamFilePath}' (one per line)
-%%   OUTPUT: JSON on stdout (one JSON object per line)
+%% Supports batch processing of multiple modules via `read_specs_batch/1' and
+%% integration with the `beamtalk_build_worker' protocol.
+%%
+%% Multi-clause specs produce a union of return types. Parameter names and
+%% types come from the first clause (Erlang convention).
 %%
 %% @end
 
@@ -20,13 +22,15 @@
 
 -export([
     read_specs/1,
+    read_specs_batch/1,
     map_type/1
 ]).
 
 -ifdef(TEST).
 -export([
     extract_param_names/1,
-    extract_specs_from_forms/1
+    extract_specs_from_forms/1,
+    merge_return_types/1
 ]).
 -endif.
 
@@ -55,6 +59,36 @@ read_specs(BeamFile) ->
             {error, {beam_lib, Reason}}
     end.
 
+%% @doc Batch-read specs from multiple `.beam` files.
+%%
+%% Returns a list of `{Module, Specs}' tuples, one per input file.
+%% Each result is:
+%%   `{Module, {ok, Specs}}' on success
+%%   `{Module, {error, Reason}}' on failure
+%%
+%% The module name is extracted from the `.beam` file's module attribute.
+-spec read_specs_batch([file:filename_all()]) ->
+    [{binary(), {ok, [map()]} | {error, term()}}].
+read_specs_batch(BeamFiles) ->
+    lists:map(
+        fun(BeamFile) ->
+            ModName = beam_file_to_module_name(BeamFile),
+            case read_specs(BeamFile) of
+                {ok, Specs} ->
+                    {ModName, {ok, Specs}};
+                {error, Reason} ->
+                    {ModName, {error, Reason}}
+            end
+        end,
+        BeamFiles
+    ).
+
+%% Extract module name from a .beam file path as a binary.
+-spec beam_file_to_module_name(file:filename_all()) -> binary().
+beam_file_to_module_name(BeamFile) ->
+    BaseName = filename:basename(BeamFile, ".beam"),
+    iolist_to_binary(BaseName).
+
 %% @doc Extract spec entries from abstract forms.
 %%
 %% Walks the forms list once, collecting `{attribute, _, spec, ...}' forms.
@@ -78,43 +112,98 @@ extract_specs_from_forms(Forms) ->
     ).
 
 %% Process a single spec into our result format.
+%%
+%% Multi-clause specs: parameter names and types come from the first clause
+%% (Erlang convention — all clauses share the same arity). The return type
+%% is the union (deduped) of all clause return types.
 -spec process_spec(atom(), non_neg_integer(), [tuple()]) -> map().
 process_spec(Name, Arity, Clauses) ->
-    %% Use the first clause for param names and types
-    {Params, ReturnType} =
-        case Clauses of
-            [{type, _, 'fun', [{type, _, product, ArgTypes}, RetType]} | _] ->
-                ParamList = extract_param_names(ArgTypes),
-                {ParamList, map_type(RetType)};
-            [
-                {type, _, bounded_fun, [
-                    {type, _, 'fun', [{type, _, product, ArgTypes}, RetType]},
-                    Constraints
-                ]}
-                | _
-            ] ->
-                %% Bounded fun: resolve constrained type variables
-                ConstraintMap = build_constraint_map(Constraints),
-                ParamList = extract_param_names_with_constraints(ArgTypes, ConstraintMap),
-                ResolvedRet = resolve_type_with_constraints(RetType, ConstraintMap),
-                {ParamList, ResolvedRet};
-            _ ->
-                %% Fallback: generate positional params
-                Positional = [
-                    #{
-                        name => positional_name(I),
-                        type => <<"Dynamic">>
-                    }
-                 || I <- lists:seq(1, Arity)
-                ],
-                {Positional, <<"Dynamic">>}
-        end,
+    %% Extract params from the first clause, return types from all clauses
+    {Params, ReturnTypes} = extract_from_clauses(Clauses, Arity),
+    ReturnType = merge_return_types(ReturnTypes),
     #{
         name => atom_to_binary(Name, utf8),
         arity => Arity,
         params => Params,
         return_type => ReturnType
     }.
+
+%% Extract params (from first clause) and return types (from all clauses).
+-spec extract_from_clauses([tuple()], non_neg_integer()) ->
+    {[map()], [binary()]}.
+extract_from_clauses(Clauses, Arity) ->
+    extract_from_clauses(Clauses, Arity, first, []).
+
+extract_from_clauses([], Arity, first, _RetAcc) ->
+    %% No clauses at all — generate fallback
+    Positional = [
+        #{name => positional_name(I), type => <<"Dynamic">>}
+     || I <- lists:seq(1, Arity)
+    ],
+    {Positional, [<<"Dynamic">>]};
+extract_from_clauses([], _Arity, {have_params, Params}, RetAcc) ->
+    {Params, lists:reverse(RetAcc)};
+extract_from_clauses([Clause | Rest], Arity, ParamState, RetAcc) ->
+    case extract_clause(Clause) of
+        {ok, ClauseParams, ClauseRet} ->
+            NewParamState =
+                case ParamState of
+                    first -> {have_params, ClauseParams};
+                    {have_params, _} = S -> S
+                end,
+            extract_from_clauses(Rest, Arity, NewParamState, [ClauseRet | RetAcc]);
+        fallback ->
+            %% Unrecognized clause form — skip it
+            extract_from_clauses(Rest, Arity, ParamState, RetAcc)
+    end.
+
+%% Extract params and return type from a single clause.
+-spec extract_clause(tuple()) ->
+    {ok, [map()], binary()} | fallback.
+extract_clause({type, _, 'fun', [{type, _, product, ArgTypes}, RetType]}) ->
+    ParamList = extract_param_names(ArgTypes),
+    {ok, ParamList, map_type(RetType)};
+extract_clause(
+    {type, _, bounded_fun, [
+        {type, _, 'fun', [{type, _, product, ArgTypes}, RetType]},
+        Constraints
+    ]}
+) ->
+    ConstraintMap = build_constraint_map(Constraints),
+    ParamList = extract_param_names_with_constraints(ArgTypes, ConstraintMap),
+    ResolvedRet = resolve_type_with_constraints(RetType, ConstraintMap),
+    {ok, ParamList, ResolvedRet};
+extract_clause(_) ->
+    fallback.
+
+%% Merge a list of return type binaries into a single type.
+%%
+%% - Single type: returns it directly
+%% - Multiple distinct types: joins with ` | ` (union syntax)
+%% - Duplicate types are removed
+%% - Empty list: returns `<<"Dynamic">>'
+-spec merge_return_types([binary()]) -> binary().
+merge_return_types([]) ->
+    <<"Dynamic">>;
+merge_return_types(Types) ->
+    Unique = dedup_types(Types),
+    case Unique of
+        [Single] -> Single;
+        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+    end.
+
+%% Remove duplicate types while preserving order.
+-spec dedup_types([binary()]) -> [binary()].
+dedup_types(Types) ->
+    dedup_types(Types, [], #{}).
+
+dedup_types([], Acc, _Seen) ->
+    lists:reverse(Acc);
+dedup_types([T | Rest], Acc, Seen) ->
+    case maps:is_key(T, Seen) of
+        true -> dedup_types(Rest, Acc, Seen);
+        false -> dedup_types(Rest, [T | Acc], Seen#{T => true})
+    end.
 
 %% Extract parameter names from spec type arguments.
 %% Spec variable names (e.g., `From :: integer()`) provide meaningful names.

@@ -23,7 +23,7 @@
 /// System uniqueId
 /// // => _
 /// ```
-sealed Object subclass: System
+sealed typed Object subclass: System
 
   /// Read an environment variable by name. Returns nil if not set.
   ///

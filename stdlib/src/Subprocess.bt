@@ -32,7 +32,7 @@
 ///
 /// @see ReactiveSubprocess (for push-mode async delivery)
 /// @see System (for simple one-shot commands via osCmd:)
-Actor subclass: Subprocess native: beamtalk_subprocess
+typed Actor subclass: Subprocess native: beamtalk_subprocess
 
   /// Convenience factory — open a subprocess with command and args.
   ///
@@ -43,7 +43,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent := (Subprocess open: "ls" args: #("-la")) unwrap
   /// ```
-  class open: command args: args -> Result =>
+  class open: command :: String args: args :: List -> Result =>
     (Erlang beamtalk_result) tryDo: [
       self spawnWith: #{#executable => command, #args => args}
     ]
@@ -54,7 +54,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent := (Subprocess open: "ls" args: #("-la") dir: #"/tmp") unwrap
   /// ```
-  class open: command args: args dir: dir -> Result =>
+  class open: command :: String args: args :: List dir: dir :: String -> Result =>
     (Erlang beamtalk_result) tryDo: [
       self spawnWith: #{#executable => command, #args => args, #dir => dir}
     ]
@@ -65,7 +65,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent := (Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp") unwrap
   /// ```
-  class open: command args: args env: env dir: dir -> Result =>
+  class open: command :: String args: args :: List env: env :: Dictionary dir: dir :: String -> Result =>
     (Erlang beamtalk_result)
       tryDo: [
         self spawnWith: #{
@@ -82,7 +82,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
-  writeLine: data -> Nil => self delegate
+  writeLine: data :: String -> Nil => self delegate
 
   /// Read one line from stdout. Blocks until a line is available. Returns nil at EOF.
   ///
@@ -98,7 +98,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// line := agent readLine: 5000.   // => String or nil
   /// ```
-  readLine: timeout -> Object => self delegate
+  readLine: timeout :: Integer -> Object => self delegate
 
   /// Read one line from stderr. Blocks until a line is available. Returns nil at EOF.
   ///
@@ -114,7 +114,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// errLine := agent readStderrLine: 5000.
   /// ```
-  readStderrLine: timeout -> Object => self delegate
+  readStderrLine: timeout :: Integer -> Object => self delegate
 
   /// Return a Stream of stdout lines. Each step sends a sync message to the actor.
   ///
@@ -122,7 +122,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent lines do: [:line | Transcript show: line]
   /// ```
-  lines -> Stream => self delegate
+  lines -> Stream(String) => self delegate
 
   /// Return a Stream of stderr lines. Same mechanics as lines.
   ///
@@ -130,7 +130,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent stderrLines do: [:line | Transcript show: line]
   /// ```
-  stderrLines -> Stream => self delegate
+  stderrLines -> Stream(String) => self delegate
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   ///

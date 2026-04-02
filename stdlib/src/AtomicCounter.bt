@@ -30,7 +30,7 @@
 /// c := AtomicCounter named: #hits
 /// c increment
 /// ```
-Object subclass: AtomicCounter
+typed Object subclass: AtomicCounter
 
   /// Create a new named counter starting at 0 (class method).
   ///

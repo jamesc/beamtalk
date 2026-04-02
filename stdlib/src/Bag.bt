@@ -13,7 +13,7 @@
 /// (Bag new add: 1) occurrencesOf: 1      // => 1
 /// (Bag withAll: #(1, 1, 2)) size         // => 3
 /// ```
-Collection subclass: Bag
+typed Collection subclass: Bag
   field: counts :: Dictionary = #{}
 
   /// Create a Bag containing all elements from a list.

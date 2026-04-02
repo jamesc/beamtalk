@@ -14,7 +14,7 @@
 /// Beamtalk allClasses
 /// Beamtalk classNamed: #Integer
 /// ```
-sealed Object subclass: BeamtalkInterface
+sealed typed Object subclass: BeamtalkInterface
   classState: current :: BeamtalkInterface | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).

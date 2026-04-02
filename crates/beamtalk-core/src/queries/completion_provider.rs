@@ -1741,10 +1741,11 @@ mod tests {
 
     #[test]
     fn erlang_completions_show_types_from_native_registry() {
-        // ADR 0075 spike: verify typed completions when NativeTypeRegistry is provided
+        // ADR 0075: verify typed completions when NativeTypeRegistry is provided
         use crate::semantic_analysis::type_checker::native_type_registry::{
-            NativeFunctionType, NativeParam, NativeTypeRegistry,
+            FunctionSignature, NativeTypeRegistry, ParamType,
         };
+        use crate::semantic_analysis::type_checker::{InferredType, TypeProvenance};
 
         let source = "Erlang lists ";
         let tokens = lex_with_eof(source);
@@ -1754,14 +1755,15 @@ mod tests {
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
             "lists",
-            vec![NativeFunctionType {
+            vec![FunctionSignature {
                 name: "reverse".to_string(),
                 arity: 1,
-                params: vec![NativeParam {
-                    name: "list".to_string(),
-                    type_name: "List".to_string(),
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
                 }],
-                return_type: "List".to_string(),
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
             }],
         );
 
@@ -2055,12 +2057,12 @@ mod tests {
     #[test]
     fn resolve_expression_type_keyword_send_inject_returns_type_param() {
         // #[1, 2, 3] inject: 0 into: [...] — inject:into: returns type param A
-        // BT-1576: With generic annotations, inject:into: has return type "A"
-        // (a type param). Without substitution context, this resolves to "A".
+        // BT-1834: A is now resolved from the initial value argument (0 :: Integer)
+        // via plain param type inference, so the return type is Integer.
         let hierarchy = ClassHierarchy::with_builtins();
         let result =
             resolve_expression_type("#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]", &hierarchy);
-        assert_eq!(result.as_deref(), Some("A"));
+        assert_eq!(result.as_deref(), Some("Integer"));
     }
 
     #[test]

@@ -11,7 +11,7 @@
 /// OS run: "echo hello"   // => "hello"
 /// OS run: "echo hello" timeout: 5000   // => "hello"
 /// ```
-sealed Object subclass: OS
+sealed typed Object subclass: OS
 
   /// Execute a shell command and return its trimmed stdout as a String.
   ///

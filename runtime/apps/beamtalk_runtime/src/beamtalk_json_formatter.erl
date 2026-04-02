@@ -419,9 +419,7 @@ format_stack_frame(#{class_name := ClassName, function := Function, arity := Ari
             _ ->
                 ""
         end,
-    io_lib:format("  ~ts>>~ts/~B~ts", [ClassPart, FunPart, Arity, Location]);
-format_stack_frame(Frame) ->
-    io_lib:format("  ~tp", [Frame]).
+    io_lib:format("  ~ts>>~ts/~B~ts", [ClassPart, FunPart, Arity, Location]).
 
 %% @doc Convert a metadata key to a binary.  Keys are usually atoms, but
 %% user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.

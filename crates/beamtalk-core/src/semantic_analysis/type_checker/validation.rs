@@ -146,6 +146,32 @@ impl TypeChecker {
                                 class_name, hierarchy, selector, arg_types,
                             );
                         }
+                        // BT-1836: Parse parameterized return types like "Stream(Integer)"
+                        // into Known { class_name: "Stream", type_args: [Known("Integer")] }
+                        // so downstream method resolution works correctly.
+                        if let Some(open) = ret_ty.find('(') {
+                            let base = &ret_ty[..open];
+                            let inner = &ret_ty[open + 1..ret_ty.len() - 1];
+                            let params = super::TypeChecker::split_type_params(inner);
+                            let resolved_args: Vec<super::InferredType> = params
+                                .iter()
+                                .map(|p| {
+                                    let p_eco: EcoString = (*p).into();
+                                    if super::is_generic_type_param(&p_eco) {
+                                        super::InferredType::Dynamic
+                                    } else {
+                                        super::InferredType::known(p_eco)
+                                    }
+                                })
+                                .collect();
+                            return super::InferredType::Known {
+                                class_name: base.into(),
+                                type_args: resolved_args,
+                                provenance: super::TypeProvenance::Substituted(
+                                    crate::source_analysis::Span::default(),
+                                ),
+                            };
+                        }
                         return InferredType::known(ret_ty.clone());
                     }
                 }
@@ -373,6 +399,14 @@ impl TypeChecker {
     ) -> bool {
         if actual == expected {
             return true;
+        }
+        // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
+        // If expected contains `|`, split into members and check if actual matches any.
+        if expected.contains(" | ") {
+            return expected.split(" | ").any(|member| {
+                let member_eco: EcoString = member.trim().into();
+                Self::is_type_compatible(actual, &member_eco, hierarchy)
+            });
         }
         // Singleton types: #foo is compatible with Symbol (its supertype)
         // and with itself (already handled by equality above).

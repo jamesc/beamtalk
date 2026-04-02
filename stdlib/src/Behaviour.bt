@@ -50,7 +50,7 @@ abstract Object subclass: Behaviour
   /// Counter superclass      // => Actor (as class object)
   /// ProtoObject superclass  // => nil
   /// ```
-  sealed superclass => @primitive "classSuperclass"
+  sealed superclass -> Behaviour | Nil => @primitive "classSuperclass"
 
   /// Return all superclasses in order from immediate parent to root.
   ///
@@ -58,7 +58,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter allSuperclasses   // => [Actor, Object, ProtoObject]
   /// ```
-  sealed allSuperclasses -> List => @primitive "classAllSuperclasses"
+  sealed allSuperclasses -> List(Behaviour) => @primitive "classAllSuperclasses"
 
   /// Return direct subclasses of the receiver as a list of class objects.
   ///
@@ -66,7 +66,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Object subclasses   // => [Behaviour, Actor, Integer, ...]
   /// ```
-  sealed subclasses -> List => @primitive "classSubclasses"
+  sealed subclasses -> List(Behaviour) => @primitive "classSubclasses"
 
   /// Return all subclasses transitively (breadth-first) as class objects.
   ///
@@ -74,7 +74,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Object allSubclasses   // => [Behaviour, Class, Actor, ...]
   /// ```
-  sealed allSubclasses -> List => @primitive "classAllSubclasses"
+  sealed allSubclasses -> List(Behaviour) => @primitive "classAllSubclasses"
 
   /// Test whether the receiver strictly inherits from aClass (self not included).
   ///
@@ -109,7 +109,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter methods   // => [increment, getValue]
   /// ```
-  sealed methods -> List => @primitive "classLocalMethods"
+  sealed methods -> List(Symbol) => @primitive "classLocalMethods"
 
   /// Return all selectors understood by instances, including inherited ones.
   ///
@@ -119,7 +119,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter allMethods   // => [increment, getValue, class, respondsTo:, ...]
   /// ```
-  sealed allMethods -> List => @primitive "classMethods"
+  sealed allMethods -> List(Symbol) => @primitive "classMethods"
 
   /// Test whether instances of the receiver understand the given selector
   /// (checks full inheritance chain).
@@ -155,7 +155,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter whichClassIncludesSelector: #class  // => ProtoObject
   /// ```
-  sealed whichClassIncludesSelector: selector :: Symbol =>
+  sealed whichClassIncludesSelector: selector :: Symbol -> Behaviour | Nil =>
     (self includesSelector: selector) ifTrue: [^self]
     self allSuperclasses detect: [:c |
       c includesSelector: selector
@@ -169,7 +169,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter fieldNames   // => [value]
   /// ```
-  sealed fieldNames -> List => @primitive "classFieldNames"
+  sealed fieldNames -> List(Symbol) => @primitive "classFieldNames"
 
   /// Return all field names including inherited, in slot order.
   ///
@@ -177,7 +177,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter allFieldNames   // => [value]
   /// ```
-  sealed allFieldNames -> List => @primitive "classAllFieldNames"
+  sealed allFieldNames -> List(Symbol) => @primitive "classAllFieldNames"
 
   // --- Documentation (ADR 0033) ---
 
@@ -270,7 +270,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Integer protocols   // => [#Printable, #Comparable, ...]
   /// ```
-  sealed protocols -> List => @primitive "classProtocols"
+  sealed protocols -> List(Symbol) => @primitive "classProtocols"
 
   // --- Source file and reload (ADR 0040 Phase 2) ---
 

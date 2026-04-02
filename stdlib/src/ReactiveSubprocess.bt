@@ -43,7 +43,7 @@
 /// ```
 ///
 /// @see Subprocess (for pull-mode synchronous I/O)
-Actor subclass: ReactiveSubprocess
+typed Actor subclass: ReactiveSubprocess
 
   /// Open a subprocess in push mode, delivering lines to `notify`.
   ///

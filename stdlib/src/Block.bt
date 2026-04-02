@@ -15,7 +15,7 @@
 /// [:x | x * 2] value: 3       // => 6
 /// [true] whileTrue: [Transcript show: "loop"]
 /// ```
-sealed Object subclass: Block
+sealed typed Object subclass: Block
 
   /// Evaluate a zero-argument block.
   ///
@@ -105,4 +105,4 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args :: List => @primitive "valueWithArguments:"
+  valueWithArguments: args :: List -> Object => @primitive "valueWithArguments:"

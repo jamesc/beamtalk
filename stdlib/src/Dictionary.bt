@@ -15,7 +15,7 @@
 /// #{#name => "Alice"} at: #name               // => "Alice"
 /// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
 /// ```
-sealed Collection subclass: Dictionary(K, V)
+sealed typed Collection subclass: Dictionary(K, V)
 
   /// Number of key-value pairs.
   ///
@@ -31,7 +31,7 @@ sealed Collection subclass: Dictionary(K, V)
   /// ```beamtalk
   /// #{#a => 1, #b => 2} keys
   /// ```
-  keys -> List => @primitive "keys"
+  keys -> List(K) => @primitive "keys"
 
   /// Return a list of all values.
   ///
@@ -39,7 +39,7 @@ sealed Collection subclass: Dictionary(K, V)
   /// ```beamtalk
   /// #{#a => 1, #b => 2} values
   /// ```
-  values -> List => @primitive "values"
+  values -> List(V) => @primitive "values"
 
   /// Return the value associated with `key`. Raises an error if not found.
   ///

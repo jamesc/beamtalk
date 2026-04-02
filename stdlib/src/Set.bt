@@ -12,7 +12,7 @@
 /// (Set new add: 1) includes: 1    // => true
 /// (Set new add: 1) size           // => 1
 /// ```
-sealed Collection subclass: Set(E)
+sealed typed Collection subclass: Set(E)
   field: elements :: List = #()
 
   /// Create a Set from a list, deduplicating elements.
@@ -150,4 +150,4 @@ sealed Collection subclass: Set(E)
   /// ```beamtalk
   /// ((Set new add: 1) stream) asList   // => #(1)
   /// ```
-  stream -> Stream => @primitive "stream"
+  stream -> Stream(E) => @primitive "stream"

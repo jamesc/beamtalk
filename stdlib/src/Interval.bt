@@ -12,7 +12,7 @@
 /// 1 to: 10 by: 2     // => (1 to: 10 by: 2)
 /// (1 to: 10) size    // => 10
 /// ```
-Collection subclass: Interval
+typed Collection subclass: Interval
   field: from :: Integer = 0
   field: to :: Integer = 0
   field: step :: Integer = 1

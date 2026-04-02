@@ -811,19 +811,19 @@ No existing behavior changes. This is purely additive:
 
 **Epic:** BT-1839
 **Issues:** BT-1840, BT-1841, BT-1842, BT-1843, BT-1844, BT-1845, BT-1846, BT-1847, BT-1848, BT-1849, BT-1850, BT-1851, BT-1852, BT-1853
-**Status:** Planned
+**Status:** Phase 1 Complete — Phase 2 Deferred (see [gate evaluation](0075-gate-evaluation.md))
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
-| 0 | BT-1840 | Spike: Extract Erlang specs + param names from .beam | S | Planned |
-| 1 | BT-1841 | Runtime: Full spec reader with batch processing | M | Planned |
-| 1 | BT-1842 | Type checker: Erlang→Beamtalk type mapping + NativeTypeRegistry | M | Planned |
-| 1 | BT-1843 | Type checker: FFI call inference + keyword mismatch warning | M | Planned |
-| 1 | BT-1844 | Build + LSP: Cache integration + typed completions | M | Planned |
-| Gate | BT-1845 | Gate: Evaluate auto-extract quality — decide Phase 2 | S | Planned |
-| 2 | BT-1846 | Parser: `declare native:` top-level form | M | Planned |
-| 2 | BT-1847 | Build: Stub resolution chain | S | Planned |
-| 2 | BT-1848 | Curate initial OTP stubs (10 modules) | M | Planned |
+| 0 | BT-1840 | Spike: Extract Erlang specs + param names from .beam | S | Done |
+| 1 | BT-1841 | Runtime: Full spec reader with batch processing | M | Done |
+| 1 | BT-1842 | Type checker: Erlang→Beamtalk type mapping + NativeTypeRegistry | M | Done |
+| 1 | BT-1843 | Type checker: FFI call inference + keyword mismatch warning | M | Done |
+| 1 | BT-1844 | Build + LSP: Cache integration + typed completions | M | Done |
+| Gate | BT-1845 | Gate: Evaluate auto-extract quality — decide Phase 2 | S | Done |
+| 2 | BT-1846 | Parser: `declare native:` top-level form | M | Deferred |
+| 2 | BT-1847 | Build: Stub resolution chain | S | Deferred |
+| 2 | BT-1848 | Curate initial OTP stubs (10 modules) | M | Deferred |
 | 3 | BT-1849 | CLI: Create `beamtalk generate` subcommand group | M | Planned |
 | 3 | BT-1850 | CLI: Implement `beamtalk generate stubs` | M | Planned |
 | 4 | BT-1851 | Runtime: `beamtalk_native_docs` EEP-48 reader | S | Planned |

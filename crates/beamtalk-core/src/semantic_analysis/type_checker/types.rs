@@ -20,6 +20,12 @@ pub enum TypeProvenance {
     Inferred(Span),
     /// Derived from a generic substitution at this location.
     Substituted(Span),
+    /// Auto-extracted from `.beam` abstract code (ADR 0075).
+    ///
+    /// Types with this provenance come from Erlang `-spec` attributes read at
+    /// build time. The span is always `Span::default()` (no source location in
+    /// the Beamtalk codebase) — diagnostics show "from <module>.beam -spec".
+    Extracted,
 }
 
 /// Inferred type for an expression or variable.

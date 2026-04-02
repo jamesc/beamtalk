@@ -16,7 +16,7 @@
 ///   handle lines take: 10.
 /// ].
 /// ```
-sealed Object subclass: FileHandle
+sealed typed Object subclass: FileHandle
 
   /// Return a lazy Stream of lines from this file handle.
   ///
@@ -30,4 +30,4 @@ sealed Object subclass: FileHandle
   ///   handle lines do: [:line | Transcript show: line].
   /// ].
   /// ```
-  lines -> Stream => (Erlang beamtalk_file) handleLines: self
+  lines -> Stream(String) => (Erlang beamtalk_file) handleLines: self
