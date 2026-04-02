@@ -59,7 +59,7 @@
             #{name => 'Server', module => 'bt@stdlib@server', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
             #{name => 'Set', module => 'bt@stdlib@set', parent => 'Collection', package => 'stdlib', kind => object, type_params => ['E']},
             #{name => 'StackFrame', module => 'bt@stdlib@stack_frame', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
-            #{name => 'Stream', module => 'bt@stdlib@stream', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Stream', module => 'bt@stdlib@stream', parent => 'Object', package => 'stdlib', kind => object, type_params => ['E']},
             #{name => 'String', module => 'bt@stdlib@string', parent => 'Binary', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Subprocess', module => 'bt@stdlib@subprocess', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
             #{name => 'SupervisionSpec', module => 'bt@stdlib@supervision_spec', parent => 'Value', package => 'stdlib', kind => value, type_params => []},

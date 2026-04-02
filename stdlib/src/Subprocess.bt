@@ -122,7 +122,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent lines do: [:line | Transcript show: line]
   /// ```
-  lines -> Stream => self delegate
+  lines -> Stream(String) => self delegate
 
   /// Return a Stream of stderr lines. Same mechanics as lines.
   ///
@@ -130,7 +130,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent stderrLines do: [:line | Transcript show: line]
   /// ```
-  stderrLines -> Stream => self delegate
+  stderrLines -> Stream(String) => self delegate
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   ///

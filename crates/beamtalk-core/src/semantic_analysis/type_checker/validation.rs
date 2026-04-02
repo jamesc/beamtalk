@@ -146,6 +146,32 @@ impl TypeChecker {
                                 class_name, hierarchy, selector, arg_types,
                             );
                         }
+                        // BT-1836: Parse parameterized return types like "Stream(Integer)"
+                        // into Known { class_name: "Stream", type_args: [Known("Integer")] }
+                        // so downstream method resolution works correctly.
+                        if let Some(open) = ret_ty.find('(') {
+                            let base = &ret_ty[..open];
+                            let inner = &ret_ty[open + 1..ret_ty.len() - 1];
+                            let params = super::TypeChecker::split_type_params(inner);
+                            let resolved_args: Vec<super::InferredType> = params
+                                .iter()
+                                .map(|p| {
+                                    let p_eco: EcoString = (*p).into();
+                                    if super::is_generic_type_param(&p_eco) {
+                                        super::InferredType::Dynamic
+                                    } else {
+                                        super::InferredType::known(p_eco)
+                                    }
+                                })
+                                .collect();
+                            return super::InferredType::Known {
+                                class_name: base.into(),
+                                type_args: resolved_args,
+                                provenance: super::TypeProvenance::Substituted(
+                                    crate::source_analysis::Span::default(),
+                                ),
+                            };
+                        }
                         return InferredType::known(ret_ty.clone());
                     }
                 }

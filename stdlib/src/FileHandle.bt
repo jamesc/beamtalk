@@ -30,4 +30,4 @@ sealed typed Object subclass: FileHandle
   ///   handle lines do: [:line | Transcript show: line].
   /// ].
   /// ```
-  lines -> Stream => (Erlang beamtalk_file) handleLines: self
+  lines -> Stream(String) => (Erlang beamtalk_file) handleLines: self

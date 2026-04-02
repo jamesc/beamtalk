@@ -489,7 +489,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// ("hello" stream) take: 3         // => #("h", "e", "l")
   /// ```
-  stream -> Stream => @primitive "stream"
+  stream -> Stream(String) => @primitive "stream"
 
   /// Test if the string matches a regular expression pattern.
   /// Accepts a String pattern or compiled Regex object.
