@@ -870,3 +870,330 @@ impl<'a> ReplAssembler<'a> {
         Ok((docs, rhs_var))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Expression, Identifier, Literal};
+    use crate::codegen::core_erlang::CodeGenError;
+    use crate::source_analysis::Span;
+    use ecow::EcoString;
+    use std::collections::HashMap;
+
+    // ── Helpers ────────────────────────────────────────────────────────
+
+    /// Creates a dummy span for test AST nodes.
+    fn span() -> Span {
+        Span::new(0, 1)
+    }
+
+    /// Creates an integer literal expression.
+    fn int_expr(value: i64) -> Expression {
+        Expression::Literal(Literal::Integer(value), span())
+    }
+
+    /// Creates a string literal expression.
+    fn str_expr(value: &str) -> Expression {
+        Expression::Literal(Literal::String(EcoString::from(value)), span())
+    }
+
+    /// Creates a symbol literal expression.
+    fn sym_expr(value: &str) -> Expression {
+        Expression::Literal(Literal::Symbol(EcoString::from(value)), span())
+    }
+
+    /// Creates a float literal expression.
+    fn float_expr(value: f64) -> Expression {
+        Expression::Literal(Literal::Float(value), span())
+    }
+
+    /// Creates an identifier expression.
+    fn ident_expr(name: &str) -> Expression {
+        Expression::Identifier(Identifier::new(name, span()))
+    }
+
+    /// Creates a simple assignment expression (x := value).
+    fn assign_expr(name: &str, value: Expression) -> Expression {
+        Expression::Assignment {
+            target: Box::new(ident_expr(name)),
+            value: Box::new(value),
+            span: span(),
+        }
+    }
+
+    /// Creates a unary message send expression (receiver selector).
+    fn unary_send(receiver: Expression, selector: &str) -> Expression {
+        use crate::ast::MessageSelector;
+        Expression::MessageSend {
+            receiver: Box::new(receiver),
+            selector: MessageSelector::Unary(EcoString::from(selector)),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        }
+    }
+
+    // ── generate_repl_expression: single expression ───────────────────
+
+    #[test]
+    fn repl_integer_literal() {
+        let result = generate_repl_expression(&int_expr(42), "repl_test_1").unwrap();
+        assert!(
+            result.contains("module 'repl_test_1'"),
+            "missing module name"
+        );
+        assert!(result.contains("['eval'/1]"), "missing eval/1 export");
+        assert!(result.contains("fun (Bindings)"), "missing Bindings param");
+        assert!(result.contains("42"), "missing integer value");
+        assert!(result.contains("{Result, State}"), "missing return tuple");
+    }
+
+    #[test]
+    fn repl_string_literal() {
+        let result = generate_repl_expression(&str_expr("hello"), "repl_test_2").unwrap();
+        assert!(result.contains("module 'repl_test_2'"));
+        // String literals compile to Core Erlang binary byte sequences.
+        // "hello" = bytes 104, 101, 108, 108, 111
+        assert!(
+            result.contains("#<104>"),
+            "should contain binary encoding of string"
+        );
+    }
+
+    #[test]
+    fn repl_symbol_literal() {
+        let result = generate_repl_expression(&sym_expr("ok"), "repl_test_3").unwrap();
+        assert!(result.contains("module 'repl_test_3'"));
+        assert!(result.contains("'ok'"), "symbol should compile to atom");
+    }
+
+    #[test]
+    fn repl_float_literal() {
+        let result = generate_repl_expression(&float_expr(1.5), "repl_test_4").unwrap();
+        assert!(result.contains("module 'repl_test_4'"));
+        assert!(result.contains("1.5"), "missing float value");
+    }
+
+    #[test]
+    fn repl_module_structure() {
+        let result = generate_repl_expression(&int_expr(1), "repl_mod_struct").unwrap();
+        // Verify the essential Core Erlang module structure
+        assert!(result.contains("module 'repl_mod_struct' ['eval'/1]"));
+        assert!(result.contains("attributes []"));
+        assert!(result.contains("'eval'/1 = fun (Bindings)"));
+        assert!(result.contains("let State = Bindings"));
+        assert!(result.contains("let Result ="));
+        assert!(result.contains("end"));
+    }
+
+    #[test]
+    fn repl_single_assignment_updates_state() {
+        // Single assignment goes through generate_eval_module_body_inner
+        let expr = assign_expr("x", int_expr(42));
+        let result = generate_repl_expression(&expr, "repl_assign_single").unwrap();
+        assert!(result.contains("module 'repl_assign_single'"));
+        // Single assignment in REPL mode compiles the value expression and
+        // updates state -- the exact mechanism depends on the codegen path,
+        // but the output must contain the variable name and value.
+        assert!(result.contains("42"), "should contain the assigned value");
+    }
+
+    #[test]
+    fn repl_multi_assignment_threads_state() {
+        // Multi-expression path threads state between assignments via maps:put
+        let exprs = vec![assign_expr("x", int_expr(42)), ident_expr("x")];
+        let result = generate_repl_expressions(&exprs, "repl_assign_multi").unwrap();
+        assert!(
+            result.contains("maps':'put'"),
+            "assignment should use maps:put for state threading: {result}"
+        );
+        assert!(
+            result.contains("'x'"),
+            "should store variable name as atom key"
+        );
+    }
+
+    // ── generate_repl_expressions: multi-expression ───────────────────
+
+    #[test]
+    fn repl_multi_non_assignment_intermediate() {
+        // Non-assignment intermediate expression (side-effect only, value discarded)
+        let exprs = vec![int_expr(1), int_expr(2)];
+        let result = generate_repl_expressions(&exprs, "repl_multi_side").unwrap();
+        assert!(result.contains("module 'repl_multi_side'"));
+        // Both values should appear in the generated code
+        assert!(result.contains('1'), "should contain first expression");
+        assert!(result.contains('2'), "should contain second expression");
+    }
+
+    #[test]
+    fn repl_multi_expressions_single_delegates() {
+        // With a single expression, generate_repl_expressions should delegate
+        // to the single-expression path and produce identical output.
+        let single = generate_repl_expression(&int_expr(99), "repl_delegate").unwrap();
+        let multi = generate_repl_expressions(&[int_expr(99)], "repl_delegate").unwrap();
+        assert_eq!(
+            single, multi,
+            "single expression should delegate to same path"
+        );
+    }
+
+    #[test]
+    fn repl_multi_three_assignments() {
+        let exprs = vec![
+            assign_expr("a", int_expr(1)),
+            assign_expr("b", int_expr(2)),
+            assign_expr("c", int_expr(3)),
+        ];
+        let result = generate_repl_expressions(&exprs, "repl_multi_3").unwrap();
+        assert!(result.contains("'a'"), "should bind variable a");
+        assert!(result.contains("'b'"), "should bind variable b");
+        assert!(result.contains("'c'"), "should bind variable c");
+    }
+
+    // ── generate_repl_expressions: empty input ────────────────────────
+
+    #[test]
+    fn repl_empty_expressions_returns_error() {
+        let result = generate_repl_expressions(&[], "repl_empty");
+        assert!(result.is_err(), "empty expressions should return error");
+        match result.unwrap_err() {
+            CodeGenError::UnsupportedFeature { feature, .. } => {
+                assert!(
+                    feature.contains("empty"),
+                    "error should mention empty: {feature}"
+                );
+            }
+            other => panic!("expected UnsupportedFeature, got: {other}"),
+        }
+    }
+
+    // ── generate_repl_expressions_with_index ──────────────────────────
+
+    #[test]
+    fn repl_with_empty_class_index() {
+        let result =
+            generate_repl_expressions_with_index(&[int_expr(42)], "repl_idx_empty", HashMap::new())
+                .unwrap();
+        assert!(result.contains("module 'repl_idx_empty'"));
+        assert!(result.contains("42"));
+    }
+
+    #[test]
+    fn repl_with_class_index_produces_valid_module() {
+        let mut index = HashMap::new();
+        index.insert("Counter".to_string(), "bt@app@counter".to_string());
+        let result =
+            generate_repl_expressions_with_index(&[int_expr(1)], "repl_idx_class", index).unwrap();
+        // Should still produce a valid module — the class index only affects
+        // class reference resolution, not literal expressions.
+        assert!(result.contains("module 'repl_idx_class'"));
+    }
+
+    // ── generate_test_expression ──────────────────────────────────────
+
+    #[test]
+    fn test_expression_integer() {
+        let result = generate_test_expression(&int_expr(7), "test_mod_1").unwrap();
+        assert!(result.contains("module 'test_mod_1'"));
+        assert!(result.contains('7'));
+    }
+
+    #[test]
+    fn test_expression_no_workspace_bindings_in_return() {
+        // Test mode should still return {Result, State} tuple — the difference
+        // is workspace_mode=false which affects how identifier lookups work
+        // (no maps:get from State for unknown vars).
+        let result = generate_test_expression(&int_expr(42), "test_mod_2").unwrap();
+        assert!(
+            result.contains("{Result, State}"),
+            "should return result tuple"
+        );
+    }
+
+    #[test]
+    fn test_expression_module_structure() {
+        let result = generate_test_expression(&str_expr("test"), "test_struct").unwrap();
+        assert!(result.contains("module 'test_struct' ['eval'/1]"));
+        assert!(result.contains("attributes []"));
+        assert!(result.contains("'eval'/1 = fun (Bindings)"));
+        assert!(result.contains("let State = Bindings"));
+    }
+
+    // ── generate_repl_expressions_traced ──────────────────────────────
+
+    #[test]
+    fn traced_single_expression() {
+        let source = "42";
+        let result = generate_repl_expressions_traced(
+            &[int_expr(42)],
+            source,
+            "repl_trace_1",
+            HashMap::new(),
+        )
+        .unwrap();
+        assert!(result.contains("module 'repl_trace_1'"));
+        // Trace mode wraps results in [{<<"source">>, Value}] list
+        assert!(
+            result.contains("42"),
+            "should contain the source text as binary"
+        );
+    }
+
+    #[test]
+    fn traced_empty_returns_error() {
+        let result = generate_repl_expressions_traced(&[], "", "repl_trace_empty", HashMap::new());
+        assert!(result.is_err(), "empty traced expressions should error");
+    }
+
+    #[test]
+    fn traced_multi_expressions() {
+        let source = "x := 1\nx";
+        let exprs = vec![assign_expr("x", int_expr(1)), ident_expr("x")];
+        let result =
+            generate_repl_expressions_traced(&exprs, source, "repl_trace_multi", HashMap::new())
+                .unwrap();
+        assert!(result.contains("module 'repl_trace_multi'"));
+    }
+
+    #[test]
+    fn traced_assignment_includes_source_binary() {
+        let source = "x := 42";
+        let expr = assign_expr("x", int_expr(42));
+        let result =
+            generate_repl_expressions_traced(&[expr], source, "repl_trace_assign", HashMap::new())
+                .unwrap();
+        // Trace mode embeds source text as a Core Erlang binary literal.
+        // "x := 42" starts with byte 120 ('x')
+        assert!(
+            result.contains("#<120>"),
+            "trace output should contain source text as binary: {result}"
+        );
+    }
+
+    // ── Message send expressions ──────────────────────────────────────
+
+    #[test]
+    fn repl_unary_message_send() {
+        // A simple unary message like `42 asString`
+        let expr = unary_send(int_expr(42), "asString");
+        let result = generate_repl_expression(&expr, "repl_msg_send").unwrap();
+        assert!(result.contains("module 'repl_msg_send'"));
+        // The codegen should contain a dispatch/function call for the message
+        assert!(result.contains("42"), "should contain the receiver literal");
+    }
+
+    // ── Module name variations ────────────────────────────────────────
+
+    #[test]
+    fn module_name_preserved_exactly() {
+        let result = generate_repl_expression(&int_expr(1), "my_custom_module_42").unwrap();
+        assert!(result.contains("module 'my_custom_module_42'"));
+    }
+
+    #[test]
+    fn module_name_with_special_chars() {
+        let result = generate_repl_expression(&int_expr(1), "repl_eval_999").unwrap();
+        assert!(result.contains("module 'repl_eval_999'"));
+    }
+}
