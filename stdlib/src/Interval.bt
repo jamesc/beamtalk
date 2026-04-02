@@ -13,9 +13,9 @@
 /// (1 to: 10) size    // => 10
 /// ```
 Collection subclass: Interval
-  field: from = 0
-  field: to = 0
-  field: step = 1
+  field: from :: Integer = 0
+  field: to :: Integer = 0
+  field: step :: Integer = 1
 
   /// Number of elements in the interval.
   ///

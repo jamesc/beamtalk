@@ -36,8 +36,8 @@
 ///
 /// @see Actor#withTimeout:
 Actor subclass: TimeoutProxy
-  state: target = nil
-  state: timeoutMs = 5000
+  state: target :: Actor | Nil = nil
+  state: timeoutMs :: Integer | Symbol = 5000
 
   /// Set the target actor to forward messages to.
   setTarget: newTarget :: Actor -> Nil => self.target := newTarget

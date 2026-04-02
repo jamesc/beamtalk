@@ -32,9 +32,9 @@
 /// ```
 Value subclass: SupervisionSpec
   /// Child id override — nil uses the actor class name as the OTP child id.
-  field: id = nil
+  field: id :: Symbol | Nil = nil
   /// The actor class being supervised.
-  field: actorClass = nil
+  field: actorClass :: Class | Nil = nil
   /// OTP restart policy — `#permanent`, `#transient`, or `#temporary`.
   ///
   /// Defaults to `#temporary`. Set to the actor's `supervisionPolicy` when
@@ -43,12 +43,12 @@ Value subclass: SupervisionSpec
   /// Optional initialization arguments passed via `spawnWith:`.
   ///
   /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
-  field: args = nil
+  field: args :: Object | Nil = nil
   /// Custom shutdown timeout in milliseconds, or nil to use the computed default.
   ///
   /// When nil, workers use 5000ms and supervisors use `#infinity`.
   /// Set via `withShutdown:` to override the default for graceful drain/cleanup.
-  field: shutdown = nil
+  field: shutdown :: Integer | Nil = nil
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs: are auto-generated.)
@@ -71,7 +71,7 @@ Value subclass: SupervisionSpec
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SupervisionSpec id: #primary actorClass: Counter restart: #permanent args: nil
+  /// SupervisionSpec id: #primary actorClass: Counter restart: #permanent args: nil shutdown: 5000
   ///   // printString => "SupervisionSpec(Counter, id: #primary, restart: #permanent)"
   /// ```
   printString -> String =>
