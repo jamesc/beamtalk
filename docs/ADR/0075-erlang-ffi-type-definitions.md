@@ -795,6 +795,7 @@ Basic typed completions ship in Phase 1. This phase adds richer tooling and runt
 - **Richer type mapping** — as Beamtalk's type system grows (subrange types, typed maps, record types), the Erlang→Beamtalk mapping can become more precise
 - **Elixir stubs** — `declare native:` files for Elixir modules (`'Elixir.Enum'`, `'Elixir.String'`, etc.)
 - **PLT integration** — read Dialyzer PLT for inferred types of unspecced functions (if needed)
+- **Native module discoverability** — `Beamtalk nativeModules` or `Workspace nativeModules` listing all available Erlang modules with type info (from `NativeTypeRegistry`) or all loaded modules (from `code:all_loaded()`)
 - **AI-assisted stub refinement** — use LLMs to tighten `Dynamic` params and refine keyword names in generated stubs
 
 ## Migration Path
