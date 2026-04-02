@@ -111,18 +111,31 @@ impl ProtocolInfo {
         registry: &'a ProtocolRegistry,
     ) -> Vec<&'a EcoString> {
         let mut selectors: Vec<&EcoString> = self.methods.iter().map(|m| &m.selector).collect();
+        let mut visited = std::collections::HashSet::new();
+        self.collect_parent_selectors(registry, &mut selectors, &mut visited);
+        selectors
+    }
 
+    /// Recursively collects selectors from parent protocols, with cycle detection.
+    fn collect_parent_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+        selectors: &mut Vec<&'a EcoString>,
+        visited: &mut std::collections::HashSet<EcoString>,
+    ) {
         if let Some(ref parent_name) = self.extending {
+            if !visited.insert(parent_name.clone()) {
+                return; // Cycle detected — stop recursion
+            }
             if let Some(parent) = registry.get(parent_name) {
-                for sel in parent.all_required_selectors(registry) {
+                for sel in parent.methods.iter().map(|m| &m.selector) {
                     if !selectors.contains(&sel) {
                         selectors.push(sel);
                     }
                 }
+                parent.collect_parent_selectors(registry, selectors, visited);
             }
         }
-
-        selectors
     }
 
     /// Returns all method requirements, including those inherited from extended protocols.

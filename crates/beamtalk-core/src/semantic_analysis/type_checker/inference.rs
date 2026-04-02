@@ -1107,10 +1107,17 @@ impl TypeChecker {
     /// If no protocol registry is set, or zero/multiple protocols match the
     /// selector, the narrowing is returned unchanged (stays `Dynamic`).
     fn refine_responds_to_narrowing(&self, mut info: NarrowingInfo) -> NarrowingInfo {
-        if let Some(ref selector) = info.responded_selector {
-            if let Some(ref registry) = self.protocol_registry {
-                if let Some(protocol_name) = registry.find_unique_protocol_for_selector(selector) {
-                    info.true_type = InferredType::known(protocol_name.clone());
+        // Only refine to a protocol type when the variable is currently Dynamic.
+        // If the variable already has a concrete type (e.g., Integer), narrowing
+        // to a protocol (e.g., Printable) would lose type-specific APIs.
+        if matches!(info.true_type, InferredType::Dynamic) {
+            if let Some(ref selector) = info.responded_selector {
+                if let Some(ref registry) = self.protocol_registry {
+                    if let Some(protocol_name) =
+                        registry.find_unique_protocol_for_selector(selector)
+                    {
+                        info.true_type = InferredType::known(protocol_name.clone());
+                    }
                 }
             }
         }
