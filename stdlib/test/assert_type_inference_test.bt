@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1820: Integration tests for type parameter inference through TestCase
+// assertion methods. Verifies that assertOk: returns the typed T value from
+// Result(T, E), allowing typed operations without warnings.
+
+TestCase subclass: AssertTypeInferenceTest
+
+  testAssertOkIntegerArithmetic =>
+    // assertOk: on Result(Integer, ...) should return Integer, enabling +
+    value := self assertOk: (Result ok: 10)
+    self assert: value + 5 equals: 15
+    self assert: value * 2 equals: 20
+
+  testAssertOkStringOperations =>
+    // assertOk: on Result(String, ...) should return String, enabling size
+    value := self assertOk: (Result ok: "hello")
+    self assert: value size equals: 5
+    self assert: value ++ " world" equals: "hello world"
+
+  testAssertOkArrayOperations =>
+    // assertOk: on Result(Array, ...) should return Array, enabling size
+    arr := self assertOk: (Result ok: #[1, 2, 3])
+    self assert: arr size equals: 3
+
+  testAssertOkChainedUsage =>
+    // The typed return value can be used in further expressions
+    a := self assertOk: (Result ok: 100)
+    b := self assertOk: (Result ok: 200)
+    sum := a + b
+    self assert: sum equals: 300
