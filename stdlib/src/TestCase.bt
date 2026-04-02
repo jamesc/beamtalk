@@ -140,7 +140,7 @@ Value subclass: TestCase
   ///
   /// ## Examples
   /// ```beamtalk
-  /// self should: [1 / 0] raise: ZeroDivisionError
+  /// self should: [1 / 0] raise: #zero_division
   /// ```
   should: block :: Block raise: errorKind :: Symbol -> Nil =>
     (Erlang beamtalk_test_case) should: block raise: errorKind
