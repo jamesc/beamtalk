@@ -676,7 +676,7 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![line(), "{'reply', {'ok', Result}, NewState}",]
                     ),
-                    // Error case: return {error, Error} with stacktrace (BT-1822)
+                    // Error case: pass error (now includes stacktrace) opaquely to caller
                     line(),
                     "<{'error', Error, ErrState}> when 'true' ->",
                     nest(

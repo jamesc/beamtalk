@@ -712,7 +712,8 @@ sync_send_remote(ActorPid, Selector, Args) ->
                             {Result, Metadata#{outcome => ok}};
                         {error, {ErlType, ErrorValue, Stacktrace}} ->
                             %% BT-1822: safe_dispatch caught an Erlang exception with stacktrace;
-                            %% re-raise with full type/stacktrace context
+                            %% re-raise with full type/stacktrace context.
+                            %% Guard prevents false-match on non-stacktrace 3-tuples.
                             error(
                                 beamtalk_exception_handler:ensure_wrapped(
                                     ErlType, ErrorValue, Stacktrace
