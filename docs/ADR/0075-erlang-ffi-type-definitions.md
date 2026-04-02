@@ -30,7 +30,7 @@ This is the **single largest gap** in typed coverage. A codebase that is fully t
 
 **Existing infrastructure that makes this solvable:**
 
-1. **Beamtalk→Erlang type mapping** is already defined in `spec_codegen.rs` (lines 33–51) for generating Dialyzer `-spec` attributes. The reverse mapping (Erlang→Beamtalk) is straightforward:
+1. **Beamtalk→Erlang type mapping** is already defined in `crates/beamtalk-core/src/codegen/core_erlang/spec_codegen.rs` (lines 33–51) for generating Dialyzer `-spec` attributes. The forward mapping includes types not present in Erlang specs (e.g., `Character` → `integer()`, `Set` → `map()`). The reverse mapping (Erlang→Beamtalk) covers the types that actually appear in Erlang `-spec` annotations:
 
    | Erlang type | Beamtalk type |
    |-------------|---------------|
@@ -72,7 +72,7 @@ This is the **single largest gap** in typed coverage. A codebase that is fully t
 
 ### Hybrid: Auto-Extract from `.beam` + Stub Override Files
 
-A two-layer system that provides **automatic baseline typing** for all Erlang modules and **curated overrides** where precision matters.
+A two-layer system that provides **automatic baseline typing** for all specced Erlang modules on the code path and **curated overrides** where precision matters.
 
 ### Layer 1: Auto-Extract from `.beam` Specs + `.erl` Source
 
@@ -127,7 +127,7 @@ Spec extraction requires the `abstract_code` chunk, which is only present in `.b
 
 **Policy:** When a `.beam` file lacks `abstract_code`, the spec reader returns no specs for that module — it silently falls through to `Dynamic` (layer 5 in the resolution chain). The build emits a one-time info-level diagnostic: `"Note: <module>.beam has no debug_info — auto-extracted types unavailable. Add a stub file in stubs/ for type coverage."` This is not a warning (it's expected for some packages) but gives users a path forward.
 
-**Important:** This limitation only affects auto-extraction. Curated stub stubs work regardless of `+debug_info` — they are the recommended path for packages known to strip debug info.
+**Important:** This limitation only affects auto-extraction. Curated stub files work regardless of `+debug_info` — they are the recommended path for packages known to strip debug info.
 
 **Beamtalk-compiled `.beam` files:** Note that Beamtalk compiles via Core Erlang, and Core Erlang compilation does not preserve `-spec` attributes in the `abstract_code` chunk (documented in `validate_specs.escript`). However, this is not a problem: Beamtalk-compiled modules already have full type information in the Beamtalk type checker via `ClassHierarchy` — auto-extraction targets *foreign* (non-Beamtalk) `.beam` files.
 
@@ -205,13 +205,13 @@ declare native: lists
   sort: list :: List(T) -> List(T)
 
   /// Sort with a custom comparator.
-  sort: list :: List(T) by: comparator :: Block(T, T -> Integer) -> List(T)
+  sort: list :: List(T) by: comparator :: Block(T, T, Integer) -> List(T)
 
   /// Apply a function to each element.
-  map: fun :: Block(A -> B) with: list :: List(A) -> List(B)
+  map: fun :: Block(A, B) with: list :: List(A) -> List(B)
 
   /// Left fold.
-  foldl: fun :: Block(T, Acc -> Acc) with: acc :: Acc with: list :: List(T) -> Acc
+  foldl: fun :: Block(T, Acc, Acc) with: acc :: Acc with: list :: List(T) -> Acc
 ```
 
 **Format rules:**
@@ -517,7 +517,7 @@ Dialyzer builds a Persistent Lookup Table with success typings — types inferre
 
 ## Steelman Analysis
 
-### Best Argument for Pure stub Stubs (No Auto-Extract)
+### Best Argument for Pure Stubs (No Auto-Extract)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
@@ -550,7 +550,7 @@ Dialyzer builds a Persistent Lookup Table with success typings — types inferre
 
 ## Alternatives Considered
 
-### Alternative A: Pure stub Stubs (No Auto-Extract)
+### Alternative A: Pure Stubs (No Auto-Extract)
 
 Require hand-written stub files for every Erlang module that should have type info. Functions without stubs return `Dynamic`.
 
@@ -606,7 +606,7 @@ Read inferred types from Dialyzer's PLT files to supplement missing `-spec` anno
 - **Stub maintenance** — curated OTP stubs must be updated when OTP adds/changes functions (mitigated by `generate stubs` tool and version drift detection). Scope is limited: only ~20 compiler-distributed OTP stubs and package-local native stubs. Hex dep types come from auto-extract — no maintenance needed
 - **New parse form** — `declare native:` is a new top-level form, though it reuses the existing protocol signature parser and requires no separate parser
 - **Trust boundary** — stubs can declare incorrect types; the compiler trusts them. Incorrect stubs cause false diagnostics (mitigated by `stub-gen` producing correct starting points)
-- **`+debug_info` dependency** — auto-extraction only works for `.beam` files compiled with `+debug_info`. Release-stripped packages and some precompiled Hex deps fall through to `Dynamic` (mitigated by stub stubs for important packages)
+- **`+debug_info` dependency** — auto-extraction only works for `.beam` files compiled with `+debug_info`. Release-stripped packages and some precompiled Hex deps fall through to `Dynamic` (mitigated by stub files for important packages)
 - **Cold build cost** — first build must read `abstract_code` from all `.beam` files on the code path. For large dependency graphs (200+ modules), this may add several seconds. Results are cached in `_build/type_cache/` and invalidated by `.beam` timestamp changes — incremental builds have zero extraction overhead
 - **Hot code reload staleness** — `NativeTypeRegistry` is populated at build time. If an Erlang module is hot-reloaded mid-session with changed specs, the registry is stale until the next `beamtalk build`. This is a known limitation — type info is compile-time, dispatch is runtime. Consistent with ADR 0025's "compile-time only" principle
 
