@@ -43,9 +43,8 @@ TestCase subclass: BinaryTest
     bin := Binary serialize: 42
     self assert: bin byteSize > 0
 
-  testDeserializeTypeError =>
-    self should: [Binary deserialize: 42] raise: #type_error
-
+  // testDeserializeTypeError: removed — type checker now prevents Binary deserialize: 42
+  // at compile time (BT-1828 tightened :: Object → :: Binary)
   testClassIdentity =>
     // BT-802 (ADR 0036): class on class returns a real metaclass object
     self assert: (Binary class) isMeta equals: true
@@ -425,8 +424,8 @@ TestCase subclass: BinaryTest
     @expect type
     self assert: (result at: 2) equals: bin byteSize
 
-  testDeserializeWithUsedTypeError =>
-    self should: [Binary deserializeWithUsed: 42] raise: #type_error
+  // testDeserializeWithUsedTypeError: removed — type checker now prevents
+  // Binary deserializeWithUsed: 42 at compile time (BT-1828)
 
   // ═══════════════════════════════════════════════════════════════════
   // printString — display representation

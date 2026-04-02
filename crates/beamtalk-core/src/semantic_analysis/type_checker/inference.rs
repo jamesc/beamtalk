@@ -18,7 +18,7 @@ use crate::ast::{
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, Span};
-use ecow::EcoString;
+use ecow::{EcoString, eco_format};
 
 use super::{InferredType, TypeChecker, TypeEnv};
 
@@ -28,10 +28,10 @@ use super::{InferredType, TypeChecker, TypeEnv};
 /// as the receiver of `ifTrue:`/`ifFalse:`, the type checker narrows the tested
 /// variable inside the block scope (ADR 0068 Phase 1g).
 ///
-/// The `respondsTo:` variant (ADR 0068 Phase 2e) narrows to `Dynamic` in the
-/// true block, suppressing DNU warnings for the tested selector. If a protocol
-/// in the registry requires exactly that selector, protocol conformance can be
-/// inferred.
+/// The `respondsTo:` variant (ADR 0068 Phase 2e) initially narrows to `Dynamic`,
+/// then `refine_responds_to_narrowing` consults the protocol registry: if exactly
+/// one protocol requires the tested selector, the type is refined to that
+/// protocol (BT-1833). Multiple or zero matches fall back to `Dynamic`.
 #[derive(Debug, Clone)]
 pub(super) struct NarrowingInfo {
     /// The variable name being narrowed.
@@ -43,11 +43,10 @@ pub(super) struct NarrowingInfo {
     pub(super) is_nil_check: bool,
     /// The selector tested in a `respondsTo:` narrowing (ADR 0068 Phase 2e).
     ///
-    /// When set, the narrowing was detected from `x respondsTo: #selector`
-    /// and the variable is narrowed to `Dynamic` in the true block.
-    /// Read by tests and reserved for future protocol inference integration
-    /// (e.g., matching `responded_selector` to protocol required methods).
-    #[allow(dead_code)]
+    /// When set, the narrowing was detected from `x respondsTo: #selector`.
+    /// Used by `refine_responds_to_narrowing` to look up the matching
+    /// protocol in the registry and narrow to that protocol type instead
+    /// of `Dynamic` (BT-1833).
     pub(super) responded_selector: Option<EcoString>,
 }
 
@@ -133,6 +132,9 @@ impl TypeChecker {
 
             // Check state default values match declared types
             self.check_state_defaults(class, hierarchy);
+
+            // Warn about typed state fields with no default that aren't nilable
+            self.check_uninitialized_state(class);
         }
 
         // Check standalone method definitions (Tonel-style: `Counter >> increment => ...`)
@@ -211,7 +213,7 @@ impl TypeChecker {
     /// - `Union` → `Union(resolved_members)`
     /// - `FalseOr` → `Union([inner, False])`
     /// - `SelfType` → `Dynamic` (resolved at call site, not here)
-    /// - `Singleton` → `Dynamic` (not yet supported)
+    /// - `Singleton` → `Known("#name")` (singleton type, compatible with Symbol)
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         match ann {
             TypeAnnotation::Simple(type_id) => {
@@ -240,9 +242,8 @@ impl TypeChecker {
                 let inner_ty = Self::resolve_type_annotation(inner);
                 InferredType::union_of(&[inner_ty, InferredType::known("False")])
             }
-            TypeAnnotation::SelfType { .. } | TypeAnnotation::Singleton { .. } => {
-                InferredType::Dynamic
-            }
+            TypeAnnotation::SelfType { .. } => InferredType::Dynamic,
+            TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
         }
     }
 
@@ -638,7 +639,7 @@ impl TypeChecker {
             selector_name.as_str(),
             "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:"
         ) {
-            Self::detect_narrowing(receiver)
+            Self::detect_narrowing(receiver).map(|info| self.refine_responds_to_narrowing(info))
         } else {
             None
         };
@@ -1099,6 +1100,30 @@ impl TypeChecker {
 
             _ => None,
         }
+    }
+
+    /// Refines a `respondsTo:` narrowing from `Dynamic` to a protocol type
+    /// when the protocol registry is available and exactly one protocol
+    /// requires the tested selector (ADR 0068 Phase 2e, BT-1833).
+    ///
+    /// If no protocol registry is set, or zero/multiple protocols match the
+    /// selector, the narrowing is returned unchanged (stays `Dynamic`).
+    fn refine_responds_to_narrowing(&self, mut info: NarrowingInfo) -> NarrowingInfo {
+        // Only refine to a protocol type when the variable is currently Dynamic.
+        // If the variable already has a concrete type (e.g., Integer), narrowing
+        // to a protocol (e.g., Printable) would lose type-specific APIs.
+        if matches!(info.true_type, InferredType::Dynamic) {
+            if let Some(ref selector) = info.responded_selector {
+                if let Some(ref registry) = self.protocol_registry {
+                    if let Some(protocol_name) =
+                        registry.find_unique_protocol_for_selector(selector)
+                    {
+                        info.true_type = InferredType::known(protocol_name.clone());
+                    }
+                }
+            }
+        }
+        info
     }
 
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
@@ -1654,7 +1679,7 @@ impl TypeChecker {
             Literal::Integer(_) => InferredType::known("Integer"),
             Literal::Float(_) => InferredType::known("Float"),
             Literal::String(_) => InferredType::known("String"),
-            Literal::Symbol(_) => InferredType::known("Symbol"),
+            Literal::Symbol(name) => InferredType::known(eco_format!("#{name}")),
             Literal::Character(_) => InferredType::known("Character"),
             Literal::List(_) => InferredType::known("List"),
         }
@@ -1734,7 +1759,7 @@ mod tests {
     fn infer_literal_symbol() {
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Symbol("ok".into())),
-            InferredType::known("Symbol")
+            InferredType::known("#ok")
         );
     }
 
@@ -1872,7 +1897,7 @@ mod tests {
         };
         assert_eq!(
             TypeChecker::resolve_type_annotation(&ann),
-            InferredType::Dynamic
+            InferredType::known("#north")
         );
     }
 

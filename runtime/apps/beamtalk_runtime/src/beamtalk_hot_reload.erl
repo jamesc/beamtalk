@@ -226,7 +226,15 @@ try_change_code(Pid, Module, Extra) ->
             catch sys:resume(Pid)
         end
     catch
-        exit:{noproc, _} -> {error, noproc};
-        exit:{timeout, _} -> {error, timeout};
-        Class:Error -> {error, {Class, Error}}
+        exit:{noproc, _} ->
+            {error, noproc};
+        exit:{timeout, _} ->
+            {error, timeout};
+        Class:Error:Stacktrace ->
+            ?LOG_DEBUG(
+                "Code change failed for ~p: ~p:~p",
+                [Module, Class, Error],
+                #{stacktrace => Stacktrace, domain => [beamtalk, runtime]}
+            ),
+            {error, {Class, Error}}
     end.

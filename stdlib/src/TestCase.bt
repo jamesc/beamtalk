@@ -38,7 +38,7 @@ Value subclass: TestCase
   /// ```beamtalk
   /// CounterTest run: #testIncrement
   /// ```
-  class run: testName -> String =>
+  class run: testName :: Symbol -> String =>
     (Erlang beamtalk_test_case) runClass: self withTest: testName
 
   /// Whether this test class must run serially (not concurrently).
@@ -64,11 +64,11 @@ Value subclass: TestCase
   /// ```beamtalk
   /// setUp => self withCounter: (Counter spawn)
   /// ```
-  setUp => self
+  setUp -> Self => self
 
   /// Clean up after the test. Called after each test method.
   /// Override in subclasses to release resources or reset state.
-  tearDown => nil
+  tearDown -> Nil => nil
 
   /// Prepare a suite-level fixture. Called once before all tests in this class.
   /// Override to create expensive resources shared across tests.
@@ -89,7 +89,7 @@ Value subclass: TestCase
   /// ```beamtalk
   /// tearDownOnce => self suiteFixture close
   /// ```
-  tearDownOnce => nil
+  tearDownOnce -> Nil => nil
 
   /// Access the suite-level fixture set by `setUpOnce`.
   /// Returns nil when no setUpOnce fixture has been set.
@@ -140,9 +140,9 @@ Value subclass: TestCase
   ///
   /// ## Examples
   /// ```beamtalk
-  /// self should: [1 / 0] raise: ZeroDivisionError
+  /// self should: [1 / 0] raise: #zero_division
   /// ```
-  should: block :: Block raise: errorKind :: Object -> Nil =>
+  should: block :: Block raise: errorKind :: Symbol -> Nil =>
     (Erlang beamtalk_test_case) should: block raise: errorKind
 
   /// Fail the test immediately with the given `message`.

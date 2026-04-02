@@ -111,18 +111,31 @@ impl ProtocolInfo {
         registry: &'a ProtocolRegistry,
     ) -> Vec<&'a EcoString> {
         let mut selectors: Vec<&EcoString> = self.methods.iter().map(|m| &m.selector).collect();
+        let mut visited = std::collections::HashSet::new();
+        self.collect_parent_selectors(registry, &mut selectors, &mut visited);
+        selectors
+    }
 
+    /// Recursively collects selectors from parent protocols, with cycle detection.
+    fn collect_parent_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+        selectors: &mut Vec<&'a EcoString>,
+        visited: &mut std::collections::HashSet<EcoString>,
+    ) {
         if let Some(ref parent_name) = self.extending {
+            if !visited.insert(parent_name.clone()) {
+                return; // Cycle detected — stop recursion
+            }
             if let Some(parent) = registry.get(parent_name) {
-                for sel in parent.all_required_selectors(registry) {
+                for sel in parent.methods.iter().map(|m| &m.selector) {
                     if !selectors.contains(&sel) {
                         selectors.push(sel);
                     }
                 }
+                parent.collect_parent_selectors(registry, selectors, visited);
             }
         }
-
-        selectors
     }
 
     /// Returns all method requirements, including those inherited from extended protocols.
@@ -291,6 +304,28 @@ impl ProtocolRegistry {
     /// Returns an iterator over all protocols in the registry.
     pub fn protocols(&self) -> impl Iterator<Item = (&EcoString, &ProtocolInfo)> {
         self.protocols.iter()
+    }
+
+    /// Finds protocols that require a given selector (instance methods only).
+    ///
+    /// Used by `respondsTo:` narrowing (ADR 0068 Phase 2e) to refine the
+    /// narrowed type from `Dynamic` to a specific protocol when exactly one
+    /// protocol in the registry requires the tested selector. Returns `None`
+    /// if zero or multiple protocols match (ambiguous — fall back to Dynamic).
+    #[must_use]
+    pub fn find_unique_protocol_for_selector(&self, selector: &str) -> Option<&EcoString> {
+        let mut found: Option<&EcoString> = None;
+        for (name, info) in &self.protocols {
+            let selectors = info.all_required_selectors(self);
+            if selectors.iter().any(|s| s.as_str() == selector) {
+                if found.is_some() {
+                    // Ambiguous — multiple protocols require this selector
+                    return None;
+                }
+                found = Some(name);
+            }
+        }
+        found
     }
 
     /// Check if a class conforms to a protocol.

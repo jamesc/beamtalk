@@ -85,7 +85,7 @@ abstract Object subclass: Behaviour
   /// Counter inheritsFrom: Actor    // => true
   /// Counter inheritsFrom: Counter  // => false
   /// ```
-  sealed inheritsFrom: aClass -> Boolean =>
+  sealed inheritsFrom: aClass :: Behaviour -> Boolean =>
     self allSuperclasses includes: aClass
 
   /// Test whether aBehaviour is the receiver or one of its ancestors.
@@ -98,7 +98,7 @@ abstract Object subclass: Behaviour
   /// Counter includesBehaviour: Actor    // => true
   /// Counter includesBehaviour: Integer  // => false
   /// ```
-  sealed includesBehaviour: aBehaviour -> Boolean =>
+  sealed includesBehaviour: aBehaviour :: Behaviour -> Boolean =>
     self == aBehaviour ifTrue: [true] ifFalse: [self inheritsFrom: aBehaviour]
 
   // --- Method dictionary ---
@@ -132,7 +132,7 @@ abstract Object subclass: Behaviour
   /// Counter canUnderstand: #class      // => true (inherited from ProtoObject)
   /// Counter canUnderstand: #bogus      // => false
   /// ```
-  sealed canUnderstand: selector -> Boolean =>
+  sealed canUnderstand: selector :: Symbol -> Boolean =>
     self allMethods includes: selector
 
   /// Test whether the selector is defined locally in this class
@@ -143,7 +143,7 @@ abstract Object subclass: Behaviour
   /// Counter includesSelector: #increment  // => true
   /// Counter includesSelector: #class      // => false (defined in ProtoObject)
   /// ```
-  sealed includesSelector: selector -> Boolean =>
+  sealed includesSelector: selector :: Symbol -> Boolean =>
     @primitive "classIncludesSelector"
 
   /// Walk the hierarchy and return the class that defines the given selector,
@@ -155,7 +155,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter whichClassIncludesSelector: #class  // => ProtoObject
   /// ```
-  sealed whichClassIncludesSelector: selector =>
+  sealed whichClassIncludesSelector: selector :: Symbol =>
     (self includesSelector: selector) ifTrue: [^self]
     self allSuperclasses detect: [:c |
       c includesSelector: selector
@@ -187,7 +187,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter doc           // => nil (or "A counter actor" if set)
   /// ```
-  sealed doc => @primitive "classDoc"
+  sealed doc -> String | Nil => @primitive "classDoc"
 
   /// Set the class documentation string. Returns the receiver.
   ///
@@ -196,7 +196,7 @@ abstract Object subclass: Behaviour
   /// Counter doc: "A counter actor"
   /// Counter doc           // => "A counter actor"
   /// ```
-  sealed doc: aString -> Behaviour => @primitive "classSetDoc"
+  sealed doc: aString :: String -> Behaviour => @primitive "classSetDoc"
 
   /// Set the documentation string for a specific method. Returns the receiver.
   ///
@@ -205,7 +205,7 @@ abstract Object subclass: Behaviour
   /// Counter setDocForMethod: #increment to: "Increment the counter by 1"
   /// (Counter >> #increment) doc   // => "Increment the counter by 1"
   /// ```
-  sealed setDocForMethod: aSelector to: aString -> Behaviour =>
+  sealed setDocForMethod: aSelector :: Symbol to: aString :: String -> Behaviour =>
     @primitive "classSetMethodDoc"
 
   /// Return the documentation string for a specific method, or nil if no doc
@@ -216,7 +216,8 @@ abstract Object subclass: Behaviour
   /// Counter docForMethod: #increment   // => "Increase the counter by one." (or nil)
   /// Counter docForMethod: #nonExistent // => nil
   /// ```
-  sealed docForMethod: aSelector => @primitive "classDocForMethod"
+  sealed docForMethod: aSelector :: Symbol -> String | Nil =>
+    @primitive "classDocForMethod"
 
   // --- Identity ---
 
@@ -283,7 +284,7 @@ abstract Object subclass: Behaviour
   /// Counter sourceFile   // => "examples/counter.bt"
   /// Integer sourceFile   // => nil (stdlib built-in)
   /// ```
-  sealed sourceFile => @primitive "classSourceFile"
+  sealed sourceFile -> String | Nil => @primitive "classSourceFile"
 
   /// Recompile this class from its source file and hot-swap the BEAM module.
   ///

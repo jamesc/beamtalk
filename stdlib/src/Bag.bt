@@ -14,7 +14,7 @@
 /// (Bag withAll: #(1, 1, 2)) size         // => 3
 /// ```
 Collection subclass: Bag
-  field: counts = #{}
+  field: counts :: Dictionary = #{}
 
   /// Create a Bag containing all elements from a list.
   ///

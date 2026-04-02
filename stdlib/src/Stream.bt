@@ -16,7 +16,7 @@
 sealed Object subclass: Stream
 
   /// Use 'Stream on: collection' or 'Stream from: start' to create a Stream.
-  class new: _ =>
+  class new: _ :: Object -> Nil =>
     self error: "Use 'Stream on: collection' or 'Stream from: start' to create a Stream"
 
   /// Create an infinite Stream starting from `start`, incrementing by 1.
@@ -43,7 +43,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
   /// ```
-  class sealed on: collection -> Stream =>
+  class sealed on: collection :: Object -> Stream =>
     (Erlang beamtalk_stream) on: collection
 
   /// Filter elements matching predicate (lazy).

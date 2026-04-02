@@ -246,12 +246,13 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                         domain => [beamtalk, runtime]
                     }),
                     {error, {beamtalk_error, BtError}};
-                Kind:Reason ->
+                Kind:Reason:Stacktrace ->
                     %% Unexpected failure in callback
                     ?LOG_ERROR("Actor spawn callback failed", #{
                         callback => CallbackMod,
                         kind => Kind,
                         reason => Reason,
+                        stacktrace => Stacktrace,
                         registry_pid => RegistryPid,
                         actor_pid => ActorPid,
                         class => ClassName,

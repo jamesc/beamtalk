@@ -141,6 +141,13 @@ pub struct TypeChecker {
     /// (E0403). `None` means no package context (REPL, single-file scripts) —
     /// visibility checks are skipped.
     pub(super) current_package: Option<EcoString>,
+    /// Protocol registry for `respondsTo:` narrowing (ADR 0068 Phase 2e).
+    ///
+    /// When set, `detect_narrowing` can refine `respondsTo:` narrowing from
+    /// `Dynamic` to a specific protocol type by looking up which protocol
+    /// requires the tested selector. Set by `check_module_with_protocols`
+    /// before running the main type checking pass.
+    pub(super) protocol_registry: Option<ProtocolRegistry>,
 }
 
 impl TypeChecker {
@@ -152,6 +159,7 @@ impl TypeChecker {
             type_map: TypeMap::new(),
             method_return_types: HashMap::new(),
             current_package: None,
+            protocol_registry: None,
         }
     }
 
@@ -166,6 +174,7 @@ impl TypeChecker {
             type_map: TypeMap::new(),
             method_return_types: HashMap::new(),
             current_package: Some(EcoString::from(package)),
+            protocol_registry: None,
         }
     }
 
@@ -215,8 +224,16 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
+        // Store protocol registry for respondsTo: narrowing (BT-1833).
+        // This allows detect_narrowing to refine Dynamic → protocol type.
+        self.protocol_registry = Some(protocol_registry.clone());
+
         // Run the standard type checking pass first
         self.check_module(module, hierarchy);
+
+        // Clear the registry after the main pass (it's borrowed by the caller
+        // for the remaining protocol-specific passes below).
+        self.protocol_registry = None;
 
         // Phase 2b: Protocol conformance checking on type annotations.
         // When a parameter type annotation resolves to a protocol name, check

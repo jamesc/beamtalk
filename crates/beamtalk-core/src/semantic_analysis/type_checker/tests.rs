@@ -66,6 +66,10 @@ fn str_lit(s: &str) -> Expression {
     Expression::Literal(Literal::String(s.into()), span())
 }
 
+fn symbol_lit(s: &str) -> Expression {
+    Expression::Literal(Literal::Symbol(s.into()), span())
+}
+
 fn char_lit(c: char) -> Expression {
     Expression::Literal(Literal::Character(c), span())
 }
@@ -108,7 +112,7 @@ fn test_literal_type_inference() {
     );
     assert_eq!(
         TypeChecker::infer_literal(&Literal::Symbol("sym".into())),
-        InferredType::known("Symbol")
+        InferredType::known("#sym")
     );
 }
 
@@ -2312,10 +2316,14 @@ fn test_field_assign_subtype_no_warn() {
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
+    let type_mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
     assert!(
-        checker.diagnostics().is_empty(),
-        "Integer should be assignable to Number, got: {:?}",
-        checker.diagnostics()
+        type_mismatches.is_empty(),
+        "Integer should be assignable to Number, got: {type_mismatches:?}"
     );
 }
 
@@ -2370,7 +2378,7 @@ fn test_state_default_value_match_no_warn() {
 
 #[test]
 fn test_dynamic_expression_no_warn() {
-    // Assigning a dynamic expression (unknown variable) to a typed field → no warning
+    // Assigning a dynamic expression (unknown variable) to a typed field → no assignment warning
     let state = vec![StateDeclaration::with_type(
         ident("count"),
         TypeAnnotation::simple("Integer", span()),
@@ -2382,10 +2390,14 @@ fn test_dynamic_expression_no_warn() {
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
+    let type_mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
     assert!(
-        checker.diagnostics().is_empty(),
-        "Dynamic expressions should never produce warnings, got: {:?}",
-        checker.diagnostics()
+        type_mismatches.is_empty(),
+        "Dynamic expressions should never produce type mismatch warnings, got: {type_mismatches:?}"
     );
 }
 
@@ -2414,6 +2426,154 @@ fn test_union_type_annotation_no_false_positive() {
         checker.diagnostics().is_empty(),
         "Union type annotations should not produce false positives, got: {:?}",
         checker.diagnostics()
+    );
+}
+
+// --- Uninitialized typed state field warnings (BT-1831) ---
+
+#[test]
+fn test_uninitialized_typed_state_warns() {
+    // Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
+    // The sibling-default heuristic triggers: warns on `name` since the class has
+    // at least one typed field with a default (lifecycle-nil pattern).
+    let state = vec![
+        StateDeclaration::with_type(
+            ident("name"),
+            TypeAnnotation::simple("String", span()),
+            span(),
+        ),
+        StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        ),
+    ];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 uninitialized warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("name"));
+    assert!(warnings[0].message.contains("String"));
+}
+
+#[test]
+fn test_all_factory_fields_no_warn() {
+    // All-factory class: all typed fields have no default → no warnings.
+    // Sibling-default heuristic: if no typed field has a default, the class
+    // is factory-constructed (spawnWith:/new:) — suppress warnings.
+    let state = vec![
+        StateDeclaration::with_type(
+            ident("name"),
+            TypeAnnotation::simple("String", span()),
+            span(),
+        ),
+        StateDeclaration::with_type(
+            ident("config"),
+            TypeAnnotation::simple("Dictionary", span()),
+            span(),
+        ),
+    ];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "All-factory class should not warn about uninitialized fields, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_nilable_typed_state_no_warn() {
+    // state: name :: String | Nil → no warning (nil is valid)
+    let state = vec![StateDeclaration::with_type(
+        ident("name"),
+        TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("String", span()),
+                TypeAnnotation::simple("Nil", span()),
+            ],
+            span(),
+        ),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        uninitialized.is_empty(),
+        "Nilable typed state should not warn about uninitialized, got: {uninitialized:?}"
+    );
+}
+
+#[test]
+fn test_typed_state_with_default_no_warn() {
+    // state: name :: String = "" → no warning (has default)
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("name"),
+        TypeAnnotation::simple("String", span()),
+        str_lit(""),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        uninitialized.is_empty(),
+        "Typed state with default should not warn about uninitialized, got: {uninitialized:?}"
+    );
+}
+
+#[test]
+fn test_untyped_state_no_default_no_warn() {
+    // state: name (no type, no default) → no warning
+    let state = vec![StateDeclaration::new(ident("name"), span())];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        uninitialized.is_empty(),
+        "Untyped state should not warn about uninitialized, got: {uninitialized:?}"
     );
 }
 
@@ -4294,8 +4454,8 @@ fn constructor_inference_error_infers_e_from_symbol() {
             );
             assert_eq!(
                 type_args[1].as_known().map(EcoString::as_str),
-                Some("Symbol"),
-                "E should be inferred as Symbol from argument"
+                Some("#not_found"),
+                "E should be inferred as #not_found from symbol literal argument"
             );
         }
         other => panic!("Expected Known type with type_args, got: {other:?}"),
@@ -4402,8 +4562,8 @@ fn constructor_inference_error_flows_to_error_accessor() {
 
     assert_eq!(
         error_ty.as_known().map(EcoString::as_str),
-        Some("Symbol"),
-        "error on (GenResult error: #not_found) should return Symbol via constructor inference"
+        Some("#not_found"),
+        "error on (GenResult error: #not_found) should return #not_found via constructor inference"
     );
 }
 
@@ -5219,6 +5379,335 @@ fn test_responds_to_protocol_inference() {
     assert!(
         required.contains(&"asString"),
         "Printable protocol requires asString"
+    );
+}
+
+// ---- BT-1833: respondsTo: narrows to protocol type ----
+
+/// Helper: build a protocol module with a single protocol requiring a single selector.
+fn make_protocol_module(
+    protocol_name: &str,
+    required_selector: &str,
+) -> (Module, ProtocolRegistry, ClassHierarchy) {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let proto_def = ProtocolDefinition {
+        name: ident(protocol_name),
+        type_params: vec![],
+        extending: None,
+        method_signatures: vec![ProtocolMethodSignature {
+            selector: MessageSelector::Unary(required_selector.into()),
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(ident("String"))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_method_signatures: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let module = Module {
+        protocols: vec![proto_def],
+        ..Module::new(vec![], span())
+    };
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&module, &hierarchy);
+    assert!(diags.is_empty());
+    (module, registry, hierarchy)
+}
+
+#[test]
+fn test_responds_to_narrows_to_protocol_type() {
+    // When `x respondsTo: #asString` with a Printable protocol requiring asString,
+    // the true-branch should narrow x to Printable (not Dynamic).
+    let (_, registry, hierarchy) = make_protocol_module("Printable", "asString");
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #asString) ifTrue: [x asString]
+                if_true(
+                    responds_to("x", "asString"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("asString".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // asString is a valid method on Printable protocol, so no DNU warning
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (x narrowed to Printable), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_no_protocol_match_falls_back_to_dynamic() {
+    // When `x respondsTo: #unknownMethod` and no protocol requires that selector,
+    // the narrowing should fall back to Dynamic (no warnings in true block).
+    let (_, registry, hierarchy) = make_protocol_module("Printable", "asString");
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #unknownMethod) ifTrue: [x unknownMethod]
+                if_true(
+                    responds_to("x", "unknownMethod"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownMethod".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // Dynamic suppresses DNU, so no warning in the true block
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (x narrowed to Dynamic), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_protocol_narrows_validates_methods() {
+    // When narrowed to Printable, sending a method NOT on the protocol should warn.
+    let (_, registry, hierarchy) = make_protocol_module("Printable", "asString");
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #asString) ifTrue: [x nonExistentMethod]
+                if_true(
+                    responds_to("x", "asString"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("nonExistentMethod".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // Printable only has asString — nonExistentMethod should warn
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu_warnings.len(),
+        1,
+        "Expected 1 DNU warning for nonExistentMethod on Printable, got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_ambiguous_protocols_falls_back_to_dynamic() {
+    // When multiple protocols require the same selector, fall back to Dynamic.
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // Create two protocols both requiring 'asString'
+    let proto1 = ProtocolDefinition {
+        name: ident("Printable"),
+        type_params: vec![],
+        extending: None,
+        method_signatures: vec![ProtocolMethodSignature {
+            selector: MessageSelector::Unary("asString".into()),
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(ident("String"))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_method_signatures: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let proto2 = ProtocolDefinition {
+        name: ident("Displayable"),
+        type_params: vec![],
+        extending: None,
+        method_signatures: vec![ProtocolMethodSignature {
+            selector: MessageSelector::Unary("asString".into()),
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(ident("String"))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_method_signatures: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let proto_module = Module {
+        protocols: vec![proto1, proto2],
+        ..Module::new(vec![], span())
+    };
+    let mut registry = ProtocolRegistry::new();
+    registry.register_module(&proto_module, &hierarchy);
+
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![
+                // (x respondsTo: #asString) ifTrue: [x unknownMethod]
+                if_true(
+                    responds_to("x", "asString"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownMethod".into()),
+                        vec![],
+                    )]),
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // With ambiguous protocols, x stays Dynamic — no DNU warning for unknownMethod
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (ambiguous protocols → Dynamic), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_responds_to_without_protocol_registry_stays_dynamic() {
+    // When check_module is called without protocols (no registry),
+    // respondsTo: narrowing stays Dynamic (backward compatible).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Object"))],
+            vec![if_true(
+                responds_to("x", "customMethod"),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("customMethod".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    // Use check_module (no protocol registry) — should still work
+    checker.check_module(&module, &hierarchy);
+
+    // Dynamic suppresses DNU, so no warning
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings (Dynamic narrowing, no registry), got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_find_unique_protocol_for_selector() {
+    // Unit test for the ProtocolRegistry helper method.
+    let (_, registry, _) = make_protocol_module("Printable", "asString");
+
+    // Unique match: asString → Printable
+    let result = registry.find_unique_protocol_for_selector("asString");
+    assert_eq!(
+        result.map(EcoString::as_str),
+        Some("Printable"),
+        "asString should uniquely match Printable"
+    );
+
+    // No match: unknownSelector → None
+    let result = registry.find_unique_protocol_for_selector("unknownSelector");
+    assert!(
+        result.is_none(),
+        "unknownSelector should not match any protocol"
     );
 }
 
@@ -6725,5 +7214,903 @@ fn method_local_params_from_array_type() {
         result_ty.as_known().map(EcoString::as_str),
         Some("String"),
         "processArray: with Array(String) should return String (T), got: {result_ty:?}"
+    );
+}
+
+// ---- BT-1830: Singleton type inference and validation ----
+
+#[test]
+fn is_assignable_to_singleton_exact_match() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"#ok".into(), &hierarchy),
+        "#ok should be assignable to #ok"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_mismatch() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_assignable_to(&"#error".into(), &"#ok".into(), &hierarchy),
+        "#error should not be assignable to #ok"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_accepts_symbol() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"Symbol".into(), &"#ok".into(), &hierarchy),
+        "Symbol should be assignable to #ok (Symbol is the general type)"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_value_to_symbol() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"Symbol".into(), &hierarchy),
+        "#ok should be assignable to Symbol (singleton is a subtype of Symbol)"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_rejects_unrelated_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_assignable_to(&"Integer".into(), &"#ok".into(), &hierarchy),
+        "Integer should not be assignable to #ok"
+    );
+}
+
+#[test]
+fn singleton_return_type_mismatch_warns() {
+    // method -> #ok => #error  — should warn
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Checker"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Unary("status".into()),
+            vec![],
+            vec![bare(symbol_lit("error"))], // Returns Symbol, declared #ok
+            TypeAnnotation::singleton("ok", span()),
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let return_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        return_warnings.len(),
+        1,
+        "should warn about singleton return type mismatch: {return_warnings:?}"
+    );
+    assert!(return_warnings[0].message.contains("#ok"));
+}
+
+#[test]
+fn singleton_return_type_match_no_warning() {
+    // method -> #ok => #ok  — should NOT warn (Symbol literal is compatible)
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Checker"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Unary("status".into()),
+            vec![],
+            vec![bare(symbol_lit("ok"))], // Returns Symbol — compatible with #ok
+            TypeAnnotation::singleton("ok", span()),
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let return_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        return_warnings.is_empty(),
+        "Symbol literal compatible with singleton return type should not warn: {return_warnings:?}"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_to_symbol_union() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // #ok should be assignable to "Symbol | nil" (singleton is a subtype of Symbol)
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"Symbol | nil".into(), &hierarchy),
+        "#ok should be assignable to Symbol | nil"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_to_object() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // #ok should be assignable to Object (Symbol is a subclass of Object)
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"Object".into(), &hierarchy),
+        "#ok should be assignable to Object via Symbol superclass chain"
+    );
+}
+
+// ── BT-1832: Union type validation across all contexts ──────────────────
+
+// --- Argument type checking with unions ---
+
+#[test]
+fn union_arg_all_compatible_no_warning() {
+    // Union(Integer | Float) passed to param expecting Number → all compatible → no warning
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "Calculator".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "compute:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Calculator".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("Number".into()),
+            param_types: vec![Some("Number".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &"Calculator".into(),
+        "compute:",
+        &[InferredType::simple_union(&["Integer", "Float"])],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "All union members (Integer, Float) are Numbers — no warning expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn union_arg_none_compatible_warns() {
+    // Union(String | Symbol) passed to param expecting Integer → none compatible → warning
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "Calculator".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "compute:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Calculator".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("Integer".into()),
+            param_types: vec![Some("Integer".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &"Calculator".into(),
+        "compute:",
+        &[InferredType::simple_union(&["String", "Symbol"])],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "No union member is Integer — expected 1 warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(checker.diagnostics()[0].message.contains("expects Integer"));
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Warning
+    );
+}
+
+#[test]
+fn union_arg_mixed_compatible_hints() {
+    // Union(Integer | String) passed to param expecting Number → Integer matches, String doesn't → hint
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "Calculator".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "compute:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Calculator".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("Number".into()),
+            param_types: vec![Some("Number".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &"Calculator".into(),
+        "compute:",
+        &[InferredType::simple_union(&["Integer", "String"])],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Mixed union — expected 1 hint, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Hint
+    );
+    assert!(checker.diagnostics()[0].message.contains("expects Number"));
+}
+
+#[test]
+fn union_arg_dynamic_still_skips() {
+    // Dynamic arg should still skip (no regression)
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "Calculator".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "compute:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Calculator".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("Integer".into()),
+            param_types: vec![Some("Integer".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &"Calculator".into(),
+        "compute:",
+        &[InferredType::Dynamic],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Dynamic arg should skip — no warning expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+// --- Field assignment with unions ---
+
+#[test]
+fn union_field_assign_all_compatible_no_warning() {
+    // state: count :: Number; self.count := (Integer | Float) → all compatible → no warning
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("count"),
+        TypeAnnotation::simple("Number", span()),
+        int_lit(0),
+        span(),
+    )];
+    let method = make_method(
+        "setCount",
+        vec![field_assign("count", int_lit(1))], // placeholder, we test directly below
+    );
+    let class = counter_class_with_typed_state(vec![method], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Counter"));
+    checker.check_field_assignment(
+        &ident("count"),
+        &InferredType::simple_union(&["Integer", "Float"]),
+        span(),
+        &hierarchy,
+        &env,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "All union members compatible with Number — no warning expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn union_field_assign_none_compatible_warns() {
+    // state: count :: Integer; self.count := (String | Symbol) → none compatible → warning
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("count"),
+        TypeAnnotation::simple("Integer", span()),
+        int_lit(0),
+        span(),
+    )];
+    let method = make_method("setCount", vec![field_assign("count", int_lit(1))]);
+    let class = counter_class_with_typed_state(vec![method], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Counter"));
+    checker.check_field_assignment(
+        &ident("count"),
+        &InferredType::simple_union(&["String", "Symbol"]),
+        span(),
+        &hierarchy,
+        &env,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "No union member is Integer — expected 1 warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(checker.diagnostics()[0].message.contains("Type mismatch"));
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Warning
+    );
+}
+
+#[test]
+fn union_field_assign_mixed_compatible_hints() {
+    // state: count :: Number; self.count := (Integer | String) → Integer matches, String doesn't → hint
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("count"),
+        TypeAnnotation::simple("Number", span()),
+        int_lit(0),
+        span(),
+    )];
+    let method = make_method("setCount", vec![field_assign("count", int_lit(1))]);
+    let class = counter_class_with_typed_state(vec![method], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Counter"));
+    checker.check_field_assignment(
+        &ident("count"),
+        &InferredType::simple_union(&["Integer", "String"]),
+        span(),
+        &hierarchy,
+        &env,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Mixed union — expected 1 hint, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Hint
+    );
+}
+
+// --- Protocol conformance with unions ---
+
+#[test]
+fn union_protocol_all_conform_no_warning() {
+    // Integer | String both conform to Printable (both have asString) → no warning
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let mut registry = ProtocolRegistry::new();
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("Printable", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::simple("String", span())),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+    registry.register_module(&proto_module, &hierarchy);
+
+    let mut checker = TypeChecker::new();
+    checker.check_protocol_argument_conformance(
+        &InferredType::simple_union(&["Integer", "String"]),
+        "Printable",
+        span(),
+        &hierarchy,
+        &registry,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Both Integer and String conform to Printable — no warning expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn union_protocol_none_conform_warns() {
+    // Integer | String, neither has sortKey → warning
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let mut registry = ProtocolRegistry::new();
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("HasSortKey", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("sortKey".into()),
+                parameters: vec![],
+                return_type: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+    registry.register_module(&proto_module, &hierarchy);
+
+    let mut checker = TypeChecker::new();
+    checker.check_protocol_argument_conformance(
+        &InferredType::simple_union(&["Integer", "String"]),
+        "HasSortKey",
+        span(),
+        &hierarchy,
+        &registry,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "No union member conforms to HasSortKey — expected 1 warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        checker.diagnostics()[0]
+            .message
+            .contains("does not conform to protocol HasSortKey")
+    );
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Warning
+    );
+}
+
+#[test]
+fn union_protocol_mixed_conformance_hints() {
+    // Build a protocol "HasSortKey" requiring sortKey.
+    // Integer has sortKey (we register it), String does not → hint.
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    // Add sortKey to Integer so it conforms
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "SortableInt".into(),
+        superclass: Some("Integer".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: true,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "sortKey".into(),
+            arity: 0,
+            kind: MethodKind::Primary,
+            defined_in: "SortableInt".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: None,
+            param_types: vec![],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut registry = ProtocolRegistry::new();
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("HasSortKey", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("sortKey".into()),
+                parameters: vec![],
+                return_type: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+    registry.register_module(&proto_module, &hierarchy);
+
+    let mut checker = TypeChecker::new();
+    // SortableInt conforms (has sortKey), String does not
+    checker.check_protocol_argument_conformance(
+        &InferredType::simple_union(&["SortableInt", "String"]),
+        "HasSortKey",
+        span(),
+        &hierarchy,
+        &registry,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Mixed conformance — expected 1 hint, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Hint
+    );
+    assert!(checker.diagnostics()[0].message.contains("Not all members"));
+}
+
+// --- Type parameter bounds with unions ---
+
+#[test]
+fn union_type_param_bounds_all_conform_no_warning() {
+    // Logger(T :: Printable) where T = Integer | String → both conform → no warning
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "BoundedLogger".into(),
+        superclass: Some("Actor".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec!["T".into()],
+        type_param_bounds: vec![Some("Printable".into())],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut registry = ProtocolRegistry::new();
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("Printable", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::simple("String", span())),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+    registry.register_module(&proto_module, &hierarchy);
+
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds(
+        &"BoundedLogger".into(),
+        &[InferredType::simple_union(&["Integer", "String"])],
+        span(),
+        &hierarchy,
+        &registry,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "All union members conform to Printable — no warning expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn union_type_param_bounds_none_conform_warns() {
+    // Logger(T :: HasSortKey) where T = Integer | String → neither conforms → warning
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "BoundedLogger".into(),
+        superclass: Some("Actor".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec!["T".into()],
+        type_param_bounds: vec![Some("HasSortKey".into())],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut registry = ProtocolRegistry::new();
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("HasSortKey", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("sortKey".into()),
+                parameters: vec![],
+                return_type: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+    registry.register_module(&proto_module, &hierarchy);
+
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds(
+        &"BoundedLogger".into(),
+        &[InferredType::simple_union(&["Integer", "String"])],
+        span(),
+        &hierarchy,
+        &registry,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "No union member conforms to HasSortKey — expected 1 warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        checker.diagnostics()[0]
+            .message
+            .contains("does not conform to HasSortKey")
+    );
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Warning
+    );
+}
+
+#[test]
+fn union_type_param_bounds_mixed_conformance_hints() {
+    // Logger(T :: HasSortKey) where T = SortableInt | String → SortableInt conforms, String doesn't → hint
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![
+        ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("HasSortKey".into())],
+            superclass_type_args: vec![],
+        },
+        ClassInfo {
+            name: "SortableInt".into(),
+            superclass: Some("Integer".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: true,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: "sortKey".into(),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: "SortableInt".into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: None,
+                param_types: vec![],
+                doc: None,
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    ]);
+
+    let mut registry = ProtocolRegistry::new();
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("HasSortKey", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("sortKey".into()),
+                parameters: vec![],
+                return_type: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+    registry.register_module(&proto_module, &hierarchy);
+
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds(
+        &"BoundedLogger".into(),
+        &[InferredType::simple_union(&["SortableInt", "String"])],
+        span(),
+        &hierarchy,
+        &registry,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Mixed conformance — expected 1 hint, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        checker.diagnostics()[0].severity,
+        crate::source_analysis::Severity::Hint
+    );
+    assert!(
+        checker.diagnostics()[0]
+            .message
+            .contains("not all members conform to HasSortKey")
     );
 }

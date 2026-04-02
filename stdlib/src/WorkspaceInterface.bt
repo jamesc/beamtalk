@@ -18,7 +18,7 @@
 /// WorkspaceInterface current actorsOf: Counter
 /// ```
 sealed Object subclass: WorkspaceInterface
-  classState: current = nil
+  classState: current :: WorkspaceInterface | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
   class current => self.current
@@ -50,7 +50,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: aClass :: Object -> List =>
+  actorsOf: aClass :: Class -> List =>
     self actors select: [:a | a class includesBehaviour: aClass]
 
   /// Return a list of loaded user classes with source file info.
@@ -127,7 +127,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  test: testClass :: Object -> TestResult => TestRunner run: testClass
+  test: testClass :: Class -> TestResult => TestRunner run: testClass
 
   /// Register a value in the workspace namespace under a given name.
   /// Subsequent REPL evals can reference the value by name.
@@ -138,7 +138,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  bind: value as: bindingName :: Symbol -> Nil =>
+  bind: value :: Object as: bindingName :: Symbol -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) bind: value as: bindingName
 
   /// Remove a registered name from the workspace namespace.
@@ -175,7 +175,7 @@ sealed Object subclass: WorkspaceInterface
   /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>
   /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>  (idempotent)
   /// ```
-  startSupervisor: aClass :: Object -> Object =>
+  startSupervisor: aClass :: Class -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
 
   /// Stop and remove a supervisor from the workspace.
@@ -188,7 +188,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace stopSupervisor: MySup       // => nil
   /// ```
-  stopSupervisor: aClass :: Object -> Nil =>
+  stopSupervisor: aClass :: Class -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) stopSupervisor: aClass
 
   /// List all supervisors visible from the workspace.

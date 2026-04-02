@@ -15,7 +15,7 @@
 /// Transcript recent
 /// ```
 Actor subclass: TranscriptStream native: beamtalk_transcript_stream
-  classState: current = nil
+  classState: current :: TranscriptStream | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
   class current -> TranscriptStream => self.current
