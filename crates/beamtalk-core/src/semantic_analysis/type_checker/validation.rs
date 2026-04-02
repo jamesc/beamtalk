@@ -794,6 +794,17 @@ impl TypeChecker {
     /// `state: name :: String` (no default) may be used uninitialized — emit a warning.
     /// `state: name :: String | Nil` is fine (nil is valid), as is `state: name :: String = ""`.
     pub(super) fn check_uninitialized_state(&mut self, class: &crate::ast::ClassDefinition) {
+        // Sibling-default heuristic (BT-1837): only warn about uninitialized fields
+        // when the class has a mix of defaulted and undefaulted typed fields. If NO
+        // typed fields have defaults, the class is factory-constructed (spawnWith:/new:)
+        // and all fields are set by the factory — warning would be a false positive.
+        let has_any_typed_default = class.state.iter().any(|d| {
+            d.type_annotation.is_some() && d.default_value.is_some()
+        });
+        if !has_any_typed_default {
+            return; // All-factory class — no warnings
+        }
+
         // Collect type parameter names — generic fields can't be validated.
         let type_param_names: Vec<&str> = class
             .type_params
