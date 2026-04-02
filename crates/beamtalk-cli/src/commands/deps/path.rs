@@ -415,6 +415,15 @@ fn compile_dependency_with_context(
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
     let mut cached_asts = cached_asts;
+    let compile_ctx = crate::beam_compiler::CompileContext {
+        hierarchy: crate::beam_compiler::ClassHierarchyContext {
+            class_module_index: class_module_index.clone(),
+            class_superclass_index: class_superclass_index.clone(),
+            pre_loaded_classes: all_class_infos.clone(),
+        },
+        dep_registry: None, // No collision detection within dependency compilation
+        strict_deps: false, // Dependencies use their own strict-deps setting, not root's
+    };
 
     for file in &source_files {
         let stem = file
@@ -442,12 +451,8 @@ fn compile_dependency_with_context(
             &core_file,
             options,
             &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
-            &class_module_index,
-            &class_superclass_index,
-            &all_class_infos,
+            &compile_ctx,
             cached,
-            None,  // No collision detection within dependency compilation
-            false, // Dependencies use their own strict-deps setting, not root's
         )?;
 
         core_files.push(core_file);

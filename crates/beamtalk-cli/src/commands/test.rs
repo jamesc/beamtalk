@@ -14,7 +14,9 @@
 //!
 //! Part of ADR 0014 (Beamtalk Test Framework), Phase 2.
 
-use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use crate::beam_compiler::{
+    BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
+};
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -138,10 +140,8 @@ pub(crate) fn discover_test_classes(
 fn compile_fixtures_directory(
     fixtures_dir: &Utf8Path,
     output_dir: &Utf8Path,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
+    hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
-    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -178,10 +178,8 @@ fn compile_fixtures_directory(
             fixture_path,
             &module_name,
             output_dir,
-            class_module_index,
-            class_superclass_index,
+            hierarchy,
             warnings_as_errors,
-            pre_loaded_classes,
         )
         .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
         core_files.push(core_file);
@@ -203,10 +201,8 @@ fn compile_fixtures_directory(
 fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
+    hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
-    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -214,10 +210,8 @@ fn compile_fixture(
         fixture_path,
         &module_name,
         output_dir,
-        class_module_index,
-        class_superclass_index,
+        hierarchy,
         warnings_as_errors,
-        pre_loaded_classes,
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -302,10 +296,8 @@ fn generate_core_file(
     source_path: &Utf8Path,
     module_name: &str,
     output_dir: &Utf8Path,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
+    hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
-    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -317,18 +309,18 @@ fn generate_core_file(
         ..Default::default()
     };
 
+    let ctx = CompileContext {
+        hierarchy: hierarchy.clone(),
+        ..CompileContext::default()
+    };
     compile_source_with_bindings(
         source_path,
         module_name,
         &core_file,
         &options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
-        class_module_index,
-        class_superclass_index,
-        pre_loaded_classes,
+        &ctx,
         None,
-        None,  // TODO: pass dep_registry for test compilation with deps
-        false, // Test compilation doesn't use strict-deps
     )
     .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
 
@@ -529,10 +521,8 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 fn discover_and_compile_doc_tests(
     source_path: &Utf8Path,
     build_dir: &Utf8Path,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
+    hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
-    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -547,15 +537,8 @@ fn discover_and_compile_doc_tests(
     }
 
     // Compile the containing source file so its classes are available to doc tests
-    compile_fixture(
-        source_path,
-        build_dir,
-        class_module_index,
-        class_superclass_index,
-        warnings_as_errors,
-        pre_loaded_classes,
-    )
-    .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
+    compile_fixture(source_path, build_dir, hierarchy, warnings_as_errors)
+        .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
     let mut results = Vec::new();
 
@@ -1064,13 +1047,16 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     // resolved by renaming abstract_shape's class to AbstractShape.
     pipeline.all_class_infos.extend(fixture_class_infos);
 
+    let fixture_hierarchy = ClassHierarchyContext {
+        class_module_index: pipeline.class_module_index.clone(),
+        class_superclass_index: pipeline.class_superclass_index.clone(),
+        pre_loaded_classes: pipeline.all_class_infos.clone(),
+    };
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
         &pipeline.build_dir,
-        &pipeline.class_module_index,
-        &pipeline.class_superclass_index,
+        &fixture_hierarchy,
         pipeline.warnings_as_errors,
-        &pipeline.all_class_infos,
     )?;
     for module_name in &precompiled {
         pipeline.precompiled_modules.insert(module_name.clone());
@@ -1173,6 +1159,13 @@ fn compile_single_test_file(
         }
     }
 
+    // Build hierarchy once for all compilations within this test file.
+    let file_hierarchy = ClassHierarchyContext {
+        class_module_index: file_class_index.clone(),
+        class_superclass_index: file_super_index.clone(),
+        pre_loaded_classes: pipeline.all_class_infos.clone(),
+    };
+
     // Handle deprecated @load directives as fallback.
     // Fixtures in the fixtures/ directory are already compiled above.
     resolve_load_directives(
@@ -1181,8 +1174,7 @@ fn compile_single_test_file(
         &load_files,
         fixtures_dir,
         fixture_modules_by_name,
-        &file_class_index,
-        &file_super_index,
+        &file_hierarchy,
     )?;
 
     // Compile TestCase subclasses
@@ -1192,10 +1184,8 @@ fn compile_single_test_file(
             test_file,
             &test_class.module_name,
             &pipeline.build_dir,
-            &file_class_index,
-            &file_super_index,
+            &file_hierarchy,
             pipeline.warnings_as_errors,
-            &pipeline.all_class_infos,
         )
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
@@ -1212,10 +1202,8 @@ fn compile_single_test_file(
     let doc_results = discover_and_compile_doc_tests(
         test_file,
         &pipeline.build_dir,
-        &file_class_index,
-        &file_super_index,
+        &file_hierarchy,
         pipeline.warnings_as_errors,
-        &pipeline.all_class_infos,
     )?;
     for dr in doc_results {
         // BT-1631: Doc test EUnit wrappers are still generated but not compiled here.
@@ -1241,8 +1229,7 @@ fn resolve_load_directives(
     load_files: &[String],
     fixtures_dir: &Utf8Path,
     fixture_modules_by_name: &mut HashMap<String, Utf8PathBuf>,
-    file_class_index: &HashMap<String, String>,
-    file_super_index: &HashMap<String, String>,
+    hierarchy: &ClassHierarchyContext,
 ) -> Result<()> {
     for load_path in load_files {
         let fixture_path = Utf8PathBuf::from(load_path);
@@ -1296,10 +1283,8 @@ fn resolve_load_directives(
         let module_name = compile_fixture(
             &fixture_path,
             &pipeline.build_dir,
-            file_class_index,
-            file_super_index,
+            hierarchy,
             pipeline.warnings_as_errors,
-            &pipeline.all_class_infos,
         )?;
         pipeline.all_fixture_modules.push(module_name);
     }

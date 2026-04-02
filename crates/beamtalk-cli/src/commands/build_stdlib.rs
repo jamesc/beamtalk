@@ -315,12 +315,8 @@ fn compile_stdlib_file(
         core_file,
         options,
         bindings,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &[],
+        &crate::beam_compiler::CompileContext::default(),
         None,
-        None,  // No collision detection for stdlib compilation
-        false, // Stdlib never uses strict-deps
     )
 }
 

@@ -3,7 +3,9 @@
 
 //! Build beamtalk projects.
 
-use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use crate::beam_compiler::{
+    BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
+};
 use crate::commands::build_layout::BuildLayout;
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -482,6 +484,15 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     let strict_deps = full_manifest
         .as_ref()
         .is_some_and(|m| m.package.strict_deps);
+    let compile_ctx = CompileContext {
+        hierarchy: ClassHierarchyContext {
+            class_module_index: class_module_index.clone(),
+            class_superclass_index: class_superclass_index.clone(),
+            pre_loaded_classes: all_class_infos.clone(),
+        },
+        dep_registry: registry_ref,
+        strict_deps,
+    };
     for (file, module_name, core_file) in &file_module_pairs {
         // Always track module names for .app generation
         module_names.push(module_name.clone());
@@ -492,18 +503,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         }
 
         let cached = cached_asts.remove(file);
-        compile_file(
-            file,
-            module_name,
-            core_file,
-            options,
-            &class_module_index,
-            &class_superclass_index,
-            &all_class_infos,
-            cached,
-            registry_ref,
-            strict_deps,
-        )?;
+        compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
         core_files.push(core_file.clone());
     }
 
@@ -565,17 +565,35 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             &build_dir,
             &project_root,
             pkg,
-            &module_names,
-            &class_module_index,
-            &native_module_names,
-            &bt_dep_names,
-            &hex_dep_names,
-            &all_class_infos,
-            &source_files,
+            &compile_ctx.hierarchy,
+            &PackageBuildOutputs {
+                module_names: &module_names,
+                native_module_names: &native_module_names,
+                bt_dep_names: &bt_dep_names,
+                hex_dep_names: &hex_dep_names,
+                source_files: &source_files,
+            },
         )?;
     }
 
     Ok(())
+}
+
+/// Collected build outputs needed for OTP application packaging.
+///
+/// Groups the module name lists and source file paths that
+/// `generate_package_outputs` requires, reducing its parameter count.
+struct PackageBuildOutputs<'a> {
+    /// All compiled Beamtalk module names (e.g. `"bt@my_app@main"`).
+    module_names: &'a [String],
+    /// Native Erlang module names compiled from `native/*.erl`.
+    native_module_names: &'a [String],
+    /// Names of Beamtalk path dependencies (for OTP `{applications}` list).
+    bt_dep_names: &'a [String],
+    /// Names of hex dependencies (for OTP `{applications}` list).
+    hex_dep_names: &'a [String],
+    /// All `.bt` source files in the package.
+    source_files: &'a [Utf8PathBuf],
 }
 
 /// Generate OTP application artefacts for a package build.
@@ -583,23 +601,22 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
 /// Emits the `.app` file and, when `[application] supervisor` is set, the
 /// OTP application callback module (`beamtalk_{appname}_app.erl` + `.beam`).
 ///
-/// `class_module_index` maps Beamtalk class names to their compiled Erlang module
-/// names (e.g. `"AppSup"` → `"bt@my_app@supervision@app_sup"`). Used to resolve
-/// the supervisor class's actual module regardless of source file path.
-#[allow(clippy::too_many_arguments)]
+/// `hierarchy.class_module_index` maps Beamtalk class names to their compiled
+/// Erlang module names (e.g. `"AppSup"` → `"bt@my_app@supervision@app_sup"`).
+/// Used to resolve the supervisor class's actual module regardless of source
+/// file path.
 fn generate_package_outputs(
     build_dir: &Utf8Path,
     project_root: &Utf8PathBuf,
     pkg: &manifest::PackageManifest,
-    module_names: &[String],
-    class_module_index: &HashMap<String, String>,
-    native_module_names: &[String],
-    bt_dep_names: &[String],
-    hex_dep_names: &[String],
-    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
-    source_files: &[Utf8PathBuf],
+    hierarchy: &ClassHierarchyContext,
+    outputs: &PackageBuildOutputs<'_>,
 ) -> Result<()> {
-    let class_metadata = build_class_metadata(all_class_infos, class_module_index, &pkg.name);
+    let class_metadata = build_class_metadata(
+        &hierarchy.pre_loaded_classes,
+        &hierarchy.class_module_index,
+        &pkg.name,
+    );
 
     // BT-1191: Generate OTP application callback when [application] supervisor is set.
     let app_callback_module =
@@ -607,7 +624,8 @@ fn generate_package_outputs(
             let cb_module_name = format!("beamtalk_{}_app", pkg.name);
             // Resolve the supervisor's actual Erlang module via the class index.
             // This correctly handles classes in subdirectories (e.g. src/app/app_sup.bt).
-            let sup_module = class_module_index
+            let sup_module = hierarchy
+                .class_module_index
                 .get(&app_config.supervisor)
                 .ok_or_else(|| {
                     miette::miette!(
@@ -635,11 +653,11 @@ fn generate_package_outputs(
     // Include the generated callback module in the .app modules list so release
     // tooling (appup generation, etc.) can account for it.
     let all_modules: Vec<String> = if let Some(ref cb) = app_callback_module {
-        let mut v = module_names.to_vec();
+        let mut v = outputs.module_names.to_vec();
         v.push(cb.clone());
         v
     } else {
-        module_names.to_vec()
+        outputs.module_names.to_vec()
     };
 
     app_file::generate_app_file(
@@ -648,9 +666,9 @@ fn generate_package_outputs(
         &all_modules,
         &class_metadata,
         app_callback_module.as_deref(),
-        native_module_names,
-        bt_dep_names,
-        hex_dep_names,
+        outputs.native_module_names,
+        outputs.bt_dep_names,
+        outputs.hex_dep_names,
     )?;
     info!(name = %pkg.name, "Generated .app file");
 
@@ -658,7 +676,12 @@ fn generate_package_outputs(
     // The corpus_dir is _build/dev/ (parent of ebin/) so MCP can find it
     // alongside the build output.
     let corpus_dir = build_dir.parent().unwrap_or(build_dir);
-    generate_package_corpus(corpus_dir, &pkg.name, all_class_infos, source_files)?;
+    generate_package_corpus(
+        corpus_dir,
+        &pkg.name,
+        &hierarchy.pre_loaded_classes,
+        outputs.source_files,
+    )?;
 
     Ok(())
 }
@@ -1066,18 +1089,13 @@ pub(crate) fn compute_relative_module(
 ///
 /// When `cached_ast` is `Some`, reuses the pre-parsed source and `Module` from
 /// Pass 1 instead of re-reading and re-parsing the file (BT-1544).
-#[allow(clippy::too_many_arguments)]
 fn compile_file(
     path: &Utf8Path,
     module_name: &str,
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
-    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    ctx: &CompileContext<'_>,
     cached_ast: Option<CachedAst>,
-    dep_registry: Option<&beamtalk_core::semantic_analysis::DependencyRegistry>,
-    strict_deps: bool,
 ) -> Result<()> {
     debug!("Compiling {path}");
 
@@ -1087,12 +1105,8 @@ fn compile_file(
         core_file,
         options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
-        class_module_index,
-        class_superclass_index,
-        pre_loaded_classes,
+        ctx,
         cached_ast,
-        dep_registry,
-        strict_deps,
     )?;
 
     debug!("Generated Core Erlang: {core_file}");
@@ -2042,12 +2056,8 @@ mod tests {
             "test",
             &core_file,
             &default_options(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
+            &CompileContext::default(),
             None,
-            None,
-            false,
         );
         assert!(result.is_ok());
         assert!(core_file.exists());
@@ -2066,12 +2076,8 @@ mod tests {
             "test",
             &core_file,
             &default_options(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
+            &CompileContext::default(),
             None,
-            None,
-            false,
         );
         assert!(result.is_err());
     }
@@ -2531,12 +2537,15 @@ mod tests {
             "bt@gang_of_four@main",
             &core_file,
             &options,
-            &class_module_index,
-            &class_superclass_index,
-            &all_class_infos,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index: class_module_index.clone(),
+                    class_superclass_index: class_superclass_index.clone(),
+                    pre_loaded_classes: all_class_infos.clone(),
+                },
+                ..CompileContext::default()
+            },
             None,
-            None,
-            false,
         )
         .unwrap();
 
@@ -2613,12 +2622,15 @@ mod tests {
             "bt@test_pkg@inheriting_counter",
             &core_file,
             &options,
-            &class_module_index,
-            &class_superclass_index,
-            &all_class_infos,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index: class_module_index.clone(),
+                    class_superclass_index: class_superclass_index.clone(),
+                    pre_loaded_classes: all_class_infos.clone(),
+                },
+                ..CompileContext::default()
+            },
             None,
-            None,
-            false,
         )
         .expect("Cross-file inheritance should compile without errors");
 
