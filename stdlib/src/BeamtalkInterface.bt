@@ -15,7 +15,7 @@
 /// Beamtalk classNamed: #Integer
 /// ```
 sealed Object subclass: BeamtalkInterface
-  classState: current = nil
+  classState: current :: BeamtalkInterface | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
   class current -> BeamtalkInterface => self.current
