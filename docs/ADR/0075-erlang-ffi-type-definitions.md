@@ -70,13 +70,13 @@ This is the **single largest gap** in typed coverage. A codebase that is fully t
 
 ## Decision
 
-### Hybrid: Auto-Extract from `.beam` + `.d.bt` Override Files
+### Hybrid: Auto-Extract from `.beam` + Stub Override Files
 
 A two-layer system that provides **automatic baseline typing** for all Erlang modules and **curated overrides** where precision matters.
 
 ### Layer 1: Auto-Extract from `.beam` Specs
 
-At build time, the compiler reads `-spec` attributes from compiled `.beam` files on the code path and builds an `ErlangTypeRegistry` mapping module/function/arity to Beamtalk types.
+At build time, the compiler reads `-spec` attributes from compiled `.beam` files on the code path and builds an `NativeTypeRegistry` mapping module/function/arity to Beamtalk types.
 
 **How it works:**
 
@@ -98,9 +98,9 @@ Spec extraction requires the `abstract_code` chunk, which is only present in `.b
 | Mix release builds | **No** | `mix release` strips debug info since Elixir 1.9 |
 | Hex packages (precompiled) | Varies | Some strip for size optimization |
 
-**Policy:** When a `.beam` file lacks `abstract_code`, the spec reader returns no specs for that module — it silently falls through to `Dynamic` (layer 5 in the resolution chain). The build emits a one-time info-level diagnostic: `"Note: <module>.beam has no debug_info — auto-extracted types unavailable. Add a .d.bt stub for type coverage."` This is not a warning (it's expected for some packages) but gives users a path forward.
+**Policy:** When a `.beam` file lacks `abstract_code`, the spec reader returns no specs for that module — it silently falls through to `Dynamic` (layer 5 in the resolution chain). The build emits a one-time info-level diagnostic: `"Note: <module>.beam has no debug_info — auto-extracted types unavailable. Add a stub file in stubs/ for type coverage."` This is not a warning (it's expected for some packages) but gives users a path forward.
 
-**Important:** This limitation only affects auto-extraction. Curated `.d.bt` stubs work regardless of `+debug_info` — they are the recommended path for packages known to strip debug info.
+**Important:** This limitation only affects auto-extraction. Curated stub stubs work regardless of `+debug_info` — they are the recommended path for packages known to strip debug info.
 
 **Beamtalk-compiled `.beam` files:** Note that Beamtalk compiles via Core Erlang, and Core Erlang compilation does not preserve `-spec` attributes in the `abstract_code` chunk (documented in `validate_specs.escript`). However, this is not a problem: Beamtalk-compiled modules already have full type information in the Beamtalk type checker via `ClassHierarchy` — auto-extraction targets *foreign* (non-Beamtalk) `.beam` files.
 
@@ -123,7 +123,7 @@ Auto-extracts to:
 | `seq/2` | `Integer, Integer` | `List(Integer)` |
 | `member/2` | `Dynamic, List` | `Boolean` |
 
-Note: `Elem :: T` with no constraint maps to `Dynamic` — correct but imprecise. The `.d.bt` override layer addresses this.
+Note: `Elem :: T` with no constraint maps to `Dynamic` — correct but imprecise. The stub override layer addresses this.
 
 **Type variable handling:**
 
@@ -144,18 +144,20 @@ Note: `Elem :: T` with no constraint maps to `Dynamic` — correct but imprecise
 | `map()` (untyped) | `Dictionary` | Beamtalk equivalent |
 | `#{key := Type}` | `Dictionary` | Typed map keys not yet supported in Beamtalk |
 
-### Layer 2: `.d.bt` Override Files
+### Layer 2: Stub Override Files (`.bt` in `stubs/`)
 
-Hand-curated declaration files that override or supplement auto-extracted types. These add meaningful keyword names, tighter types, and type information for unspecced functions.
+Hand-curated stub files that override or supplement auto-extracted types. These add meaningful keyword names, tighter types, and type information for unspecced functions.
+
+**Key design decision:** Stubs are **valid `.bt` files** parsed by the existing parser — not a separate stub format with a separate parser. This follows TypeScript's principle that declaration files use the same language. However, unlike TypeScript where `.d.ts` describes TypeScript types requiring the full type system parser, our stubs need only method signatures with type annotations — a small subset already implemented for protocol definitions. We add a single new top-level form (`declare native:`) and reuse the existing protocol method signature parser for the body.
 
 **Stub file format:**
 
 ```beamtalk
-// stubs/otp/lists.d.bt
+// stubs/otp/lists.bt
 
-/// Type declarations for erlang module `lists`.
+/// Type declarations for Erlang module `lists`.
 /// OTP compatibility: 25+
-declare ErlangModule: lists
+declare native: lists
 
   /// Reverse a list.
   reverse: list :: List(T) -> List(T)
@@ -182,41 +184,53 @@ declare ErlangModule: lists
 
 **Format rules:**
 
-- `declare ErlangModule: <atom>` — names the Erlang module being typed
-- Each line declares a function with Beamtalk-style keyword syntax and type annotations
+- `declare native: <atom>` — top-level form naming the Erlang module. Not a class declaration — stubs are never registered in `ClassHierarchy`, never loaded into the workspace, and never generate codegen output. They exist solely to populate `NativeTypeRegistry`
+- Method signatures use the same syntax as protocol definitions (ADR 0068) — keyword message syntax with type annotations, no `=>` body
 - First keyword = Erlang function name, subsequent keywords provide meaningful parameter names
 - Type parameters (e.g., `T`, `A`, `B`, `Acc`) are **method-scoped** — each function declaration introduces its own type variables, universally quantified per call. This differs from ADR 0068's class-level type params (e.g., `Result(T, E)`) which are positional and declared at the class site. Stub type params are more like Hindley-Milner `forall` — `reverse: list :: List(T) -> List(T)` means "for any type T, given a List(T), returns a List(T)." The type checker needs a per-call substitution pass for these, separate from the class-level generic substitution in ADR 0068
-- `///` doc comments flow to LSP hover — they supplement (not replace) Erlang docs
+- `///` doc comments flow to LSP hover and `:help Erlang <module>` — they supplement (not replace) Erlang docs
 - Functions not listed fall through to auto-extracted types
 - Multiple arity variants are separate declarations
 
+**What reusing the parser buys us:**
+- No `stub_parser.rs` — eliminated entirely
+- Syntax highlighting works in any editor with `.bt` support
+- LSP features (completions, hover, go-to-definition) work on stub files for free
+- `stub-gen` output is valid Beamtalk that users can open, read, and edit with full tooling
+- Doc comments (`///`) use the existing doc comment parser
+
+**What stubs are NOT:**
+- Not classes — no `ClassHierarchy` entry, no `ClassInfo`, no superclass chain
+- Not loadable — `Workspace load:` ignores `stubs/` directory; stubs never produce `.beam` files
+- Not instantiable — `declare native:` is a type-only construct, not an object
+
 **Override semantics:**
 
-A `.d.bt` declaration for `lists:reverse/1` completely replaces the auto-extracted type for that function/arity. If a function has a `.d.bt` declaration, auto-extracted types are ignored for that specific function/arity — not merged.
+A stub declaration for `lists:reverse/1` completely replaces the auto-extracted type for that function/arity. If a function has a stub declaration, auto-extracted types are ignored for that specific function/arity — not merged.
 
 ### Resolution Order
 
 When the type checker encounters `Erlang <module> <function>: args`, it resolves the function's type signature using this precedence (highest wins):
 
 ```text
-1. Package-bundled .d.bt    — library author ships types with their package
+1. Package-bundled stubs/   — library author ships stubs with their package
 2. Project-local stubs/     — user overrides in their own project
 3. Distribution stubs/      — curated stubs shipped with the Beamtalk compiler
 4. Auto-extracted from .beam — read from compiled .beam at build time
 5. Dynamic                  — no type info available (same as today)
 ```
 
-**Each layer is a complete override at the function/arity level.** If `stubs/otp/lists.d.bt` declares `reverse/1`, that definition is used — the `.beam` spec is not consulted for that function. But `lists:nth/2`, not declared in the stub file, still uses the auto-extracted type.
+**Each layer is a complete override at the function/arity level.** If `stubs/otp/lists.bt` declares `reverse/1`, that definition is used — the `.beam` spec is not consulted for that function. But `lists:nth/2`, not declared in the stub file, still uses the auto-extracted type.
 
 ### Type Checker Integration
 
-The type checker gains an `ErlangTypeRegistry` that stores resolved function signatures:
+The type checker gains an `NativeTypeRegistry` that stores resolved function signatures:
 
 ```rust
 /// Registry of Erlang function type signatures, populated at build time.
 ///
-/// Resolution: .d.bt overrides > auto-extracted .beam specs > Dynamic
-struct ErlangTypeRegistry {
+/// Resolution: stub overrides > auto-extracted .beam specs > Dynamic
+struct NativeTypeRegistry {
     /// module → function_name → arity → FunctionSignature
     modules: HashMap<EcoString, HashMap<EcoString, Vec<FunctionSignature>>>,
 }
@@ -224,11 +238,11 @@ struct ErlangTypeRegistry {
 struct FunctionSignature {
     params: Vec<ParamType>,
     return_type: InferredType,
-    provenance: TypeProvenance,  // Declared(.d.bt span) or Inferred(.beam)
+    provenance: TypeProvenance,  // Declared(stub span) or Extracted(.beam)
 }
 
 struct ParamType {
-    keyword: Option<EcoString>,  // meaningful keyword name (from .d.bt only)
+    keyword: Option<EcoString>,  // meaningful keyword name (from stubs only)
     type_: InferredType,
 }
 ```
@@ -237,7 +251,7 @@ When the type checker encounters a message send on `ErlangModule`:
 
 1. Extract the module name from the proxy receiver
 2. Extract the function name from the first keyword and count arguments for arity
-3. Look up `(module, function, arity)` in `ErlangTypeRegistry`
+3. Look up `(module, function, arity)` in `NativeTypeRegistry`
 4. If found: check argument types against `params`, return the declared `return_type`
 5. If not found: return `Dynamic` (same as today — no regression)
 
@@ -258,33 +272,37 @@ This requires extending `ErlangModule`'s type representation from a simple `Know
 ```beamtalk
 > Erlang lists reverse: 42
   ⚠️ Warning: lists:reverse/1 parameter 1 expects List, got Integer
-  (type from stubs/otp/lists.d.bt:5)
+  (type from stubs/otp/lists.bt:5)
 
 > Erlang lists reverse: #(1, 2, 3)
   // type checker infers: List — downstream code gets typed
 ```
 
-**Provenance tracking:** Types from `.d.bt` stubs have `TypeProvenance::Declared` (with span pointing into the stub file). Types from auto-extraction have a new `TypeProvenance::Extracted` variant. This distinction appears in diagnostics so users know where the type info came from.
+**Provenance tracking:** Types from stub files have `TypeProvenance::Declared` (with span pointing into the stub file). Types from auto-extraction have a new `TypeProvenance::Extracted` variant. This distinction appears in diagnostics so users know where the type info came from.
 
 ### Stub Generation Tool
 
-A `beamtalk stub-gen` command bootstraps `.d.bt` files from `.beam` specs:
+A `beamtalk stub-gen` command bootstraps stub files from `.beam` specs:
 
 ```bash
 # Generate stubs for specific modules
 beamtalk stub-gen lists maps string file io ets
 
-# Output: stubs/otp/lists.d.bt, stubs/otp/maps.d.bt, ...
+# Output: stubs/otp/lists.bt, stubs/otp/maps.bt, ...
 # Auto-extracted types as starting point — human refines keyword names, tightens types
+
+# Generate stubs for a package's native Erlang modules
+beamtalk stub-gen --native-dir native/
+# Output: stubs/beamtalk_http.bt, stubs/beamtalk_http_server.bt, ...
 ```
 
-The generated stubs use `with:` for non-first parameters (matching the current FFI convention). The author then replaces `with:` with meaningful keyword names and tightens `Dynamic` params where appropriate.
+The generated stubs use `with:` for non-first parameters (matching the current FFI convention). The author then replaces `with:` with meaningful keyword names and tightens `Dynamic` params where appropriate. For library authors with native Erlang code (ADR 0072), `stub-gen --native-dir` reads the compiled `.beam` output from their `native/` directory and generates stub files for each module — giving them a starting point to ship typed stubs with their package.
 
 **Example generated stub (before refinement):**
 
 ```beamtalk
 // Auto-generated from lists.beam (OTP 27) — refine keyword names and types
-declare ErlangModule: lists
+declare native: lists
 
   reverse: arg1 :: List -> List
   seq: arg1 :: Integer with: arg2 :: Integer -> List(Integer)
@@ -294,7 +312,7 @@ declare ErlangModule: lists
 **After human refinement:**
 
 ```beamtalk
-declare ErlangModule: lists
+declare native: lists
 
   reverse: list :: List(T) -> List(T)
   seq: from :: Integer to: to :: Integer -> List(Integer)
@@ -304,12 +322,12 @@ declare ErlangModule: lists
 ### Distribution Model
 
 **Shipped with the compiler:**
-- Curated `.d.bt` stubs for ~20 core OTP modules: `lists`, `maps`, `string`, `binary`, `file`, `io`, `ets`, `gen_server`, `supervisor`, `erlang`, `math`, `crypto`, `timer`, `os`, `re`, `unicode`, `proplists`, `sets`, `dict`, `queue`
+- Curated stubs for ~20 core OTP modules: `lists`, `maps`, `string`, `binary`, `file`, `io`, `ets`, `gen_server`, `supervisor`, `erlang`, `math`, `crypto`, `timer`, `os`, `re`, `unicode`, `proplists`, `sets`, `dict`, `queue`
 - These live in the Beamtalk source tree under `stubs/otp/` and are installed with the compiler distribution
 - Maintained by the Beamtalk project, tested against supported OTP versions
 
 **Package-bundled stubs:**
-- Beamtalk packages with native Erlang code (ADR 0072) can include `.d.bt` files for their native modules
+- Beamtalk packages with native Erlang code (ADR 0072) can include stub files for their native modules
 - Declared in `beamtalk.toml`:
 
   ```toml
@@ -335,7 +353,7 @@ declare ErlangModule: lists
   ```
 
 **Auto-extract covers the rest:**
-- Any `.beam` on the code path without a `.d.bt` override gets auto-extracted types
+- Any `.beam` on the code path without a stub override gets auto-extracted types
 - This includes OTP modules without curated stubs, transitive Hex dependencies, and user Erlang code
 - No manual work required — baseline typing is automatic
 
@@ -344,7 +362,7 @@ declare ErlangModule: lists
 ```beamtalk
 > Erlang lists seq: 1 to: 10
 #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-// type: List(Integer) — from stubs/otp/lists.d.bt
+// type: List(Integer) — from stubs/otp/lists.bt
 
 > Erlang crypto hash: #sha256 with: "hello"
 <<44, 242, ...>>
@@ -355,14 +373,14 @@ declare ErlangModule: lists
 
 > Erlang lists reverse: 42
 ⚠️ Warning: lists:reverse/1 parameter 1 expects List(T), got Integer
-  (type from stubs/otp/lists.d.bt:5)
+  (type from stubs/otp/lists.bt:5)
 ```
 
 ### Error Examples
 
 **Stub parse error:**
 ```
-error: Failed to parse stubs/otp/lists.d.bt:7
+error: Failed to parse stubs/otp/lists.bt:7
   Expected type annotation after '::', got ')'
   7 |   seq: from :: Integer to: to :: -> List(Integer)
                                          ^
@@ -370,13 +388,13 @@ error: Failed to parse stubs/otp/lists.d.bt:7
 
 **Arity mismatch between stub and actual function:**
 ```
-⚠️ Warning: stubs/otp/lists.d.bt declares lists:seq/3 but lists.beam exports seq/2 and seq/3
+⚠️ Warning: stubs/otp/lists.bt declares lists:seq/3 but lists.beam exports seq/2 and seq/3
   Stub declaration for lists:seq/3 will be used; lists:seq/2 has no stub (auto-extracted)
 ```
 
 **Version drift detection:**
 ```
-⚠️ Warning: stubs/otp/lists.d.bt declares lists:enumerate/1 but it is not exported from lists.beam
+⚠️ Warning: stubs/otp/lists.bt declares lists:enumerate/1 but it is not exported from lists.beam
   This function may have been added in a newer OTP version
   Stub will be ignored for lists:enumerate/1
 ```
@@ -441,12 +459,12 @@ Dialyzer builds a Persistent Lookup Table with success typings — types inferre
 
 **Neutral:** Auto-extract means this works out of the box. No new concepts to learn — FFI calls look the same, they just get better checking.
 
-**Risk:** Users may not understand why some Erlang functions have precise types and others return `Dynamic`. Mitigation: diagnostic messages include provenance ("type from lists.d.bt" vs "type from lists.beam -spec" vs "no type info available").
+**Risk:** Users may not understand why some Erlang functions have precise types and others return `Dynamic`. Mitigation: diagnostic messages include provenance ("type from stubs/otp/lists.bt" vs "type from lists.beam -spec" vs "no type info available").
 
 ### Smalltalk Developer
-**Positive:** The `.d.bt` stub format uses familiar Beamtalk keyword syntax. Meaningful keyword names in stubs make FFI calls read more like Smalltalk message sends: `Erlang lists seq: 1 to: 10` instead of `Erlang lists seq: 1 with: 10`.
+**Positive:** Stubs use familiar Beamtalk keyword syntax — they're valid `.bt` files. Meaningful keyword names in stubs make FFI calls read more like Smalltalk message sends: `Erlang lists seq: 1 to: 10` instead of `Erlang lists seq: 1 with: 10`.
 
-**Concern:** A new file format (`.d.bt`) adds surface area. Mitigation: stubs are optional — the system works without them. Only library authors or power users need to write stubs.
+**Concern:** The `declare native:` form is a new concept. Mitigation: stubs are optional — the system works without them. Only library authors or power users need to write stubs. The syntax is a small subset of existing Beamtalk, not a new language.
 
 ### Erlang/BEAM Developer
 **Positive:** Their existing `-spec` annotations are automatically used — no duplicate work. Types match their actual OTP version. Hex packages with good specs get automatic typing.
@@ -459,17 +477,17 @@ Dialyzer builds a Persistent Lookup Table with success typings — types inferre
 **Concern:** Build time increases slightly (reading `.beam` files for specs). Mitigation: results are cached per module; only re-extracted when `.beam` timestamps change. Incremental builds read zero `.beam` files.
 
 ### Tooling Developer
-**Positive:** `ErlangTypeRegistry` is a clean, queryable data structure. The LSP can use it for completions, hover, and signature help on FFI calls. Provenance tracking enables "go to type definition" that jumps to the `.d.bt` file.
+**Positive:** `NativeTypeRegistry` is a clean, queryable data structure. The LSP can use it for completions, hover, and signature help on FFI calls. Provenance tracking enables "go to type definition" that jumps to the stub file. Because stubs are valid `.bt` files, all existing LSP features (syntax highlighting, completions, hover) work on stub files for free.
 
 **Concern:** Two sources of truth (auto-extracted + stubs) means the registry merge logic must be correct. Mitigation: the merge is simple — stubs win per function/arity, everything else is auto-extracted.
 
 ## Steelman Analysis
 
-### Best Argument for Pure `.d.bt` Stubs (No Auto-Extract)
+### Best Argument for Pure stub Stubs (No Auto-Extract)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "I can read the `.d.bt` file and see exactly what's available — it's self-documenting, like TypeScript's `.d.ts`" |
+| **Newcomer** | "I can read the stub file and see exactly what's available — it's self-documenting, like TypeScript's `.d.ts`" |
 | **Smalltalk purist** | "Types should be curated by humans who understand the domain, not mechanically extracted from a foreign type system with its own quirks" |
 | **BEAM veteran** | "Erlang specs are sometimes wrong or overly broad — `term()` everywhere. Hand-written stubs can be more honest about what a function actually accepts" |
 | **Operator** | "No build-time dependency on reading `.beam` files; stubs are static, deterministic, cacheable" |
@@ -498,13 +516,13 @@ Dialyzer builds a Persistent Lookup Table with success typings — types inferre
 
 ## Alternatives Considered
 
-### Alternative A: Pure `.d.bt` Stubs (No Auto-Extract)
+### Alternative A: Pure stub Stubs (No Auto-Extract)
 
-Require hand-written `.d.bt` files for every Erlang module that should have type info. Functions without stubs return `Dynamic`.
+Require hand-written stub files for every Erlang module that should have type info. Functions without stubs return `Dynamic`.
 
 ```beamtalk
 // Must write this before lists:reverse gets typed
-declare ErlangModule: lists
+declare native: lists
   reverse: list :: List(T) -> List(T)
   // ... hundreds more functions
 ```
@@ -513,7 +531,7 @@ declare ErlangModule: lists
 
 ### Alternative B: Pure Auto-Extract (No Override Mechanism)
 
-Read all types from `.beam` specs. No `.d.bt` files, no overrides.
+Read all types from `.beam` specs. No stub files, no overrides.
 
 **Rejected.** Quality ceiling is too low. Erlang specs use `term()` broadly, keyword names are lost, and overloaded specs can produce confusing unions. For the 20 most-used OTP modules, human curation meaningfully improves the developer experience. Without an override mechanism, there's no way to provide that.
 
@@ -552,17 +570,17 @@ Read inferred types from Dialyzer's PLT files to supplement missing `-spec` anno
 - **Build time increase** — reading `.beam` specs adds time to first build (mitigated by caching)
 - **Imprecise auto-extracted types** — `term()` → `Dynamic` means some functions get no useful type info from auto-extract alone
 - **Stub maintenance** — curated OTP stubs must be updated when OTP adds/changes functions (mitigated by `stub-gen` tool and version drift detection)
-- **New file format** — `.d.bt` is a new parser target, adding compiler surface area
+- **New parse form** — `declare native:` is a new top-level form, though it reuses the existing protocol signature parser and requires no separate parser
 - **Trust boundary** — stubs can declare incorrect types; the compiler trusts them. Incorrect stubs cause false diagnostics (mitigated by `stub-gen` producing correct starting points)
-- **`+debug_info` dependency** — auto-extraction only works for `.beam` files compiled with `+debug_info`. Release-stripped packages and some precompiled Hex deps fall through to `Dynamic` (mitigated by `.d.bt` stubs for important packages)
+- **`+debug_info` dependency** — auto-extraction only works for `.beam` files compiled with `+debug_info`. Release-stripped packages and some precompiled Hex deps fall through to `Dynamic` (mitigated by stub stubs for important packages)
 - **Cold build cost** — first build must read `abstract_code` from all `.beam` files on the code path. For large dependency graphs (200+ modules), this may add several seconds. Results are cached in `_build/type_cache/` and invalidated by `.beam` timestamp changes — incremental builds have zero extraction overhead
-- **Hot code reload staleness** — `ErlangTypeRegistry` is populated at build time. If an Erlang module is hot-reloaded mid-session with changed specs, the registry is stale until the next `beamtalk build`. This is a known limitation — type info is compile-time, dispatch is runtime. Consistent with ADR 0025's "compile-time only" principle
+- **Hot code reload staleness** — `NativeTypeRegistry` is populated at build time. If an Erlang module is hot-reloaded mid-session with changed specs, the registry is stale until the next `beamtalk build`. This is a known limitation — type info is compile-time, dispatch is runtime. Consistent with ADR 0025's "compile-time only" principle
 
 ### Neutral
 - Auto-extracted types have `TypeProvenance::Extracted` — diagnostics show the source
 - Functions with no spec and no stub return `Dynamic` — identical to current behavior
 - No runtime changes — this is entirely a compile-time/tooling feature
-- The `.d.bt` parser is a subset of the existing Beamtalk parser (type annotations + method signatures, no bodies)
+- Stubs are valid `.bt` files using a `declare native:` top-level form — parsed by the existing parser, no separate stub parser needed
 
 ## Implementation
 
@@ -578,7 +596,7 @@ Validate the core assumption before building full infrastructure. ADR 0028 expli
 
 **Validates:** `abstract_code` chunk availability, spec format parsing, type mapping correctness, build worker integration.
 
-**Components:** `beamtalk_spec_reader.erl` (new), minimal `ErlangTypeRegistry` prototype, one type checker test
+**Components:** `beamtalk_spec_reader.erl` (new), minimal `NativeTypeRegistry` prototype, one type checker test
 
 ### Phase 1: Auto-Extract Infrastructure
 
@@ -586,24 +604,24 @@ Build the full Erlang spec reader and Rust integration:
 
 1. **`beamtalk_spec_reader.erl`** — Extend the Phase 0 spike to handle all Erlang type forms, batch-process multiple modules, and emit results as structured terms via the build worker protocol
 2. **Erlang→Beamtalk type mapping** — Rust module that converts the full range of Erlang abstract type representations to `InferredType` values (reverse of `spec_codegen.rs`), including generic type variables, union types, and the edge cases table above
-3. **`ErlangTypeRegistry`** — new struct in the type checker that stores resolved function signatures
+3. **`NativeTypeRegistry`** — new struct in the type checker that stores resolved function signatures
 4. **Build integration** — invoke spec reader during `beamtalk build`, cache results per module
 5. **Type checker integration** — look up FFI call types in the registry during inference
 
-**Components:** `beamtalk_spec_reader.erl` (new), `crates/beamtalk-core/src/semantic_analysis/type_checker/erlang_types.rs` (new), `beam_compiler.rs` (extended), `inference.rs` (extended)
+**Components:** `beamtalk_spec_reader.erl` (new), `crates/beamtalk-core/src/semantic_analysis/type_checker/native_types.rs` (new), `beam_compiler.rs` (extended), `inference.rs` (extended)
 
-### Phase 2: `.d.bt` Stub Format and Parser
+### Phase 2: `declare native:` Parse Form and Stub Files
 
-1. **Stub file format** — define the `.d.bt` grammar (subset of Beamtalk: `declare`, type annotations, method signatures)
-2. **Stub parser** — parse `.d.bt` files into `FunctionSignature` entries
+1. **`declare native:` top-level form** — add to the existing parser as a new top-level declaration (alongside class and protocol definitions). Parses `declare native: <ident>` header, then reuses the existing protocol method signature parser for the body. No separate `stub_parser.rs` needed
+2. **Build pipeline integration** — `stubs/` directory is scanned during build; `.bt` files there are parsed but skip codegen, populating `NativeTypeRegistry` only
 3. **Resolution chain** — merge stubs with auto-extracted types (stubs win per function/arity)
-4. **Initial OTP stubs** — curate `.d.bt` files for 10 core modules: `lists`, `maps`, `string`, `file`, `io`, `ets`, `gen_server`, `erlang`, `math`, `crypto`
+4. **Initial OTP stubs** — curate stub files for 10 core modules: `lists`, `maps`, `string`, `file`, `io`, `ets`, `gen_server`, `erlang`, `math`, `crypto`
 
-**Components:** `crates/beamtalk-core/src/parser/stub_parser.rs` (new), `stubs/otp/*.d.bt` (new), `ErlangTypeRegistry` (extended)
+**Components:** `crates/beamtalk-core/src/source_analysis/parser/declarations.rs` (extended — new `parse_declare_native`), `crates/beamtalk-core/src/ast/` (new `NativeDeclaration` AST node), `stubs/otp/*.bt` (new), `NativeTypeRegistry` (extended)
 
 ### Phase 3: `stub-gen` Tool and Package Integration
 
-1. **`beamtalk stub-gen`** CLI command — reads `.beam` files and generates `.d.bt` stubs
+1. **`beamtalk stub-gen`** CLI command — reads `.beam` files and generates `declare native:` stub files. Supports `--native-dir` for library authors to generate stubs from their own native Erlang code
 2. **`beamtalk.toml` integration** — packages declare stubs for their native modules
 3. **Dependency resolution** — collect stubs from transitive dependencies during build
 4. **Expand curated stubs** to ~20 OTP modules
@@ -612,12 +630,12 @@ Build the full Erlang spec reader and Rust integration:
 
 ### Phase 4: LSP Integration
 
-Note: basic typed completions can optionally be pulled into Phase 1 or 2 since `ErlangTypeRegistry` is available as soon as auto-extract ships. The full LSP phase below covers the complete integration.
+Note: basic typed completions can optionally be pulled into Phase 1 or 2 since `NativeTypeRegistry` is available as soon as auto-extract ships. The full LSP phase below covers the complete integration.
 
 1. **Typed completions** for `Erlang <module>` — show function signatures with types
-2. **Hover info** — display type signature and doc comment from `.d.bt` on hover
+2. **Hover info** — display type signature and doc comment from stub file on hover
 3. **Signature help** — show parameter types as user types arguments
-4. **Go to type definition** — jump to `.d.bt` file for stub-typed functions
+4. **Go to type definition** — jump to stub file for stub-typed functions
 5. **Diagnostics** — surface type warnings from FFI calls in the editor
 
 **Components:** `crates/beamtalk-lsp/src/completion_provider.rs` (extended), `crates/beamtalk-lsp/src/hover_provider.rs` (extended)
@@ -625,7 +643,7 @@ Note: basic typed completions can optionally be pulled into Phase 1 or 2 since `
 ### Future Work
 
 - **Richer type mapping** — as Beamtalk's type system grows (subrange types, typed maps, record types), the Erlang→Beamtalk mapping can become more precise
-- **Elixir stubs** — `.d.bt` files for Elixir modules (`'Elixir.Enum'`, `'Elixir.String'`, etc.)
+- **Elixir stubs** — `declare native:` files for Elixir modules (`'Elixir.Enum'`, `'Elixir.String'`, etc.)
 - **PLT integration** — read Dialyzer PLT for inferred types of unspecced functions (if needed)
 - **AI-assisted stub generation** — use LLMs to generate meaningful keyword names from Erlang doc comments and parameter names in source
 - **Community stub registry** — if the ecosystem grows large enough, a central registry (like DefinitelyTyped) may become worthwhile
