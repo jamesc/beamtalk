@@ -367,6 +367,20 @@ struct TestResultDetail {
     error: Option<String>,
 }
 
+/// Parsed per-module `EUnit` output sections, split by `NATIVE_EUNIT_DONE` markers.
+struct EunitModuleSections {
+    /// Per-module results: `(module_name, passed, failed, skipped)`.
+    modules: Vec<(String, usize, usize, usize)>,
+    /// Total passing tests across all modules.
+    total_passed: usize,
+    /// Total failing tests across all modules.
+    total_failed: usize,
+    /// Total skipped tests across all modules.
+    total_skipped: usize,
+    /// Captured `EUnit` output from failing modules.
+    eunit_output: String,
+}
+
 /// Result from running native `EUnit` tests.
 #[derive(Debug, Default)]
 struct NativeEunitResult {
@@ -870,78 +884,70 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
     report_results(&pipeline, &results, start_time)
 }
 
-/// Initialize the test pipeline: discover packages and build class indexes.
-#[allow(clippy::too_many_lines)]
-fn initialize_pipeline(
-    test_path: Utf8PathBuf,
-    test_files: Vec<Utf8PathBuf>,
-    build_dir: Utf8PathBuf,
-    warnings_as_errors: bool,
-    jobs: usize,
-) -> Result<TestPipeline> {
-    // Discover all unique package roots: walk up from each test file's directory,
-    // and also check the CWD. This allows `beamtalk test .` from a parent directory
-    // (e.g. `examples/`) to find and build all packages that contain test files.
-    //
-    // All roots are canonicalized before deduplication so that `"."` (relative CWD)
-    // and an absolute path to the same directory compare equal in `seen`. Without
-    // this, passing absolute test file paths could insert the same package twice
-    // (once as `"."`, once as `/abs/path`), incorrectly flipping multi-package mode.
-    let discovered_packages: Vec<(Utf8PathBuf, manifest::PackageManifest)> = {
-        let mut roots: Vec<Utf8PathBuf> = Vec::new();
-        let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
+/// Discover unique package roots and load their manifests.
+///
+/// Walks up from each test file's directory, seeds from CWD and `test_path`,
+/// and deduplicates by canonical path so relative and absolute references to
+/// the same directory compare equal.
+fn discover_packages_with_manifests(
+    test_path: &Utf8Path,
+    test_files: &[Utf8PathBuf],
+) -> Result<Vec<(Utf8PathBuf, manifest::PackageManifest)>> {
+    let mut roots: Vec<Utf8PathBuf> = Vec::new();
+    let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
 
-        // Check CWD first
-        let cwd = canonical_path(Utf8Path::new("."));
-        if seen.insert(cwd.clone()) {
-            roots.push(cwd);
+    // Check CWD first
+    let cwd = canonical_path(Utf8Path::new("."));
+    if seen.insert(cwd.clone()) {
+        roots.push(cwd);
+    }
+
+    // Also seed from the test_path itself when it's a directory.
+    // This ensures `beamtalk test path/to/pkg` from a parent directory
+    // discovers the package even when it has no .bt test files
+    // (native-only packages).
+    if test_path.is_dir() {
+        let tp = canonical_path(test_path);
+        if seen.insert(tp.clone()) {
+            roots.push(tp);
         }
+    }
 
-        // Also seed from the test_path itself when it's a directory.
-        // This ensures `beamtalk test path/to/pkg` from a parent directory
-        // discovers the package even when it has no .bt test files
-        // (native-only packages).
-        if test_path.is_dir() {
-            let tp = canonical_path(&test_path);
-            if seen.insert(tp.clone()) {
-                roots.push(tp);
+    // Walk up from each test file to find its package root
+    for test_file in test_files {
+        if let Some(root) = canonical_package_root(test_file) {
+            if seen.insert(root.clone()) {
+                roots.push(root);
             }
         }
+    }
 
-        // Walk up from each test file to find its package root
-        for test_file in &test_files {
-            if let Some(root) = canonical_package_root(test_file) {
-                if seen.insert(root.clone()) {
-                    roots.push(root);
-                }
-            }
+    // Load manifests, skip roots without a beamtalk.toml
+    let mut pkgs = Vec::new();
+    for root in roots {
+        if let Some(pkg) = manifest::find_manifest(&root)? {
+            pkgs.push((root, pkg));
         }
+    }
+    Ok(pkgs)
+}
 
-        // Load manifests, skip roots without a beamtalk.toml
-        let mut pkgs = Vec::new();
-        for root in roots {
-            if let Some(pkg) = manifest::find_manifest(&root)? {
-                pkgs.push((root, pkg));
-            }
-        }
-        pkgs
-    };
-
-    // Map from package root -> package name for test module naming.
-    // Used to prefix test module names with the package name when multiple
-    // packages are in scope, preventing module collisions (e.g. two packages
-    // that both define a `SmokeTest` class would otherwise both compile to
-    // `bt@smoke_test.beam` in the shared temp build dir).
-    let pkg_root_to_name: HashMap<Utf8PathBuf, String> = discovered_packages
-        .iter()
-        .map(|(root, pkg)| (root.clone(), pkg.name.clone()))
-        .collect();
-
-    // Build per-package class indexes and a merged combined index.
-    // Per-package indexes let each test file see only its own package's classes,
-    // preventing false cross-package class name collisions when running tests
-    // from a parent directory containing multiple packages. The merged index is
-    // used for fixture compilation (which can reference any package's classes).
+/// Build per-package class indexes and a merged combined index.
+///
+/// Per-package indexes let each test file see only its own package's classes,
+/// preventing false cross-package class name collisions when running tests
+/// from a parent directory containing multiple packages. The merged index is
+/// used for fixture compilation (which can reference any package's classes).
+///
+/// Returns `(pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos)`.
+fn build_merged_class_indexes(
+    discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
+) -> (
+    PkgClassIndexes,
+    HashMap<String, String>,
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) {
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
@@ -951,7 +957,7 @@ fn initialize_pipeline(
         Vec::new();
     let mut dep_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
         Vec::new();
-    for (pkg_root, pkg) in &discovered_packages {
+    for (pkg_root, pkg) in discovered_packages {
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
@@ -1000,6 +1006,37 @@ fn initialize_pipeline(
     // To add a new .bt source location, add its ClassInfo slice here.
     let all_class_infos =
         super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
+
+    (
+        pkg_class_indexes,
+        class_module_index,
+        class_superclass_index,
+        all_class_infos,
+    )
+}
+
+/// Initialize the test pipeline: discover packages and build class indexes.
+fn initialize_pipeline(
+    test_path: Utf8PathBuf,
+    test_files: Vec<Utf8PathBuf>,
+    build_dir: Utf8PathBuf,
+    warnings_as_errors: bool,
+    jobs: usize,
+) -> Result<TestPipeline> {
+    let discovered_packages = discover_packages_with_manifests(&test_path, &test_files)?;
+
+    // Map from package root -> package name for test module naming.
+    // Used to prefix test module names with the package name when multiple
+    // packages are in scope, preventing module collisions (e.g. two packages
+    // that both define a `SmokeTest` class would otherwise both compile to
+    // `bt@smoke_test.beam` in the shared temp build dir).
+    let pkg_root_to_name: HashMap<Utf8PathBuf, String> = discovered_packages
+        .iter()
+        .map(|(root, pkg)| (root.clone(), pkg.name.clone()))
+        .collect();
+
+    let (pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos) =
+        build_merged_class_indexes(&discovered_packages);
 
     Ok(TestPipeline {
         test_path,
@@ -1473,18 +1510,12 @@ fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
 
 /// Run tests via `beamtalk_test_runner:run_all(Jobs)` in a single BEAM process.
 ///
-/// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
-/// discovers test classes, executes them with the specified concurrency level,
-/// and returns aggregated results as JSON.
-#[allow(clippy::too_many_lines)]
-fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
-    debug!("Running BUnit tests with jobs={}", pipeline.jobs);
-
-    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
-        .wrap_err("Cannot find Erlang runtime directory")?;
-    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
-    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
-
+/// Build Erlang `ensure_loaded_or_warn` calls for fixtures, packages, and test modules.
+///
+/// Returns a tuple of `(fixture_load_cmd, package_load_cmd, test_load_cmd)` strings
+/// ready for inclusion in the `-eval` command. Each string is empty or ends with `, `
+/// so they can be concatenated directly.
+fn build_load_commands(pipeline: &TestPipeline) -> (String, String, String) {
     // Build fixture loading commands
     // BT-1732: Use ensure_loaded_or_warn for consistent on_load failure reporting.
     let fixture_load_cmd = if pipeline.all_fixture_modules.is_empty() {
@@ -1499,7 +1530,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
             + ", "
     };
 
-    // Build package module loading commands (triggers on_load → class registration)
+    // Build package module loading commands (triggers on_load -> class registration)
     // BT-1732: Check return values and report which class failed to load and why.
     let package_load_cmd = if pipeline.package_modules.is_empty() {
         String::new()
@@ -1513,7 +1544,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
             + ", "
     };
 
-    // Build test module loading commands (triggers on_load → class registration)
+    // Build test module loading commands (triggers on_load -> class registration)
     // BT-1732: Check return values and report which test class failed to load.
     let test_load_cmd = if pipeline.compiled_tests.is_empty() {
         String::new()
@@ -1532,24 +1563,18 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
             + ", "
     };
 
-    // ADR 0072: Start hex dep OTP applications before tests
-    let hex_deps_start_cmd =
-        beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
+    (fixture_load_cmd, package_load_cmd, test_load_cmd)
+}
 
-    // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
-    let eval_cmd = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-         {hex_deps_start_cmd}\
-         {package_load_cmd}\
-         {fixture_load_cmd}\
-         {test_load_cmd}\
-         Result = beamtalk_test_runner:run_all({jobs}), \
-         JSON = beamtalk_test_runner:result_to_json(Result), \
-         io:format(\"~s~n\", [JSON]), \
-         init:stop(case beamtalk_test_runner:result_has_passed(Result) of true -> 0; _ -> 1 end).",
-        jobs = pipeline.jobs
-    );
-
+/// Build a BEAM command (`erl -noshell`) with `-pa` paths for the build dir,
+/// package ebin dirs, and runtime paths, then appends the `-eval` command.
+///
+/// Shared by both `BUnit` and native `EUnit` test runners.
+fn build_beam_test_command(
+    pipeline: &TestPipeline,
+    pa_args: &[std::ffi::OsString],
+    eval_cmd: &str,
+) -> std::process::Command {
     let mut cmd = std::process::Command::new("erl");
     #[cfg(windows)]
     {
@@ -1576,24 +1601,21 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
         }
     }
 
-    for arg in &pa_args {
+    for arg in pa_args {
         cmd.arg(arg);
     }
 
-    cmd.arg("-eval").arg(&eval_cmd);
+    cmd.arg("-eval").arg(eval_cmd);
+    cmd
+}
 
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run BUnit tests")?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    debug!("BUnit stdout: {}", stdout);
-    debug!("BUnit stderr: {}", stderr);
-
-    // Extract JSON from stdout — skip any Erlang error/info reports that may precede it.
+/// Parse `BUnit` runner JSON output into a `BunitResult`.
+///
+/// Extracts the JSON line from stdout (skipping Erlang error/info reports),
+/// deserializes the summary fields (`total`, `passed`, `failed`, `skipped`,
+/// `duration`) and the `tests` array into structured results.
+fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
+    // Extract JSON from stdout -- skip any Erlang error/info reports that may precede it.
     // The JSON line starts with `{"` (a JSON object key). Using `{"` instead of just `{`
     // avoids matching Erlang error tuples like `{error, {beamtalk_error,...}}` which also
     // start with `{` but are not valid JSON.
@@ -1653,6 +1675,53 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     })
 }
 
+/// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
+/// discovers test classes, executes them with the specified concurrency level,
+/// and returns aggregated results as JSON.
+fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
+    debug!("Running BUnit tests with jobs={}", pipeline.jobs);
+
+    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+        .wrap_err("Cannot find Erlang runtime directory")?;
+    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
+
+    let (fixture_load_cmd, package_load_cmd, test_load_cmd) = build_load_commands(pipeline);
+
+    // ADR 0072: Start hex dep OTP applications before tests
+    let hex_deps_start_cmd =
+        beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
+
+    // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {hex_deps_start_cmd}\
+         {package_load_cmd}\
+         {fixture_load_cmd}\
+         {test_load_cmd}\
+         Result = beamtalk_test_runner:run_all({jobs}), \
+         JSON = beamtalk_test_runner:result_to_json(Result), \
+         io:format(\"~s~n\", [JSON]), \
+         init:stop(case beamtalk_test_runner:result_has_passed(Result) of true -> 0; _ -> 1 end).",
+        jobs = pipeline.jobs
+    );
+
+    let mut cmd = build_beam_test_command(pipeline, &pa_args, &eval_cmd);
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run BUnit tests")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    debug!("BUnit stdout: {}", stdout);
+    debug!("BUnit stderr: {}", stderr);
+
+    parse_bunit_result_json(&stdout, &stderr)
+}
+
 /// Parse `EUnit`'s summary line from verbose output to extract test counts.
 ///
 /// `EUnit` outputs one of two summary formats:
@@ -1700,12 +1769,91 @@ fn parse_eunit_summary(output: &str) -> (usize, usize, usize) {
     (0, 0, 0)
 }
 
+/// Parse `EUnit` verbose output into per-module results using `NATIVE_EUNIT_DONE` markers.
+///
+/// Splits stdout by marker lines to attribute each `EUnit` summary to the correct
+/// module. Falls back to counting modules as all-passed or all-failed if no
+/// markers are found (e.g. `EUnit` crashed before emitting any output).
+///
+fn parse_eunit_module_sections(
+    stdout: &str,
+    success: bool,
+    native_test_modules: &[String],
+) -> EunitModuleSections {
+    let mut modules = Vec::new();
+    let mut total_passed: usize = 0;
+    let mut total_failed: usize = 0;
+    let mut total_skipped: usize = 0;
+    let mut eunit_output = String::new();
+
+    // Split output into per-module sections using the marker lines
+    let mut current_section = String::new();
+    let mut module_idx = 0;
+    for line in stdout.lines() {
+        if let Some(module_name) = line.strip_prefix("NATIVE_EUNIT_DONE:") {
+            // Parse the section for this module's EUnit summary
+            let (passed, mut failed, skipped) = parse_eunit_summary(&current_section);
+
+            // If EUnit crashed before printing a summary (e.g. {error, Reason}),
+            // parse_eunit_summary returns (0, 0, 0). Detect this by checking the
+            // exit status -- if the process failed and no tests were counted, treat
+            // the module as having 1 failure.
+            if passed == 0 && failed == 0 && skipped == 0 && !success {
+                // Check if the section contains EUnit error indicators
+                if current_section.contains("*failed*")
+                    || current_section.contains("Error in")
+                    || current_section.contains("{error,")
+                {
+                    failed = 1;
+                }
+            }
+
+            modules.push((module_name.to_string(), passed, failed, skipped));
+            total_passed += passed;
+            total_failed += failed;
+            total_skipped += skipped;
+
+            if failed > 0 {
+                eunit_output.push_str(&current_section);
+            }
+
+            current_section.clear();
+            module_idx += 1;
+        } else {
+            current_section.push_str(line);
+            current_section.push('\n');
+        }
+    }
+
+    // If no markers found, fall back to counting test modules as all-passed or all-failed
+    if module_idx == 0 && !native_test_modules.is_empty() {
+        warn!("No NATIVE_EUNIT_DONE markers found in EUnit output");
+        for module_name in native_test_modules {
+            if success {
+                modules.push((module_name.clone(), 1, 0, 0));
+                total_passed += 1;
+            } else {
+                modules.push((module_name.clone(), 0, 1, 0));
+                total_failed += 1;
+            }
+        }
+        eunit_output = stdout.to_string();
+    }
+
+    EunitModuleSections {
+        modules,
+        total_passed,
+        total_failed,
+        total_skipped,
+        eunit_output,
+    }
+}
+
 /// Run native `EUnit` test modules in a BEAM process.
 ///
 /// Executes `eunit:test/2` for each discovered native test module and
 /// collects per-module pass/fail counts by parsing `EUnit`'s verbose
 /// summary output.
-#[allow(clippy::too_many_lines)]
 fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> {
     debug!(
         count = pipeline.native_test_modules.len(),
@@ -1747,36 +1895,7 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
          init:stop(case HasFailed of true -> 1; false -> 0 end)."
     );
 
-    let mut cmd = std::process::Command::new("erl");
-    #[cfg(windows)]
-    {
-        let build_dir_path = pipeline.build_dir.as_str().replace('\\', "/");
-        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
-    }
-    #[cfg(not(windows))]
-    {
-        cmd.arg("-noshell")
-            .arg("-pa")
-            .arg(pipeline.build_dir.as_str());
-    }
-
-    for ebin_dir in &pipeline.package_ebin_dirs {
-        #[cfg(windows)]
-        {
-            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
-            cmd.arg("-pa").arg(ebin_dir_path);
-        }
-        #[cfg(not(windows))]
-        {
-            cmd.arg("-pa").arg(ebin_dir.as_str());
-        }
-    }
-
-    for arg in &pa_args {
-        cmd.arg(arg);
-    }
-
-    cmd.arg("-eval").arg(&eval_cmd);
+    let mut cmd = build_beam_test_command(pipeline, &pa_args, &eval_cmd);
 
     let output = cmd
         .output()
@@ -1789,80 +1908,19 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     debug!("Native EUnit stdout: {}", stdout);
     debug!("Native EUnit stderr: {}", stderr);
 
-    // Parse EUnit's summary lines to get exact per-module pass/fail counts.
-    // EUnit outputs one of two summary formats per module:
-    //   "  N tests passed."                          (all passed)
-    //   "  Failed: F.  Skipped: S.  Passed: P."      (some failed)
-    // We split stdout by our NATIVE_EUNIT_DONE markers to attribute
-    // each summary to the correct module.
-    let mut modules = Vec::new();
-    let mut total_passed: usize = 0;
-    let mut total_failed: usize = 0;
-    let mut total_skipped: usize = 0;
-    let mut eunit_output = String::new();
-
-    // Split output into per-module sections using the marker lines
-    let mut current_section = String::new();
-    let mut module_idx = 0;
-    for line in stdout.lines() {
-        if let Some(module_name) = line.strip_prefix("NATIVE_EUNIT_DONE:") {
-            // Parse the section for this module's EUnit summary
-            let (passed, mut failed, skipped) = parse_eunit_summary(&current_section);
-
-            // If EUnit crashed before printing a summary (e.g. {error, Reason}),
-            // parse_eunit_summary returns (0, 0, 0). Detect this by checking the
-            // exit status — if the process failed and no tests were counted, treat
-            // the module as having 1 failure.
-            if passed == 0 && failed == 0 && skipped == 0 && !output.status.success() {
-                // Check if the section contains EUnit error indicators
-                if current_section.contains("*failed*")
-                    || current_section.contains("Error in")
-                    || current_section.contains("{error,")
-                {
-                    failed = 1;
-                }
-            }
-
-            modules.push((module_name.to_string(), passed, failed, skipped));
-            total_passed += passed;
-            total_failed += failed;
-            total_skipped += skipped;
-
-            if failed > 0 {
-                eunit_output.push_str(&current_section);
-            }
-
-            current_section.clear();
-            module_idx += 1;
-        } else {
-            current_section.push_str(line);
-            current_section.push('\n');
-        }
-    }
-
-    // If no markers found, fall back to counting test modules as all-passed or all-failed
-    if module_idx == 0 && !pipeline.native_test_modules.is_empty() {
-        warn!("No NATIVE_EUNIT_DONE markers found in EUnit output");
-        let all_passed = output.status.success();
-        for module_name in &pipeline.native_test_modules {
-            if all_passed {
-                modules.push((module_name.clone(), 1, 0, 0));
-                total_passed += 1;
-            } else {
-                modules.push((module_name.clone(), 0, 1, 0));
-                total_failed += 1;
-            }
-        }
-        eunit_output = stdout.to_string();
-    }
+    let sections = parse_eunit_module_sections(
+        &stdout,
+        output.status.success(),
+        &pipeline.native_test_modules,
+    );
 
     Ok(NativeEunitResult {
-        total: total_passed + total_failed + total_skipped,
-        passed: total_passed,
-        failed: total_failed,
-        skipped: total_skipped,
-        modules,
-        output: eunit_output,
+        total: sections.total_passed + sections.total_failed + sections.total_skipped,
+        passed: sections.total_passed,
+        failed: sections.total_failed,
+        skipped: sections.total_skipped,
+        modules: sections.modules,
+        output: sections.eunit_output,
     })
 }
 
