@@ -324,17 +324,14 @@ fn compile_stdlib_file(
     )
 }
 
-/// Metadata for a single stdlib class, used to generate the load-order file
-/// and the generated builtins module.
-#[allow(clippy::struct_field_names)] // domain names like class_name match the domain model
-#[allow(clippy::struct_excessive_bools)] // mirrors ClassInfo fields from class_hierarchy
-struct ClassMeta {
-    /// Erlang module name (e.g., `bt@stdlib@integer`).
-    module_name: String,
-    /// Beamtalk class name (e.g., `Integer`).
-    class_name: String,
-    /// Name of the superclass, or `"none"` for root classes.
-    superclass_name: String,
+/// Class modifier flags from class hierarchy analysis.
+///
+/// Groups the boolean modifiers that describe a class's constraints (sealed,
+/// abstract, typed, native). Extracted from `ClassMeta` to keep that struct
+/// focused on identity and structure.
+#[derive(Default)]
+#[allow(clippy::struct_excessive_bools)] // these 4 bools are orthogonal class modifier flags
+struct ClassModifiers {
     /// Whether the class is sealed (cannot be subclassed).
     is_sealed: bool,
     /// Whether the class is abstract (cannot be instantiated directly).
@@ -343,6 +340,20 @@ struct ClassMeta {
     is_typed: bool,
     /// Whether this class delegates to a native Erlang backing module (ADR 0056).
     is_native: bool,
+}
+
+/// Metadata for a single stdlib class, used to generate the load-order file
+/// and the generated builtins module.
+#[allow(clippy::struct_field_names)] // domain names like class_name match the domain model
+struct ClassMeta {
+    /// Erlang module name (e.g., `bt@stdlib@integer`).
+    module_name: String,
+    /// Beamtalk class name (e.g., `Integer`).
+    class_name: String,
+    /// Name of the superclass, or `"none"` for root classes.
+    superclass_name: String,
+    /// Class modifier flags (sealed, abstract, typed, native).
+    modifiers: ClassModifiers,
     /// Class kind: object, value, or actor (ADR 0067/0070).
     class_kind: beamtalk_core::ast::ClassKind,
     /// Instance state (field) names declared in the class.
@@ -699,10 +710,12 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         module_name: module_name.to_string(),
         class_name,
         superclass_name: class.superclass_name().to_string(),
-        is_sealed: class.is_sealed,
-        is_abstract: class.is_abstract,
-        is_typed: class.is_typed,
-        is_native: class.backing_module.is_some(),
+        modifiers: ClassModifiers {
+            is_sealed: class.is_sealed,
+            is_abstract: class.is_abstract,
+            is_typed: class.is_typed,
+            is_native: class.backing_module.is_some(),
+        },
         class_kind: class.class_kind,
         state,
         state_types,
@@ -955,11 +968,11 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_value: {is_value},\n\
          \x20           is_native: {is_native},\n",
         name = meta.class_name,
-        sealed = meta.is_sealed,
-        abstract_ = meta.is_abstract,
-        typed = meta.is_typed,
+        sealed = meta.modifiers.is_sealed,
+        abstract_ = meta.modifiers.is_abstract,
+        typed = meta.modifiers.is_typed,
         is_value = meta.superclass_name == "Value",
-        is_native = meta.is_native,
+        is_native = meta.modifiers.is_native,
     );
 
     // State
@@ -1266,10 +1279,7 @@ mod tests {
             module_name: "bt@stdlib@counter".to_string(),
             class_name: "Counter".to_string(),
             superclass_name: "Actor".to_string(),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_native: false,
+            modifiers: ClassModifiers::default(),
             class_kind: beamtalk_core::ast::ClassKind::Actor,
             state: vec!["count".to_string()],
             state_types: vec![],
@@ -1343,10 +1353,10 @@ mod tests {
             module_name: "bt@stdlib@proto_object".to_string(),
             class_name: "ProtoObject".to_string(),
             superclass_name: "none".to_string(),
-            is_sealed: false,
-            is_abstract: true,
-            is_typed: false,
-            is_native: false,
+            modifiers: ClassModifiers {
+                is_abstract: true,
+                ..ClassModifiers::default()
+            },
             class_kind: beamtalk_core::ast::ClassKind::Object,
             state: vec![],
             state_types: vec![],
@@ -1377,10 +1387,7 @@ mod tests {
                 module_name: "bt@stdlib@zebra".to_string(),
                 class_name: "Zebra".to_string(),
                 superclass_name: "Object".to_string(),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
-                is_native: false,
+                modifiers: ClassModifiers::default(),
                 class_kind: beamtalk_core::ast::ClassKind::Object,
                 state: vec![],
                 state_types: vec![],
@@ -1393,10 +1400,10 @@ mod tests {
                 module_name: "bt@stdlib@alpha".to_string(),
                 class_name: "Alpha".to_string(),
                 superclass_name: "Object".to_string(),
-                is_sealed: true,
-                is_abstract: false,
-                is_typed: false,
-                is_native: false,
+                modifiers: ClassModifiers {
+                    is_sealed: true,
+                    ..ClassModifiers::default()
+                },
                 class_kind: beamtalk_core::ast::ClassKind::Object,
                 state: vec![],
                 state_types: vec![],
