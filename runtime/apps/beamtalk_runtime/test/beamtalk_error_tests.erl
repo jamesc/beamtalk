@@ -309,3 +309,54 @@ format_safe_with_tuple_test() ->
     Result = beamtalk_error:format_safe({badmatch, 42}),
     ?assert(is_binary(Result)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"badmatch">>)).
+
+%%% Tests: format_safe/2
+
+format_safe_2_extracts_error_from_stacktrace_test() ->
+    BtError = beamtalk_error:new(does_not_understand, 'UndefinedObject', config),
+    %% Simulate a stacktrace-like tuple that embeds a beamtalk_error
+    FakeStack =
+        {12345,
+            [{error, #{error => BtError, '$beamtalk_class' => 'RuntimeError'}, {67890, true, []}}],
+            []},
+    Result = beamtalk_error:format_safe({error, function_clause}, FakeStack),
+    ?assert(is_binary(Result)),
+    %% Should extract the DNU message, not just "{error,function_clause}"
+    ?assertNotEqual(nomatch, binary:match(Result, <<"UndefinedObject">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"config">>)).
+
+format_safe_2_uses_reason_when_it_is_beamtalk_error_test() ->
+    BtError = beamtalk_error:new(class_not_found, 'MyClass'),
+    Result = beamtalk_error:format_safe(BtError, []),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"MyClass">>)).
+
+format_safe_2_falls_back_when_no_beamtalk_error_test() ->
+    Result = beamtalk_error:format_safe({error, badarg}, {some, tuple}),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"badarg">>)).
+
+%%% Tests: extract_beamtalk_error/2
+
+extract_beamtalk_error_finds_record_test() ->
+    Error = beamtalk_error:new(runtime_error, 'TestClass'),
+    ?assertEqual(Error, beamtalk_error:extract_beamtalk_error(Error, 3)).
+
+extract_beamtalk_error_finds_in_map_test() ->
+    Error = beamtalk_error:new(runtime_error, 'TestClass'),
+    Map = #{error => Error, '$beamtalk_class' => 'RuntimeError'},
+    ?assertEqual(Error, beamtalk_error:extract_beamtalk_error(Map, 3)).
+
+extract_beamtalk_error_finds_in_nested_tuple_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Foo', bar),
+    Nested = {12345, [{error, #{error => Error}, {67890, true, []}}], []},
+    ?assertEqual(Error, beamtalk_error:extract_beamtalk_error(Nested, 5)).
+
+extract_beamtalk_error_returns_undefined_test() ->
+    ?assertEqual(undefined, beamtalk_error:extract_beamtalk_error({1, 2, 3}, 3)).
+
+extract_beamtalk_error_respects_depth_limit_test() ->
+    Error = beamtalk_error:new(runtime_error, 'Deep'),
+    %% Error nested 3 levels deep, but depth limit is 1
+    Nested = {a, {b, Error}},
+    ?assertEqual(undefined, beamtalk_error:extract_beamtalk_error(Nested, 1)).

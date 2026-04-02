@@ -261,12 +261,36 @@ append_extra_meta(Meta, Fields) ->
 
 %% @doc Format an extra metadata value for JSON output.
 %%
-%% Stacktraces get special formatting via `erl_error:format_stacktrace/1`
-%% (when available) or `~tp`. All other terms are formatted as `~tp`.
+%% Stacktraces get special formatting: Erlang stacktrace lists are converted
+%% to human-readable frames via `beamtalk_stack_frame`. Non-list stacktraces
+%% (e.g., tuples from Core Erlang catch) are scanned for beamtalk errors.
 -spec format_extra_value(atom() | binary(), term()) -> binary().
 format_extra_value(stacktrace, Stack) when is_list(Stack) ->
-    Formatted = lists:join($\n, [io_lib:format("  ~tp", [Frame]) || Frame <- Stack]),
-    safe_to_binary(Formatted);
+    %% Standard Erlang stacktrace — convert to human-readable frames
+    try
+        Frames = beamtalk_stack_frame:wrap(Stack),
+        Lines = [format_stack_frame(F) || F <- Frames],
+        safe_to_binary(lists:join($\n, Lines))
+    catch
+        _:_ ->
+            %% Fallback if wrap fails
+            Formatted = lists:join($\n, [io_lib:format("  ~tp", [Frame]) || Frame <- Stack]),
+            safe_to_binary(Formatted)
+    end;
+format_extra_value(stacktrace, Stack) ->
+    %% Non-list stacktrace (e.g., tuple from Core Erlang catch).
+    %% Try to extract a beamtalk error for a useful message, then append raw term.
+    try
+        case beamtalk_error:extract_beamtalk_error(Stack, 4) of
+            undefined ->
+                safe_to_binary(io_lib:format("~tp", [Stack]));
+            BtError ->
+                ErrorMsg = beamtalk_error:format(BtError),
+                safe_to_binary(io_lib:format("~ts\n  raw: ~tp", [ErrorMsg, Stack]))
+        end
+    catch
+        _:_ -> safe_to_binary(io_lib:format("~tp", [Stack]))
+    end;
 format_extra_value(_Key, Value) when is_binary(Value) ->
     Value;
 format_extra_value(_Key, Value) when is_atom(Value) ->
@@ -277,6 +301,30 @@ format_extra_value(_Key, Value) when is_pid(Value) ->
     list_to_binary(pid_to_list(Value));
 format_extra_value(_Key, Value) ->
     safe_to_binary(io_lib:format("~tp", [Value])).
+
+%% @doc Format a single StackFrame tagged map as a concise string.
+-spec format_stack_frame(map()) -> iolist().
+format_stack_frame(#{class_name := ClassName, function := Function, arity := Arity} = Frame) ->
+    ClassPart =
+        case ClassName of
+            nil -> <<"?">>;
+            _ -> atom_to_binary(ClassName, utf8)
+        end,
+    FunPart =
+        case Function of
+            undefined -> <<"?">>;
+            _ -> atom_to_binary(Function, utf8)
+        end,
+    Location =
+        case Frame of
+            #{file := File, line := Line} when File =/= nil, Line =/= nil ->
+                io_lib:format(" (~ts:~B)", [File, Line]);
+            _ ->
+                ""
+        end,
+    io_lib:format("  ~ts>>~ts/~B~ts", [ClassPart, FunPart, Arity, Location]);
+format_stack_frame(Frame) ->
+    io_lib:format("  ~tp", [Frame]).
 
 %% @doc Convert a metadata key to a binary.  Keys are usually atoms, but
 %% user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.
