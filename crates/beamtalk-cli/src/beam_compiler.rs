@@ -645,6 +645,45 @@ pub fn write_core_erlang_with_source(
     Ok(())
 }
 
+/// Cross-file class hierarchy data needed during compilation.
+///
+/// Groups the three class hierarchy indexes that are threaded through the
+/// compilation pipeline — eliminating repeated parameter triples in
+/// `compile_file`, `compile_source_with_bindings`, and
+/// `write_core_erlang_with_bindings`.
+///
+/// **DDD Context:** Compilation
+#[derive(Debug, Clone, Default)]
+pub struct ClassHierarchyContext {
+    /// Maps Beamtalk class names to their compiled Erlang module names.
+    /// E.g., `"AppSup"` → `"bt@my_app@supervision@app_sup"`.
+    pub class_module_index: std::collections::HashMap<String, String>,
+    /// Maps class names to their direct superclass names.
+    /// E.g., `"MyChild"` → `"MyParent"`.
+    pub class_superclass_index: std::collections::HashMap<String, String>,
+    /// Full `ClassInfo` entries from all source files in the compilation unit.
+    /// Injected into the type checker's hierarchy during Pass 2 so cross-file
+    /// method resolution works without reading BEAM files.
+    pub pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+}
+
+/// Compilation context bundling hierarchy data with dependency resolution settings.
+///
+/// Groups the `ClassHierarchyContext`, optional dependency registry, and
+/// strict-deps flag that are threaded through `compile_file` and
+/// `compile_source_with_bindings`. Avoids passing these as separate parameters.
+///
+/// **DDD Context:** Compilation
+#[derive(Debug, Default)]
+pub struct CompileContext<'a> {
+    /// Cross-file class hierarchy indexes.
+    pub hierarchy: ClassHierarchyContext,
+    /// Optional dependency registry for cross-package collision detection.
+    pub dep_registry: Option<&'a beamtalk_core::semantic_analysis::DependencyRegistry>,
+    /// Whether to promote transitive dependency usage warnings to errors.
+    pub strict_deps: bool,
+}
+
 /// Writes Core Erlang code with primitive bindings.
 ///
 /// BT-295 / ADR 0007 Phase 3: Same as [`write_core_erlang`] but accepts
@@ -654,20 +693,14 @@ pub fn write_core_erlang_with_source(
 ///
 /// Returns an error if the module name is invalid, code generation fails,
 /// or the output file cannot be written.
-#[allow(clippy::implicit_hasher)]
-#[allow(clippy::too_many_arguments)]
 pub fn write_core_erlang_with_bindings(
     module: &beamtalk_core::ast::Module,
     module_name: &str,
     output_path: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
-    source_text: Option<&str>,
-    workspace_mode: bool,
-    stdlib_mode: bool,
-    class_module_index: &std::collections::HashMap<String, String>,
-    class_superclass_index: &std::collections::HashMap<String, String>,
-    source_path: Option<&str>,
-    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    hierarchy: &ClassHierarchyContext,
+    source: Option<(&str, Option<&str>)>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -676,17 +709,21 @@ pub fn write_core_erlang_with_bindings(
         );
     }
 
+    let (source_text, source_path) = match source {
+        Some((text, path)) => (Some(text), path),
+        None => (None, None),
+    };
     let core_erlang = beamtalk_core::erlang::generate_module(
         module,
         beamtalk_core::erlang::CodegenOptions::new(module_name)
             .with_bindings(bindings.clone())
             .with_source_opt(source_text)
-            .with_workspace_mode(workspace_mode)
-            .with_stdlib_mode(stdlib_mode)
-            .with_class_module_index(class_module_index.clone())
-            .with_class_superclass_index(class_superclass_index.clone())
+            .with_workspace_mode(options.workspace_mode)
+            .with_stdlib_mode(options.stdlib_mode)
+            .with_class_module_index(hierarchy.class_module_index.clone())
+            .with_class_superclass_index(hierarchy.class_superclass_index.clone())
             .with_source_path_opt(source_path)
-            .with_class_hierarchy(pre_loaded_classes),
+            .with_class_hierarchy(hierarchy.pre_loaded_classes.clone()),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -728,12 +765,8 @@ pub fn compile_source(
         core_output,
         options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &[],
+        &CompileContext::default(),
         None,
-        None,
-        false,
     )
 }
 
@@ -746,11 +779,7 @@ pub fn compile_source(
 ///
 /// Returns an error if reading, parsing, or code generation fails,
 /// or if any diagnostic has error severity.
-#[allow(
-    clippy::implicit_hasher,
-    clippy::too_many_arguments,
-    clippy::too_many_lines
-)]
+#[allow(clippy::too_many_lines)]
 #[instrument(skip_all, fields(path = %source_path, module = module_name))]
 pub(crate) fn compile_source_with_bindings(
     source_path: &Utf8Path,
@@ -758,12 +787,8 @@ pub(crate) fn compile_source_with_bindings(
     core_output: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
-    class_module_index: &std::collections::HashMap<String, String>,
-    class_superclass_index: &std::collections::HashMap<String, String>,
-    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    ctx: &CompileContext<'_>,
     cached_ast: Option<crate::commands::build::CachedAst>,
-    dep_registry: Option<&beamtalk_core::semantic_analysis::DependencyRegistry>,
-    strict_deps: bool,
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
@@ -802,7 +827,7 @@ pub(crate) fn compile_source_with_bindings(
     // from the current file to avoid duplicates (they'll be added by build()).
     let cross_file_classes =
         beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
-            pre_loaded_classes,
+            &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
@@ -815,7 +840,7 @@ pub(crate) fn compile_source_with_bindings(
     // BT-1732: Enrich unresolved class warnings with dependency package hints.
     // When a class is unresolved but exists in a declared dependency's class_module_index,
     // update the hint to suggest the dependency package.
-    if let Some(registry) = dep_registry {
+    if let Some(registry) = ctx.dep_registry {
         for diag in &mut diagnostics {
             if diag.category
                 == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass)
@@ -857,7 +882,7 @@ pub(crate) fn compile_source_with_bindings(
     // BT-1653 / ADR 0070 Phase 3: Cross-package class collision detection.
     // When dependencies are loaded, check for ambiguous unqualified class
     // references and stdlib name reservation violations.
-    if let Some(registry) = dep_registry {
+    if let Some(registry) = ctx.dep_registry {
         beamtalk_core::semantic_analysis::check_collision_at_use_sites(
             &module,
             registry,
@@ -869,7 +894,7 @@ pub(crate) fn compile_source_with_bindings(
         beamtalk_core::semantic_analysis::check_transitive_dep_usage(
             &module,
             registry,
-            strict_deps,
+            ctx.strict_deps,
             &mut diagnostics,
         );
     }
@@ -955,18 +980,21 @@ pub(crate) fn compile_source_with_bindings(
         .and_then(|p| p.into_os_string().into_string().ok())
         .unwrap_or_else(|| source_path.as_str().to_string());
     let embed_source_path = Some(embed_source_path.as_str());
+    // Build a codegen-specific hierarchy with cross-file classes (filtered to
+    // exclude the current file's classes, which are added by codegen itself).
+    let codegen_hierarchy = ClassHierarchyContext {
+        class_module_index: ctx.hierarchy.class_module_index.clone(),
+        class_superclass_index: ctx.hierarchy.class_superclass_index.clone(),
+        pre_loaded_classes: cross_file_classes,
+    };
     write_core_erlang_with_bindings(
         &module,
         module_name,
         core_output,
+        options,
         bindings,
-        Some(&source),
-        options.workspace_mode,
-        options.stdlib_mode,
-        class_module_index,
-        class_superclass_index,
-        embed_source_path,
-        cross_file_classes,
+        &codegen_hierarchy,
+        Some((&source, embed_source_path)),
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 
