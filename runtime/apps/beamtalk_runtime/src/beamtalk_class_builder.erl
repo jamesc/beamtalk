@@ -451,13 +451,14 @@ notify_class_loaded(ClassName) ->
                         class => ClassName,
                         domain => [beamtalk, runtime]
                     });
-                Kind:Reason ->
+                Kind:Reason:Stacktrace ->
                     %% Unexpected failure in callback — log but don't fail class load
                     ?LOG_WARNING("Class load callback failed", #{
                         callback => Mod,
                         class => ClassName,
                         kind => Kind,
                         reason => Reason,
+                        stacktrace => Stacktrace,
                         domain => [beamtalk, runtime]
                     })
             end;

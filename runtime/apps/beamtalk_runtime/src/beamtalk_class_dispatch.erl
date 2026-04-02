@@ -329,12 +329,13 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                                 #{
                                     class => ClassName,
                                     selector => Selector,
+                                    stacktrace => ST,
                                     domain => [beamtalk, runtime]
                                 }
                             ),
                             {reply, {error, undef}, ClassVars}
                     end;
-                ErrClass:Error:_ST ->
+                ErrClass:Error:ErrST ->
                     ?LOG_DEBUG(
                         "Class method ~p:~p failed",
                         [ClassName, Selector],
@@ -342,6 +343,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             class => ClassName,
                             selector => Selector,
                             reason => beamtalk_error:format_reason(ErrClass, Error),
+                            stacktrace => ErrST,
                             domain => [beamtalk, runtime]
                         }
                     ),
