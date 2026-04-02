@@ -18,7 +18,7 @@ use crate::ast::{
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, Span};
-use ecow::EcoString;
+use ecow::{EcoString, eco_format};
 
 use super::{InferredType, TypeChecker, TypeEnv};
 
@@ -211,7 +211,7 @@ impl TypeChecker {
     /// - `Union` → `Union(resolved_members)`
     /// - `FalseOr` → `Union([inner, False])`
     /// - `SelfType` → `Dynamic` (resolved at call site, not here)
-    /// - `Singleton` → `Dynamic` (not yet supported)
+    /// - `Singleton` → `Known("#name")` (singleton type, compatible with Symbol)
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         match ann {
             TypeAnnotation::Simple(type_id) => {
@@ -240,9 +240,8 @@ impl TypeChecker {
                 let inner_ty = Self::resolve_type_annotation(inner);
                 InferredType::union_of(&[inner_ty, InferredType::known("False")])
             }
-            TypeAnnotation::SelfType { .. } | TypeAnnotation::Singleton { .. } => {
-                InferredType::Dynamic
-            }
+            TypeAnnotation::SelfType { .. } => InferredType::Dynamic,
+            TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
         }
     }
 
@@ -1654,7 +1653,7 @@ impl TypeChecker {
             Literal::Integer(_) => InferredType::known("Integer"),
             Literal::Float(_) => InferredType::known("Float"),
             Literal::String(_) => InferredType::known("String"),
-            Literal::Symbol(_) => InferredType::known("Symbol"),
+            Literal::Symbol(name) => InferredType::known(eco_format!("#{name}")),
             Literal::Character(_) => InferredType::known("Character"),
             Literal::List(_) => InferredType::known("List"),
         }
@@ -1734,7 +1733,7 @@ mod tests {
     fn infer_literal_symbol() {
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Symbol("ok".into())),
-            InferredType::known("Symbol")
+            InferredType::known("#ok")
         );
     }
 
@@ -1872,7 +1871,7 @@ mod tests {
         };
         assert_eq!(
             TypeChecker::resolve_type_annotation(&ann),
-            InferredType::Dynamic
+            InferredType::known("#north")
         );
     }
 

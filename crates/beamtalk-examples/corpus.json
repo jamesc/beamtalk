@@ -10569,6 +10569,36 @@
       "explanation": "BUnit tests for the Array collection type (BT-822)"
     },
     {
+      "id": "stdlib-test-assert-type-inference-test",
+      "title": "AssertTypeInferenceTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "AssertTypeInferenceTest",
+        "TestCase",
+        "append",
+        "assert_type_inference_test",
+        "assign",
+        "assignment",
+        "concat",
+        "concatenate",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string join",
+        "subclassing",
+        "testAssertOkArrayOperations",
+        "testAssertOkChainedUsage",
+        "testAssertOkIntegerArithmetic",
+        "testAssertOkStringOperations"
+      ],
+      "source": "// BT-1820: Integration tests for type parameter inference through TestCase\n// assertion methods. Verifies that assertOk: returns the typed T value from\n// Result(T, E), allowing typed operations without warnings.\n\nTestCase subclass: AssertTypeInferenceTest\n\n  testAssertOkIntegerArithmetic =>\n    // assertOk: on Result(Integer, ...) should return Integer, enabling +\n    value := self assertOk: (Result ok: 10)\n    self assert: value + 5 equals: 15\n    self assert: value * 2 equals: 20\n\n  testAssertOkStringOperations =>\n    // assertOk: on Result(String, ...) should return String, enabling size\n    value := self assertOk: (Result ok: \"hello\")\n    self assert: value size equals: 5\n    self assert: value ++ \" world\" equals: \"hello world\"\n\n  testAssertOkArrayOperations =>\n    // assertOk: on Result(Array, ...) should return Array, enabling size\n    arr := self assertOk: (Result ok: #[1, 2, 3])\n    self assert: arr size equals: 3\n\n  testAssertOkChainedUsage =>\n    // The typed return value can be used in further expressions\n    a := self assertOk: (Result ok: 100)\n    b := self assertOk: (Result ok: 200)\n    sum := a + b\n    self assert: sum equals: 300",
+      "explanation": "BT-1820: Integration tests for type parameter inference through TestCase assertion methods. Verifies that assertOk: returns the typed T value from Result(T, E), allowing typed operations without warnings."
+    },
+    {
       "id": "stdlib-test-atomic-counter-test",
       "title": "AtomicCounterTest",
       "category": "stdlib-tests",
