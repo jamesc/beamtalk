@@ -100,7 +100,7 @@ Verified against OTP: spec variable names in `abstract_code` are high quality. `
 
 **Parameter name → keyword mapping:** Spec variable names are lowercased to Beamtalk keywords. The first becomes the function keyword; subsequent become positional keywords:
 
-```
+```text
 seq/2 spec vars: From, To → seq: from :: Integer to: to :: Integer -> List(Integer)
 member/2 spec vars: Elem, List → member: elem :: Dynamic in: list :: List -> Boolean
 ```
@@ -481,7 +481,7 @@ Only `member` needs human refinement (`Dynamic` → `T`). The keyword names are 
 ### Error Examples
 
 **Stub parse error:**
-```
+```text
 error: Failed to parse stubs/lists.bt:7
   Expected type annotation after '::', got ')'
   7 |   seq: from :: Integer to: to :: -> List(Integer)
@@ -489,13 +489,13 @@ error: Failed to parse stubs/lists.bt:7
 ```
 
 **Arity mismatch between stub and actual function:**
-```
+```text
 ⚠️ Warning: stubs/lists.bt declares lists:seq/3 but lists.beam exports seq/2 and seq/3
   Stub declaration for lists:seq/3 will be used; lists:seq/2 has no stub (auto-extracted)
 ```
 
 **Version drift detection:**
-```
+```text
 ⚠️ Warning: stubs/lists.bt declares lists:enumerate/1 but it is not exported from lists.beam
   This function may have been added in a newer OTP version
   Stub will be ignored for lists:enumerate/1
@@ -741,7 +741,7 @@ Build the full Erlang spec reader, Rust integration, and typed LSP completions �
 
 Introduce a new `beamtalk generate` subcommand group, absorbing the existing `gen-native` command:
 
-```
+```bash
 beamtalk generate native MyActor                              # existing gen-native, moved here
 beamtalk generate stubs lists maps string                     # generate OTP module stubs
 beamtalk generate stubs --native-dir native/                  # package author workflow
@@ -755,7 +755,7 @@ beamtalk generate stubs --native-dir native/                  # package author w
 
 **CLI output examples:**
 
-```
+```text
 $ beamtalk generate stubs lists maps
   Reading lists.beam ... 91 specs found
   Reading maps.beam ... 39 specs found
