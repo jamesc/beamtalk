@@ -22,7 +22,7 @@
 /// 42 class class thisClass        // => Integer
 /// Metaclass class class == Metaclass class  // => true
 /// ```
-sealed Class subclass: Metaclass
+sealed typed Class subclass: Metaclass
 
   // --- Constructor guard ---
 

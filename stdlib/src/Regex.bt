@@ -19,10 +19,11 @@
 /// ```beamtalk
 /// Regex from: "[a-z]+" options: #(#caseless)   // case-insensitive
 /// ```
-sealed Value subclass: Regex
+sealed typed Value subclass: Regex
 
   /// Use 'Regex from: pattern' to create a Regex.
-  class new: _ => self error: "Use 'Regex from: pattern' to create a Regex"
+  class new: _ :: Object -> Object =>
+    self error: "Use 'Regex from: pattern' to create a Regex"
 
   /// Compile a regex pattern string into a Regex object (class method).
   ///

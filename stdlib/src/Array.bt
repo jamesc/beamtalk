@@ -22,7 +22,7 @@
 /// #[10, 20, 30] at: 2         // => 20
 /// #[1, 2, 3] collect: [:x | x * 2]  // => #[2, 4, 6]
 /// ```
-sealed Collection subclass: Array(E)
+sealed typed Collection subclass: Array(E)
 
   /// Create an Array from a list of elements.
   ///

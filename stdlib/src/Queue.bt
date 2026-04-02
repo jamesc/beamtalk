@@ -21,7 +21,7 @@
 /// value := result at: 1     // => 1
 /// rest := result at: 2      // => Queue with [2]
 /// ```
-Value subclass: Queue
+typed Value subclass: Queue
 
   /// Create an empty Queue (class method).
   ///
@@ -39,7 +39,8 @@ Value subclass: Queue
   /// ```beamtalk
   /// q2 := q enqueue: 42
   /// ```
-  enqueue: elem -> Queue => (Erlang beamtalk_queue) enqueue: self elem: elem
+  enqueue: elem :: Object -> Queue =>
+    (Erlang beamtalk_queue) enqueue: self elem: elem
 
   /// Remove and return the front element as a `{value, newQueue}` Tuple.
   ///
@@ -61,7 +62,7 @@ Value subclass: Queue
   /// ```beamtalk
   /// front := q peek    // => first element
   /// ```
-  peek => (Erlang beamtalk_queue) peek: self
+  peek -> Object => (Erlang beamtalk_queue) peek: self
 
   /// Return `true` if the queue contains no elements.
   ///

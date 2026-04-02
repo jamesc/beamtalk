@@ -28,7 +28,7 @@
 /// Json prettyPrint: #{"name" => "Ada"}
 /// // => _
 /// ```
-sealed Object subclass: Json
+sealed typed Object subclass: Json
 
   /// Parse a JSON string into a Beamtalk value (class method).
   ///

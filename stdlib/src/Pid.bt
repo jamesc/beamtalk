@@ -16,7 +16,7 @@
 /// pid printString        // => "#Pid<0.123.0>"
 /// pid isAlive            // => true or false
 /// ```
-sealed Object subclass: Pid
+sealed typed Object subclass: Pid
 
   /// Convert the pid to a readable string representation.
   ///

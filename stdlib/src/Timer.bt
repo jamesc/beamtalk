@@ -12,7 +12,7 @@
 /// t cancel                                       // => true
 /// Timer sleep: 50                                // sleep 50ms
 /// ```
-sealed Object subclass: Timer
+sealed typed Object subclass: Timer
 
   // ===== Class Methods =====
 

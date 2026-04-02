@@ -30,7 +30,7 @@
 ///     // => #{ #id => #DatabasePool, #start => #[DatabasePool, #spawn, #()],
 ///     //        #restart => #temporary, #shutdown => 5000, #type => #worker }
 /// ```
-Value subclass: SupervisionSpec
+typed Value subclass: SupervisionSpec
   /// Child id override — nil uses the actor class name as the OTP child id.
   field: id :: Symbol | Nil = nil
   /// The actor class being supervised.
@@ -58,11 +58,11 @@ Value subclass: SupervisionSpec
     (self withId: anId) withRestart: policy
 
   /// Return a new spec with id and args overridden.
-  withId: anId :: Symbol withArgs: someArgs -> SupervisionSpec =>
+  withId: anId :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     (self withId: anId) withArgs: someArgs
 
   /// Return a new spec with id, restart, and args all overridden.
-  withId: anId :: Symbol withRestart: policy :: Symbol withArgs: someArgs -> SupervisionSpec =>
+  withId: anId :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withId: anId) withRestart: policy) withArgs: someArgs
 
   // === Display ===

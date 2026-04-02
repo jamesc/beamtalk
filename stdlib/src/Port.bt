@@ -15,7 +15,7 @@
 /// port class             // => Port
 /// port printString       // => "#Port<0.5>"
 /// ```
-sealed Object subclass: Port
+sealed typed Object subclass: Port
 
   /// Convert the port to a readable string representation.
   ///

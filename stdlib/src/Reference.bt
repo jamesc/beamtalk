@@ -16,7 +16,7 @@
 /// ref class              // => Reference
 /// ref printString        // => "#Ref<0.1.2.3>"
 /// ```
-sealed Object subclass: Reference
+sealed typed Object subclass: Reference
 
   /// Convert the reference to a readable string representation.
   ///

@@ -20,7 +20,7 @@
 /// ```
 ///
 /// @see docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
-sealed Value subclass: Package
+sealed typed Value subclass: Package
   field: name :: String = ""
   field: version :: String = ""
   field: classes :: List = #()
