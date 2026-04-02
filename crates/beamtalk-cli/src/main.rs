@@ -477,26 +477,30 @@ fn run() -> Result<()> {
             warnings_as_errors,
             quiet,
             show_output,
-        } => commands::test_stdlib::run_tests(
-            &path,
-            no_warnings,
-            warnings_as_errors,
-            quiet,
-            show_output,
-        ),
+        } => {
+            let opts = commands::test_stdlib::TestRunOptions {
+                no_warnings,
+                warnings_as_errors,
+                quiet,
+                verbose: show_output,
+            };
+            commands::test_stdlib::run_tests(&path, &opts)
+        }
         Command::TestDocs {
             path,
             no_warnings,
             warnings_as_errors,
             quiet,
             show_output,
-        } => commands::test_docs::run_tests(
-            &path,
-            no_warnings,
-            warnings_as_errors,
-            quiet,
-            show_output,
-        ),
+        } => {
+            let opts = commands::test_stdlib::TestRunOptions {
+                no_warnings,
+                warnings_as_errors,
+                quiet,
+                verbose: show_output,
+            };
+            commands::test_docs::run_tests(&path, &opts)
+        }
         Command::Test {
             path,
             warnings_as_errors,

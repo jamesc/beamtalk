@@ -432,20 +432,25 @@ pub(crate) struct CompiledTestFile {
     pub(crate) assertion_count: usize,
 }
 
+/// Shared options for test runners that accept boolean flags.
+///
+/// Eliminates duplicate `(no_warnings, warnings_as_errors, quiet, verbose)` parameter
+/// lists across `test_stdlib::run_tests` and `test_docs::run_tests`.
+#[allow(clippy::struct_excessive_bools)]
+pub struct TestRunOptions {
+    pub no_warnings: bool,
+    pub warnings_as_errors: bool,
+    pub quiet: bool,
+    pub verbose: bool,
+}
+
 /// Run stdlib tests.
 ///
 /// Finds all `.btscript` files in the given path (file or directory), parses
 /// `// =>` assertions, compiles expressions to Core Erlang, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
-#[allow(clippy::fn_params_excessive_bools)]
-pub fn run_tests(
-    path: &str,
-    no_warnings: bool,
-    warnings_as_errors: bool,
-    quiet: bool,
-    verbose: bool,
-) -> Result<()> {
+pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     info!("Starting stdlib test run");
 
     let test_path = Utf8PathBuf::from(path);
@@ -460,7 +465,7 @@ pub fn run_tests(
         return Ok(());
     }
 
-    if !quiet {
+    if !opts.quiet {
         println!("Compiling {} test file(s)...", test_files.len());
     }
 
@@ -479,8 +484,12 @@ pub fn run_tests(
     let mut all_fixture_modules = Vec::new();
 
     for test_file in &test_files {
-        let result =
-            compile_single_test_file(test_file, &build_dir, no_warnings, warnings_as_errors)?;
+        let result = compile_single_test_file(
+            test_file,
+            &build_dir,
+            opts.no_warnings,
+            opts.warnings_as_errors,
+        )?;
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
         all_fixture_modules.extend(result.fixture_modules);
@@ -518,7 +527,7 @@ pub fn run_tests(
         &test_module_names,
         &all_fixture_modules,
         &build_dir,
-        verbose,
+        opts.verbose,
     )?;
 
     // Phase 5: Report results
@@ -527,7 +536,7 @@ pub fn run_tests(
         &eunit_result,
         test_files.len(),
         total_tests,
-        quiet,
+        opts.quiet,
     )
 }
 

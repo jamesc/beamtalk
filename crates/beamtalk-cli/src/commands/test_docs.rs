@@ -23,7 +23,7 @@
 //! Fixture files that contain `TestCase subclass:` are also run as `BUnit` test suites.
 
 use super::test_stdlib::{
-    CompiledTestFile, compile_erl_files, compile_single_test_file, report_results,
+    CompiledTestFile, TestRunOptions, compile_erl_files, compile_single_test_file, report_results,
     run_all_eunit_tests,
 };
 use crate::commands::util;
@@ -386,14 +386,7 @@ fn generate_bunit_wrappers(
 ///
 /// Files with no ` ```beamtalk ` blocks are skipped silently.
 #[instrument(skip_all)]
-#[allow(clippy::fn_params_excessive_bools)]
-pub fn run_tests(
-    path: &str,
-    no_warnings: bool,
-    warnings_as_errors: bool,
-    quiet: bool,
-    verbose: bool,
-) -> Result<()> {
+pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     info!("Starting doctest run");
 
     let test_path = Utf8PathBuf::from(path);
@@ -437,7 +430,7 @@ pub fn run_tests(
         return Ok(());
     }
 
-    if !quiet {
+    if !opts.quiet {
         println!(
             "Compiling doctests from {} file(s)...",
             btscript_files.len()
@@ -451,9 +444,13 @@ pub fn run_tests(
     let mut all_fixture_modules: Vec<String> = Vec::new();
 
     for (md_path, btscript_path) in &btscript_files {
-        let result =
-            compile_single_test_file(btscript_path, &build_dir, no_warnings, warnings_as_errors)
-                .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
+        let result = compile_single_test_file(
+            btscript_path,
+            &build_dir,
+            opts.no_warnings,
+            opts.warnings_as_errors,
+        )
+        .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
 
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
@@ -501,7 +498,7 @@ pub fn run_tests(
         &test_module_names,
         &all_fixture_modules,
         &build_dir,
-        verbose,
+        opts.verbose,
     )?;
 
     // Phase 5: Report results
@@ -511,7 +508,7 @@ pub fn run_tests(
         &eunit_result,
         file_count,
         total_tests,
-        quiet,
+        opts.quiet,
     )
 }
 
