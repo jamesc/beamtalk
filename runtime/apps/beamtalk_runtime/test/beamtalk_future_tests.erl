@@ -15,6 +15,13 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+%% Logger handler callback for BT-1822 stacktrace tests
+-export([log/2]).
+
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {log_event, LogEvent},
+    ok.
+
 %%% Basic resolve/await tests
 
 resolve_then_await_test() ->
@@ -707,3 +714,57 @@ reject_without_await_no_crash_test() ->
 
     %% Later await should get the rejection
     ?assertThrow({future_rejected, unhandled_error}, beamtalk_future:await(Future, 100)).
+
+%%% ============================================================================
+%%% BT-1822: Stacktrace preservation tests
+%%% ============================================================================
+
+callback_crash_log_includes_stacktrace_test() ->
+    %% Install a capturing logger handler to verify stacktrace is logged
+    Parent = self(),
+    HandlerId = bt_1822_future_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => Parent},
+        level => all
+    }),
+    try
+        %% Create a future and add a callback that crashes
+        Future = beamtalk_future:new(),
+        beamtalk_future:when_resolved(Future, fun(_Value) ->
+            erlang:error(deliberate_callback_crash)
+        end),
+
+        %% Resolve the future — this triggers the crashing callback in a spawned process
+        beamtalk_future:resolve(Future, some_value),
+
+        %% Collect log events and find the specific callback failure with stacktrace
+        Found = collect_log_with_stacktrace("Error in future callback", 2000),
+        ?assertMatch({ok, _}, Found),
+        {ok, ST} = Found,
+        ?assert(is_list(ST)),
+        ?assert(length(ST) > 0)
+    after
+        logger:remove_handler(HandlerId)
+    end.
+
+%% @private Collect log events until we find one matching the expected message with stacktrace
+collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
+    collect_log_with_stacktrace(ExpectedMsg, Timeout, erlang:monotonic_time(millisecond)).
+
+collect_log_with_stacktrace(ExpectedMsg, Timeout, Start) ->
+    Remaining = Timeout - (erlang:monotonic_time(millisecond) - Start),
+    case Remaining > 0 of
+        false ->
+            not_found;
+        true ->
+            receive
+                {log_event, #{msg := {string, Msg}, meta := #{stacktrace := ST}}} when
+                    Msg =:= ExpectedMsg
+                ->
+                    {ok, ST};
+                {log_event, _} ->
+                    collect_log_with_stacktrace(ExpectedMsg, Timeout, Start)
+            after Remaining ->
+                not_found
+            end
+    end.

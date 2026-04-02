@@ -62,7 +62,7 @@ abstract Object subclass: DynamicSupervisor(C)
   ///   class initialize: sup =>
   ///     3 timesRepeat: [sup startChild]
   /// ```
-  class initialize: _supervisor => nil
+  class initialize: _supervisor -> Nil => nil
 
   // === Class-side lifecycle ===
 

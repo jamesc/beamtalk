@@ -95,7 +95,7 @@ sealed typed Collection subclass: List
   /// #(1, 2, 3) includes: 2   // => true
   /// #(1, 2, 3) includes: 9   // => false
   /// ```
-  includes: item -> Boolean => @primitive "includes:"
+  includes: item :: Object -> Boolean => @primitive "includes:"
 
   /// Sort the list in ascending order.
   ///
@@ -348,7 +348,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) intersperse: 0        // => #(1, 0, 2, 0, 3)
   /// ```
-  intersperse: separator -> List => @primitive "intersperse:"
+  intersperse: separator :: Object -> List => @primitive "intersperse:"
 
   /// Prepend an item to the front of the list in O(1) time (returns a new list).
   ///
@@ -357,7 +357,7 @@ sealed typed Collection subclass: List
   /// #(2, 3) addFirst: 1              // => #(1, 2, 3)
   /// #() addFirst: "x"               // => #("x")
   /// ```
-  addFirst: item -> List => @primitive "addFirst:"
+  addFirst: item :: Object -> List => @primitive "addFirst:"
 
   /// Append an item to the end of the list (returns a new list).
   ///
@@ -365,7 +365,7 @@ sealed typed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2) add: 3                   // => #(1, 2, 3)
   /// ```
-  add: item -> List => @primitive "add:"
+  add: item :: Object -> List => @primitive "add:"
 
   /// Return a lazy Stream over the list elements.
   ///

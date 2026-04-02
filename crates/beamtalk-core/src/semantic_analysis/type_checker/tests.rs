@@ -66,6 +66,10 @@ fn str_lit(s: &str) -> Expression {
     Expression::Literal(Literal::String(s.into()), span())
 }
 
+fn symbol_lit(s: &str) -> Expression {
+    Expression::Literal(Literal::Symbol(s.into()), span())
+}
+
 fn char_lit(c: char) -> Expression {
     Expression::Literal(Literal::Character(c), span())
 }
@@ -108,7 +112,7 @@ fn test_literal_type_inference() {
     );
     assert_eq!(
         TypeChecker::infer_literal(&Literal::Symbol("sym".into())),
-        InferredType::known("Symbol")
+        InferredType::known("#sym")
     );
 }
 
@@ -2312,10 +2316,14 @@ fn test_field_assign_subtype_no_warn() {
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
+    let type_mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
     assert!(
-        checker.diagnostics().is_empty(),
-        "Integer should be assignable to Number, got: {:?}",
-        checker.diagnostics()
+        type_mismatches.is_empty(),
+        "Integer should be assignable to Number, got: {type_mismatches:?}"
     );
 }
 
@@ -2370,7 +2378,7 @@ fn test_state_default_value_match_no_warn() {
 
 #[test]
 fn test_dynamic_expression_no_warn() {
-    // Assigning a dynamic expression (unknown variable) to a typed field → no warning
+    // Assigning a dynamic expression (unknown variable) to a typed field → no assignment warning
     let state = vec![StateDeclaration::with_type(
         ident("count"),
         TypeAnnotation::simple("Integer", span()),
@@ -2382,10 +2390,14 @@ fn test_dynamic_expression_no_warn() {
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
+    let type_mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
     assert!(
-        checker.diagnostics().is_empty(),
-        "Dynamic expressions should never produce warnings, got: {:?}",
-        checker.diagnostics()
+        type_mismatches.is_empty(),
+        "Dynamic expressions should never produce type mismatch warnings, got: {type_mismatches:?}"
     );
 }
 
@@ -2414,6 +2426,111 @@ fn test_union_type_annotation_no_false_positive() {
         checker.diagnostics().is_empty(),
         "Union type annotations should not produce false positives, got: {:?}",
         checker.diagnostics()
+    );
+}
+
+// --- Uninitialized typed state field warnings (BT-1831) ---
+
+#[test]
+fn test_uninitialized_typed_state_warns() {
+    // state: name :: String (no default) → warning
+    let state = vec![StateDeclaration::with_type(
+        ident("name"),
+        TypeAnnotation::simple("String", span()),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 uninitialized warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("name"));
+    assert!(warnings[0].message.contains("String"));
+}
+
+#[test]
+fn test_nilable_typed_state_no_warn() {
+    // state: name :: String | Nil → no warning (nil is valid)
+    let state = vec![StateDeclaration::with_type(
+        ident("name"),
+        TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("String", span()),
+                TypeAnnotation::simple("Nil", span()),
+            ],
+            span(),
+        ),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        uninitialized.is_empty(),
+        "Nilable typed state should not warn about uninitialized, got: {uninitialized:?}"
+    );
+}
+
+#[test]
+fn test_typed_state_with_default_no_warn() {
+    // state: name :: String = "" → no warning (has default)
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("name"),
+        TypeAnnotation::simple("String", span()),
+        str_lit(""),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        uninitialized.is_empty(),
+        "Typed state with default should not warn about uninitialized, got: {uninitialized:?}"
+    );
+}
+
+#[test]
+fn test_untyped_state_no_default_no_warn() {
+    // state: name (no type, no default) → no warning
+    let state = vec![StateDeclaration::new(ident("name"), span())];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
+    assert!(
+        uninitialized.is_empty(),
+        "Untyped state should not warn about uninitialized, got: {uninitialized:?}"
     );
 }
 
@@ -4294,8 +4411,8 @@ fn constructor_inference_error_infers_e_from_symbol() {
             );
             assert_eq!(
                 type_args[1].as_known().map(EcoString::as_str),
-                Some("Symbol"),
-                "E should be inferred as Symbol from argument"
+                Some("#not_found"),
+                "E should be inferred as #not_found from symbol literal argument"
             );
         }
         other => panic!("Expected Known type with type_args, got: {other:?}"),
@@ -4402,8 +4519,8 @@ fn constructor_inference_error_flows_to_error_accessor() {
 
     assert_eq!(
         error_ty.as_known().map(EcoString::as_str),
-        Some("Symbol"),
-        "error on (GenResult error: #not_found) should return Symbol via constructor inference"
+        Some("#not_found"),
+        "error on (GenResult error: #not_found) should return #not_found via constructor inference"
     );
 }
 
@@ -6725,5 +6842,138 @@ fn method_local_params_from_array_type() {
         result_ty.as_known().map(EcoString::as_str),
         Some("String"),
         "processArray: with Array(String) should return String (T), got: {result_ty:?}"
+    );
+}
+
+// ---- BT-1830: Singleton type inference and validation ----
+
+#[test]
+fn is_assignable_to_singleton_exact_match() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"#ok".into(), &hierarchy),
+        "#ok should be assignable to #ok"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_mismatch() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_assignable_to(&"#error".into(), &"#ok".into(), &hierarchy),
+        "#error should not be assignable to #ok"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_accepts_symbol() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"Symbol".into(), &"#ok".into(), &hierarchy),
+        "Symbol should be assignable to #ok (Symbol is the general type)"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_value_to_symbol() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"Symbol".into(), &hierarchy),
+        "#ok should be assignable to Symbol (singleton is a subtype of Symbol)"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_rejects_unrelated_type() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_assignable_to(&"Integer".into(), &"#ok".into(), &hierarchy),
+        "Integer should not be assignable to #ok"
+    );
+}
+
+#[test]
+fn singleton_return_type_mismatch_warns() {
+    // method -> #ok => #error  — should warn
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Checker"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Unary("status".into()),
+            vec![],
+            vec![bare(symbol_lit("error"))], // Returns Symbol, declared #ok
+            TypeAnnotation::singleton("ok", span()),
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let return_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        return_warnings.len(),
+        1,
+        "should warn about singleton return type mismatch: {return_warnings:?}"
+    );
+    assert!(return_warnings[0].message.contains("#ok"));
+}
+
+#[test]
+fn singleton_return_type_match_no_warning() {
+    // method -> #ok => #ok  — should NOT warn (Symbol literal is compatible)
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Checker"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Unary("status".into()),
+            vec![],
+            vec![bare(symbol_lit("ok"))], // Returns Symbol — compatible with #ok
+            TypeAnnotation::singleton("ok", span()),
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let return_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        return_warnings.is_empty(),
+        "Symbol literal compatible with singleton return type should not warn: {return_warnings:?}"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_to_symbol_union() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // #ok should be assignable to "Symbol | nil" (singleton is a subtype of Symbol)
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"Symbol | nil".into(), &hierarchy),
+        "#ok should be assignable to Symbol | nil"
+    );
+}
+
+#[test]
+fn is_assignable_to_singleton_to_object() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // #ok should be assignable to Object (Symbol is a subclass of Object)
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"Object".into(), &hierarchy),
+        "#ok should be assignable to Object via Symbol superclass chain"
     );
 }

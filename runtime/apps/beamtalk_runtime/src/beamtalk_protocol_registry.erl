@@ -157,8 +157,13 @@ conforms_to(ClassName, ProtocolName) ->
                 ),
                 InstanceOk andalso ClassOk
             catch
-                _:_ ->
+                Kind:Reason:ST ->
                     %% If the class process is dead or unreachable, assume non-conformance
+                    ?LOG_DEBUG(
+                        "Protocol conformance check failed for ~p (protocol ~p): ~p:~p",
+                        [ClassName, ProtocolName, Kind, Reason],
+                        #{stacktrace => ST, domain => [beamtalk, runtime]}
+                    ),
                     false
             end
     end.

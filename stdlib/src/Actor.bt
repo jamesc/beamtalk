@@ -26,7 +26,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawn
   /// ```
-  class sealed spawn => @intrinsic actorSpawn
+  class sealed spawn -> Self => @intrinsic actorSpawn
 
   /// Spawn a new actor process with initialization arguments.
   ///
@@ -34,7 +34,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawnWith: #{#count => 10}
   /// ```
-  class sealed spawnWith: initArgs => @intrinsic actorSpawnWith
+  class sealed spawnWith: initArgs -> Self => @intrinsic actorSpawnWith
 
   // === Supervision defaults ===
 
@@ -101,7 +101,7 @@ Object subclass: Actor
   /// slowDb query: sql              // forwarded with 30s timeout
   /// slowDb stop                    // stop the proxy when done
   /// ```
-  withTimeout: ms =>
+  withTimeout: ms :: Integer | Symbol -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
     proxy setTimeoutMs: ms
@@ -125,7 +125,7 @@ Object subclass: Actor
   ///   state: items = nil
   ///   initialize => self.items := #()
   /// ```
-  initialize => nil
+  initialize -> Nil => nil
 
   /// Optional lifecycle hook called when the actor is shutting down.
   ///
@@ -145,7 +145,7 @@ Object subclass: Actor
   ///   terminate: reason =>
   ///     self.logFile isNil ifFalse: [self.logFile close]
   /// ```
-  terminate: _reason => nil
+  terminate: _reason :: Object -> Nil => nil
 
   /// Delegate message dispatch to the backing Erlang module.
   ///
@@ -197,7 +197,7 @@ Object subclass: Actor
   ///   Logger info: "worker exited" metadata: #{"reason" => reason displayString}
   /// ]
   /// ```
-  sealed onExit: block -> Symbol => @primitive "actorOnExit"
+  sealed onExit: block :: Block -> Symbol => @primitive "actorOnExit"
 
   /// Gracefully stop this actor (gen_server:stop).
   ///

@@ -34,4 +34,5 @@ sealed ProtoObject subclass: ErlangModule
   /// (Erlang lists) reverse: #(3, 2, 1)    // => [1, 2, 3]
   /// (Erlang erlang) node                   // => :'nonode@nohost'
   /// ```
-  doesNotUnderstand: selector args: arguments => @intrinsic erlangApply
+  doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
+    @intrinsic erlangApply
