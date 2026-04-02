@@ -32,7 +32,7 @@
 //! ```
 
 use beamtalk_core::semantic_analysis::type_checker::{
-    NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
+    is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line, NativeTypeRegistry,
 };
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -1071,7 +1071,12 @@ impl TypeCache {
     ///
     /// Returns `Some(specs_line)` if the cache is fresh (`.beam` mtime matches),
     /// or `None` if the cache is stale or missing.
-    fn lookup(&self, module_name: &str, beam_mtime_secs: u64, beam_mtime_nanos: u32) -> Option<String> {
+    fn lookup(
+        &self,
+        module_name: &str,
+        beam_mtime_secs: u64,
+        beam_mtime_nanos: u32,
+    ) -> Option<String> {
         let path = self.cache_path(module_name);
         let content = std::fs::read_to_string(path.as_std_path()).ok()?;
         let entry: TypeCacheEntry = serde_json::from_str(&content).ok()?;
@@ -1083,7 +1088,13 @@ impl TypeCache {
     }
 
     /// Writes a cache entry for the given module.
-    fn store(&self, module_name: &str, beam_mtime_secs: u64, beam_mtime_nanos: u32, specs_line: &str) {
+    fn store(
+        &self,
+        module_name: &str,
+        beam_mtime_secs: u64,
+        beam_mtime_nanos: u32,
+        specs_line: &str,
+    ) {
         if let Err(e) = std::fs::create_dir_all(self.cache_dir.as_std_path()) {
             debug!("Failed to create type cache dir: {e}");
             return;
@@ -1406,7 +1417,11 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
 
     if !output.status.success() {
         let stderr_msg = String::from_utf8_lossy(&output.stderr);
-        warn!("erl probe failed (exit {}): {}", output.status, stderr_msg.trim());
+        warn!(
+            "erl probe failed (exit {}): {}",
+            output.status,
+            stderr_msg.trim()
+        );
         return Ok(Vec::new());
     }
 
