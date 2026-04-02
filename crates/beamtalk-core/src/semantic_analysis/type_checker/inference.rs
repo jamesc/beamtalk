@@ -3109,6 +3109,7 @@ mod tests {
     #[test]
     fn substitute_return_type_nested_result() {
         // Return type Result(T, E) with T=Array(Integer), E=Error
+        // Substitution on "Result(T, E)" should produce Result(Array(Integer), Error)
         let mut method_subst = HashMap::new();
         method_subst.insert(
             EcoString::from("T"),
@@ -3119,19 +3120,31 @@ mod tests {
             },
         );
         method_subst.insert(EcoString::from("E"), InferredType::known("Error"));
-        // When return type is just "T", substitution returns the Array(Integer) directly
-        let result = TypeChecker::substitute_return_type("T", &HashMap::new(), &method_subst);
+        let result =
+            TypeChecker::substitute_return_type("Result(T, E)", &HashMap::new(), &method_subst);
         match result {
             InferredType::Known {
                 class_name,
                 type_args,
                 ..
             } => {
-                assert_eq!(class_name.as_str(), "Array");
-                assert_eq!(type_args.len(), 1);
-                assert_eq!(type_args[0], InferredType::known("Integer"));
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                match &type_args[0] {
+                    InferredType::Known {
+                        class_name,
+                        type_args,
+                        ..
+                    } => {
+                        assert_eq!(class_name.as_str(), "Array");
+                        assert_eq!(type_args.len(), 1);
+                        assert_eq!(type_args[0], InferredType::known("Integer"));
+                    }
+                    other => panic!("Expected Known Array(Integer), got {other:?}"),
+                }
+                assert_eq!(type_args[1], InferredType::known("Error"));
             }
-            other => panic!("Expected Known Array(Integer), got {other:?}"),
+            other => panic!("Expected Known Result(Array(Integer), Error), got {other:?}"),
         }
     }
 }

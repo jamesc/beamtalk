@@ -21,7 +21,7 @@ TestCase subclass: AssertTypeInferenceTest
 
   testAssertOkArrayOperations =>
     // assertOk: on Result(Array, ...) should return Array, enabling size
-    arr := self assertOk: (Result ok: #(1, 2, 3))
+    arr := self assertOk: (Result ok: #[1, 2, 3])
     self assert: arr size equals: 3
 
   testAssertOkChainedUsage =>
