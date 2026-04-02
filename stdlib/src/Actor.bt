@@ -145,7 +145,7 @@ Object subclass: Actor
   ///   terminate: reason =>
   ///     self.logFile isNil ifFalse: [self.logFile close]
   /// ```
-  terminate: _reason :: Symbol -> Nil => nil
+  terminate: _reason :: Object -> Nil => nil
 
   /// Delegate message dispatch to the backing Erlang module.
   ///

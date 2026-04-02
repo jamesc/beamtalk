@@ -78,7 +78,7 @@ abstract Object subclass: DynamicSupervisor(C)
   startChild -> C => (Erlang beamtalk_supervisor) startChild: self
 
   /// Start a new child with the given initialization args.
-  startChild: args :: Dictionary -> C =>
+  startChild: args -> C =>
     (Erlang beamtalk_supervisor) startChild: self with: args
 
   /// Terminate the given child process.
