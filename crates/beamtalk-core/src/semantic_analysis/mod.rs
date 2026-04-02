@@ -262,6 +262,30 @@ pub fn analyse_with_options_and_classes(
     )
 }
 
+/// Analyse a module with compiler options, pre-loaded classes, and native type registry.
+///
+/// ADR 0075: When `native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
+/// get return type inference and keyword mismatch warnings from the registry.
+///
+/// This is the build-pipeline entry point for Phase 1 typed FFI.
+pub fn analyse_with_natives(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    native_type_registry: Option<type_checker::NativeTypeRegistry>,
+) -> AnalysisResult {
+    analyse_full_with_natives(
+        module,
+        &[],
+        options.stdlib_mode,
+        options.skip_module_expression_lint,
+        pre_loaded_classes,
+        None,
+        options.current_package.as_deref(),
+        native_type_registry,
+    )
+}
+
 /// Analyse a module with pre-defined variables and pre-loaded class entries
 /// from BEAM metadata (ADR 0050 Phase 4).
 ///
@@ -316,6 +340,34 @@ fn analyse_full(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     known_packages: Option<std::collections::HashSet<String>>,
     current_package: Option<&str>,
+) -> AnalysisResult {
+    analyse_full_with_natives(
+        module,
+        known_vars,
+        stdlib_mode,
+        skip_module_expression_lint,
+        pre_loaded_classes,
+        known_packages,
+        current_package,
+        None,
+    )
+}
+
+/// Internal: full analysis with all knobs, including native type registry.
+///
+/// ADR 0075: When `native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
+/// get return type inference and keyword mismatch warnings from the registry.
+#[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
+#[allow(clippy::too_many_arguments)]
+fn analyse_full_with_natives(
+    module: &Module,
+    known_vars: &[&str],
+    stdlib_mode: bool,
+    skip_module_expression_lint: bool,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    known_packages: Option<std::collections::HashSet<String>>,
+    current_package: Option<&str>,
+    native_type_registry: Option<type_checker::NativeTypeRegistry>,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -391,6 +443,10 @@ fn analyse_full(
     } else {
         TypeChecker::new()
     };
+    // ADR 0075: Wire native type registry for FFI call inference.
+    if let Some(registry) = native_type_registry {
+        type_checker.set_native_type_registry(registry);
+    }
     type_checker.check_module_with_protocols(
         module,
         &result.class_hierarchy,
