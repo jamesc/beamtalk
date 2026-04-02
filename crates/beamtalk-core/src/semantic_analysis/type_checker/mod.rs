@@ -27,13 +27,17 @@ use std::collections::HashMap;
 
 mod inference;
 pub mod native_type_registry;
+pub mod native_types;
 mod protocol;
 #[cfg(test)]
 mod tests;
 mod types;
 mod validation;
 
-pub use native_type_registry::NativeTypeRegistry;
+pub use native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
+pub use native_types::{
+    is_specs_line, is_specs_result_error, is_specs_result_ok, map_type_name, parse_specs_line,
+};
 pub(in crate::semantic_analysis) use types::is_generic_type_param;
 pub use types::{InferredType, TypeProvenance};
 
