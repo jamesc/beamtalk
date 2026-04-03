@@ -1079,6 +1079,14 @@ fn parse_map_value_keyword_with_binary_arg() {
                     if selector.name() == "add:"),
                 "Value should be keyword send `add:`"
             );
+            // Verify the argument is a binary `+` expression (precedence check)
+            if let Expression::MessageSend { arguments, .. } = &pairs[0].value {
+                assert!(
+                    matches!(&arguments[0], Expression::MessageSend { selector, .. }
+                        if selector.name() == "+"),
+                    "Expected binary `+` expression as `add:` argument"
+                );
+            }
         }
         other => panic!("Expected map literal, got: {other:?}"),
     }
