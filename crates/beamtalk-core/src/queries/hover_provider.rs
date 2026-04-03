@@ -33,6 +33,7 @@ use crate::ast::{
 use crate::language_service::{HoverInfo, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::semantic_analysis::type_checker::TypeMap;
+use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use crate::semantic_analysis::{ClassHierarchy, InferredType};
 use crate::source_analysis::Span;
 
@@ -62,7 +63,7 @@ use crate::source_analysis::Span;
 /// let (module, _) = parse(tokens);
 /// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 ///
-/// let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy);
+/// let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None);
 /// assert!(hover.is_some());
 /// ```
 #[must_use]
@@ -71,6 +72,7 @@ pub fn compute_hover(
     source: &str,
     position: Position,
     hierarchy: &ClassHierarchy,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<HoverInfo> {
     let offset = position.to_byte_offset(source)?;
     let offset_val = offset.get();
@@ -108,6 +110,7 @@ pub fn compute_hover(
             &class_context,
             hierarchy,
             &type_map,
+            native_types,
         ) {
             return Some(hover);
         }
@@ -126,6 +129,7 @@ pub fn compute_hover(
                     &class_context,
                     hierarchy,
                     &type_map,
+                    native_types,
                 ) {
                     return Some(hover);
                 }
@@ -142,6 +146,7 @@ pub fn compute_hover(
                     &class_context,
                     hierarchy,
                     &type_map,
+                    native_types,
                 ) {
                     return Some(hover);
                 }
@@ -163,6 +168,7 @@ pub fn compute_hover(
                 &class_context,
                 hierarchy,
                 &type_map,
+                native_types,
             ) {
                 return Some(hover);
             }
@@ -613,6 +619,7 @@ fn find_hover_in_expr(
     context: &HoverClassContext<'_>,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<HoverInfo> {
     let span = expr.span();
     if offset < span.start() || offset >= span.end() {
@@ -682,8 +689,9 @@ fn find_hover_in_expr(
             }
         }
         Expression::Assignment { target, value, .. } => {
-            find_hover_in_expr(target, offset, context, hierarchy, type_map)
-                .or_else(|| find_hover_in_expr(value, offset, context, hierarchy, type_map))
+            find_hover_in_expr(target, offset, context, hierarchy, type_map, native_types).or_else(
+                || find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types),
+            )
         }
         Expression::MessageSend {
             receiver,
@@ -693,14 +701,14 @@ fn find_hover_in_expr(
             ..
         } => {
             // First check receiver and arguments
-            if let Some(hover) = find_hover_in_expr(receiver, offset, context, hierarchy, type_map)
+            if let Some(hover) =
+                find_hover_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
             {
                 return Some(hover);
             }
-            if let Some(hover) = arguments
-                .iter()
-                .find_map(|arg| find_hover_in_expr(arg, offset, context, hierarchy, type_map))
-            {
+            if let Some(hover) = arguments.iter().find_map(|arg| {
+                find_hover_in_expr(arg, offset, context, hierarchy, type_map, native_types)
+            }) {
                 return Some(hover);
             }
 
@@ -744,6 +752,7 @@ fn find_hover_in_expr(
                     context,
                     hierarchy,
                     type_map,
+                    native_types,
                 ) {
                     return Some(hover);
                 }
@@ -751,20 +760,32 @@ fn find_hover_in_expr(
             }
             None
         }
-        Expression::Block(block) => block
-            .body
-            .iter()
-            .find_map(|s| find_hover_in_expr(&s.expression, offset, context, hierarchy, type_map)),
+        Expression::Block(block) => block.body.iter().find_map(|s| {
+            find_hover_in_expr(
+                &s.expression,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+            )
+        }),
         Expression::Return { value, .. } => {
-            find_hover_in_expr(value, offset, context, hierarchy, type_map)
+            find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types)
         }
         Expression::DestructureAssignment { pattern, value, .. } => {
-            find_hover_in_pattern(pattern, offset, type_map)
-                .or_else(|| find_hover_in_expr(value, offset, context, hierarchy, type_map))
+            find_hover_in_pattern(pattern, offset, type_map).or_else(|| {
+                find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types)
+            })
         }
-        Expression::Parenthesized { expression, .. } => {
-            find_hover_in_expr(expression, offset, context, hierarchy, type_map)
-        }
+        Expression::Parenthesized { expression, .. } => find_hover_in_expr(
+            expression,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+        ),
         Expression::FieldAccess {
             receiver, field, ..
         } => {
@@ -789,24 +810,23 @@ fn find_hover_in_expr(
                         .with_documentation("_state variable_".to_string()),
                 )
             } else {
-                find_hover_in_expr(receiver, offset, context, hierarchy, type_map)
+                find_hover_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
             }
         }
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            if let Some(hover) = find_hover_in_expr(receiver, offset, context, hierarchy, type_map)
+            if let Some(hover) =
+                find_hover_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
             {
                 return Some(hover);
             }
             // Check each cascaded message
             for msg in messages {
                 // Check arguments first
-                if let Some(hover) = msg
-                    .arguments
-                    .iter()
-                    .find_map(|arg| find_hover_in_expr(arg, offset, context, hierarchy, type_map))
-                {
+                if let Some(hover) = msg.arguments.iter().find_map(|arg| {
+                    find_hover_in_expr(arg, offset, context, hierarchy, type_map, native_types)
+                }) {
                     return Some(hover);
                 }
                 // Compute selector span: from message start to first argument (or message end)
@@ -826,6 +846,7 @@ fn find_hover_in_expr(
                             context,
                             hierarchy,
                             type_map,
+                            native_types,
                         ) {
                             return Some(hover);
                         }
@@ -836,32 +857,58 @@ fn find_hover_in_expr(
             None
         }
         Expression::Match { value, arms, .. } => {
-            find_hover_in_expr(value, offset, context, hierarchy, type_map).or_else(|| {
-                arms.iter().find_map(|arm| {
-                    find_hover_in_pattern(&arm.pattern, offset, type_map)
-                        .or_else(|| {
-                            arm.guard.as_ref().and_then(|g| {
-                                find_hover_in_expr(g, offset, context, hierarchy, type_map)
+            find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types).or_else(
+                || {
+                    arms.iter().find_map(|arm| {
+                        find_hover_in_pattern(&arm.pattern, offset, type_map)
+                            .or_else(|| {
+                                arm.guard.as_ref().and_then(|g| {
+                                    find_hover_in_expr(
+                                        g,
+                                        offset,
+                                        context,
+                                        hierarchy,
+                                        type_map,
+                                        native_types,
+                                    )
+                                })
                             })
-                        })
-                        .or_else(|| {
-                            find_hover_in_expr(&arm.body, offset, context, hierarchy, type_map)
-                        })
-                })
-            })
+                            .or_else(|| {
+                                find_hover_in_expr(
+                                    &arm.body,
+                                    offset,
+                                    context,
+                                    hierarchy,
+                                    type_map,
+                                    native_types,
+                                )
+                            })
+                    })
+                },
+            )
         }
         Expression::MapLiteral { pairs, span } => {
             if offset >= span.start() && offset < span.end() {
                 // Check if hovering over a specific key or value
                 for pair in pairs {
-                    if let Some(hover) =
-                        find_hover_in_expr(&pair.key, offset, context, hierarchy, type_map)
-                    {
+                    if let Some(hover) = find_hover_in_expr(
+                        &pair.key,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                    ) {
                         return Some(hover);
                     }
-                    if let Some(hover) =
-                        find_hover_in_expr(&pair.value, offset, context, hierarchy, type_map)
-                    {
+                    if let Some(hover) = find_hover_in_expr(
+                        &pair.value,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                    ) {
                         return Some(hover);
                     }
                 }
@@ -882,13 +929,14 @@ fn find_hover_in_expr(
             if offset >= span.start() && offset < span.end() {
                 for elem in elements {
                     if let Some(hover) =
-                        find_hover_in_expr(elem, offset, context, hierarchy, type_map)
+                        find_hover_in_expr(elem, offset, context, hierarchy, type_map, native_types)
                     {
                         return Some(hover);
                     }
                 }
                 if let Some(t) = tail {
-                    if let Some(hover) = find_hover_in_expr(t, offset, context, hierarchy, type_map)
+                    if let Some(hover) =
+                        find_hover_in_expr(t, offset, context, hierarchy, type_map, native_types)
                     {
                         return Some(hover);
                     }
@@ -905,7 +953,7 @@ fn find_hover_in_expr(
             if offset >= span.start() && offset < span.end() {
                 for elem in elements {
                     if let Some(hover) =
-                        find_hover_in_expr(elem, offset, context, hierarchy, type_map)
+                        find_hover_in_expr(elem, offset, context, hierarchy, type_map, native_types)
                     {
                         return Some(hover);
                     }
@@ -947,9 +995,14 @@ fn find_hover_in_expr(
                 // Check interpolated expressions for hover targets
                 for segment in segments {
                     if let crate::ast::StringSegment::Interpolation(expr) = segment {
-                        if let Some(info) =
-                            find_hover_in_expr(expr, offset, context, hierarchy, type_map)
-                        {
+                        if let Some(info) = find_hover_in_expr(
+                            expr,
+                            offset,
+                            context,
+                            hierarchy,
+                            type_map,
+                            native_types,
+                        ) {
                             return Some(info);
                         }
                     }
@@ -980,10 +1033,25 @@ fn resolved_selector_hover_info(
     context: &HoverClassContext<'_>,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<HoverInfo> {
     let selector_name = selector.name();
     let (receiver_class, class_side) =
         resolve_receiver_class(receiver, context, hierarchy, type_map)?;
+
+    // ADR 0075 Phase 4: FFI hover for ErlangModule receivers.
+    // When hovering over a selector on an ErlangModule<module_name>, look up
+    // the function signature in NativeTypeRegistry and display typed info.
+    if receiver_class == "ErlangModule" {
+        return ffi_selector_hover_info(
+            receiver,
+            &selector_name,
+            selector,
+            span,
+            type_map,
+            native_types,
+        );
+    }
 
     let method = if class_side {
         hierarchy.find_class_method(receiver_class.as_str(), selector_name.as_str())?
@@ -1017,6 +1085,95 @@ fn resolved_selector_hover_info(
         None => format!("{resolution_context}\n\n{meta_line}"),
     };
     Some(HoverInfo::new(summary, span).with_documentation(doc))
+}
+
+/// Builds hover info for an FFI call selector (ADR 0075 Phase 4).
+///
+/// Extracts the Erlang module name from the receiver's type map entry
+/// (which is `ErlangModule<module_name>`), resolves the function name and
+/// arity from the selector, and looks up the signature in `NativeTypeRegistry`.
+fn ffi_selector_hover_info(
+    receiver: &Expression,
+    selector_name: &ecow::EcoString,
+    selector: &MessageSelector,
+    span: Span,
+    type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
+) -> Option<HoverInfo> {
+    // Extract the Erlang module name from the receiver's inferred type.
+    // The receiver is typed as ErlangModule<module_name> by the type checker.
+    let module_name = extract_erlang_module_name(receiver, type_map)?;
+
+    // Extract the function name (first keyword) and arity.
+    let function_name = selector_name
+        .split(':')
+        .next()
+        .unwrap_or(selector_name.as_str());
+    let arity = match selector {
+        MessageSelector::Unary(_) => 0,
+        MessageSelector::Binary(_) => 1,
+        MessageSelector::Keyword(parts) => u8::try_from(parts.len()).unwrap_or(u8::MAX),
+    };
+
+    // Look up in NativeTypeRegistry for typed signature
+    let sig = native_types.and_then(|reg| reg.lookup(&module_name, function_name, arity));
+
+    let summary = if let Some(sig) = sig {
+        format!("```beamtalk\n{}\n```", sig.display_signature())
+    } else {
+        // Fallback: show untyped FFI call info
+        format!("```beamtalk\nErlang {module_name} {selector_name}\n```")
+    };
+
+    let provenance = if let Some(sig) = sig {
+        match sig.provenance {
+            crate::semantic_analysis::type_checker::TypeProvenance::Extracted => {
+                "auto-extracted from `.beam`"
+            }
+            crate::semantic_analysis::type_checker::TypeProvenance::Declared(_) => "from stub file",
+            _ => "native type registry",
+        }
+    } else {
+        "no type info available"
+    };
+
+    let doc =
+        format!("Erlang FFI: `{module_name}:{function_name}/{arity}`\n\n_Source: {provenance}_");
+    Some(HoverInfo::new(summary, span).with_documentation(doc))
+}
+
+/// Extracts the Erlang module name from an `ErlangModule<module_name>` receiver.
+///
+/// Checks the type map for the receiver's inferred type, which should be
+/// `Known { class_name: "ErlangModule", type_args: [Known { class_name: "lists" }] }`.
+/// Falls back to checking if the receiver is a `MessageSend` with `Erlang` class
+/// reference (for direct `Erlang lists reverse:` patterns).
+fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Option<String> {
+    // First try the type map
+    if let Some(InferredType::Known { type_args, .. }) = type_map.get(receiver.span()) {
+        if let Some(InferredType::Known { class_name, .. }) = type_args.first() {
+            return Some(class_name.to_string());
+        }
+    }
+
+    // Fall back to AST inspection for `Erlang <module>` pattern:
+    // The outer expression has an inner MessageSend where receiver is ClassReference "Erlang"
+    // and selector is Unary(module_name). But in that case, `receiver` here IS the inner
+    // `Erlang lists` message send, so we look at it directly.
+    if let Expression::MessageSend {
+        receiver: inner_receiver,
+        selector: MessageSelector::Unary(module_name),
+        ..
+    } = receiver
+    {
+        if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
+            if name.name == "Erlang" {
+                return Some(module_name.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Formats a `MethodInfo` from the hierarchy as a typed signature string.
@@ -1255,7 +1412,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_hover(&module, source, position, &hierarchy)
+        compute_hover(&module, source, position, &hierarchy, None)
     }
 
     #[test]
@@ -1328,7 +1485,7 @@ mod tests {
 
         let selector_offset = source.rfind("increment").unwrap();
         let pos = Position::from_offset(source, selector_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover call-site selector");
         let hover = hover.unwrap();
         assert!(
@@ -1375,7 +1532,7 @@ mod tests {
 
         // Position at "Parser" (after "json@")
         let pos = Position::new(0, 5);
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover on package-qualified class");
         let hover = hover.unwrap();
         assert!(
@@ -1417,7 +1574,7 @@ mod tests {
             is_intrinsic: false,
             span: Span::new(0, 22),
         };
-        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new());
+        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None);
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("`@primitive \"erlang_add\"`"));
@@ -1437,7 +1594,7 @@ mod tests {
             is_intrinsic: false,
             span: Span::new(0, 15),
         };
-        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new());
+        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None);
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("`@primitive size`"));
@@ -1455,7 +1612,7 @@ mod tests {
         // Find the exact offset of "self" in the source
         let self_offset = source.find("self.count").unwrap();
         let pos = Position::from_offset(source, self_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should find hover for self");
         let hover = hover.unwrap();
         assert!(
@@ -1475,7 +1632,7 @@ mod tests {
         // Find "self" in the class method body
         let class_method_self = source.find("self new:").unwrap();
         let pos = Position::from_offset(source, class_method_self).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
             "Should find hover for self in class method"
@@ -1499,7 +1656,7 @@ mod tests {
         // Find the position of the top-level "Counter" reference
         let counter_pos = source.rfind("Counter").unwrap();
         let pos = Position::from_offset(source, counter_pos).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should find hover for Counter reference");
         let hover = hover.unwrap();
         assert!(
@@ -1528,7 +1685,7 @@ mod tests {
 
         let offset = source.find("count ::").unwrap();
         let pos = Position::from_offset(source, offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover state declaration name");
         let hover = hover.unwrap();
@@ -1566,7 +1723,7 @@ mod tests {
 
         let offset = source.find("count =").unwrap();
         let pos = Position::from_offset(source, offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(
             hover.is_some(),
@@ -1605,7 +1762,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy);
+        let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None);
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(
@@ -1654,7 +1811,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let hover = compute_hover(&module, source, Position::new(1, 0), &hierarchy);
+        let hover = compute_hover(&module, source, Position::new(1, 0), &hierarchy, None);
         assert!(hover.is_some(), "Should find hover");
         let hover = hover.unwrap();
         assert!(
@@ -1673,7 +1830,7 @@ mod tests {
 
         let self_offset = source.find("self.count").unwrap();
         let pos = Position::from_offset(source, self_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
             "Should find hover for self in standalone method"
@@ -1695,7 +1852,7 @@ mod tests {
 
         let self_offset = source.find("self new:").unwrap();
         let pos = Position::from_offset(source, self_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
             "Should find hover for self in standalone class method"
@@ -1717,7 +1874,7 @@ mod tests {
 
         let selector_offset = source.find("increment =>").unwrap();
         let pos = Position::from_offset(source, selector_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover method declaration selector");
         let hover = hover.unwrap();
@@ -1737,7 +1894,7 @@ mod tests {
 
         let selector_offset = source.find("at:").unwrap();
         let pos = Position::from_offset(source, selector_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover keyword declaration selector");
         let hover = hover.unwrap();
@@ -1757,7 +1914,7 @@ mod tests {
 
         let param_offset = source.find("aBlock ::").unwrap();
         let pos = Position::from_offset(source, param_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover typed parameter name");
         let hover = hover.unwrap();
@@ -1777,7 +1934,7 @@ mod tests {
 
         let param_type_offset = source.find("Block ->").unwrap();
         let param_type_pos = Position::from_offset(source, param_type_offset).unwrap();
-        let param_type_hover = compute_hover(&module, source, param_type_pos, &hierarchy);
+        let param_type_hover = compute_hover(&module, source, param_type_pos, &hierarchy, None);
         assert!(param_type_hover.is_some(), "Should hover parameter type");
         let param_type_hover = param_type_hover.unwrap();
         assert!(
@@ -1790,7 +1947,7 @@ mod tests {
 
         let return_type_offset = source.find("-> Boolean").unwrap() + 3;
         let return_type_pos = Position::from_offset(source, return_type_offset).unwrap();
-        let return_type_hover = compute_hover(&module, source, return_type_pos, &hierarchy);
+        let return_type_hover = compute_hover(&module, source, return_type_pos, &hierarchy, None);
         assert!(return_type_hover.is_some(), "Should hover return type");
         let return_type_hover = return_type_hover.unwrap();
         assert!(
@@ -1811,7 +1968,7 @@ mod tests {
 
         let selector_offset = source.find("increment ->").unwrap();
         let pos = Position::from_offset(source, selector_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover declaration selector");
         let hover = hover.unwrap();
@@ -1840,7 +1997,7 @@ mod tests {
 
         let object_offset = source.find("Object").unwrap();
         let pos = Position::from_offset(source, object_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover superclass identifier");
         let hover = hover.unwrap();
@@ -1860,7 +2017,7 @@ mod tests {
 
         let class_offset = source.find("Counter").unwrap();
         let pos = Position::from_offset(source, class_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover class declaration name");
         let hover = hover.unwrap();
@@ -1919,7 +2076,7 @@ mod tests {
 
         let selector_offset = source.rfind("value").unwrap();
         let pos = Position::from_offset(source, selector_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
             "Should hover on user-defined annotated selector"
@@ -1942,7 +2099,7 @@ mod tests {
 
         let selector_offset = source.rfind("value").unwrap();
         let pos = Position::from_offset(source, selector_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
             "Should hover on user-defined inferred selector"
@@ -2095,7 +2252,7 @@ mod tests {
 
         // Hover over "Foo" (class name declaration at offset 17)
         let pos = Position::new(0, 17);
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover on internal class name");
         let hover = hover.unwrap();
         assert!(
@@ -2115,13 +2272,89 @@ mod tests {
         // Hover over "helper" method selector
         let helper_offset = source.find("helper").unwrap();
         let pos = Position::from_offset(source, helper_offset).unwrap();
-        let hover = compute_hover(&module, source, pos, &hierarchy);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover on internal method selector");
         let hover = hover.unwrap();
         let doc = hover.documentation.as_deref().unwrap_or("");
         assert!(
             doc.contains("internal"),
             "Hover on internal method should show 'internal' in docs. Got: {doc}",
+        );
+    }
+
+    // --- FFI hover tests (ADR 0075 Phase 4) ---
+
+    #[test]
+    fn ffi_hover_shows_typed_signature_from_registry() {
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let source = "Erlang lists reverse: #(1, 2, 3)";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+            }],
+        );
+
+        // Hover over "reverse:" — the selector of the FFI call
+        // Source: "Erlang lists reverse: #(1, 2, 3)"
+        //         0123456789012345678901234
+        let reverse_offset = source.find("reverse").unwrap();
+        let pos = Position::from_offset(source, reverse_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry));
+        let hover = hover.expect("should get hover for FFI selector");
+        assert!(
+            hover.contents.contains("reverse:"),
+            "FFI hover should show typed signature. Got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("List"),
+            "FFI hover should show parameter type. Got: {}",
+            hover.contents
+        );
+        let doc = hover.documentation.as_deref().unwrap_or("");
+        assert!(
+            doc.contains("lists:reverse/1"),
+            "FFI hover should show Erlang module:function/arity. Got: {doc}"
+        );
+        assert!(
+            doc.contains("auto-extracted"),
+            "FFI hover should show provenance. Got: {doc}"
+        );
+    }
+
+    #[test]
+    fn ffi_hover_without_registry_shows_untyped_info() {
+        let source = "Erlang lists reverse: #(1, 2, 3)";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over "reverse:" — no registry provided
+        let reverse_offset = source.find("reverse").unwrap();
+        let pos = Position::from_offset(source, reverse_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = hover.expect("should get hover even without registry");
+        let doc = hover.documentation.as_deref().unwrap_or("");
+        assert!(
+            doc.contains("Erlang FFI"),
+            "FFI hover should indicate it is an Erlang FFI call. Got: {doc}"
         );
     }
 }
