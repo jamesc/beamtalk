@@ -1180,6 +1180,7 @@ impl TypeChecker {
         let mut missing_names: Vec<EcoString> = Vec::new();
         let mut return_types: Vec<InferredType> = Vec::new();
         let mut responding_count: usize = 0;
+        let mut uncertain_member_count: usize = 0;
         let has_nil = members.iter().any(|m| {
             m.as_known()
                 .is_some_and(|n| n.as_str() == "UndefinedObject")
@@ -1204,10 +1205,12 @@ impl TypeChecker {
                 continue;
             }
             if !hierarchy.has_class(member_name) {
+                uncertain_member_count += 1;
                 return_types.push(InferredType::Dynamic);
                 continue;
             }
             if hierarchy.has_instance_dnu_override(member_name) {
+                uncertain_member_count += 1;
                 return_types.push(InferredType::Dynamic);
                 continue;
             }
@@ -1289,9 +1292,10 @@ impl TypeChecker {
             };
 
             // BT-1872: Use warning severity when no non-nil members respond
-            // (the message send will definitely fail at runtime), hint when
-            // only some members lack the selector.
-            let diag = if responding_count == 0 {
+            // AND no uncertain members (unknown classes, DNU overrides) exist
+            // (the message send will definitely fail at runtime). Use hint when
+            // only some members lack the selector or uncertainty exists.
+            let diag = if responding_count == 0 && uncertain_member_count == 0 {
                 Diagnostic::warning(message, span)
             } else {
                 Diagnostic::hint(message, span)
