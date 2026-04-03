@@ -9725,6 +9725,7 @@ fn type_args_for_non_generic_class_in_method_param_warns() {
         is_internal: false,
         comments: CommentAttachment::default(),
         doc_comment: None,
+        expect: None,
         span: span(),
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
@@ -9803,6 +9804,7 @@ fn type_args_for_block_no_false_positive() {
         is_internal: false,
         comments: CommentAttachment::default(),
         doc_comment: None,
+        expect: None,
         span: span(),
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
