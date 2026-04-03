@@ -1153,6 +1153,74 @@ fn parse_map_uppercase_key_not_converted() {
     }
 }
 
+#[test]
+fn parse_map_value_keyword_message() {
+    // BT-1854: Nested keyword messages with map literal arguments inside outer map literals
+    let module =
+        parse_ok("#{#session => SessionInfo new: #{#turnCount => 0}, #tokens => TokenUsage new}");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(pairs.len(), 2);
+            // First value is a keyword message: SessionInfo new: #{#turnCount => 0}
+            match &pairs[0].value {
+                Expression::MessageSend {
+                    receiver,
+                    selector: MessageSelector::Keyword(keywords),
+                    arguments,
+                    ..
+                } => {
+                    assert!(
+                        matches!(receiver.as_ref(), Expression::ClassReference { name, .. } if name.name.as_str() == "SessionInfo")
+                    );
+                    assert_eq!(keywords.len(), 1);
+                    assert_eq!(keywords[0].keyword.as_str(), "new:");
+                    assert_eq!(arguments.len(), 1);
+                    assert!(
+                        matches!(&arguments[0], Expression::MapLiteral { pairs, .. } if pairs.len() == 1)
+                    );
+                }
+                _ => panic!("Expected keyword MessageSend for first value"),
+            }
+            // Second value is a unary message: TokenUsage new
+            assert!(matches!(
+                &pairs[1].value,
+                Expression::MessageSend {
+                    selector: MessageSelector::Unary(_),
+                    ..
+                }
+            ));
+        }
+        _ => panic!("Expected MapLiteral"),
+    }
+}
+
+#[test]
+fn parse_map_value_multi_keyword_message() {
+    // BT-1854: Multi-keyword messages as map values
+    let module = parse_ok("#{#key => Foo from: 1 to: 2}");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(pairs.len(), 1);
+            match &pairs[0].value {
+                Expression::MessageSend {
+                    selector: MessageSelector::Keyword(keywords),
+                    arguments,
+                    ..
+                } => {
+                    assert_eq!(keywords.len(), 2);
+                    assert_eq!(keywords[0].keyword.as_str(), "from:");
+                    assert_eq!(keywords[1].keyword.as_str(), "to:");
+                    assert_eq!(arguments.len(), 2);
+                }
+                _ => panic!("Expected keyword MessageSend"),
+            }
+        }
+        _ => panic!("Expected MapLiteral"),
+    }
+}
+
 // ========================================================================
 // Class Definition Parsing Tests
 // ========================================================================

@@ -2087,8 +2087,8 @@ impl Parser {
             }
             self.advance(); // consume '=>'
 
-            // Parse value expression (binary to support operators like `+` in values)
-            let value = self.parse_binary_message();
+            // Parse value expression (keyword to support `Foo new: #{...}` nested in maps)
+            let value = self.parse_keyword_message();
 
             let pair_span = pair_start.merge(value.span());
             pairs.push(MapPair::new(key, value, pair_span));
