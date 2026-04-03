@@ -3857,17 +3857,15 @@ fn resolve_type_name_string_union() {
     );
 }
 
-/// BT-1572: Message send on union receiver warns if any member lacks the selector.
+/// BT-1572 + BT-1857: Message send on union receiver warns if non-Nil member lacks the selector.
 #[test]
-fn union_receiver_warns_when_member_lacks_selector() {
-    // String understands `size`, UndefinedObject does not.
-    // Sending `size` to a `String | nil` receiver should emit a DNU hint.
+fn union_receiver_warns_when_non_nil_member_lacks_selector() {
+    // String understands `trim` but Integer does not.
+    // Sending `trim` to a `String | Integer` receiver should emit a DNU hint for Integer.
     let module = Module::new(
         vec![ExpressionStatement::bare(msg_send(
-            // We need a way to get a union-typed receiver. We'll use a class with
-            // a union-typed state field, then access it.
             Expression::Identifier(ident("x")),
-            MessageSelector::Unary("size".into()),
+            MessageSelector::Unary("trim".into()),
             vec![],
         ))],
         span(),
@@ -3875,14 +3873,8 @@ fn union_receiver_warns_when_member_lacks_selector() {
 
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
-
-    // Manually set up a union-typed variable in the environment by calling
-    // infer_expr directly with a pre-configured env.
     let mut env = TypeEnv::new();
-    env.set(
-        "x",
-        InferredType::simple_union(&["String", "UndefinedObject"]),
-    );
+    env.set("x", InferredType::simple_union(&["String", "Integer"]));
 
     let _ty = checker.infer_expr(
         &module.expressions[0].expression,
@@ -3899,17 +3891,18 @@ fn union_receiver_warns_when_member_lacks_selector() {
     assert_eq!(
         dnu_hints.len(),
         1,
-        "Should warn that UndefinedObject does not understand 'size'"
+        "Should warn that Integer does not understand 'trim'"
     );
     assert!(
-        dnu_hints[0].message.contains("UndefinedObject"),
+        dnu_hints[0].message.contains("Integer"),
         "Warning should mention which member lacks the selector"
     );
 }
 
-/// BT-1572: Nullable hint for nil in union.
+/// BT-1857: Nil members in unions are skipped for method resolution.
+/// String | Nil sending `size` should not warn — Nil is skipped.
 #[test]
-fn union_receiver_nullable_hint() {
+fn union_receiver_nil_skipped_no_warning() {
     let module = Module::new(
         vec![ExpressionStatement::bare(msg_send(
             Expression::Identifier(ident("x")),
@@ -3927,6 +3920,52 @@ fn union_receiver_nullable_hint() {
         InferredType::simple_union(&["String", "UndefinedObject"]),
     );
 
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu_hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_hints.is_empty(),
+        "Should NOT warn when Nil is the only non-responding member (it's skipped)"
+    );
+
+    // Return type should be from String.size (Integer), not a union with Nil
+    assert!(
+        matches!(ty, InferredType::Known { ref class_name, .. } if class_name == "Integer"),
+        "Return type should be Integer from String.size, got {ty:?}"
+    );
+}
+
+/// BT-1857: Nullable hint still appears when non-Nil member also lacks selector.
+#[test]
+fn union_receiver_nullable_hint_with_non_nil_missing() {
+    // Float | Nil — Float doesn't understand `size`, and union has Nil.
+    // Should warn about Float AND add nullable hint.
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("size".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "x",
+        InferredType::simple_union(&["Float", "UndefinedObject"]),
+    );
+
     checker.infer_expr(
         &module.expressions[0].expression,
         &hierarchy,
@@ -3939,7 +3978,11 @@ fn union_receiver_nullable_hint() {
         .iter()
         .filter(|d| d.message.contains("does not understand"))
         .collect();
-    assert_eq!(dnu_hints.len(), 1);
+    assert_eq!(dnu_hints.len(), 1, "Should warn about Float");
+    assert!(
+        dnu_hints[0].message.contains("Float"),
+        "Warning should mention Float, not UndefinedObject"
+    );
     assert!(
         dnu_hints[0]
             .hint
@@ -3983,6 +4026,130 @@ fn union_receiver_no_warning_when_all_understand() {
     assert!(
         dnu_hints.is_empty(),
         "No warning when all union members understand the selector"
+    );
+}
+
+/// BT-1857: Dynamic member in union is handled conservatively (no warning).
+#[test]
+fn union_receiver_dynamic_member_no_warning() {
+    // If a union member is Dynamic, we can't know what it responds to.
+    // Should not warn — conservative handling.
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("fooBar".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // Union with a Dynamic member — should fall through to Dynamic result
+    env.set(
+        "x",
+        InferredType::Union {
+            members: vec![InferredType::known("String"), InferredType::Dynamic],
+            provenance: super::TypeProvenance::Inferred(span()),
+        },
+    );
+
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu_hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_hints.is_empty(),
+        "Should not warn when Dynamic is in the union (conservative)"
+    );
+    // Dynamic poisons the union → result should be Dynamic
+    assert!(
+        matches!(ty, InferredType::Dynamic),
+        "Return type should be Dynamic when union contains Dynamic, got {ty:?}"
+    );
+}
+
+/// BT-1857: Return type is union of return types from all responding members.
+#[test]
+fn union_receiver_return_type_is_union_of_member_returns() {
+    // Integer.asString -> String, Array.asString -> String.
+    // Both understand `asString` and return String, so result is String (not a union).
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("asString".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("x", InferredType::simple_union(&["Integer", "String"]));
+
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    // Both return String, so union_of collapses to Known(String)
+    assert!(
+        matches!(ty, InferredType::Known { ref class_name, .. } if class_name == "String"),
+        "Return type should be String when all members return String, got {ty:?}"
+    );
+}
+
+/// BT-1857: Nil-only union (`UndefinedObject` alone) — no members to check, returns Dynamic.
+#[test]
+fn union_receiver_nil_only_returns_dynamic() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("size".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // Degenerate case: union of just Nil
+    env.set(
+        "x",
+        InferredType::Union {
+            members: vec![InferredType::known("UndefinedObject")],
+            provenance: super::TypeProvenance::Inferred(span()),
+        },
+    );
+
+    let _ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu_hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_hints.is_empty(),
+        "Nil-only union should not produce DNU warnings"
     );
 }
 
@@ -9723,6 +9890,7 @@ fn type_args_for_non_generic_class_in_method_param_warns() {
         return_type: None,
         is_sealed: false,
         is_internal: false,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -9801,6 +9969,7 @@ fn type_args_for_block_no_false_positive() {
         return_type: None,
         is_sealed: false,
         is_internal: false,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),

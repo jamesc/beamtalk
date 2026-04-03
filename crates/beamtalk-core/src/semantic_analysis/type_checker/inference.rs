@@ -1171,11 +1171,33 @@ impl TypeChecker {
         let mut missing_names: Vec<EcoString> = Vec::new();
         let mut return_types: Vec<InferredType> = Vec::new();
 
+        // BT-1857: Track whether the union contains Nil (UndefinedObject).
+        // Nil members are skipped for method resolution since the common pattern
+        // is `x :: T | Nil` where nil-check narrows the type before sends.
+        let has_nil = members.iter().any(|m| {
+            m.as_known()
+                .is_some_and(|n| n.as_str() == "UndefinedObject")
+        });
+
+        // BT-1857: If any member is Dynamic, we can't know its full method set.
+        // Return Dynamic conservatively without emitting warnings.
+        let has_dynamic = members.iter().any(|m| matches!(m, InferredType::Dynamic));
+        if has_dynamic {
+            return InferredType::Dynamic;
+        }
+
         for member in members {
             let Some(member_name) = member.as_known() else {
+                // Dynamic member — handled above, but nested unions could
+                // still reach here; treat conservatively.
                 return_types.push(InferredType::Dynamic);
                 continue;
             };
+            // BT-1857: Skip Nil members for method resolution. They don't
+            // contribute to the return type union and shouldn't trigger DNU.
+            if member_name.as_str() == "UndefinedObject" {
+                continue;
+            }
             if !hierarchy.has_class(member_name) {
                 return_types.push(InferredType::Dynamic);
                 continue;
@@ -1212,9 +1234,6 @@ impl TypeChecker {
                 .collect();
             let union_display = member_names.join(" | ");
             let missing_display: Vec<&str> = missing_names.iter().map(EcoString::as_str).collect();
-            let is_nullable = missing_names
-                .iter()
-                .any(|m| m.as_str() == "UndefinedObject");
 
             let message = if missing_names.len() == 1 {
                 format!(
@@ -1230,12 +1249,15 @@ impl TypeChecker {
 
             let mut diag = Diagnostic::hint(message, span)
                 .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
-            if is_nullable {
+            if has_nil {
                 diag = diag.with_hint(format!("Check for nil before sending '{selector}'"));
             }
             self.diagnostics.push(diag);
         }
 
+        // BT-1857: If the union had Nil but all non-Nil members responded,
+        // the return type is just the union of the non-Nil return types
+        // (Nil was skipped, so it's not in return_types).
         InferredType::union_of(&return_types)
     }
 
