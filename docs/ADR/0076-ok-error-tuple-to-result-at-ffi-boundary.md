@@ -348,14 +348,21 @@ This is the second automatic coercion at the FFI boundary (after charlist → St
 
 1. **Rigid convention:** The source pattern is a well-defined, universally-recognized convention on BEAM (not a structural coincidence). Charlists and ok/error tuples both qualify — they are documented OTP conventions used by essentially all Erlang libraries.
 2. **High frequency:** The pattern appears in the vast majority of FFI interactions. ok/error is the most common Erlang return pattern; charlists appear whenever string-accepting functions are called.
-3. **Lossless:** The conversion preserves all information. `{ok, V}` → `Result ok: V` loses nothing; `Result toTuple` recovers the original. Charlist ↔ binary is similarly lossless for valid Unicode.
+3. **Lossless:** The conversion preserves all information. `{ok, V}` → `Result ok: V` loses nothing; `result value` recovers V and `result error` recovers the reason. Charlist ↔ binary is similarly lossless for valid Unicode.
 4. **Single boundary point:** The conversion happens at exactly one code path (`direct_call/3`), not scattered across the runtime. This keeps the coercion auditable and debuggable.
-5. **Escape hatch exists:** Users can bypass the coercion when needed (`toTuple` for Result, explicit `Erlang unicode charactersToBinary:` for charlists).
+5. **Escape hatch exists:** Users can bypass the coercion when needed (`result value` / `#(#ok, v)` for Result, explicit `Erlang unicode charactersToBinary:` for charlists).
 
-**Patterns that do NOT qualify for future coercion** (for avoidance of doubt):
-- Erlang records (`{record_name, ...}`) — not a universal convention, structure varies per module
-- Property lists (`[{key, value}, ...]`) — ambiguous with regular lists of tuples
-- Erlang maps (`#{key => value}`) — already pass through as Beamtalk Dictionaries via the object model
+**Evaluated patterns that do NOT qualify:**
+
+| Pattern | Fails criteria | Detail |
+|---------|---------------|--------|
+| **Property lists** `[{key, value}]` | Rigid, Lossless | Structurally ambiguous with regular lists of tuples — `[{x, 1}, {y, 2}]` could be a proplist or a list of coordinates. Also largely legacy: OTP migrated public APIs from proplists to maps (OTP 17, 2014). Modern OTP specs use module-local `option()` union types, not `proplists:proplist()` — only 1 OTP module (ssh) references the proplist type in its specs. |
+| **Erlang records** `{record_name, ...}` | Rigid | Not a universal convention. Structure varies per module, field positions are compile-time only (no runtime metadata). Cannot be recognized structurally — a record is just a tuple with an atom first element, same as `{ok, V}` but without universal semantics. |
+| **Pid → Actor** | Rigid, Lossless | Pids are already native BEAM values that pass through cleanly. The "mismatch" is at the *protocol* level (a raw pid can't respond to Beamtalk messages), not the *representation* level. Converting a pid to an Actor would require knowing which Actor class it is — information not available from the pid alone. This is a feature request, not a coercion. |
+| **`undefined` → `nil`** | Rigid | Not a universal convention — Erlang functions variously use `undefined`, `none`, `false`, `error`, and `not_found` for absence. Converting only `undefined` would be arbitrary. Also lossy: can't distinguish "function returned the atom `undefined`" from "value is absent." |
+| **Erlang maps** `#{key => value}` | N/A | Already pass through as Beamtalk Dictionaries via the object model — no coercion needed. |
+
+**We believe two coercions (charlists, ok/error) are the complete set.** These are the two Erlang conventions that survived OTP's modernization while creating a genuine representation mismatch with Beamtalk's object model. Charlists exist because `io_lib:format` and friends predate binaries. ok/error tuples exist because there is no better BEAM-native alternative (unlike proplists, which maps cleanly replaced). Everything else is either already compatible (atoms, pids, maps, binaries, integers, lists) or too ambiguous to convert reliably.
 
 If a future proposal seeks a third coercion, it must satisfy all five criteria and reference this policy.
 
