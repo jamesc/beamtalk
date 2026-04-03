@@ -155,8 +155,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// cache removeKey: "oldKey"
   /// ```
-  removeKey: key :: K -> Nil =>
-    (Erlang beamtalk_ets) removeKey: self key: key
+  removeKey: key :: K -> Nil => (Erlang beamtalk_ets) removeKey: self key: key
 
   /// Return all keys in the table as a `List`.
   ///
