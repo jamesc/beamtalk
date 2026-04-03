@@ -577,6 +577,12 @@ fn unparse_method_definition_with_prefix(
         }
     }
 
+    // BT-1856: Emit @expect directive before the method declaration
+    if let Some((cat, _)) = method.expect {
+        docs.push(docvec!["@expect ", unparse_expect_category(cat)]);
+        docs.push(line());
+    }
+
     // Optional prefix (e.g. "class ") then method signature
     docs.push(prefix);
     docs.push(unparse_method_signature(method));
@@ -726,6 +732,12 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
             }
             docs.push(line());
         }
+    }
+
+    // BT-1856: Emit @expect directive before the declaration
+    if let Some((cat, _)) = state.expect {
+        docs.push(docvec!["@expect ", unparse_expect_category(cat)]);
+        docs.push(line());
     }
 
     let keyword = if is_class {

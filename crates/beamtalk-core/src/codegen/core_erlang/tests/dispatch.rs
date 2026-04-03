@@ -340,6 +340,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
             name: Identifier::new("listeners", Span::new(0, 9)),
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
             type_annotation: None,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),

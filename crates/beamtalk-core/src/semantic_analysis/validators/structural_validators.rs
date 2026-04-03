@@ -849,6 +849,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),

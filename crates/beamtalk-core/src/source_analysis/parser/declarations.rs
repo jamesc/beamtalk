@@ -9,12 +9,12 @@
 //! - Method definitions with optional `sealed` or `internal` modifiers
 
 use crate::ast::{
-    ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, Expression,
-    ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition, MethodKind,
-    MethodModifiers, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
+    ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
+    Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
+    MethodKind, MethodModifiers, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
     StandaloneMethodDefinition, StateDeclaration, TypeAnnotation, TypeParamDecl,
 };
-use crate::source_analysis::TokenKind;
+use crate::source_analysis::{Span, TokenKind};
 
 use super::{Diagnostic, Parser};
 
@@ -326,16 +326,30 @@ impl Parser {
             && !self.is_at_protocol_definition()
             && !self.is_at_standalone_method_definition()
         {
+            // BT-1856: Check for `@expect category` before a declaration.
+            // Consume it and attach to the next state/method declaration.
+            let pending_expect = if matches!(self.current_kind(), TokenKind::AtExpect) {
+                Some(self.parse_declaration_expect())
+            } else {
+                None
+            };
+
             // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
             if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:")
             {
-                if let Some(state_decl) = self.parse_state_declaration() {
+                if let Some(mut state_decl) = self.parse_state_declaration() {
+                    if let Some(expect) = pending_expect {
+                        state_decl.expect = Some(expect);
+                    }
                     state.push(state_decl);
                 }
             }
             // Check for class variable declaration: `classState: varName ...`
             else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
-                if let Some(classvar_decl) = self.parse_classvar_declaration() {
+                if let Some(mut classvar_decl) = self.parse_classvar_declaration() {
+                    if let Some(expect) = pending_expect {
+                        classvar_decl.expect = Some(expect);
+                    }
                     class_variables.push(classvar_decl);
                 }
             }
@@ -365,7 +379,10 @@ impl Parser {
                     }
                     found
                 };
-                if let Some(method) = self.parse_method_definition() {
+                if let Some(mut method) = self.parse_method_definition() {
+                    if let Some(expect) = pending_expect {
+                        method.expect = Some(expect);
+                    }
                     if is_class_method {
                         class_methods.push(method);
                     } else {
@@ -373,6 +390,13 @@ impl Parser {
                     }
                 }
             } else {
+                // BT-1856: @expect before an invalid position (e.g., end of class body)
+                if let Some((_, span)) = pending_expect {
+                    self.diagnostics.push(Diagnostic::error(
+                        "@expect in a class body must precede a state/field or method declaration",
+                        span,
+                    ));
+                }
                 // Not a state or method - end of class body
                 break;
             }
@@ -645,6 +669,37 @@ impl Parser {
         self.is_keyword_method_params_at(start_offset)
     }
 
+    /// Parses an `@expect category` that precedes a declaration (BT-1856).
+    ///
+    /// Consumes the `@expect` token and the category identifier, returning
+    /// the parsed category and the span of the directive. If the category is
+    /// unknown, emits a parse error and returns `ExpectCategory::All` as a
+    /// fallback so parsing can continue.
+    fn parse_declaration_expect(&mut self) -> (ExpectCategory, Span) {
+        let start_token = self.advance(); // consume AtExpect
+        let start = start_token.span();
+
+        if let TokenKind::Identifier(name) = self.current_kind() {
+            let name = name.clone();
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            if let Some(category) = ExpectCategory::from_name(&name) {
+                (category, span)
+            } else {
+                let valid = ExpectCategory::valid_names().join(", ");
+                let message =
+                    format!("unknown @expect category '{name}', valid categories are: {valid}");
+                self.diagnostics.push(Diagnostic::error(message, span));
+                (ExpectCategory::All, span)
+            }
+        } else {
+            let valid = ExpectCategory::valid_names().join(", ");
+            let message = format!("@expect must be followed by a category name ({valid})");
+            self.diagnostics.push(Diagnostic::error(message, start));
+            (ExpectCategory::All, start)
+        }
+    }
+
     /// Parses a state/field declaration.
     ///
     /// Syntax:
@@ -719,6 +774,7 @@ impl Parser {
             type_annotation,
             default_value,
             declared_keyword,
+            expect: None,
             comments,
             doc_comment,
             span,
@@ -788,6 +844,7 @@ impl Parser {
             type_annotation,
             default_value,
             declared_keyword: DeclaredKeyword::State,
+            expect: None,
             comments,
             doc_comment,
             span,
