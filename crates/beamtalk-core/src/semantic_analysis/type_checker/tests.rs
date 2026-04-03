@@ -9506,3 +9506,229 @@ fn test_result_narrowing_does_not_leak() {
         "Narrowing should not leak outside the block, expected 1 DNU for unknownMethod"
     );
 }
+
+// BT-1861: Warn on type args for classes with no type params
+#[test]
+fn type_args_for_non_generic_class_warns() {
+    // Integer has no type params — `:: Integer(String)` should warn
+    let state = vec![StateDeclaration::with_type(
+        ident("count"),
+        TypeAnnotation::Generic {
+            base: ident("Integer"),
+            parameters: vec![TypeAnnotation::Simple(ident("String"))],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 'no type parameters' warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        warnings[0].message.contains("Integer"),
+        "Warning should mention the class name, got: {}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn type_args_for_generic_class_no_false_positive() {
+    // GenericDict has type params (K, V) — `:: GenericDict(Symbol, Integer)` should NOT warn
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![
+        ClassInfo {
+            name: "GenericDict".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["K".into(), "V".into()],
+            type_param_bounds: vec![None, None],
+            superclass_type_args: vec![],
+        },
+        ClassInfo {
+            name: "Counter".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    ]);
+
+    let state = vec![StateDeclaration::with_type(
+        ident("refs"),
+        TypeAnnotation::Generic {
+            base: ident("GenericDict"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Symbol")),
+                TypeAnnotation::Simple(ident("Integer")),
+            ],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "GenericDict has type params — should not warn, got: {warnings:?}",
+    );
+}
+
+#[test]
+fn type_args_for_non_generic_class_in_method_param_warns() {
+    // Method parameter annotated as `:: Boolean(Integer)` — Boolean has no type params
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("doSomething".into()),
+        parameters: vec![ParameterDefinition {
+            name: ident("flag"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Boolean"),
+                parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+                span: span(),
+            }),
+        }],
+        body: vec![],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 'no type parameters' warning for method param, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("Boolean"));
+}
+
+#[test]
+fn type_args_for_non_generic_class_in_return_type_warns() {
+    // Return type annotated as `:: String(Integer)` — String has no type params
+    let method = MethodDefinition::with_return_type(
+        MessageSelector::Unary("name".into()),
+        vec![],
+        vec![],
+        TypeAnnotation::Generic {
+            base: ident("String"),
+            parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+            span: span(),
+        },
+        span(),
+    );
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 'no type parameters' warning for return type, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("String"));
+}
+
+#[test]
+fn type_args_for_block_no_false_positive() {
+    // Block uses type args as documentation convention (e.g., `Block(E, Boolean)`)
+    // This should NOT trigger the "no type parameters" warning
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("doSomething".into()),
+        parameters: vec![ParameterDefinition {
+            name: ident("block"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Block"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("E")),
+                    TypeAnnotation::Simple(ident("Boolean")),
+                ],
+                span: span(),
+            }),
+        }],
+        body: vec![],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "Block type args are a documentation convention — should not warn, got: {warnings:?}",
+    );
+}
