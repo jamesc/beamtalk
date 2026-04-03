@@ -12,16 +12,12 @@
 use miette::Result;
 
 /// Run the `generate stubs` command (placeholder).
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "skeleton — will return errors once implemented"
-)]
 pub fn run(spec_path: &str, output: &str) -> Result<()> {
-    println!("beamtalk generate stubs: not yet implemented");
-    println!("  spec:   {spec_path}");
-    println!("  output: {output}");
-    println!();
-    println!("This command will generate Beamtalk stub definitions from FFI spec files.");
-    println!("See ADR 0075 for the planned design.");
-    Ok(())
+    eprintln!("beamtalk generate stubs: not yet implemented");
+    eprintln!("  spec:   {spec_path}");
+    eprintln!("  output: {output}");
+    eprintln!();
+    eprintln!("This command will generate Beamtalk stub definitions from FFI spec files.");
+    eprintln!("See ADR 0075 for the planned design.");
+    miette::bail!("generate stubs is not yet implemented — see ADR 0075 Phase 3")
 }
