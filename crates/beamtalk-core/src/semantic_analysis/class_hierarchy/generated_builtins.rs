@@ -1,4 +1,4 @@
-// AUTO-GENERATED from stdlib/src/*.bt by `beamtalk build-stdlib` — do not edit manually.
+// AUTO-GENERATED from lib/*.bt by `beamtalk build-stdlib` — do not edit manually.
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
