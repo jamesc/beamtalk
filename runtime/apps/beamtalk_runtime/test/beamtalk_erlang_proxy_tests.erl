@@ -789,3 +789,85 @@ direct_call_actor_monitor_coercion_test() ->
     ?assert(is_reference(Ref)),
     erlang:demonitor(Ref, [flush]),
     gen_server:stop(Counter).
+
+%%% ===================================================================
+%%% ADR 0076: ok/error tuple → Result coercion
+%%% ===================================================================
+
+coerce_result_ok_tuple_test() ->
+    %% {ok, Value} → Result ok: Value
+    Result = beamtalk_erlang_proxy:coerce_result({ok, 42}),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(true, maps:get('isOk', Result)),
+    ?assertEqual(42, maps:get('okValue', Result)).
+
+coerce_result_error_tuple_test() ->
+    %% {error, Reason} → Result error: Reason (wrapped as Exception)
+    Result = beamtalk_erlang_proxy:coerce_result({error, enoent}),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(false, maps:get('isOk', Result)),
+    ?assertEqual(nil, maps:get('okValue', Result)),
+    %% errReason should be wrapped as an Exception tagged map via ensure_wrapped
+    ErrReason = maps:get('errReason', Result),
+    ?assert(is_map(ErrReason)),
+    ?assert(maps:is_key('$beamtalk_class', ErrReason)).
+
+coerce_result_bare_ok_atom_test() ->
+    %% bare ok → Result ok: nil
+    Result = beamtalk_erlang_proxy:coerce_result(ok),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(true, maps:get('isOk', Result)),
+    ?assertEqual(nil, maps:get('okValue', Result)).
+
+coerce_result_bare_error_atom_test() ->
+    %% bare error → Result error: nil (nil wrapped as Exception)
+    Result = beamtalk_erlang_proxy:coerce_result(error),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(false, maps:get('isOk', Result)),
+    ?assertEqual(nil, maps:get('okValue', Result)),
+    %% errReason wraps nil via ensure_wrapped
+    ErrReason = maps:get('errReason', Result),
+    ?assert(is_map(ErrReason)).
+
+coerce_result_three_element_ok_tuple_passthrough_test() ->
+    %% {ok, V1, V2} passes through unchanged (3+ elements)
+    Input = {ok, 1, 2},
+    ?assertEqual(Input, beamtalk_erlang_proxy:coerce_result(Input)).
+
+coerce_result_three_element_error_tuple_passthrough_test() ->
+    %% {error, R1, R2} passes through unchanged (3+ elements)
+    Input = {error, reason, details},
+    ?assertEqual(Input, beamtalk_erlang_proxy:coerce_result(Input)).
+
+coerce_result_non_ok_error_tuple_passthrough_test() ->
+    %% {foo, bar} passes through unchanged
+    Input = {foo, bar},
+    ?assertEqual(Input, beamtalk_erlang_proxy:coerce_result(Input)).
+
+coerce_result_non_tuple_passthrough_test() ->
+    %% Non-tuple values pass through unchanged
+    ?assertEqual(42, beamtalk_erlang_proxy:coerce_result(42)),
+    ?assertEqual(<<"hello">>, beamtalk_erlang_proxy:coerce_result(<<"hello">>)),
+    ?assertEqual([1, 2, 3], beamtalk_erlang_proxy:coerce_result([1, 2, 3])),
+    ?assertEqual(foo, beamtalk_erlang_proxy:coerce_result(foo)).
+
+direct_call_ok_tuple_coerced_to_result_test() ->
+    %% file:get_cwd/0 returns {ok, Dir} — should become Result ok: Dir
+    Result = beamtalk_erlang_proxy:direct_call(file, get_cwd, []),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(true, maps:get('isOk', Result)),
+    %% okValue is the directory path (charlist from Erlang, not yet string-coerced)
+    ?assertNotEqual(nil, maps:get('okValue', Result)).
+
+direct_call_error_tuple_coerced_to_result_test() ->
+    %% file:read_file on nonexistent file returns {error, enoent}
+    Result = beamtalk_erlang_proxy:direct_call(file, read_file, [<<"/nonexistent_file_xyz_12345">>]),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(false, maps:get('isOk', Result)).
+
+dispatch_ok_tuple_coerced_to_result_test() ->
+    %% Dispatch path also coerces ok/error tuples
+    Proxy = beamtalk_erlang_proxy:new(file),
+    Result = beamtalk_erlang_proxy:dispatch('get_cwd', [], Proxy),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(true, maps:get('isOk', Result)).

@@ -36,7 +36,7 @@
 
 -module(beamtalk_erlang_proxy).
 
--export([direct_call/3, dispatch/3, has_method/1, new/1]).
+-export([coerce_result/1, direct_call/3, dispatch/3, has_method/1, new/1]).
 
 -include("beamtalk.hrl").
 
@@ -179,7 +179,7 @@ direct_call(Module, FunName, Args) ->
 apply_with_coercion(Module, FunName, Args, OrigSelector) ->
     try
         Result = erlang:apply(Module, FunName, Args),
-        coerce_charlist_result(Result)
+        coerce_result(coerce_charlist_result(Result))
     catch
         error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
             erlang:raise(error, Wrapped, WrappedStack);
@@ -192,7 +192,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
                 true ->
                     try
                         RetryResult = erlang:apply(Module, FunName, CoercedArgs),
-                        coerce_charlist_result(RetryResult)
+                        coerce_result(coerce_charlist_result(RetryResult))
                     catch
                         error:badarg:Stack2 ->
                             raise_badarg_error(Module, FunName, OrigSelector, Stack2);
@@ -276,7 +276,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                 true ->
                     %% Exact match — call directly
                     try
-                        erlang:apply(Module, FunName, Args)
+                        coerce_result(erlang:apply(Module, FunName, Args))
                     catch
                         error:#{error := #beamtalk_error{}} = Wrapped:_Stack ->
                             %% Re-raise already-wrapped Beamtalk exceptions
@@ -309,7 +309,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                                 true ->
                                     try
                                         Result = erlang:apply(Module, FunName, CoercedArgs),
-                                        coerce_charlist_result(Result)
+                                        coerce_result(coerce_charlist_result(Result))
                                     catch
                                         error:badarg:Stack2 ->
                                             raise_badarg_error(
@@ -559,6 +559,28 @@ coerce_charlist_result(Result) when is_list(Result) ->
     end;
 coerce_charlist_result(Result) ->
     Result.
+
+%% @doc Coerce Erlang ok/error tuples to Beamtalk Result objects (ADR 0076).
+%%
+%% Applied after `coerce_charlist_result/1` in the FFI pipeline. Converts:
+%% - `{ok, Value}` → `Result ok: Value` via `from_tagged_tuple/1`
+%% - `{error, Reason}` → `Result error: Reason` via `from_tagged_tuple/1`
+%% - bare `ok` atom → `Result ok: nil`
+%% - bare `error` atom → `Result error: nil`
+%% - 3+ element tuples (e.g. `{ok, V1, V2}`) pass through as Tuple
+%% - Non-ok/error tuples pass through as Tuple
+%% - Non-tuple/non-atom values pass through unchanged
+-spec coerce_result(term()) -> term().
+coerce_result({ok, Value}) ->
+    beamtalk_result:from_tagged_tuple({ok, Value});
+coerce_result({error, Reason}) ->
+    beamtalk_result:from_tagged_tuple({error, Reason});
+coerce_result(ok) ->
+    beamtalk_result:from_tagged_tuple({ok, nil});
+coerce_result(error) ->
+    beamtalk_result:from_tagged_tuple({error, nil});
+coerce_result(Other) ->
+    Other.
 
 %% @doc Raise error for unloaded module.
 -spec raise_module_not_loaded(atom(), atom()) -> no_return().
