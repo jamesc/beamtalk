@@ -98,12 +98,12 @@ This integrates into the existing coercion pipeline alongside charlist coercion 
 | `Erlang module fn: args` (FFI call via `direct_call/3`) | **Yes** | This is the FFI boundary — the single integration point |
 | Messages received from Erlang processes (`receive`, actor mailbox) | **No** | Messages travel through OTP message passing, not the proxy. An Erlang process sending `{ok, Data}` delivers a raw `Tuple` |
 | ETS reads (`Ets at:`, `Ets select:`) | **N/A** | Ets class methods call `(Erlang beamtalk_ets)` which does go through `direct_call/3`, but `beamtalk_ets` returns clean Beamtalk values (`Value`, `nil`, tagged maps), never ok/error tuples. If a user stores an ok/error tuple as a *value* in ETS and reads it back, the value passes through the proxy — but it was stored as a tagged map (Result) or a Tuple, not as `{ok, V}`, so no double-conversion occurs |
-| Values inside converted Results | **No** | Only the outermost return value is checked. `{ok, {ok, "nested"}}` becomes `Result ok: #(ok, "nested")` — the inner tuple is not recursively converted |
+| Values inside converted Results | **No** | Only the outermost return value is checked. `{ok, {ok, "nested"}}` would become `Result ok: #(ok, "nested")` — the inner tuple is not recursively converted. Note: no OTP public API returns nested ok/error tuples; this case is theoretical |
 | Outbound arguments to Erlang | **No** | Conversion is return-value only. Passing a `Result` to an Erlang function does not auto-convert it back to a tuple |
 
 This scope matches charlist coercion, which also only applies at the `direct_call/3` boundary.
 
-**The message/ETS asymmetry is deliberate:** converting messages would require hooking into OTP's message delivery, which is neither feasible nor desirable. Users receiving ok/error tuples from Erlang messages use `Tuple isOk`/`unwrap` as they do today — or call `Result fromTuple: tuple` to explicitly convert. This is a narrow inconsistency (FFI calls return Result, received messages return Tuple) but the alternative — converting in some message paths but not others — would be worse.
+**The message asymmetry is deliberate:** converting messages would require hooking into OTP's message delivery, which is neither feasible nor desirable. Users receiving ok/error tuples from Erlang messages use `Tuple isOk`/`unwrap` as they do today — or call `Result fromTuple: tuple` to explicitly convert. This is a narrow inconsistency (FFI calls return Result, received messages return Tuple) but the alternative — converting in some message paths but not others — would be worse.
 
 **Round-trip escape hatch:**
 
