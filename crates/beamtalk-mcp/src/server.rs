@@ -660,11 +660,7 @@ impl BeamtalkMcp {
                     "Load completed with errors: {} classes loaded, {} file(s) failed [{}]",
                     classes.len(),
                     failed_paths.len(),
-                    failed_paths
-                        .iter()
-                        .copied()
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    failed_paths.iter().copied().collect::<Vec<_>>().join(", ")
                 )));
             }
 
