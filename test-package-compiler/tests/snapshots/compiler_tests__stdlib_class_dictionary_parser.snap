@@ -58,6 +58,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [
                             Comment {
@@ -105,6 +106,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -142,6 +144,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -198,6 +201,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -271,6 +275,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -344,6 +349,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -400,6 +406,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -456,6 +463,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [
                             Comment {
@@ -522,6 +530,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -578,6 +587,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [
                             Comment {

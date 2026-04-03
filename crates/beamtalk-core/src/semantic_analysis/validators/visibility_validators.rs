@@ -1093,6 +1093,7 @@ mod tests {
             is_sealed: false,
             is_internal,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: bt1702_span(),

@@ -138,6 +138,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,

@@ -5,9 +5,9 @@
 use super::*;
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
-    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
-    MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern, ProtocolDefinition,
-    ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
+    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
+    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::Span;
 
@@ -351,6 +351,7 @@ fn test_class_side_spawn_returns_class_type() {
                 is_sealed: false,
                 is_internal: false,
                 kind: MethodKind::Primary,
+                expect: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: span(),
@@ -597,6 +598,7 @@ fn test_class_method_body_gets_self_type() {
                 is_sealed: false,
                 is_internal: false,
                 kind: MethodKind::Primary,
+                expect: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: span(),
@@ -769,6 +771,7 @@ fn make_method(selector: &str, body: Vec<Expression>) -> MethodDefinition {
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -931,6 +934,7 @@ fn test_super_infers_parent_class_type() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -972,6 +976,7 @@ fn test_super_infers_parent_class_type() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1022,6 +1027,7 @@ fn test_super_unknown_selector_warns() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1059,6 +1065,7 @@ fn test_super_unknown_selector_warns() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1367,6 +1374,82 @@ fn test_typed_class_no_warning_when_fully_annotated() {
     assert!(
         typed_warnings.is_empty(),
         "fully annotated method should not warn, got: {typed_warnings:?}"
+    );
+}
+
+// ── BT-1856: @expect suppression on declarations ───────────────────────────
+
+#[test]
+fn test_expect_type_suppresses_typed_method_warnings() {
+    // typed class with untyped method that has @expect type — no warnings
+    let mut method = MethodDefinition::new(
+        MessageSelector::Unary("first".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        span(),
+    );
+    method.expect = Some((ExpectCategory::Type, span()));
+
+    let class_def = ClassDefinition::with_modifiers(
+        ident("MyTyped"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Missing"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "@expect type should suppress missing annotation warnings, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_expect_all_suppresses_typed_method_warnings() {
+    // @expect all should also suppress typed class warnings
+    let mut method = MethodDefinition::new(
+        MessageSelector::Unary("first".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        span(),
+    );
+    method.expect = Some((ExpectCategory::All, span()));
+
+    let class_def = ClassDefinition::with_modifiers(
+        ident("MyTyped"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Missing"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "@expect all should suppress missing annotation warnings, got: {warnings:?}"
     );
 }
 
@@ -3027,6 +3110,7 @@ fn method_unannotated(selector: &str, body: Vec<Expression>) -> MethodDefinition
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -3042,6 +3126,7 @@ fn method_annotated(selector: &str, return_type: &str, body: Vec<Expression>) ->
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -3923,6 +4008,7 @@ fn false_or_param_resolves_to_union() {
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -4320,6 +4406,7 @@ fn check_return_type_handles_generic_declared_type() {
         is_internal: false,
         span: span(),
         doc_comment: None,
+        expect: None,
         comments: CommentAttachment::default(),
     };
 
@@ -4712,6 +4799,7 @@ fn make_keyword_method(
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),

@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expression, TypeAnnotation};
+use crate::ast::{ExpectCategory, Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -345,6 +345,14 @@ impl TypeChecker {
         method: &crate::ast::MethodDefinition,
         class_name: &EcoString,
     ) {
+        // BT-1856: Skip if declaration has a matching @expect directive
+        if matches!(
+            method.expect,
+            Some((ExpectCategory::Type | ExpectCategory::All, _))
+        ) {
+            return;
+        }
+
         // Skip primitive/intrinsic methods — their types are runtime-defined
         if method
             .body
@@ -992,6 +1000,13 @@ impl TypeChecker {
             if Self::is_nilable_type(type_annotation) {
                 continue; // Nilable union — nil is a valid initial value
             }
+            // BT-1856: Skip if declaration has a matching @expect directive
+            if matches!(
+                decl.expect,
+                Some((ExpectCategory::Type | ExpectCategory::All, _))
+            ) {
+                continue;
+            }
             self.diagnostics.push(
                 Diagnostic::warning(
                     format!(
@@ -1002,7 +1017,8 @@ impl TypeChecker {
                 )
                 .with_category(DiagnosticCategory::Type)
                 .with_hint(format!(
-                    "Add a default value (e.g., `state: {} :: {declared_type} = ...`) or make it nilable (`{declared_type} | Nil`)",
+                    "Add a default value (e.g., `state: {} :: {declared_type} = ...`) or make it nilable (`{declared_type} | Nil`). \
+                     Use `@expect type` before the declaration to suppress this warning",
                     decl.name.name
                 )),
             );
