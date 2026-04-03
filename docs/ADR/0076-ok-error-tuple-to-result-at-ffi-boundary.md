@@ -48,6 +48,7 @@ This ADR follows the same philosophy: convert at the boundary so users work with
 - Must handle edge cases: bare `ok` atoms, 3+ element tuples, non-ok/error tuples
 - Performance overhead must be negligible (single pattern match per FFI return)
 - This is a second exception to ADR 0028's "transparent interop" principle — must be justified
+- Must define clear scope: which code paths trigger conversion, which don't
 
 ## Decision
 
@@ -87,6 +88,36 @@ coerce_result(Result) ->
 ```
 
 This integrates into the existing coercion pipeline alongside charlist coercion — the result of `coerce_charlist_result/1` feeds into `coerce_result/1`.
+
+**Conversion scope — where this applies and where it does not:**
+
+| Code path | Converts? | Rationale |
+|-----------|-----------|-----------|
+| `Erlang module fn: args` (FFI call via `direct_call/3`) | **Yes** | This is the FFI boundary — the single integration point |
+| Messages received from Erlang processes (`receive`, actor mailbox) | **No** | Messages travel through OTP message passing, not the proxy. An Erlang process sending `{ok, Data}` delivers a raw `Tuple` |
+| ETS reads (`Ets at:`, `Ets select:`) | **No** | ETS operations go through stdlib dispatch, not the FFI proxy. Tuples stored in ETS remain tuples when read |
+| Values inside converted Results | **No** | Only the outermost return value is checked. `{ok, {ok, "nested"}}` becomes `Result ok: #(ok, "nested")` — the inner tuple is not recursively converted |
+| Outbound arguments to Erlang | **No** | Conversion is return-value only. Passing a `Result` to an Erlang function does not auto-convert it back to a tuple |
+
+This scope matches charlist coercion, which also only applies at the `direct_call/3` boundary.
+
+**The message/ETS asymmetry is deliberate:** converting messages would require hooking into OTP's message delivery, which is neither feasible nor desirable. Users receiving ok/error tuples from Erlang messages use `Tuple isOk`/`unwrap` as they do today — or call `Result fromTuple: tuple` to explicitly convert. This is a narrow inconsistency (FFI calls return Result, received messages return Tuple) but the alternative — converting in some message paths but not others — would be worse.
+
+**Round-trip escape hatch:**
+
+When a user needs to pass a Result back to Erlang as a tuple (e.g., forwarding a return value), Result provides a `toTuple` method:
+
+```beamtalk
+// Get a Result from FFI
+result := Erlang file readFile: "/tmp/hello.txt"
+// => Result ok: "Hello, world!\n"
+
+// Forward the raw tuple to an Erlang function
+Erlang myModule process: result toTuple
+// Erlang sees: {ok, <<"Hello, world!\n">>}
+```
+
+`toTuple` reconstructs the original `{ok, Value}` or `{error, Reason}` tuple. This is the symmetric counterpart to the auto-conversion — explicit in the reverse direction.
 
 ### 2. Type system: map Erlang specs to Result(T, E) in auto-extract
 
@@ -183,10 +214,10 @@ Erlang erlang timestamp
 ## Prior Art
 
 ### Gleam (BEAM)
-Gleam's `Result(value, error)` type compiles directly to `{ok, Value}` / `{error, Reason}` tuples — zero conversion needed because the representations are identical. When calling Erlang via `@external`, the programmer declares the return type; Gleam trusts the annotation at compile time. No runtime coercion.
+Gleam's `Result(value, error)` type compiles directly to `{ok, Value}` / `{error, Reason}` tuples — zero conversion needed because the representations are identical. When calling Erlang via `@external`, the programmer declares the return type; Gleam trusts the annotation at compile time. No runtime coercion. Gleam is **not** a precedent for automatic coercion — it avoids the problem entirely through representation choice.
 
-**What we adopt:** The insight that ok/error is so pervasive on BEAM that it deserves first-class Result treatment.
-**What we adapt:** Where Gleam achieves this through identical representation (possible because Gleam controls its own compilation), Beamtalk needs runtime conversion because Result is a tagged map, not a bare tuple.
+**What we adopt:** The insight that ok/error is so pervasive on BEAM that it deserves first-class Result treatment, and that users expect Result semantics on FFI returns.
+**Why Gleam's approach doesn't work for Beamtalk:** Beamtalk's Result is a tagged map (ADR 0060), not a bare tuple. This enables rich method dispatch (`map:`, `andThen:`) but means the representations differ. We cannot use identical representation without giving up the object model — hence runtime conversion at the boundary.
 
 ### Elixir (BEAM)
 Entirely manual and convention-based. `{:ok, value} | {:error, reason}` is a community pattern; the `with` macro chains ok-path matching but provides no automatic conversion. Each library may have slightly different error shapes.
@@ -248,6 +279,16 @@ Kotlin removes Java's checked exception requirement but doesn't convert to a Res
 
 - 🎨 **Language designer**: "Only convert when we have evidence. This is principled."
 
+### Option E: Explicit `asResult` on Tuple (Rejected)
+
+- 🧑‍💻 **Newcomer**: "I can explore with Tuple first, then upgrade to Result when I need combinators."
+- 🎩 **Smalltalk purist**: "Sending `asResult` is an explicit message — I control the conversion."
+- ⚙️ **BEAM veteran**: "This is the safest option. My tuples stay tuples unless I choose otherwise. No round-trip surprises, no false positives."
+- 🏭 **Operator**: "Zero hidden runtime work. I can grep for `asResult` to find every conversion point."
+- 🎨 **Language designer**: "This is the most conservative, least surprising option. It composes cleanly and has zero edge cases."
+
+This is the strongest rejected alternative. It loses on the **consistency argument**: charlist coercion is automatic, so ok/error coercion should be too. If we adopted `asResult`, we'd need to justify why strings are coerced automatically but the most common return pattern isn't.
+
 ### Tension Points
 
 - **BEAM veterans** may prefer opt-in (Option B) while **newcomers** strongly prefer auto-conversion — we resolve this in favor of auto-conversion because the charlist precedent already established that boundary coercion is acceptable, and the BEAM veteran's escape hatch (tuple destructuring) exists
@@ -274,6 +315,22 @@ Only auto-convert when the Erlang module has a `-spec` returning `{ok, T} | {err
 
 **Rejected because:** Creates confusing inconsistency — the same `{ok, "hello"}` value becomes `Result` from one module and `Tuple` from another, depending on whether the author wrote a spec. Spec presence affects *type precision* (Result(T,E) vs Result(Dynamic,Dynamic)), not whether conversion happens at all.
 
+### Alternative: Explicit `asResult` on Tuple (opt-in conversion)
+
+Keep Tuple as the FFI return type but add an `asResult` method for explicit, user-controlled conversion:
+
+```beamtalk
+result := Erlang file readFile: "/tmp/hello.txt"
+result asResult map: [:content | content size]  // explicit conversion
+
+// Or without conversion:
+result isOk ifTrue: [result at: 2]  // still works
+```
+
+The LSP could suggest `asResult` when the Erlang spec indicates an ok/error return type.
+
+**Rejected because:** Adds ceremony to every FFI call site — the most common Erlang return pattern requires an extra method call everywhere. Breaks the charlist coercion precedent (charlist conversion is transparent, not opt-in). Newcomers won't discover `asResult` without documentation. However, this is the strongest alternative: it preserves transparent interop fully and gives BEAM veterans control. The deciding factor is consistency with the charlist coercion decision — if charlist conversion is automatic, ok/error conversion should be too, since both are high-frequency boundary patterns.
+
 ### Alternative: Keep Tuple with Better Methods
 
 Enhance Tuple's API to provide combinator-like methods (`map:`, `andThen:`) directly:
@@ -284,6 +341,25 @@ result map: [:v | v size]  // on Tuple, not Result
 ```
 
 **Rejected because:** Duplicates the Result API on Tuple. Creates a parallel error-handling idiom. Tuple is documented as "an interop artifact, not a general-purpose data structure." Adding combinator methods contradicts that design intent and bloats the Tuple interface.
+
+## Coercion Policy
+
+This is the second automatic coercion at the FFI boundary (after charlist → String, BT-1127). To prevent ad-hoc coercion creep, this ADR establishes criteria for when boundary coercion is acceptable:
+
+**A coercion is justified when ALL of the following hold:**
+
+1. **Rigid convention:** The source pattern is a well-defined, universally-recognized convention on BEAM (not a structural coincidence). Charlists and ok/error tuples both qualify — they are documented OTP conventions used by essentially all Erlang libraries.
+2. **High frequency:** The pattern appears in the vast majority of FFI interactions. ok/error is the most common Erlang return pattern; charlists appear whenever string-accepting functions are called.
+3. **Lossless:** The conversion preserves all information. `{ok, V}` → `Result ok: V` loses nothing; `Result toTuple` recovers the original. Charlist ↔ binary is similarly lossless for valid Unicode.
+4. **Single boundary point:** The conversion happens at exactly one code path (`direct_call/3`), not scattered across the runtime. This keeps the coercion auditable and debuggable.
+5. **Escape hatch exists:** Users can bypass the coercion when needed (`toTuple` for Result, explicit `Erlang unicode charactersToBinary:` for charlists).
+
+**Patterns that do NOT qualify for future coercion** (for avoidance of doubt):
+- Erlang records (`{record_name, ...}`) — not a universal convention, structure varies per module
+- Property lists (`[{key, value}, ...]`) — ambiguous with regular lists of tuples
+- Erlang maps (`#{key => value}`) — already pass through as Beamtalk Dictionaries via the object model
+
+If a future proposal seeks a third coercion, it must satisfy all five criteria and reference this policy.
 
 ## Consequences
 
@@ -302,18 +378,22 @@ result map: [:v | v size]  // on Tuple, not Result
 - **Slight runtime overhead:** One pattern match per FFI return value. Negligible — `case` on tuple tag is a single BEAM instruction
 - **BEAM veteran surprise:** Developers expecting raw tuples will initially encounter Result objects. Mitigated by clear documentation and the fact that Result provides a strict superset of the information
 - **Existing code using Tuple methods breaks:** Code calling `isOk`/`unwrap` on FFI returns will get a `does_not_understand` error since Result doesn't respond to `at:`. Migration path provided below
+- **FFI/message asymmetry:** ok/error tuples from FFI calls become Result, but ok/error tuples received as messages from Erlang processes remain Tuple. This is a narrow inconsistency — documented in the scope section above, with `Result fromTuple:` available for explicit message conversion
+- **Observer/recon display:** Result objects display as tagged maps (`#{'$beamtalk_class' => 'Result', ...}`) in Erlang debugging tools rather than the familiar `{ok, Value}` tuple. BEAM veterans inspecting process state may find this disorienting initially. Mitigated by the `'$beamtalk_class' => 'Result'` tag making the intent clear
 
 ### Neutral
 
 - Tuple class retains `isOk`/`isError`/`unwrap` methods — they remain useful for tuples from non-FFI sources (e.g., Erlang data structures stored in ETS, messages from Erlang processes)
 - `beamtalk_result:from_tagged_tuple/1` already exists and handles the conversion correctly — minimal new runtime code required
+- The false-positive rate (non-error tuples tagged with `ok`/`error` that happen to be 2-element) is negligible in practice — `ok` and `error` atoms are used overwhelmingly for their conventional purpose in OTP and Hex packages
 
 ## Implementation
 
 ### Phase 1: Runtime Conversion (core change)
 - **beamtalk_erlang_proxy.erl:** Add `coerce_result/1` after `coerce_charlist_result/1` in the `direct_call/3` pipeline
 - **beamtalk_result.erl:** Add clauses for bare `ok`/`error` atoms in `from_tagged_tuple/1`
-- **Tests:** EUnit tests for all conversion rules (2-element, bare atom, 3+ element passthrough, non-tuple passthrough)
+- **Result.bt:** Add `toTuple` instance method (reconstructs `{ok, V}` or `{error, R}`) and `Result fromTuple:` class method (explicit conversion for messages/ETS)
+- **Tests:** EUnit tests for all conversion rules (2-element, bare atom, 3+ element passthrough, non-tuple passthrough); BUnit tests for `toTuple` round-tripping; e2e btscript tests for FFI calls returning Result
 - **Affected components:** Runtime only (no parser/codegen changes)
 - **Effort:** S
 
