@@ -7,10 +7,11 @@
 %%% starts the singleton actors. Monitors singleton PIDs and re-sets class
 %%% variables when children restart.
 %%%
-%%% Also activates compiled project modules from `_build/dev/ebin/` at startup
-%%% (BT-739). When a project path is provided, scans that directory for
-%%% `bt@*.beam` modules (excluding `bt@stdlib@*`) and calls `register_class/0`
-%%% on each, making them visible in the class registry without requiring `:load`.
+%%% Also activates compiled project modules at startup (BT-739). When a project
+%%% path is provided, first activates dependency classes from `_build/deps/*/ebin/`
+%%% and native code paths, then scans `_build/dev/ebin/` for `bt@*.beam` modules
+%%% (excluding `bt@stdlib@*`) and calls `register_class/0` on each, making them
+%%% visible in the class registry without requiring `:load`.
 %%%
 %%% Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 %%%
@@ -21,7 +22,7 @@
 
 -export([start_link/0, start_link/1]).
 -export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
--export([activate_project_modules/1]).
+-export([activate_project_modules/1, activate_dependency_modules/1]).
 
 %% Backwards-compatible re-exports — callers should migrate to
 %% beamtalk_module_activation directly.
@@ -241,8 +242,13 @@ set_class_variable(ClassName, Obj) ->
 activate_project_modules(undefined) ->
     ok;
 activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(ProjectPath) > 0 ->
+    AbsPath = binary_to_list(ProjectPath),
+    %% Activate dependency classes BEFORE project classes so that project code
+    %% (e.g. Orchestrator.initialize calling config on a dependency class) can
+    %% reference them immediately at startup, not only after :sync.
+    _ = activate_dependency_modules(AbsPath),
     EbinDir = filename:absname(
-        filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])
+        filename:join([AbsPath, "_build", "dev", "ebin"])
     ),
     {ok, Errors} = beamtalk_module_activation:activate_ebin(EbinDir, #{
         on_activate => fun on_project_module_activated/1
@@ -259,6 +265,33 @@ activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(Pro
     end;
 activate_project_modules(_Other) ->
     ok.
+
+%% @doc Activate pre-compiled dependency modules from _build/deps/ and native paths.
+%%
+%% Delegates to `beamtalk_module_activation:activate_dependencies/2` with a
+%% workspace-specific callback that registers each module in workspace_meta.
+%% Called by both bootstrap init (startup) and `:sync` (repl_ops_load).
+%%
+%% Returns a (possibly empty) list of `{Module, Reason}` error pairs.
+-spec activate_dependency_modules(string()) -> [{module(), term()}].
+activate_dependency_modules(ProjectPath) ->
+    Opts = #{
+        on_activate => fun({Module, SourcePath}) ->
+            beamtalk_workspace_meta:register_module(Module, SourcePath)
+        end
+    },
+    DepErrors = beamtalk_module_activation:activate_dependencies(ProjectPath, Opts),
+    case DepErrors of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_WARNING(
+                "Bootstrap: ~b dependency module(s) failed to activate",
+                [length(DepErrors)],
+                #{errors => DepErrors, domain => [beamtalk, runtime]}
+            )
+    end,
+    DepErrors.
 
 %% @private Callback for project module activation.
 %% Registers the module in workspace_meta and stores source text.
