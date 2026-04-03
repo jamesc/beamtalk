@@ -97,7 +97,7 @@ This integrates into the existing coercion pipeline alongside charlist coercion 
 |-----------|-----------|-----------|
 | `Erlang module fn: args` (FFI call via `direct_call/3`) | **Yes** | This is the FFI boundary — the single integration point |
 | Messages received from Erlang processes (`receive`, actor mailbox) | **No** | Messages travel through OTP message passing, not the proxy. An Erlang process sending `{ok, Data}` delivers a raw `Tuple` |
-| ETS reads (`Ets at:`, `Ets select:`) | **No** | ETS operations go through stdlib dispatch, not the FFI proxy. Tuples stored in ETS remain tuples when read |
+| ETS reads (`Ets at:`, `Ets select:`) | **N/A** | Ets class methods call `(Erlang beamtalk_ets)` which does go through `direct_call/3`, but `beamtalk_ets` returns clean Beamtalk values (`Value`, `nil`, tagged maps), never ok/error tuples. If a user stores an ok/error tuple as a *value* in ETS and reads it back, the value passes through the proxy — but it was stored as a tagged map (Result) or a Tuple, not as `{ok, V}`, so no double-conversion occurs |
 | Values inside converted Results | **No** | Only the outermost return value is checked. `{ok, {ok, "nested"}}` becomes `Result ok: #(ok, "nested")` — the inner tuple is not recursively converted |
 | Outbound arguments to Erlang | **No** | Conversion is return-value only. Passing a `Result` to an Erlang function does not auto-convert it back to a tuple |
 
