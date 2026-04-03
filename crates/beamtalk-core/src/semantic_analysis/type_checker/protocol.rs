@@ -270,14 +270,49 @@ impl TypeChecker {
                     .map(Self::resolve_type_annotation)
                     .collect();
 
-                // Check bounds against the base class's type_param_bounds
-                self.check_type_param_bounds(
-                    &base.name,
-                    &type_args,
-                    *span,
-                    hierarchy,
-                    protocol_registry,
-                );
+                // BT-1861: Warn when type args are provided for a class with no type params.
+                // Block is exempt — parameterized Block annotations (e.g., Block(E, Boolean))
+                // are a documentation convention for describing closure signatures.
+                let has_type_params = if base.name == "Block" {
+                    true // Block uses type args as documentation convention
+                } else if let Some(class_info) = hierarchy.get_class(&base.name) {
+                    !class_info.type_params.is_empty()
+                } else if let Some(proto_info) = protocol_registry.get(&base.name) {
+                    !proto_info.type_params.is_empty()
+                } else {
+                    true // Unknown type — don't warn (may be defined elsewhere)
+                };
+
+                if has_type_params {
+                    // Check bounds against the base class's type_param_bounds
+                    self.check_type_param_bounds(
+                        &base.name,
+                        &type_args,
+                        *span,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                } else {
+                    let args_str = parameters
+                        .iter()
+                        .map(|p| p.type_name().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "{} has no type parameters but was given type arguments",
+                                base.name
+                            ),
+                            *span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!(
+                            "Remove the type arguments: use {0} instead of {0}({args_str})",
+                            base.name,
+                        )),
+                    );
+                }
 
                 // Recurse into nested type annotations (e.g., `Result(Array(Integer), Error)`)
                 for param in parameters {
