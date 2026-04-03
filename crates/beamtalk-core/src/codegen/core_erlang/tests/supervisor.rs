@@ -292,6 +292,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         is_internal: false,
         span: Span::new(0, 0),
         doc_comment: None,
+        expect: None,
         comments: CommentAttachment::default(),
     };
     let class = ClassDefinition {

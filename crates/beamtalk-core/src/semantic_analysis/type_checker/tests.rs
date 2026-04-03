@@ -5,9 +5,9 @@
 use super::*;
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
-    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
-    MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern, ProtocolDefinition,
-    ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
+    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
+    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::Span;
 
@@ -351,6 +351,7 @@ fn test_class_side_spawn_returns_class_type() {
                 is_sealed: false,
                 is_internal: false,
                 kind: MethodKind::Primary,
+                expect: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: span(),
@@ -597,6 +598,7 @@ fn test_class_method_body_gets_self_type() {
                 is_sealed: false,
                 is_internal: false,
                 kind: MethodKind::Primary,
+                expect: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: span(),
@@ -769,6 +771,7 @@ fn make_method(selector: &str, body: Vec<Expression>) -> MethodDefinition {
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -931,6 +934,7 @@ fn test_super_infers_parent_class_type() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -972,6 +976,7 @@ fn test_super_infers_parent_class_type() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1022,6 +1027,7 @@ fn test_super_unknown_selector_warns() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1059,6 +1065,7 @@ fn test_super_unknown_selector_warns() {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1367,6 +1374,82 @@ fn test_typed_class_no_warning_when_fully_annotated() {
     assert!(
         typed_warnings.is_empty(),
         "fully annotated method should not warn, got: {typed_warnings:?}"
+    );
+}
+
+// ── BT-1856: @expect suppression on declarations ───────────────────────────
+
+#[test]
+fn test_expect_type_suppresses_typed_method_warnings() {
+    // typed class with untyped method that has @expect type — no warnings
+    let mut method = MethodDefinition::new(
+        MessageSelector::Unary("first".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        span(),
+    );
+    method.expect = Some((ExpectCategory::Type, span()));
+
+    let class_def = ClassDefinition::with_modifiers(
+        ident("MyTyped"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Missing"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "@expect type should suppress missing annotation warnings, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_expect_all_suppresses_typed_method_warnings() {
+    // @expect all should also suppress typed class warnings
+    let mut method = MethodDefinition::new(
+        MessageSelector::Unary("first".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        span(),
+    );
+    method.expect = Some((ExpectCategory::All, span()));
+
+    let class_def = ClassDefinition::with_modifiers(
+        ident("MyTyped"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Missing"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "@expect all should suppress missing annotation warnings, got: {warnings:?}"
     );
 }
 
@@ -3027,6 +3110,7 @@ fn method_unannotated(selector: &str, body: Vec<Expression>) -> MethodDefinition
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -3042,6 +3126,7 @@ fn method_annotated(selector: &str, return_type: &str, body: Vec<Expression>) ->
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -3923,6 +4008,7 @@ fn false_or_param_resolves_to_union() {
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -4320,6 +4406,7 @@ fn check_return_type_handles_generic_declared_type() {
         is_internal: false,
         span: span(),
         doc_comment: None,
+        expect: None,
         comments: CommentAttachment::default(),
     };
 
@@ -4628,6 +4715,20 @@ fn responds_to(var_name: &str, selector_name: &str) -> Expression {
     )
 }
 
+/// Helper: build `x isOk` unary expression (BT-1859)
+fn is_ok(var_name: &str) -> Expression {
+    msg_send(var(var_name), MessageSelector::Unary("isOk".into()), vec![])
+}
+
+/// Helper: build `x isError` unary expression (BT-1859)
+fn is_error(var_name: &str) -> Expression {
+    msg_send(
+        var(var_name),
+        MessageSelector::Unary("isError".into()),
+        vec![],
+    )
+}
+
 /// Helper: build a block expression `[body]`
 fn block_expr(body: Vec<Expression>) -> Expression {
     Expression::Block(Block::new(
@@ -4659,7 +4760,6 @@ fn if_true(receiver: Expression, block: Expression) -> Expression {
 }
 
 /// Helper: build `receiver ifFalse: [block]`
-#[allow(dead_code)] // Used in future narrowing tests
 fn if_false(receiver: Expression, block: Expression) -> Expression {
     msg_send(
         receiver,
@@ -4712,6 +4812,7 @@ fn make_keyword_method(
         is_sealed: false,
         is_internal: false,
         kind: MethodKind::Primary,
+        expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
         span: span(),
@@ -9191,5 +9292,531 @@ fn test_ffi_member_returns_boolean() {
         send_type,
         Some(&InferredType::known("Boolean")),
         "member should return Boolean"
+    );
+}
+
+// ---- BT-1859: Result isOk/isError narrowing tests ----
+
+#[test]
+fn test_detect_narrowing_is_ok_pattern() {
+    let expr = is_ok("r");
+    let info = TypeChecker::detect_narrowing(&expr);
+    assert!(info.is_some(), "Should detect isOk narrowing");
+    let info = info.unwrap();
+    assert_eq!(info.variable.as_str(), "r");
+    assert!(info.is_result_ok_check);
+    assert!(!info.is_result_error_check);
+    assert!(!info.is_nil_check);
+}
+
+#[test]
+fn test_detect_narrowing_is_error_pattern() {
+    let expr = is_error("r");
+    let info = TypeChecker::detect_narrowing(&expr);
+    assert!(info.is_some(), "Should detect isError narrowing");
+    let info = info.unwrap();
+    assert_eq!(info.variable.as_str(), "r");
+    assert!(!info.is_result_ok_check);
+    assert!(info.is_result_error_check);
+    assert!(!info.is_nil_check);
+}
+
+#[test]
+fn test_result_isok_narrowing_true_branch() {
+    // r :: Result(String, Error)
+    // r isOk ifTrue: [r value]
+    // Inside the block, `r` should still be Result(String, Error) so
+    // `value` resolves to String via generic substitution (no DNU).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            // Use Result as param type (the type checker will resolve it)
+            vec![("r", Some("Result"))],
+            vec![if_true(
+                is_ok("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("value".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r value inside isOk ifTrue: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_isok_narrowing_false_branch() {
+    // r :: Result(String, Error)
+    // r isOk ifFalse: [r error]
+    // Inside the false block, `r` is the error variant, so `error` is valid.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![if_false(
+                is_ok("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("error".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r error inside isOk ifFalse: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_isok_narrowing_both_branches() {
+    // r :: Result(String, Error)
+    // r isOk ifTrue: [r value] ifFalse: [r error]
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![if_true_if_false(
+                is_ok("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("value".into()),
+                    vec![],
+                )]),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("error".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r value/error inside isOk ifTrue:ifFalse: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_iserror_narrowing_true_branch() {
+    // r :: Result(String, Error)
+    // r isError ifTrue: [r error]
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![if_true(
+                is_error("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("error".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r error inside isError ifTrue: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_narrowing_non_result_no_narrowing() {
+    // x :: Integer
+    // x isOk ifTrue: [x unknownThing]
+    // Integer does not understand isOk, so we should get a DNU warning for isOk
+    // and also for unknownThing. The narrowing should NOT apply because x is not a Result.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Integer"))],
+            vec![if_true(
+                is_ok("x"),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("unknownThing".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    // Should have DNU for 'isOk' on Integer and 'unknownThing' on Integer
+    assert!(
+        !warnings.is_empty(),
+        "Non-Result receiver should still produce DNU warnings, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_narrowing_does_not_leak() {
+    // r :: Result(String, Error)
+    // r isOk ifTrue: [r value]
+    // r unknownMethod  // should warn — narrowing scoped to block
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![
+                if_true(
+                    is_ok("r"),
+                    block_expr(vec![msg_send(
+                        var("r"),
+                        MessageSelector::Unary("value".into()),
+                        vec![],
+                    )]),
+                ),
+                msg_send(
+                    var("r"),
+                    MessageSelector::Unary("unknownMethod".into()),
+                    vec![],
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("does not understand") && d.message.contains("unknownMethod")
+        })
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Narrowing should not leak outside the block, expected 1 DNU for unknownMethod"
+    );
+}
+
+// BT-1861: Warn on type args for classes with no type params
+#[test]
+fn type_args_for_non_generic_class_warns() {
+    // Integer has no type params — `:: Integer(String)` should warn
+    let state = vec![StateDeclaration::with_type(
+        ident("count"),
+        TypeAnnotation::Generic {
+            base: ident("Integer"),
+            parameters: vec![TypeAnnotation::Simple(ident("String"))],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 'no type parameters' warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        warnings[0].message.contains("Integer"),
+        "Warning should mention the class name, got: {}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn type_args_for_generic_class_no_false_positive() {
+    // GenericDict has type params (K, V) — `:: GenericDict(Symbol, Integer)` should NOT warn
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![
+        ClassInfo {
+            name: "GenericDict".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["K".into(), "V".into()],
+            type_param_bounds: vec![None, None],
+            superclass_type_args: vec![],
+        },
+        ClassInfo {
+            name: "Counter".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    ]);
+
+    let state = vec![StateDeclaration::with_type(
+        ident("refs"),
+        TypeAnnotation::Generic {
+            base: ident("GenericDict"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Symbol")),
+                TypeAnnotation::Simple(ident("Integer")),
+            ],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "GenericDict has type params — should not warn, got: {warnings:?}",
+    );
+}
+
+#[test]
+fn type_args_for_non_generic_class_in_method_param_warns() {
+    // Method parameter annotated as `:: Boolean(Integer)` — Boolean has no type params
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("doSomething".into()),
+        parameters: vec![ParameterDefinition {
+            name: ident("flag"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Boolean"),
+                parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+                span: span(),
+            }),
+        }],
+        body: vec![],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 'no type parameters' warning for method param, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("Boolean"));
+}
+
+#[test]
+fn type_args_for_non_generic_class_in_return_type_warns() {
+    // Return type annotated as `:: String(Integer)` — String has no type params
+    let method = MethodDefinition::with_return_type(
+        MessageSelector::Unary("name".into()),
+        vec![],
+        vec![],
+        TypeAnnotation::Generic {
+            base: ident("String"),
+            parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+            span: span(),
+        },
+        span(),
+    );
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 'no type parameters' warning for return type, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("String"));
+}
+
+#[test]
+fn type_args_for_block_no_false_positive() {
+    // Block uses type args as documentation convention (e.g., `Block(E, Boolean)`)
+    // This should NOT trigger the "no type parameters" warning
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("doSomething".into()),
+        parameters: vec![ParameterDefinition {
+            name: ident("block"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Block"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("E")),
+                    TypeAnnotation::Simple(ident("Boolean")),
+                ],
+                span: span(),
+            }),
+        }],
+        body: vec![],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "Block type args are a documentation convention — should not warn, got: {warnings:?}",
     );
 }

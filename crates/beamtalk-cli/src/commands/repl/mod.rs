@@ -872,7 +872,14 @@ fn handle_sync(client: &mut ReplClient) {
 }
 
 /// Display per-file errors and compiler warnings from a sync response.
+///
+/// BT-1855: Reports each failed file with its error message, line number, and
+/// hint (when available), followed by a summary line listing all failed file
+/// paths so the user can identify problems without manual bisection.
 fn display_sync_diagnostics(response: &ReplResponse) {
+    // BT-1855: Collect distinct failed file paths for the summary line.
+    let mut failed_paths: Vec<&str> = Vec::new();
+
     for err in &response.errors {
         if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
             let path = err
@@ -896,8 +903,23 @@ fn display_sync_diagnostics(response: &ReplResponse) {
                     eprintln!("  {painted} in {path}");
                 }
             }
+
+            if !failed_paths.contains(&path) {
+                failed_paths.push(path);
+            }
         }
     }
+
+    // BT-1855: Print a summary line listing all failed files.
+    if !failed_paths.is_empty() {
+        let summary = format!(
+            "{} file(s) failed to load: {}",
+            failed_paths.len(),
+            failed_paths.join(", ")
+        );
+        eprintln!("{}", color::paint(color::RED, &summary));
+    }
+
     if let Some(ref warns) = response.warnings {
         for w in warns {
             eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));

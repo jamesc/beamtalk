@@ -2859,11 +2859,25 @@ self assert: someResult unwrap size equals: 10
 
 This is preferred over `@expect dnu` at type-erasure boundaries because it communicates *why* the diagnostic appears: a type-system limitation, not intentional dynamic dispatch.
 
+**Declaration-level `@expect`:** In addition to suppressing diagnostics on expressions, `@expect` can be placed before `state:`/`field:` declarations and method definitions inside a class body. This suppresses diagnostics that fire on the declaration itself:
+
+```beamtalk
+Actor subclass: Orchestrator
+  @expect type
+  state: deps :: OrchestratorDeps    // factory-required, no sensible default — suppress uninitialized warning
+
+typed Object subclass: Collection(E)
+  @expect type
+  first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning
+```
+
+Declaration-level `@expect` supports the same categories and stale-directive rules as expression-level `@expect`.
+
 **Unknown categories are parse errors:** Writing an unknown category (e.g. `@expect selfcapture`) is rejected at parse time with an error listing the valid names. This prevents typos from silently suppressing nothing.
 
-**Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.
+**Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression or declaration), the compiler emits a warning to prevent directives from silently becoming out of date.
 
-`@expect` works inside method bodies, class definitions, and at module scope.
+`@expect` works inside method bodies, on declarations in class definitions, and at module scope.
 
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 

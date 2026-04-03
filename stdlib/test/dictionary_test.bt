@@ -105,3 +105,14 @@ TestCase subclass: DictionaryTest
     self assert: #{#x => 1 + 2, #y => 3 * 4} equals: #{#x => 3, #y => 12}
     // Subtraction in map value
     self assert: #{#result => 10 - 3} equals: #{#result => 7}
+
+  testKeywordMessageInMapValue =>
+    // BT-1854: nested keyword messages inside map literal values
+    // Keyword send with map arg as map value
+    self assert: (#{
+      #data => Dictionary new: #{#x => 1}
+    } at: #data) equals: #{#x => 1}
+    // Multiple entries, one with keyword send
+    d := #{#a => Dictionary new: #{#n => 0}, #b => 42}
+    self assert: (d at: #a) equals: #{#n => 0}
+    self assert: (d at: #b) equals: 42
