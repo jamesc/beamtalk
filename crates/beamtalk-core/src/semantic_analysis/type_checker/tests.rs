@@ -3997,12 +3997,17 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
         dnu_hints[0].message.contains("Float"),
         "Warning should mention Float, not UndefinedObject"
     );
-    // BT-1857: UndefinedObject should NOT be listed as a non-responding member
-    // (it may appear in the union display for context, but the "does not understand"
-    // prefix should only name Float)
+    // BT-1857: UndefinedObject should NOT appear as a non-responding member.
+    // Extract the subject (text before "does not understand") and verify it
+    // does not mention UndefinedObject.
+    let subject = dnu_hints[0]
+        .message
+        .split("does not understand")
+        .next()
+        .unwrap_or("");
     assert!(
-        !dnu_hints[0].message.starts_with("UndefinedObject"),
-        "UndefinedObject should not be listed as a non-responding member"
+        !subject.contains("UndefinedObject"),
+        "UndefinedObject should not be listed as a non-responding member, got subject: {subject:?}"
     );
 }
 
