@@ -1155,12 +1155,20 @@ impl TypeChecker {
         None
     }
 
-    /// Infer the result type of a message send on a union-typed receiver.
+    /// Resolve a message send on a union-typed receiver (BT-1857).
     ///
-    /// Checks the selector against ALL union members. If any member lacks the
-    /// selector, emits a warning with a nullable hint when `UndefinedObject` is
-    /// the missing member. The return type is the union of member return types
-    /// (simplified to a single type if all agree).
+    /// For each member type in the union:
+    /// - **Nil (`UndefinedObject`)**: skipped for method resolution. The common
+    ///   pattern `x :: T | Nil` means the user is expected to nil-check before
+    ///   sending, matching `isNil` narrowing semantics.
+    /// - **Dynamic**: handled conservatively (no warning, returns Dynamic).
+    /// - **Known types with DNU override or unknown to hierarchy**: Dynamic.
+    /// - **Known types**: resolved normally; return type collected.
+    ///
+    /// Warnings:
+    /// - ALL non-nil members respond → no warning, return union of return types.
+    /// - SOME non-nil members respond → DNU hint naming the non-responding members.
+    /// - NO non-nil members respond → existing DNU warning.
     fn infer_union_message_send(
         &mut self,
         members: &[InferredType],
@@ -1170,31 +1178,27 @@ impl TypeChecker {
     ) -> InferredType {
         let mut missing_names: Vec<EcoString> = Vec::new();
         let mut return_types: Vec<InferredType> = Vec::new();
-
-        // BT-1857: Track whether the union contains Nil (UndefinedObject).
-        // Nil members are skipped for method resolution since the common pattern
-        // is `x :: T | Nil` where nil-check narrows the type before sends.
+        let mut responding_count: usize = 0;
         let has_nil = members.iter().any(|m| {
             m.as_known()
                 .is_some_and(|n| n.as_str() == "UndefinedObject")
         });
-
-        // BT-1857: If any member is Dynamic, we can't know its full method set.
-        // Return Dynamic conservatively without emitting warnings.
         let has_dynamic = members.iter().any(|m| matches!(m, InferredType::Dynamic));
         if has_dynamic {
             return InferredType::Dynamic;
         }
 
         for member in members {
+            // Dynamic members: no warning, contribute Dynamic to return type.
             let Some(member_name) = member.as_known() else {
                 // Dynamic member — handled above, but nested unions could
                 // still reach here; treat conservatively.
                 return_types.push(InferredType::Dynamic);
                 continue;
             };
-            // BT-1857: Skip Nil members for method resolution. They don't
-            // contribute to the return type union and shouldn't trigger DNU.
+            // BT-1857: Skip Nil (UndefinedObject) for method resolution.
+            // Nil is expected to be guarded by `isNil` checks; emitting a DNU
+            // warning for every `T | Nil` union is noisy and unhelpful.
             if member_name.as_str() == "UndefinedObject" {
                 continue;
             }
@@ -1207,14 +1211,41 @@ impl TypeChecker {
                 continue;
             }
             if hierarchy.resolves_selector(member_name, selector) {
+                responding_count += 1;
                 if let Some(method) = hierarchy.find_method(member_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
-                        let resolved = if ret_ty.as_str() == "Self" {
-                            member_name.clone()
+                        if ret_ty.as_str() == "Self" {
+                            // Self resolves to the concrete member type (with type args)
+                            return_types.push(member.clone());
                         } else {
-                            ret_ty.clone()
-                        };
-                        return_types.push(InferredType::known(resolved));
+                            // BT-1857: Apply generic substitution for parameterised
+                            // union members (e.g. Array(Integer) in a union).
+                            let InferredType::Known { type_args, .. } = member else {
+                                unreachable!()
+                            };
+                            let subst = Self::build_inherited_substitution_map(
+                                hierarchy,
+                                member_name,
+                                type_args,
+                                &method.defined_in,
+                            );
+                            if !subst.is_empty() {
+                                return_types.push(Self::substitute_return_type(
+                                    ret_ty,
+                                    &subst,
+                                    &HashMap::new(),
+                                ));
+                            } else if super::is_generic_type_param(ret_ty)
+                                && !hierarchy.has_class(ret_ty)
+                            {
+                                return_types.push(InferredType::Dynamic);
+                            } else if let Some(open) = ret_ty.find('(') {
+                                return_types
+                                    .push(InferredType::known(EcoString::from(&ret_ty[..open])));
+                            } else {
+                                return_types.push(InferredType::known(ret_ty.clone()));
+                            }
+                        }
                     } else {
                         return_types.push(InferredType::Dynamic);
                     }
@@ -1227,7 +1258,16 @@ impl TypeChecker {
             }
         }
 
-        if !missing_names.is_empty() {
+        // BT-1857: If nil was in the union and at least one non-nil member
+        // responds, include Nil in the return-type union (the value may still
+        // be nil at runtime if the nil-check branch returns nil).
+        if has_nil && responding_count > 0 {
+            return_types.push(InferredType::known(EcoString::from("UndefinedObject")));
+        }
+
+        // BT-1857: Suppress DNU warnings when Dynamic is in the union —
+        // Dynamic accepts any message, so we can't know the full method set.
+        if !missing_names.is_empty() && !has_dynamic {
             let member_names: Vec<String> = members
                 .iter()
                 .filter_map(|m| m.display_name().map(|n| n.to_string()))
@@ -1247,11 +1287,8 @@ impl TypeChecker {
                 )
             };
 
-            let mut diag = Diagnostic::hint(message, span)
+            let diag = Diagnostic::hint(message, span)
                 .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
-            if has_nil {
-                diag = diag.with_hint(format!("Check for nil before sending '{selector}'"));
-            }
             self.diagnostics.push(diag);
         }
 

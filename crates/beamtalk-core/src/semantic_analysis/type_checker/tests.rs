@@ -3937,11 +3937,25 @@ fn union_receiver_nil_skipped_no_warning() {
         "Should NOT warn when Nil is the only non-responding member (it's skipped)"
     );
 
-    // Return type should be from String.size (Integer), not a union with Nil
-    assert!(
-        matches!(ty, InferredType::Known { ref class_name, .. } if class_name == "Integer"),
-        "Return type should be Integer from String.size, got {ty:?}"
-    );
+    // Return type should include Integer from String.size, plus Nil back since
+    // the receiver may be nil (BT-1857: Nil re-added to return type)
+    match &ty {
+        InferredType::Union { members, .. } => {
+            let names: Vec<&str> = members
+                .iter()
+                .filter_map(|m| m.as_known().map(EcoString::as_str))
+                .collect();
+            assert!(
+                names.contains(&"Integer"),
+                "Return type should include Integer from String>>size, got: {names:?}"
+            );
+            assert!(
+                names.contains(&"UndefinedObject"),
+                "Return type should include Nil since receiver may be nil, got: {names:?}"
+            );
+        }
+        other => panic!("Expected Union return type, got {other:?}"),
+    }
 }
 
 /// BT-1857: Nullable hint still appears when non-Nil member also lacks selector.
@@ -3983,13 +3997,12 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
         dnu_hints[0].message.contains("Float"),
         "Warning should mention Float, not UndefinedObject"
     );
+    // BT-1857: UndefinedObject should NOT be listed as a non-responding member
+    // (it may appear in the union display for context, but the "does not understand"
+    // prefix should only name Float)
     assert!(
-        dnu_hints[0]
-            .hint
-            .as_ref()
-            .unwrap()
-            .contains("Check for nil"),
-        "Should provide nullable hint when UndefinedObject is in the union"
+        !dnu_hints[0].message.starts_with("UndefinedObject"),
+        "UndefinedObject should not be listed as a non-responding member"
     );
 }
 
@@ -9893,7 +9906,6 @@ fn type_args_for_non_generic_class_in_method_param_warns() {
         expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
-        expect: None,
         span: span(),
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
@@ -9973,7 +9985,6 @@ fn type_args_for_block_no_false_positive() {
         expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
-        expect: None,
         span: span(),
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
