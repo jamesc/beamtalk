@@ -1,0 +1,118 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for automatic ok/error tuple → Result conversion at the Erlang FFI
+// boundary (BT-1868, ADR 0076).
+//
+// The FFI proxy (`beamtalk_erlang_proxy.erl`) auto-converts `{ok, V}` and
+// `{error, R}` tuples returned from Erlang calls into `Result` objects.
+// Non-ok/error tuples (e.g. `erlang:timestamp/0`) remain as `Tuple`.
+
+// ===========================================================================
+// OK PATH — file:read_file/1 returns {ok, Binary} → Result ok: String
+// ===========================================================================
+
+// Set up a temp file for testing
+Erlang file write_file: "/tmp/bt_ffi_result_test.txt" with: "hello ffi"
+// => Result ok: nil
+
+// Read it back — should be a Result, not a Tuple
+result := Erlang file read_file: "/tmp/bt_ffi_result_test.txt"
+// => Result ok: "hello ffi"
+
+result class name
+// => Result
+
+result ok
+// => true
+
+result value
+// => hello ffi
+
+// ===========================================================================
+// ERROR PATH — file:read_file/1 returns {error, enoent} → Result error:
+// ===========================================================================
+
+errResult := Erlang file read_file: "/tmp/bt_nonexistent_ffi_test_file"
+// => Result error: enoent
+
+errResult class name
+// => Result
+
+errResult isError
+// => true
+
+errResult ok
+// => false
+
+// ===========================================================================
+// BARE OK — file:write_file/2 returns bare `ok` atom → Result ok: nil
+// ===========================================================================
+
+writeResult := Erlang file write_file: "/tmp/bt_ffi_result_test.txt" with: "data"
+// => Result ok: nil
+
+writeResult ok
+// => true
+
+writeResult value
+// => nil
+
+// ===========================================================================
+// RESULT COMBINATOR CHAINING ON FFI RETURNS
+// ===========================================================================
+
+// map: on ok result
+(Erlang file read_file: "/tmp/bt_ffi_result_test.txt") map: [:c | c size]
+// => Result ok: 4
+
+// map: on error result — returns error unchanged
+(Erlang file read_file: "/tmp/bt_nonexistent_ffi_test_file") map: [:c | c size]
+// => Result error: enoent
+
+// andThen: on ok result — chains into another Result
+(Erlang file read_file: "/tmp/bt_ffi_result_test.txt") andThen: [:c | Result ok: c size]
+// => Result ok: 4
+
+// andThen: on error result — short-circuits
+(Erlang file read_file: "/tmp/bt_nonexistent_ffi_test_file") andThen: [:c | Result ok: c size]
+// => Result error: enoent
+
+// ===========================================================================
+// NON-OK/ERROR TUPLES REMAIN AS TUPLE
+// ===========================================================================
+
+// erlang:timestamp/0 returns {Megasecs, Secs, Microsecs} — not ok/error
+ts := Erlang erlang timestamp
+// => _
+
+ts class name
+// => Tuple
+
+// ===========================================================================
+// RESULT fromTuple: — EXPLICIT CONVERSION
+// ===========================================================================
+
+// Convert an ok tuple explicitly
+okTuple := Tuple withAll: #(#ok, 42)
+// => _
+
+Result fromTuple: okTuple
+// => Result ok: 42
+
+// Convert an error tuple explicitly
+errTuple := Tuple withAll: #(#error, #oops)
+// => _
+
+fromTupleResult := Result fromTuple: errTuple
+// => Result error: oops
+
+fromTupleResult isError
+// => true
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Erlang file delete: "/tmp/bt_ffi_result_test.txt"
+// => _
