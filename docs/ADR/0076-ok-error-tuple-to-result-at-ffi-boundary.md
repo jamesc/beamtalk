@@ -119,7 +119,13 @@ Erlang myModule process: result toTuple
 // Erlang sees: {ok, <<"Hello, world!\n">>}
 ```
 
-`toTuple` reconstructs the original `{ok, Value}` or `{error, Reason}` tuple. This is the symmetric counterpart to the auto-conversion — explicit in the reverse direction.
+`toTuple` reconstructs an `{ok, Value}` or `{error, Reason}` tuple. For ok Results, the value is the original unwrapped value. For error Results, the reason is the wrapped exception object (not the original bare atom) — because `from_tagged_tuple/1` wraps error reasons via `ensure_wrapped/1`, the round-trip is `{error, enoent}` → `Result error: (ErlangError reason: #enoent)` → `{error, #beamtalk_error{...}}`. If the caller needs the original bare reason for Erlang interop, use `result error reason` to extract it:
+
+```beamtalk
+// Round-trip with original bare reason:
+result := Erlang file readFile: "/nonexistent"
+Erlang myModule handleError: result error reason  // passes #enoent (Symbol)
+```
 
 ### 2. Type system: map Erlang specs to Result(T, E) in auto-extract
 
