@@ -278,13 +278,10 @@ enum Command {
         action: commands::deps::cli::DepsCommand,
     },
 
-    /// Generate a skeleton Erlang `gen_server` from a `native:` Actor class
-    ///
-    /// Reads `<ClassName>.bt`, extracts `native:` declaration and `self delegate`
-    /// methods, and writes a skeleton `.erl` file with matching `handle_call/3` clauses.
-    GenNative {
-        /// Class name (e.g., `MyActor`) — looks for `MyActor.bt`, `src/MyActor.bt`, or `lib/MyActor.bt`
-        class_name: String,
+    /// Generate code from Beamtalk sources (native Erlang stubs, FFI stubs)
+    Generate {
+        #[command(subcommand)]
+        action: commands::generate::cli::GenerateCommand,
     },
 
     /// Generate HTML API documentation from source files
@@ -506,7 +503,7 @@ fn run() -> Result<()> {
             warnings_as_errors,
             jobs,
         } => commands::test::run_tests(&path, warnings_as_errors, jobs),
-        Command::GenNative { class_name } => commands::gen_native::run(&class_name),
+        Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
         Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {

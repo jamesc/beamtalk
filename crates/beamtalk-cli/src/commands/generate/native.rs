@@ -13,7 +13,7 @@ use miette::{Context, Result};
 use std::fmt::Write as _;
 use std::fs;
 
-/// Run the `gen-native` command: parse a `.bt` file and generate a skeleton `.erl` file.
+/// Run the `generate native` command: parse a `.bt` file and generate a skeleton `.erl` file.
 pub fn run(class_name: &str) -> Result<()> {
     // Find the .bt file for the given class name
     let bt_path = find_bt_file(class_name)?;
