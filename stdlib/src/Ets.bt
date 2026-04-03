@@ -104,7 +104,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// cache at: "key"        // => value or nil
   /// ```
-  at: key :: K -> V => (Erlang beamtalk_ets) lookup: self key: key
+  at: key :: K -> V | nil => (Erlang beamtalk_ets) lookup: self key: key
 
   /// Insert or replace a key-value pair. Returns `nil`.
   ///
