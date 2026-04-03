@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1862: Test fixture — actor with a keyword class method that transforms
+// constructor args before building state.
+//
+// The class method `create: name value: val` combines the two params into a
+// single `label` string, demonstrating arg→state transformation that would
+// be lost if supervision bypassed the class method.
+
+Actor subclass: ClassMethodActor
+  state: label = ""
+
+  class create: name value: val -> ClassMethodActor =>
+    combined := name asString ++ ":" ++ val asString
+    self spawnWith: #{#label => combined}
+
+  label => self.label

@@ -1,4 +1,4 @@
-// AUTO-GENERATED from stdlib/src/*.bt by `beamtalk build-stdlib` — do not edit manually.
+// AUTO-GENERATED from lib/*.bt by `beamtalk build-stdlib` — do not edit manually.
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
@@ -2189,8 +2189,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             package: Some("stdlib".into()),
             is_value: true,
             is_native: false,
-            state: vec!["id".into(), "actorClass".into(), "restart".into(), "args".into(), "shutdown".into()],
-            state_types: HashMap::from([("id".into(), "Symbol | Nil".into()), ("actorClass".into(), "Class | Nil".into()), ("restart".into(), "Symbol".into()), ("args".into(), "Object | Nil".into()), ("shutdown".into(), "Integer | Nil".into())]),
+            state: vec!["id".into(), "actorClass".into(), "restart".into(), "args".into(), "shutdown".into(), "classMethod".into()],
+            state_types: HashMap::from([("id".into(), "Symbol | Nil".into()), ("actorClass".into(), "Class | Nil".into()), ("restart".into(), "Symbol".into()), ("args".into(), "Object | Nil".into()), ("shutdown".into(), "Integer | Nil".into()), ("classMethod".into(), "Symbol | Nil".into())]),
             methods: vec![
                 MethodInfo { selector: "withId:withRestart:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Return a new spec with id and restart overridden.".into()) },
                 MethodInfo { selector: "withId:withArgs:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Object".into())], doc: Some("Return a new spec with id and args overridden.".into()) },
@@ -2207,9 +2207,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withArgs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Object | Nil".into())], doc: Some("Returns a new `SupervisionSpec` with `args` set to the given value.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "shutdown".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer | Nil".into()), param_types: vec![], doc: Some("Returns the `shutdown` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "withShutdown:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Integer | Nil".into())], doc: Some("Returns a new `SupervisionSpec` with `shutdown` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "classMethod".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol | Nil".into()), param_types: vec![], doc: Some("Returns the `classMethod` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withClassMethod:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol | Nil".into())], doc: Some("Returns a new `SupervisionSpec` with `classMethod` set to the given value.\n\n*(compiler-generated)*".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "id:actorClass:restart:args:shutdown:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol | Nil".into()), Some("Class | Nil".into()), Some("Symbol".into()), Some("Object | Nil".into()), Some("Integer | Nil".into())], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil), shutdown (default: nil).\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "id:actorClass:restart:args:shutdown:classMethod:".into(), arity: 6, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol | Nil".into()), Some("Class | Nil".into()), Some("Symbol".into()), Some("Object | Nil".into()), Some("Integer | Nil".into()), Some("Symbol | Nil".into())], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil), shutdown (default: nil), classMethod (default: nil).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],

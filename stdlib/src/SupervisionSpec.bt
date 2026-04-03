@@ -9,9 +9,9 @@
 /// you need per-child overrides for id, restart policy, or startup args.
 ///
 /// The auto-generated API (from `field:` declarations) includes:
-/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`
-/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`
-/// - Keyword constructor: `id:actorClass:restart:args:shutdown:`
+/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`, `classMethod`
+/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`, `withClassMethod:`
+/// - Keyword constructor: `id:actorClass:restart:args:shutdown:classMethod:`
 ///
 /// See ADR 0059 for the full design.
 ///
@@ -49,6 +49,24 @@ typed Value subclass: SupervisionSpec
   /// When nil, workers use 5000ms and supervisors use `#infinity`.
   /// Set via `withShutdown:` to override the default for graceful drain/cleanup.
   field: shutdown :: Integer | Nil = nil
+  /// Keyword class method selector to use as the constructor.
+  ///
+  /// When set, the supervisor routes starts/restarts through this class method
+  /// instead of directly calling `start_link/init`. The class method transforms
+  /// raw constructor args into the actor's state (e.g., building a deps object).
+  /// `args` should be an Array of ordered arguments matching the class method's
+  /// parameter positions, not a Dictionary.
+  ///
+  /// When nil (default), `withArgs:` provides a Dictionary merged directly into
+  /// state via `spawnWith:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Orchestrator supervisionSpec
+  ///     withClassMethod: #'start:linearClient:'
+  ///     withArgs: #(config, client)
+  /// ```
+  field: classMethod :: Symbol | Nil = nil
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs: are auto-generated.)
@@ -106,8 +124,15 @@ typed Value subclass: SupervisionSpec
       self error: "SupervisionSpec>>childSpec: actorClass must not be nil"
     ]
     childId := self id isNil ifTrue: [self actorClass name] ifFalse: [self id]
-    startFn := self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
-    startArgs := self args isNil ifTrue: [#()] ifFalse: [#(self args)]
+    startFn := self classMethod isNil ifTrue: [
+      self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
+    ] ifFalse: [#classMethod]
+    startArgs := self classMethod isNil
+      ifTrue: [self args isNil ifTrue: [#()] ifFalse: [#(self args)]]
+      ifFalse: [
+        effectiveArgs := self args isNil ifTrue: [#()] ifFalse: [self args]
+        #(self classMethod, effectiveArgs)
+      ]
     shutdown := self shutdown isNil ifTrue: [
       self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]
     ] ifFalse: [self shutdown]

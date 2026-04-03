@@ -49,7 +49,8 @@
     register_root/1,
     get_root/0,
     clear_root/0,
-    run_initialize/1
+    run_initialize/1,
+    start_child_via_class_method/4
 ]).
 
 -include("beamtalk.hrl").
@@ -614,6 +615,31 @@ to_otp_strategy(oneForAll) -> one_for_all;
 to_otp_strategy(restForOne) -> rest_for_one;
 to_otp_strategy(S) -> S.
 
+%% @doc Start a supervised child by dispatching through its keyword class method.
+%%
+%% BT-1862: When a SupervisionSpec uses `withClassMethod:`, the supervisor must
+%% route starts/restarts through the actor's keyword class method (e.g.,
+%% `start:linearClient:`) instead of calling `start_link/init` directly. The class
+%% method transforms raw constructor args into properly shaped state before calling
+%% `spawnWith:`.
+%%
+%% Uses `class_send` to dispatch the keyword class method through the CHILD actor's
+%% class gen_server. This is safe during supervisor init because only the supervisor's
+%% own class gen_server is blocked — the child actor's class gen_server is free.
+%% Running inside the class gen_server process ensures that `self spawnWith:` can
+%% access the process dictionary entries set during class init.
+%%
+%% The MFA stored in the OTP child spec is:
+%%   {beamtalk_supervisor, start_child_via_class_method, [ClassName, Module, Selector, Args]}
+%% All terms are atoms/lists (no pids), so the MFA survives class object restarts.
+-spec start_child_via_class_method(atom(), module(), atom(), [term()]) -> {ok, pid()}.
+start_child_via_class_method(ClassName, _Module, Selector, Args) ->
+    ClassPid = beamtalk_class_registry:whereis_class(ClassName),
+    Result = beamtalk_class_dispatch:class_send(ClassPid, Selector, Args),
+    %% Result is {beamtalk_object, _Class, _Module, Pid}
+    Pid = element(4, Result),
+    {ok, Pid}.
+
 %% @private
 %% Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
 %%
@@ -650,33 +676,43 @@ spec_to_otp(BtSpec) ->
                 %% Worker: use start_link/1 (returns {ok, Pid}) for OTP compatibility.
                 %% spawn/0 wraps the pid in {beamtalk_object,...} which OTP rejects.
                 StartFn = array:get(1, StartErlArray),
-                InitArgs =
-                    case StartFn of
-                        spawn ->
-                            %% No init args — start with empty state map.
-                            [#{}];
-                        'spawnWith:' ->
-                            %% #(self args) uses list syntax (#(...)) so it compiles to an
-                            %% Erlang list [ArgsMap] — use it directly as the start_link arg.
-                            array:get(2, StartErlArray);
-                        Other ->
-                            %% Unknown start function — raise structured error rather than crashing.
-                            %% Tag as 'SupervisionSpec'/'childSpec' to reflect where the spec
-                            %% originated (SupervisionSpec>>childSpec), not the supervisor itself.
-                            Error = beamtalk_error:new(
-                                runtime_error,
-                                'SupervisionSpec',
-                                childSpec,
-                                iolist_to_binary(
-                                    io_lib:format(
-                                        "unsupported child start function: ~p (expected spawn or spawnWith:)",
-                                        [Other]
-                                    )
+                case StartFn of
+                    spawn ->
+                        %% No init args — start with empty state map.
+                        {ChildModule, start_link, [#{}]};
+                    'spawnWith:' ->
+                        %% #(self args) uses list syntax (#(...)) so it compiles to an
+                        %% Erlang list [ArgsMap] — use it directly as the start_link arg.
+                        InitArgs = array:get(2, StartErlArray),
+                        {ChildModule, start_link, InitArgs};
+                    classMethod ->
+                        %% BT-1862: Route through the actor's keyword class method.
+                        %% StartArgs is #(selector, argsList) — compiled as an
+                        %% Erlang list [Selector, ArgsList]. The selector is stored
+                        %% in source form (e.g., 'create:value:') — class_send
+                        %% handles the class_ prefix mapping internally.
+                        [Selector, ArgsList] = array:get(2, StartErlArray),
+                        {beamtalk_supervisor, start_child_via_class_method, [
+                            ChildClass, ChildModule, Selector, ArgsList
+                        ]};
+                    Other ->
+                        %% Unknown start function — raise structured error rather than crashing.
+                        %% Tag as 'SupervisionSpec'/'childSpec' to reflect where the spec
+                        %% originated (SupervisionSpec>>childSpec), not the supervisor itself.
+                        Error = beamtalk_error:new(
+                            runtime_error,
+                            'SupervisionSpec',
+                            childSpec,
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "unsupported child start function: ~p "
+                                    "(expected spawn, spawnWith:, or classMethod)",
+                                    [Other]
                                 )
-                            ),
-                            error(beamtalk_exception_handler:ensure_wrapped(Error))
-                    end,
-                {ChildModule, start_link, InitArgs}
+                            )
+                        ),
+                        error(beamtalk_exception_handler:ensure_wrapped(Error))
+                end
         end,
     #{
         id => maps:get(id, BtSpec),

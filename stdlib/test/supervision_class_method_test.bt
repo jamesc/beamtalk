@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1862: Tests for SupervisionSpec withClassMethod: routing through
+// the actor's keyword class method instead of direct start_link/init.
+//
+// Fixtures: stdlib/test/fixtures/class_method_actor.bt
+//           stdlib/test/fixtures/class_method_supervisor.bt
+
+TestCase subclass: SupervisionClassMethodTest
+
+  // === childSpec encoding ===
+  testChildSpecUsesClassMethodStartFn =>
+    spec := (ClassMethodActor supervisionSpec withClassMethod: #create:value:) withArgs: #(#hello, 42)
+    child := spec childSpec
+    start := child at: #start
+    // Position 1 is the #classMethod marker
+    self assert: (start at: 2) equals: #classMethod
+
+  testChildSpecEncodesSelector =>
+    spec := (ClassMethodActor supervisionSpec withClassMethod: #create:value:) withArgs: #(#hello, 42)
+    child := spec childSpec
+    start := child at: #start
+    // Position 2 is #(selector, argsArray)
+    cmArgs := start at: 3
+    self assert: (cmArgs at: 1) equals: #create:value:
+
+  testChildSpecEncodesArgs =>
+    spec := (ClassMethodActor supervisionSpec withClassMethod: #create:value:) withArgs: #(#hello, 42)
+    child := spec childSpec
+    start := child at: #start
+    cmArgs := start at: 3
+    argsArray := cmArgs at: 2
+    self assert: (argsArray at: 1) equals: #hello
+    self assert: (argsArray at: 2) equals: 42
+
+  testChildSpecWithClassMethodNilArgs =>
+    // classMethod with nil args encodes empty array
+    spec := ClassMethodActor supervisionSpec withClassMethod: #create:value:
+    child := spec childSpec
+    start := child at: #start
+    cmArgs := start at: 3
+    argsArray := cmArgs at: 2
+    self assert: argsArray size equals: 0
+
+  testChildSpecWithoutClassMethodPreservesSpawnWith =>
+    // When classMethod is nil, existing spawnWith: path is preserved
+    spec := ClassMethodActor supervisionSpec withArgs: #{#label => "direct"}
+    child := spec childSpec
+    start := child at: #start
+    self assert: (start at: 2) equals: #spawnWith:
+
+  // === Live supervisor with class method ===
+  testSupervisedActorViaClassMethod =>
+    sup := ClassMethodSupervisor supervise
+    child := sup which: ClassMethodActor
+    // The class method transforms #hello + 42 into "hello:42"
+    self assert: child label equals: "hello:42"
+    [sup stop] on: Error do: [:e | nil]
