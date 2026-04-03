@@ -4628,6 +4628,20 @@ fn responds_to(var_name: &str, selector_name: &str) -> Expression {
     )
 }
 
+/// Helper: build `x isOk` unary expression (BT-1859)
+fn is_ok(var_name: &str) -> Expression {
+    msg_send(var(var_name), MessageSelector::Unary("isOk".into()), vec![])
+}
+
+/// Helper: build `x isError` unary expression (BT-1859)
+fn is_error(var_name: &str) -> Expression {
+    msg_send(
+        var(var_name),
+        MessageSelector::Unary("isError".into()),
+        vec![],
+    )
+}
+
 /// Helper: build a block expression `[body]`
 fn block_expr(body: Vec<Expression>) -> Expression {
     Expression::Block(Block::new(
@@ -4659,7 +4673,6 @@ fn if_true(receiver: Expression, block: Expression) -> Expression {
 }
 
 /// Helper: build `receiver ifFalse: [block]`
-#[allow(dead_code)] // Used in future narrowing tests
 fn if_false(receiver: Expression, block: Expression) -> Expression {
     msg_send(
         receiver,
@@ -9191,5 +9204,305 @@ fn test_ffi_member_returns_boolean() {
         send_type,
         Some(&InferredType::known("Boolean")),
         "member should return Boolean"
+    );
+}
+
+// ---- BT-1859: Result isOk/isError narrowing tests ----
+
+#[test]
+fn test_detect_narrowing_is_ok_pattern() {
+    let expr = is_ok("r");
+    let info = TypeChecker::detect_narrowing(&expr);
+    assert!(info.is_some(), "Should detect isOk narrowing");
+    let info = info.unwrap();
+    assert_eq!(info.variable.as_str(), "r");
+    assert!(info.is_result_ok_check);
+    assert!(!info.is_result_error_check);
+    assert!(!info.is_nil_check);
+}
+
+#[test]
+fn test_detect_narrowing_is_error_pattern() {
+    let expr = is_error("r");
+    let info = TypeChecker::detect_narrowing(&expr);
+    assert!(info.is_some(), "Should detect isError narrowing");
+    let info = info.unwrap();
+    assert_eq!(info.variable.as_str(), "r");
+    assert!(!info.is_result_ok_check);
+    assert!(info.is_result_error_check);
+    assert!(!info.is_nil_check);
+}
+
+#[test]
+fn test_result_isok_narrowing_true_branch() {
+    // r :: Result(String, Error)
+    // r isOk ifTrue: [r value]
+    // Inside the block, `r` should still be Result(String, Error) so
+    // `value` resolves to String via generic substitution (no DNU).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            // Use Result as param type (the type checker will resolve it)
+            vec![("r", Some("Result"))],
+            vec![if_true(
+                is_ok("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("value".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r value inside isOk ifTrue: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_isok_narrowing_false_branch() {
+    // r :: Result(String, Error)
+    // r isOk ifFalse: [r error]
+    // Inside the false block, `r` is the error variant, so `error` is valid.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![if_false(
+                is_ok("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("error".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r error inside isOk ifFalse: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_isok_narrowing_both_branches() {
+    // r :: Result(String, Error)
+    // r isOk ifTrue: [r value] ifFalse: [r error]
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![if_true_if_false(
+                is_ok("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("value".into()),
+                    vec![],
+                )]),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("error".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r value/error inside isOk ifTrue:ifFalse: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_iserror_narrowing_true_branch() {
+    // r :: Result(String, Error)
+    // r isError ifTrue: [r error]
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![if_true(
+                is_error("r"),
+                block_expr(vec![msg_send(
+                    var("r"),
+                    MessageSelector::Unary("error".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "r error inside isError ifTrue: should not produce DNU, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_narrowing_non_result_no_narrowing() {
+    // x :: Integer
+    // x isOk ifTrue: [x unknownThing]
+    // Integer does not understand isOk, so we should get a DNU warning for isOk
+    // and also for unknownThing. The narrowing should NOT apply because x is not a Result.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Integer"))],
+            vec![if_true(
+                is_ok("x"),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("unknownThing".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    // Should have DNU for 'isOk' on Integer and 'unknownThing' on Integer
+    assert!(
+        !warnings.is_empty(),
+        "Non-Result receiver should still produce DNU warnings, got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_result_narrowing_does_not_leak() {
+    // r :: Result(String, Error)
+    // r isOk ifTrue: [r value]
+    // r unknownMethod  // should warn — narrowing scoped to block
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("r", Some("Result"))],
+            vec![
+                if_true(
+                    is_ok("r"),
+                    block_expr(vec![msg_send(
+                        var("r"),
+                        MessageSelector::Unary("value".into()),
+                        vec![],
+                    )]),
+                ),
+                msg_send(
+                    var("r"),
+                    MessageSelector::Unary("unknownMethod".into()),
+                    vec![],
+                ),
+            ],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("does not understand") && d.message.contains("unknownMethod")
+        })
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Narrowing should not leak outside the block, expected 1 DNU for unknownMethod"
     );
 }
