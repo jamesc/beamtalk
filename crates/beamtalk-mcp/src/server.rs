@@ -636,12 +636,33 @@ impl BeamtalkMcp {
         let mut parts = Vec::new();
 
         if !errors.is_empty() {
+            // BT-1855: Count distinct failed file paths (a single file may
+            // produce multiple diagnostics) to give an accurate summary.
+            let failed_paths: std::collections::BTreeSet<&str> = errors
+                .iter()
+                .filter_map(|e| {
+                    e.as_object()
+                        .and_then(|m| m.get("path"))
+                        .and_then(|v| v.as_str())
+                })
+                .collect();
+
             // Lead with failure summary so agents detect errors immediately.
-            parts.push(Content::text(format!(
-                "Load completed with errors: {} succeeded, {} failed",
-                classes.len(),
-                errors.len()
-            )));
+            if failed_paths.is_empty() {
+                // Errors without structured path info — fall back to error count.
+                parts.push(Content::text(format!(
+                    "Load completed with errors: {} classes loaded, {} error(s)",
+                    classes.len(),
+                    errors.len()
+                )));
+            } else {
+                parts.push(Content::text(format!(
+                    "Load completed with errors: {} classes loaded, {} file(s) failed [{}]",
+                    classes.len(),
+                    failed_paths.len(),
+                    failed_paths.iter().copied().collect::<Vec<_>>().join(", ")
+                )));
+            }
 
             // Report each failure with path, line, message, and hint.
             for e in &errors {
@@ -675,6 +696,12 @@ impl BeamtalkMcp {
                     "Loaded classes: {}",
                     classes.join(", ")
                 )));
+            }
+
+            // BT-1855: Include incremental summary even when there are errors,
+            // so agents know how many files were processed overall.
+            if let Some(summary) = response.summary {
+                parts.push(Content::text(summary));
             }
 
             return Ok(CallToolResult::error(parts));

@@ -38,9 +38,27 @@ pub(super) struct NarrowingInfo {
     pub(super) variable: EcoString,
     /// The type the variable is narrowed to in the *true* branch.
     pub(super) true_type: InferredType,
+    /// The type the variable is narrowed to in the *false* branch, if any.
+    ///
+    /// When `Some`, the false branch of `ifFalse:` / `ifTrue:ifFalse:` uses
+    /// this type.  When `None`, false-branch narrowing falls back to the
+    /// `is_nil_check` logic (non-nil stripping) or no narrowing.
+    pub(super) false_type: Option<InferredType>,
     /// Whether this is a nil-check (`isNil`). If so, the *false* branch
     /// narrows to non-nil and early-return narrowing applies.
     pub(super) is_nil_check: bool,
+    /// Whether this is a Result `isOk` / `ok` check (BT-1859).
+    ///
+    /// When true, the true branch knows `value` is safe (ok variant) and the
+    /// false branch knows `error` is safe (error variant).  The actual type
+    /// of the variable stays `Result(T, E)` in both branches — the generic
+    /// substitution already resolves `value -> T` and `error -> E`.
+    pub(super) is_result_ok_check: bool,
+    /// Whether this is a Result `isError` check (BT-1859).
+    ///
+    /// Inverse of `is_result_ok_check`: true branch is the error variant,
+    /// false branch is the ok variant.
+    pub(super) is_result_error_check: bool,
     /// The selector tested in a `respondsTo:` narrowing (ADR 0068 Phase 2e).
     ///
     /// When set, the narrowing was detected from `x respondsTo: #selector`.
@@ -639,7 +657,9 @@ impl TypeChecker {
             selector_name.as_str(),
             "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:"
         ) {
-            Self::detect_narrowing(receiver).map(|info| self.refine_responds_to_narrowing(info))
+            Self::detect_narrowing(receiver)
+                .map(|info| self.refine_responds_to_narrowing(info))
+                .map(|info| Self::refine_result_narrowing(info, env))
         } else {
             None
         };
@@ -1229,6 +1249,7 @@ impl TypeChecker {
     /// | `(x class) = ClassName` / `(x class) =:= ClassName` | class identity check (parens) |
     /// | `x isKindOf: ClassName` | kind check |
     /// | `x isNil` | nil check |
+    #[allow(clippy::too_many_lines)] // Pattern-matching arms for each narrowing kind
     pub(super) fn detect_narrowing(receiver: &Expression) -> Option<NarrowingInfo> {
         // Unwrap parentheses
         let receiver = match receiver {
@@ -1247,7 +1268,48 @@ impl TypeChecker {
                 Some(NarrowingInfo {
                     variable: var_name,
                     true_type: InferredType::known("UndefinedObject"),
+                    false_type: None,
                     is_nil_check: true,
+                    is_result_ok_check: false,
+                    is_result_error_check: false,
+                    responded_selector: None,
+                })
+            }
+
+            // Pattern: `x isOk` / `x ok` — Result ok-check (BT-1859)
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Unary(sel),
+                ..
+            } if sel.as_str() == "isOk" || sel.as_str() == "ok" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                Some(NarrowingInfo {
+                    variable: var_name,
+                    // Placeholder — refined by `refine_result_narrowing` once
+                    // we know the variable's actual type from the env.
+                    true_type: InferredType::Dynamic,
+                    false_type: None,
+                    is_nil_check: false,
+                    is_result_ok_check: true,
+                    is_result_error_check: false,
+                    responded_selector: None,
+                })
+            }
+
+            // Pattern: `x isError` — Result error-check (BT-1859)
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Unary(sel),
+                ..
+            } if sel.as_str() == "isError" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                Some(NarrowingInfo {
+                    variable: var_name,
+                    true_type: InferredType::Dynamic,
+                    false_type: None,
+                    is_nil_check: false,
+                    is_result_ok_check: false,
+                    is_result_error_check: true,
                     responded_selector: None,
                 })
             }
@@ -1267,7 +1329,10 @@ impl TypeChecker {
                         // Narrow to Dynamic — we know the object responds to the selector,
                         // but not its concrete class. Dynamic suppresses DNU warnings.
                         true_type: InferredType::Dynamic,
+                        false_type: None,
                         is_nil_check: false,
+                        is_result_ok_check: false,
+                        is_result_error_check: false,
                         responded_selector: Some(sel_name.clone()),
                     })
                 } else {
@@ -1287,7 +1352,10 @@ impl TypeChecker {
                     Some(NarrowingInfo {
                         variable: var_name,
                         true_type: InferredType::known(name.name.clone()),
+                        false_type: None,
                         is_nil_check: false,
+                        is_result_ok_check: false,
+                        is_result_error_check: false,
                         responded_selector: None,
                     })
                 } else {
@@ -1320,7 +1388,10 @@ impl TypeChecker {
                             return Some(NarrowingInfo {
                                 variable: var_name,
                                 true_type: InferredType::known(name.name.clone()),
+                                false_type: None,
                                 is_nil_check: false,
+                                is_result_ok_check: false,
+                                is_result_error_check: false,
                                 responded_selector: None,
                             });
                         }
@@ -1353,6 +1424,43 @@ impl TypeChecker {
                     }
                 }
             }
+        }
+        info
+    }
+
+    /// Refines a Result `isOk` / `ok` / `isError` narrowing (BT-1859).
+    ///
+    /// When the variable has type `Result(T, E)`, both true and false branches
+    /// keep the full `Result(T, E)` type — generic substitution already resolves
+    /// `value -> T` and `error -> E`.  The narrowing ensures the branches get
+    /// typed environments (via `infer_block_with_narrowing`) rather than falling
+    /// through to the no-narrowing path.
+    ///
+    /// If the variable is not typed as `Result`, the result-specific flags are
+    /// cleared and `true_type` is set to the variable's current type so the
+    /// narrowing is effectively a no-op (preserves the existing type in blocks).
+    fn refine_result_narrowing(mut info: NarrowingInfo, env: &TypeEnv) -> NarrowingInfo {
+        if !info.is_result_ok_check && !info.is_result_error_check {
+            return info;
+        }
+        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+        let is_result = matches!(
+            &current_ty,
+            InferredType::Known { class_name, .. } if class_name.as_str() == "Result"
+        );
+        if is_result {
+            // Both branches keep the full Result(T, E) type so generic
+            // substitution continues to resolve value->T / error->E.
+            info.true_type = current_ty.clone();
+            info.false_type = Some(current_ty);
+        } else {
+            // Not a Result — clear the result flags so downstream code doesn't
+            // treat this as a Result narrowing.  Set true_type to the variable's
+            // current type to preserve type info in the block env.
+            info.is_result_ok_check = false;
+            info.is_result_error_check = false;
+            info.true_type = current_ty;
+            info.false_type = None;
         }
         info
     }
@@ -1392,7 +1500,18 @@ impl TypeChecker {
             "ifFalse:" => {
                 // Single argument: narrow in the false branch (complement)
                 if let Some(arg) = arguments.first() {
-                    if info.is_nil_check {
+                    if let Some(ref false_ty) = info.false_type {
+                        // Explicit false type (e.g., Result isOk/isError — BT-1859)
+                        let ty = self.infer_block_with_narrowing(
+                            arg,
+                            &info.variable,
+                            false_ty,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                        arg_types.push(ty);
+                    } else if info.is_nil_check {
                         // isNil ifFalse: → variable is non-nil
                         let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
                         let non_nil = Self::non_nil_type(&current_ty);
@@ -1426,7 +1545,18 @@ impl TypeChecker {
                     arg_types.push(ty);
                 }
                 if let Some(false_arg) = arguments.get(1) {
-                    if info.is_nil_check {
+                    if let Some(ref false_ty) = info.false_type {
+                        // Explicit false type (e.g., Result isOk/isError — BT-1859)
+                        let ty = self.infer_block_with_narrowing(
+                            false_arg,
+                            &info.variable,
+                            false_ty,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                        arg_types.push(ty);
+                    } else if info.is_nil_check {
                         // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
                         let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
                         let non_nil = Self::non_nil_type(&current_ty);
@@ -2368,6 +2498,108 @@ mod tests {
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect (x class) = Type");
         assert_eq!(info.variable.as_str(), "x");
         assert_eq!(info.true_type, InferredType::known("Integer"));
+    }
+
+    // ---- detect_narrowing: isOk / ok / isError (BT-1859) ----
+
+    #[test]
+    fn detect_narrowing_is_ok() {
+        // x isOk
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("isOk".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect isOk");
+        assert_eq!(info.variable.as_str(), "x");
+        assert!(info.is_result_ok_check);
+        assert!(!info.is_result_error_check);
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn detect_narrowing_ok() {
+        // x ok
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("ok".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect ok");
+        assert_eq!(info.variable.as_str(), "x");
+        assert!(info.is_result_ok_check);
+        assert!(!info.is_result_error_check);
+    }
+
+    #[test]
+    fn detect_narrowing_is_error() {
+        // x isError
+        let expr = Expression::MessageSend {
+            receiver: Box::new(var("x")),
+            selector: MessageSelector::Unary("isError".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect isError");
+        assert_eq!(info.variable.as_str(), "x");
+        assert!(!info.is_result_ok_check);
+        assert!(info.is_result_error_check);
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn refine_result_narrowing_with_result_type() {
+        // When the variable has type Result(String, Error), refine should set
+        // true_type and false_type to the full Result type.
+        let mut env = TypeEnv::new();
+        let result_ty = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![InferredType::known("String"), InferredType::known("Error")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        env.set("r", result_ty.clone());
+
+        let info = NarrowingInfo {
+            variable: "r".into(),
+            true_type: InferredType::Dynamic,
+            false_type: None,
+            is_nil_check: false,
+            is_result_ok_check: true,
+            is_result_error_check: false,
+            responded_selector: None,
+        };
+        let refined = TypeChecker::refine_result_narrowing(info, &env);
+        assert_eq!(refined.true_type, result_ty);
+        assert_eq!(refined.false_type, Some(result_ty));
+        assert!(refined.is_result_ok_check);
+    }
+
+    #[test]
+    fn refine_result_narrowing_non_result_disables() {
+        // When the variable is not a Result, the result flags are cleared.
+        let mut env = TypeEnv::new();
+        env.set("x", InferredType::known("Integer"));
+
+        let info = NarrowingInfo {
+            variable: "x".into(),
+            true_type: InferredType::Dynamic,
+            false_type: None,
+            is_nil_check: false,
+            is_result_ok_check: true,
+            is_result_error_check: false,
+            responded_selector: None,
+        };
+        let refined = TypeChecker::refine_result_narrowing(info, &env);
+        assert!(!refined.is_result_ok_check);
+        assert!(!refined.is_result_error_check);
+        assert!(refined.false_type.is_none());
+        // true_type should be preserved as the current type, not Dynamic
+        assert_eq!(refined.true_type, InferredType::known("Integer"));
     }
 
     // ---- non_nil_type ----

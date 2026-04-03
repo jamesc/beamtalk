@@ -2007,8 +2007,13 @@ impl Parser {
     /// Keys must be symbol literals (`#key`), string literals, integers, or parenthesized
     /// expressions (e.g. `#{(varKey) => v}` for dynamic keys). Bare lowercase identifiers
     /// are rejected with a diagnostic error suggesting `#key` (BT-1240).
-    /// Keys and values are parsed as unary expressions (primaries + unary messages),
+    /// Keys are parsed as unary expressions (primaries + unary messages),
     /// which stops at binary operators like `=>` and `,`.
+    /// Values are parsed as keyword messages (lowest message precedence), so
+    /// `#{#key => Foo new: #{#a => 1}}` parses the nested keyword send correctly.
+    /// The `,` and `}` delimiters terminate parsing naturally: `,` has no
+    /// binding power (so binary parsing stops) and `}` cannot start a message
+    /// send (BT-1854).
     fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -2087,8 +2092,12 @@ impl Parser {
             }
             self.advance(); // consume '=>'
 
-            // Parse value expression (binary to support operators like `+` in values)
-            let value = self.parse_binary_message();
+            // Parse value expression as a full keyword message (lowest message
+            // precedence), so `#{#k => Foo new: #{#a => 1}}` correctly parses
+            // the nested keyword send as the map value.  The `,` and `}` delimiters
+            // terminate parsing naturally: `,` has no binding power (so binary
+            // parsing stops) and `}` cannot start a message send (BT-1854).
+            let value = self.parse_keyword_message();
 
             let pair_span = pair_start.merge(value.span());
             pairs.push(MapPair::new(key, value, pair_span));

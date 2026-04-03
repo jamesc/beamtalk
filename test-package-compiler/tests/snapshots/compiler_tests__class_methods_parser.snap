@@ -51,6 +51,7 @@ Module {
                         ),
                     ),
                     declared_keyword: State,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -152,6 +153,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -202,6 +204,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -330,6 +333,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -380,6 +384,7 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     kind: Primary,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -413,6 +418,7 @@ Module {
                         ),
                     ),
                     declared_keyword: State,
+                    expect: None,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,

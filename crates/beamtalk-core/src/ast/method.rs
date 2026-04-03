@@ -10,7 +10,7 @@ use crate::source_analysis::Span;
 
 use super::CommentAttachment;
 use super::ExpressionStatement;
-use super::expression::{Expression, Identifier, MessageSelector, TypeAnnotation};
+use super::expression::{ExpectCategory, Expression, Identifier, MessageSelector, TypeAnnotation};
 
 /// Modifier flags for a method definition.
 ///
@@ -97,6 +97,13 @@ pub struct MethodDefinition {
     pub is_internal: bool,
     /// The kind of method.
     pub kind: MethodKind,
+    /// Optional `@expect` directive attached to this method declaration (BT-1856).
+    ///
+    /// When present, diagnostics matching this category that fire on the
+    /// method declaration are suppressed. If no matching diagnostic fires,
+    /// a "stale @expect" warning is emitted. The span is the source location
+    /// of the `@expect category` directive itself (for stale warnings).
+    pub expect: Option<(ExpectCategory, Span)>,
     /// Non-doc comments (`//` and `/* */`) appearing before this method.
     pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).
@@ -144,6 +151,7 @@ impl MethodDefinition {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -167,6 +175,7 @@ impl MethodDefinition {
             is_sealed: false,
             is_internal: false,
             kind: MethodKind::Primary,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -191,6 +200,7 @@ impl MethodDefinition {
             is_sealed: modifiers.is_sealed,
             is_internal: modifiers.is_internal,
             kind: modifiers.kind,
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,

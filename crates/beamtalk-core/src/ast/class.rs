@@ -9,7 +9,9 @@
 use crate::source_analysis::Span;
 
 use super::CommentAttachment;
-use super::expression::{Expression, Identifier, MessageSelector, TypeAnnotation, TypeParamDecl};
+use super::expression::{
+    ExpectCategory, Expression, Identifier, MessageSelector, TypeAnnotation, TypeParamDecl,
+};
 use super::method::{MethodDefinition, ParameterDefinition};
 
 /// Modifier flags for a class definition.
@@ -393,6 +395,13 @@ pub struct StateDeclaration {
     pub default_value: Option<Expression>,
     /// Which keyword was used in source (`state:` or `field:`).
     pub declared_keyword: DeclaredKeyword,
+    /// Optional `@expect` directive attached to this declaration (BT-1856).
+    ///
+    /// When present, diagnostics matching this category that fire on the
+    /// declaration are suppressed. If no matching diagnostic fires, a
+    /// "stale @expect" warning is emitted. The span is the source location
+    /// of the `@expect category` directive itself (for stale warnings).
+    pub expect: Option<(ExpectCategory, Span)>,
     /// Non-doc comments (`//` and `/* */`) appearing before this field.
     pub comments: CommentAttachment,
     /// Doc comment attached to this field (`///` lines).
@@ -410,6 +419,7 @@ impl StateDeclaration {
             type_annotation: None,
             default_value: None,
             declared_keyword: DeclaredKeyword::default(),
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -424,6 +434,7 @@ impl StateDeclaration {
             type_annotation: Some(type_annotation),
             default_value: None,
             declared_keyword: DeclaredKeyword::default(),
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -438,6 +449,7 @@ impl StateDeclaration {
             type_annotation: None,
             default_value: Some(default_value),
             declared_keyword: DeclaredKeyword::default(),
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -457,6 +469,7 @@ impl StateDeclaration {
             type_annotation: Some(type_annotation),
             default_value: Some(default_value),
             declared_keyword: DeclaredKeyword::default(),
+            expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,

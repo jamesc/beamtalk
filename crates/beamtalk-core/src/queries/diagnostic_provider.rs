@@ -120,11 +120,26 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
 
     collect_directives_from_exprs(&module.expressions, &mut directives);
     for class in &module.classes {
+        // BT-1856: Collect declaration-level @expect from state declarations.
+        // directive_span = the @expect token span (for stale warnings),
+        // target_span = the declaration span (for matching diagnostics).
+        for state_decl in class.state.iter().chain(class.class_variables.iter()) {
+            if let Some((cat, expect_span)) = state_decl.expect {
+                directives.push((cat, expect_span, state_decl.span));
+            }
+        }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
+            // BT-1856: Collect declaration-level @expect from method declarations
+            if let Some((cat, expect_span)) = method.expect {
+                directives.push((cat, expect_span, method.span));
+            }
             collect_directives_from_exprs(&method.body, &mut directives);
         }
     }
     for standalone in &module.method_definitions {
+        if let Some((cat, expect_span)) = standalone.method.expect {
+            directives.push((cat, expect_span, standalone.method.span));
+        }
         collect_directives_from_exprs(&standalone.method.body, &mut directives);
     }
 
@@ -868,6 +883,161 @@ mod tests {
         assert!(
             !has_parse_error,
             "dead_assignment should be a recognized @expect category, got: {parse_diags:?}"
+        );
+    }
+
+    // ── BT-1856: Declaration-level @expect ──────────────────────────────────────
+
+    #[test]
+    fn expect_type_on_state_suppresses_uninitialized_warning() {
+        // @expect type before a typed state field with no default should suppress
+        // the uninitialized-field warning.
+        let source = "\
+Actor subclass: MyActor
+  state: running :: Dictionary = #{}
+  @expect type
+  state: deps :: OrchestratorDeps
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let uninitialized = diagnostics
+            .iter()
+            .any(|d| d.message.contains("uninitialized"));
+        assert!(
+            !uninitialized,
+            "@expect type should suppress uninitialized warning, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_type_on_method_suppresses_missing_annotation() {
+        // @expect type before a method in a typed class should suppress
+        // missing-type-annotation warnings.
+        let source = "\
+typed Object subclass: MyTyped
+  @expect type
+  first => 42
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let missing_annotation = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Missing") && d.message.contains("type annotation"));
+        assert!(
+            !missing_annotation,
+            "@expect type should suppress missing annotation warnings, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn stale_expect_on_state_declaration() {
+        // @expect unused on a state field that is actually used should emit
+        // a stale warning (since there is no unused-field diagnostic).
+        let source = "\
+Object subclass: Foo
+  @expect unused
+  state: x = 0
+
+  getX => self.x
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "Should emit stale @expect when no matching diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn stale_expect_on_method_declaration() {
+        // @expect type on a fully-annotated method in a typed class should be stale.
+        let source = "\
+typed Object subclass: MyTyped
+  @expect type
+  getValue -> Integer => 42
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "Should emit stale @expect when method already has annotations, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_type_on_state_round_trips_through_unparse() {
+        // Parsing and unparsing @expect type on state should round-trip.
+        let source = "\
+Actor subclass: MyActor
+  @expect type
+  state: deps :: OrchestratorDeps
+";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let output = crate::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect type"),
+            "Unparsed output should contain @expect type, got: {output}"
+        );
+        assert!(
+            output.contains("state: deps :: OrchestratorDeps"),
+            "Unparsed output should contain the state declaration, got: {output}"
+        );
+    }
+
+    #[test]
+    fn expect_type_on_method_round_trips_through_unparse() {
+        // Parsing and unparsing @expect type on a method should round-trip.
+        let source = "\
+typed Object subclass: MyTyped
+  @expect type
+  first => 42
+";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let output = crate::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect type"),
+            "Unparsed output should contain @expect type, got: {output}"
+        );
+    }
+
+    #[test]
+    fn expect_before_invalid_position_in_class_body() {
+        // @expect at the end of a class body (not before state/method) should error.
+        let source = "\
+Object subclass: Foo
+  state: x = 0
+  @expect type
+
+Object subclass: Bar
+  state: y = 0
+";
+        let tokens = lex_with_eof(source);
+        let (_, parse_diags) = parse(tokens);
+
+        let invalid_pos = parse_diags
+            .iter()
+            .any(|d| d.message.contains("must precede"));
+        assert!(
+            invalid_pos,
+            "@expect before invalid position should produce error, got: {parse_diags:?}"
         );
     }
 }
