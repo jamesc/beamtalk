@@ -64,7 +64,7 @@ y
 
 // {#ok, val} := (tuple from FFI) — binds val; display is intentionally unchecked
 // because the JSON representation of Erlang tuples is implementation-defined.
-{#ok, val} := Erlang erlang list_to_tuple: #(#ok, 42)
+{#ok, val} := Tuple withAll: #(#ok, 42)
 // => _
 
 val
