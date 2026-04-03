@@ -18,8 +18,7 @@
 %%% ## Callers
 %%%
 %%% - `beamtalk_stdlib` — stdlib startup (topo_sort + activate_module)
-%%% - `beamtalk_workspace_bootstrap` — project module activation at REPL boot
-%%% - `beamtalk_repl_ops_load` — dependency activation during `:sync`
+%%% - `beamtalk_workspace_bootstrap` — dependency + project activation at boot and :sync
 %%%
 %%% Caller-specific side effects (e.g. registering in workspace_meta, storing
 %%% source text) are handled via the `on_activate` callback in activation options.
@@ -30,6 +29,8 @@
 -export([
     activate_ebin/1,
     activate_ebin/2,
+    activate_dependencies/1,
+    activate_dependencies/2,
     activate_module/1,
     activate_module/2,
     find_bt_modules_in_dir/1,
@@ -112,6 +113,80 @@ activate_ebin(EbinDir, Opts) ->
             ),
             {ok, AppErrors ++ ModErrors}
     end.
+
+%% @doc Activate all dependency packages and native ebin paths for a project.
+%%
+%% Scans `{ProjectPath}/_build/deps/*/ebin/` for compiled dependency packages,
+%% activates each via `activate_ebin/2`, and adds native code paths
+%% (`_build/dev/native/ebin/` and rebar3 hex deps) to the BEAM code path.
+%%
+%% Equivalent to `activate_dependencies(ProjectPath, #{})`.
+-spec activate_dependencies(file:filename()) -> [{atom(), term()}].
+activate_dependencies(ProjectPath) ->
+    activate_dependencies(ProjectPath, #{}).
+
+%% @doc Activate all dependency packages with custom activation options.
+%%
+%% Returns a (possibly empty) list of `{Name, Reason}` error pairs, where
+%% `Name` may be a module atom (activation failure) or an application name
+%% (`.app` load failure).
+-spec activate_dependencies(file:filename(), opts()) -> [{atom(), term()}].
+activate_dependencies(ProjectPath, Opts) ->
+    DepsDir = filename:join([ProjectPath, "_build", "deps"]),
+    DepErrors =
+        case filelib:is_dir(DepsDir) of
+            false ->
+                [];
+            true ->
+                case file:list_dir(DepsDir) of
+                    {ok, DepNames} ->
+                        lists:flatmap(
+                            fun(DepName) ->
+                                EbinDir = filename:join([DepsDir, DepName, "ebin"]),
+                                {ok, Errors} = activate_ebin(EbinDir, Opts),
+                                Errors
+                            end,
+                            lists:sort(DepNames)
+                        );
+                    {error, _} ->
+                        []
+                end
+        end,
+    %% Add native ebin paths for FFI modules.
+    NativeEbin = filename:join([ProjectPath, "_build", "dev", "native", "ebin"]),
+    case filelib:is_dir(NativeEbin) of
+        true ->
+            _ = code:add_pathz(NativeEbin),
+            ok;
+        false ->
+            ok
+    end,
+    %% Add rebar3 hex dependency ebin paths (cowboy, gun, etc.).
+    Rebar3LibDir = filename:join([ProjectPath, "_build", "dev", "native", "default", "lib"]),
+    case filelib:is_dir(Rebar3LibDir) of
+        false ->
+            ok;
+        true ->
+            case file:list_dir(Rebar3LibDir) of
+                {ok, HexDeps} ->
+                    lists:foreach(
+                        fun(HexDep) ->
+                            HexEbin = filename:join([Rebar3LibDir, HexDep, "ebin"]),
+                            case filelib:is_dir(HexEbin) of
+                                true ->
+                                    _ = code:add_pathz(HexEbin),
+                                    ok;
+                                false ->
+                                    ok
+                            end
+                        end,
+                        HexDeps
+                    );
+                {error, _} ->
+                    ok
+            end
+    end,
+    DepErrors.
 
 %% @doc Activate a single module with default options.
 -spec activate_module(module()) -> ok | {error, term()}.

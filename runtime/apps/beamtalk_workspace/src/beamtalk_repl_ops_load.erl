@@ -33,8 +33,7 @@
     extract_package_from_module/1,
     classify_files_by_change/2,
     get_file_mtime/1,
-    extract_native_refs/1,
-    activate_dependency_modules/1
+    extract_native_refs/1
 ]).
 -endif.
 
@@ -92,7 +91,7 @@ sync_project(Path, Options) ->
 do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     %% Activate pre-compiled dependency modules before loading project files,
     %% so that project classes can reference dependency classes (e.g. HTTPClient).
-    DepErrors = activate_dependency_modules(AbsPath),
+    DepErrors = beamtalk_workspace_bootstrap:activate_dependency_modules(AbsPath),
     %% Load the workspace project's own .app metadata so that
     %% beamtalk_package:all/0 and Workspace dependencies can discover it.
     ProjectEbin = filename:join([AbsPath, "_build", "dev", "ebin"]),
@@ -497,84 +496,6 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     beamtalk_repl_protocol:encode_modules(
         ModulesWithInfo ++ WorkspaceExtra, Msg, fun beamtalk_repl_json:term_to_json/1
     ).
-
-%%% ============================================================================
-%%% Dependency activation — load pre-compiled dependency BEAM modules
-%%% ============================================================================
-
-%% @doc Discover and activate pre-compiled dependency modules from _build/deps/.
-%%
-%% For each dependency package in `_build/deps/{name}/ebin/`, delegates to
-%% `beamtalk_module_activation:activate_ebin/2` which adds the ebin to the
-%% code path, loads the OTP `.app` metadata (so `Package all` sees deps),
-%% discovers and topo-sorts `bt@*.beam` modules, and calls `register_class/0`.
-%%
-%% Also adds native ebin paths (_build/dev/native/ebin/ and rebar3 hex deps)
-%% to the code path so that FFI modules are available.
--spec activate_dependency_modules(string()) -> [{module(), term()}].
-activate_dependency_modules(AbsPath) ->
-    DepOpts = #{
-        on_activate => fun({Module, SourcePath}) ->
-            beamtalk_workspace_meta:register_module(Module, SourcePath)
-        end
-    },
-    DepsDir = filename:join([AbsPath, "_build", "deps"]),
-    DepErrors =
-        case filelib:is_dir(DepsDir) of
-            false ->
-                [];
-            true ->
-                case file:list_dir(DepsDir) of
-                    {ok, DepNames} ->
-                        lists:flatmap(
-                            fun(DepName) ->
-                                EbinDir = filename:join([DepsDir, DepName, "ebin"]),
-                                {ok, Errors} = beamtalk_module_activation:activate_ebin(
-                                    EbinDir, DepOpts
-                                ),
-                                Errors
-                            end,
-                            lists:sort(DepNames)
-                        );
-                    {error, _} ->
-                        []
-                end
-        end,
-    %% Add native ebin paths for FFI modules.
-    NativeEbin = filename:join([AbsPath, "_build", "dev", "native", "ebin"]),
-    case filelib:is_dir(NativeEbin) of
-        true ->
-            _ = code:add_pathz(NativeEbin),
-            ok;
-        false ->
-            ok
-    end,
-    %% Add rebar3 hex dependency ebin paths (cowboy, gun, etc.).
-    Rebar3LibDir = filename:join([AbsPath, "_build", "dev", "native", "default", "lib"]),
-    case filelib:is_dir(Rebar3LibDir) of
-        false ->
-            ok;
-        true ->
-            case file:list_dir(Rebar3LibDir) of
-                {ok, HexDeps} ->
-                    lists:foreach(
-                        fun(HexDep) ->
-                            HexEbin = filename:join([Rebar3LibDir, HexDep, "ebin"]),
-                            case filelib:is_dir(HexEbin) of
-                                true ->
-                                    _ = code:add_pathz(HexEbin),
-                                    ok;
-                                false ->
-                                    ok
-                            end
-                        end,
-                        HexDeps
-                    );
-                {error, _} ->
-                    ok
-            end
-    end,
-    DepErrors.
 
 %%% Internal helpers
 
