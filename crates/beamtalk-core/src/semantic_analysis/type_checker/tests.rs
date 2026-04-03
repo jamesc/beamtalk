@@ -10007,3 +10007,95 @@ fn type_args_for_block_no_false_positive() {
         "Block type args are a documentation convention — should not warn, got: {warnings:?}",
     );
 }
+
+/// BT-1872: When no non-nil union members understand the selector, the DNU
+/// diagnostic should be a warning (definite runtime failure).
+#[test]
+fn union_dnu_all_missing_emits_warning() {
+    // Neither Integer nor Float understands `size`.
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("size".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "x",
+        InferredType::Union {
+            members: vec![InferredType::known("Integer"), InferredType::known("Float")],
+            provenance: super::TypeProvenance::Inferred(span()),
+        },
+    );
+
+    let _ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("not understand"))
+        .collect();
+    assert_eq!(
+        dnu_diags.len(),
+        1,
+        "Expected exactly one DNU diagnostic, got {dnu_diags:?}"
+    );
+    assert_eq!(
+        dnu_diags[0].severity,
+        crate::source_analysis::Severity::Warning,
+        "DNU when no members respond should be Warning severity"
+    );
+}
+
+/// BT-1872: When some but not all non-nil union members understand the
+/// selector, the DNU diagnostic should remain a hint.
+#[test]
+fn union_dnu_partial_missing_emits_hint() {
+    // String understands `size`, Integer does not.
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("size".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+
+    let _ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("not understand"))
+        .collect();
+    assert_eq!(
+        dnu_diags.len(),
+        1,
+        "Expected exactly one DNU diagnostic, got {dnu_diags:?}"
+    );
+    assert_eq!(
+        dnu_diags[0].severity,
+        crate::source_analysis::Severity::Hint,
+        "DNU when some members respond should be Hint severity"
+    );
+}

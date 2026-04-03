@@ -1169,6 +1169,7 @@ impl TypeChecker {
     /// - ALL non-nil members respond → no warning, return union of return types.
     /// - SOME non-nil members respond → DNU hint naming the non-responding members.
     /// - NO non-nil members respond → existing DNU warning.
+    #[allow(clippy::too_many_lines)]
     fn infer_union_message_send(
         &mut self,
         members: &[InferredType],
@@ -1287,8 +1288,15 @@ impl TypeChecker {
                 )
             };
 
-            let diag = Diagnostic::hint(message, span)
-                .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
+            // BT-1872: Use warning severity when no non-nil members respond
+            // (the message send will definitely fail at runtime), hint when
+            // only some members lack the selector.
+            let diag = if responding_count == 0 {
+                Diagnostic::warning(message, span)
+            } else {
+                Diagnostic::hint(message, span)
+            }
+            .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
             self.diagnostics.push(diag);
         }
 
