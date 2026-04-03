@@ -35,18 +35,21 @@
     from_tagged_tuple/1,
     'ok:'/1,
     'makeError:'/1,
+    'fromTuple:'/1,
     'tryDo:'/1,
     'unwrapError:'/2
 ]).
 %% FFI shims: beamtalk_erlang_proxy:selector_to_function/1 strips the colon
 %% suffix from keyword selectors (e.g. 'ok:' → ok). Each shim delegates to
 %% the canonical quoted function that is the real implementation.
--export([ok/1, makeError/1, tryDo/1, unwrapError/1]).
+-export([ok/1, makeError/1, fromTuple/1, tryDo/1, unwrapError/1]).
 
 -spec ok(term()) -> map().
 ok(Value) -> 'ok:'(Value).
 -spec makeError(term()) -> map().
 makeError(Reason) -> 'makeError:'(Reason).
+-spec fromTuple(tuple()) -> map().
+fromTuple(Tuple) -> 'fromTuple:'(Tuple).
 -spec tryDo(function()) -> map().
 tryDo(Block) -> 'tryDo:'(Block).
 -spec unwrapError(term()) -> no_return().
@@ -116,6 +119,37 @@ from_tagged_tuple({error, Reason}) ->
     %% from_tagged_tuple/1 wraps for FFI callers; direct Beamtalk callers supply
     %% structured errors (or bare symbols, their responsibility).
     #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => Reason}.
+
+%% @doc Implements `Result fromTuple: tuple` — converts an Erlang ok/error tuple to a Result.
+%%
+%% Delegates to `from_tagged_tuple/1` for `{ok, V}` and `{error, R}` tuples.
+%% Raises a structured type error for any other value.
+%%
+%% Called from Beamtalk as `(Erlang beamtalk_result) fromTuple: tuple` (class method).
+%%
+%% ## Examples (Beamtalk)
+%% ```beamtalk
+%% Result fromTuple: #(#ok, 42)         // => Result ok: 42
+%% Result fromTuple: #(#error, #oops)   // => Result error: ...
+%% Result fromTuple: #(1, 2, 3)         // => raises Exception
+%% ```
+-spec 'fromTuple:'(tuple()) -> map().
+'fromTuple:'({ok, _Value} = Tuple) ->
+    from_tagged_tuple(Tuple);
+'fromTuple:'({error, _Reason} = Tuple) ->
+    from_tagged_tuple(Tuple);
+'fromTuple:'(Other) ->
+    beamtalk_error:raise(#beamtalk_error{
+        kind = type_error,
+        class = 'Result',
+        selector = 'fromTuple:',
+        message =
+            <<"fromTuple: expected an {ok, Value} or {error, Reason} tuple, got: ",
+                (beamtalk_primitive:print_string(Other))/binary>>,
+        hint =
+            <<"Pass a two-element tuple tagged with ok or error, e.g. Tuple withAll: #(#ok, 42)">>,
+        details = #{got => Other}
+    }).
 
 %% @doc Implements `Result tryDo: block` — wraps exception-raising blocks as Results.
 %%
