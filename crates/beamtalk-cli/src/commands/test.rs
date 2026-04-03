@@ -2391,12 +2391,31 @@ mod tests {
     ///
     /// This test verifies that the canonicalization in `discovered_packages` deduplicates
     /// the relative `"."` and the same path expressed as an absolute path.
+    /// This test uses a temp dir with an explicit `set_current_dir` instead of
+    /// relying on the cargo-provided CWD because another test in this file also
+    /// mutates the process CWD. The `#[serial(cwd)]` annotation prevents the two
+    /// from racing. On macOS, `/var` is a symlink to `/private/var`, so the temp
+    /// dir's `current_dir()` path and `canonicalize(".")` can diverge unless both
+    /// go through `canonical_path`.
     #[test]
+    #[serial_test::serial(cwd)]
     fn test_canonical_dedup_relative_and_absolute_same_path() {
-        // Get the absolute CWD — this is the value that `find_package_root()` would
-        // return for a file inside the current directory, while the production code
-        // also inserts `"."` (relative). Both must canonicalize to the same path so
-        // they deduplicate in `seen` and don't incorrectly flip multi-package mode.
+        // RAII guard so CWD is restored even if an assertion panics.
+        struct CwdGuard(std::path::PathBuf);
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                std::env::set_current_dir(&self.0).unwrap();
+            }
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // Get the absolute CWD — on macOS this may be `/var/folders/…` (not
+        // symlink-resolved) while `canonicalize(".")` returns `/private/var/…`.
+        // Both must canonicalize to the same path so they deduplicate in `seen`
+        // and don't incorrectly flip multi-package mode.
         let cwd_abs = Utf8PathBuf::from_path_buf(std::env::current_dir().unwrap()).unwrap();
 
         let a = canonical_path(Utf8Path::new("."));
