@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1862: Test fixture — supervisor that starts a ClassMethodActor via
+// its keyword class method instead of raw spawnWith:.
+//
+// Uses `withClassMethod:` to route through `create:value:` so the arg→state
+// transformation runs on every start/restart.
+
+Supervisor subclass: ClassMethodSupervisor
+
+  class children -> List =>
+    spec := ClassMethodActor supervisionSpec
+    spec := spec withClassMethod: #create:value:
+    spec := spec withArgs: #(#hello, 42)
+    spec := spec withRestart: #permanent
+    #(spec)

@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1862: E2E fixture — actor with a keyword class method that transforms
+// constructor args before building state. Used to verify supervision routes
+// through the class method on both initial start and OTP restart.
+
+Actor subclass: E2EClassMethodActor
+  state: label = ""
+
+  class create: name value: val -> E2EClassMethodActor =>
+    combined := name asString ++ ":" ++ val asString
+    self spawnWith: #{#label => combined}
+
+  label => self.label

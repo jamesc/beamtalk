@@ -9893,6 +9893,7 @@ fn type_args_for_non_generic_class_in_method_param_warns() {
         expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
+        expect: None,
         span: span(),
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
@@ -9972,6 +9973,7 @@ fn type_args_for_block_no_false_positive() {
         expect: None,
         comments: CommentAttachment::default(),
         doc_comment: None,
+        expect: None,
         span: span(),
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);

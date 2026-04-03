@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1862: E2E fixture — supervisor that starts E2EClassMethodActor via its
+// keyword class method. The child is permanent so OTP will restart it after
+// a crash, routing through the class method again.
+
+Supervisor subclass: E2EClassMethodSupervisor
+
+  class children -> List =>
+    spec := E2EClassMethodActor supervisionSpec
+    spec := spec withClassMethod: #create:value:
+    spec := spec withArgs: #(#test, 99)
+    spec := spec withRestart: #permanent
+    #(spec)

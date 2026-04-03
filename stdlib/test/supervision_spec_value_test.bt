@@ -24,11 +24,13 @@ TestCase subclass: SupervisionSpecValueTest
       restart: #permanent
       args: nil
       shutdown: nil
+      classMethod: nil
     self assert: spec id equals: #db
     self assert: spec actorClass equals: Counter
     self assert: spec restart equals: #permanent
     self assert: spec args equals: nil
     self assert: spec shutdown equals: nil
+    self assert: spec classMethod equals: nil
 
   testWithSetterReturnsFreshCopy =>
     spec := SupervisionSpec new
