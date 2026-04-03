@@ -1,11 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Tuple — Erlang interop type for fixed-size tagged results.
+/// Tuple — Erlang interop type for fixed-size heterogeneous collections.
 ///
 /// Tuples exist primarily for interoperability with Erlang/OTP code.
-/// Many Erlang functions return `{'ok', Value}` or `{'error', Reason}` tuples.
-/// Use `isOk`, `isError`, `unwrap`, and `unwrapOr:` to work with these results.
+/// They map directly to Erlang tuples on the BEAM.
+///
+/// **FFI Result conversion (ADR 0076):** Erlang functions that return
+/// `{ok, Value}` or `{error, Reason}` tuples are automatically converted
+/// to `Result` objects at the FFI boundary. This means most Erlang calls
+/// that follow the ok/error convention return `Result`, not `Tuple`.
+/// Tuples are still returned for non-ok/error patterns (e.g., `erlang:timestamp`).
+///
+/// For ok/error tuples received outside the FFI boundary (e.g., from Erlang
+/// messages), use `Result fromTuple:` to explicitly convert:
+///
+/// ```beamtalk
+/// Result fromTuple: (Tuple withAll: #(#ok, 42))   // => Result ok: 42
+/// ```
+///
+/// The Tuple methods `isOk`, `isError`, `unwrap`, and `unwrapOr:` remain
+/// available for working with tuples from non-FFI sources.
 ///
 /// For general-purpose collections, prefer List, Dictionary, or Array.
 ///
@@ -14,9 +29,15 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// // Working with Erlang return values
-/// result isOk ifTrue: [result unwrap]
-/// result unwrapOr: 'default'
+/// // Constructing tuples
+/// t := Tuple withAll: #(1, 2, 3)
+/// t at: 1   // => 1
+/// t size    // => 3
+///
+/// // Working with ok/error tuples from non-FFI sources
+/// result := Tuple withAll: #(#ok, 42)
+/// result isOk ifTrue: [result unwrap]   // => 42
+/// result unwrapOr: 0                    // => 42
 /// ```
 sealed typed Collection subclass: Tuple
 

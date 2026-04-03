@@ -664,6 +664,63 @@ Object subclass: File
 
 **Keyword mapping:** Beamtalk keyword selectors map to Erlang function names by joining with underscores. `Erlang maps merge: a with: b` calls `maps:merge_with(A, B)`. Unary selectors map directly: `Erlang erlang node` calls `erlang:node()`.
 
+**Result conversion (ADR 0076):** Erlang functions that return `{ok, Value}` or `{error, Reason}` tuples are automatically converted to `Result` objects at the FFI boundary. This means FFI calls use the same error-handling idiom as native Beamtalk code:
+
+```beamtalk
+// FFI calls returning ok/error tuples become Result objects
+result := Erlang file read_file: "/tmp/hello.txt"
+result              // => Result ok: "Hello, world!\n"
+result value        // => "Hello, world!\n"
+
+// Use Result combinators directly on FFI returns
+result map: [:content | content size]
+// => Result ok: 14
+
+// Error path
+result := Erlang file read_file: "/nonexistent"
+result              // => Result error: (ErlangError reason: #enoent)
+result isError      // => true
+
+// Chain FFI calls with andThen:
+(Erlang file read_file: "/tmp/config.json")
+  andThen: [:content | Erlang json decode: content]
+  mapError: [:e | "Config load failed: " ++ e reason asString]
+
+// Bare ok atoms (e.g. file:write_file/2) become Result ok: nil
+Erlang file write_file: "/tmp/out.txt" with: "data"
+// => Result ok: nil
+```
+
+**Conversion rules:**
+- `{ok, Value}` becomes `Result ok: Value`
+- `{error, Reason}` becomes `Result error: Reason`
+- Bare `ok` atom becomes `Result ok: nil`
+- Bare `error` atom becomes `Result error: nil`
+- Tuples with 3+ elements, non-ok/error tuples, and non-tuple values pass through unchanged
+
+**Scope:** Conversion applies only to FFI calls via `Erlang module method: args`. Messages received from Erlang processes via `receive` or actor mailboxes remain raw Tuples. Use `Result fromTuple:` to explicitly convert those:
+
+```beamtalk
+// Converting a Tuple received from a message
+tuple := receiveMessage  // raw {ok, data} Tuple from Erlang process
+result := Result fromTuple: tuple
+result value  // => data
+```
+
+**Migration from Tuple-based FFI code:**
+
+```beamtalk
+// Before (Tuple-based):
+result := Erlang file read_file: path
+result isOk ifTrue: [result unwrap] ifFalse: ["error"]
+
+// After (Result-based):
+result := Erlang file read_file: path
+result ifOk: [:content | content] ifError: [:e | "error"]
+// Or simply:
+result value  // raises on error
+```
+
 **Error handling:** Errors from Erlang calls are wrapped as `BEAMError`, `ExitError`, or `ThrowError` — catchable with `on:do:`:
 
 ```beamtalk
