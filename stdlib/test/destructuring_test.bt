@@ -18,19 +18,19 @@ TestCase subclass: DestructuringTest
     self assert: c equals: 3
 
   testTupleDestructuringWithTaggedSymbol =>
-    {status, val} := Erlang erlang list_to_tuple: #(#ok, 42)
+    {status, val} := Tuple withAll: #(#ok, 42)
     self assert: status equals: #ok
     self assert: val equals: 42
 
   testTupleDestructuringWithTaggedSymbolLiteral =>
     // Literal pattern in first slot: {#ok, value} matches only when first element is #ok.
-    {#ok, value} := Erlang erlang list_to_tuple: #(#ok, 42)
+    {#ok, value} := Tuple withAll: #(#ok, 42)
     self assert: value equals: 42
 
   testTupleDestructuringLiteralMismatchRaisesError =>
     // When the literal slot does not match, a RuntimeError with badmatch details is raised.
     result := [
-      {#ok, _val} := Erlang erlang list_to_tuple: #(#error, 42)
+      {#ok, _val} := Tuple withAll: #(#error, 42)
       #did_not_raise
     ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
     self assert: result equals: true
@@ -93,7 +93,7 @@ TestCase subclass: DestructuringTest
   testTupleDestructuringOnlyStatement =>
     // Destructuring as the only (and therefore last) statement in a method.
     // Verifies the method compiles and runs without error.
-    {_, _} := Erlang erlang list_to_tuple: #(#ok, 42)
+    {_, _} := Tuple withAll: #(#ok, 42)
 
   testArrayDestructuringOnlyStatement =>
     // Same for array destructuring as the only statement.

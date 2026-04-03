@@ -381,7 +381,7 @@ TestCase subclass: PatternMatchingTest
 
   testTuplePatternInMatchArm =>
     // Tuple pattern arms — basic tagged tuple match
-    t := Erlang erlang list_to_tuple: #(#ok, 42)
+    t := Tuple withAll: #(#ok, 42)
     self
       assert: (t match: [
         {#ok, v} -> v;
@@ -390,7 +390,7 @@ TestCase subclass: PatternMatchingTest
       ])
       equals: 42
     // Tuple arm fallthrough: tag doesn't match
-    t2 := Erlang erlang list_to_tuple: #(#error, "oops")
+    t2 := Tuple withAll: #(#error, "oops")
     self
       assert: (t2 match: [
         {#ok, v} -> v;

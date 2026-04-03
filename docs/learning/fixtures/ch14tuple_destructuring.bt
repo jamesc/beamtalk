@@ -11,21 +11,21 @@ TestCase subclass: Ch14TupleDestructuring
     self assert: b equals: 20
 
   testTaggedTuple =>
-    {status, value} := Erlang erlang list_to_tuple: #(#ok, 42)
+    {status, value} := Tuple withAll: #(#ok, 42)
     self assert: status equals: #ok
     self assert: value equals: 42
 
   testLiteralPatternInFirstSlot =>
-    {#ok, value} := Erlang erlang list_to_tuple: #(#ok, 42)
+    {#ok, value} := Tuple withAll: #(#ok, 42)
     self assert: value equals: 42
 
   testLiteralMismatchRaises =>
     result := [
-      {#ok, _val} := Erlang erlang list_to_tuple: #(#error, 42)
+      {#ok, _val} := Tuple withAll: #(#error, 42)
       #did_not_raise
     ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
     self assert: result equals: true
 
   testWildcard =>
-    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)
+    {_, b} := Tuple withAll: #(#ignore, 99)
     self assert: b equals: 99
