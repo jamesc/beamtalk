@@ -258,11 +258,11 @@ Kotlin removes Java's checked exception requirement but doesn't convert to a Res
 
 ### Option A: Universal Auto-Conversion (Chosen — same runtime as Option D)
 
-- 🧑‍💻 **Newcomer**: "I just call Erlang and get Result — no ceremony, no surprises. This is what I'd expect."
-- 🎩 **Smalltalk purist**: "Result responds to `map:` — that's more Smalltalk than positional `at: 2` on a tuple."
+- 🧑‍💻 **Newcomer**: "I just call Erlang and get Result — no ceremony, no surprises. This is what I'd expect from a modern language."
+- 🎩 **Smalltalk purist**: "In Smalltalk, everything is an object that responds to messages. A raw tuple can't respond to `map:` — it's not a real object. Result *is*. Auto-conversion makes FFI returns participate in the language properly."
 - ⚙️ **BEAM veteran**: "Every BEAM language wraps ok/error eventually. Once at the boundary is cleaner than in every caller."
 - 🏭 **Operator**: "Consistent Result objects mean consistent error logging patterns."
-- 🎨 **Language designer**: "Charlist coercion proved boundary conversion works. This is higher-frequency — bigger payoff."
+- 🎨 **Language designer**: "This is real FFI across a representation boundary — like Kotlin boxing Java primitives or Swift bridging NSString. The object model requires tagged maps for dispatch; a raw tuple *cannot* participate in Beamtalk's message-passing semantics. Converting at the boundary is the standard answer to this problem."
 
 ### Option B: Opt-in via Type Annotation (Rejected)
 
@@ -270,7 +270,7 @@ Kotlin removes Java's checked exception requirement but doesn't convert to a Res
 - 🎩 **Smalltalk purist**: "Explicit is better. I control when conversion happens."
 - ⚙️ **BEAM veteran**: "I might *want* the raw tuple for pattern matching or forwarding. Don't convert for me."
 - 🏭 **Operator**: "No hidden runtime work — I can reason about exactly what happens."
-- 🎨 **Language designer**: "Type annotations driving behavior is clean and composable."
+- 🎨 **Language designer**: "TypeScript chose this: types are an overlay, never changing runtime behavior. The `.d.ts` model proves you can type an untyped ecosystem without runtime conversion."
 
 ### Option C: Spec-Dependent Conversion (Rejected)
 
@@ -280,16 +280,17 @@ Kotlin removes Java's checked exception requirement but doesn't convert to a Res
 
 - 🧑‍💻 **Newcomer**: "I can explore with Tuple first, then upgrade to Result when I need combinators."
 - 🎩 **Smalltalk purist**: "Sending `asResult` is an explicit message — I control the conversion."
-- ⚙️ **BEAM veteran**: "This is the safest option. My tuples stay tuples unless I choose otherwise. No round-trip surprises, no false positives."
+- ⚙️ **BEAM veteran**: "This is the safest option. I keep the tuple representation I know. No surprises, no false positives."
 - 🏭 **Operator**: "Zero hidden runtime work. I can grep for `asResult` to find every conversion point."
 - 🎨 **Language designer**: "This is the most conservative, least surprising option. It composes cleanly and has zero edge cases."
 
-This is the strongest rejected alternative. It loses on the **consistency argument**: charlist coercion is automatic, so ok/error coercion should be too. If we adopted `asResult`, we'd need to justify why strings are coerced automatically but the most common return pattern isn't.
+This is the strongest rejected alternative. It loses on two arguments: (1) **consistency** — charlist coercion is automatic, so ok/error coercion should be too; and (2) **the FFI boundary argument** — Beamtalk has a real representation boundary with Erlang (unlike TypeScript/JavaScript where values are shared). Languages with real FFI boundaries (Kotlin/JVM, Swift/Obj-C) convert at the boundary automatically, not on demand. Asking users to manually bridge every FFI return would be like asking Kotlin users to call `Integer.valueOf()` on every Java int.
 
 ### Tension Points
 
-- **BEAM veterans** may prefer opt-in (Option B) while **newcomers** strongly prefer auto-conversion — we resolve this in favor of auto-conversion because the charlist precedent already established that boundary coercion is acceptable, and the BEAM veteran's escape hatch (tuple destructuring) exists
-- **Transparent interop purists** are uncomfortable with a second coercion, but the alternative — two different error-handling idioms in every Beamtalk codebase — is worse for all user cohorts
+- **BEAM veterans** may prefer opt-in (Option E) while **newcomers** strongly prefer auto-conversion. The deciding factor is that Beamtalk has a *real FFI boundary* — tuples can't respond to messages, so "keeping the tuple" means keeping an object that can't fully participate in the language. This isn't about preference; it's a consequence of the object model.
+- **The TypeScript counter-argument** is genuine: TypeScript proves you can type an untyped ecosystem without runtime conversion. But TypeScript chose *not* to have a richer object model than JavaScript. Beamtalk did — tagged maps with class dispatch. That choice requires conversion at the boundary.
+- **Transparent interop purists** are uncomfortable with a second coercion, but "transparent" was never fully true — Beamtalk values are tagged maps, Erlang values are bare terms. The charlist coercion acknowledged this; ok/error coercion is the same principle applied to the highest-frequency pattern.
 - Option C's inconsistency (behavior depends on whether someone wrote a spec) is a dealbreaker for most cohorts
 
 ## Alternatives Considered
