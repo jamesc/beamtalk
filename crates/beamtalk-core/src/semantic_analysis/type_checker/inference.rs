@@ -1254,7 +1254,9 @@ impl TypeChecker {
                 }
             } else {
                 missing_names.push(member_name.clone());
-                return_types.push(InferredType::Dynamic);
+                // BT-1871: Do NOT push Dynamic here — a non-responding member
+                // should not widen the return type.  If *no* members respond,
+                // `union_of(&[])` returns Dynamic as a fallback.
             }
         }
 

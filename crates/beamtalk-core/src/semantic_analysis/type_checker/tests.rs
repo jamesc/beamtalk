@@ -4171,6 +4171,84 @@ fn union_receiver_nil_only_returns_dynamic() {
     );
 }
 
+/// BT-1871: Non-responding union members should not widen return type with Dynamic.
+/// `(String | Integer).size` — Integer doesn't understand `size`, but String does
+/// and returns Integer. Result should be Integer, not Integer | Dynamic.
+#[test]
+fn union_receiver_non_responding_member_does_not_widen_return_type() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("size".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    // String.size returns Integer. Integer doesn't understand `size`.
+    // BT-1871: The return type should be just Integer, NOT Integer | Dynamic.
+    assert!(
+        matches!(ty, InferredType::Known { ref class_name, .. } if class_name == "Integer"),
+        "Return type should be Integer (not widened with Dynamic), got {ty:?}"
+    );
+
+    // Should still warn about Integer not understanding `size`
+    let dnu_hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu_hints.len(),
+        1,
+        "Should warn that Integer does not understand 'size'"
+    );
+}
+
+/// BT-1871: When NO union members respond, return Dynamic as fallback.
+#[test]
+fn union_receiver_no_members_respond_returns_dynamic() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("nonExistentMethod".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    // Neither String nor Integer understand `nonExistentMethod`.
+    // With no return types collected, union_of returns Dynamic as fallback.
+    assert!(
+        matches!(ty, InferredType::Dynamic),
+        "Return type should be Dynamic when no members respond, got {ty:?}"
+    );
+}
+
 /// BT-1572: Integer | False (`FalseOr`) parameter resolution.
 #[test]
 fn false_or_param_resolves_to_union() {
