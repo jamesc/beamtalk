@@ -6,6 +6,7 @@
 %% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
 %% ADR 0075: Erlang FFI Type Definitions (Phase 1).
+%% ADR 0076: ok/error → Result type mapping (Phase 2).
 %%
 %% Extracts spec forms and spec variable names from the `abstract_code` chunk
 %% of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
@@ -284,14 +285,44 @@ build_constraint_map(Constraints) ->
     ).
 
 %% Resolve a type, substituting constrained type variables.
+%%
+%% For union types, each branch is resolved individually so that type
+%% variables inside union branches get their constraint types applied
+%% before ok/error Result recognition runs.
 -spec resolve_type_with_constraints(tuple(), map()) -> binary().
 resolve_type_with_constraints({var, _, VarName}, ConstraintMap) ->
     case maps:find(VarName, ConstraintMap) of
         {ok, Type} -> map_type(Type);
         error -> <<"Dynamic">>
     end;
+resolve_type_with_constraints({type, Line, union, Branches}, ConstraintMap) ->
+    ResolvedBranches = [
+        resolve_branch_with_constraints(B, ConstraintMap)
+     || B <- Branches
+    ],
+    map_union(ResolvedBranches, Line);
 resolve_type_with_constraints(Type, _ConstraintMap) ->
     map_type(Type).
+
+%% Resolve a single union branch, substituting constrained type variables
+%% inside tuple elements. This preserves the abstract form structure so
+%% that map_union/2 can pattern-match on ok/error tuples.
+-spec resolve_branch_with_constraints(tuple(), map()) -> tuple().
+resolve_branch_with_constraints({var, Line, VarName}, ConstraintMap) ->
+    case maps:find(VarName, ConstraintMap) of
+        {ok, Type} -> Type;
+        error -> {var, Line, VarName}
+    end;
+resolve_branch_with_constraints({type, Line, tuple, Elements}, ConstraintMap) when
+    is_list(Elements)
+->
+    ResolvedElements = [
+        resolve_branch_with_constraints(E, ConstraintMap)
+     || E <- Elements
+    ],
+    {type, Line, tuple, ResolvedElements};
+resolve_branch_with_constraints(Other, _ConstraintMap) ->
+    Other.
 
 %% @doc Map an Erlang abstract type to a Beamtalk type name.
 %%
@@ -333,8 +364,8 @@ map_type({type, _, module, []}) -> <<"Symbol">>;
 map_type({type, _, char, []}) -> <<"Integer">>;
 map_type({type, _, byte, []}) -> <<"Integer">>;
 map_type({type, _, string, []}) -> <<"List">>;
-%% Union types — use the first branch (simplified)
-map_type({type, _, union, [First | _]}) -> map_type(First);
+%% Union types — recognize ok/error patterns as Result(T, E)
+map_type({type, Line, union, Branches}) -> map_union(Branches, Line);
 %% Range type (e.g., 1..10)
 map_type({type, _, range, _}) -> <<"Integer">>;
 %% Remote types (e.g., sets:set())
@@ -349,6 +380,120 @@ map_type({var, _, _}) -> <<"Dynamic">>;
 map_type({integer, _, _}) -> <<"Integer">>;
 %% Anything else
 map_type(_) -> <<"Dynamic">>.
+
+%% @doc Classify union branches and emit Result(T, E) for ok/error patterns.
+%%
+%% Recognizes these patterns in union types (ADR 0076 Phase 2):
+%%   - {ok, T} | {error, E}  → Result(T, E)
+%%   - ok | {error, E}       → Result(Nil, E)    (bare ok atom)
+%%   - {ok, T} alone         → Result(T, Dynamic) (no error branch)
+%%   - {error, E} alone      → Result(Dynamic, E) (no ok branch)
+%%   - 3+ branch union with ok/error → Result(T, E) | Other
+%%
+%% Non-ok/error unions fall through to standard type mapping.
+-spec map_union([tuple()], term()) -> binary().
+map_union(Branches, _Line) ->
+    {OkTypes, ErrTypes, OtherBranches} = classify_union_branches(Branches),
+    case {OkTypes, ErrTypes} of
+        {[], []} ->
+            %% No ok/error branches — standard union, map each branch
+            Mapped = dedup_types([map_type(B) || B <- Branches]),
+            case Mapped of
+                [Single] -> Single;
+                Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+            end;
+        _ ->
+            %% At least one ok or error branch — emit Result(T, E)
+            OkType = resolve_ok_type(OkTypes),
+            ErrType = resolve_err_type(ErrTypes),
+            ResultType = format_result_type(OkType, ErrType),
+            case OtherBranches of
+                [] ->
+                    ResultType;
+                _ ->
+                    OtherMapped = dedup_types([map_type(B) || B <- OtherBranches]),
+                    AllTypes = dedup_types([ResultType | OtherMapped]),
+                    iolist_to_binary(lists:join(<<" | ">>, AllTypes))
+            end
+    end.
+
+%% Classify union branches into ok tuples, error tuples, and other branches.
+-spec classify_union_branches([tuple()]) ->
+    {OkTypes :: [tuple() | nil], ErrTypes :: [tuple() | nil], Others :: [tuple()]}.
+classify_union_branches(Branches) ->
+    classify_union_branches(Branches, [], [], []).
+
+classify_union_branches([], OkAcc, ErrAcc, OtherAcc) ->
+    {lists:reverse(OkAcc), lists:reverse(ErrAcc), lists:reverse(OtherAcc)};
+classify_union_branches([Branch | Rest], OkAcc, ErrAcc, OtherAcc) ->
+    case Branch of
+        {type, _, tuple, [{atom, _, ok}, OkInner]} ->
+            classify_union_branches(Rest, [OkInner | OkAcc], ErrAcc, OtherAcc);
+        {type, _, tuple, [{atom, _, ok}]} ->
+            %% {ok} — single-element ok tuple, treat as ok with Nil value
+            classify_union_branches(Rest, [nil | OkAcc], ErrAcc, OtherAcc);
+        {atom, _, ok} ->
+            %% Bare ok atom — maps to ok value of Nil
+            classify_union_branches(Rest, [nil | OkAcc], ErrAcc, OtherAcc);
+        {type, _, tuple, [{atom, _, error}, ErrInner]} ->
+            classify_union_branches(Rest, OkAcc, [ErrInner | ErrAcc], OtherAcc);
+        {type, _, tuple, [{atom, _, error}]} ->
+            %% {error} — single-element error tuple, treat as error with Nil reason
+            classify_union_branches(Rest, OkAcc, [nil | ErrAcc], OtherAcc);
+        {atom, _, error} ->
+            %% Bare error atom — maps to error reason of Nil
+            classify_union_branches(Rest, OkAcc, [nil | ErrAcc], OtherAcc);
+        _ ->
+            classify_union_branches(Rest, OkAcc, ErrAcc, [Branch | OtherAcc])
+    end.
+
+%% Determine the ok type from classified ok branches.
+-spec resolve_ok_type([tuple() | nil]) -> binary().
+resolve_ok_type([]) ->
+    <<"Dynamic">>;
+resolve_ok_type([nil]) ->
+    <<"Nil">>;
+resolve_ok_type([Type]) ->
+    map_type(Type);
+resolve_ok_type(Types) ->
+    %% Multiple ok branches — union their inner types
+    Mapped = dedup_types([
+        case T of
+            nil -> <<"Nil">>;
+            _ -> map_type(T)
+        end
+     || T <- Types
+    ]),
+    case Mapped of
+        [Single] -> Single;
+        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+    end.
+
+%% Determine the error type from classified error branches.
+-spec resolve_err_type([tuple() | nil]) -> binary().
+resolve_err_type([]) ->
+    <<"Dynamic">>;
+resolve_err_type([nil]) ->
+    <<"Nil">>;
+resolve_err_type([Type]) ->
+    map_type(Type);
+resolve_err_type(Types) ->
+    Mapped = dedup_types([
+        case T of
+            nil -> <<"Nil">>;
+            _ -> map_type(T)
+        end
+     || T <- Types
+    ]),
+    case Mapped of
+        [Single] -> Single;
+        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+    end.
+
+%% Format Result(T, E) type string.
+-spec format_result_type(binary(), binary()) -> binary().
+format_result_type(OkType, ErrType) ->
+    iolist_to_binary([<<"Result(">>, OkType, <<", ">>, ErrType, <<")">>]).
 
 %% Normalize a spec variable name to a lowercase binary suitable for Beamtalk keywords.
 -spec normalize_param_name(atom()) -> binary().
