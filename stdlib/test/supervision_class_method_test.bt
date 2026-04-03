@@ -50,6 +50,13 @@ TestCase subclass: SupervisionClassMethodTest
     start := child at: #start
     self assert: (start at: 2) equals: #spawnWith:
 
+  testChildSpecRejectsDictionaryArgsWithClassMethod =>
+    // When classMethod is set, passing a Dictionary instead of a List should error
+    spec := (ClassMethodActor supervisionSpec withClassMethod: #create:value:) withArgs: #{
+      #name => #hello
+    }
+    self should: [spec childSpec] raise: #user_error
+
   // === Live supervisor with class method ===
   testSupervisedActorViaClassMethod =>
     sup := ClassMethodSupervisor supervise

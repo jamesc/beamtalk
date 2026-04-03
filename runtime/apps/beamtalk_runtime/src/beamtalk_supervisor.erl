@@ -623,22 +623,67 @@ to_otp_strategy(S) -> S.
 %% method transforms raw constructor args into properly shaped state before calling
 %% `spawnWith:`.
 %%
-%% Uses `class_send` to dispatch the keyword class method through the CHILD actor's
-%% class gen_server. This is safe during supervisor init because only the supervisor's
-%% own class gen_server is blocked — the child actor's class gen_server is free.
-%% Running inside the class gen_server process ensures that `self spawnWith:` can
-%% access the process dictionary entries set during class init.
+%% Runs the class method directly in the supervisor process via
+%% `call_class_method_direct` (not `class_send`). This is critical because
+%% `gen_server:start_link` inside the class method must link the new child to
+%% the supervisor process — not the class gen_server. Running via `class_send`
+%% would execute inside the class gen_server, linking the child there instead,
+%% breaking OTP supervision semantics (supervisor would not detect child exits).
+%%
+%% Process dictionary entries (`beamtalk_class_name`, `beamtalk_class_module`,
+%% `beamtalk_class_is_abstract`) are set temporarily so that `self spawnWith:`
+%% in the class method body can resolve class metadata via `class_self_spawn/4`.
 %%
 %% The MFA stored in the OTP child spec is:
 %%   {beamtalk_supervisor, start_child_via_class_method, [ClassName, Module, Selector, Args]}
 %% All terms are atoms/lists (no pids), so the MFA survives class object restarts.
--spec start_child_via_class_method(atom(), module(), atom(), [term()]) -> {ok, pid()}.
-start_child_via_class_method(ClassName, _Module, Selector, Args) ->
-    ClassPid = beamtalk_class_registry:whereis_class(ClassName),
-    Result = beamtalk_class_dispatch:class_send(ClassPid, Selector, Args),
-    %% Result is {beamtalk_object, _Class, _Module, Pid}
-    Pid = element(4, Result),
-    {ok, Pid}.
+%% Selector is in compiled form (e.g., `class_create:value:`).
+-spec start_child_via_class_method(atom(), module(), atom(), [term()]) ->
+    {ok, pid()} | {error, term()}.
+start_child_via_class_method(ClassName, Module, Selector, Args) ->
+    %% Set process dictionary entries needed by class_self_spawn/4.
+    %% These are normally set by the class gen_server during init;
+    %% we replicate them here so the class method runs correctly
+    %% in the supervisor process.
+    put(beamtalk_class_name, ClassName),
+    put(beamtalk_class_module, Module),
+    put(beamtalk_class_is_abstract, false),
+    try
+        ClassSelf = make_init_class_self(ClassName, Module),
+        ClassVars = #{},
+        RawResult = call_class_method_direct(
+            ClassName, Module, Selector, ClassSelf, ClassVars, Args
+        ),
+        %% Handle class_var_result wrapper if class method mutates class vars
+        Result =
+            case RawResult of
+                {class_var_result, R, _NewClassVars} -> R;
+                R -> R
+            end,
+        case Result of
+            {beamtalk_object, _Class, _Mod, Pid} when is_pid(Pid) ->
+                {ok, Pid};
+            {beamtalk_supervisor, _Class, _Mod, Pid} when is_pid(Pid) ->
+                {ok, Pid};
+            Other ->
+                Error = beamtalk_error:new(
+                    runtime_error,
+                    ClassName,
+                    Selector,
+                    iolist_to_binary(
+                        io_lib:format(
+                            "class method must return an Actor object, got: ~p",
+                            [Other]
+                        )
+                    )
+                ),
+                {error, beamtalk_exception_handler:ensure_wrapped(Error)}
+        end
+    after
+        erase(beamtalk_class_name),
+        erase(beamtalk_class_module),
+        erase(beamtalk_class_is_abstract)
+    end.
 
 %% @private
 %% Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
@@ -689,11 +734,14 @@ spec_to_otp(BtSpec) ->
                         %% BT-1862: Route through the actor's keyword class method.
                         %% StartArgs is #(selector, argsList) — compiled as an
                         %% Erlang list [Selector, ArgsList]. The selector is stored
-                        %% in source form (e.g., 'create:value:') — class_send
-                        %% handles the class_ prefix mapping internally.
+                        %% in source form (e.g., 'create:value:'); we prepend 'class_'
+                        %% to get the compiled function name for call_class_method_direct.
                         [Selector, ArgsList] = array:get(2, StartErlArray),
+                        CompiledSelector = list_to_atom(
+                            "class_" ++ atom_to_list(Selector)
+                        ),
                         {beamtalk_supervisor, start_child_via_class_method, [
-                            ChildClass, ChildModule, Selector, ArgsList
+                            ChildClass, ChildModule, CompiledSelector, ArgsList
                         ]};
                     Other ->
                         %% Unknown start function — raise structured error rather than crashing.

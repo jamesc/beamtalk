@@ -54,8 +54,8 @@ typed Value subclass: SupervisionSpec
   /// When set, the supervisor routes starts/restarts through this class method
   /// instead of directly calling `start_link/init`. The class method transforms
   /// raw constructor args into the actor's state (e.g., building a deps object).
-  /// `args` should be an Array of ordered arguments matching the class method's
-  /// parameter positions, not a Dictionary.
+  /// `args` should be a List of ordered arguments matching the class method's
+  /// parameter positions (e.g., `#(config, client)`), not a Dictionary.
   ///
   /// When nil (default), `withArgs:` provides a Dictionary merged directly into
   /// state via `spawnWith:`.
@@ -127,6 +127,13 @@ typed Value subclass: SupervisionSpec
     startFn := self classMethod isNil ifTrue: [
       self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
     ] ifFalse: [#classMethod]
+    // Validate: when classMethod is set, args must be nil or a List — not a Dictionary
+    (self classMethod isNil not and: [
+      self args isNil not and: [self args isKindOf: Dictionary]
+    ])
+      ifTrue: [
+        self error: "SupervisionSpec>>childSpec: when classMethod is set, args must be a List #(...), not a Dictionary"
+      ]
     startArgs := self classMethod isNil
       ifTrue: [self args isNil ifTrue: [#()] ifFalse: [#(self args)]]
       ifFalse: [
