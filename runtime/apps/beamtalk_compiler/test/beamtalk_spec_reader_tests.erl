@@ -203,14 +203,252 @@ map_type_nonempty_list_test() ->
         beamtalk_spec_reader:map_type({type, 0, nonempty_list, [{type, 0, integer, []}]})
     ).
 
-%% Union types — map_type returns the first branch (simplified at this level)
+%% Union types — non-ok/error unions map each branch
 map_type_union_test() ->
     ?assertEqual(
-        <<"Integer">>,
+        <<"Integer | Float">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [{type, 0, integer, []}, {type, 0, float, []}]}
         )
     ).
+
+%% Union types — dedup identical mapped types
+map_type_union_dedup_test() ->
+    %% integer() | non_neg_integer() both map to Integer
+    ?assertEqual(
+        <<"Integer">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{type, 0, integer, []}, {type, 0, non_neg_integer, []}]}
+        )
+    ).
+
+%%% ---------------------------------------------------------------
+%%% Union types — ok/error Result recognition (ADR 0076 Phase 2)
+%%% ---------------------------------------------------------------
+
+%% {ok, binary()} | {error, posix()} → Result(String, Symbol)
+map_type_result_ok_error_test() ->
+    ?assertEqual(
+        <<"Result(String, Symbol)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]}
+            ]}
+        )
+    ).
+
+%% {ok, pid()} | {error, term()} → Result(Pid, Dynamic)
+map_type_result_pid_dynamic_test() ->
+    ?assertEqual(
+        <<"Result(Pid, Dynamic)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, pid, []}]},
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, term, []}]}
+            ]}
+        )
+    ).
+
+%% ok | {error, E} → Result(Nil, E) (bare ok in union)
+map_type_result_bare_ok_test() ->
+    ?assertEqual(
+        <<"Result(Nil, Symbol)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {atom, 0, ok},
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]}
+            ]}
+        )
+    ).
+
+%% {ok, T} without error branch → Result(T, Dynamic)
+map_type_result_ok_only_test() ->
+    %% {ok, T} | other — ok branch present, no error branch
+    ?assertEqual(
+        <<"Result(String, Dynamic) | Integer">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
+                {type, 0, integer, []}
+            ]}
+        )
+    ).
+
+%% {ok, T} as the sole branch in a union with no error branch
+map_type_result_ok_only_pure_test() ->
+    ?assertEqual(
+        <<"Result(String, Dynamic)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]}
+            ]}
+        )
+    ).
+
+%% {error, E} without ok branch → Result(Dynamic, E)
+map_type_result_error_only_test() ->
+    %% {error, E} | other — error branch present, no ok branch
+    ?assertEqual(
+        <<"Result(Dynamic, Symbol) | Integer">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]},
+                {type, 0, integer, []}
+            ]}
+        )
+    ).
+
+%% {error, E} as the sole branch in a union with no ok branch
+map_type_result_error_only_pure_test() ->
+    ?assertEqual(
+        <<"Result(Dynamic, Symbol)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]}
+            ]}
+        )
+    ).
+
+%% {ok, T} | {error, E} | Other → Result(T, E) | Other
+map_type_result_three_branch_test() ->
+    ?assertEqual(
+        <<"Result(String, Symbol) | Integer">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]},
+                {type, 0, integer, []}
+            ]}
+        )
+    ).
+
+%% term()/any() return type (no ok/error structure) → Dynamic (unchanged)
+map_type_result_term_unchanged_test() ->
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({type, 0, term, []})),
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({type, 0, any, []})).
+
+%% Bare error atom in union
+map_type_result_bare_error_test() ->
+    ?assertEqual(
+        <<"Result(String, Nil)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
+                {atom, 0, error}
+            ]}
+        )
+    ).
+
+%% Both bare ok and bare error
+map_type_result_both_bare_test() ->
+    ?assertEqual(
+        <<"Result(Nil, Nil)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {atom, 0, ok},
+                {atom, 0, error}
+            ]}
+        )
+    ).
+
+%%% ---------------------------------------------------------------
+%%% Real OTP module verification (ADR 0076 Phase 2)
+%%% ---------------------------------------------------------------
+
+%% file:read_file/1 → Result(String, ...) return type
+verify_file_read_file_result_test() ->
+    BeamFile = code:which(file),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+    ReadFileSpecs = [
+        S
+     || S <- Specs,
+        maps:get(name, S) =:= <<"read_file">>,
+        maps:get(arity, S) =:= 1
+    ],
+    ?assert(length(ReadFileSpecs) > 0),
+    [Spec | _] = ReadFileSpecs,
+    RetType = maps:get(return_type, Spec),
+    %% Should start with "Result(" — the ok type is String from binary()
+    ?assertMatch(<<"Result(String,", _/binary>>, RetType).
+
+%% timer:send_after/2 → Result return type
+verify_timer_send_after_result_test() ->
+    BeamFile = code:which(timer),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+    SendAfterSpecs = [
+        S
+     || S <- Specs,
+        maps:get(name, S) =:= <<"send_after">>,
+        maps:get(arity, S) =:= 2
+    ],
+    ?assert(length(SendAfterSpecs) > 0),
+    [Spec | _] = SendAfterSpecs,
+    RetType = maps:get(return_type, Spec),
+    %% Should be a Result type
+    ?assertMatch(<<"Result(", _/binary>>, RetType).
+
+%% application:start/1 → Result(Nil, ...) (bare ok in union)
+verify_application_start_result_test() ->
+    BeamFile = code:which(application),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+    StartSpecs = [
+        S
+     || S <- Specs,
+        maps:get(name, S) =:= <<"start">>,
+        maps:get(arity, S) =:= 1
+    ],
+    ?assert(length(StartSpecs) > 0),
+    [Spec | _] = StartSpecs,
+    RetType = maps:get(return_type, Spec),
+    %% Should be Result(Nil, ...) because of bare ok atom
+    ?assertMatch(<<"Result(Nil,", _/binary>>, RetType).
+
+%%% ---------------------------------------------------------------
+%%% Bounded fun with ok/error union (constraint resolution into Result)
+%%% ---------------------------------------------------------------
+
+%% Simulate: -spec read_file(Filename) -> {ok, Binary} | {error, Reason}
+%%           when Filename :: binary(), Binary :: binary(), Reason :: atom().
+%% This tests constraint resolution inside union branches.
+bounded_fun_result_with_constraints_test() ->
+    Forms = [
+        {attribute, 1, spec,
+            {{read_file, 1}, [
+                {type, 2, bounded_fun, [
+                    {type, 2, 'fun', [
+                        {type, 2, product, [{var, 2, 'Filename'}]},
+                        {type, 2, union, [
+                            {type, 2, tuple, [{atom, 2, ok}, {var, 2, 'Binary'}]},
+                            {type, 2, tuple, [{atom, 2, error}, {var, 2, 'Reason'}]}
+                        ]}
+                    ]},
+                    [
+                        {type, 3, constraint, [
+                            {atom, 3, is_subtype},
+                            [{var, 3, 'Filename'}, {type, 3, binary, []}]
+                        ]},
+                        {type, 4, constraint, [
+                            {atom, 4, is_subtype},
+                            [{var, 4, 'Binary'}, {type, 4, binary, []}]
+                        ]},
+                        {type, 5, constraint, [
+                            {atom, 5, is_subtype},
+                            [{var, 5, 'Reason'}, {type, 5, atom, []}]
+                        ]}
+                    ]
+                ]}
+            ]}}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Spec] = Result,
+    ?assertEqual(<<"read_file">>, maps:get(name, Spec)),
+    %% The union's type variables (Binary, Reason) must be resolved via constraints
+    %% before Result recognition, yielding Result(String, Symbol)
+    ?assertEqual(<<"Result(String, Symbol)">>, maps:get(return_type, Spec)).
 
 %%% ---------------------------------------------------------------
 %%% extract_param_names/1 — parameter name extraction
