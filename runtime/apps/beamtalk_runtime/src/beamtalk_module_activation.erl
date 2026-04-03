@@ -121,12 +121,16 @@ activate_ebin(EbinDir, Opts) ->
 %% (`_build/dev/native/ebin/` and rebar3 hex deps) to the BEAM code path.
 %%
 %% Equivalent to `activate_dependencies(ProjectPath, #{})`.
--spec activate_dependencies(file:filename()) -> [{module(), term()}].
+-spec activate_dependencies(file:filename()) -> [{atom(), term()}].
 activate_dependencies(ProjectPath) ->
     activate_dependencies(ProjectPath, #{}).
 
 %% @doc Activate all dependency packages with custom activation options.
--spec activate_dependencies(file:filename(), opts()) -> [{module(), term()}].
+%%
+%% Returns a (possibly empty) list of `{Name, Reason}` error pairs, where
+%% `Name` may be a module atom (activation failure) or an application name
+%% (`.app` load failure).
+-spec activate_dependencies(file:filename(), opts()) -> [{atom(), term()}].
 activate_dependencies(ProjectPath, Opts) ->
     DepsDir = filename:join([ProjectPath, "_build", "deps"]),
     DepErrors =

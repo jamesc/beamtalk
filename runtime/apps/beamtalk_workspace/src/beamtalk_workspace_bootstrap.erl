@@ -272,8 +272,10 @@ activate_project_modules(_Other) ->
 %% workspace-specific callback that registers each module in workspace_meta.
 %% Called by both bootstrap init (startup) and `:sync` (repl_ops_load).
 %%
-%% Returns a (possibly empty) list of `{Module, Reason}` error pairs.
--spec activate_dependency_modules(string()) -> [{module(), term()}].
+%% Returns a (possibly empty) list of `{Name, Reason}` error pairs, where
+%% `Name` may be either a module name or an application name for `.app` load
+%% failures reported by dependency activation.
+-spec activate_dependency_modules(string()) -> [{atom(), term()}].
 activate_dependency_modules(ProjectPath) ->
     Opts = #{
         on_activate => fun({Module, SourcePath}) ->
@@ -286,7 +288,7 @@ activate_dependency_modules(ProjectPath) ->
             ok;
         _ ->
             ?LOG_WARNING(
-                "Bootstrap: ~b dependency module(s) failed to activate",
+                "Dependency activation: ~b module(s) failed to activate",
                 [length(DepErrors)],
                 #{errors => DepErrors, domain => [beamtalk, runtime]}
             )
