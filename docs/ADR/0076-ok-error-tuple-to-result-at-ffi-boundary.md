@@ -105,26 +105,15 @@ This scope matches charlist coercion, which also only applies at the `direct_cal
 
 **The message asymmetry is deliberate:** converting messages would require hooking into OTP's message delivery, which is neither feasible nor desirable. Users receiving ok/error tuples from Erlang messages use `Tuple isOk`/`unwrap` as they do today — or call `Result fromTuple: tuple` to explicitly convert. This is a narrow inconsistency (FFI calls return Result, received messages return Tuple) but the alternative — converting in some message paths but not others — would be worse.
 
-**Round-trip escape hatch:**
-
-When a user needs to pass a Result back to Erlang as a tuple (e.g., forwarding a return value), Result provides a `toTuple` method:
+**No `toTuple` method is provided.** Erlang functions take *values* as arguments, not ok/error-wrapped tuples — the ok/error convention is a return pattern, not an input pattern. In the rare case where an Erlang function expects a tagged tuple as input, construct it directly:
 
 ```beamtalk
-// Get a Result from FFI
-result := Erlang file readFile: "/tmp/hello.txt"
-// => Result ok: "Hello, world!\n"
+// Extract the value to pass to another Erlang function:
+result := Erlang file open: path with: #(#read)
+result andThen: [:fd | Erlang file read: fd with: 1024]
 
-// Forward the raw tuple to an Erlang function
-Erlang myModule process: result toTuple
-// Erlang sees: {ok, <<"Hello, world!\n">>}
-```
-
-`toTuple` reconstructs an `{ok, Value}` or `{error, Reason}` tuple. For ok Results, the value is the original unwrapped value. For error Results, the reason is the wrapped exception object (not the original bare atom) — because `from_tagged_tuple/1` wraps error reasons via `ensure_wrapped/1`, the round-trip is `{error, enoent}` → `Result error: (ErlangError reason: #enoent)` → `{error, #beamtalk_error{...}}`. If the caller needs the original bare reason for Erlang interop, use `result error reason` to extract it:
-
-```beamtalk
-// Round-trip with original bare reason:
-result := Erlang file readFile: "/nonexistent"
-Erlang myModule handleError: result error reason  // passes #enoent (Symbol)
+// If you genuinely need an ok/error tuple (unusual):
+#(#ok, result value)
 ```
 
 ### 2. Type system: map Erlang specs to Result(T, E) in auto-extract
@@ -400,8 +389,8 @@ If a future proposal seeks a third coercion, it must satisfy all five criteria a
 ### Phase 1: Runtime Conversion (core change)
 - **beamtalk_erlang_proxy.erl:** Add `coerce_result/1` after `coerce_charlist_result/1` in the `direct_call/3` pipeline
 - **beamtalk_result.erl:** Add clauses for bare `ok`/`error` atoms in `from_tagged_tuple/1`
-- **Result.bt:** Add `toTuple` instance method (reconstructs `{ok, V}` or `{error, R}`) and `Result fromTuple:` class method (explicit conversion for messages/ETS)
-- **Tests:** EUnit tests for all conversion rules (2-element, bare atom, 3+ element passthrough, non-tuple passthrough); BUnit tests for `toTuple` round-tripping; e2e btscript tests for FFI calls returning Result
+- **Result.bt:** Add `Result fromTuple:` class method (explicit conversion for ok/error tuples received via messages)
+- **Tests:** EUnit tests for all conversion rules (2-element, bare atom, 3+ element passthrough, non-tuple passthrough); BUnit tests for `Result fromTuple:`; e2e btscript tests for FFI calls returning Result
 - **Affected components:** Runtime only (no parser/codegen changes)
 - **Effort:** S
 
@@ -451,14 +440,17 @@ result ifOk: [:content |
 result value  // raises on error, returns content on success
 ```
 
-### Code forwarding tuples to Erlang
+### Code forwarding results to Erlang
 
-If existing code passes an FFI result back to an Erlang function expecting a tuple, this will break because Result is a tagged map, not a tuple. This is expected to be rare — a codebase audit found **zero production instances** of constructing ok/error tuples to pass to Erlang. If needed, construct the tuple explicitly:
+Erlang functions take *values* as arguments, not ok/error-wrapped tuples. Extract the value from the Result and pass it directly:
 
 ```beamtalk
-// If you need to pass an ok/error tuple to Erlang:
-Erlang someModule process: #(#ok, value)
+// Extract the value to pass on:
+result := Erlang file open: path with: #(#read)
+result andThen: [:fd | Erlang file read: fd with: 1024]
 ```
+
+A codebase audit found **zero production instances** of constructing ok/error tuples to pass to Erlang. If genuinely needed, construct the tuple directly: `#(#ok, value)`.
 
 ### Tests using `erlang:list_to_tuple/1` to create ok/error tuples
 
