@@ -24,6 +24,7 @@ use crate::ast::{ClassDefinition, Expression, MessageSelector, Module};
 use crate::language_service::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
 use crate::semantic_analysis::class_hierarchy::MethodInfo;
 use crate::semantic_analysis::type_checker::TypeMap;
+use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
 
@@ -47,6 +48,7 @@ pub fn compute_signature_help(
     source: &str,
     position: Position,
     hierarchy: &ClassHierarchy,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<SignatureHelp> {
     #[expect(
         clippy::cast_possible_truncation,
@@ -58,9 +60,14 @@ pub fn compute_signature_help(
     // Search top-level expressions
     for stmt in &module.expressions {
         let context = SigHelpClassContext::TopLevel;
-        if let Some(help) =
-            find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
-        {
+        if let Some(help) = find_signature_in_expr(
+            &stmt.expression,
+            offset,
+            &context,
+            hierarchy,
+            &type_map,
+            native_types,
+        ) {
             return Some(help);
         }
     }
@@ -70,9 +77,14 @@ pub fn compute_signature_help(
         for method in &class.methods {
             let context = SigHelpClassContext::InstanceMethod(class);
             for stmt in &method.body {
-                if let Some(help) =
-                    find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
-                {
+                if let Some(help) = find_signature_in_expr(
+                    &stmt.expression,
+                    offset,
+                    &context,
+                    hierarchy,
+                    &type_map,
+                    native_types,
+                ) {
                     return Some(help);
                 }
             }
@@ -80,9 +92,14 @@ pub fn compute_signature_help(
         for method in &class.class_methods {
             let context = SigHelpClassContext::ClassMethod(class);
             for stmt in &method.body {
-                if let Some(help) =
-                    find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
-                {
+                if let Some(help) = find_signature_in_expr(
+                    &stmt.expression,
+                    offset,
+                    &context,
+                    hierarchy,
+                    &type_map,
+                    native_types,
+                ) {
                     return Some(help);
                 }
             }
@@ -97,9 +114,14 @@ pub fn compute_signature_help(
             SigHelpClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str())
         };
         for stmt in &smd.method.body {
-            if let Some(help) =
-                find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
-            {
+            if let Some(help) = find_signature_in_expr(
+                &stmt.expression,
+                offset,
+                &context,
+                hierarchy,
+                &type_map,
+                native_types,
+            ) {
                 return Some(help);
             }
         }
@@ -116,6 +138,7 @@ fn find_signature_in_expr(
     context: &SigHelpClassContext<'_>,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<SignatureHelp> {
     let span = expr.span();
     if offset < span.start() || offset > span.end() {
@@ -132,13 +155,13 @@ fn find_signature_in_expr(
         } => {
             // Check nested expressions first (inner-most message wins)
             if let Some(help) =
-                find_signature_in_expr(receiver, offset, context, hierarchy, type_map)
+                find_signature_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
             {
                 return Some(help);
             }
             for arg in arguments {
                 if let Some(help) =
-                    find_signature_in_expr(arg, offset, context, hierarchy, type_map)
+                    find_signature_in_expr(arg, offset, context, hierarchy, type_map, native_types)
                 {
                     return Some(help);
                 }
@@ -151,6 +174,18 @@ fn find_signature_in_expr(
                     let active_param = determine_active_parameter(parts, arguments, offset);
                     let selector_name = selector.name();
 
+                    // ADR 0075 Phase 4: FFI signature help for ErlangModule receivers
+                    if let Some(help) = resolve_ffi_signature_help(
+                        receiver,
+                        &selector_name,
+                        selector,
+                        active_param,
+                        type_map,
+                        native_types,
+                    ) {
+                        return Some(help);
+                    }
+
                     // Resolve receiver type and look up method
                     if let Some(method) =
                         resolve_method(receiver, &selector_name, context, hierarchy, type_map)
@@ -162,31 +197,57 @@ fn find_signature_in_expr(
             None
         }
         Expression::Block(block) => block.body.iter().find_map(|s| {
-            find_signature_in_expr(&s.expression, offset, context, hierarchy, type_map)
+            find_signature_in_expr(
+                &s.expression,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+            )
         }),
         Expression::Assignment { target, value, .. } => {
-            find_signature_in_expr(target, offset, context, hierarchy, type_map)
-                .or_else(|| find_signature_in_expr(value, offset, context, hierarchy, type_map))
+            find_signature_in_expr(target, offset, context, hierarchy, type_map, native_types)
+                .or_else(|| {
+                    find_signature_in_expr(
+                        value,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                    )
+                })
         }
         Expression::Return { value, .. } => {
-            find_signature_in_expr(value, offset, context, hierarchy, type_map)
+            find_signature_in_expr(value, offset, context, hierarchy, type_map, native_types)
         }
-        Expression::Parenthesized { expression, .. } => {
-            find_signature_in_expr(expression, offset, context, hierarchy, type_map)
-        }
+        Expression::Parenthesized { expression, .. } => find_signature_in_expr(
+            expression,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+        ),
         Expression::Cascade {
             receiver, messages, ..
         } => {
             if let Some(help) =
-                find_signature_in_expr(receiver, offset, context, hierarchy, type_map)
+                find_signature_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
             {
                 return Some(help);
             }
             for msg in messages {
                 for arg in &msg.arguments {
-                    if let Some(help) =
-                        find_signature_in_expr(arg, offset, context, hierarchy, type_map)
-                    {
+                    if let Some(help) = find_signature_in_expr(
+                        arg,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                    ) {
                         return Some(help);
                     }
                 }
@@ -206,36 +267,152 @@ fn find_signature_in_expr(
             None
         }
         Expression::Match { value, arms, .. } => {
-            find_signature_in_expr(value, offset, context, hierarchy, type_map).or_else(|| {
-                arms.iter().find_map(|arm| {
-                    find_signature_in_expr(&arm.body, offset, context, hierarchy, type_map)
+            find_signature_in_expr(value, offset, context, hierarchy, type_map, native_types)
+                .or_else(|| {
+                    arms.iter().find_map(|arm| {
+                        find_signature_in_expr(
+                            &arm.body,
+                            offset,
+                            context,
+                            hierarchy,
+                            type_map,
+                            native_types,
+                        )
+                    })
                 })
-            })
         }
         Expression::FieldAccess { receiver, .. } => {
-            find_signature_in_expr(receiver, offset, context, hierarchy, type_map)
+            find_signature_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
         }
         Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
-            find_signature_in_expr(&pair.key, offset, context, hierarchy, type_map).or_else(|| {
-                find_signature_in_expr(&pair.value, offset, context, hierarchy, type_map)
+            find_signature_in_expr(
+                &pair.key,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+            )
+            .or_else(|| {
+                find_signature_in_expr(
+                    &pair.value,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                )
             })
         }),
         Expression::ListLiteral { elements, tail, .. } => elements
             .iter()
-            .find_map(|e| find_signature_in_expr(e, offset, context, hierarchy, type_map))
+            .find_map(|e| {
+                find_signature_in_expr(e, offset, context, hierarchy, type_map, native_types)
+            })
             .or_else(|| {
-                tail.as_ref()
-                    .and_then(|t| find_signature_in_expr(t, offset, context, hierarchy, type_map))
+                tail.as_ref().and_then(|t| {
+                    find_signature_in_expr(t, offset, context, hierarchy, type_map, native_types)
+                })
             }),
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
             if let crate::ast::StringSegment::Interpolation(expr) = seg {
-                find_signature_in_expr(expr, offset, context, hierarchy, type_map)
+                find_signature_in_expr(expr, offset, context, hierarchy, type_map, native_types)
             } else {
                 None
             }
         }),
         _ => None,
     }
+}
+
+/// Resolves FFI signature help for `ErlangModule` receivers (ADR 0075 Phase 4).
+///
+/// When the receiver is typed as `ErlangModule<module_name>`, extracts the Erlang
+/// module and function name, looks up the signature in `NativeTypeRegistry`, and
+/// builds a `SignatureHelp` with typed parameter info.
+fn resolve_ffi_signature_help(
+    receiver: &Expression,
+    selector_name: &str,
+    selector: &MessageSelector,
+    active_param: u32,
+    type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
+) -> Option<SignatureHelp> {
+    // Check if receiver is typed as ErlangModule
+    let receiver_ty = type_map.get(receiver.span())?;
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = receiver_ty
+    else {
+        return None;
+    };
+    if class_name != "ErlangModule" {
+        return None;
+    }
+
+    // Extract module name from type args
+    let module_name = match type_args.first() {
+        Some(InferredType::Known { class_name, .. }) => class_name.as_str(),
+        _ => return None,
+    };
+
+    // Extract function name and arity
+    let function_name = selector_name.split(':').next().unwrap_or(selector_name);
+    let arity = match selector {
+        MessageSelector::Keyword(parts) => u8::try_from(parts.len()).unwrap_or(u8::MAX),
+        _ => return None, // Signature help only for keyword messages
+    };
+
+    let registry = native_types?;
+    let sig = registry.lookup(module_name, function_name, arity)?;
+
+    // Build signature help from the FFI signature
+    let mut parameters = Vec::with_capacity(sig.params.len());
+    let mut label_fragments = Vec::with_capacity(sig.params.len());
+
+    for (i, param) in sig.params.iter().enumerate() {
+        let keyword = if i == 0 {
+            format!("{function_name}:")
+        } else {
+            match &param.keyword {
+                Some(kw) => format!("{kw}:"),
+                None => "with:".to_string(),
+            }
+        };
+        let param_name = param.keyword.as_deref().unwrap_or("arg");
+        let type_display = param
+            .type_
+            .display_name()
+            .unwrap_or_else(|| EcoString::from("Dynamic"));
+        let param_label = format!("{keyword} {param_name} :: {type_display}");
+        label_fragments.push(param_label.clone());
+        parameters.push(ParameterInfo {
+            label: EcoString::from(param_label),
+            documentation: Some(EcoString::from(format!("Type: {type_display}"))),
+        });
+    }
+
+    let ret_display = sig
+        .return_type
+        .display_name()
+        .unwrap_or_else(|| EcoString::from("Dynamic"));
+    let label = format!("{} -> {ret_display}", label_fragments.join(" "));
+
+    let documentation = Some(EcoString::from(format!(
+        "Erlang FFI: `{module_name}:{function_name}/{arity}`"
+    )));
+
+    Some(SignatureHelp {
+        signatures: vec![SignatureInfo {
+            label: EcoString::from(label),
+            documentation,
+            parameters,
+        }],
+        active_signature: 0,
+        active_parameter: active_param,
+    })
 }
 
 /// Determines which parameter is active based on cursor position relative to keyword parts.
@@ -391,7 +568,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_signature_help(&module, source, position, &hierarchy)
+        compute_signature_help(&module, source, position, &hierarchy, None)
     }
 
     #[test]
@@ -418,7 +595,8 @@ mod tests {
         // Position in `self add: 1 to: 2` — cursor on `to:` (line 2, col 23)
         // Line 2: "  run => self add: 1 to: 2"
         //          0123456789012345678901234567
-        let result = compute_signature_help(&module, source, Position::new(2, 23), &hierarchy);
+        let result =
+            compute_signature_help(&module, source, Position::new(2, 23), &hierarchy, None);
         let help = result.expect("should find signature help for self add:to:");
         assert_eq!(help.signatures.len(), 1);
         assert_eq!(help.signatures[0].parameters.len(), 2);
@@ -445,7 +623,8 @@ mod tests {
         // Cursor right after `add:` — should be param 0
         // Line 2: "  run => self add: 1 to: 2"
         //                       ^-- col 19
-        let result = compute_signature_help(&module, source, Position::new(2, 19), &hierarchy);
+        let result =
+            compute_signature_help(&module, source, Position::new(2, 19), &hierarchy, None);
         let help = result.expect("should get signature help at 'add:' position");
         assert_eq!(
             help.active_parameter, 0,
@@ -455,11 +634,90 @@ mod tests {
         // Cursor right after `to:` — should be param 1
         // Line 2: "  run => self add: 1 to: 2"
         //                               ^-- col 24
-        let result = compute_signature_help(&module, source, Position::new(2, 24), &hierarchy);
+        let result =
+            compute_signature_help(&module, source, Position::new(2, 24), &hierarchy, None);
         let help = result.expect("should get signature help at 'to:' position");
         assert_eq!(
             help.active_parameter, 1,
             "cursor after 'to:' should be param 1"
+        );
+    }
+
+    // --- FFI signature help tests (ADR 0075 Phase 4) ---
+
+    #[test]
+    fn ffi_signature_help_shows_typed_params() {
+        use crate::semantic_analysis::InferredType;
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let source = "Erlang lists seq: 1 to: 10";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "seq".to_string(),
+                arity: 2,
+                params: vec![
+                    ParamType {
+                        keyword: Some(ecow::EcoString::from("from")),
+                        type_: InferredType::known("Integer"),
+                    },
+                    ParamType {
+                        keyword: Some(ecow::EcoString::from("to")),
+                        type_: InferredType::known("Integer"),
+                    },
+                ],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+            }],
+        );
+
+        // Position inside `seq: 1 to: 10` — cursor on "to:" (line 0, col 20)
+        // Source: "Erlang lists seq: 1 to: 10"
+        //          0123456789012345678901234567
+        let result = compute_signature_help(
+            &module,
+            source,
+            Position::new(0, 20),
+            &hierarchy,
+            Some(&registry),
+        );
+        let help = result.expect("should find FFI signature help");
+        assert_eq!(help.signatures.len(), 1);
+        assert_eq!(help.signatures[0].parameters.len(), 2);
+        assert!(
+            help.signatures[0].label.contains("Integer"),
+            "FFI sig help should show Integer type. Got: {}",
+            help.signatures[0].label
+        );
+        assert!(
+            help.signatures[0].label.contains("List"),
+            "FFI sig help should show List return type. Got: {}",
+            help.signatures[0].label
+        );
+    }
+
+    #[test]
+    fn ffi_signature_help_without_registry_falls_through() {
+        let source = "Erlang lists seq: 1 to: 10";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Without registry, signature help should still work (falls through to normal resolution)
+        let result =
+            compute_signature_help(&module, source, Position::new(0, 20), &hierarchy, None);
+        // ErlangModule doesn't have a "seq:to:" method in the hierarchy, so no result
+        assert!(
+            result.is_none(),
+            "Without registry, FFI sig help should not resolve"
         );
     }
 }

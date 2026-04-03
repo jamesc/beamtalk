@@ -83,6 +83,32 @@ pub fn compute_diagnostics_with_known_vars(
     all_diagnostics
 }
 
+/// Computes diagnostics with native type registry for FFI type warnings (ADR 0075).
+///
+/// When `native_types` is `Some`, FFI calls get typed return inference and
+/// keyword mismatch / argument type warnings from the registry.
+#[must_use]
+pub fn compute_diagnostics_with_native_types(
+    module: &crate::ast::Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    native_types: Option<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+) -> Vec<Diagnostic> {
+    let mut all_diagnostics = parse_diagnostics;
+
+    if native_types.is_some() {
+        let options = crate::CompilerOptions::default();
+        let analysis_result =
+            crate::semantic_analysis::analyse_with_natives(module, &options, vec![], native_types);
+        all_diagnostics.extend(analysis_result.diagnostics);
+    } else {
+        let analysis_result = crate::semantic_analysis::analyse(module);
+        all_diagnostics.extend(analysis_result.diagnostics);
+    }
+
+    apply_expect_directives(module, &mut all_diagnostics);
+    all_diagnostics
+}
+
 /// Computes diagnostics with pre-defined REPL variables and pre-loaded class
 /// entries from BEAM metadata (ADR 0050 Phase 4).
 ///

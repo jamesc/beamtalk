@@ -606,9 +606,12 @@ impl LanguageService for SimpleLanguageService {
     fn diagnostics(&self, file: &Utf8PathBuf) -> Vec<Diagnostic> {
         self.get_file(file)
             .map(|data| {
-                crate::queries::diagnostic_provider::compute_diagnostics(
+                // ADR 0075 Phase 4: Pass NativeTypeRegistry so FFI type warnings
+                // surface in the editor as diagnostics.
+                crate::queries::diagnostic_provider::compute_diagnostics_with_native_types(
                     &data.module,
                     data.diagnostics.clone(),
+                    self.native_types.clone(),
                 )
             })
             .unwrap_or_default()
@@ -643,6 +646,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
+            self.native_types.as_ref(),
         )
     }
 
@@ -654,6 +658,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
+            self.native_types.as_ref(),
         )
     }
 
