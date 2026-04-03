@@ -1009,6 +1009,139 @@ fn unclosed_map_literal_bare_eof_terminates() {
     let _diagnostics = parse_err("#{key");
 }
 
+// ========================================================================
+// Nested keyword messages in map literal values (BT-1854)
+// ========================================================================
+
+/// Regression test: keyword message as a map value should parse correctly.
+/// `#{#key => Foo new: #{#a => 1}}` should parse the nested keyword send
+/// as the value, not break out prematurely.
+#[test]
+fn parse_map_value_keyword_message_with_map_arg() {
+    let module = parse_ok("#{#session => SessionInfo new: #{#turnCount => 0}}");
+    match &module.expressions[0].expression {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(pairs.len(), 1);
+            // The value should be a keyword send `SessionInfo new: #{#turnCount => 0}`
+            match &pairs[0].value {
+                Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } => {
+                    assert_eq!(selector.name(), "new:");
+                    assert!(
+                        matches!(&arguments[0], Expression::MapLiteral { .. }),
+                        "Expected map literal as keyword argument"
+                    );
+                }
+                other => panic!("Expected keyword message send as map value, got: {other:?}"),
+            }
+        }
+        other => panic!("Expected map literal, got: {other:?}"),
+    }
+}
+
+/// Multiple map entries where one value is a keyword message with a map arg.
+#[test]
+fn parse_map_nested_keyword_with_multiple_entries() {
+    let module =
+        parse_ok("#{#session => SessionInfo new: #{#turnCount => 0}, #tokens => TokenUsage new}");
+    match &module.expressions[0].expression {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(pairs.len(), 2);
+            // First value: keyword send
+            assert!(
+                matches!(&pairs[0].value, Expression::MessageSend { selector, .. }
+                    if selector.name() == "new:"),
+                "First value should be keyword send `new:`"
+            );
+            // Second value: unary send
+            assert!(
+                matches!(&pairs[1].value, Expression::MessageSend { selector, .. }
+                    if selector.name() == "new"),
+                "Second value should be unary send `new`"
+            );
+        }
+        other => panic!("Expected map literal, got: {other:?}"),
+    }
+}
+
+/// Map value with keyword message and binary operators in the argument.
+#[test]
+fn parse_map_value_keyword_with_binary_arg() {
+    let module = parse_ok("#{#result => Calculator add: 1 + 2}");
+    match &module.expressions[0].expression {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(pairs.len(), 1);
+            assert!(
+                matches!(&pairs[0].value, Expression::MessageSend { selector, .. }
+                    if selector.name() == "add:"),
+                "Value should be keyword send `add:`"
+            );
+            // Verify the argument is a binary `+` expression (precedence check)
+            if let Expression::MessageSend { arguments, .. } = &pairs[0].value {
+                assert!(
+                    matches!(&arguments[0], Expression::MessageSend { selector, .. }
+                        if selector.name() == "+"),
+                    "Expected binary `+` expression as `add:` argument"
+                );
+            }
+        }
+        other => panic!("Expected map literal, got: {other:?}"),
+    }
+}
+
+/// Multiline nested keyword messages in map literal (exact syntax from BT-1854).
+#[test]
+fn parse_map_multiline_nested_keyword() {
+    let module = parse_ok(
+        "RunningEntry new: #{
+  #session => SessionInfo new: #{#turnCount => 0},
+  #tokens => TokenUsage new
+}",
+    );
+    match &module.expressions[0].expression {
+        Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } => {
+            assert_eq!(selector.name(), "new:");
+            match &arguments[0] {
+                Expression::MapLiteral { pairs, .. } => {
+                    assert_eq!(pairs.len(), 2);
+                }
+                other => panic!("Expected map literal argument, got: {other:?}"),
+            }
+        }
+        other => panic!("Expected keyword message send, got: {other:?}"),
+    }
+}
+
+/// Multi-keyword message as a map value should parse all keywords as one send.
+#[test]
+fn parse_map_value_multi_keyword_message() {
+    let module = parse_ok("#{#item => Array at: 0 put: 99}");
+    match &module.expressions[0].expression {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(pairs.len(), 1);
+            match &pairs[0].value {
+                Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } => {
+                    assert_eq!(selector.name(), "at:put:");
+                    assert_eq!(arguments.len(), 2);
+                }
+                other => panic!("Expected multi-keyword send as map value, got: {other:?}"),
+            }
+        }
+        other => panic!("Expected map literal, got: {other:?}"),
+    }
+}
+
 #[test]
 fn parse_exponentiation_operator() {
     // BT-414: `**` is a binary operator
