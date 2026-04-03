@@ -83,6 +83,19 @@ sealed typed Value subclass: Result(T, E)
   class sealed tryDo: block :: Block -> Result =>
     (Erlang beamtalk_result) tryDo: block
 
+  /// Convert an Erlang-style tagged tuple to a Result (class method).
+  ///
+  /// Accepts `{ok, V}` and `{error, R}` tuples from Erlang messages or
+  /// other non-FFI sources. Raises on tuples that are not ok/error tagged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Result fromTuple: (Tuple withAll: #(#ok, 42))       // => Result ok: 42
+  /// Result fromTuple: (Tuple withAll: #(#error, #oops)) // => Result error: ...
+  /// ```
+  class fromTuple: tuple :: Tuple -> Result =>
+    (Erlang beamtalk_result) fromTuple: tuple
+
   // ===== Instance Methods — Querying =====
 
   /// True if this Result holds a success value.
