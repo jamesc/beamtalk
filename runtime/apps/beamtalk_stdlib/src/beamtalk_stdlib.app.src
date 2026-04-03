@@ -27,7 +27,7 @@
             #{name => 'Erlang', module => 'bt@stdlib@erlang', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ErlangModule', module => 'bt@stdlib@erlang_module', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Error', module => 'bt@stdlib@error', parent => 'Exception', package => 'stdlib', kind => object, type_params => []},
-            #{name => 'Ets', module => 'bt@stdlib@ets', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Ets', module => 'bt@stdlib@ets', parent => 'Object', package => 'stdlib', kind => object, type_params => ['K', 'V']},
             #{name => 'Exception', module => 'bt@stdlib@exception', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ExitError', module => 'bt@stdlib@exit_error', parent => 'BEAMError', package => 'stdlib', kind => object, type_params => []},
             #{name => 'False', module => 'bt@stdlib@false', parent => 'Boolean', package => 'stdlib', kind => object, type_params => []},

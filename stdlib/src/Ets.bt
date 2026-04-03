@@ -39,7 +39,7 @@
 /// shared := Ets named: #sharedCache
 /// shared at: "counter" put: 1
 /// ```
-typed Object subclass: Ets
+typed Object subclass: Ets(K, V)
 
   /// Create a new named public ETS table (class method).
   ///
@@ -104,7 +104,7 @@ typed Object subclass: Ets
   /// ```beamtalk
   /// cache at: "key"        // => value or nil
   /// ```
-  at: key :: Object -> Object => (Erlang beamtalk_ets) lookup: self key: key
+  at: key :: K -> V | nil => (Erlang beamtalk_ets) lookup: self key: key
 
   /// Insert or replace a key-value pair. Returns `nil`.
   ///
@@ -118,7 +118,7 @@ typed Object subclass: Ets
   /// ```beamtalk
   /// cache at: "counter" put: 1
   /// ```
-  at: key :: Object put: value :: Object -> Nil =>
+  at: key :: K put: value :: V -> Nil =>
     (Erlang beamtalk_ets)
       insert: self
       key: key
@@ -134,7 +134,7 @@ typed Object subclass: Ets
   /// cache at: "missing" ifAbsent: [0]    // => 0
   /// cache at: "key"     ifAbsent: [0]    // => stored value
   /// ```
-  at: key :: Object ifAbsent: block :: Block -> Object =>
+  at: key :: K ifAbsent: block :: Block(V) -> V =>
     (Erlang beamtalk_ets)
       lookupIfAbsent: self
       key: key
@@ -146,7 +146,7 @@ typed Object subclass: Ets
   /// ```beamtalk
   /// cache includesKey: "key"    // => true or false
   /// ```
-  includesKey: key :: Object -> Boolean =>
+  includesKey: key :: K -> Boolean =>
     (Erlang beamtalk_ets) includesKey: self key: key
 
   /// Remove the entry for `key`. Returns `nil`. Idempotent if key is absent.
@@ -155,8 +155,7 @@ typed Object subclass: Ets
   /// ```beamtalk
   /// cache removeKey: "oldKey"
   /// ```
-  removeKey: key :: Object -> Nil =>
-    (Erlang beamtalk_ets) removeKey: self key: key
+  removeKey: key :: K -> Nil => (Erlang beamtalk_ets) removeKey: self key: key
 
   /// Return all keys in the table as a `List`.
   ///
@@ -168,7 +167,7 @@ typed Object subclass: Ets
   /// ```beamtalk
   /// cache keys    // => #("key1", "key2")
   /// ```
-  keys -> List => (Erlang beamtalk_ets) keys: self
+  keys -> List(K) => (Erlang beamtalk_ets) keys: self
 
   /// Return the number of entries in the table.
   ///
