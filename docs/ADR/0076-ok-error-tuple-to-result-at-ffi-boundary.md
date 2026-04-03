@@ -5,7 +5,7 @@ Proposed (2026-04-03)
 
 ## Context
 
-Erlang's most common return pattern — `{ok, Value} | {error, Reason}` — currently passes through the FFI proxy as a raw Beamtalk `Tuple`. Users must use `isOk`/`unwrap` from the Tuple class, losing inner type information and access to Result's combinator methods (`map:`, `andThen:`, `mapError:`, `ifOk:ifError:`).
+Erlang's most common return pattern — `{ok, Value} | {error, Reason}` — currently passes through the FFI proxy as a raw Beamtalk `Tuple`. Users must call Tuple's `isOk`/`unwrap` instance methods on the result, losing inner type information and access to Result's combinator methods (`map:`, `andThen:`, `mapError:`, `ifOk:ifError:`).
 
 ADR 0075 (Erlang FFI Type Definitions) identifies this as the **single largest gap** in typed FFI coverage:
 
@@ -79,13 +79,15 @@ coerce_result(Result) ->
         {error, Reason} ->
             beamtalk_result:from_tagged_tuple({error, Reason});
         ok ->
-            beamtalk_result:from_tagged_tuple({ok, nil});
+            beamtalk_result:ok(nil);
         error ->
-            beamtalk_result:from_tagged_tuple({error, nil});
+            beamtalk_result:make_error(nil);
         Other ->
             Other
     end.
 ```
+
+Note: bare `ok`/`error` atoms use `ok/1` and `make_error/1` directly rather than `from_tagged_tuple/1`, because `from_tagged_tuple({error, nil})` would wrap `nil` through `ensure_wrapped/1` producing a wrapped Exception object. For bare `error` with no reason, we want a literal `nil` error reason, not a wrapped exception.
 
 This integrates into the existing coercion pipeline alongside charlist coercion — the result of `coerce_charlist_result/1` feeds into `coerce_result/1`.
 
@@ -243,7 +245,7 @@ Kotlin removes Java's checked exception requirement but doesn't convert to a Res
 ## User Impact
 
 ### Newcomer (from Python/JS/Ruby)
-**Positive.** Pattern matching on tuples is unfamiliar; `Result` with `map:`, `value`, and `isOk` feels like working with `Optional` or `Promise`. Error handling via combinators is more intuitive than positional tuple extraction. The REPL shows `Result ok: "..."` which is self-documenting.
+**Positive.** Pattern matching on tuples is unfamiliar; `Result` with `map:`, `value`, and `ok`/`isError` feels like working with `Optional` or `Promise`. Error handling via combinators is more intuitive than positional tuple extraction. The REPL shows `Result ok: "..."` which is self-documenting.
 
 ### Smalltalk developer
 **Mostly positive.** Result is a proper object with methods — more aligned with message-passing philosophy than raw tuples. Smalltalk traditionally uses exceptions for errors, so Result is a pragmatic departure, but the combinator API (`map:`, `andThen:`) follows familiar block-passing patterns.
@@ -377,7 +379,7 @@ If a future proposal seeks a third coercion, it must satisfy all five criteria a
 - **Second exception to transparent interop (ADR 0028):** ok/error tuples are no longer passed through verbatim. Justified by the same rationale as charlist coercion — user ergonomics outweigh purity for this high-frequency pattern
 - **Slight runtime overhead:** One pattern match per FFI return value. Negligible — `case` on tuple tag is a single BEAM instruction
 - **BEAM veteran surprise:** Developers expecting raw tuples will initially encounter Result objects. Mitigated by clear documentation and the fact that Result provides a strict superset of the information
-- **Existing code using Tuple methods breaks:** Code calling `isOk`/`unwrap` on FFI returns will get a `does_not_understand` error since Result doesn't respond to `at:`. Migration path provided below
+- **Existing code using Tuple-only methods breaks:** Code calling `isOk` or `at:` (positional extraction) on FFI returns will get a `does_not_understand` error since Result uses `ok` instead of `isOk` and doesn't support positional access. Note that `unwrap` and `isError` work on both Tuple and Result, so code using those methods continues to work. Migration path provided below
 - **FFI/message asymmetry:** ok/error tuples from FFI calls become Result, but ok/error tuples received as messages from Erlang processes remain Tuple. This is a narrow inconsistency — documented in the scope section above, with `Result fromTuple:` available for explicit message conversion
 - **Observer/recon display:** Result objects display as tagged maps (`#{'$beamtalk_class' => 'Result', ...}`) in Erlang debugging tools rather than the familiar `{ok, Value}` tuple. BEAM veterans inspecting process state may find this disorienting initially. Mitigated by the `'$beamtalk_class' => 'Result'` tag making the intent clear
 
