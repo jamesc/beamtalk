@@ -486,8 +486,22 @@ t := Tuple withAll: #(#ok, 42)
 - `stdlib/test/pattern_matching_test.bt` (~2 test methods)
 - `docs/learning/fixtures/ch14tuple_destructuring.bt` (~3 examples)
 
+## Implementation Tracking
+
+**Epic:** BT-1863
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 1 | BT-1864 | Runtime: coerce ok/error tuples to Result in FFI proxy | S | — |
+| 1 | BT-1865 | Stdlib: add Result fromTuple: class method | S | BT-1864 |
+| 1 | BT-1866 | Migrate tests from list_to_tuple to Tuple withAll: | S | BT-1864 |
+| 2 | BT-1867 | Spec reader: recognize ok/error unions as Result(T, E) | M | BT-1864 |
+| 3 | BT-1868 | E2E btscript tests for FFI Result conversion | S | BT-1864, BT-1865 |
+| 3 | BT-1869 | Documentation: FFI Result conversion and migration guide | S | BT-1864, BT-1868 |
+
 ## References
-- Related issues: BT-1838, BT-1127 (charlist coercion precedent)
+- Related issues: BT-1838, BT-1863 (epic), BT-1127 (charlist coercion precedent)
 - Related ADRs: ADR 0028 (BEAM interop — transparent interop principle), ADR 0060 (Result type — hybrid error handling), ADR 0068 (parametric types — `Result(T, E)` generics), ADR 0075 (Erlang FFI type definitions — spec extraction pipeline)
 - Gate evaluation: `docs/ADR/0075-gate-evaluation.md` — 86.5% useful types in top-20 OTP modules
 - Prior art: Swift/Obj-C automatic NSError → throws conversion, Gleam identical representation, Elixir manual `with` macro
