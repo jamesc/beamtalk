@@ -9193,3 +9193,272 @@ fn test_ffi_member_returns_boolean() {
         "member should return Boolean"
     );
 }
+
+// ---- BT-1861: Warn on type args for classes with no type params ----
+
+#[test]
+fn test_type_annotation_arity_integer_with_args_warns() {
+    // state: x :: Integer(String) → warning: Integer has no type params
+    let state = vec![StateDeclaration::with_type(
+        ident("x"),
+        TypeAnnotation::Generic {
+            base: ident("Integer"),
+            parameters: vec![TypeAnnotation::Simple(ident("String"))],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 arity warning, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("Integer"));
+}
+
+#[test]
+fn test_type_annotation_arity_dictionary_with_args_no_warn() {
+    // state: x :: Dictionary(Symbol, Integer) → no warning (Dictionary has K, V)
+    let state = vec![StateDeclaration::with_type(
+        ident("x"),
+        TypeAnnotation::Generic {
+            base: ident("Dictionary"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Symbol")),
+                TypeAnnotation::Simple(ident("Integer")),
+            ],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "No arity warnings expected for Dictionary(K, V), got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_type_annotation_arity_result_with_args_no_warn() {
+    // state: x :: Result(Integer, Error) → no warning (Result has T, E)
+    let state = vec![StateDeclaration::with_type(
+        ident("x"),
+        TypeAnnotation::Generic {
+            base: ident("Result"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "No arity warnings expected for Result(T, E), got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_type_annotation_arity_boolean_with_args_warns() {
+    // state: flag :: Boolean(Integer) → warning: Boolean has no type params
+    let state = vec![StateDeclaration::with_type(
+        ident("flag"),
+        TypeAnnotation::Generic {
+            base: ident("Boolean"),
+            parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 arity warning for Boolean(Integer), got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("Boolean"));
+}
+
+#[test]
+fn test_type_annotation_arity_nested_warns() {
+    // state: x :: Result(Integer(String), Error) → warning for Integer(String)
+    // Result(T, E) is fine, but Integer(String) nested inside it should warn
+    let state = vec![StateDeclaration::with_type(
+        ident("x"),
+        TypeAnnotation::Generic {
+            base: ident("Result"),
+            parameters: vec![
+                TypeAnnotation::Generic {
+                    base: ident("Integer"),
+                    parameters: vec![TypeAnnotation::Simple(ident("String"))],
+                    span: span(),
+                },
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 nested arity warning, got: {warnings:?}"
+    );
+    assert!(warnings[0].message.contains("Integer"));
+}
+
+#[test]
+fn test_type_annotation_arity_unknown_class_no_warn() {
+    // state: x :: UnknownClass(String) → no arity warning (class is unknown)
+    let state = vec![StateDeclaration::with_type(
+        ident("x"),
+        TypeAnnotation::Generic {
+            base: ident("UnknownClass"),
+            parameters: vec![TypeAnnotation::Simple(ident("String"))],
+            span: span(),
+        },
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "No arity warnings expected for unknown class, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_type_annotation_arity_method_param_warns() {
+    // Method param x :: Integer(String) → should also warn
+    let method = MethodDefinition {
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "doWith:".into(),
+            span: span(),
+        }]),
+        parameters: vec![ParameterDefinition::with_type(
+            ident("x"),
+            TypeAnnotation::Generic {
+                base: ident("Integer"),
+                parameters: vec![TypeAnnotation::Simple(ident("String"))],
+                span: span(),
+            },
+        )],
+        body: vec![bare(int_lit(0))],
+        return_type: None,
+        is_sealed: false,
+        kind: MethodKind::Primary,
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: span(),
+    };
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 arity warning for method param, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("Integer"));
+}
+
+#[test]
+fn test_type_annotation_arity_return_type_warns() {
+    // Method -> Integer(String) → should also warn
+    let method = MethodDefinition::with_return_type(
+        MessageSelector::Unary("compute".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        TypeAnnotation::Generic {
+            base: ident("Integer"),
+            parameters: vec![TypeAnnotation::Simple(ident("String"))],
+            span: span(),
+        },
+        span(),
+    );
+    let class = counter_class_with_typed_state(vec![method], vec![]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("no type parameters"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 arity warning for return type, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(warnings[0].message.contains("Integer"));
+}

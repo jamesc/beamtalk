@@ -1509,4 +1509,144 @@ impl TypeChecker {
             }
         }
     }
+
+    /// Walk all type annotations in a module and warn when type arguments are
+    /// provided for a class that declares no type parameters.
+    ///
+    /// For example, `state: x :: Integer(String)` is almost certainly a mistake
+    /// since `Integer` has no type parameters — the `(String)` is silently
+    /// discarded. Emitting a warning prevents this footgun (BT-1861).
+    pub(super) fn check_type_annotation_arity_in_module(
+        &mut self,
+        module: &crate::ast::Module,
+        hierarchy: &ClassHierarchy,
+    ) {
+        for class in &module.classes {
+            // Collect the class's own type parameter names so we skip them
+            let class_type_params: Vec<&str> = class
+                .type_params
+                .iter()
+                .map(|tp| tp.name.name.as_str())
+                .collect();
+
+            // Check state field type annotations
+            for state_decl in &class.state {
+                if let Some(ref ann) = state_decl.type_annotation {
+                    self.check_type_annotation_arity(ann, hierarchy, &class_type_params);
+                }
+            }
+
+            // Check method parameter and return type annotations
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for param in &method.parameters {
+                    if let Some(ref ann) = param.type_annotation {
+                        self.check_type_annotation_arity(ann, hierarchy, &class_type_params);
+                    }
+                }
+                if let Some(ref ann) = method.return_type {
+                    self.check_type_annotation_arity(ann, hierarchy, &class_type_params);
+                }
+            }
+
+            // Check superclass type args
+            for arg in &class.superclass_type_args {
+                self.check_type_annotation_arity(arg, hierarchy, &class_type_params);
+            }
+        }
+
+        // Check standalone method definitions
+        for standalone in &module.method_definitions {
+            let class_type_params: Vec<&str> = hierarchy
+                .get_class(&standalone.class_name.name)
+                .map(|info| info.type_params.iter().map(EcoString::as_str).collect())
+                .unwrap_or_default();
+
+            for param in &standalone.method.parameters {
+                if let Some(ref ann) = param.type_annotation {
+                    self.check_type_annotation_arity(ann, hierarchy, &class_type_params);
+                }
+            }
+            if let Some(ref ann) = standalone.method.return_type {
+                self.check_type_annotation_arity(ann, hierarchy, &class_type_params);
+            }
+        }
+    }
+
+    /// Check a single type annotation for arity mismatches.
+    ///
+    /// Warns when a `Generic` annotation names a class that has no type
+    /// parameters. Recurses into nested annotations (union members, generic
+    /// args, false-or inner) so that e.g. `Result(Integer(String), Error)` is
+    /// also caught.
+    fn check_type_annotation_arity(
+        &mut self,
+        ann: &TypeAnnotation,
+        hierarchy: &ClassHierarchy,
+        class_type_params: &[&str],
+    ) {
+        match ann {
+            TypeAnnotation::Generic {
+                base,
+                parameters,
+                span,
+            } => {
+                let base_name = &base.name;
+
+                // Skip if the base is a type parameter of the enclosing class
+                // (e.g., `T(Integer)` where T is a class type param — unusual
+                // but not something we can validate statically).
+                if class_type_params.contains(&base_name.as_str()) {
+                    return;
+                }
+
+                // Skip single-letter uppercase names (generic type params like T, E, K, V)
+                if super::is_generic_type_param(base_name) {
+                    return;
+                }
+
+                // Block uses type args as function signature documentation
+                // (e.g., Block(Integer, String) for a block taking Integer and
+                // returning String) even though Block has no formal type params.
+                if base_name == "Block" {
+                    return;
+                }
+
+                // Only warn if the class is known in the hierarchy and has no type params.
+                // Unknown classes are handled elsewhere (unknown-class warnings).
+                if let Some(class_info) = hierarchy.get_class(base_name) {
+                    if class_info.type_params.is_empty() {
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "{base_name} has no type parameters, but type arguments were provided"
+                                ),
+                                *span,
+                            )
+                            .with_category(DiagnosticCategory::Type)
+                            .with_hint(format!(
+                                "Remove the type arguments: use `{base_name}` instead of `{base_name}(...)`"
+                            )),
+                        );
+                    }
+                }
+
+                // Recurse into the type arguments themselves
+                for param in parameters {
+                    self.check_type_annotation_arity(param, hierarchy, class_type_params);
+                }
+            }
+            TypeAnnotation::Union { types, .. } => {
+                for ty in types {
+                    self.check_type_annotation_arity(ty, hierarchy, class_type_params);
+                }
+            }
+            TypeAnnotation::FalseOr { inner, .. } => {
+                self.check_type_annotation_arity(inner, hierarchy, class_type_params);
+            }
+            // Simple, SelfType, Singleton — no type args to check
+            TypeAnnotation::Simple(_)
+            | TypeAnnotation::SelfType { .. }
+            | TypeAnnotation::Singleton { .. } => {}
+        }
+    }
 }

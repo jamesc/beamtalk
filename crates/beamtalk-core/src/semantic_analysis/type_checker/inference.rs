@@ -177,6 +177,9 @@ impl TypeChecker {
             }
         }
 
+        // BT-1861: Warn when type arguments are provided for classes with no type params.
+        self.check_type_annotation_arity_in_module(module, hierarchy);
+
         // Check top-level expressions last — method return types are now available.
         self.infer_stmts(&module.expressions, hierarchy, &mut env, false);
     }
