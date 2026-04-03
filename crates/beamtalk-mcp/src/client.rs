@@ -981,8 +981,10 @@ pub struct ReplResponse {
     /// Protocol and language versions (describe op).
     pub versions: Option<serde_json::Value>,
     /// Incremental load summary (load-project op, BT-1685).
-    /// E.g. "Reloaded 2 of 7 files (5 unchanged)"
+    /// E.g. "Reloaded 2 of 7 files (5 unchanged, 1 failed)"
     pub summary: Option<String>,
+    /// Number of unique files that failed to compile (load-project op, BT-1855).
+    pub error_count: Option<u32>,
 }
 
 impl ReplResponse {

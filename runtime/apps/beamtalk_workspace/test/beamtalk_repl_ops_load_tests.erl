@@ -832,3 +832,49 @@ activate_deps_adds_hex_ebin_paths_test() ->
 activate_dep_ebin_nonexistent_test() ->
     %% Non-existent dir should be a no-op (delegated to beamtalk_module_activation).
     ?assertEqual({ok, []}, beamtalk_module_activation:activate_ebin("/nonexistent/path")).
+
+%%====================================================================
+%% build_incremental_summary/5 (BT-1855)
+%%====================================================================
+
+build_incremental_summary_no_details_test() ->
+    ?assertEqual(
+        <<"Reloaded 5 of 5 files">>,
+        beamtalk_repl_ops_load:build_incremental_summary(5, 5, 0, 0, 0)
+    ).
+
+build_incremental_summary_unchanged_test() ->
+    ?assertEqual(
+        <<"Reloaded 2 of 7 files (5 unchanged)">>,
+        beamtalk_repl_ops_load:build_incremental_summary(2, 7, 5, 0, 0)
+    ).
+
+build_incremental_summary_deleted_test() ->
+    ?assertEqual(
+        <<"Reloaded 3 of 5 files (2 deleted)">>,
+        beamtalk_repl_ops_load:build_incremental_summary(3, 5, 0, 2, 0)
+    ).
+
+build_incremental_summary_unchanged_and_deleted_test() ->
+    ?assertEqual(
+        <<"Reloaded 2 of 10 files (5 unchanged, 3 deleted)">>,
+        beamtalk_repl_ops_load:build_incremental_summary(2, 10, 5, 3, 0)
+    ).
+
+build_incremental_summary_with_failures_test() ->
+    ?assertEqual(
+        <<"Reloaded 5 of 7 files (2 unchanged, 1 failed)">>,
+        beamtalk_repl_ops_load:build_incremental_summary(5, 7, 2, 0, 1)
+    ).
+
+build_incremental_summary_all_details_test() ->
+    ?assertEqual(
+        <<"Reloaded 3 of 10 files (4 unchanged, 1 deleted, 2 failed)">>,
+        beamtalk_repl_ops_load:build_incremental_summary(3, 10, 4, 1, 2)
+    ).
+
+build_incremental_summary_only_failures_test() ->
+    ?assertEqual(
+        <<"Reloaded 3 of 3 files (1 failed)">>,
+        beamtalk_repl_ops_load:build_incremental_summary(3, 3, 0, 0, 1)
+    ).

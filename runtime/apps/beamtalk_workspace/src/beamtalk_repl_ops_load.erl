@@ -33,7 +33,8 @@
     extract_package_from_module/1,
     classify_files_by_change/2,
     get_file_mtime/1,
-    extract_native_refs/1
+    extract_native_refs/1,
+    build_incremental_summary/5
 ]).
 -endif.
 
@@ -221,17 +222,21 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     TotalFiles = length(AllFiles) + DeletedCount,
     ChangedCount = length(ChangedBt) + length(ChangedErl),
     UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
+    %% BT-1855: Count unique files that failed (errors may have multiple
+    %% diagnostics per file, so deduplicate via sets).
+    ErrorFileCount = sets:size(sets:union(ErlErrorPaths, BtErrorPaths)),
     DepErrorMsgs = [format_dep_error(Mod, Reason) || {Mod, Reason} <- DepErrors],
     {ok, #{
         classes => ClassNames,
         errors => Errors,
         dep_errors => DepErrorMsgs,
         summary => build_incremental_summary(
-            ChangedCount, TotalFiles, UnchangedCount, DeletedCount
+            ChangedCount, TotalFiles, UnchangedCount, DeletedCount, ErrorFileCount
         ),
         changed_count => ChangedCount,
         unchanged_count => UnchangedCount,
         deleted_count => DeletedCount,
+        error_count => ErrorFileCount,
         total_files => TotalFiles
     }}.
 
@@ -1420,10 +1425,15 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
 %% @private
 %% @doc Build the incremental summary message.
 %% Format: "Reloaded 2 of 7 files (5 unchanged)" or "Reloaded 2 of 7 files (3 unchanged, 2 deleted)"
+%% When errors are present: "Reloaded 2 of 7 files (5 unchanged, 1 failed)"
 -spec build_incremental_summary(
-    non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()
+    non_neg_integer(),
+    non_neg_integer(),
+    non_neg_integer(),
+    non_neg_integer(),
+    non_neg_integer()
 ) -> binary().
-build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount) ->
+build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount, ErrorCount) ->
     BaseParts = [
         "Reloaded ",
         integer_to_list(ChangedCount),
@@ -1431,15 +1441,22 @@ build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount
         integer_to_list(TotalFiles),
         " files"
     ],
+    Details = lists:filter(
+        fun
+            ({_, 0}) -> false;
+            (_) -> true
+        end,
+        [{unchanged, UnchangedCount}, {deleted, DeletedCount}, {failed, ErrorCount}]
+    ),
     DetailParts =
-        case {UnchangedCount, DeletedCount} of
-            {0, 0} ->
+        case Details of
+            [] ->
                 [];
-            {U, 0} ->
-                [" (", integer_to_list(U), " unchanged)"];
-            {0, D} ->
-                [" (", integer_to_list(D), " deleted)"];
-            {U, D} ->
-                [" (", integer_to_list(U), " unchanged, ", integer_to_list(D), " deleted)"]
+            _ ->
+                Formatted = lists:join(", ", [
+                    [integer_to_list(N), " ", atom_to_list(Label)]
+                 || {Label, N} <- Details
+                ]),
+                [" ("] ++ Formatted ++ [")"]
         end,
     iolist_to_binary(BaseParts ++ DetailParts).

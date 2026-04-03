@@ -636,11 +636,19 @@ impl BeamtalkMcp {
         let mut parts = Vec::new();
 
         if !errors.is_empty() {
+            // BT-1855: Count unique failed file paths (a file may have multiple
+            // diagnostics, but we report it as one failed file).
+            let failed_files: std::collections::BTreeSet<&str> = errors
+                .iter()
+                .filter_map(|e| e.get("path").and_then(|v| v.as_str()))
+                .collect();
+            let failed_count = failed_files.len().max(1); // at least 1 if errors exist
+
             // Lead with failure summary so agents detect errors immediately.
             parts.push(Content::text(format!(
-                "Load completed with errors: {} succeeded, {} failed",
+                "Load completed with errors: {} classes loaded, {} file(s) failed",
                 classes.len(),
-                errors.len()
+                failed_count
             )));
 
             // Report each failure with path, line, message, and hint.
@@ -675,6 +683,11 @@ impl BeamtalkMcp {
                     "Loaded classes: {}",
                     classes.join(", ")
                 )));
+            }
+
+            // BT-1855: Include incremental summary even on the error path.
+            if let Some(ref summary) = response.summary {
+                parts.push(Content::text(summary.clone()));
             }
 
             return Ok(CallToolResult::error(parts));
