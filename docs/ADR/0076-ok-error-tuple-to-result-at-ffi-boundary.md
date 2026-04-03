@@ -44,7 +44,7 @@ This ADR follows the same philosophy: convert at the boundary so users work with
 
 ### Constraints
 
-- Must not break existing code that passes ok/error tuples to Erlang functions (outbound direction)
+- Must not break outbound direction (passing ok/error tuples to Erlang). Codebase audit found zero production instances of this pattern — outbound tuples are constructed via `Tuple withAll:` (stdlib dispatch, not FFI proxy) and are unaffected
 - Must handle edge cases: bare `ok` atoms, 3+ element tuples, non-ok/error tuples
 - Performance overhead must be negligible (single pattern match per FFI return)
 - This is a second exception to ADR 0028's "transparent interop" principle — must be justified
@@ -453,12 +453,38 @@ result value  // raises on error, returns content on success
 
 ### Code forwarding tuples to Erlang
 
-If existing code passes an FFI result back to an Erlang function expecting a tuple, this will break because Result is a tagged map, not a tuple. This is expected to be rare — most code consumes the result rather than forwarding it. If needed, construct the tuple explicitly:
+If existing code passes an FFI result back to an Erlang function expecting a tuple, this will break because Result is a tagged map, not a tuple. This is expected to be rare — a codebase audit found **zero production instances** of constructing ok/error tuples to pass to Erlang. If needed, construct the tuple explicitly:
 
 ```beamtalk
 // If you need to pass an ok/error tuple to Erlang:
 Erlang someModule process: #(#ok, value)
 ```
+
+### Tests using `erlang:list_to_tuple/1` to create ok/error tuples
+
+~15 test cases in `stdlib/test/` and `docs/learning/fixtures/` use `Erlang erlang list_to_tuple: #(#ok, 42)` to construct ok/error tuples for destructuring and pattern-matching tests. After this change, `list_to_tuple` returns a Result (since it's an FFI call returning `{ok, 42}`), breaking these tests.
+
+Before:
+```beamtalk
+// Creates a Tuple, used for destructuring tests
+t := Erlang erlang list_to_tuple: #(#ok, 42)
+{#ok, value} := t  // destructures Tuple
+```
+
+After:
+```beamtalk
+// Use Tuple withAll: instead — not an FFI call, no conversion
+t := Tuple withAll: #(#ok, 42)
+{#ok, value} := t  // destructures Tuple as before
+```
+
+`Tuple withAll:` goes through stdlib dispatch, not the FFI proxy, so it is unaffected by the conversion. This is the recommended pattern for constructing tuples in Beamtalk regardless of this ADR — `list_to_tuple` was always an unnecessary Erlang detour.
+
+**Affected files:**
+- `stdlib/test/tuple_test.bt` (~6 test methods)
+- `stdlib/test/destructuring_test.bt` (~4 test methods)
+- `stdlib/test/pattern_matching_test.bt` (~2 test methods)
+- `docs/learning/fixtures/ch14tuple_destructuring.bt` (~3 examples)
 
 ## References
 - Related issues: BT-1838, BT-1127 (charlist coercion precedent)
