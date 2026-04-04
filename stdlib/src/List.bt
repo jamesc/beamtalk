@@ -209,7 +209,7 @@ sealed typed Collection subclass: List(E)
   /// ```beamtalk
   /// #(#(1, 2), #(3, 4)) flatten    // => #(1, 2, 3, 4)
   /// ```
-  flatten -> List(E) => @primitive "flatten"
+  flatten -> List => @primitive "flatten"
 
   /// Map each element with `block` then flatten one level.
   ///
@@ -320,13 +320,14 @@ sealed typed Collection subclass: List(E)
   /// ```
   groupBy: block :: Block -> Dictionary => @primitive "groupBy:"
 
-  /// Partition elements into two lists: those matching `block` and those not.
+  /// Partition elements into a Dictionary with "matching" and "nonMatching" keys.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3, 4) partition: [:x | x isEven]
+  ///   // => Dictionary("matching" -> #(2, 4), "nonMatching" -> #(1, 3))
   /// ```
-  partition: block :: Block(E, Boolean) -> List(List(E)) =>
+  partition: block :: Block(E, Boolean) -> Dictionary(String, List(E)) =>
     @primitive "partition:"
 
   /// Take elements from the front while `block` returns true.

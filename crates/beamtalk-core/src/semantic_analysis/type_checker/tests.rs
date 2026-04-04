@@ -10397,3 +10397,86 @@ fn union_dnu_partial_missing_emits_hint() {
         "DNU when some members respond should be Hint severity"
     );
 }
+
+// ---- BT-1882: flatten and partition: type annotations ----
+
+/// BT-1882: List(List(Integer)) flatten returns List (not List(List(Integer))).
+#[test]
+fn generic_list_flatten_returns_unparameterized_list() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    // Variable typed as List(List(Integer)) — a nested list
+    env.set(
+        "nested",
+        InferredType::Known {
+            class_name: eco_string("List"),
+            type_args: vec![InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Inferred(span()),
+            }],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("nested"),
+            MessageSelector::Unary("flatten".into()),
+            vec![],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("List"),
+        "List(List(Integer)) flatten should return List, got: {result:?}"
+    );
+}
+
+/// BT-1882: List(Integer) partition: returns Dictionary (not List(List(Integer))).
+#[test]
+fn generic_list_partition_returns_dictionary() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+
+    env.set(
+        "nums",
+        InferredType::Known {
+            class_name: eco_string("List"),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+
+    let block = Expression::Block(Block::new(
+        vec![crate::ast::BlockParameter::new("x", span())],
+        vec![bare(msg_send(
+            var("x"),
+            MessageSelector::Unary("isEven".into()),
+            vec![],
+        ))],
+        span(),
+    ));
+
+    let result = checker.infer_expr(
+        &msg_send(
+            var("nums"),
+            MessageSelector::Keyword(vec![KeywordPart::new("partition:", span())]),
+            vec![block],
+        ),
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        result.as_known().map(EcoString::as_str),
+        Some("Dictionary"),
+        "List(Integer) partition: should return Dictionary, got: {result:?}"
+    );
+}
