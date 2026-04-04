@@ -417,10 +417,10 @@ impl TypeChecker {
         // Singleton types: #foo is a subtype of Symbol, not the reverse.
         // Symbol is NOT compatible with a singleton like #ok.
         // Generic type params (K, V, T, etc.) are always compatible (conservative).
-        if expected.starts_with('#') {
+        if expected.starts_with('#') && !expected.contains('|') {
             return actual == expected || super::is_generic_type_param(actual);
         }
-        if actual.starts_with('#') {
+        if actual.starts_with('#') && !actual.contains('|') {
             // Singletons are subtypes of Symbol — check if expected is Symbol
             // or an ancestor of Symbol in the class hierarchy.
             if super::is_generic_type_param(expected) {
@@ -1053,12 +1053,20 @@ impl TypeChecker {
         }
         // Singleton declared types: value must be the exact same singleton.
         // Symbol is NOT assignable to a singleton like #ok (wrong subtyping direction).
-        if declared_type.starts_with('#') {
+        if declared_type.starts_with('#') && !declared_type.contains('|') {
             return value_type == declared_type;
         }
-        // Singleton value types: treat as Symbol for hierarchy assignability
-        // (e.g., #ok is assignable to Object, Symbol | nil, etc.)
-        if value_type.starts_with('#') {
+        // Singleton value types: check union membership first, then fall back to
+        // Symbol hierarchy (e.g., #ok is assignable to Object, Symbol | nil, etc.)
+        if value_type.starts_with('#') && !value_type.contains('|') {
+            // For union declared types, check if the singleton is a member
+            if declared_type.contains('|') {
+                return declared_type.split('|').map(str::trim).any(|member| {
+                    let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                    value_type.as_str() == member_eco.as_str()
+                        || Self::is_type_compatible(value_type, &member_eco, hierarchy)
+                });
+            }
             let symbol: EcoString = "Symbol".into();
             return Self::is_assignable_to(&symbol, declared_type, hierarchy);
         }

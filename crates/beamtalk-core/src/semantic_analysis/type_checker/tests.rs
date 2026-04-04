@@ -7758,6 +7758,23 @@ fn symbol_not_assignable_to_singleton_union() {
     );
 }
 
+#[test]
+fn singleton_assignable_to_singleton_union() {
+    // Regression: #ok must be assignable to #ok | #error (singleton union).
+    // Previously, starts_with('#') matched the union string before the union
+    // check, causing an exact-match return that rejected valid members.
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        TypeChecker::is_assignable_to(&"#ok".into(), &"#ok | #error".into(), &hierarchy),
+        "#ok should be assignable to #ok | #error"
+    );
+    assert!(
+        TypeChecker::is_assignable_to(&"#error".into(), &"#ok | #error".into(), &hierarchy),
+        "#error should be assignable to #ok | #error"
+    );
+}
+
+
 // ── BT-1832: Union type validation across all contexts ──────────────────
 
 // --- Argument type checking with unions ---
