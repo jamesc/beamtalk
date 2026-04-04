@@ -375,6 +375,105 @@ invalid_method_not_function_async_test() ->
 
     gen_server:stop(Actor).
 
+%%% Backward-compat error path tests (BT-1889)
+%% Verify that the {error, {ErlType, ErrorValue}} 2-tuple path (pre-BT-1822
+%% compiled actors without stacktrace) preserves the exception class.
+
+compat_sync_send_exit_preserves_class_test() ->
+    %% An exit error through the backward-compat path should produce ExitError,
+    %% not RuntimeError (which would happen if ErlType were discarded).
+    {ok, Actor} = test_compat_error_actor:start_link(),
+    try
+        beamtalk_actor:sync_send(Actor, triggerExitError, []),
+        ?assert(false, "Expected error to be raised")
+    catch
+        error:#{error := Inner, '$beamtalk_class' := Class} ->
+            ?assertEqual('ExitError', Class),
+            ?assertEqual(erlang_exit, Inner#beamtalk_error.kind)
+    after
+        gen_server:stop(Actor)
+    end.
+
+compat_sync_send_throw_preserves_class_test() ->
+    %% A throw error through the backward-compat path should produce ThrowError.
+    {ok, Actor} = test_compat_error_actor:start_link(),
+    try
+        beamtalk_actor:sync_send(Actor, triggerThrowError, []),
+        ?assert(false, "Expected error to be raised")
+    catch
+        error:#{error := Inner, '$beamtalk_class' := Class} ->
+            ?assertEqual('ThrowError', Class),
+            ?assertEqual(erlang_throw, Inner#beamtalk_error.kind)
+    after
+        gen_server:stop(Actor)
+    end.
+
+compat_sync_send_error_preserves_class_test() ->
+    %% A plain error through the backward-compat path should produce RuntimeError.
+    {ok, Actor} = test_compat_error_actor:start_link(),
+    try
+        beamtalk_actor:sync_send(Actor, triggerPlainError, []),
+        ?assert(false, "Expected error to be raised")
+    catch
+        error:#{error := Inner, '$beamtalk_class' := Class} ->
+            ?assertEqual('RuntimeError', Class),
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind)
+    after
+        gen_server:stop(Actor)
+    end.
+
+compat_self_dispatch_exit_preserves_class_test() ->
+    %% Test the self_dispatch path (unwrap_dispatch_result) with backward-compat
+    %% 2-tuple errors. selfSendExitError triggers a self-send inside the actor,
+    %% which goes through self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result.
+    %% The safe_dispatch/3 for triggerExitError returns {error, {exit, ...}, State}.
+    {ok, Actor} = test_compat_error_actor:start_link(),
+    try
+        %% The self-send error bubbles up through dispatch/4's try/catch as an
+        %% error exception, which wrap_method_error catches and wraps.
+        Result = gen_server:call(Actor, {selfSendExitError, []}),
+        ?assertMatch({error, _}, Result),
+        {error, Inner} = Result,
+        %% The inner error should be a #beamtalk_error{} from wrap_method_error,
+        %% with the original_reason containing the ExitError wrapped exception.
+        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
+        Details = Inner#beamtalk_error.details,
+        OriginalReason = maps:get(original_reason, Details),
+        ?assertMatch(#{'$beamtalk_class' := 'ExitError'}, OriginalReason)
+    after
+        gen_server:stop(Actor)
+    end.
+
+compat_self_dispatch_throw_preserves_class_test() ->
+    %% Same as above but for throw errors through the self_dispatch path.
+    {ok, Actor} = test_compat_error_actor:start_link(),
+    try
+        Result = gen_server:call(Actor, {selfSendThrowError, []}),
+        ?assertMatch({error, _}, Result),
+        {error, Inner} = Result,
+        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
+        Details = Inner#beamtalk_error.details,
+        OriginalReason = maps:get(original_reason, Details),
+        ?assertMatch(#{'$beamtalk_class' := 'ThrowError'}, OriginalReason)
+    after
+        gen_server:stop(Actor)
+    end.
+
+compat_self_dispatch_error_preserves_class_test() ->
+    %% Same as above but for plain errors through the self_dispatch path.
+    {ok, Actor} = test_compat_error_actor:start_link(),
+    try
+        Result = gen_server:call(Actor, {selfSendPlainError, []}),
+        ?assertMatch({error, _}, Result),
+        {error, Inner} = Result,
+        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
+        Details = Inner#beamtalk_error.details,
+        OriginalReason = maps:get(original_reason, Details),
+        ?assertMatch(#{'$beamtalk_class' := 'RuntimeError'}, OriginalReason)
+    after
+        gen_server:stop(Actor)
+    end.
+
 %%% Stress tests
 
 stress_many_actors_test() ->
