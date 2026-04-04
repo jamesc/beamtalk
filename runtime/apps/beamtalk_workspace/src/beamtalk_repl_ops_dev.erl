@@ -2012,8 +2012,8 @@ format_erlang_module_with_specs(Module, BeamPath, Msg) ->
     FnSection =
         case Specs of
             [] ->
-                %% No specs — fall back to exports list
-                format_exports_list(Module);
+                %% No specs — try EEP-48 signatures, then fall back to exports list
+                format_eep48_signatures_or_exports(Module);
             _ ->
                 format_specs_list(Specs)
         end,
@@ -2050,6 +2050,35 @@ format_exports_list(Module) ->
                 ])
              || {F, A} <- Sorted
             ],
+            iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>])
+    catch
+        _:_ -> <<"(no export information available)\n">>
+    end.
+
+%% @private Try to show EEP-48 signatures for exported functions; fall back to
+%% bare exports list when no EEP-48 docs are available.
+-spec format_eep48_signatures_or_exports(module()) -> binary().
+format_eep48_signatures_or_exports(Module) ->
+    try Module:module_info(exports) of
+        Exports ->
+            Filtered = [{F, A} || {F, A} <- Exports, F =/= module_info],
+            Sorted = lists:sort(Filtered),
+            Lines = lists:map(
+                fun({F, A}) ->
+                    case beamtalk_native_docs:lookup(Module, F, A) of
+                        #{sig := Sig} when Sig =/= <<>> ->
+                            iolist_to_binary([<<"  ">>, Sig]);
+                        _ ->
+                            iolist_to_binary([
+                                <<"  ">>,
+                                atom_to_binary(F, utf8),
+                                <<"/">>,
+                                integer_to_binary(A)
+                            ])
+                    end
+                end,
+                Sorted
+            ),
             iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>])
     catch
         _:_ -> <<"(no export information available)\n">>

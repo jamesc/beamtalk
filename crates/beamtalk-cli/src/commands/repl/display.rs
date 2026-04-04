@@ -77,6 +77,8 @@ pub(crate) fn print_help() {
     println!("  :help <Class> <sel>     Show instance-side method documentation");
     println!("  :help <Class> class     Show class-side docs (name, allMethods, reload, ...)");
     println!("  :help <Class> class <sel>  Show class-side method documentation");
+    println!("  :help Erlang <module>   Show Erlang module docs and function signatures");
+    println!("  :help Erlang <mod> <fn> Show Erlang function docs and type signature");
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");

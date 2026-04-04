@@ -833,13 +833,12 @@ fn handle_help_topic(line: &str, client: &mut ReplClient) {
 /// Queries the backend for type signatures (from `-spec` attributes) combined
 /// with EEP-48 documentation for the given Erlang module or function.
 fn handle_erlang_help(tokens: &[&str], client: &mut ReplClient) {
+    // Note: callers guarantee tokens is non-empty (only called when tokens.len() > 1
+    // after splitting off the "Erlang" prefix).
     let (module, function) = match tokens {
-        [] => {
-            eprintln!("Usage: :help Erlang <module> [function]");
-            return;
-        }
         [module] => (*module, None),
         [module, function, ..] => (*module, Some(*function)),
+        [] => unreachable!("handle_erlang_help called with empty tokens"),
     };
 
     match client.get_erlang_help(module, function) {
