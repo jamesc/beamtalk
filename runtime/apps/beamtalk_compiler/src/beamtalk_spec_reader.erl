@@ -92,23 +92,47 @@ beam_file_to_module_name(BeamFile) ->
 
 %% @doc Extract spec entries from abstract forms.
 %%
-%% Walks the forms list once, collecting `{attribute, _, spec, ...}' forms.
-%% For each spec, extracts parameter names from spec variable annotations
-%% and maps Erlang types to Beamtalk type names.
+%% Collects `{attribute, _, spec, ...}' forms and the export list from the
+%% given forms. Only specs for exported functions are returned.
 -spec extract_specs_from_forms([erl_parse:abstract_form()]) -> [map()].
 extract_specs_from_forms(Forms) ->
+    Exports = extract_exports(Forms),
     lists:filtermap(
         fun
             ({attribute, _, spec, {{Name, Arity}, Clauses}}) ->
-                Entry = process_spec(Name, Arity, Clauses),
-                {true, Entry};
+                case sets:is_element({Name, Arity}, Exports) of
+                    true ->
+                        Entry = process_spec(Name, Arity, Clauses),
+                        {true, Entry};
+                    false ->
+                        false
+                end;
             ({attribute, _, spec, {{_Mod, Name, Arity}, Clauses}}) ->
                 %% Remote spec form (module:function/arity)
-                Entry = process_spec(Name, Arity, Clauses),
-                {true, Entry};
+                case sets:is_element({Name, Arity}, Exports) of
+                    true ->
+                        Entry = process_spec(Name, Arity, Clauses),
+                        {true, Entry};
+                    false ->
+                        false
+                end;
             (_) ->
                 false
         end,
+        Forms
+    ).
+
+%% Extract the set of exported {Name, Arity} pairs from abstract forms.
+-spec extract_exports([erl_parse:abstract_form()]) -> sets:set({atom(), non_neg_integer()}).
+extract_exports(Forms) ->
+    lists:foldl(
+        fun
+            ({attribute, _, export, FnList}, Acc) ->
+                lists:foldl(fun(FA, S) -> sets:add_element(FA, S) end, Acc, FnList);
+            (_, Acc) ->
+                Acc
+        end,
+        sets:new(),
         Forms
     ).
 
