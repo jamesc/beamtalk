@@ -23,16 +23,25 @@ pub enum GenerateCommand {
         class_name: String,
     },
 
-    /// Generate Beamtalk stub definitions from an FFI spec file (placeholder)
+    /// Generate Beamtalk stub definitions from `.beam` abstract code (ADR 0075)
     ///
-    /// Reads an FFI type-definition file and generates `.bt` class stubs
-    /// with method signatures and type annotations.
+    /// Reads `-spec` attributes and parameter names from compiled `.beam` files
+    /// and generates `.bt` stub files with `declare native:` forms.
+    ///
+    /// Examples:
+    ///   beamtalk generate stubs lists maps string
+    ///   beamtalk generate stubs --native-dir native/
+    ///   beamtalk generate stubs lists -o `my_stubs`/
     Stubs {
-        /// Path to the FFI spec file (e.g., `ffi/my_module.toml`)
-        spec_path: String,
+        /// OTP module names to generate stubs for (e.g., `lists maps string`)
+        modules: Vec<String>,
 
-        /// Output directory for generated `.bt` stubs (default: `src/`)
-        #[arg(long, default_value = "src")]
+        /// Directory containing native `.beam` files to generate stubs for
+        #[arg(long)]
+        native_dir: Option<String>,
+
+        /// Output directory for generated `.bt` stubs (default: `stubs/`)
+        #[arg(short, long, default_value = "stubs")]
         output: String,
     },
 }
@@ -41,6 +50,10 @@ pub enum GenerateCommand {
 pub fn run(command: GenerateCommand) -> Result<()> {
     match command {
         GenerateCommand::Native { class_name } => super::native::run(&class_name),
-        GenerateCommand::Stubs { spec_path, output } => super::stubs::run(&spec_path, &output),
+        GenerateCommand::Stubs {
+            modules,
+            native_dir,
+            output,
+        } => super::stubs::run(&modules, native_dir.as_deref(), &output),
     }
 }
