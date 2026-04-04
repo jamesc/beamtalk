@@ -18,14 +18,10 @@
 /// WorkspaceInterface current actorsOf: Counter
 /// ```
 sealed typed Object subclass: WorkspaceInterface
-  classState: current :: WorkspaceInterface | Nil = nil
+  classState: current :: WorkspaceInterface = nil
 
-  /// Return the current singleton instance (nil before workspace bootstrap).
-  class current => self.current
-
-  /// Set the current singleton instance.
-  class current: instance :: WorkspaceInterface -> Nil =>
-    self.current := instance
+  /// Return the current singleton instance.
+  class current -> WorkspaceInterface => self.current
 
   /// Return a list of all live actors as object references.
   ///
