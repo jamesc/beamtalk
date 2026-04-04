@@ -197,7 +197,7 @@ The compiler emits a warning if a `self delegate` method has no return type anno
 The call site determines the dispatch mode — no annotation needed in the `.bt` file:
 
 - `pool query: sql` -- sync via `gen_server:call` (`handle_call/3`)
-- `pool ! query: sql` -- async cast via `gen_server:cast` (`handle_cast/2`)
+- `pool query: sql!` -- async cast via `gen_server:cast` (`handle_cast/2`)
 
 Backing gen_servers that support fire-and-forget should implement both `handle_call` and `handle_cast` clauses for the relevant selectors.
 
