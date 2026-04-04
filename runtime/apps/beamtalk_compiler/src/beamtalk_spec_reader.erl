@@ -24,6 +24,10 @@
 -export([
     read_specs/1,
     read_specs_batch/1,
+    read_raw_specs/1,
+    read_types/1,
+    format_erlang_spec/1,
+    format_erlang_type/1,
     map_type/1
 ]).
 
@@ -83,6 +87,88 @@ read_specs_batch(BeamFiles) ->
         end,
         BeamFiles
     ).
+
+%% @doc Read raw spec abstract forms from a `.beam` file.
+%%
+%% Returns `{ok, RawSpecs}' where `RawSpecs' is a list of
+%% `{Name, Arity, SpecForm}' tuples containing the original abstract form
+%% suitable for pretty-printing with `erl_pp:attribute/1'.
+%% Only specs for exported functions are returned.
+-spec read_raw_specs(file:filename_all()) ->
+    {ok, [{atom(), non_neg_integer(), tuple()}]} | {error, no_debug_info | {beam_lib, term()}}.
+read_raw_specs(BeamFile) ->
+    case beam_lib:chunks(BeamFile, [abstract_code]) of
+        {ok, {_Module, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+            Exports = extract_exports(Forms),
+            RawSpecs = lists:filtermap(
+                fun
+                    ({attribute, _, spec, {{Name, Arity}, _Clauses}} = Form) ->
+                        case sets:is_element({Name, Arity}, Exports) of
+                            true -> {true, {Name, Arity, Form}};
+                            false -> false
+                        end;
+                    ({attribute, _, spec, {{_Mod, Name, Arity}, _Clauses}} = Form) ->
+                        case sets:is_element({Name, Arity}, Exports) of
+                            true -> {true, {Name, Arity, Form}};
+                            false -> false
+                        end;
+                    (_) ->
+                        false
+                end,
+                Forms
+            ),
+            {ok, RawSpecs};
+        {ok, {_Module, [{abstract_code, no_abstract_code}]}} ->
+            {error, no_debug_info};
+        {error, beam_lib, Reason} ->
+            {error, {beam_lib, Reason}}
+    end.
+
+%% @doc Read type definitions from a `.beam` file.
+%%
+%% Returns `{ok, Types}' where `Types' is a list of
+%% `{Name, Arity, TypeForm}' tuples containing the original abstract form
+%% suitable for pretty-printing with `erl_pp:attribute/1'.
+-spec read_types(file:filename_all()) ->
+    {ok, [{atom(), non_neg_integer(), tuple()}]} | {error, no_debug_info | {beam_lib, term()}}.
+read_types(BeamFile) ->
+    case beam_lib:chunks(BeamFile, [abstract_code]) of
+        {ok, {_Module, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+            Types = lists:filtermap(
+                fun
+                    ({attribute, _, type, {Name, _Def, Args}} = Form) when is_atom(Name) ->
+                        {true, {Name, length(Args), Form}};
+                    (_) ->
+                        false
+                end,
+                Forms
+            ),
+            {ok, Types};
+        {ok, {_Module, [{abstract_code, no_abstract_code}]}} ->
+            {error, no_debug_info};
+        {error, beam_lib, Reason} ->
+            {error, {beam_lib, Reason}}
+    end.
+
+%% @doc Pretty-print a raw spec abstract form as an Erlang `-spec' string.
+%%
+%% Takes the raw spec form from `read_raw_specs/1' and returns a formatted
+%% binary like `<<"-spec next_file(Log) -> ok | {error, Reason}.">>'.
+-spec format_erlang_spec(tuple()) -> binary().
+format_erlang_spec(SpecForm) ->
+    Formatted = erl_pp:attribute(SpecForm),
+    Bin = iolist_to_binary(Formatted),
+    string:trim(Bin).
+
+%% @doc Pretty-print a raw type abstract form as an Erlang `-type' string.
+%%
+%% Takes the raw type form from `read_types/1' and returns a formatted
+%% binary like `<<"-type my_type() :: a | b.">>'.
+-spec format_erlang_type(tuple()) -> binary().
+format_erlang_type(TypeForm) ->
+    Formatted = erl_pp:attribute(TypeForm),
+    Bin = iolist_to_binary(Formatted),
+    string:trim(Bin).
 
 %% Extract module name from a .beam file path as a binary.
 -spec beam_file_to_module_name(file:filename_all()) -> binary().
