@@ -12,12 +12,18 @@
 // OK PATH — file:read_file/1 returns {ok, Binary} → Result ok: String
 // ===========================================================================
 
-// Set up a temp file for testing
-Erlang file write_file: "/tmp/bt_ffi_result_test.txt" with: "hello ffi"
+// Set up a temp file for testing (use File tempDirectory for cross-platform paths)
+_btTmpDir := File tempDirectory
+// => _
+
+_btTmpFile := _btTmpDir ++ "/bt_ffi_result_test.txt"
+// => _
+
+Erlang file write_file: _btTmpFile with: "hello ffi"
 // => Result ok: nil
 
 // Read it back — should be a Result, not a Tuple
-result := Erlang file read_file: "/tmp/bt_ffi_result_test.txt"
+result := Erlang file read_file: _btTmpFile
 // => Result ok: "hello ffi"
 
 result class name
@@ -33,7 +39,7 @@ result value
 // ERROR PATH — file:read_file/1 returns {error, enoent} → Result error:
 // ===========================================================================
 
-errResult := Erlang file read_file: "/tmp/bt_nonexistent_ffi_test_file"
+errResult := Erlang file read_file: (_btTmpDir ++ "/bt_nonexistent_ffi_test_file")
 // => Result error: enoent
 
 errResult class name
@@ -49,7 +55,7 @@ errResult ok
 // BARE OK — file:write_file/2 returns bare `ok` atom → Result ok: nil
 // ===========================================================================
 
-writeResult := Erlang file write_file: "/tmp/bt_ffi_result_test.txt" with: "data"
+writeResult := Erlang file write_file: _btTmpFile with: "data"
 // => Result ok: nil
 
 writeResult ok
@@ -63,19 +69,19 @@ writeResult value
 // ===========================================================================
 
 // map: on ok result
-(Erlang file read_file: "/tmp/bt_ffi_result_test.txt") map: [:c | c size]
+(Erlang file read_file: _btTmpFile) map: [:c | c size]
 // => Result ok: 4
 
 // map: on error result — returns error unchanged
-(Erlang file read_file: "/tmp/bt_nonexistent_ffi_test_file") map: [:c | c size]
+(Erlang file read_file: (_btTmpDir ++ "/bt_nonexistent_ffi_test_file")) map: [:c | c size]
 // => Result error: enoent
 
 // andThen: on ok result — chains into another Result
-(Erlang file read_file: "/tmp/bt_ffi_result_test.txt") andThen: [:c | Result ok: c size]
+(Erlang file read_file: _btTmpFile) andThen: [:c | Result ok: c size]
 // => Result ok: 4
 
 // andThen: on error result — short-circuits
-(Erlang file read_file: "/tmp/bt_nonexistent_ffi_test_file") andThen: [:c | Result ok: c size]
+(Erlang file read_file: (_btTmpDir ++ "/bt_nonexistent_ffi_test_file")) andThen: [:c | Result ok: c size]
 // => Result error: enoent
 
 // ===========================================================================
@@ -114,5 +120,5 @@ fromTupleResult isError
 // CLEANUP
 // ===========================================================================
 
-Erlang file delete: "/tmp/bt_ffi_result_test.txt"
+Erlang file delete: _btTmpFile
 // => _

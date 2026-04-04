@@ -780,6 +780,24 @@ Transcript show: 'hello'
 // => nil
 ```
 
+### Cross-Platform Temp Paths
+
+**Never hardcode `/tmp/` in tests.** This breaks on Windows where `/tmp` does not exist.
+
+Use `File tempDirectory` to get the OS temp directory, then build paths from it:
+
+```beamtalk
+// In .btscript (e2e) or .bt (BUnit) tests:
+tmp := File tempDirectory       // OS temp dir (e.g. /tmp or $TMPDIR on Unix, %TEMP% on Windows)
+path := tmp ++ "/bt_my_test_file.txt"
+
+// In Erlang tests:
+TmpDir = beamtalk_file:'tempDirectory'(),
+Path = <<TmpDir/binary, "/my_test_file.txt">>,
+```
+
+For BUnit tests (`stdlib/test/*.bt`), prefer relative paths under `target/bt-test-tmp/` when possible — these don't need cross-platform handling. Use `File tempDirectory` only when an absolute path is required.
+
 ---
 
 ## Debugging Test Failures
