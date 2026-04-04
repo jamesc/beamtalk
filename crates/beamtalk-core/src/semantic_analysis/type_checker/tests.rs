@@ -7774,7 +7774,6 @@ fn singleton_assignable_to_singleton_union() {
     );
 }
 
-
 // ── BT-1832: Union type validation across all contexts ──────────────────
 
 // --- Argument type checking with unions ---
