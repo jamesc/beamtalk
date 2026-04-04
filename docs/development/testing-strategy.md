@@ -788,7 +788,7 @@ Use `File tempDirectory` to get the OS temp directory, then build paths from it:
 
 ```beamtalk
 // In .btscript (e2e) or .bt (BUnit) tests:
-tmp := File tempDirectory       // "/tmp" on Linux/macOS, "C:\Users\...\Temp" on Windows
+tmp := File tempDirectory       // OS temp dir (e.g. /tmp or $TMPDIR on Unix, %TEMP% on Windows)
 path := tmp ++ "/bt_my_test_file.txt"
 
 // In Erlang tests:
