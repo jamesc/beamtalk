@@ -522,9 +522,14 @@ pid_table_survives_owner_death_test_() ->
                             receive
                                 {table_created, HeirPid} ->
                                     ?assertEqual(SupPid, HeirPid),
-                                    %% Kill the owner process
+                                    %% Kill the owner process and wait for it to exit
+                                    MRef = erlang:monitor(process, Spawned),
                                     Spawned ! stop,
-                                    timer:sleep(50),
+                                    receive
+                                        {'DOWN', MRef, process, Spawned, _} -> ok
+                                    after 5000 ->
+                                        ?assert(false)
+                                    end,
                                     %% Table should still exist (inherited by supervisor)
                                     ?assertNotEqual(undefined, ets:info(beamtalk_class_pids))
                             after 5000 ->
@@ -588,9 +593,14 @@ restart_class_recovery_test_() ->
             {"kill and restart class", fun() ->
                 OldPid = beamtalk_class_registry:whereis_class('RestartTest1888'),
                 ?assert(is_pid(OldPid)),
-                %% Kill the class process
+                %% Kill the class process and wait for it to exit
+                MRef = erlang:monitor(process, OldPid),
                 exit(OldPid, kill),
-                timer:sleep(50),
+                receive
+                    {'DOWN', MRef, process, OldPid, _} -> ok
+                after 5000 ->
+                    ?assert(false)
+                end,
                 %% Should be unregistered now
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('RestartTest1888')),
                 %% Restart it

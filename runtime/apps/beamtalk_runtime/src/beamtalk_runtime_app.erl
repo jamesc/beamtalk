@@ -52,6 +52,7 @@ start(_StartType, _StartArgs) ->
             %% process is replaced.
             beamtalk_class_registry:ensure_pid_table(),
             beamtalk_class_registry:ensure_class_warnings_table(),
+            beamtalk_class_registry:ensure_pending_errors_table(),
             %% ADR 0036 Phase 1 (BT-802): Post-bootstrap self-grounding assertion.
             %% Validates that Metaclass class class == Metaclass class holds
             %% after bootstrap. This is a soft assertion (logs on failure, does not crash).

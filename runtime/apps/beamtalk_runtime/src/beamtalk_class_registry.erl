@@ -53,6 +53,7 @@
     get_class_method_return_type/2,
     restart_class/1,
     ensure_pid_table/0,
+    ensure_pending_errors_table/0,
     record_class_pid/2,
     class_name_for_pid/1
 ]).
