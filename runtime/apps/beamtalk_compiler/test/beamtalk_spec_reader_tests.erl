@@ -416,6 +416,7 @@ verify_application_start_result_test() ->
 %% This tests constraint resolution inside union branches.
 bounded_fun_result_with_constraints_test() ->
     Forms = [
+        {attribute, 1, export, [{read_file, 1}]},
         {attribute, 1, spec,
             {{read_file, 1}, [
                 {type, 2, bounded_fun, [
@@ -490,6 +491,7 @@ extract_param_names_no_var_test() ->
 extract_specs_from_forms_simple_test() ->
     Forms = [
         {attribute, 1, module, test_mod},
+        {attribute, 2, export, [{foo, 1}]},
         {attribute, 2, spec,
             {{foo, 1}, [
                 {type, 3, 'fun', [
@@ -511,6 +513,7 @@ extract_specs_from_forms_simple_test() ->
 extract_specs_from_forms_bounded_fun_test() ->
     %% Simulate: -spec bar(X) -> X when X :: integer().
     Forms = [
+        {attribute, 1, export, [{bar, 1}]},
         {attribute, 1, spec,
             {{bar, 1}, [
                 {type, 2, bounded_fun, [
@@ -555,6 +558,7 @@ multi_clause_different_returns_test() ->
     %% -spec baz(integer()) -> boolean()
     %%         ; (float()) -> atom().
     Forms = [
+        {attribute, 1, export, [{baz, 1}]},
         {attribute, 1, spec,
             {{baz, 1}, [
                 {type, 2, 'fun', [
@@ -583,6 +587,7 @@ multi_clause_same_returns_test() ->
     %% -spec qux(integer()) -> boolean()
     %%         ; (float()) -> boolean().
     Forms = [
+        {attribute, 1, export, [{qux, 1}]},
         {attribute, 1, spec,
             {{qux, 1}, [
                 {type, 2, 'fun', [
@@ -605,6 +610,7 @@ multi_clause_mixed_bounded_test() ->
     %% -spec mixed(X) -> X when X :: integer()
     %%           ; (binary()) -> boolean().
     Forms = [
+        {attribute, 1, export, [{mixed, 1}]},
         {attribute, 1, spec,
             {{mixed, 1}, [
                 {type, 2, bounded_fun, [
@@ -635,6 +641,7 @@ multi_clause_mixed_bounded_test() ->
 %% All unrecognizable clauses fall back to positional params + Dynamic.
 multi_clause_all_unrecognized_test() ->
     Forms = [
+        {attribute, 1, export, [{weird, 2}]},
         {attribute, 1, spec,
             {{weird, 2}, [
                 {unknown_clause_form, 2},
@@ -655,6 +662,7 @@ multi_clause_all_unrecognized_test() ->
 %% Zero-arity function spec.
 zero_arity_spec_test() ->
     Forms = [
+        {attribute, 1, export, [{now, 0}]},
         {attribute, 1, spec,
             {{now, 0}, [
                 {type, 2, 'fun', [
@@ -759,6 +767,7 @@ read_specs_batch_module_names_test() ->
 extract_specs_remote_spec_test() ->
     %% Remote spec: {attribute, _, spec, {{Module, Name, Arity}, Clauses}}
     Forms = [
+        {attribute, 1, export, [{remote_fn, 1}]},
         {attribute, 1, spec,
             {{other_mod, remote_fn, 1}, [
                 {type, 2, 'fun', [
@@ -773,6 +782,95 @@ extract_specs_remote_spec_test() ->
     ?assertEqual(<<"remote_fn">>, maps:get(name, Spec)),
     ?assertEqual(1, maps:get(arity, Spec)),
     ?assertEqual(<<"Symbol">>, maps:get(return_type, Spec)).
+
+%%% ---------------------------------------------------------------
+%%% Export filtering — only exported functions appear in specs
+%%% ---------------------------------------------------------------
+
+%% Specs for internal (non-exported) functions are excluded.
+extract_specs_filters_unexported_test() ->
+    Forms = [
+        {attribute, 1, module, test_mod},
+        {attribute, 2, export, [{public_fn, 1}]},
+        {attribute, 3, spec,
+            {{public_fn, 1}, [
+                {type, 4, 'fun', [
+                    {type, 4, product, [{type, 4, integer, []}]},
+                    {type, 4, boolean, []}
+                ]}
+            ]}},
+        {attribute, 5, spec,
+            {{internal_fn, 2}, [
+                {type, 6, 'fun', [
+                    {type, 6, product, [{type, 6, binary, []}, {type, 6, atom, []}]},
+                    {type, 6, list, []}
+                ]}
+            ]}},
+        {attribute, 7, spec,
+            {{another_internal, 0}, [
+                {type, 8, 'fun', [
+                    {type, 8, product, []},
+                    {type, 8, atom, []}
+                ]}
+            ]}},
+        {eof, 9}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    %% Only the exported function should appear
+    ?assertEqual(1, length(Result)),
+    [Spec] = Result,
+    ?assertEqual(<<"public_fn">>, maps:get(name, Spec)),
+    ?assertEqual(1, maps:get(arity, Spec)).
+
+%% Multiple export attributes are combined.
+extract_specs_multiple_export_attrs_test() ->
+    Forms = [
+        {attribute, 1, module, test_mod},
+        {attribute, 2, export, [{foo, 1}]},
+        {attribute, 3, export, [{bar, 0}]},
+        {attribute, 4, spec,
+            {{foo, 1}, [
+                {type, 5, 'fun', [
+                    {type, 5, product, [{type, 5, integer, []}]},
+                    {type, 5, boolean, []}
+                ]}
+            ]}},
+        {attribute, 6, spec,
+            {{bar, 0}, [
+                {type, 7, 'fun', [
+                    {type, 7, product, []},
+                    {type, 7, atom, []}
+                ]}
+            ]}},
+        {attribute, 8, spec,
+            {{internal, 1}, [
+                {type, 9, 'fun', [
+                    {type, 9, product, [{type, 9, atom, []}]},
+                    {type, 9, binary, []}
+                ]}
+            ]}},
+        {eof, 10}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(2, length(Result)),
+    Names = lists:sort([maps:get(name, S) || S <- Result]),
+    ?assertEqual([<<"bar">>, <<"foo">>], Names).
+
+%% No export attributes means no specs are returned.
+extract_specs_no_exports_returns_empty_test() ->
+    Forms = [
+        {attribute, 1, module, test_mod},
+        {attribute, 2, spec,
+            {{hidden, 1}, [
+                {type, 3, 'fun', [
+                    {type, 3, product, [{type, 3, integer, []}]},
+                    {type, 3, atom, []}
+                ]}
+            ]}},
+        {eof, 4}
+    ],
+    Result = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual([], Result).
 
 %%% ---------------------------------------------------------------
 %%% Graceful fallback — .beam without debug_info
