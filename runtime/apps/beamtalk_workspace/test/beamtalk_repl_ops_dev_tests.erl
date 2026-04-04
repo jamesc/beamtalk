@@ -835,3 +835,74 @@ parse_bare_qualified_name_test() ->
         {undefined, <<"json@Parser">>},
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"json@Parser">>)
     ).
+
+%%====================================================================
+%% dedupe_keyword_aliases/1
+%%====================================================================
+
+dedupe_removes_plain_alias_when_keyword_exists_test() ->
+    %% Both parse/1 and 'parse:'/1 exist — plain variant should be removed
+    Specs = [
+        #{name => <<"parse">>, arity => 1, params => [], return_type => <<"Map">>},
+        #{name => <<"parse:">>, arity => 1, params => [], return_type => <<"Map">>}
+    ],
+    Result = beamtalk_repl_ops_dev:dedupe_keyword_aliases(Specs),
+    ?assertEqual(1, length(Result)),
+    ?assertEqual(<<"parse:">>, maps:get(name, hd(Result))).
+
+dedupe_keeps_both_when_arities_differ_test() ->
+    %% parse/0 and 'parse:'/1 have different arities — keep both
+    Specs = [
+        #{name => <<"parse">>, arity => 0, params => [], return_type => <<"Map">>},
+        #{name => <<"parse:">>, arity => 1, params => [], return_type => <<"Map">>}
+    ],
+    Result = beamtalk_repl_ops_dev:dedupe_keyword_aliases(Specs),
+    ?assertEqual(2, length(Result)).
+
+dedupe_no_change_for_regular_erlang_modules_test() ->
+    %% Regular Erlang functions (no colon-suffixed names) — nothing removed
+    Specs = [
+        #{name => <<"format">>, arity => 2, params => [], return_type => <<"Binary">>},
+        #{name => <<"parse">>, arity => 1, params => [], return_type => <<"Map">>}
+    ],
+    Result = beamtalk_repl_ops_dev:dedupe_keyword_aliases(Specs),
+    ?assertEqual(2, length(Result)).
+
+dedupe_removes_multiple_aliases_test() ->
+    %% Multiple keyword pairs — all plain aliases removed
+    Specs = [
+        #{name => <<"parse">>, arity => 1, params => [], return_type => <<"Map">>},
+        #{name => <<"parse:">>, arity => 1, params => [], return_type => <<"Map">>},
+        #{name => <<"generate">>, arity => 1, params => [], return_type => <<"Binary">>},
+        #{name => <<"generate:">>, arity => 1, params => [], return_type => <<"Binary">>},
+        #{name => <<"version">>, arity => 0, params => [], return_type => <<"String">>}
+    ],
+    Result = beamtalk_repl_ops_dev:dedupe_keyword_aliases(Specs),
+    Names = [maps:get(name, S) || S <- Result],
+    ?assertEqual([<<"generate:">>, <<"parse:">>, <<"version">>], lists:sort(Names)).
+
+dedupe_empty_list_test() ->
+    ?assertEqual([], beamtalk_repl_ops_dev:dedupe_keyword_aliases([])).
+
+%%====================================================================
+%% format_beamtalk_signature/3 — double-colon fix
+%%====================================================================
+
+signature_no_double_colon_for_keyword_name_test() ->
+    %% Keyword message name already ends in ':' — should not get '::'
+    Params = [#{name => <<"input">>, type => <<"String">>}],
+    Result = beamtalk_repl_ops_dev:format_beamtalk_signature(<<"parse:">>, Params, <<"Map">>),
+    %% Should be "parse: input :: String -> Map", NOT "parse:: input :: String -> Map"
+    ?assertNotEqual(nomatch, binary:match(Result, <<"parse: input">>)),
+    ?assertEqual(nomatch, binary:match(Result, <<"parse::">>)).
+
+signature_adds_colon_for_plain_name_test() ->
+    %% Plain function name — colon should be added
+    Params = [#{name => <<"input">>, type => <<"String">>}],
+    Result = beamtalk_repl_ops_dev:format_beamtalk_signature(<<"parse">>, Params, <<"Map">>),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"parse: input">>)).
+
+signature_nullary_unchanged_test() ->
+    %% Nullary function — no params, no colon appended
+    Result = beamtalk_repl_ops_dev:format_beamtalk_signature(<<"version">>, [], <<"String">>),
+    ?assertEqual(<<"version -> String">>, Result).
