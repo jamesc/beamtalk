@@ -1062,22 +1062,32 @@ impl TypeCache {
         Self { cache_dir }
     }
 
-    /// Returns the cache file path for a given Erlang module name.
-    fn cache_path(&self, module_name: &str) -> Utf8PathBuf {
-        self.cache_dir.join(format!("{module_name}.json"))
+    /// Returns the cache file path for a given Erlang module name and beam path.
+    ///
+    /// The cache key incorporates a hash of the beam file's absolute path to
+    /// prevent collisions when different projects have same-named `.beam` files
+    /// (e.g., two projects both containing `my_app.beam` in the global stub cache).
+    fn cache_path(&self, module_name: &str, beam_path: &Utf8Path) -> Utf8PathBuf {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        beam_path.as_str().hash(&mut hasher);
+        let path_hash = hasher.finish();
+        self.cache_dir
+            .join(format!("{module_name}_{path_hash:016x}.json"))
     }
 
-    /// Checks if the cache entry for `module_name` is still valid.
+    /// Checks if the cache entry for `module_name` at `beam_path` is still valid.
     ///
     /// Returns `Some(specs_line)` if the cache is fresh (`.beam` mtime matches),
     /// or `None` if the cache is stale or missing.
     fn lookup(
         &self,
         module_name: &str,
+        beam_path: &Utf8Path,
         beam_mtime_secs: u64,
         beam_mtime_nanos: u32,
     ) -> Option<String> {
-        let path = self.cache_path(module_name);
+        let path = self.cache_path(module_name, beam_path);
         let content = std::fs::read_to_string(path.as_std_path()).ok()?;
         let entry: TypeCacheEntry = serde_json::from_str(&content).ok()?;
         if entry.beam_mtime_secs == beam_mtime_secs && entry.beam_mtime_nanos == beam_mtime_nanos {
@@ -1091,6 +1101,7 @@ impl TypeCache {
     fn store(
         &self,
         module_name: &str,
+        beam_path: &Utf8Path,
         beam_mtime_secs: u64,
         beam_mtime_nanos: u32,
         specs_line: &str,
@@ -1104,7 +1115,7 @@ impl TypeCache {
             beam_mtime_nanos,
             specs_line: specs_line.to_string(),
         };
-        let path = self.cache_path(module_name);
+        let path = self.cache_path(module_name, beam_path);
         match serde_json::to_string(&entry) {
             Ok(json) => {
                 if let Err(e) = std::fs::write(path.as_std_path(), json) {
@@ -1161,7 +1172,7 @@ pub fn extract_beam_specs(
         let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
         let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
 
-        if let Some(specs_line) = cache.lookup(module_name, mtime_secs, mtime_nanos) {
+        if let Some(specs_line) = cache.lookup(module_name, beam_file, mtime_secs, mtime_nanos) {
             if !specs_line.is_empty() {
                 parse_specs_line(&specs_line, &mut registry);
             }
@@ -1196,17 +1207,18 @@ pub fn extract_beam_specs(
     let mut seen_modules: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (module_name, specs_line) in &new_lines {
         seen_modules.insert(module_name.clone());
-        // Find the mtime for caching.
+        // Find the beam file for caching (need path + mtime).
         let beam_file = cache_misses.iter().find(|f| {
             f.file_stem()
                 .is_some_and(|stem| stem == module_name.as_str())
         });
-        let (mtime_secs, mtime_nanos) = beam_file.map_or((0, 0), |f| beam_mtime(f));
-
         if !specs_line.is_empty() {
             parse_specs_line(specs_line, &mut registry);
         }
-        cache.store(module_name, mtime_secs, mtime_nanos, specs_line);
+        if let Some(beam_file) = beam_file {
+            let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
+            cache.store(module_name, beam_file, mtime_secs, mtime_nanos, specs_line);
+        }
     }
 
     // Negative cache: modules that were sent for extraction but produced no output
@@ -1216,7 +1228,7 @@ pub fn extract_beam_specs(
         let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
         if !seen_modules.contains(module_name) {
             let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
-            cache.store(module_name, mtime_secs, mtime_nanos, "");
+            cache.store(module_name, beam_file, mtime_secs, mtime_nanos, "");
         }
     }
 
@@ -1934,24 +1946,26 @@ end
         let temp = TempDir::new().unwrap();
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
         let cache = TypeCache::new(cache_dir);
+        let beam_path = Utf8Path::new("/usr/lib/erlang/lib/stdlib/ebin/lists.beam");
 
         let specs_line = "beamtalk-specs-module:lists:[#{arity => 1,name => <<\"reverse\">>,params => [#{name => <<\"list\">>,type => <<\"List\">>}],return_type => <<\"List\">>}]";
-        cache.store("lists", 12345, 0, specs_line);
+        cache.store("lists", beam_path, 12345, 0, specs_line);
 
         // Cache hit with matching mtime
-        let result = cache.lookup("lists", 12345, 0);
+        let result = cache.lookup("lists", beam_path, 12345, 0);
         assert_eq!(result, Some(specs_line.to_string()));
 
         // Cache miss with different mtime (seconds)
-        let result = cache.lookup("lists", 99999, 0);
+        let result = cache.lookup("lists", beam_path, 99999, 0);
         assert!(result.is_none(), "Different mtime should be a cache miss");
 
         // Cache miss with different mtime (nanos only)
-        let result = cache.lookup("lists", 12345, 1);
+        let result = cache.lookup("lists", beam_path, 12345, 1);
         assert!(result.is_none(), "Different nanos should be a cache miss");
 
         // Cache miss for unknown module
-        let result = cache.lookup("maps", 12345, 0);
+        let maps_path = Utf8Path::new("/usr/lib/erlang/lib/stdlib/ebin/maps.beam");
+        let result = cache.lookup("maps", maps_path, 12345, 0);
         assert!(result.is_none(), "Unknown module should be a cache miss");
     }
 
@@ -1960,14 +1974,21 @@ end
         let temp = TempDir::new().unwrap();
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
         let cache = TypeCache::new(cache_dir);
+        let beam_path = Utf8Path::new("/usr/lib/erlang/lib/stdlib/ebin/lists.beam");
 
-        cache.store("lists", 100, 0, "line1");
-        assert_eq!(cache.lookup("lists", 100, 0), Some("line1".to_string()));
+        cache.store("lists", beam_path, 100, 0, "line1");
+        assert_eq!(
+            cache.lookup("lists", beam_path, 100, 0),
+            Some("line1".to_string())
+        );
 
         // Overwrite with new mtime
-        cache.store("lists", 200, 0, "line2");
-        assert!(cache.lookup("lists", 100, 0).is_none());
-        assert_eq!(cache.lookup("lists", 200, 0), Some("line2".to_string()));
+        cache.store("lists", beam_path, 200, 0, "line2");
+        assert!(cache.lookup("lists", beam_path, 100, 0).is_none());
+        assert_eq!(
+            cache.lookup("lists", beam_path, 200, 0),
+            Some("line2".to_string())
+        );
     }
 
     #[test]
@@ -1975,9 +1996,38 @@ end
         let temp = TempDir::new().unwrap();
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
         let cache = TypeCache::new(cache_dir);
+        let beam_path = Utf8Path::new("/some/path/no_specs.beam");
 
-        cache.store("no_specs", 100, 0, "");
-        assert_eq!(cache.lookup("no_specs", 100, 0), Some(String::new()));
+        cache.store("no_specs", beam_path, 100, 0, "");
+        assert_eq!(
+            cache.lookup("no_specs", beam_path, 100, 0),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn type_cache_different_paths_do_not_collide() {
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir);
+
+        let path_a = Utf8Path::new("/project_a/_build/my_app.beam");
+        let path_b = Utf8Path::new("/project_b/_build/my_app.beam");
+
+        cache.store("my_app", path_a, 100, 0, "specs_from_a");
+        cache.store("my_app", path_b, 100, 0, "specs_from_b");
+
+        // Each path returns its own cached specs
+        assert_eq!(
+            cache.lookup("my_app", path_a, 100, 0),
+            Some("specs_from_a".to_string()),
+            "Path A should return its own cached specs"
+        );
+        assert_eq!(
+            cache.lookup("my_app", path_b, 100, 0),
+            Some("specs_from_b".to_string()),
+            "Path B should return its own cached specs"
+        );
     }
 
     #[test]

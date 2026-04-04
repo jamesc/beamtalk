@@ -74,11 +74,21 @@ pub fn run(modules: &[String], native_dir: Option<&str>, output: &str) -> Result
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?;
 
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = entry
+                .into_diagnostic()
+                .wrap_err_with(|| format!("I/O error reading entry in '{dir}'"))?;
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "beam") {
                 if let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) {
                     let module_name = utf8_path.file_stem().unwrap_or("unknown").to_string();
+                    if !is_valid_module_name(&module_name) {
+                        eprintln!(
+                            "warning: Skipping '{module_name}.beam' — \
+                             not a valid Erlang module name"
+                        );
+                        continue;
+                    }
                     eprintln!("Reading {module_name}.beam ...");
                     beam_files.push((module_name, utf8_path));
                 }
@@ -158,15 +168,7 @@ enum BeamLocation {
 /// Uses `erl -eval 'code:which(Module)'` to find the absolute path.
 fn locate_beam_file(module_name: &str) -> Result<BeamLocation> {
     // Validate module name: must be a valid Erlang atom (lowercase start, alnum + _)
-    if module_name.is_empty()
-        || !module_name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase())
-        || !module_name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !is_valid_module_name(module_name) {
         miette::bail!("Invalid module name: '{module_name}' — must be a valid Erlang atom");
     }
 
@@ -210,6 +212,18 @@ fn locate_beam_file(module_name: &str) -> Result<BeamLocation> {
         eprintln!("warning: Non-UTF8 path for {module_name}: {stdout}");
         Ok(BeamLocation::NotFound)
     }
+}
+
+/// Checks whether a derived module name is a valid Erlang atom.
+///
+/// A valid module name starts with a lowercase ASCII letter and contains
+/// only ASCII alphanumeric characters and underscores. This prevents
+/// file stems with dashes, dots, or other special characters from being
+/// treated as module names.
+fn is_valid_module_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Format a complete `.bt` stub file for a module.
@@ -533,5 +547,29 @@ mod tests {
         assert!(locate_beam_file("").is_err());
         // Special chars
         assert!(locate_beam_file("foo-bar").is_err());
+    }
+
+    #[test]
+    fn is_valid_module_name_accepts_valid_names() {
+        assert!(is_valid_module_name("lists"));
+        assert!(is_valid_module_name("my_app"));
+        assert!(is_valid_module_name("gen_server2"));
+        assert!(is_valid_module_name("a"));
+    }
+
+    #[test]
+    fn is_valid_module_name_rejects_invalid_names() {
+        // Empty
+        assert!(!is_valid_module_name(""));
+        // Starts with uppercase
+        assert!(!is_valid_module_name("Lists"));
+        // Contains dash
+        assert!(!is_valid_module_name("foo-bar"));
+        // Contains dot
+        assert!(!is_valid_module_name("my.module"));
+        // Starts with number
+        assert!(!is_valid_module_name("1bad"));
+        // Contains space
+        assert!(!is_valid_module_name("foo bar"));
     }
 }
