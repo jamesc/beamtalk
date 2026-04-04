@@ -950,7 +950,7 @@
         "string join",
         "throw"
       ],
-      "source": "// FFI calls returning ok/error tuples become Result objects\nresult := Erlang file read_file: \"/tmp/hello.txt\"\nresult              // => Result ok: \"Hello, world!\\n\"\nresult value        // => \"Hello, world!\\n\"\n\n// Use Result combinators directly on FFI returns\nresult map: [:content | content size]\n// => Result ok: 14\n\n// Error path\nresult := Erlang file read_file: \"/nonexistent\"\nresult              // => Result error: enoent\nresult isError      // => true\n\n// Chain FFI calls with andThen:\n(Erlang file read_file: \"/tmp/config.json\")\n  andThen: [:content | Erlang json decode: content]\n  mapError: [:e | \"Config load failed: \" ++ e message]\n\n// Bare ok atoms (e.g. file:write_file/2) become Result ok: nil\nErlang file write_file: \"/tmp/out.txt\" with: \"data\"\n// => Result ok: nil",
+      "source": "// FFI calls returning ok/error tuples become Result objects\nresult := Erlang file read_file: \"/tmp/hello.txt\"\nresult              // => Result ok: \"Hello, world!\\n\"\nresult value        // => \"Hello, world!\\n\"\n\n// Use Result combinators directly on FFI returns\nresult map: [:content | content size]\n// => Result ok: 14\n\n// Error path\nresult := Erlang file read_file: \"/nonexistent\"\nresult              // => Result error: (ErlangError reason: #enoent)\nresult isError      // => true\n\n// Chain FFI calls with andThen:\n(Erlang file read_file: \"/tmp/config.json\")\n  andThen: [:content | Erlang json decode: content]\n  mapError: [:e | \"Config load failed: \" ++ e reason asString]\n\n// Bare ok atoms (e.g. file:write_file/2) become Result ok: nil\nErlang file write_file: \"/tmp/out.txt\" with: \"data\"\n// => Result ok: nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1024,7 +1024,7 @@
         "throw",
         "unless"
       ],
-      "source": "// Before (Tuple-based, pre-ADR-0076 — FFI returned raw Tuples):\nresult := Erlang file read_file: path\nresult isOk ifTrue: [result unwrap] ifFalse: [\"error\"]  // Tuple methods\n\n// After (Result-based):\nresult := Erlang file read_file: path\nresult ifOk: [:content | content] ifError: [:e | \"error\"]\n// Or simply:\nresult value  // raises on error",
+      "source": "// Before (Tuple-based):\nresult := Erlang file read_file: path\nresult isOk ifTrue: [result unwrap] ifFalse: [\"error\"]\n\n// After (Result-based):\nresult := Erlang file read_file: path\nresult ifOk: [:content | content] ifError: [:e | \"error\"]\n// Or simply:\nresult value  // raises on error",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
