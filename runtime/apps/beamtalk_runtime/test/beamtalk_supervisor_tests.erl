@@ -12,6 +12,8 @@
 %%% - stop/1 returns nil
 %%% - build_child_specs/1 with empty list
 %%% - supervisor tuple structure
+%%% - start_child_via_class_method/4: valid return, invalid return, class_var_result
+%%%   unwrap, process dictionary cleanup, child linking, supervisor restart (BT-1875)
 -module(beamtalk_supervisor_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -24,6 +26,19 @@
 %% when the test populates the module ETS table with this module as the "parent" class module.
 -export([class_children/2, class_strategy/2, class_maxRestarts/2, class_restartWindow/2]).
 
+%% BT-1875: Fake class methods for start_child_via_class_method tests.
+%% Simulates what a compiled Beamtalk keyword class method does: start a gen_server
+%% and return a {beamtalk_object, ...} tuple.
+-export([
+    'class_create:value:'/4,
+    class_returnInvalid/2,
+    class_returnWrapped/2,
+    start_link_fake_child/0
+]).
+
+%% gen_server callbacks for fake child actor used by BT-1875 tests.
+-export([handle_call/3, handle_cast/2]).
+
 %%====================================================================
 %% OTP supervisor callback
 %%====================================================================
@@ -35,7 +50,17 @@ init({simple_one_for_one, ChildSpec}) ->
     SupFlags = #{strategy => simple_one_for_one, intensity => 0, period => 1},
     {ok, {SupFlags, [ChildSpec]}};
 init({SupFlags, ChildSpecs}) ->
-    {ok, {SupFlags, ChildSpecs}}.
+    {ok, {SupFlags, ChildSpecs}};
+%% BT-1875: Fake child actor init — minimal gen_server for supervision tests.
+init(fake_child) ->
+    {ok, #{counter => 0}}.
+
+%% BT-1875: gen_server callbacks for fake child actor.
+handle_call(_Msg, _From, State) ->
+    {reply, ok, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
 %%====================================================================
 %% Helpers
@@ -338,3 +363,198 @@ class_children(_ClassSelf, _ClassVars) -> [].
 class_strategy(_ClassSelf, _ClassVars) -> oneForOne.
 class_maxRestarts(_ClassSelf, _ClassVars) -> 3.
 class_restartWindow(_ClassSelf, _ClassVars) -> 5.
+
+%%====================================================================
+%% BT-1875: start_child_via_class_method tests
+%%====================================================================
+
+%% @doc Start a fake child gen_server — OTP-compatible {ok, Pid} return.
+start_link_fake_child() ->
+    gen_server:start_link(?MODULE, fake_child, []).
+
+%% Fake class method: simulates `MyClass create: Name value: Val` which starts
+%% a gen_server and returns a beamtalk_object tuple.
+'class_create:value:'(_ClassSelf, _ClassVars, _Name, _Value) ->
+    {ok, Pid} = start_link_fake_child(),
+    {beamtalk_object, 'FakeChild', ?MODULE, Pid}.
+
+%% Fake class method: returns an invalid (non-actor) value.
+class_returnInvalid(_ClassSelf, _ClassVars) ->
+    <<"not an actor tuple">>.
+
+%% Fake class method: returns a class_var_result wrapper around a valid actor.
+class_returnWrapped(_ClassSelf, _ClassVars) ->
+    {ok, Pid} = start_link_fake_child(),
+    {class_var_result, {beamtalk_object, 'FakeChild', ?MODULE, Pid}, #{some_var => 42}}.
+
+%% @private Set up ETS tables and register a fake class for start_child_via_class_method.
+%% Returns the fake class pid (a dummy process) that should be cleaned up after the test.
+setup_fake_class(ClassName) ->
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_module_table:new(),
+    %% Register a dummy process as the class gen_server so whereis_class resolves.
+    FakeClassPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    register(RegName, FakeClassPid),
+    %% Register module mapping so call_class_method_direct can find our fake methods.
+    beamtalk_class_module_table:insert(ClassName, ?MODULE),
+    FakeClassPid.
+
+%% @private Clean up after a fake class test.
+cleanup_fake_class(ClassName, FakeClassPid) ->
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    catch unregister(RegName),
+    FakeClassPid ! stop,
+    beamtalk_class_module_table:delete(ClassName),
+    ok.
+
+%% --- Tests ---
+
+start_child_via_class_method_returns_ok_pid_test() ->
+    %% A class method that returns {beamtalk_object, _, _, Pid} yields {ok, Pid}.
+    FakeClassPid = setup_fake_class('BT1875Actor'),
+    try
+        {ok, ChildPid} = beamtalk_supervisor:start_child_via_class_method(
+            'BT1875Actor', ?MODULE, 'class_create:value:', [hello, 42]
+        ),
+        ?assert(is_pid(ChildPid)),
+        ?assert(is_process_alive(ChildPid)),
+        gen_server:stop(ChildPid)
+    after
+        cleanup_fake_class('BT1875Actor', FakeClassPid)
+    end.
+
+start_child_via_class_method_invalid_return_test() ->
+    %% A class method that returns a non-actor value yields {error, WrappedError}
+    %% where the error is a beamtalk_error with runtime_error kind.
+    FakeClassPid = setup_fake_class('BT1875Invalid'),
+    try
+        Result = beamtalk_supervisor:start_child_via_class_method(
+            'BT1875Invalid', ?MODULE, class_returnInvalid, []
+        ),
+        ?assertMatch({error, #{'$beamtalk_class' := _, error := #beamtalk_error{}}}, Result)
+    after
+        cleanup_fake_class('BT1875Invalid', FakeClassPid)
+    end.
+
+start_child_via_class_method_unwraps_class_var_result_test() ->
+    %% A class method returning {class_var_result, ActorTuple, Vars} is unwrapped.
+    FakeClassPid = setup_fake_class('BT1875Wrapped'),
+    try
+        {ok, ChildPid} = beamtalk_supervisor:start_child_via_class_method(
+            'BT1875Wrapped', ?MODULE, class_returnWrapped, []
+        ),
+        ?assert(is_pid(ChildPid)),
+        ?assert(is_process_alive(ChildPid)),
+        gen_server:stop(ChildPid)
+    after
+        cleanup_fake_class('BT1875Wrapped', FakeClassPid)
+    end.
+
+start_child_via_class_method_cleans_process_dict_test() ->
+    %% Process dictionary entries are cleaned up even on success.
+    FakeClassPid = setup_fake_class('BT1875Cleanup'),
+    try
+        {ok, ChildPid} = beamtalk_supervisor:start_child_via_class_method(
+            'BT1875Cleanup', ?MODULE, 'class_create:value:', [a, b]
+        ),
+        gen_server:stop(ChildPid),
+        %% Verify process dictionary is clean after the call.
+        ?assertEqual(undefined, get(beamtalk_class_name)),
+        ?assertEqual(undefined, get(beamtalk_class_module)),
+        ?assertEqual(undefined, get(beamtalk_class_is_abstract))
+    after
+        cleanup_fake_class('BT1875Cleanup', FakeClassPid)
+    end.
+
+start_child_via_class_method_cleans_process_dict_on_error_test() ->
+    %% Process dictionary entries are cleaned up even when the class method
+    %% returns an invalid value.
+    FakeClassPid = setup_fake_class('BT1875CleanupErr'),
+    try
+        _ = beamtalk_supervisor:start_child_via_class_method(
+            'BT1875CleanupErr', ?MODULE, class_returnInvalid, []
+        ),
+        ?assertEqual(undefined, get(beamtalk_class_name)),
+        ?assertEqual(undefined, get(beamtalk_class_module)),
+        ?assertEqual(undefined, get(beamtalk_class_is_abstract))
+    after
+        cleanup_fake_class('BT1875CleanupErr', FakeClassPid)
+    end.
+
+start_child_via_class_method_child_linked_to_caller_test() ->
+    %% The child started via class method is linked to the calling process
+    %% (which in production is the OTP supervisor process), NOT to the class
+    %% gen_server. This verifies the fix from the original Copilot review.
+    FakeClassPid = setup_fake_class('BT1875Link'),
+    try
+        {ok, ChildPid} = beamtalk_supervisor:start_child_via_class_method(
+            'BT1875Link', ?MODULE, 'class_create:value:', [x, y]
+        ),
+        %% The child should be linked to self() (the test process = the caller),
+        %% NOT to FakeClassPid (the class gen_server).
+        {links, CallerLinks} = process_info(self(), links),
+        {links, ClassLinks} = process_info(FakeClassPid, links),
+        ?assert(lists:member(ChildPid, CallerLinks)),
+        ?assertNot(lists:member(ChildPid, ClassLinks)),
+        %% Unlink before stopping to avoid test process crash.
+        unlink(ChildPid),
+        gen_server:stop(ChildPid)
+    after
+        cleanup_fake_class('BT1875Link', FakeClassPid)
+    end.
+
+start_child_via_class_method_supervisor_restart_test() ->
+    %% OTP supervisor restarts a crashed child via start_child_via_class_method.
+    %% This is the key integration test: a child spec using the class method MFA
+    %% is placed in a real OTP supervisor, the child is killed, and we verify the
+    %% supervisor restarts it automatically.
+    FakeClassPid = setup_fake_class('BT1875Restart'),
+    try
+        ChildSpec = #{
+            id => 'BT1875Restart',
+            start =>
+                {beamtalk_supervisor, start_child_via_class_method, [
+                    'BT1875Restart', ?MODULE, 'class_create:value:', [test, 1]
+                ]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
+        },
+        SupFlags = #{strategy => one_for_one, intensity => 5, period => 10},
+        {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+        try
+            %% Get the initial child pid.
+            [{_, ChildPid1, _, _}] = supervisor:which_children(SupPid),
+            ?assert(is_pid(ChildPid1)),
+            ?assert(is_process_alive(ChildPid1)),
+
+            %% Monitor to detect when the child dies.
+            Ref = monitor(process, ChildPid1),
+            %% Kill the child — the supervisor should restart it.
+            exit(ChildPid1, kill),
+            receive
+                {'DOWN', Ref, process, ChildPid1, killed} -> ok
+            after 2000 ->
+                error(child_did_not_die)
+            end,
+
+            %% Give the supervisor time to restart.
+            timer:sleep(100),
+
+            %% Verify a new child is running with a different pid.
+            [{_, ChildPid2, _, _}] = supervisor:which_children(SupPid),
+            ?assert(is_pid(ChildPid2)),
+            ?assert(is_process_alive(ChildPid2)),
+            ?assertNotEqual(ChildPid1, ChildPid2)
+        after
+            gen_server:stop(SupPid)
+        end
+    after
+        cleanup_fake_class('BT1875Restart', FakeClassPid)
+    end.
