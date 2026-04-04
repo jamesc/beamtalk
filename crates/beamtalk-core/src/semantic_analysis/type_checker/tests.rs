@@ -7602,11 +7602,13 @@ fn is_assignable_to_singleton_mismatch() {
 }
 
 #[test]
-fn is_assignable_to_singleton_accepts_symbol() {
+fn is_assignable_to_singleton_rejects_symbol() {
+    // BT-1878: Symbol is NOT assignable to #ok — subtyping goes the other direction.
+    // #ok is a subtype of Symbol, not the reverse.
     let hierarchy = ClassHierarchy::with_builtins();
     assert!(
-        TypeChecker::is_assignable_to(&"Symbol".into(), &"#ok".into(), &hierarchy),
-        "Symbol should be assignable to #ok (Symbol is the general type)"
+        !TypeChecker::is_assignable_to(&"Symbol".into(), &"#ok".into(), &hierarchy),
+        "Symbol should NOT be assignable to #ok (wrong subtyping direction)"
     );
 }
 
@@ -7711,6 +7713,18 @@ fn is_assignable_to_singleton_to_object() {
     assert!(
         TypeChecker::is_assignable_to(&"#ok".into(), &"Object".into(), &hierarchy),
         "#ok should be assignable to Object via Symbol superclass chain"
+    );
+}
+
+// ── BT-1878: Singleton/Symbol subtyping direction regression tests ──
+
+#[test]
+fn symbol_not_assignable_to_singleton_union() {
+    // BT-1878: Symbol should NOT be assignable to a union of singletons
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_assignable_to(&"Symbol".into(), &"#ok | #error".into(), &hierarchy),
+        "Symbol should NOT be assignable to #ok | #error"
     );
 }
 
