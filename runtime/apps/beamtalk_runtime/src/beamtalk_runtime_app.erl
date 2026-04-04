@@ -46,6 +46,12 @@ start(_StartType, _StartArgs) ->
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of
         {ok, _} = Ok ->
+            %% BT-1888: Now that the supervisor is alive, retroactively set the
+            %% heir on ETS tables created above (before the supervisor existed).
+            %% This ensures the tables survive even if the application controller
+            %% process is replaced.
+            beamtalk_class_registry:ensure_pid_table(),
+            beamtalk_class_registry:ensure_class_warnings_table(),
             %% ADR 0036 Phase 1 (BT-802): Post-bootstrap self-grounding assertion.
             %% Validates that Metaclass class class == Metaclass class holds
             %% after bootstrap. This is a soft assertion (logs on failure, does not crash).

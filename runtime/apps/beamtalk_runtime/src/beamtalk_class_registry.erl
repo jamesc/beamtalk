@@ -188,6 +188,7 @@ ensure_module_table() ->
 %% Uses try/catch to handle concurrent creation race (TOCTOU safe).
 %% BT-742: Key changed from flat ClassName to {Package | undefined, ClassName}
 %% so that draining warnings for one package doesn't affect another's.
+%% BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
 -spec ensure_class_warnings_table() -> ok.
 ensure_class_warnings_table() ->
     case ets:info(beamtalk_class_warnings) of
@@ -195,13 +196,20 @@ ensure_class_warnings_table() ->
             try
                 ets:new(
                     beamtalk_class_warnings,
-                    [bag, public, named_table, {write_concurrency, true}]
+                    [
+                        bag,
+                        public,
+                        named_table,
+                        {write_concurrency, true}
+                        | heir_option()
+                    ]
                 ),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
+            maybe_set_heir(beamtalk_class_warnings),
             ok
     end.
 
@@ -385,6 +393,7 @@ is_bootstrap_stub_module(beamtalk_class_builder_bt) -> true;
 is_bootstrap_stub_module(_) -> false.
 
 %% @private Ensure the pending load errors ETS table exists.
+%% BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
 -spec ensure_pending_errors_table() -> ok.
 ensure_pending_errors_table() ->
     case ets:info(beamtalk_pending_load_errors) of
@@ -392,14 +401,77 @@ ensure_pending_errors_table() ->
             try
                 ets:new(
                     beamtalk_pending_load_errors,
-                    [set, public, named_table, {write_concurrency, true}]
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {write_concurrency, true}
+                        | heir_option()
+                    ]
                 ),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
+            maybe_set_heir(beamtalk_pending_load_errors),
             ok
+    end.
+
+%%====================================================================
+%% ETS Ownership Helpers (BT-1888)
+%%====================================================================
+
+%% @private Return an ETS heir option for table survival across process crashes.
+%%
+%% BT-1888: ETS tables created by a transient process (e.g. a class gen_server)
+%% are destroyed when that process dies.  Using `{heir, Pid, Data}` hands the
+%% table to a long-lived process instead of deleting it.
+%%
+%% We pick the runtime supervisor (`beamtalk_runtime_sup`) if it is alive.
+%% If the supervisor is not yet running (early bootstrap, tests), we omit
+%% the heir option — the table will be owned by the caller and recreated
+%% if needed via the existing ensure_* idempotent guards.
+-spec heir_option() -> [tuple()].
+heir_option() ->
+    case whereis(beamtalk_runtime_sup) of
+        undefined -> [];
+        Pid -> [{heir, Pid, undefined}]
+    end.
+
+%% @private Retroactively set the heir on an existing table if one is not set.
+%%
+%% BT-1888: Tables created early in boot (from `beamtalk_runtime_app:start/2`)
+%% run before the supervisor is alive, so `heir_option/0` returns `[]`.
+%% Subsequent `ensure_*` calls (e.g., from `beamtalk_object_class:init/1`)
+%% invoke this to set the heir once the supervisor is available.
+%% Only the table owner can call `ets:setopts/2`, so we guard on ownership.
+-spec maybe_set_heir(atom()) -> ok.
+maybe_set_heir(Table) ->
+    case whereis(beamtalk_runtime_sup) of
+        undefined ->
+            ok;
+        SupPid ->
+            case ets:info(Table, heir) of
+                SupPid ->
+                    %% Already set correctly.
+                    ok;
+                _ ->
+                    %% Only the owner can change heir. If we're not the owner,
+                    %% skip silently — the owner will set it on their next ensure call.
+                    case ets:info(Table, owner) of
+                        Owner when Owner =:= self() ->
+                            try
+                                ets:setopts(Table, {heir, SupPid, undefined})
+                            catch
+                                %% Heir PID died between whereis and setopts (TOCTOU).
+                                error:badarg -> ok
+                            end,
+                            ok;
+                        _ ->
+                            ok
+                    end
+            end
     end.
 
 %%====================================================================
@@ -504,6 +576,7 @@ class_display_name(ClassName) when is_atom(ClassName) ->
 %% BT-1768: This table maps `{Pid, ClassName}` so that when a class process
 %% crashes and the Erlang registry removes its name, we can still recover the
 %% class name from the stale pid for auto-restart.
+%% BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
 -spec ensure_pid_table() -> ok.
 ensure_pid_table() ->
     case ets:info(beamtalk_class_pids) of
@@ -511,13 +584,20 @@ ensure_pid_table() ->
             try
                 ets:new(
                     beamtalk_class_pids,
-                    [set, public, named_table, {read_concurrency, true}]
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {read_concurrency, true}
+                        | heir_option()
+                    ]
                 ),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
+            maybe_set_heir(beamtalk_class_pids),
             ok
     end.
 

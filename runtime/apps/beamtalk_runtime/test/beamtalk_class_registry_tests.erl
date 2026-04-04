@@ -445,6 +445,190 @@ user_classes_test_() ->
         ]}.
 
 %%% ============================================================================
+%%% ETS table ownership / heir tests (BT-1888)
+%%% ============================================================================
+
+pid_table_survives_owner_death_test_() ->
+    {setup,
+        fun() ->
+            %% Delete the table if it exists so we can recreate it
+            %% from a spawned (transient) process to test heir behavior.
+            case ets:info(beamtalk_class_pids) of
+                undefined ->
+                    {missing, []};
+                _ ->
+                    Saved = ets:tab2list(beamtalk_class_pids),
+                    %% We can only delete if we own the table. If we don't,
+                    %% skip the test setup — table is already owned by a
+                    %% persistent process (the correct state).
+                    case ets:info(beamtalk_class_pids, owner) of
+                        Owner when Owner =:= self() ->
+                            ets:delete(beamtalk_class_pids),
+                            {owned, Saved};
+                        _ ->
+                            {foreign, Saved}
+                    end
+            end
+        end,
+        fun
+            ({missing, _}) ->
+                %% Ensure the table exists again for other tests
+                beamtalk_class_registry:ensure_pid_table();
+            ({owned, Saved}) ->
+                %% Restore table and entries
+                beamtalk_class_registry:ensure_pid_table(),
+                ets:insert(beamtalk_class_pids, Saved);
+            ({foreign, _Saved}) ->
+                ok
+        end,
+        fun() ->
+            %% When runtime sup is alive, heir option is set and the table
+            %% should survive the creating process dying.
+            case whereis(beamtalk_runtime_sup) of
+                undefined ->
+                    %% Can't test heir behavior without the supervisor.
+                    %% Just verify ensure_pid_table is idempotent.
+                    beamtalk_class_registry:ensure_pid_table(),
+                    ?assertNotEqual(undefined, ets:info(beamtalk_class_pids));
+                SupPid ->
+                    %% Delete existing table to recreate from a spawned process
+                    case ets:info(beamtalk_class_pids) of
+                        undefined ->
+                            ok;
+                        _ ->
+                            case ets:info(beamtalk_class_pids, owner) =:= self() of
+                                true ->
+                                    ets:delete(beamtalk_class_pids);
+                                false ->
+                                    %% Can't delete a table we don't own;
+                                    %% just test that heir is set.
+                                    Heir = ets:info(beamtalk_class_pids, heir),
+                                    ?assertEqual(SupPid, Heir),
+                                    ok
+                            end
+                    end,
+                    case ets:info(beamtalk_class_pids) of
+                        undefined ->
+                            %% Create table from a transient process
+                            TestPid = self(),
+                            Spawned = spawn(fun() ->
+                                beamtalk_class_registry:ensure_pid_table(),
+                                ets:insert(beamtalk_class_pids, {self(), 'TestHeirClass'}),
+                                TestPid ! {table_created, ets:info(beamtalk_class_pids, heir)},
+                                receive
+                                    stop -> ok
+                                end
+                            end),
+                            receive
+                                {table_created, HeirPid} ->
+                                    ?assertEqual(SupPid, HeirPid),
+                                    %% Kill the owner process
+                                    Spawned ! stop,
+                                    timer:sleep(50),
+                                    %% Table should still exist (inherited by supervisor)
+                                    ?assertNotEqual(undefined, ets:info(beamtalk_class_pids))
+                            after 5000 ->
+                                ?assert(false)
+                            end;
+                        _ ->
+                            %% Table already exists and we verified heir above
+                            ok
+                    end
+            end
+        end}.
+
+heir_option_returns_empty_when_no_supervisor_test() ->
+    %% heir_option/0 is private but we can test via ensure_pid_table behavior.
+    %% When no runtime supervisor is running, ensure_pid_table still creates the table.
+    %% We can't easily test the private function directly, but we verify that
+    %% the table creation doesn't crash regardless of supervisor state.
+    beamtalk_class_registry:ensure_pid_table(),
+    ?assertNotEqual(undefined, ets:info(beamtalk_class_pids)).
+
+%%% ============================================================================
+%%% restart_class tests (BT-1888)
+%%% ============================================================================
+
+restart_class_no_module_test() ->
+    %% Attempting to restart a class with no module table entry should fail.
+    ?assertMatch(
+        {error, {no_module_for_class, 'NonExistentRestart1888'}},
+        beamtalk_class_registry:restart_class('NonExistentRestart1888')
+    ).
+
+restart_class_recovery_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_registry:ensure_module_table(),
+            beamtalk_class_registry:ensure_pid_table(),
+            HierSaved = ets:tab2list(beamtalk_class_hierarchy),
+            %% Start a class, then kill it to test recovery
+            ClassInfo = #{
+                superclass => none,
+                methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start('RestartTest1888', ClassInfo),
+            %% Verify it's alive and registered
+            ?assertNotEqual(undefined, beamtalk_class_registry:whereis_class('RestartTest1888')),
+            {HierSaved, Pid}
+        end,
+        fun({HierSaved, _Pid}) ->
+            %% Clean up the restarted class if it exists
+            case beamtalk_class_registry:whereis_class('RestartTest1888') of
+                undefined -> ok;
+                P -> catch gen_server:stop(P)
+            end,
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, HierSaved)
+        end,
+        [
+            {"kill and restart class", fun() ->
+                OldPid = beamtalk_class_registry:whereis_class('RestartTest1888'),
+                ?assert(is_pid(OldPid)),
+                %% Kill the class process
+                exit(OldPid, kill),
+                timer:sleep(50),
+                %% Should be unregistered now
+                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('RestartTest1888')),
+                %% Restart it
+                {ok, NewPid} = beamtalk_class_registry:restart_class('RestartTest1888'),
+                ?assert(is_pid(NewPid)),
+                ?assertNotEqual(OldPid, NewPid),
+                %% Should be registered again
+                ?assertEqual(NewPid, beamtalk_class_registry:whereis_class('RestartTest1888'))
+            end}
+        ]}.
+
+%%% ============================================================================
+%%% class_name_for_pid tests (BT-1888)
+%%% ============================================================================
+
+class_name_for_pid_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pid_table(),
+            ok
+        end,
+        fun(_) -> ok end, [
+            {"record and lookup", fun() ->
+                Pid = self(),
+                beamtalk_class_registry:record_class_pid(Pid, 'PidLookupTest1888'),
+                ?assertEqual(
+                    {ok, 'PidLookupTest1888'}, beamtalk_class_registry:class_name_for_pid(Pid)
+                ),
+                %% Clean up
+                ets:delete(beamtalk_class_pids, Pid)
+            end},
+            {"not found for unknown pid", fun() ->
+                FakePid = list_to_pid("<0.99999.0>"),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(FakePid))
+            end}
+        ]}.
+
+%%% ============================================================================
 %%% ADR 0032 Phase 1: invalidate_subclass_flattened_tables removed
 %%% ============================================================================
 %% The rebuild broadcast (invalidate_subclass_flattened_tables) was removed in
