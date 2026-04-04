@@ -71,7 +71,7 @@ multiply(A, B) -> A * B.
 version() -> 1.
 ```
 
-**Keyword mapping:** Beamtalk keyword selectors map to Erlang function names by joining keywords. `(Erlang my_mod) do: x with: y` calls `my_mod:'do:with:'(X, Y)`. Unary selectors map directly: `(Erlang my_mod) status` calls `my_mod:status()`.
+**Keyword mapping:** In Erlang FFI calls, the function name is taken from the **first keyword** (with the colon removed), and all arguments are passed positionally. `(Erlang my_mod) do: x with: y` calls `my_mod:do(X, Y)`. Unary selectors map directly: `(Erlang my_mod) status` calls `my_mod:status()`.
 
 **Instance methods** pass `self` explicitly when delegating to Erlang:
 
@@ -126,7 +126,7 @@ pool close
 
 ### Writing the Backing Gen_Server
 
-The hand-written Erlang module must implement the standard gen_server protocol with the `{Selector, [Args]}` wire format:
+The hand-written Erlang module must implement the standard gen_server protocol. Messages arrive in the wire format `{Selector, Args, PropCtx}` where `PropCtx` is a propagated context map (ADR 0069). Add a guard clause to strip it, then match on `{Selector, Args}`:
 
 ```erlang
 %% native/my_db_pool.erl
@@ -142,6 +142,10 @@ init(Config) ->
     {ok, Conn} = connect_db(Config),
     {ok, #{conn => Conn}}.
 
+%% Strip propagated context (ADR 0069 Phase 2b) — required boilerplate
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call({'query:', [SQL]}, _From, #{conn := Conn} = State) ->
     {reply, {ok, execute(Conn, SQL, [])}, State};
 handle_call({'query:params:', [SQL, Params]}, _From, #{conn := Conn} = State) ->
@@ -193,7 +197,7 @@ The compiler emits a warning if a `self delegate` method has no return type anno
 The call site determines the dispatch mode — no annotation needed in the `.bt` file:
 
 - `pool query: sql` -- sync via `gen_server:call` (`handle_call/3`)
-- `pool query: sql!` -- async via `gen_server:cast` (`handle_cast/2`)
+- `pool query: sql!` -- async cast via `gen_server:cast` (`handle_cast/2`)
 
 Backing gen_servers that support fire-and-forget should implement both `handle_call` and `handle_cast` clauses for the relevant selectors.
 
@@ -203,6 +207,10 @@ Backing gen_servers that support fire-and-forget should implement both `handle_c
 
 ```erlang
 %% gen_statem handle_event_function mode
+%% Strip propagated context (ADR 0069 Phase 2b)
+handle_event({call, From}, {Selector, Args, PropCtx}, State, Data) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_event({call, From}, {Selector, Args}, State, Data);
 handle_event({call, From}, {'readLine', []}, _State, Data) ->
     {keep_state, Data, [{reply, From, {ok, read_line(Data)}}]}.
 ```
@@ -235,6 +243,11 @@ start_link(Config) ->
 init(_Config) ->
     %% TODO: initialise state from Config
     {ok, #{}}.
+
+%% Strip propagated context (ADR 0069 Phase 2b) — required boilerplate
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 
 %% --- Delegate methods from DatabasePool.bt ---
 
@@ -469,6 +482,10 @@ init(Config) ->
     logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
     {ok, #{tid => Tid}}.
 
+%% Strip propagated context (ADR 0069 Phase 2b) — required boilerplate
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call({'get:', [Key]}, _From, #{tid := Tid} = State) ->
     Result = case ets:lookup(Tid, Key) of
         [{_, Value}] -> Value;
