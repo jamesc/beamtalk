@@ -1,10 +1,12 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Unit tests for beamtalk_native_docs module (BT-1851).
+%% @doc Unit tests for beamtalk_native_docs module (BT-1851, BT-1876).
 %%
 %% Tests the EEP-48 documentation reader against real OTP modules.
 %% Uses `lists` and `maps` as known-good sources of EEP-48 docs.
+%% Also tests security hardening: safe binary_to_term, non-v1 format
+%% handling, and binary path support from code:which/1.
 -module(beamtalk_native_docs_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -139,3 +141,94 @@ lookup_with_examples_test() ->
             %% Shouldn't happen for lists:sort/1
             ?assert(false)
     end.
+
+%%% ============================================================================
+%%% Non-v1 Docs Format Tests (BT-1876)
+%%% ============================================================================
+
+non_v1_docs_format_lookup_test() ->
+    {BeamPath, Module} = create_beam_with_docs_chunk({docs_v2, fake, data}),
+    try
+        ?assertEqual(
+            {error, unsupported_format},
+            beamtalk_native_docs:lookup(Module, foo, 0)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+non_v1_docs_format_module_doc_test() ->
+    {BeamPath, Module} = create_beam_with_docs_chunk({docs_v2, fake, data}),
+    try
+        ?assertEqual(
+            {error, unsupported_format},
+            beamtalk_native_docs:module_doc(Module)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
+%%% Corrupt Docs Chunk Tests (BT-1876)
+%%% ============================================================================
+
+corrupt_docs_chunk_lookup_test() ->
+    {BeamPath, Module} = create_beam_with_raw_docs_chunk(<<"not valid erlang term">>),
+    try
+        ?assertEqual(
+            {error, no_docs},
+            beamtalk_native_docs:lookup(Module, foo, 0)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+corrupt_docs_chunk_module_doc_test() ->
+    {BeamPath, Module} = create_beam_with_raw_docs_chunk(<<"not valid erlang term">>),
+    try
+        ?assertEqual(
+            {error, no_docs},
+            beamtalk_native_docs:module_doc(Module)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
+%%% Helpers
+%%% ============================================================================
+
+%% @private Create a temporary .beam file with a custom Docs chunk.
+%% The DocsTerm is serialized with term_to_binary and embedded
+%% into the Docs chunk of a minimal .beam file.
+create_beam_with_docs_chunk(DocsTerm) ->
+    DocsBin = term_to_binary(DocsTerm),
+    create_beam_with_raw_docs_chunk(DocsBin).
+
+%% @private Create a temporary .beam with raw bytes in the Docs chunk.
+create_beam_with_raw_docs_chunk(RawDocsBin) ->
+    Module = beamtalk_native_docs_test_fake,
+    %% Compile a minimal module to get a valid .beam
+    Forms = [
+        {attribute, 1, module, Module},
+        {attribute, 2, export, [{foo, 0}]},
+        {function, 3, foo, 0, [{clause, 3, [], [], [{atom, 3, ok}]}]}
+    ],
+    {ok, Module, BeamBin} = compile:forms(Forms),
+    %% Inject custom Docs chunk into the beam binary
+    {ok, _, Chunks} = beam_lib:all_chunks(BeamBin),
+    Chunks2 = [{"Docs", RawDocsBin} | lists:keydelete("Docs", 1, Chunks)],
+    {ok, NewBeamBin} = beam_lib:build_module(Chunks2),
+    %% Write to a temp file in the test working directory
+    BeamPath = atom_to_list(Module) ++ ".beam",
+    ok = file:write_file(BeamPath, NewBeamBin),
+    %% Load the module from the file so code:which/1 finds it
+    {module, Module} = code:load_abs(filename:rootname(BeamPath)),
+    {BeamPath, Module}.
+
+%% @private Clean up a fake beam file and purge the module.
+cleanup_fake_beam(BeamPath, Module) ->
+    code:purge(Module),
+    code:delete(Module),
+    code:purge(Module),
+    file:delete(BeamPath).
