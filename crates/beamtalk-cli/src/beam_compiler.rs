@@ -1158,7 +1158,7 @@ pub fn extract_beam_specs(
     let mut cache_hit_count = 0;
 
     for beam_file in beam_files {
-        let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
+        let module_name = sanitize_module_name(beam_file.file_stem().unwrap_or(beam_file.as_str()));
         let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
 
         if let Some(specs_line) = cache.lookup(module_name, mtime_secs, mtime_nanos) {
@@ -1213,7 +1213,7 @@ pub fn extract_beam_specs(
     // (e.g., no debug_info, no specs). Cache them with empty specs_line to avoid
     // re-extracting on every build.
     for beam_file in &cache_misses {
-        let module_name = beam_file.file_stem().unwrap_or(beam_file.as_str());
+        let module_name = sanitize_module_name(beam_file.file_stem().unwrap_or(beam_file.as_str()));
         if !seen_modules.contains(module_name) {
             let (mtime_secs, mtime_nanos) = beam_mtime(beam_file);
             cache.store(module_name, mtime_secs, mtime_nanos, "");
@@ -1229,6 +1229,17 @@ pub fn extract_beam_specs(
     );
 
     Ok(registry)
+}
+
+/// Sanitizes a module name derived from a beam file path by stripping any
+/// directory components (path separators). This prevents path traversal when
+/// the module name is used in cache filenames.
+fn sanitize_module_name(name: &str) -> &str {
+    // Take only the final component after any path separator.
+    let after_slash = name.rfind('/').map_or(name, |i| &name[i + 1..]);
+    after_slash
+        .rfind('\\')
+        .map_or(after_slash, |i| &after_slash[i + 1..])
 }
 
 /// Returns the modification time of a `.beam` file as `(seconds, nanoseconds)`
@@ -1250,6 +1261,24 @@ fn beam_mtime(path: &Utf8Path) -> (u64, u32) {
 fn extract_specs_via_build_worker(beam_files: &[Utf8PathBuf]) -> Result<Vec<(String, String)>> {
     let mut child = spawn_build_worker_for_specs()?;
 
+    let result = extract_specs_from_child(&mut child, beam_files);
+
+    // Always wait/kill the child process to prevent zombies, even on error.
+    if result.is_err() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+
+    result
+}
+
+/// Inner helper for `extract_specs_via_build_worker`. Separated so that the
+/// caller can guarantee `child.wait()` / `child.kill()` on all exit paths,
+/// including early `?` returns from stdin/stdout/stderr capture or write errors.
+fn extract_specs_from_child(
+    child: &mut std::process::Child,
+    beam_files: &[Utf8PathBuf],
+) -> Result<Vec<(String, String)>> {
     let mut stdin = child
         .stdin
         .take()
@@ -1280,10 +1309,7 @@ fn extract_specs_via_build_worker(beam_files: &[Utf8PathBuf]) -> Result<Vec<(Str
         .wrap_err("Failed to write to spec extraction stdin")?;
     drop(stdin);
 
-    let results = read_specs_protocol(stdout, stderr)?;
-
-    let _ = child.wait();
-    Ok(results)
+    read_specs_protocol(stdout, stderr)
 }
 
 /// Spawns a `beamtalk_build_worker` BEAM node for spec extraction.
@@ -1993,5 +2019,30 @@ end
         let (secs, nanos) = beam_mtime(Utf8Path::new("/nonexistent/foo.beam"));
         assert_eq!(secs, 0, "Nonexistent file should return 0 seconds");
         assert_eq!(nanos, 0, "Nonexistent file should return 0 nanos");
+    }
+
+    #[test]
+    fn sanitize_module_name_plain() {
+        assert_eq!(sanitize_module_name("lists"), "lists");
+    }
+
+    #[test]
+    fn sanitize_module_name_strips_unix_path() {
+        assert_eq!(sanitize_module_name("/usr/lib/erlang/lists"), "lists");
+    }
+
+    #[test]
+    fn sanitize_module_name_strips_windows_path() {
+        assert_eq!(sanitize_module_name("C:\\otp\\lib\\lists"), "lists");
+    }
+
+    #[test]
+    fn sanitize_module_name_strips_mixed_separators() {
+        assert_eq!(sanitize_module_name("/usr/lib\\erlang/lists"), "lists");
+    }
+
+    #[test]
+    fn sanitize_module_name_empty_string() {
+        assert_eq!(sanitize_module_name(""), "");
     }
 }
