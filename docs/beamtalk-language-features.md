@@ -678,13 +678,13 @@ result map: [:content | content size]
 
 // Error path
 result := Erlang file read_file: "/nonexistent"
-result              // => Result error: (ErlangError reason: #enoent)
+result              // => Result error: enoent
 result isError      // => true
 
 // Chain FFI calls with andThen:
 (Erlang file read_file: "/tmp/config.json")
   andThen: [:content | Erlang json decode: content]
-  mapError: [:e | "Config load failed: " ++ e reason asString]
+  mapError: [:e | "Config load failed: " ++ e message]
 
 // Bare ok atoms (e.g. file:write_file/2) become Result ok: nil
 Erlang file write_file: "/tmp/out.txt" with: "data"
@@ -710,9 +710,9 @@ result value  // => data
 **Migration from Tuple-based FFI code:**
 
 ```beamtalk
-// Before (Tuple-based):
+// Before (Tuple-based, pre-ADR-0076 — FFI returned raw Tuples):
 result := Erlang file read_file: path
-result isOk ifTrue: [result unwrap] ifFalse: ["error"]
+result isOk ifTrue: [result unwrap] ifFalse: ["error"]  // Tuple methods
 
 // After (Result-based):
 result := Erlang file read_file: path
