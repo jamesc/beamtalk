@@ -276,7 +276,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                 true ->
                     %% Exact match — call directly
                     try
-                        coerce_result(erlang:apply(Module, FunName, Args))
+                        coerce_result(coerce_charlist_result(erlang:apply(Module, FunName, Args)))
                     catch
                         error:#{error := #beamtalk_error{}} = Wrapped:_Stack ->
                             %% Re-raise already-wrapped Beamtalk exceptions
@@ -572,9 +572,9 @@ coerce_charlist_result(Result) ->
 %% - Non-tuple/non-atom values pass through unchanged
 -spec coerce_result(term()) -> term().
 coerce_result({ok, Value}) ->
-    beamtalk_result:from_tagged_tuple({ok, Value});
+    beamtalk_result:from_tagged_tuple({ok, coerce_charlist_result(Value)});
 coerce_result({error, Reason}) ->
-    beamtalk_result:from_tagged_tuple({error, Reason});
+    beamtalk_result:from_tagged_tuple({error, coerce_charlist_result(Reason)});
 coerce_result(ok) ->
     beamtalk_result:from_tagged_tuple({ok, nil});
 coerce_result(error) ->
