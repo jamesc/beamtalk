@@ -9057,6 +9057,78 @@ fn non_union_param_type_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
+// BT-1877: Nil resolved to UndefinedObject in union param validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn union_param_type_nil_does_not_disable_validation() {
+    // BT-1877: `String | Nil` param with Integer arg should warn.
+    // Before fix, `Nil` was not in the hierarchy so the conservative fallback
+    // made it compatible with anything, silently disabling validation.
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "setName:",
+        1,
+        vec![Some("String | Nil".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("setName:", span())]),
+        vec![int_lit(42)],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Integer should be incompatible with 'String | Nil' — Nil must not disable validation, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn union_param_type_nil_compatible_with_object_union() {
+    // `Object | Nil` param with Integer arg should pass (Integer is subclass of Object)
+    let hierarchy = hierarchy_with_extension(
+        "Object",
+        "setValue:",
+        1,
+        vec![Some("Object | Nil".into())],
+        Some("Nil".into()),
+    );
+    let module = make_module(vec![msg_send(
+        msg_send(
+            class_ref("Object"),
+            MessageSelector::Unary("new".into()),
+            vec![],
+        ),
+        MessageSelector::Keyword(vec![KeywordPart::new("setValue:", span())]),
+        vec![int_lit(42)],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Integer should be compatible with 'Object | Nil' (subclass of Object), got: {type_warnings:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // ADR 0075: FFI call type inference from NativeTypeRegistry
 // ---------------------------------------------------------------------------
 
