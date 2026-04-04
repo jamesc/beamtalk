@@ -1820,8 +1820,10 @@ fn parse_eunit_module_sections(
         );
 
         let (passed, mut failed, skipped) = parse_eunit_summary(&current_section);
-        // If no summary was parsed and the process failed, count as 1 failure
-        if passed == 0 && failed == 0 && skipped == 0 && !success {
+        // If the BEAM process failed (non-zero exit), ensure at least 1 failure
+        // is reported — even if a partial summary showed "All tests passed" for
+        // this module before the crash.
+        if failed == 0 && !success {
             failed = 1;
         }
 
