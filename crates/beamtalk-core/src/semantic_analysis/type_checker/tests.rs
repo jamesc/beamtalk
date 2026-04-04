@@ -1381,7 +1381,9 @@ fn test_typed_class_no_warning_when_fully_annotated() {
 
 #[test]
 fn test_expect_type_suppresses_typed_method_warnings() {
-    // typed class with untyped method that has @expect type — no warnings
+    // BT-1883: typed class with untyped method that has @expect type —
+    // type checker emits the diagnostic, apply_expect_directives suppresses it,
+    // and no stale @expect warning is produced.
     let mut method = MethodDefinition::new(
         MessageSelector::Unary("first".into()),
         vec![],
@@ -1403,22 +1405,17 @@ fn test_expect_type_suppresses_typed_method_warnings() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("Missing"))
-        .collect();
+    let diags = run_with_expect(&module, &hierarchy);
     assert!(
-        warnings.is_empty(),
-        "@expect type should suppress missing annotation warnings, got: {warnings:?}"
+        diags.is_empty(),
+        "@expect type should suppress missing annotation warnings with no stale warning, got: {diags:?}"
     );
 }
 
 #[test]
 fn test_expect_all_suppresses_typed_method_warnings() {
-    // @expect all should also suppress typed class warnings
+    // BT-1883: @expect all should also suppress typed class warnings
+    // without producing a stale @expect warning.
     let mut method = MethodDefinition::new(
         MessageSelector::Unary("first".into()),
         vec![],
@@ -1440,16 +1437,49 @@ fn test_expect_all_suppresses_typed_method_warnings() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("Missing"))
-        .collect();
+    let diags = run_with_expect(&module, &hierarchy);
     assert!(
-        warnings.is_empty(),
-        "@expect all should suppress missing annotation warnings, got: {warnings:?}"
+        diags.is_empty(),
+        "@expect all should suppress missing annotation warnings with no stale warning, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_expect_type_suppresses_uninitialized_state_warning() {
+    // BT-1883: @expect type on an uninitialized state field should suppress
+    // the warning without producing a stale @expect warning.
+    let mut typed_no_default = StateDeclaration::with_type(
+        ident("count"),
+        TypeAnnotation::simple("Integer", span()),
+        span(),
+    );
+    typed_no_default.expect = Some((ExpectCategory::Type, span()));
+
+    // Need at least one typed field WITH a default to trigger the sibling-default heuristic
+    let typed_with_default = StateDeclaration::with_type_and_default(
+        ident("name"),
+        TypeAnnotation::simple("String", span()),
+        str_lit("default"),
+        span(),
+    );
+
+    let class_def = ClassDefinition::with_modifiers(
+        ident("MyTyped"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![typed_no_default, typed_with_default],
+        vec![],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(
+        diags.is_empty(),
+        "@expect type on uninitialized state should suppress warning with no stale warning, got: {diags:?}"
     );
 }
 
