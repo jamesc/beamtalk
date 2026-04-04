@@ -163,6 +163,11 @@ impl NativeTypeRegistry {
     pub fn function_count(&self) -> usize {
         self.modules.values().map(Vec::len).sum()
     }
+
+    /// Returns an iterator over all module names in the registry.
+    pub fn module_names(&self) -> impl Iterator<Item = &str> {
+        self.modules.keys().map(String::as_str)
+    }
 }
 
 #[cfg(test)]
