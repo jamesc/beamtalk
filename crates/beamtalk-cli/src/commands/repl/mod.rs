@@ -798,6 +798,14 @@ fn handle_help_topic(line: &str, client: &mut ReplClient) {
     // Parse "ClassName", "ClassName selector",
     // "ClassName class", or "ClassName class selector"
     let tokens: Vec<&str> = args.split_whitespace().collect();
+
+    // BT-1852: Detect "Erlang <module>" and "Erlang <module> <function>" patterns.
+    // "Erlang" alone shows the Erlang class docs; "Erlang <module>" shows FFI help.
+    if tokens.first() == Some(&"Erlang") && tokens.len() > 1 {
+        handle_erlang_help(&tokens[1..], client);
+        return;
+    }
+
     let (class_name, class_side, selector) = match tokens.as_slice() {
         [cls] => (*cls, false, None),
         [cls, sel] if *sel == "class" => (*cls, true, None),
@@ -807,6 +815,34 @@ fn handle_help_topic(line: &str, client: &mut ReplClient) {
     };
 
     match client.get_docs(class_name, class_side, selector) {
+        Ok(response) => {
+            if response.is_error() {
+                if let Some(msg) = response.error_message() {
+                    eprintln!("{msg}");
+                }
+            } else if let Some(docs) = &response.docs {
+                println!("{docs}");
+            }
+        }
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Handle `:help Erlang <module>` and `:help Erlang <module> <function>` (BT-1852).
+///
+/// Queries the backend for type signatures (from `-spec` attributes) combined
+/// with EEP-48 documentation for the given Erlang module or function.
+fn handle_erlang_help(tokens: &[&str], client: &mut ReplClient) {
+    let (module, function) = match tokens {
+        [] => {
+            eprintln!("Usage: :help Erlang <module> [function]");
+            return;
+        }
+        [module] => (*module, None),
+        [module, function, ..] => (*module, Some(*function)),
+    };
+
+    match client.get_erlang_help(module, function) {
         Ok(response) => {
             if response.is_error() {
                 if let Some(msg) = response.error_message() {

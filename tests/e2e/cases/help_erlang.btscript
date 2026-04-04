@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for :help Erlang <module> (BT-1852)
+//
+// Tests FFI documentation lookup combining type specs and EEP-48 docs.
+
+// :help Erlang with a known module — should show module header, docs, and functions
+:help Erlang lists
+// => Erlang module: lists_
+
+// :help Erlang with a specific function — should show type signature and docs
+:help Erlang lists reverse
+// => lists:reverse_
+
+// :help Erlang with a nonexistent module — should show error
+:help Erlang nonexistent_module_xyz
+// => ERROR: Erlang module 'nonexistent_module_xyz' not found
+
+// :help Erlang with a nonexistent function — should show error
+:help Erlang lists nonexistent_function_xyz
+// => ERROR: lists:nonexistent_function_xyz not found
+
+// :help Erlang with no module name — shows the Erlang class docs
+:help Erlang
+// => == Erlang < ProtoObject ==_
+
+// :help Erlang maps — another common module should work
+:help Erlang maps
+// => Erlang module: maps_

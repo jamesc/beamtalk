@@ -832,7 +832,26 @@ impl ReplClient {
             request["selector"] = serde_json::Value::String(sel.to_string());
         }
 
-        self.write_json(&request)?;
+        self.send_docs_request(&request)
+    }
+
+    /// Get help for an Erlang module or function via the erlang-help op (BT-1852).
+    fn get_erlang_help(&mut self, module: &str, function: Option<&str>) -> Result<String, String> {
+        let mut request = serde_json::json!({
+            "op": "erlang-help",
+            "id": "e2e-erlang-help",
+            "module": module
+        });
+        if let Some(func) = function {
+            request["function"] = serde_json::Value::String(func.to_string());
+        }
+
+        self.send_docs_request(&request)
+    }
+
+    /// Send a docs/erlang-help request and parse the response.
+    fn send_docs_request(&mut self, request: &serde_json::Value) -> Result<String, String> {
+        self.write_json(request)?;
 
         let response_line = self.read_text()?;
 
@@ -1354,11 +1373,19 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             } else {
                 case.expression.strip_prefix(":h ").unwrap().trim()
             };
-            let (class_name, selector) = match args.split_once(' ') {
-                Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
-                None => (args, None),
-            };
-            client.get_docs(class_name, selector)
+            // BT-1852: Detect "Erlang <module>" pattern for FFI help.
+            let tokens: Vec<&str> = args.split_whitespace().collect();
+            if tokens.first() == Some(&"Erlang") && tokens.len() > 1 {
+                let module = tokens[1];
+                let function = tokens.get(2).copied();
+                client.get_erlang_help(module, function)
+            } else {
+                let (class_name, selector) = match args.split_once(' ') {
+                    Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
+                    None => (args, None),
+                };
+                client.get_docs(class_name, selector)
+            }
         } else if case.expression == ":clear" {
             client.clear_and_report()
         } else if case.expression == ":bindings" {

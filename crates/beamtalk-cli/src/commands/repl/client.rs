@@ -338,6 +338,26 @@ impl ReplClient {
         self.send_request(&req)
     }
 
+    /// Get help for an Erlang module or function (BT-1852).
+    ///
+    /// Sends `erlang-help` op to the backend with `module` and optional `function`.
+    /// Returns combined type signatures and EEP-48 documentation.
+    pub(crate) fn get_erlang_help(
+        &mut self,
+        module: &str,
+        function: Option<&str>,
+    ) -> Result<ReplResponse> {
+        let mut req = serde_json::json!({
+            "op": "erlang-help",
+            "id": protocol::next_msg_id(),
+            "module": module
+        });
+        if let Some(func) = function {
+            req["function"] = serde_json::Value::String(func.to_string());
+        }
+        self.send_request(&req)
+    }
+
     /// Show generated Core Erlang for an expression (BT-724).
     pub(crate) fn show_codegen(&mut self, code: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
