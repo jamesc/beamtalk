@@ -924,6 +924,181 @@ map_type_unknown_form_test() ->
     ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({unknown_form, 0, something})).
 
 %%% ---------------------------------------------------------------
+%%% Type resolution — user_type and remote_type (BT-1902)
+%%% ---------------------------------------------------------------
+
+%% Local user_type resolution: a type alias resolves to its definition.
+%% Uses process dictionary directly to simulate what read_specs does.
+resolve_user_type_local_test() ->
+    %% -type my_int() :: integer().
+    %% user_type my_int should resolve to Integer
+    Registry = #{{my_int, 0} => {type, 1, integer, []}},
+    OpaqueSet = sets:new(),
+    put(beamtalk_type_registry, Registry),
+    put(beamtalk_opaque_set, OpaqueSet),
+    put(beamtalk_type_depth, 0),
+    try
+        ?assertEqual(
+            <<"Integer">>,
+            beamtalk_spec_reader:map_type({user_type, 0, my_int, []})
+        )
+    after
+        erase(beamtalk_type_registry),
+        erase(beamtalk_opaque_set),
+        erase(beamtalk_type_depth)
+    end.
+
+%% Chained user_type resolution: type aliases referencing other type aliases.
+resolve_user_type_chained_test() ->
+    %% -type base() :: atom().
+    %% -type alias() :: base().
+    Registry = #{
+        {base, 0} => {type, 1, atom, []},
+        {alias, 0} => {user_type, 1, base, []}
+    },
+    OpaqueSet = sets:new(),
+    put(beamtalk_type_registry, Registry),
+    put(beamtalk_opaque_set, OpaqueSet),
+    put(beamtalk_type_depth, 0),
+    try
+        ?assertEqual(
+            <<"Symbol">>,
+            beamtalk_spec_reader:map_type({user_type, 0, alias, []})
+        )
+    after
+        erase(beamtalk_type_registry),
+        erase(beamtalk_opaque_set),
+        erase(beamtalk_type_depth)
+    end.
+
+%% User_type referencing a union resolves correctly.
+resolve_user_type_union_test() ->
+    %% -type my_result() :: {ok, binary()} | {error, atom()}.
+    Registry = #{
+        {my_result, 0} =>
+            {type, 1, union, [
+                {type, 1, tuple, [{atom, 1, ok}, {type, 1, binary, []}]},
+                {type, 1, tuple, [{atom, 1, error}, {type, 1, atom, []}]}
+            ]}
+    },
+    OpaqueSet = sets:new(),
+    put(beamtalk_type_registry, Registry),
+    put(beamtalk_opaque_set, OpaqueSet),
+    put(beamtalk_type_depth, 0),
+    try
+        ?assertEqual(
+            <<"Result(String, Symbol)">>,
+            beamtalk_spec_reader:map_type({user_type, 0, my_result, []})
+        )
+    after
+        erase(beamtalk_type_registry),
+        erase(beamtalk_opaque_set),
+        erase(beamtalk_type_depth)
+    end.
+
+%% Opaque types remain Dynamic even when definition is available.
+resolve_opaque_stays_dynamic_test() ->
+    %% -opaque my_opaque() :: integer().
+    Registry = #{{my_opaque, 0} => {type, 1, integer, []}},
+    OpaqueSet = sets:from_list([{my_opaque, 0}]),
+    put(beamtalk_type_registry, Registry),
+    put(beamtalk_opaque_set, OpaqueSet),
+    put(beamtalk_type_depth, 0),
+    try
+        ?assertEqual(
+            <<"Dynamic">>,
+            beamtalk_spec_reader:map_type({user_type, 0, my_opaque, []})
+        )
+    after
+        erase(beamtalk_type_registry),
+        erase(beamtalk_opaque_set),
+        erase(beamtalk_type_depth)
+    end.
+
+%% Recursive type hits depth limit and returns Dynamic.
+resolve_recursive_type_depth_limit_test() ->
+    %% -type tree() :: {node, tree(), tree()} | leaf.
+    Registry = #{
+        {tree, 0} =>
+            {type, 1, union, [
+                {type, 1, tuple, [
+                    {atom, 1, node},
+                    {user_type, 1, tree, []},
+                    {user_type, 1, tree, []}
+                ]},
+                {atom, 1, leaf}
+            ]}
+    },
+    OpaqueSet = sets:new(),
+    put(beamtalk_type_registry, Registry),
+    put(beamtalk_opaque_set, OpaqueSet),
+    put(beamtalk_type_depth, 0),
+    try
+        %% Should not crash; resolves to some type with depth limiting
+        Result = beamtalk_spec_reader:map_type({user_type, 0, tree, []}),
+        ?assert(is_binary(Result)),
+        %% Depth counter should be restored to 0 after resolution
+        ?assertEqual(0, get(beamtalk_type_depth))
+    after
+        erase(beamtalk_type_registry),
+        erase(beamtalk_opaque_set),
+        erase(beamtalk_type_depth)
+    end.
+
+%% Remote type resolution: file:posix() resolves to Symbol (it's atom()).
+resolve_remote_type_posix_test() ->
+    %% Use read_specs on file.beam — posix() should resolve to Symbol (atom)
+    BeamFile = code:which(file),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+    ReadFileSpecs = [
+        S
+     || S <- Specs,
+        maps:get(name, S) =:= <<"read_file">>,
+        maps:get(arity, S) =:= 1
+    ],
+    ?assert(length(ReadFileSpecs) > 0),
+    [Spec | _] = ReadFileSpecs,
+    %% posix() in error branch should resolve to Symbol (since posix() = atom())
+    ?assertEqual(<<"Result(String, Symbol)">>, maps:get(return_type, Spec)).
+
+%% Remote type resolution: disk_log error types resolve.
+resolve_remote_type_disk_log_test() ->
+    BeamFile = code:which(disk_log),
+    case BeamFile of
+        non_existing ->
+            ok;
+        _ ->
+            {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+            NextFileSpecs = [
+                S
+             || S <- Specs,
+                maps:get(name, S) =:= <<"next_file">>,
+                maps:get(arity, S) =:= 1
+            ],
+            ?assert(length(NextFileSpecs) > 0),
+            [Spec | _] = NextFileSpecs,
+            RetType = maps:get(return_type, Spec),
+            %% Should be Result(Nil, Symbol | Tuple) instead of Result(Nil, Dynamic)
+            ?assertEqual(<<"Result(Nil, Symbol | Tuple)">>, RetType)
+    end.
+
+%% map_type/1 without context still returns Dynamic for user_type.
+map_type_user_type_no_context_test() ->
+    %% When called outside read_specs, no type registry is set
+    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({user_type, 0, foo, []})).
+
+%% map_type/1 without context still returns Dynamic for remote_type.
+%% (remote_type resolution requires depth context; without it, should not crash)
+map_type_remote_type_no_context_resolves_test() ->
+    %% When called outside read_specs for a known OTP type, it may still resolve
+    %% since resolve_remote_type handles missing depth gracefully
+    Result = beamtalk_spec_reader:map_type(
+        {remote_type, 0, [{atom, 0, file}, {atom, 0, posix}, []]}
+    ),
+    ?assert(is_binary(Result)).
+
+%%% ---------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------
 
