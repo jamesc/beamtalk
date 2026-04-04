@@ -428,42 +428,51 @@ compat_self_dispatch_exit_preserves_class_test() ->
     %% which goes through self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result.
     %% The safe_dispatch/3 for triggerExitError returns {error, {exit, ...}, State}.
     {ok, Actor} = test_compat_error_actor:start_link(),
-    %% The self-send error bubbles up through dispatch/4's try/catch as an
-    %% error exception, which wrap_method_error catches and wraps.
-    Result = gen_server:call(Actor, {selfSendExitError, []}),
-    ?assertMatch({error, _}, Result),
-    {error, Inner} = Result,
-    %% The inner error should be a #beamtalk_error{} from wrap_method_error,
-    %% with the original_reason containing the ExitError wrapped exception.
-    ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-    Details = Inner#beamtalk_error.details,
-    OriginalReason = maps:get(original_reason, Details),
-    ?assertMatch(#{'$beamtalk_class' := 'ExitError'}, OriginalReason),
-    gen_server:stop(Actor).
+    try
+        %% The self-send error bubbles up through dispatch/4's try/catch as an
+        %% error exception, which wrap_method_error catches and wraps.
+        Result = gen_server:call(Actor, {selfSendExitError, []}),
+        ?assertMatch({error, _}, Result),
+        {error, Inner} = Result,
+        %% The inner error should be a #beamtalk_error{} from wrap_method_error,
+        %% with the original_reason containing the ExitError wrapped exception.
+        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
+        Details = Inner#beamtalk_error.details,
+        OriginalReason = maps:get(original_reason, Details),
+        ?assertMatch(#{'$beamtalk_class' := 'ExitError'}, OriginalReason)
+    after
+        gen_server:stop(Actor)
+    end.
 
 compat_self_dispatch_throw_preserves_class_test() ->
     %% Same as above but for throw errors through the self_dispatch path.
     {ok, Actor} = test_compat_error_actor:start_link(),
-    Result = gen_server:call(Actor, {selfSendThrowError, []}),
-    ?assertMatch({error, _}, Result),
-    {error, Inner} = Result,
-    ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-    Details = Inner#beamtalk_error.details,
-    OriginalReason = maps:get(original_reason, Details),
-    ?assertMatch(#{'$beamtalk_class' := 'ThrowError'}, OriginalReason),
-    gen_server:stop(Actor).
+    try
+        Result = gen_server:call(Actor, {selfSendThrowError, []}),
+        ?assertMatch({error, _}, Result),
+        {error, Inner} = Result,
+        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
+        Details = Inner#beamtalk_error.details,
+        OriginalReason = maps:get(original_reason, Details),
+        ?assertMatch(#{'$beamtalk_class' := 'ThrowError'}, OriginalReason)
+    after
+        gen_server:stop(Actor)
+    end.
 
 compat_self_dispatch_error_preserves_class_test() ->
     %% Same as above but for plain errors through the self_dispatch path.
     {ok, Actor} = test_compat_error_actor:start_link(),
-    Result = gen_server:call(Actor, {selfSendPlainError, []}),
-    ?assertMatch({error, _}, Result),
-    {error, Inner} = Result,
-    ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-    Details = Inner#beamtalk_error.details,
-    OriginalReason = maps:get(original_reason, Details),
-    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError'}, OriginalReason),
-    gen_server:stop(Actor).
+    try
+        Result = gen_server:call(Actor, {selfSendPlainError, []}),
+        ?assertMatch({error, _}, Result),
+        {error, Inner} = Result,
+        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
+        Details = Inner#beamtalk_error.details,
+        OriginalReason = maps:get(original_reason, Details),
+        ?assertMatch(#{'$beamtalk_class' := 'RuntimeError'}, OriginalReason)
+    after
+        gen_server:stop(Actor)
+    end.
 
 %%% Stress tests
 
