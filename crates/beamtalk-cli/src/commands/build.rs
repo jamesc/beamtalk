@@ -1895,7 +1895,7 @@ fn generate_rebar_config(
     // This avoids rebar3 project discovery issues: rebar3 won't compile
     // src_dirs sources without a top-level .app.src, and generating one
     // creates conflicts with the package's own .app file.
-    config.push_str("{erl_opts, [debug_info]}.\n");
+    config.push_str("{erl_opts, [debug_info, warn_missing_doc]}.\n");
 
     debug!(path = %config_path, "Writing rebar.config");
     fs::write(&config_path, &config)
@@ -2086,6 +2086,7 @@ fn compile_native_erlang_with_deps(
 
     let mut invocation = beamtalk_cli::erlc::ErlcInvocation::new(&ebin_dir)
         .debug_info()
+        .docs()
         .erl_libs(&build_layout.rebar_lib_dir())
         .runtime_include()
         // BT-1730: generated include dir for beamtalk_classes.hrl
@@ -3560,8 +3561,8 @@ mod tests {
             "Should contain cowboy dep"
         );
         assert!(
-            content.contains("{erl_opts, [debug_info]}"),
-            "Should include debug_info"
+            content.contains("{erl_opts, [debug_info, warn_missing_doc]}"),
+            "Should include debug_info and warn_missing_doc"
         );
         // No native/ directory — should NOT include src_dirs
         assert!(

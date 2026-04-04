@@ -18,6 +18,7 @@ use std::process::Command;
 pub struct ErlcInvocation {
     output_dir: Utf8PathBuf,
     debug_info: bool,
+    docs: bool,
     erl_libs: Option<Utf8PathBuf>,
     include_dirs: Vec<Utf8PathBuf>,
     code_paths: Vec<Utf8PathBuf>,
@@ -31,6 +32,7 @@ impl ErlcInvocation {
         Self {
             output_dir: output_dir.into(),
             debug_info: false,
+            docs: false,
             erl_libs: None,
             include_dirs: Vec::new(),
             code_paths: Vec::new(),
@@ -42,6 +44,20 @@ impl ErlcInvocation {
     #[must_use]
     pub fn debug_info(mut self) -> Self {
         self.debug_info = true;
+        self
+    }
+
+    /// Enable EEP-48 documentation chunk generation.
+    ///
+    /// On OTP 27+, source files that use `-doc` / `-moduledoc` attributes
+    /// automatically get a `Docs` chunk in the compiled `.beam`. This method
+    /// adds `+warn_missing_doc` so that `erlc` emits warnings for exported
+    /// functions and modules that lack `-doc` / `-moduledoc` attributes,
+    /// encouraging developers to add documentation that will appear in
+    /// `:help` output.
+    #[must_use]
+    pub fn docs(mut self) -> Self {
+        self.docs = true;
         self
     }
 
@@ -119,6 +135,10 @@ impl ErlcInvocation {
 
         if self.debug_info {
             cmd.arg("+debug_info");
+        }
+
+        if self.docs {
+            cmd.arg("+warn_missing_doc");
         }
 
         cmd.arg("-o").arg(self.output_dir.as_str());
@@ -213,6 +233,26 @@ mod tests {
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert_eq!(args, vec!["+debug_info", "-o", "/tmp/out", "/tmp/foo.erl"]);
+    }
+
+    #[test]
+    fn test_docs() {
+        let inv = ErlcInvocation::new("/tmp/out")
+            .debug_info()
+            .docs()
+            .source_file(Utf8PathBuf::from("/tmp/foo.erl"));
+        let cmd = inv.build();
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
+        assert_eq!(
+            args,
+            vec![
+                "+debug_info",
+                "+warn_missing_doc",
+                "-o",
+                "/tmp/out",
+                "/tmp/foo.erl"
+            ]
+        );
     }
 
     #[test]
