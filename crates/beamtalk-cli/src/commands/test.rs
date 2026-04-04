@@ -1460,6 +1460,7 @@ fn compile_native_test_erlang(
 
     beamtalk_cli::erlc::ErlcInvocation::new(&ebin_dir)
         .debug_info()
+        .docs()
         .erl_libs(&test_layout.rebar_lib_dir())
         .code_paths(ebin_dirs)
         .runtime_include()

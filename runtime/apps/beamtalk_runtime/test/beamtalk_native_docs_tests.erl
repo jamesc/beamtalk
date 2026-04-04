@@ -195,6 +195,49 @@ corrupt_docs_chunk_module_doc_test() ->
     end.
 
 %%% ============================================================================
+%%% EEP-48 Doc Chunk Generation Tests (BT-1900)
+%%% ============================================================================
+
+compile_with_doc_attributes_has_docs_chunk_test() ->
+    %% Compile a module with -doc attributes via compile:file and verify
+    %% that the resulting .beam contains a Docs chunk (OTP 27+).
+    {BeamPath, Module} = create_beam_with_doc_attributes(),
+    try
+        Result = beamtalk_native_docs:lookup(Module, greet, 1),
+        ?assertMatch(#{doc := _, sig := _, examples := _}, Result),
+        #{doc := Doc} = Result,
+        %% The -doc text should appear in the docs chunk
+        ?assertNotEqual(<<>>, Doc),
+        ?assertNotEqual(nomatch, binary:match(Doc, <<"greeting">>))
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+compile_with_doc_false_is_hidden_test() ->
+    %% Functions marked with -doc false should be hidden in the Docs chunk.
+    {BeamPath, Module} = create_beam_with_doc_attributes(),
+    try
+        ?assertEqual(
+            {error, no_docs},
+            beamtalk_native_docs:lookup(Module, internal, 0)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+compile_with_moduledoc_test() ->
+    %% Module-level -moduledoc should appear in module_doc/1.
+    {BeamPath, Module} = create_beam_with_doc_attributes(),
+    try
+        Result = beamtalk_native_docs:module_doc(Module),
+        ?assertMatch(#{doc := _}, Result),
+        #{doc := Doc} = Result,
+        ?assertNotEqual(nomatch, binary:match(Doc, <<"documented module">>))
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
@@ -224,6 +267,36 @@ create_beam_with_raw_docs_chunk(RawDocsBin) ->
     ok = file:write_file(BeamPath, NewBeamBin),
     %% Load the module from the file so code:which/1 finds it
     {module, Module} = code:load_abs(filename:rootname(BeamPath)),
+    {BeamPath, Module}.
+
+%% @private Create a temporary .beam with -doc/-moduledoc attributes (OTP 27+).
+%% Uses compile:file/2 to produce a beam binary with a real Docs chunk.
+create_beam_with_doc_attributes() ->
+    Module = beamtalk_native_docs_test_docattr,
+    %% Write a temporary .erl file with -doc attributes, then compile it.
+    %% compile:forms/2 does not support -doc attributes directly, so we
+    %% write source and compile via compile:file/2.
+    SrcFile = atom_to_list(Module) ++ ".erl",
+    Source = [
+        "-module(",
+        atom_to_list(Module),
+        ").\n",
+        "-moduledoc \"A documented module for testing.\".\n",
+        "-export([greet/1, internal/0]).\n",
+        "\n",
+        "-doc \"Returns a greeting for the given name.\".\n",
+        "-spec greet(binary()) -> binary().\n",
+        "greet(Name) -> <<\"Hello, \", Name/binary>>.\n",
+        "\n",
+        "-doc false.\n",
+        "-spec internal() -> ok.\n",
+        "internal() -> ok.\n"
+    ],
+    ok = file:write_file(SrcFile, Source),
+    {ok, Module} = compile:file(SrcFile, [debug_info, {outdir, "."}]),
+    BeamPath = atom_to_list(Module) ++ ".beam",
+    {module, Module} = code:load_abs(filename:rootname(BeamPath)),
+    _ = file:delete(SrcFile),
     {BeamPath, Module}.
 
 %% @private Clean up a fake beam file and purge the module.
