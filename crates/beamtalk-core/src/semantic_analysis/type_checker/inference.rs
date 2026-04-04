@@ -2136,7 +2136,9 @@ impl TypeChecker {
                             for (declared, actual) in declared_params.iter().zip(type_args.iter()) {
                                 let decl_eco: EcoString = (*declared).into();
                                 // Only infer if this is a method-local type param
-                                if !class_type_params.contains(&decl_eco)
+                                // (single uppercase letter, not a class-level param, not a known class)
+                                if super::is_generic_type_param(&decl_eco)
+                                    && !class_type_params.contains(&decl_eco)
                                     && !hierarchy.has_class(&decl_eco)
                                 {
                                     method_subst.insert(decl_eco, actual.clone());
@@ -3698,6 +3700,33 @@ mod tests {
         // Only the Block param yields inference; Object is non-parametric
         assert_eq!(result.get("T"), Some(&InferredType::known("Integer")));
         assert_eq!(result.get("R"), Some(&InferredType::known("Integer")));
+    }
+
+    #[test]
+    fn infer_method_local_params_skips_non_type_param_in_parametric() {
+        // BT-1895: Param type is Result(Enumerable, E) where Enumerable is a protocol name,
+        // not a type parameter. It should NOT be substituted even though it's not in the hierarchy.
+        let method = method_info("check:", vec![Some("Result(Enumerable, E)")], Some("E"));
+        let arg = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![InferredType::known("List"), InferredType::known("Error")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[arg],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        // "Enumerable" is not a single-letter type param, so it must NOT be inferred
+        assert!(
+            !result.contains_key("Enumerable"),
+            "Non-type-param identifier 'Enumerable' should not be substituted"
+        );
+        // "E" IS a valid single-letter type param — it should still be inferred
+        assert_eq!(result.get("E"), Some(&InferredType::known("Error")));
     }
 
     // ---- substitute_return_type with method-local params (end-to-end flow) ----
