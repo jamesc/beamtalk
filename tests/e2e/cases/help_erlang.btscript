@@ -28,3 +28,11 @@
 // :help Erlang maps — another common module should work
 :help Erlang maps
 // => Erlang module: maps_
+
+// :help Erlang with a function that has a spec — should show original Erlang spec (BT-1901)
+:help Erlang lists reverse
+// => _Erlang: -spec reverse_
+
+// :help Erlang with a type name (not an exported function) — should show type definition (BT-1901)
+:help Erlang gen_server from
+// => gen_server:from_

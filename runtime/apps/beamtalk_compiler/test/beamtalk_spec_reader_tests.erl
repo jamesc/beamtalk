@@ -946,3 +946,135 @@ cleanup_tmp_dir(TmpDir) ->
         filelib:wildcard(filename:join(TmpDir, "*"))
     ),
     file:del_dir(TmpDir).
+
+%%% ---------------------------------------------------------------
+%%% read_raw_specs/1 — reading raw spec forms from .beam files
+%%% ---------------------------------------------------------------
+
+%% Raw specs from lists.beam includes reverse/1.
+read_raw_specs_lists_test() ->
+    BeamFile = code:which(lists),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, RawSpecs} = beamtalk_spec_reader:read_raw_specs(BeamFile),
+    ?assert(is_list(RawSpecs)),
+    ?assert(length(RawSpecs) > 0),
+    %% Each entry is {Name, Arity, Form}
+    [{N1, A1, _F1} | _] = RawSpecs,
+    ?assert(is_atom(N1)),
+    ?assert(is_integer(A1)),
+    %% reverse/1 should be present
+    ReverseRaw = [{N, A, F} || {N, A, F} <- RawSpecs, N =:= reverse, A =:= 1],
+    ?assert(length(ReverseRaw) > 0).
+
+%% Raw specs only includes exported functions.
+read_raw_specs_filters_unexported_test() ->
+    BeamFile = code:which(lists),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, RawSpecs} = beamtalk_spec_reader:read_raw_specs(BeamFile),
+    Exports = lists:module_info(exports),
+    ExportSet = sets:from_list(Exports),
+    lists:foreach(
+        fun({Name, Arity, _Form}) ->
+            ?assert(sets:is_element({Name, Arity}, ExportSet))
+        end,
+        RawSpecs
+    ).
+
+%% Raw specs from a nonexistent file returns error.
+read_raw_specs_nonexistent_test() ->
+    Result = beamtalk_spec_reader:read_raw_specs("/nonexistent/path.beam"),
+    ?assertMatch({error, _}, Result).
+
+%%% ---------------------------------------------------------------
+%%% format_erlang_spec/1 — pretty-printing raw spec forms
+%%% ---------------------------------------------------------------
+
+%% Formatting a raw spec produces a valid -spec string.
+format_erlang_spec_test() ->
+    BeamFile = code:which(lists),
+    {ok, RawSpecs} = beamtalk_spec_reader:read_raw_specs(BeamFile),
+    ReverseRaw = [{N, A, F} || {N, A, F} <- RawSpecs, N =:= reverse, A =:= 1],
+    [{_, _, Form}] = ReverseRaw,
+    Formatted = beamtalk_spec_reader:format_erlang_spec(Form),
+    ?assert(is_binary(Formatted)),
+    %% Should start with -spec
+    ?assertMatch(<<"-spec ", _/binary>>, Formatted),
+    %% Should contain the function name
+    ?assertNotEqual(nomatch, binary:match(Formatted, <<"reverse">>)).
+
+%% Formatting a spec for a bounded_fun (with when constraints) works.
+format_erlang_spec_bounded_test() ->
+    BeamFile = code:which(maps),
+    {ok, RawSpecs} = beamtalk_spec_reader:read_raw_specs(BeamFile),
+    %% maps:get/2 typically has a `when` constraint
+    GetRaw = [{N, A, F} || {N, A, F} <- RawSpecs, N =:= get, A =:= 2],
+    case GetRaw of
+        [{_, _, Form} | _] ->
+            Formatted = beamtalk_spec_reader:format_erlang_spec(Form),
+            ?assert(is_binary(Formatted)),
+            ?assertMatch(<<"-spec ", _/binary>>, Formatted);
+        [] ->
+            %% maps:get/2 may not have a spec in all OTP versions
+            ok
+    end.
+
+%%% ---------------------------------------------------------------
+%%% read_types/1 — reading type definitions from .beam files
+%%% ---------------------------------------------------------------
+
+%% Reading types from disk_log.beam returns type definitions.
+read_types_disk_log_test() ->
+    BeamFile = code:which(disk_log),
+    case BeamFile of
+        non_existing ->
+            %% disk_log may not be available in all environments
+            ok;
+        _ ->
+            {ok, Types} = beamtalk_spec_reader:read_types(BeamFile),
+            ?assert(is_list(Types)),
+            ?assert(length(Types) > 0),
+            %% Each entry is {Name, Arity, Form}
+            [{TN, TA, _TF} | _] = Types,
+            ?assert(is_atom(TN)),
+            ?assert(is_integer(TA))
+    end.
+
+%% Reading types from gen_server.beam returns type definitions.
+read_types_gen_server_test() ->
+    BeamFile = code:which(gen_server),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Types} = beamtalk_spec_reader:read_types(BeamFile),
+    ?assert(is_list(Types)),
+    ?assert(length(Types) > 0).
+
+%% Reading types from a preloaded module (erlang) returns no_debug_info.
+read_types_preloaded_test() ->
+    case code:which(erlang) of
+        preloaded ->
+            %% Can't read abstract_code from preloaded modules directly
+            ok;
+        BeamFile ->
+            %% Some test environments may have erlang.beam on disk
+            _Result = beamtalk_spec_reader:read_types(BeamFile),
+            ok
+    end.
+
+%% Reading types from a nonexistent file returns error.
+read_types_nonexistent_test() ->
+    Result = beamtalk_spec_reader:read_types("/nonexistent/path.beam"),
+    ?assertMatch({error, _}, Result).
+
+%%% ---------------------------------------------------------------
+%%% format_erlang_type/1 — pretty-printing type definitions
+%%% ---------------------------------------------------------------
+
+%% Formatting a type from gen_server produces a valid -type string.
+format_erlang_type_test() ->
+    BeamFile = code:which(gen_server),
+    {ok, Types} = beamtalk_spec_reader:read_types(BeamFile),
+    ?assert(length(Types) > 0),
+    [{_, _, Form} | _] = Types,
+    Formatted = beamtalk_spec_reader:format_erlang_type(Form),
+    ?assert(is_binary(Formatted)),
+    %% Should start with -type
+    ?assertMatch(<<"-type ", _/binary>>, Formatted).
