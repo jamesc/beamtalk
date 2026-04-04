@@ -141,6 +141,83 @@ fn gen_native_errors_on_missing_file() {
 }
 
 #[test]
+#[ignore = "requires beamtalk binary"]
+fn gen_native_refuses_to_overwrite_existing_file() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+
+    let bt_source = "Actor subclass: TestActor native: test_actor_impl\n\
+                      \x20 getValue -> Integer => self delegate\n";
+    std::fs::write(tmp.path().join("TestActor.bt"), bt_source).expect("write .bt");
+
+    // Create an existing .erl file with user content
+    let existing_content = "%% My hand-edited implementation\n";
+    std::fs::write(tmp.path().join("test_actor_impl.erl"), existing_content)
+        .expect("write existing .erl");
+
+    // Run gen-native without --force — should fail
+    let output = Command::new(beamtalk_binary())
+        .args(["gen-native", "TestActor"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run beamtalk gen-native");
+
+    assert!(
+        !output.status.success(),
+        "gen-native should refuse to overwrite without --force"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already exists") && stderr.contains("--force"),
+        "Expected overwrite error mentioning --force, got: {stderr}"
+    );
+
+    // Verify the existing file was NOT overwritten
+    let content =
+        std::fs::read_to_string(tmp.path().join("test_actor_impl.erl")).expect("read .erl");
+    assert_eq!(
+        content, existing_content,
+        "Existing file should be preserved"
+    );
+}
+
+#[test]
+#[ignore = "requires beamtalk binary"]
+fn gen_native_force_overwrites_existing_file() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+
+    let bt_source = "Actor subclass: TestActor native: test_actor_impl\n\
+                      \x20 getValue -> Integer => self delegate\n";
+    std::fs::write(tmp.path().join("TestActor.bt"), bt_source).expect("write .bt");
+
+    // Create an existing .erl file
+    std::fs::write(tmp.path().join("test_actor_impl.erl"), "%% Old content\n")
+        .expect("write existing .erl");
+
+    // Run gen-native with --force — should succeed
+    let output = Command::new(beamtalk_binary())
+        .args(["gen-native", "--force", "TestActor"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run beamtalk gen-native");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "gen-native --force should succeed:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // Verify the file was overwritten with generated content
+    let content =
+        std::fs::read_to_string(tmp.path().join("test_actor_impl.erl")).expect("read .erl");
+    assert!(
+        content.contains("-module(test_actor_impl)."),
+        "File should contain generated content, got: {content}"
+    );
+}
+
+#[test]
 #[ignore = "requires beamtalk binary and erlc"]
 fn gen_native_output_passes_erlc_syntax_check() {
     let tmp = tempfile::tempdir().expect("create tempdir");

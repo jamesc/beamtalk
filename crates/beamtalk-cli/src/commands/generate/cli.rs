@@ -21,6 +21,10 @@ pub enum GenerateCommand {
     Native {
         /// Class name (e.g., `MyActor`) -- looks for `MyActor.bt`, `src/MyActor.bt`, or `lib/MyActor.bt`
         class_name: String,
+
+        /// Overwrite existing `.erl` file if it already exists
+        #[arg(long)]
+        force: bool,
     },
 
     /// Generate Beamtalk stub definitions from `.beam` abstract code (ADR 0075)
@@ -49,7 +53,7 @@ pub enum GenerateCommand {
 /// Dispatch to the appropriate generate subcommand.
 pub fn run(command: GenerateCommand) -> Result<()> {
     match command {
-        GenerateCommand::Native { class_name } => super::native::run(&class_name),
+        GenerateCommand::Native { class_name, force } => super::native::run(&class_name, force),
         GenerateCommand::Stubs {
             modules,
             native_dir,
