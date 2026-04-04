@@ -575,10 +575,24 @@ coerce_charlist_result(Result) ->
 coerce_ffi_result(Module, Result) ->
     case is_beamtalk_module(Module) of
         true ->
-            coerce_result(Result);
+            coerce_result_no_charlist(Result);
         false ->
             coerce_result(coerce_charlist_result(Result))
     end.
+
+%% @doc Like coerce_result/1 but skips charlist coercion on inner values.
+%% Used for Beamtalk modules whose lists are genuine typed values.
+-spec coerce_result_no_charlist(term()) -> term().
+coerce_result_no_charlist({ok, Value}) ->
+    beamtalk_result:from_tagged_tuple({ok, Value});
+coerce_result_no_charlist({error, Reason}) ->
+    beamtalk_result:from_tagged_tuple({error, Reason});
+coerce_result_no_charlist(ok) ->
+    beamtalk_result:from_tagged_tuple({ok, nil});
+coerce_result_no_charlist(error) ->
+    beamtalk_result:from_tagged_tuple({error, nil});
+coerce_result_no_charlist(Other) ->
+    Other.
 
 %% @doc Check whether a module is part of the Beamtalk runtime/stdlib.
 %%
