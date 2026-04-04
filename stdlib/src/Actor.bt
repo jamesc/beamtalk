@@ -131,8 +131,9 @@ Object subclass: Actor
   ///
   /// Override in subclasses to perform cleanup such as closing resources,
   /// flushing buffers, or notifying dependents. Called synchronously during
-  /// graceful shutdown (`stop`). The `reason` parameter is a Symbol indicating
-  /// why the actor is stopping (e.g., `#normal` for graceful stop).
+  /// graceful shutdown (`stop`). The `reason` parameter is an Object — it may
+  /// be a Symbol like `#normal` for graceful stop, but OTP can also pass
+  /// compound terms like `{shutdown, term}` for non-atom shutdown reasons.
   ///
   /// Not called when the actor is forcefully killed (`kill`).
   /// If `terminate:` raises an error, shutdown proceeds anyway.

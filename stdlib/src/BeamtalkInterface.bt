@@ -50,12 +50,14 @@ sealed typed Object subclass: BeamtalkInterface
   globals -> Dictionary => (Erlang beamtalk_interface) globals
 
   /// Show class documentation: name, superclass, and method signatures.
+  /// Accepts a Class reference, a Symbol class name, or a String class name.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Beamtalk help: Counter
+  /// Beamtalk help: #Counter
   /// ```
-  sealed help: aClass :: Class -> String =>
+  sealed help: aClass :: Object -> String =>
     (Erlang beamtalk_interface) help: aClass
 
   /// Show detailed documentation for a specific method on a class.
