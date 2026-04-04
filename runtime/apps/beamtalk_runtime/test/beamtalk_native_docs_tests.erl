@@ -270,7 +270,7 @@ create_beam_with_raw_docs_chunk(RawDocsBin) ->
     {BeamPath, Module}.
 
 %% @private Create a temporary .beam with -doc/-moduledoc attributes (OTP 27+).
-%% Uses compile:forms/2 to produce a beam binary with a real Docs chunk.
+%% Uses compile:file/2 to produce a beam binary with a real Docs chunk.
 create_beam_with_doc_attributes() ->
     Module = beamtalk_native_docs_test_docattr,
     %% Write a temporary .erl file with -doc attributes, then compile it.
