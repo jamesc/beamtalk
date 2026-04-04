@@ -175,6 +175,10 @@ ring_buffer_eviction_test_() ->
                 %% Clear any events from other tests to start clean
                 beamtalk_trace_store:clear(),
 
+                %% Capture original max_events so we restore the real
+                %% value, not a hard-coded constant.
+                OrigMax = beamtalk_trace_store:max_events(),
+
                 %% Set a small max for testing; restore in `after`
                 %% so a failing assertion doesn't leave max_events=50
                 %% for subsequent tests.
@@ -207,7 +211,7 @@ ring_buffer_eviction_test_() ->
                     PostSweep = beamtalk_trace_store:get_traces(TestPid),
                     ?assertEqual(ExpectedAfterSweep, length(PostSweep))
                 after
-                    beamtalk_trace_store:max_events(100000)
+                    beamtalk_trace_store:max_events(OrigMax)
                 end
             end)
         ]
@@ -1509,10 +1513,13 @@ max_events_config_test_() ->
                 end)},
             {"max_events/1 updates the ring buffer capacity",
                 ?_test(begin
+                    OrigMax = beamtalk_trace_store:max_events(),
                     beamtalk_trace_store:max_events(500),
-                    ?assertEqual(500, beamtalk_trace_store:max_events()),
-                    %% Reset to default
-                    beamtalk_trace_store:max_events(100000)
+                    try
+                        ?assertEqual(500, beamtalk_trace_store:max_events())
+                    after
+                        beamtalk_trace_store:max_events(OrigMax)
+                    end
                 end)}
         ]
     end}.
