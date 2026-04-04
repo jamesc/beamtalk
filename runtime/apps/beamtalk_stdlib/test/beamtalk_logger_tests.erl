@@ -94,7 +94,8 @@ remove_capture_handler(HandlerId) ->
 
 %% Logger handler callback — sends log events to the capture pid.
 log(LogEvent, #{capture_pid := Pid}) ->
-    Pid ! {captured_log, LogEvent}.
+    Pid ! {captured_log, LogEvent},
+    ok.
 
 set_level_emits_deprecation_warning_test() ->
     reset_deprecation_flag(),
