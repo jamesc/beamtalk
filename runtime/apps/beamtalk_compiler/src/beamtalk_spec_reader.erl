@@ -56,8 +56,15 @@
 read_specs(BeamFile) ->
     case beam_lib:chunks(BeamFile, [abstract_code]) of
         {ok, {_Module, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
-            Specs = extract_specs_from_forms(Forms),
-            {ok, Specs};
+            TypeRegistry = build_type_registry(Forms),
+            OpaqueSet = build_opaque_set(Forms),
+            set_type_context(TypeRegistry, OpaqueSet),
+            try
+                Specs = extract_specs_from_forms(Forms),
+                {ok, Specs}
+            after
+                clear_type_context()
+            end;
         {ok, {_Module, [{abstract_code, no_abstract_code}]}} ->
             {error, no_debug_info};
         {error, beam_lib, Reason} ->
@@ -434,62 +441,257 @@ resolve_branch_with_constraints({type, Line, tuple, Elements}, ConstraintMap) wh
 resolve_branch_with_constraints(Other, _ConstraintMap) ->
     Other.
 
+%% ---------------------------------------------------------------
+%% Type registry: extract -type/-opaque definitions from abstract forms
+%% ---------------------------------------------------------------
+
+%% Build a map from {TypeName, Arity} to the type body abstract form.
+%% Only includes -type definitions (not -opaque).
+-spec build_type_registry([erl_parse:abstract_form()]) -> map().
+build_type_registry(Forms) ->
+    lists:foldl(
+        fun
+            ({attribute, _, type, {Name, TypeBody, TypeParams}}, Acc) when
+                is_atom(Name)
+            ->
+                Acc#{{Name, length(TypeParams)} => TypeBody};
+            (_, Acc) ->
+                Acc
+        end,
+        #{},
+        Forms
+    ).
+
+%% Build a set of opaque type names (with arity) to avoid resolving them.
+-spec build_opaque_set([erl_parse:abstract_form()]) -> sets:set({atom(), non_neg_integer()}).
+build_opaque_set(Forms) ->
+    lists:foldl(
+        fun
+            ({attribute, _, opaque, {Name, _TypeBody, TypeParams}}, Acc) when
+                is_atom(Name)
+            ->
+                sets:add_element({Name, length(TypeParams)}, Acc);
+            (_, Acc) ->
+                Acc
+        end,
+        sets:new(),
+        Forms
+    ).
+
+%% Store the type registry and opaque set in process dictionary.
+-spec set_type_context(map(), sets:set()) -> ok.
+set_type_context(TypeRegistry, OpaqueSet) ->
+    put(beamtalk_type_registry, TypeRegistry),
+    put(beamtalk_opaque_set, OpaqueSet),
+    put(beamtalk_type_depth, 0),
+    ok.
+
+%% Clear type context from process dictionary.
+-spec clear_type_context() -> ok.
+clear_type_context() ->
+    erase(beamtalk_type_registry),
+    erase(beamtalk_opaque_set),
+    erase(beamtalk_type_depth),
+    ok.
+
+%% Maximum recursion depth for type resolution.
+-define(MAX_TYPE_DEPTH, 5).
+
+%% Try to resolve a user_type via the local type registry.
+%% Returns the mapped Beamtalk type or <<"Dynamic">> if not resolvable.
+-spec resolve_user_type(atom(), [tuple()]) -> binary().
+resolve_user_type(Name, Args) ->
+    Arity = length(Args),
+    OpaqueSet = get(beamtalk_opaque_set),
+    case OpaqueSet =/= undefined andalso sets:is_element({Name, Arity}, OpaqueSet) of
+        true ->
+            <<"Dynamic">>;
+        false ->
+            Registry = get(beamtalk_type_registry),
+            Depth =
+                case get(beamtalk_type_depth) of
+                    undefined -> 0;
+                    D -> D
+                end,
+            case Registry =/= undefined andalso Depth < ?MAX_TYPE_DEPTH of
+                true ->
+                    case maps:find({Name, Arity}, Registry) of
+                        {ok, TypeBody} ->
+                            put(beamtalk_type_depth, Depth + 1),
+                            try
+                                map_type(TypeBody)
+                            after
+                                put(beamtalk_type_depth, Depth)
+                            end;
+                        error ->
+                            <<"Dynamic">>
+                    end;
+                false ->
+                    <<"Dynamic">>
+            end
+    end.
+
+%% Try to resolve a remote_type by loading the remote module's beam file.
+%% Returns the mapped Beamtalk type or <<"Dynamic">> if not resolvable.
+-spec resolve_remote_type(atom(), atom(), [tuple()]) -> binary().
+resolve_remote_type(Mod, TypeName, Args) ->
+    Arity = length(Args),
+    Depth =
+        case get(beamtalk_type_depth) of
+            undefined -> 0;
+            D -> D
+        end,
+    case Depth < ?MAX_TYPE_DEPTH of
+        true ->
+            case code:which(Mod) of
+                non_existing ->
+                    <<"Dynamic">>;
+                preloaded ->
+                    %% Preloaded modules (erlang, init, etc.) have no .beam on disk
+                    <<"Dynamic">>;
+                cover_compiled ->
+                    <<"Dynamic">>;
+                BeamFile ->
+                    resolve_remote_type_from_beam(BeamFile, Mod, TypeName, Arity, Depth)
+            end;
+        false ->
+            <<"Dynamic">>
+    end.
+
+-spec resolve_remote_type_from_beam(
+    file:filename_all(), atom(), atom(), non_neg_integer(), non_neg_integer()
+) -> binary().
+resolve_remote_type_from_beam(BeamFile, _Mod, TypeName, Arity, Depth) ->
+    case beam_lib:chunks(BeamFile, [abstract_code]) of
+        {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+            RemoteOpaqueSet = build_opaque_set(Forms),
+            case sets:is_element({TypeName, Arity}, RemoteOpaqueSet) of
+                true ->
+                    <<"Dynamic">>;
+                false ->
+                    RemoteRegistry = build_type_registry(Forms),
+                    case maps:find({TypeName, Arity}, RemoteRegistry) of
+                        {ok, TypeBody} ->
+                            %% Temporarily install remote registry for nested resolution
+                            OldRegistry = get(beamtalk_type_registry),
+                            OldOpaqueSet = get(beamtalk_opaque_set),
+                            put(beamtalk_type_registry, RemoteRegistry),
+                            put(beamtalk_opaque_set, RemoteOpaqueSet),
+                            put(beamtalk_type_depth, Depth + 1),
+                            try
+                                map_type(TypeBody)
+                            after
+                                put(beamtalk_type_registry, OldRegistry),
+                                put(beamtalk_opaque_set, OldOpaqueSet),
+                                put(beamtalk_type_depth, Depth)
+                            end;
+                        error ->
+                            <<"Dynamic">>
+                    end
+            end;
+        _ ->
+            <<"Dynamic">>
+    end.
+
 %% @doc Map an Erlang abstract type to a Beamtalk type name.
 %%
 %% Implements the reverse mapping from ADR 0075 Table 1.
+%% When a type registry is available (set via process dictionary during
+%% read_specs/1), user_type and remote_type references are resolved
+%% instead of falling back to Dynamic.
 -spec map_type(tuple()) -> binary().
 %% Basic types
-map_type({type, _, integer, []}) -> <<"Integer">>;
-map_type({type, _, non_neg_integer, []}) -> <<"Integer">>;
-map_type({type, _, pos_integer, []}) -> <<"Integer">>;
-map_type({type, _, neg_integer, []}) -> <<"Integer">>;
-map_type({type, _, float, []}) -> <<"Float">>;
-map_type({type, _, number, []}) -> <<"Number">>;
-map_type({type, _, binary, _}) -> <<"String">>;
-map_type({type, _, boolean, []}) -> <<"Boolean">>;
-map_type({type, _, atom, []}) -> <<"Symbol">>;
-map_type({type, _, pid, []}) -> <<"Pid">>;
-map_type({type, _, 'fun', _}) -> <<"Block">>;
+map_type({type, _, integer, []}) ->
+    <<"Integer">>;
+map_type({type, _, non_neg_integer, []}) ->
+    <<"Integer">>;
+map_type({type, _, pos_integer, []}) ->
+    <<"Integer">>;
+map_type({type, _, neg_integer, []}) ->
+    <<"Integer">>;
+map_type({type, _, float, []}) ->
+    <<"Float">>;
+map_type({type, _, number, []}) ->
+    <<"Number">>;
+map_type({type, _, binary, _}) ->
+    <<"String">>;
+map_type({type, _, boolean, []}) ->
+    <<"Boolean">>;
+map_type({type, _, atom, []}) ->
+    <<"Symbol">>;
+map_type({type, _, pid, []}) ->
+    <<"Pid">>;
+map_type({type, _, 'fun', _}) ->
+    <<"Block">>;
 %% List types
-map_type({type, _, list, []}) -> <<"List">>;
-map_type({type, _, list, [_ElemType]}) -> <<"List">>;
-map_type({type, _, nonempty_list, _}) -> <<"List">>;
+map_type({type, _, list, []}) ->
+    <<"List">>;
+map_type({type, _, list, [_ElemType]}) ->
+    <<"List">>;
+map_type({type, _, nonempty_list, _}) ->
+    <<"List">>;
 %% Tuple types
-map_type({type, _, tuple, _}) -> <<"Tuple">>;
+map_type({type, _, tuple, _}) ->
+    <<"Tuple">>;
 %% Map types
-map_type({type, _, map, _}) -> <<"Dictionary">>;
+map_type({type, _, map, _}) ->
+    <<"Dictionary">>;
 %% Literal atoms
-map_type({atom, _, true}) -> <<"True">>;
-map_type({atom, _, false}) -> <<"False">>;
-map_type({atom, _, nil}) -> <<"Nil">>;
-map_type({atom, _, _}) -> <<"Symbol">>;
+map_type({atom, _, true}) ->
+    <<"True">>;
+map_type({atom, _, false}) ->
+    <<"False">>;
+map_type({atom, _, nil}) ->
+    <<"Nil">>;
+map_type({atom, _, _}) ->
+    <<"Symbol">>;
 %% Catch-all types that map to Dynamic
-map_type({type, _, term, []}) -> <<"Dynamic">>;
-map_type({type, _, any, []}) -> <<"Dynamic">>;
-map_type({type, _, no_return, []}) -> <<"Dynamic">>;
-map_type({type, _, iodata, []}) -> <<"Dynamic">>;
-map_type({type, _, iolist, []}) -> <<"Dynamic">>;
-map_type({type, _, node, []}) -> <<"Symbol">>;
-map_type({type, _, module, []}) -> <<"Symbol">>;
-map_type({type, _, char, []}) -> <<"Integer">>;
-map_type({type, _, byte, []}) -> <<"Integer">>;
-map_type({type, _, string, []}) -> <<"List">>;
+map_type({type, _, term, []}) ->
+    <<"Dynamic">>;
+map_type({type, _, any, []}) ->
+    <<"Dynamic">>;
+map_type({type, _, no_return, []}) ->
+    <<"Dynamic">>;
+map_type({type, _, iodata, []}) ->
+    <<"Dynamic">>;
+map_type({type, _, iolist, []}) ->
+    <<"Dynamic">>;
+map_type({type, _, node, []}) ->
+    <<"Symbol">>;
+map_type({type, _, module, []}) ->
+    <<"Symbol">>;
+map_type({type, _, char, []}) ->
+    <<"Integer">>;
+map_type({type, _, byte, []}) ->
+    <<"Integer">>;
+map_type({type, _, string, []}) ->
+    <<"List">>;
 %% Union types — recognize ok/error patterns as Result(T, E)
-map_type({type, Line, union, Branches}) -> map_union(Branches, Line);
+map_type({type, Line, union, Branches}) ->
+    map_union(Branches, Line);
 %% Range type (e.g., 1..10)
-map_type({type, _, range, _}) -> <<"Integer">>;
-%% Remote types (e.g., sets:set())
-map_type({remote_type, _, _}) -> <<"Dynamic">>;
-%% User-defined types
-map_type({user_type, _, _, _}) -> <<"Dynamic">>;
+map_type({type, _, range, _}) ->
+    <<"Integer">>;
+%% Remote types (e.g., sets:set()) — resolve via beam file when possible
+map_type({remote_type, _, [{atom, _, Mod}, {atom, _, TypeName}, Args]}) ->
+    resolve_remote_type(Mod, TypeName, Args);
+map_type({remote_type, _, _}) ->
+    <<"Dynamic">>;
+%% User-defined types — resolve via local type registry when possible
+map_type({user_type, _, Name, Args}) ->
+    resolve_user_type(Name, Args);
 %% Annotated types — unwrap the annotation
-map_type({ann_type, _, [_Var, Type]}) -> map_type(Type);
+map_type({ann_type, _, [_Var, Type]}) ->
+    map_type(Type);
 %% Type variables — unconstrained maps to Dynamic
-map_type({var, _, _}) -> <<"Dynamic">>;
+map_type({var, _, _}) ->
+    <<"Dynamic">>;
 %% Integer literals/singletons
-map_type({integer, _, _}) -> <<"Integer">>;
+map_type({integer, _, _}) ->
+    <<"Integer">>;
 %% Anything else
-map_type(_) -> <<"Dynamic">>.
+map_type(_) ->
+    <<"Dynamic">>.
 
 %% @doc Classify union branches and emit Result(T, E) for ok/error patterns.
 %%
