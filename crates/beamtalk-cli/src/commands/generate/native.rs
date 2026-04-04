@@ -14,7 +14,7 @@ use std::fmt::Write as _;
 use std::fs;
 
 /// Run the `generate native` command: parse a `.bt` file and generate a skeleton `.erl` file.
-pub fn run(class_name: &str) -> Result<()> {
+pub fn run(class_name: &str, force: bool) -> Result<()> {
     // Find the .bt file for the given class name
     let bt_path = find_bt_file(class_name)?;
 
@@ -74,9 +74,31 @@ pub fn run(class_name: &str) -> Result<()> {
 
     // Write the output file
     let output_path = Utf8PathBuf::from(format!("{module_name}.erl"));
-    fs::write(output_path.as_std_path(), &erlang_source)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write '{output_path}'"))?;
+
+    if force {
+        fs::write(output_path.as_std_path(), &erlang_source)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write '{output_path}'"))?;
+    } else {
+        // Use create_new to atomically fail if the file already exists (no TOCTOU race)
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output_path.as_std_path())
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    miette::miette!(
+                        "File '{output_path}' already exists. Use --force to overwrite."
+                    )
+                } else {
+                    miette::miette!("Failed to write '{output_path}': {e}")
+                }
+            })?;
+        file.write_all(erlang_source.as_bytes())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write '{output_path}'"))?;
+    }
 
     println!("Generated {output_path} from {bt_path}");
     println!(
