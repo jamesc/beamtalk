@@ -31,17 +31,18 @@
 %% the documentation entry for the given function and arity.
 %%
 %% Returns `#{doc => Binary, sig => Binary, examples => Binary}` on success,
-%% or `{error, no_docs}` when:
-%% - The module doesn't exist or is preloaded
-%% - The Docs chunk is absent
-%% - No documentation entry exists for the given function/arity
+%% `{error, no_docs}` when the module/function has no docs, or
+%% `{error, unsupported_format}` when the docs chunk uses a format newer
+%% than `docs_v1` (EEP-48).
 -spec lookup(module(), atom(), non_neg_integer()) ->
     #{doc := binary(), sig := binary(), examples := binary()}
-    | {error, no_docs}.
+    | {error, no_docs | unsupported_format}.
 lookup(Module, Function, Arity) ->
     case read_docs_chunk(Module) of
         {ok, {docs_v1, _Anno, _Lang, _Format, _ModDoc, _Meta, FDocs}} ->
             find_function_doc(Function, Arity, FDocs);
+        {ok, _Other} ->
+            {error, unsupported_format};
         {error, _Reason} ->
             {error, no_docs}
     end.
@@ -49,14 +50,17 @@ lookup(Module, Function, Arity) ->
 %% @doc Look up module-level documentation.
 %%
 %% Returns `#{doc => Binary}` with the module's top-level documentation,
-%% or `{error, no_docs}` when the module has no Docs chunk or the module
-%% doc is marked as `none` or `hidden`.
+%% `{error, no_docs}` when the module has no Docs chunk or the module
+%% doc is marked as `none` or `hidden`, or `{error, unsupported_format}`
+%% when the docs chunk uses a format newer than `docs_v1`.
 -spec module_doc(module()) ->
-    #{doc := binary()} | {error, no_docs}.
+    #{doc := binary()} | {error, no_docs | unsupported_format}.
 module_doc(Module) ->
     case read_docs_chunk(Module) of
         {ok, {docs_v1, _Anno, _Lang, _Format, ModDoc, _Meta, _FDocs}} ->
             extract_module_doc(ModDoc);
+        {ok, _Other} ->
+            {error, unsupported_format};
         {error, _Reason} ->
             {error, no_docs}
     end.
@@ -88,9 +92,21 @@ read_docs_from_beam(BeamPath) ->
     case beam_lib:chunks(BeamPath, ["Docs"]) of
         {ok, {_Mod, [{"Docs", DocsBin}]}} ->
             try
-                {ok, binary_to_term(DocsBin)}
+                %% Prefer [safe] to avoid atom table exhaustion from
+                %% malicious .beam files.  Doc chunks often contain
+                %% parameter-name atoms not yet in the atom table, so
+                %% fall back to the unrestricted decode when [safe]
+                %% raises badarg.
+                {ok, binary_to_term(DocsBin, [safe])}
             catch
-                _:_ -> {error, corrupt_docs}
+                error:badarg ->
+                    try
+                        {ok, binary_to_term(DocsBin)}
+                    catch
+                        _:_ -> {error, corrupt_docs}
+                    end;
+                _:_ ->
+                    {error, corrupt_docs}
             end;
         {error, _Mod, {missing_chunk, _, _}} ->
             {error, no_docs_chunk};
