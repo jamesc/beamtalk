@@ -422,13 +422,11 @@ impl TypeChecker {
                 Self::is_type_compatible(actual, &member_eco, hierarchy)
             });
         }
-        // Singleton types: #foo is compatible with Symbol (its supertype)
-        // and with itself (already handled by equality above).
+        // Singleton types: #foo is a subtype of Symbol, not the reverse.
+        // Symbol is NOT compatible with a singleton like #ok.
         // Generic type params (K, V, T, etc.) are always compatible (conservative).
         if expected.starts_with('#') {
-            return actual == "Symbol"
-                || actual == expected
-                || super::is_generic_type_param(actual);
+            return actual == expected || super::is_generic_type_param(actual);
         }
         if actual.starts_with('#') {
             // Singletons are subtypes of Symbol — check if expected is Symbol
@@ -1068,9 +1066,10 @@ impl TypeChecker {
         if value_type == declared_type {
             return true;
         }
-        // Singleton declared types: value must be the same singleton or Symbol
+        // Singleton declared types: value must be the exact same singleton.
+        // Symbol is NOT assignable to a singleton like #ok (wrong subtyping direction).
         if declared_type.starts_with('#') {
-            return value_type == "Symbol" || value_type == declared_type;
+            return value_type == declared_type;
         }
         // Singleton value types: treat as Symbol for hierarchy assignability
         // (e.g., #ok is assignable to Object, Symbol | nil, etc.)
