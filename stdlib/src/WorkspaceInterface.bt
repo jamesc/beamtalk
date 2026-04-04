@@ -7,9 +7,8 @@
 /// workspace-level bindings and actor introspection. Each workspace has its
 /// own WorkspaceInterface instance.
 ///
-/// After workspace bootstrap (ADR 0019 Phase 2), `WorkspaceInterface current`
-/// returns the singleton instance and the convenience binding `Workspace` will
-/// be available. Before bootstrap, `current` returns `nil`.
+/// The singleton instance is set during workspace bootstrap (ADR 0019 Phase 2).
+/// The convenience binding `Workspace` is also available after bootstrap.
 ///
 /// ## Examples
 /// ```beamtalk
