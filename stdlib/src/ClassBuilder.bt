@@ -23,7 +23,7 @@
 /// * Pattern: `stdlib/src/Actor.bt` (ClassBuilder is Actor subclass)
 typed Actor subclass: ClassBuilder
   state: className :: Symbol | Nil = nil
-  state: superclassRef :: Class | Nil = nil
+  state: superclassRef :: Object | Nil = nil
   state: fieldSpecs :: Dictionary = #{}
   state: methodSpecs :: Dictionary = #{}
   state: modifiers :: List = #()

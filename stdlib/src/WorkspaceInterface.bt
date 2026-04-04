@@ -17,7 +17,7 @@
 /// WorkspaceInterface current actorsOf: Counter
 /// ```
 sealed typed Object subclass: WorkspaceInterface
-  classState: current :: WorkspaceInterface = nil
+  classState: current :: WorkspaceInterface | Nil = nil
 
   /// Return the current singleton instance.
   class current -> WorkspaceInterface => self.current
