@@ -851,13 +851,38 @@ coerce_result_non_tuple_passthrough_test() ->
     ?assertEqual([1, 2, 3], beamtalk_erlang_proxy:coerce_result([1, 2, 3])),
     ?assertEqual(foo, beamtalk_erlang_proxy:coerce_result(foo)).
 
+coerce_result_ok_charlist_normalized_to_binary_test() ->
+    %% BT-1879: {ok, Charlist} should normalize charlist to binary inside Result
+    Result = beamtalk_erlang_proxy:coerce_result({ok, "hello"}),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(true, maps:get('isOk', Result)),
+    ?assertEqual(<<"hello">>, maps:get('okValue', Result)).
+
+coerce_result_error_charlist_normalized_to_binary_test() ->
+    %% BT-1879: {error, Charlist} should normalize charlist to binary inside Result
+    Result = beamtalk_erlang_proxy:coerce_result({error, "not found"}),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
+    ?assertEqual(false, maps:get('isOk', Result)),
+    %% The error reason is wrapped as an Exception; check the inner value
+    ErrReason = maps:get('errReason', Result),
+    ?assert(is_map(ErrReason)).
+
+coerce_result_ok_non_charlist_unchanged_test() ->
+    %% BT-1879: {ok, NonCharlist} should not be affected by normalization
+    Result = beamtalk_erlang_proxy:coerce_result({ok, 42}),
+    ?assertEqual(42, maps:get('okValue', Result)),
+    Result2 = beamtalk_erlang_proxy:coerce_result({ok, <<"binary">>}),
+    ?assertEqual(<<"binary">>, maps:get('okValue', Result2)).
+
 direct_call_ok_tuple_coerced_to_result_test() ->
-    %% file:get_cwd/0 returns {ok, Dir} — should become Result ok: Dir
+    %% file:get_cwd/0 returns {ok, Dir} — should become Result ok: Dir (binary)
     Result = beamtalk_erlang_proxy:direct_call(file, get_cwd, []),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    %% okValue is the directory path (charlist from Erlang, not yet string-coerced)
-    ?assertNotEqual(nil, maps:get('okValue', Result)).
+    %% BT-1879: okValue should be a binary string (charlist coerced inside Result)
+    OkValue = maps:get('okValue', Result),
+    ?assertNotEqual(nil, OkValue),
+    ?assert(is_binary(OkValue)).
 
 direct_call_error_tuple_coerced_to_result_test() ->
     %% file:read_file on nonexistent file returns {error, enoent}
@@ -870,4 +895,6 @@ dispatch_ok_tuple_coerced_to_result_test() ->
     Proxy = beamtalk_erlang_proxy:new(file),
     Result = beamtalk_erlang_proxy:dispatch('get_cwd', [], Proxy),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
-    ?assertEqual(true, maps:get('isOk', Result)).
+    ?assertEqual(true, maps:get('isOk', Result)),
+    %% BT-1879: charlist inside Result should be coerced to binary
+    ?assert(is_binary(maps:get('okValue', Result))).
