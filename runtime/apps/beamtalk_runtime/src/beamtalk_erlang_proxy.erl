@@ -179,7 +179,7 @@ direct_call(Module, FunName, Args) ->
 apply_with_coercion(Module, FunName, Args, OrigSelector) ->
     try
         Result = erlang:apply(Module, FunName, Args),
-        coerce_result(coerce_charlist_result(Result))
+        coerce_ffi_result(Module, Result)
     catch
         error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
             erlang:raise(error, Wrapped, WrappedStack);
@@ -192,7 +192,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
                 true ->
                     try
                         RetryResult = erlang:apply(Module, FunName, CoercedArgs),
-                        coerce_result(coerce_charlist_result(RetryResult))
+                        coerce_ffi_result(Module, RetryResult)
                     catch
                         error:badarg:Stack2 ->
                             raise_badarg_error(Module, FunName, OrigSelector, Stack2);
@@ -276,7 +276,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                 true ->
                     %% Exact match — call directly
                     try
-                        coerce_result(coerce_charlist_result(erlang:apply(Module, FunName, Args)))
+                        coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
                     catch
                         error:#{error := #beamtalk_error{}} = Wrapped:_Stack ->
                             %% Re-raise already-wrapped Beamtalk exceptions
@@ -309,7 +309,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                                 true ->
                                     try
                                         Result = erlang:apply(Module, FunName, CoercedArgs),
-                                        coerce_result(coerce_charlist_result(Result))
+                                        coerce_ffi_result(Module, Result)
                                     catch
                                         error:badarg:Stack2 ->
                                             raise_badarg_error(
@@ -559,6 +559,53 @@ coerce_charlist_result(Result) when is_list(Result) ->
     end;
 coerce_charlist_result(Result) ->
     Result.
+
+%% @doc Apply both charlist and result coercion, skipping charlist coercion
+%% for Beamtalk's own modules (BT-1839).
+%%
+%% Beamtalk runtime modules (beamtalk_*) and compiled classes (bt@*) already
+%% return properly-typed values — their lists are genuine Beamtalk lists, not
+%% Erlang charlists.  Applying `coerce_charlist_result/1` to their results
+%% corrupts lists of small integers (e.g., [10, 11, 12] from Stream take:)
+%% by converting them to binaries.
+%%
+%% Charlist coercion is only needed for stock Erlang modules whose APIs return
+%% charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
+-spec coerce_ffi_result(atom(), term()) -> term().
+coerce_ffi_result(Module, Result) ->
+    case is_beamtalk_module(Module) of
+        true ->
+            coerce_result_no_charlist(Result);
+        false ->
+            coerce_result(coerce_charlist_result(Result))
+    end.
+
+%% @doc Like coerce_result/1 but skips charlist coercion on inner values.
+%% Used for Beamtalk modules whose lists are genuine typed values.
+-spec coerce_result_no_charlist(term()) -> term().
+coerce_result_no_charlist({ok, Value}) ->
+    beamtalk_result:from_tagged_tuple({ok, Value});
+coerce_result_no_charlist({error, Reason}) ->
+    beamtalk_result:from_tagged_tuple({error, Reason});
+coerce_result_no_charlist(ok) ->
+    beamtalk_result:from_tagged_tuple({ok, nil});
+coerce_result_no_charlist(error) ->
+    beamtalk_result:from_tagged_tuple({error, nil});
+coerce_result_no_charlist(Other) ->
+    Other.
+
+%% @doc Check whether a module is part of the Beamtalk runtime/stdlib.
+%%
+%% Beamtalk modules use two naming conventions:
+%% - `beamtalk_*` — hand-written runtime helpers (beamtalk_stream, beamtalk_file, etc.)
+%% - `bt@*` — compiler-generated class modules (bt@stdlib@list, bt@test@foo, etc.)
+%%
+%% These modules return properly-typed Beamtalk values and must NOT have their
+%% list results coerced from charlists to binaries.
+-spec is_beamtalk_module(atom()) -> boolean().
+is_beamtalk_module(Module) ->
+    ModStr = atom_to_list(Module),
+    lists:prefix("beamtalk_", ModStr) orelse lists:prefix("bt@", ModStr).
 
 %% @doc Coerce Erlang ok/error tuples to Beamtalk Result objects (ADR 0076).
 %%
