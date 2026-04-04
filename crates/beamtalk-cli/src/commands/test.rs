@@ -1811,7 +1811,31 @@ fn parse_eunit_module_sections(
         }
     }
 
-    // If no markers found, fall back to counting test modules as all-passed or all-failed
+    // If the stream ended with accumulated output but no DONE marker (e.g. BEAM crash),
+    // flush the last module's section as a failure so results aren't silently dropped.
+    if !current_section.is_empty() && module_idx > 0 && module_idx < native_test_modules.len() {
+        let module_name = &native_test_modules[module_idx];
+        warn!(
+            module = %module_name,
+            "BEAM output ended without NATIVE_EUNIT_DONE marker — reporting partial results"
+        );
+
+        let (passed, mut failed, skipped) = parse_eunit_summary(&current_section);
+        // If the BEAM process failed (non-zero exit), ensure at least 1 failure
+        // is reported — even if a partial summary showed "All tests passed" for
+        // this module before the crash.
+        if failed == 0 && !success {
+            failed = 1;
+        }
+
+        eunit_output.push_str(&current_section);
+        modules.push((module_name.clone(), passed, failed, skipped));
+        total_passed += passed;
+        total_failed += failed;
+        total_skipped += skipped;
+    }
+
+    // If no markers found at all, fall back to counting test modules as all-passed or all-failed
     if module_idx == 0 && !native_test_modules.is_empty() {
         warn!("No NATIVE_EUNIT_DONE markers found in EUnit output");
         for module_name in native_test_modules {
@@ -2550,5 +2574,75 @@ mod tests {
     fn test_parse_eunit_summary_61_passed() {
         let output = "  All 61 tests passed.\n";
         assert_eq!(parse_eunit_summary(output), (61, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_module_sections_normal() {
+        let stdout = "module 'foo_tests'\n\
+                      foo_tests: bar_test...ok\n\
+                        All 2 tests passed.\n\
+                      NATIVE_EUNIT_DONE:foo_tests\n\
+                      module 'baz_tests'\n\
+                      baz_tests: qux_test...ok\n\
+                        Test passed.\n\
+                      NATIVE_EUNIT_DONE:baz_tests\n";
+        let modules = vec!["foo_tests".to_string(), "baz_tests".to_string()];
+        let sections = parse_eunit_module_sections(stdout, true, &modules);
+        assert_eq!(sections.modules.len(), 2);
+        assert_eq!(sections.modules[0], ("foo_tests".to_string(), 2, 0, 0));
+        assert_eq!(sections.modules[1], ("baz_tests".to_string(), 1, 0, 0));
+        assert_eq!(sections.total_passed, 3);
+        assert_eq!(sections.total_failed, 0);
+    }
+
+    #[test]
+    fn test_parse_eunit_module_sections_truncated_crash() {
+        // Simulate BEAM crash: first module completes, second module's output
+        // is cut off without a NATIVE_EUNIT_DONE marker.
+        let stdout = "module 'foo_tests'\n\
+                        All 2 tests passed.\n\
+                      NATIVE_EUNIT_DONE:foo_tests\n\
+                      module 'bar_tests'\n\
+                      bar_tests: crash_test...{error,beam_crashed}\n";
+        let modules = vec!["foo_tests".to_string(), "bar_tests".to_string()];
+        let sections = parse_eunit_module_sections(stdout, false, &modules);
+        assert_eq!(
+            sections.modules.len(),
+            2,
+            "should include the truncated module"
+        );
+        assert_eq!(sections.modules[0], ("foo_tests".to_string(), 2, 0, 0));
+        // The second module has no summary and process failed → 1 failure
+        assert_eq!(sections.modules[1], ("bar_tests".to_string(), 0, 1, 0));
+        assert_eq!(sections.total_passed, 2);
+        assert_eq!(sections.total_failed, 1);
+        assert!(
+            !sections.eunit_output.is_empty(),
+            "truncated module output should be captured"
+        );
+    }
+
+    #[test]
+    fn test_parse_eunit_module_sections_truncated_with_partial_summary() {
+        // BEAM crash after printing a partial EUnit summary for the last module
+        let stdout = "NATIVE_EUNIT_DONE:foo_tests\n\
+                      module 'bar_tests'\n\
+                        Failed: 1.  Skipped: 0.  Passed: 3.\n";
+        let modules = vec!["foo_tests".to_string(), "bar_tests".to_string()];
+        let sections = parse_eunit_module_sections(stdout, false, &modules);
+        assert_eq!(sections.modules.len(), 2);
+        // First module had empty section with DONE marker → (0, 0, 0)
+        assert_eq!(sections.modules[0], ("foo_tests".to_string(), 0, 0, 0));
+        // Second module has a parsed summary and was flushed by the crash handler
+        assert_eq!(sections.modules[1], ("bar_tests".to_string(), 3, 1, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_module_sections_no_markers() {
+        let stdout = "some output\n";
+        let modules = vec!["foo_tests".to_string()];
+        let sections = parse_eunit_module_sections(stdout, false, &modules);
+        assert_eq!(sections.modules.len(), 1);
+        assert_eq!(sections.modules[0], ("foo_tests".to_string(), 0, 1, 0));
     }
 }
