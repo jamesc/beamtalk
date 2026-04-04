@@ -405,6 +405,12 @@ impl TypeChecker {
         expected: &EcoString,
         hierarchy: &ClassHierarchy,
     ) -> bool {
+        // BT-1877: Resolve `Nil` to `UndefinedObject` so hierarchy lookups succeed.
+        let actual_resolved = Self::resolve_type_alias(actual);
+        let expected_resolved = Self::resolve_type_alias(expected);
+        let actual = actual_resolved.as_ref().unwrap_or(actual);
+        let expected = expected_resolved.as_ref().unwrap_or(expected);
+
         if actual == expected {
             return true;
         }
@@ -432,6 +438,13 @@ impl TypeChecker {
             }
             let symbol: EcoString = "Symbol".into();
             return Self::is_type_compatible(&symbol, expected, hierarchy);
+        }
+        // BT-1877: `Class` is a meta-type — any class reference is an instance of
+        // Class.  Since class references are currently inferred as their concrete
+        // class name (e.g. `Supervisor`), we treat `Class` as compatible with any
+        // known class to avoid false positives on `Class | Nil` parameters.
+        if expected.as_str() == "Class" && hierarchy.has_class(actual) {
+            return true;
         }
         // If either type isn't known to the hierarchy, don't warn (conservative)
         if !hierarchy.has_class(actual) || !hierarchy.has_class(expected) {
@@ -1210,6 +1223,20 @@ impl TypeChecker {
             "false" => "False".into(),
             "true" => "True".into(),
             _ => EcoString::from(name),
+        }
+    }
+
+    /// Resolves type aliases that don't exist in the class hierarchy to their
+    /// canonical class names. Returns `Some` with the resolved name if an alias
+    /// was applied, `None` if the name is already canonical.
+    ///
+    /// BT-1877: `Nil` in type annotations maps to `UndefinedObject` in the
+    /// hierarchy. Without this resolution, `Nil` is treated as an unknown type
+    /// and the conservative fallback disables validation.
+    fn resolve_type_alias(name: &EcoString) -> Option<EcoString> {
+        match name.as_str() {
+            "Nil" => Some("UndefinedObject".into()),
+            _ => None,
         }
     }
 
