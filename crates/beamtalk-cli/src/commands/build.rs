@@ -1895,7 +1895,7 @@ fn generate_rebar_config(
     // This avoids rebar3 project discovery issues: rebar3 won't compile
     // src_dirs sources without a top-level .app.src, and generating one
     // creates conflicts with the package's own .app file.
-    config.push_str("{erl_opts, [debug_info, warn_missing_doc]}.\n");
+    config.push_str("{erl_opts, [debug_info]}.\n");
 
     debug!(path = %config_path, "Writing rebar.config");
     fs::write(&config_path, &config)
@@ -3561,8 +3561,8 @@ mod tests {
             "Should contain cowboy dep"
         );
         assert!(
-            content.contains("{erl_opts, [debug_info, warn_missing_doc]}"),
-            "Should include debug_info and warn_missing_doc"
+            content.contains("{erl_opts, [debug_info]}"),
+            "Should include debug_info"
         );
         // No native/ directory — should NOT include src_dirs
         assert!(

@@ -199,7 +199,7 @@ corrupt_docs_chunk_module_doc_test() ->
 %%% ============================================================================
 
 compile_with_doc_attributes_has_docs_chunk_test() ->
-    %% Compile a module with -doc attributes via compile:forms and verify
+    %% Compile a module with -doc attributes via compile:file and verify
     %% that the resulting .beam contains a Docs chunk (OTP 27+).
     {BeamPath, Module} = create_beam_with_doc_attributes(),
     try
