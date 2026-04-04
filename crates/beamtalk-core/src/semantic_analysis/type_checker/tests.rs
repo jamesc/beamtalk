@@ -9630,6 +9630,140 @@ fn test_ffi_member_returns_boolean() {
     );
 }
 
+// ---- BT-1880: Class protocol selectors vs FFI module lookups ----
+
+#[test]
+fn test_erlang_class_resolves_as_class_protocol_not_ffi() {
+    // `Erlang class` should resolve as a class protocol message (returns Metaclass),
+    // NOT as ErlangModule<class>.
+    let module = make_module(vec![msg_send(
+        class_ref("Erlang"),
+        MessageSelector::Unary("class".into()),
+        vec![],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // The result should NOT be ErlangModule<class>
+    let send_type = checker.type_map().get(span());
+    if let Some(InferredType::Known { class_name, .. }) = send_type {
+        assert_ne!(
+            class_name.as_str(),
+            "ErlangModule",
+            "`Erlang class` should not be inferred as ErlangModule"
+        );
+    }
+    // No FFI-related diagnostics expected
+    let ffi_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("FFI") || d.message.contains("ErlangModule"))
+        .collect();
+    assert!(
+        ffi_diags.is_empty(),
+        "`Erlang class` should not produce FFI diagnostics. Got: {ffi_diags:?}"
+    );
+}
+
+#[test]
+fn test_erlang_new_resolves_as_class_protocol_not_ffi() {
+    // `Erlang new` should resolve as a class protocol message,
+    // NOT as ErlangModule<new>.
+    let module = make_module(vec![msg_send(
+        class_ref("Erlang"),
+        MessageSelector::Unary("new".into()),
+        vec![],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_type = checker.type_map().get(span());
+    if let Some(InferredType::Known { class_name, .. }) = send_type {
+        assert_ne!(
+            class_name.as_str(),
+            "ErlangModule",
+            "`Erlang new` should not be inferred as ErlangModule"
+        );
+    }
+}
+
+#[test]
+fn test_erlang_module_proxy_class_uses_normal_dispatch() {
+    // `proxy := Erlang lists; proxy class` — `class` on an ErlangModule instance
+    // should use normal dispatch (class protocol), not FFI lookup.
+    let module = make_module(vec![
+        assign("proxy", erlang_module_recv("lists")),
+        msg_send(var("proxy"), MessageSelector::Unary("class".into()), vec![]),
+    ]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    // Should not produce any FFI-related diagnostics for `class`
+    let ffi_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("lists:class"))
+        .collect();
+    assert!(
+        ffi_diags.is_empty(),
+        "`proxy class` should not trigger FFI lookup. Got: {ffi_diags:?}"
+    );
+}
+
+#[test]
+fn test_erlang_module_proxy_equality_uses_normal_dispatch() {
+    // `proxy := Erlang lists; proxy == other` — binary selector on ErlangModule
+    // should use normal dispatch, not FFI lookup.
+    let module = make_module(vec![
+        assign("proxy", erlang_module_recv("lists")),
+        msg_send(
+            var("proxy"),
+            MessageSelector::Binary("==".into()),
+            vec![var("other")],
+        ),
+    ]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    // Should not produce FFI diagnostics for `==`
+    let ffi_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("lists:==") || d.message.contains("FFI"))
+        .collect();
+    assert!(
+        ffi_diags.is_empty(),
+        "`proxy == other` should not trigger FFI lookup. Got: {ffi_diags:?}"
+    );
+}
+
+#[test]
+fn test_erlang_lists_still_infers_ffi() {
+    // Sanity check: `Erlang lists reverse: xs` should still go through FFI inference.
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("lists"),
+        keyword_selector(&["reverse:"]),
+        vec![var("xs")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let send_type = checker.type_map().get(span());
+    assert_eq!(
+        send_type,
+        Some(&InferredType::known("List")),
+        "FFI call should still infer correct return type"
+    );
+}
+
 // ---- BT-1859: Result isOk/isError narrowing tests ----
 
 #[test]

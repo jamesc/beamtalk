@@ -732,20 +732,26 @@ impl TypeChecker {
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
             // to enable FFI call type inference on the outer message send.
+            // BT-1880: Class protocol selectors (class, new, superclass, etc.)
+            // must NOT be intercepted as module lookups — they are handled by
+            // normal class-side dispatch (matching codegen CLASS_PROTOCOL_SELECTORS).
             if class_name == "Erlang" {
                 if let MessageSelector::Unary(module_name) = selector {
-                    // Static module name: `Erlang lists` → ErlangModule<lists>
-                    return InferredType::Known {
-                        class_name: EcoString::from("ErlangModule"),
-                        type_args: vec![InferredType::Known {
-                            class_name: module_name.clone(),
-                            type_args: vec![],
+                    if !is_class_protocol_selector(module_name) {
+                        // Static module name: `Erlang lists` → ErlangModule<lists>
+                        return InferredType::Known {
+                            class_name: EcoString::from("ErlangModule"),
+                            type_args: vec![InferredType::Known {
+                                class_name: module_name.clone(),
+                                type_args: vec![],
+                                provenance: super::TypeProvenance::Inferred(span),
+                            }],
                             provenance: super::TypeProvenance::Inferred(span),
-                        }],
-                        provenance: super::TypeProvenance::Inferred(span),
-                    };
+                        };
+                    }
                 }
-                // Dynamic module: `Erlang (someVar)` — fall through to Dynamic
+                // Class protocol selector or dynamic module: fall through to
+                // normal class-side dispatch.
             }
 
             self.check_argument_types(
@@ -802,7 +808,13 @@ impl TypeChecker {
             // When the receiver is typed as ErlangModule with a known module name
             // (from `Erlang lists` or a variable assigned from one), extract the
             // Erlang function name and arity, then look up in NativeTypeRegistry.
-            if class_name == "ErlangModule" {
+            // BT-1880: Class protocol selectors (class, new, printString, etc.)
+            // and binary selectors (==, etc.) on ErlangModule instances must use
+            // normal dispatch, not FFI lookup.
+            if class_name == "ErlangModule"
+                && !is_class_protocol_selector(&selector_name)
+                && !matches!(selector, MessageSelector::Binary(_))
+            {
                 return self.infer_ffi_call(
                     type_args,
                     selector,
@@ -2150,6 +2162,27 @@ impl TypeChecker {
             Literal::List(_) => InferredType::known("List"),
         }
     }
+}
+
+/// Class-protocol selectors that must NOT be intercepted as FFI module lookups.
+///
+/// These are handled by `beamtalk_object_class:class_send/3` at runtime.
+/// This list mirrors `CLASS_PROTOCOL_SELECTORS` in `dispatch_codegen.rs`
+/// to keep codegen and type-checker behaviour consistent (BT-1880).
+fn is_class_protocol_selector(selector: &str) -> bool {
+    matches!(
+        selector,
+        "new"
+            | "spawn"
+            | "class"
+            | "methods"
+            | "superclass"
+            | "subclasses"
+            | "allSubclasses"
+            | "class_name"
+            | "module_name"
+            | "printString"
+    )
 }
 
 #[cfg(test)]
