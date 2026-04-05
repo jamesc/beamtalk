@@ -188,7 +188,8 @@ fn print_text_report(
             } else {
                 format!("{}:?:?", entry.file)
             };
-            println!("  {:<40} ({})", location, entry.reason.description());
+            let reason = entry.reason.description().unwrap_or("unknown");
+            println!("  {:<40} ({reason})", location);
         }
     }
 }

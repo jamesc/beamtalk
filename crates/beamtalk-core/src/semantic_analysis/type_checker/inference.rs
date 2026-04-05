@@ -87,6 +87,11 @@ impl TypeChecker {
             // Determine if this class requires type annotations (typed modifier or inherited)
             let is_typed = hierarchy.is_typed(&class.name.name);
 
+            if is_typed {
+                self.check_typed_state_annotations(&class.state, &class.name.name);
+                self.check_typed_state_annotations(&class.class_variables, &class.name.name);
+            }
+
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::known(class.name.name.clone()));
@@ -618,10 +623,10 @@ impl TypeChecker {
         };
 
         // Record inferred type for the expression's full span for LSP queries.
-        // Skip Dynamic — it carries no useful info and all callers treat
-        // `None` and `Some(Dynamic)` equivalently. Avoiding the insert saves
-        // both a clone and a HashMap insertion for every unresolved expression.
-        if !matches!(ty, InferredType::Dynamic(_)) {
+        // Dynamic types with a known reason (e.g., UnannotatedParam) are included
+        // so that hover can display "Dynamic (reason)" — see BT-1912.
+        // Only Dynamic(Unknown) is skipped since it carries no useful provenance.
+        if !matches!(ty, InferredType::Dynamic(DynamicReason::Unknown)) {
             self.type_map.insert(expr.span(), ty.clone());
         }
         ty

@@ -29,16 +29,17 @@ pub enum DynamicReason {
 }
 
 impl DynamicReason {
-    /// Returns a human-readable description of why the type is Dynamic.
+    /// Returns a human-readable description of why the type is Dynamic,
+    /// or `None` for `Unknown` (no useful context to show).
     #[must_use]
-    pub fn description(self) -> &'static str {
+    pub fn description(self) -> Option<&'static str> {
         match self {
-            Self::UnannotatedParam => "parameter has no type annotation",
-            Self::UnannotatedReturn => "no return type annotation and body could not be inferred",
-            Self::DynamicReceiver => "receiver is Dynamic",
-            Self::AmbiguousControlFlow => "control flow produces incompatible types",
-            Self::UntypedFfi => "Erlang FFI call with no spec",
-            Self::Unknown => "unknown",
+            Self::UnannotatedParam => Some("unannotated parameter"),
+            Self::UnannotatedReturn => Some("unannotated return"),
+            Self::DynamicReceiver => Some("dynamic receiver"),
+            Self::AmbiguousControlFlow => Some("ambiguous control flow"),
+            Self::UntypedFfi => Some("untyped FFI"),
+            Self::Unknown => None,
         }
     }
 }
@@ -177,7 +178,8 @@ impl InferredType {
     /// - `Known("Integer", [])` → `"Integer"`
     /// - `Known("Result", [Known("Integer"), Known("String")])` → `"Result(Integer, String)"`
     /// - `Union([Known("String"), Known("UndefinedObject")])` → `"String | UndefinedObject"`
-    /// - `Dynamic(_)` → `"Dynamic"`
+    /// - `Dynamic(Unknown)` → `"Dynamic"`
+    /// - `Dynamic(UnannotatedParam)` → `"Dynamic (unannotated parameter)"`
     #[must_use]
     pub fn display_name(&self) -> Option<EcoString> {
         match self {
@@ -217,7 +219,13 @@ impl InferredType {
                 }
                 Some(result)
             }
-            Self::Dynamic(_) => Some(EcoString::from("Dynamic")),
+            Self::Dynamic(reason) => {
+                if let Some(desc) = reason.description() {
+                    Some(EcoString::from(format!("Dynamic ({desc})")))
+                } else {
+                    Some(EcoString::from("Dynamic"))
+                }
+            }
         }
     }
 

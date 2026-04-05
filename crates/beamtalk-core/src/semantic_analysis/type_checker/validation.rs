@@ -390,6 +390,28 @@ impl TypeChecker {
         }
     }
 
+    /// Check that state fields in typed classes have type annotations.
+    pub(super) fn check_typed_state_annotations(
+        &mut self,
+        state: &[crate::ast::StateDeclaration],
+        class_name: &EcoString,
+    ) {
+        for field in state {
+            if field.type_annotation.is_none() {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Missing type annotation for state field `{}` in typed class `{class_name}`",
+                            field.name.name
+                        ),
+                        field.name.span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+            }
+        }
+    }
+
     /// Check if `actual` type is compatible with `expected` type.
     ///
     /// Compatibility rules:

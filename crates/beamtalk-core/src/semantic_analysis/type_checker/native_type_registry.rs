@@ -275,7 +275,10 @@ mod tests {
             vec![param("fun", "Block")],
             InferredType::Dynamic(DynamicReason::UntypedFfi),
         );
-        assert_eq!(sig.display_signature(), "apply: fun :: Block -> Dynamic");
+        assert_eq!(
+            sig.display_signature(),
+            "apply: fun :: Block -> Dynamic (untyped FFI)"
+        );
     }
 
     #[test]

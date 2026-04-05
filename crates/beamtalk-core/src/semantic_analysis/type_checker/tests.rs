@@ -2696,6 +2696,216 @@ fn test_untyped_state_no_default_no_warn() {
     );
 }
 
+// --- BT-1913: Missing state field annotations in typed classes ---
+
+#[test]
+fn test_typed_class_warns_on_missing_state_annotation() {
+    // typed class with state field lacking type annotation
+    let state = vec![StateDeclaration::new(ident("count"), span())];
+    let class_def = ClassDefinition::with_modifiers(
+        ident("StrictCounter"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        state,
+        vec![],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Missing type annotation for state field")
+        })
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "should warn about untyped state field `count`"
+    );
+    assert!(warnings[0].message.contains("count"));
+    assert!(warnings[0].message.contains("StrictCounter"));
+}
+
+#[test]
+fn test_typed_class_no_warning_when_state_annotated() {
+    // typed class with state field that has a type annotation
+    let state = vec![StateDeclaration::with_type(
+        ident("count"),
+        TypeAnnotation::simple("Integer", span()),
+        span(),
+    )];
+    let class_def = ClassDefinition::with_modifiers(
+        ident("StrictCounter"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        state,
+        vec![],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Missing type annotation for state field")
+        })
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "annotated state field should not warn, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_inherited_typed_class_warns_on_missing_state_annotation() {
+    // A subclass of a typed class should also get the warning
+    let parent = ClassDefinition::with_modifiers(
+        ident("TypedBase"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![],
+        span(),
+    );
+    let child = ClassDefinition::with_modifiers(
+        ident("Child"),
+        Some(ident("TypedBase")),
+        ClassModifiers::default(),
+        vec![StateDeclaration::new(ident("name"), span())],
+        vec![],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![parent, child]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Missing type annotation for state field")
+        })
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "inherited typed class should warn about untyped state field `name`"
+    );
+    assert!(warnings[0].message.contains("name"));
+    assert!(warnings[0].message.contains("Child"));
+}
+
+#[test]
+fn test_expect_type_suppresses_typed_state_warning() {
+    // BT-1913: @expect type on a state field should suppress the warning
+    let mut state_decl = StateDeclaration::new(ident("count"), span());
+    state_decl.expect = Some((ExpectCategory::Type, span()));
+
+    let class_def = ClassDefinition::with_modifiers(
+        ident("StrictCounter"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![state_decl],
+        vec![],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // The type checker should emit the warning...
+    let raw_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Missing type annotation for state field")
+        })
+        .collect();
+    assert_eq!(
+        raw_warnings.len(),
+        1,
+        "type checker should emit the warning"
+    );
+
+    // ...but apply_expect_directives should suppress it
+    let mut diagnostics = checker.diagnostics().to_vec();
+    crate::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
+    let remaining: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Missing type annotation for state field")
+        })
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "@expect type should suppress the state field warning, got: {remaining:?}"
+    );
+    // No stale @expect warning
+    let stale: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("stale"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "should not produce stale @expect warning, got: {stale:?}"
+    );
+}
+
+#[test]
+fn test_untyped_class_no_state_annotation_warning() {
+    // Non-typed class should NOT warn about missing state annotations
+    let state = vec![StateDeclaration::new(ident("count"), span())];
+    let class_def = ClassDefinition::with_modifiers(
+        ident("SimpleCounter"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        state,
+        vec![],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Missing type annotation for state field")
+        })
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "non-typed class should not warn about state annotations, got: {warnings:?}"
+    );
+}
+
 // --- Behaviour protocol / Class hierarchy fallback tests (BT-777) ---
 
 #[test]
@@ -3823,10 +4033,50 @@ fn known_display_name() {
 }
 
 #[test]
-fn dynamic_display_name() {
+fn dynamic_display_name_unknown() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::Unknown).display_name(),
         Some(ecow::EcoString::from("Dynamic"))
+    );
+}
+
+#[test]
+fn dynamic_display_name_unannotated_param() {
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::UnannotatedParam).display_name(),
+        Some(ecow::EcoString::from("Dynamic (unannotated parameter)"))
+    );
+}
+
+#[test]
+fn dynamic_display_name_unannotated_return() {
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::UnannotatedReturn).display_name(),
+        Some(ecow::EcoString::from("Dynamic (unannotated return)"))
+    );
+}
+
+#[test]
+fn dynamic_display_name_dynamic_receiver() {
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::DynamicReceiver).display_name(),
+        Some(ecow::EcoString::from("Dynamic (dynamic receiver)"))
+    );
+}
+
+#[test]
+fn dynamic_display_name_ambiguous_control_flow() {
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::AmbiguousControlFlow).display_name(),
+        Some(ecow::EcoString::from("Dynamic (ambiguous control flow)"))
+    );
+}
+
+#[test]
+fn dynamic_display_name_untyped_ffi() {
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::UntypedFfi).display_name(),
+        Some(ecow::EcoString::from("Dynamic (untyped FFI)"))
     );
 }
 
@@ -10675,15 +10925,15 @@ fn coverage_percent_calculation() {
 fn dynamic_reason_descriptions() {
     assert_eq!(
         DynamicReason::UnannotatedParam.description(),
-        "parameter has no type annotation"
+        Some("unannotated parameter")
     );
     assert_eq!(
         DynamicReason::DynamicReceiver.description(),
-        "receiver is Dynamic"
+        Some("dynamic receiver")
     );
     assert_eq!(
         DynamicReason::UntypedFfi.description(),
-        "Erlang FFI call with no spec"
+        Some("untyped FFI")
     );
-    assert_eq!(DynamicReason::Unknown.description(), "unknown");
+    assert_eq!(DynamicReason::Unknown.description(), None);
 }
