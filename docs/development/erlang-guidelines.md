@@ -22,6 +22,8 @@ When generating Core Erlang or Erlang source:
 -behaviour(gen_server).
 -compile([no_auto_import]).
 
+-moduledoc "Counter actor backed by gen_server.".
+
 -export([start_link/1, increment/1, get_value/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 ```
@@ -36,11 +38,13 @@ When generating Core Erlang or Erlang source:
 - Add `-behaviour(gen_server).` for OTP behaviors
 - Include `-compile([no_auto_import]).` to avoid import conflicts
 
-**Documentation:**
-- Use EDoc format: `%%% @doc`, `%%% @param`, `%%% @returns`
-- Document the module purpose at the top
-- Document public API functions
+**Documentation (EEP-59):**
+- Use EEP-59 structured doc attributes (OTP 27+), not EDoc comments
+- `-moduledoc "Module purpose here".` after `-behaviour` for the module summary
+- `-doc "Function purpose here".` before each exported function
+- Do **not** use `-doc false` for internal helpers — keep docs visible for developers and tooling
 - Include DDD Context annotation using **triple `%`** (module-level style): `%%% **DDD Context:** ContextName` — never `%%`
+- Reference: [EEP-59](https://www.erlang.org/eeps/eep-0059), [EEP-48](https://www.erlang.org/eeps/eep-0048)
 
 **Valid DDD Context labels** (use exactly one of these 7):
 

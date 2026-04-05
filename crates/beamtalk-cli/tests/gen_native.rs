@@ -61,8 +61,13 @@ fn gen_native_generates_valid_erlang_stub() {
     // Verify structural elements
     assert!(erl_content.contains("-module(test_actor_impl)."));
     assert!(erl_content.contains("-behaviour(gen_server)."));
+    assert!(
+        erl_content.contains("-moduledoc \"Backing gen_server for the TestActor native Actor.\".")
+    );
     assert!(erl_content.contains("-export([start_link/1])."));
+    assert!(erl_content.contains("-doc \"Start and link the TestActor gen_server.\"."));
     assert!(erl_content.contains("start_link(Config) ->"));
+    assert!(erl_content.contains("-doc \"Initialise the server state from Config.\"."));
     assert!(erl_content.contains("init(_Config) ->"));
 
     // Verify handle_call clauses for each delegate method
