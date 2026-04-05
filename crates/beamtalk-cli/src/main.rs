@@ -263,6 +263,10 @@ enum Command {
         /// Max concurrent test classes. 0 = auto (scheduler count), 1 = sequential.
         #[arg(long, short = 'j', default_value = "0")]
         jobs: usize,
+
+        /// Suppress per-class output for passing tests
+        #[arg(long, short)]
+        quiet: bool,
     },
 
     /// Check environment setup (Erlang, runtime, stdlib)
@@ -502,7 +506,8 @@ fn run() -> Result<()> {
             path,
             warnings_as_errors,
             jobs,
-        } => commands::test::run_tests(&path, warnings_as_errors, jobs),
+            quiet,
+        } => commands::test::run_tests(&path, warnings_as_errors, jobs, quiet),
         Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
         Command::Doctor { dev } => commands::doctor::run(dev),

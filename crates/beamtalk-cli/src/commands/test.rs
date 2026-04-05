@@ -355,6 +355,7 @@ struct BunitResult {
 #[derive(Debug)]
 struct TestResultDetail {
     name: String,
+    class: Option<String>,
     status: String, // "pass", "fail", "skip"
     error: Option<String>,
 }
@@ -809,7 +810,7 @@ struct TestPipeline {
 /// `jobs` controls test class concurrency: `0` = auto (scheduler count),
 /// `1` = sequential, `N` = up to N concurrent classes.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()> {
+pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize, quiet: bool) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();
 
@@ -864,7 +865,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
     }
 
     let results = execute_tests(&pipeline)?;
-    report_results(&pipeline, &results, start_time)
+    report_results(&pipeline, &results, start_time, quiet)
 }
 
 /// Discover unique package roots and load their manifests.
@@ -1641,10 +1642,12 @@ fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
         .iter()
         .map(|t| {
             let name = t["name"].as_str().unwrap_or("unknown").to_string();
+            let class = t["class"].as_str().map(String::from);
             let status = t["status"].as_str().unwrap_or("unknown").to_string();
             let error = t["error"].as_str().map(String::from);
             TestResultDetail {
                 name,
+                class,
                 status,
                 error,
             }
@@ -1943,6 +1946,7 @@ fn report_results(
     pipeline: &TestPipeline,
     results: &TestResults,
     start_time: Instant,
+    quiet: bool,
 ) -> Result<()> {
     let mut failed_details = Vec::new();
     let mut total_tests: usize = 0;
@@ -1951,27 +1955,24 @@ fn report_results(
 
     // Report BUnit results
     if let Some(result) = &results.bunit {
-        // Group test results by class name (prefix of test name)
+        // Group test results by class name from the JSON "class" field.
         let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
 
         for test in &result.tests {
-            let test_name = &test.name;
-            // Extract class name from test name (class method names are formed as "ClassName testMethod")
-            let class_name = if let Some(first_word) = test_name.split_whitespace().next() {
-                first_word.to_string()
-            } else {
-                test_name.clone()
-            };
+            let class_name = test.class.clone().unwrap_or_else(|| test.name.clone());
 
-            let (passed, failed, skipped) =
-                class_results.entry(class_name.clone()).or_insert((0, 0, 0));
+            let (passed, failed, skipped) = class_results.entry(class_name).or_insert((0, 0, 0));
 
             match test.status.as_str() {
                 "pass" => *passed += 1,
                 "fail" => {
                     *failed += 1;
+                    let display_name = test
+                        .class
+                        .as_ref()
+                        .map_or(test.name.clone(), |c| format!("{c} {}", test.name));
                     if let Some(error) = &test.error {
-                        failed_details.push(format!("FAIL {test_name}: {error}"));
+                        failed_details.push(format!("FAIL {display_name}: {error}"));
                     }
                 }
                 "skip" => *skipped += 1,
@@ -1979,16 +1980,21 @@ fn report_results(
             }
         }
 
-        // Print results per class (matches BUnit output format)
+        // Print results per class in deterministic compile order (not JSON result
+        // order, which varies when jobs > 1 due to concurrent class execution).
         for compiled in &pipeline.compiled_tests {
             let class_name = &compiled.test_class.class_name;
-            if let Some((passed, failed, skipped)) = class_results.get(class_name) {
+            if let Some(&(passed, failed, skipped)) = class_results.get(class_name) {
                 let total = passed + failed + skipped;
-                if *failed > 0 {
+                if failed > 0 {
                     println!(
                         "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
                     );
-                } else {
+                } else if skipped > 0 {
+                    println!(
+                        "  {class_name}: {total} tests, {passed} passed, {skipped} skipped \u{2713}"
+                    );
+                } else if !quiet {
                     println!("  {class_name}: {total} tests, {total} passed \u{2713}");
                 }
             }
@@ -2011,7 +2017,7 @@ fn report_results(
                 println!(
                     "  {module} (native): {total} tests, {passed} passed, {skipped} skipped \u{2713}"
                 );
-            } else {
+            } else if !quiet {
                 println!("  {module} (native): {total} tests, {total} passed \u{2713}");
             }
         }
@@ -2644,5 +2650,30 @@ mod tests {
         let sections = parse_eunit_module_sections(stdout, false, &modules);
         assert_eq!(sections.modules.len(), 1);
         assert_eq!(sections.modules[0], ("foo_tests".to_string(), 0, 1, 0));
+    }
+
+    #[test]
+    fn test_parse_bunit_result_json_with_class_field() {
+        let json = r#"{"total":3,"passed":2,"failed":1,"skipped":0,"duration":0.5,"tests":[{"name":"testAdd","class":"MathTest","status":"pass"},{"name":"testSub","class":"MathTest","status":"fail","error":"expected 1 got 2"},{"name":"testConcat","class":"StringTest","status":"pass"}]}"#;
+        let result = parse_bunit_result_json(json, "").unwrap();
+        assert_eq!(result.total, 3);
+        assert_eq!(result.passed, 2);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.tests.len(), 3);
+        // Class field is parsed
+        assert_eq!(result.tests[0].class.as_deref(), Some("MathTest"));
+        assert_eq!(result.tests[0].name, "testAdd");
+        assert_eq!(result.tests[2].class.as_deref(), Some("StringTest"));
+        // Error field is parsed on failures
+        assert_eq!(result.tests[1].error.as_deref(), Some("expected 1 got 2"));
+    }
+
+    #[test]
+    fn test_parse_bunit_result_json_without_class_field() {
+        // Older runners may omit the class field — name-only fallback
+        let json = r#"{"total":1,"passed":1,"failed":0,"skipped":0,"duration":0.1,"tests":[{"name":"testFoo","status":"pass"}]}"#;
+        let result = parse_bunit_result_json(json, "").unwrap();
+        assert_eq!(result.tests[0].class, None);
+        assert_eq!(result.tests[0].name, "testFoo");
     }
 }
