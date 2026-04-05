@@ -43,7 +43,8 @@ typed Actor subclass: TimeoutProxy
   setTarget: newTarget :: Actor -> Actor => self.target := newTarget
 
   /// Set the timeout in milliseconds (or `#infinity`).
-  setTimeoutMs: ms :: Integer | Symbol -> Integer | Symbol => self.timeoutMs := ms
+  setTimeoutMs: ms :: Integer | Symbol -> Integer | Symbol =>
+    self.timeoutMs := ms
 
   /// Forward all unknown messages to the target with the configured timeout.
   doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
