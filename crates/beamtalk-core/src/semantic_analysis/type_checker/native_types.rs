@@ -365,7 +365,10 @@ mod tests {
     #[test]
     fn map_type_name_dynamic() {
         let ty = map_type_name("Dynamic");
-        assert_eq!(ty, InferredType::Dynamic(DynamicReason::UntypedFfi));
+        match ty {
+            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::UntypedFfi),
+            other => panic!("expected Dynamic(UntypedFfi), got {other:?}"),
+        }
     }
 
     #[test]
@@ -456,7 +459,10 @@ mod tests {
     fn map_type_name_union_with_dynamic() {
         // If any member is Dynamic, union_of returns Dynamic
         let ty = map_type_name("Integer | Dynamic");
-        assert_eq!(ty, InferredType::Dynamic(DynamicReason::UntypedFfi));
+        match ty {
+            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::UntypedFfi),
+            other => panic!("expected Dynamic(UntypedFfi), got {other:?}"),
+        }
     }
 
     #[test]

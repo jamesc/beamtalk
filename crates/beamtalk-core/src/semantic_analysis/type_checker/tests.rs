@@ -498,7 +498,10 @@ fn test_unknown_variable_is_dynamic() {
     let mut env = TypeEnv::new();
 
     let ty = checker.infer_expr(&var("unknownVar"), &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
+    match ty {
+        InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::Unknown),
+        other => panic!("expected Dynamic(Unknown), got {other:?}"),
+    }
 }
 
 #[test]
@@ -567,7 +570,10 @@ fn test_match_returns_dynamic() {
     };
 
     let ty = checker.infer_expr(&match_expr, &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
+    match ty {
+        InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::AmbiguousControlFlow),
+        other => panic!("expected Dynamic(AmbiguousControlFlow), got {other:?}"),
+    }
 }
 
 #[test]
