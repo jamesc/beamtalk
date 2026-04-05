@@ -100,6 +100,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted | 2026-04-01 |
 | [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Accepted | 2026-04-02 |
 | [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Accepted | 2026-04-03 |
+| [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Proposed | 2026-04-05 |
 
 ## Creating New ADRs
 
