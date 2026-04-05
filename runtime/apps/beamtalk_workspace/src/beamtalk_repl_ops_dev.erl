@@ -2152,12 +2152,13 @@ format_specs_list(Module, Specs) ->
 %% When a Beamtalk native module exports both `parse/1` (FFI alias) and
 %% `'parse:'/1` (keyword message), both appear in specs.  The plain variant
 %% is just a compiler-generated dispatch alias, so we hide it when the
-%% colon-suffixed variant exists at the same arity.
+%% colon-suffixed variant exists at the same arity.  This also handles
+%% multi-keyword selectors: `run/2` is the alias for `'run:timeout:'/2`.
 -spec dedupe_keyword_aliases([map()]) -> [map()].
 dedupe_keyword_aliases(Specs) ->
     %% Build a set of {BaseName, Arity} for all colon-suffixed names
     ColonSet = sets:from_list([
-        {strip_trailing_colon(maps:get(name, S)), maps:get(arity, S)}
+        {base_keyword_name(maps:get(name, S)), maps:get(arity, S)}
      || S <- Specs,
         is_keyword_name(maps:get(name, S))
     ]),
@@ -2183,10 +2184,15 @@ is_keyword_alias(Name, Arity, ColonSet) ->
 is_keyword_name(<<>>) -> false;
 is_keyword_name(Name) -> binary:last(Name) =:= $:.
 
-%% @private Strip a trailing ':' from a binary.
--spec strip_trailing_colon(binary()) -> binary().
-strip_trailing_colon(Name) ->
-    binary:part(Name, 0, byte_size(Name) - 1).
+%% @private Extract the base name from a keyword selector — the segment before
+%% the first colon.  Works for both single-keyword (`parse:` → `parse`) and
+%% multi-keyword selectors (`run:timeout:` → `run`).
+-spec base_keyword_name(binary()) -> binary().
+base_keyword_name(Name) ->
+    case binary:match(Name, <<":">>) of
+        {Pos, _} -> binary:part(Name, 0, Pos);
+        nomatch -> Name
+    end.
 
 %% @private Format a single function as a Beamtalk-style type signature.
 %%
