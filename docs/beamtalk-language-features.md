@@ -728,6 +728,36 @@ result value  // raises on error
 // => "badarg"
 ```
 
+### Type Specs for Native Modules
+
+When writing native Erlang modules that implement Beamtalk class methods, use the exported Dialyzer types for `Result` and `Error` values instead of bare `map()`:
+
+| Type | Description |
+|------|-------------|
+| `beamtalk_result:t()` | Any Result (unparameterized) |
+| `beamtalk_result:t(OkType, ErrType)` | Result with known ok/error types |
+| `beamtalk_error:t()` | Exception tagged map (the wrapped error visible to Beamtalk) |
+| `beamtalk_error:error()` | Internal `#beamtalk_error{}` record |
+
+**Example specs:**
+
+```erlang
+-module(beamtalk_mylib).
+
+%% Unparameterized — any Result
+-spec 'readConfig:'(binary()) -> beamtalk_result:t().
+'readConfig:'(Path) ->
+    beamtalk_result:from_tagged_tuple(file:read_file(Path)).
+
+%% Parameterized — precise ok/error types for Dialyzer
+-spec 'parse:'(binary()) -> beamtalk_result:t(map(), beamtalk_error:t()).
+'parse:'(Data) -> ...
+```
+
+These types are defined in:
+- `runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl` — `t/0` and `t/2`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_error.erl` — `t/0` and `error/0`
+
 ### Loading Code into the Workspace
 
 Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` singleton. Loaded classes are immediately available — existing actors pick up new code on next dispatch.

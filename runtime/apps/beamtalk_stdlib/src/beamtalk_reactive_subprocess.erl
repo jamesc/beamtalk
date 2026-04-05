@@ -138,7 +138,7 @@ dispatch(Selector, _Args, _Self) ->
 %%
 %% Returns `Result ok: subprocessObject` on success, `Result error:` if the
 %% process cannot be started (e.g. binary not found, permission denied).
--spec start_subprocess(map(), atom()) -> map().
+-spec start_subprocess(map(), atom()) -> beamtalk_result:t().
 start_subprocess(Config, Selector) ->
     case beamtalk_reactive_subprocess_sup:start_child(Config) of
         {ok, Pid} ->

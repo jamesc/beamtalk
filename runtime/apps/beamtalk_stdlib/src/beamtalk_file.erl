@@ -108,7 +108,7 @@
 %%
 %% Returns a Result ok map with the file contents as a binary (String), or a
 %% Result error map if the file cannot be read.
--spec 'readAll:'(binary()) -> map().
+-spec 'readAll:'(binary()) -> beamtalk_result:t().
 'readAll:'(Path) when is_binary(Path) ->
     case file:read_file(unicode:characters_to_list(Path)) of
         {ok, Contents} ->
@@ -141,7 +141,7 @@
 %%
 %% Creates the file if it doesn't exist, overwrites if it does.
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'writeAll:contents:'(binary(), binary()) -> map().
+-spec 'writeAll:contents:'(binary(), binary()) -> beamtalk_result:t().
 'writeAll:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     %% Ensure directory exists
@@ -192,7 +192,7 @@
 %% Returns a Result ok map with the file contents as a binary, or a
 %% Result error map if the file cannot be read. Unlike readAll:, this
 %% does not assume the contents are a UTF-8 string.
--spec 'readBinary:'(binary()) -> map().
+-spec 'readBinary:'(binary()) -> beamtalk_result:t().
 'readBinary:'(Path) when is_binary(Path) ->
     case file:read_file(unicode:characters_to_list(Path)) of
         {ok, Contents} ->
@@ -226,7 +226,7 @@
 %% Creates the file if it doesn't exist, overwrites if it does.
 %% Auto-creates parent directories. Contents must be a binary.
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'writeBinary:contents:'(binary(), binary()) -> map().
+-spec 'writeBinary:contents:'(binary(), binary()) -> beamtalk_result:t().
 'writeBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
@@ -272,7 +272,7 @@
 %% Opens the file in append mode and writes the binary contents.
 %% Auto-creates parent directories. Contents must be a binary.
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'appendBinary:contents:'(binary(), binary()) -> map().
+-spec 'appendBinary:contents:'(binary(), binary()) -> beamtalk_result:t().
 'appendBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
@@ -331,7 +331,7 @@ handle_has_method(_) -> false.
 %%
 %% Cross-process constraint: file-backed Streams must be consumed by the same
 %% process that created them (BEAM file handles are process-local).
--spec 'lines:'(binary()) -> map().
+-spec 'lines:'(binary()) -> beamtalk_result:t().
 'lines:'(Path) when is_binary(Path) ->
     case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
@@ -365,7 +365,7 @@ handle_has_method(_) -> false.
 %% Opens the file, passes a FileHandle to the block, and ensures the handle
 %% is closed when the block exits (whether normally or via exception).
 %% Returns a Result ok map with the result of the block.
--spec 'open:do:'(binary(), fun((map()) -> term())) -> map().
+-spec 'open:do:'(binary(), fun((map()) -> term())) -> beamtalk_result:t().
 'open:do:'(Path, Block) when is_binary(Path), is_function(Block, 1) ->
     case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
@@ -432,7 +432,7 @@ handle_has_method(_) -> false.
 %% @doc Create a directory. Returns a Result error if the parent does not exist.
 %%
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'mkdir:'(binary()) -> map().
+-spec 'mkdir:'(binary()) -> beamtalk_result:t().
 'mkdir:'(Path) when is_binary(Path) ->
     case file:make_dir(unicode:characters_to_list(Path)) of
         ok ->
@@ -472,7 +472,7 @@ handle_has_method(_) -> false.
 %% @doc Create a directory and all missing parent directories.
 %%
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'mkdirAll:'(binary()) -> map().
+-spec 'mkdirAll:'(binary()) -> beamtalk_result:t().
 'mkdirAll:'(Path) when is_binary(Path) ->
     %% filelib:ensure_path/1 creates the full path including the final component
     case filelib:ensure_path(unicode:characters_to_list(Path)) of
@@ -500,7 +500,7 @@ handle_has_method(_) -> false.
 %%
 %% Returns only entry names (not full paths). Returns a Result error map
 %% if the directory does not exist or cannot be read.
--spec 'listDirectory:'(binary()) -> map().
+-spec 'listDirectory:'(binary()) -> beamtalk_result:t().
 'listDirectory:'(Path) when is_binary(Path) ->
     PathStr = unicode:characters_to_list(Path),
     %% Check for regular file first: file:list_dir/1 returns different
@@ -565,7 +565,7 @@ handle_has_method(_) -> false.
 %% Uses filelib:is_dir/1 to distinguish directories from files, because
 %% file:delete/1 returns {error, eperm} for directories on Linux
 %% (not {error, eisdir} as documented in some OTP versions).
--spec 'delete:'(binary()) -> map().
+-spec 'delete:'(binary()) -> beamtalk_result:t().
 'delete:'(Path) when is_binary(Path) ->
     PathStr = unicode:characters_to_list(Path),
     case filelib:is_dir(PathStr) of
@@ -636,7 +636,7 @@ handle_has_method(_) -> false.
 %% @doc Recursively delete a directory tree.
 %%
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'deleteAll:'(binary()) -> map().
+-spec 'deleteAll:'(binary()) -> beamtalk_result:t().
 'deleteAll:'(Path) when is_binary(Path) ->
     case file:del_dir_r(unicode:characters_to_list(Path)) of
         ok ->
@@ -668,7 +668,7 @@ handle_has_method(_) -> false.
 %% @doc Rename or move a file or directory.
 %%
 %% Returns a Result ok map on success, Result error map on failure.
--spec 'rename:to:'(binary(), binary()) -> map().
+-spec 'rename:to:'(binary(), binary()) -> beamtalk_result:t().
 'rename:to:'(From, To) when is_binary(From), is_binary(To) ->
     case file:rename(unicode:characters_to_list(From), unicode:characters_to_list(To)) of
         ok ->
@@ -707,7 +707,7 @@ handle_has_method(_) -> false.
 %% @doc Resolve a relative path to its absolute path.
 %%
 %% Returns a Result ok map with the absolute path as a String.
--spec 'absolutePath:'(binary()) -> map().
+-spec 'absolutePath:'(binary()) -> beamtalk_result:t().
 'absolutePath:'(Path) when is_binary(Path) ->
     PathList = unicode:characters_to_list(Path),
     case filename:pathtype(PathList) of
@@ -727,7 +727,7 @@ handle_has_method(_) -> false.
 %%
 %% Returns a Result ok map with a DateTime on success, or a Result error map
 %% if the file does not exist.
--spec 'lastModified:'(binary()) -> map().
+-spec 'lastModified:'(binary()) -> beamtalk_result:t().
 'lastModified:'(Path) when is_binary(Path) ->
     case filelib:last_modified(unicode:characters_to_list(Path)) of
         0 ->
