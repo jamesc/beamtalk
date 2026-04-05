@@ -1965,17 +1965,16 @@ fn report_results(
             if !class_results.contains_key(&class_name) {
                 class_order.push(class_name.clone());
             }
-            let (passed, failed, skipped) =
-                class_results.entry(class_name).or_insert((0, 0, 0));
+            let (passed, failed, skipped) = class_results.entry(class_name).or_insert((0, 0, 0));
 
             match test.status.as_str() {
                 "pass" => *passed += 1,
                 "fail" => {
                     *failed += 1;
-                    let display_name =
-                        test.class.as_ref().map_or(test.name.clone(), |c| {
-                            format!("{c} {}", test.name)
-                        });
+                    let display_name = test
+                        .class
+                        .as_ref()
+                        .map_or(test.name.clone(), |c| format!("{c} {}", test.name));
                     if let Some(error) = &test.error {
                         failed_details.push(format!("FAIL {display_name}: {error}"));
                     }
