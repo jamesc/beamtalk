@@ -272,7 +272,7 @@ pub fn analyse_with_natives(
     module: &Module,
     options: &crate::CompilerOptions,
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    native_type_registry: Option<type_checker::NativeTypeRegistry>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
 ) -> AnalysisResult {
     analyse_full_with_natives(
         module,
@@ -367,7 +367,7 @@ fn analyse_full_with_natives(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     known_packages: Option<std::collections::HashSet<String>>,
     current_package: Option<&str>,
-    native_type_registry: Option<type_checker::NativeTypeRegistry>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 

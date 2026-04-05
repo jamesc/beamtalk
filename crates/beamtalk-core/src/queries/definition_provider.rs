@@ -585,6 +585,210 @@ pub fn check_native_delegate<'a>(
     None
 }
 
+/// Info about an Erlang FFI call site for goto-definition.
+///
+/// Returned when the cursor is on the selector of an `Erlang <module> <function>:` call,
+/// so the LSP can redirect navigation to the backing `.erl` source file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FfiCallInfo {
+    /// The Erlang module name (e.g., `lists`, `beamtalk_runtime`).
+    pub module_name: EcoString,
+    /// The Erlang function name (e.g., `reverse`).
+    pub function_name: EcoString,
+    /// Erlang arity of the function.
+    pub arity: u8,
+    /// Source line number (1-based) of the function definition in the `.erl` file.
+    ///
+    /// Populated from `FunctionSignature::line` when the registry is available.
+    /// `None` if the registry has no line info or the function isn't found.
+    pub line: Option<u32>,
+}
+
+/// Check if the cursor offset is on the selector of an Erlang FFI call.
+///
+/// Detects the pattern `Erlang <module> <function>:` where `<module>` is a
+/// unary message to the `Erlang` class reference and `<function>:` is the
+/// outer selector. Returns the module and function names for `.erl` lookup.
+#[must_use]
+pub fn check_ffi_call(module: &Module, offset: u32) -> Option<FfiCallInfo> {
+    // Check top-level expressions
+    for stmt in &module.expressions {
+        if let Some(info) = find_ffi_call_in_expr(&stmt.expression, offset) {
+            return Some(info);
+        }
+    }
+    // Check class method bodies
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for stmt in &method.body {
+                if let Some(info) = find_ffi_call_in_expr(&stmt.expression, offset) {
+                    return Some(info);
+                }
+            }
+        }
+    }
+    // Check standalone method bodies
+    for smd in &module.method_definitions {
+        for stmt in &smd.method.body {
+            if let Some(info) = find_ffi_call_in_expr(&stmt.expression, offset) {
+                return Some(info);
+            }
+        }
+    }
+    None
+}
+
+/// Recursively search for an FFI call pattern at the given offset.
+fn find_ffi_call_in_expr(expr: &Expression, offset: u32) -> Option<FfiCallInfo> {
+    let span = expr.span();
+    if offset < span.start() || offset >= span.end() {
+        return None;
+    }
+
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            // First check arguments and receiver recursively
+            for arg in arguments {
+                if let Some(info) = find_ffi_call_in_expr(arg, offset) {
+                    return Some(info);
+                }
+            }
+            if let Some(info) = find_ffi_call_in_expr(receiver, offset) {
+                return Some(info);
+            }
+
+            // Check if cursor is on the FFI selector or module name
+            check_ffi_message_send(receiver, selector, arguments, span, offset)
+        }
+        Expression::Assignment { target, value, .. } => {
+            find_ffi_call_in_expr(target, offset).or_else(|| find_ffi_call_in_expr(value, offset))
+        }
+        Expression::Block(block) => block
+            .body
+            .iter()
+            .find_map(|s| find_ffi_call_in_expr(&s.expression, offset)),
+        Expression::Return { value, .. } => find_ffi_call_in_expr(value, offset),
+        Expression::Parenthesized { expression, .. } => find_ffi_call_in_expr(expression, offset),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            if let Some(info) = find_ffi_call_in_expr(receiver, offset) {
+                return Some(info);
+            }
+            for msg in messages {
+                for arg in &msg.arguments {
+                    if let Some(info) = find_ffi_call_in_expr(arg, offset) {
+                        return Some(info);
+                    }
+                }
+            }
+            None
+        }
+        Expression::FieldAccess { receiver, .. } => find_ffi_call_in_expr(receiver, offset),
+        Expression::Match { value, arms, .. } => {
+            if let Some(info) = find_ffi_call_in_expr(value, offset) {
+                return Some(info);
+            }
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    if let Some(info) = find_ffi_call_in_expr(guard, offset) {
+                        return Some(info);
+                    }
+                }
+                if let Some(info) = find_ffi_call_in_expr(&arm.body, offset) {
+                    return Some(info);
+                }
+            }
+            None
+        }
+        Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
+            if let crate::ast::StringSegment::Interpolation(expr) = seg {
+                find_ffi_call_in_expr(expr, offset)
+            } else {
+                None
+            }
+        }),
+        Expression::ListLiteral { elements, tail, .. } => elements
+            .iter()
+            .find_map(|e| find_ffi_call_in_expr(e, offset))
+            .or_else(|| tail.as_ref().and_then(|t| find_ffi_call_in_expr(t, offset))),
+        Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
+            find_ffi_call_in_expr(&pair.key, offset)
+                .or_else(|| find_ffi_call_in_expr(&pair.value, offset))
+        }),
+        _ => None,
+    }
+}
+
+/// Check if a `MessageSend` is an FFI call with the cursor on the selector or module name.
+///
+/// Handles two patterns:
+/// - Cursor on `reverse:` in `Erlang lists reverse: x` → returns module + function
+/// - Cursor on `lists` in `Erlang lists` → returns module only
+fn check_ffi_message_send(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+    send_span: Span,
+    offset: u32,
+) -> Option<FfiCallInfo> {
+    // Pattern 1: receiver is `Erlang <module>`, cursor is on the outer selector.
+    // Use selector_span_contains for proper multi-keyword hit testing (e.g.,
+    // `seq: 1 to: 10` — cursor on either `seq:` or `to:` should navigate).
+    if let Expression::MessageSend {
+        receiver: inner_receiver,
+        selector: MessageSelector::Unary(module_name_str),
+        ..
+    } = receiver
+    {
+        if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
+            if name.name == "Erlang" {
+                let computed_span =
+                    selector_span_for_message_send(receiver.span(), arguments, send_span);
+                if selector_span_contains(selector, offset, computed_span).is_some() {
+                    let selector_name = selector.name();
+                    let function_name = selector_name
+                        .split(':')
+                        .next()
+                        .unwrap_or(selector_name.as_str());
+                    let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
+                    return Some(FfiCallInfo {
+                        module_name: module_name_str.clone(),
+                        function_name: EcoString::from(function_name),
+                        arity,
+                        line: None, // Populated by language service from registry
+                    });
+                }
+            }
+        }
+    }
+
+    // Pattern 2: receiver is `Erlang`, cursor is on the module name
+    if let Expression::ClassReference { name, .. } = receiver {
+        if name.name == "Erlang" {
+            if let MessageSelector::Unary(module_name_str) = selector {
+                let sel_start = receiver.span().end();
+                let sel_end = send_span.end();
+                if offset >= sel_start && offset < sel_end {
+                    return Some(FfiCallInfo {
+                        module_name: module_name_str.clone(),
+                        function_name: EcoString::new(),
+                        arity: 0,
+                        line: None, // Module-level navigation, no specific function
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Recursively search for a variable definition (first assignment) in an expression.
 fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
     match expr {

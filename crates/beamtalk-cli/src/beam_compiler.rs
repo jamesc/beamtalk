@@ -701,6 +701,12 @@ pub struct CompileContext<'a> {
     pub dep_registry: Option<&'a beamtalk_core::semantic_analysis::DependencyRegistry>,
     /// Whether to promote transitive dependency usage warnings to errors.
     pub strict_deps: bool,
+    /// Native type registry for FFI call inference during build (ADR 0075).
+    ///
+    /// When set, semantic analysis uses [`beamtalk_core::semantic_analysis::analyse_with_natives`]
+    /// so that `Erlang <module> <function>:` calls get return type inference and
+    /// argument type checking in build output, not just the LSP.
+    pub native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
 }
 
 /// Writes Core Erlang code with primitive bindings.
@@ -849,10 +855,11 @@ pub(crate) fn compile_source_with_bindings(
             &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
         &module,
         options,
         cross_file_classes.clone(),
+        ctx.native_type_registry.clone(),
     );
     diagnostics.extend(analysis_result.diagnostics);
 
