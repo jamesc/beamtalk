@@ -22,6 +22,8 @@
 //! also accept identifier (variable) arguments for dynamic dispatch.
 
 use crate::ast::{Expression, Literal, MessageSelector};
+#[cfg(test)]
+use crate::semantic_analysis::type_checker::DynamicReason;
 use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use std::collections::HashMap;
@@ -1608,7 +1610,7 @@ mod tests {
     #[test]
     fn test_type_aware_at_dynamic_receiver_skips() {
         let validator = TypeAwareIntegerArgValidator;
-        let ty = InferredType::Dynamic;
+        let ty = InferredType::Dynamic(DynamicReason::Unknown);
         let args = vec![Expression::Literal(
             Literal::String("key".into()),
             test_span(),
@@ -1707,7 +1709,7 @@ mod tests {
     #[test]
     fn test_type_aware_includes_dynamic_receiver_skips() {
         let validator = TypeAwareStringArgValidator;
-        let ty = InferredType::Dynamic;
+        let ty = InferredType::Dynamic(DynamicReason::Unknown);
         let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
         let diags = validator.validate(
             &keyword_selector("includes:"),

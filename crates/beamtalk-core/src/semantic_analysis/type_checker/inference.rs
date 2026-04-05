@@ -20,7 +20,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::{EcoString, eco_format};
 
-use super::{InferredType, TypeChecker, TypeEnv};
+use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
 /// Describes a control-flow narrowing detected from a type-test expression.
 ///
@@ -217,7 +217,7 @@ impl TypeChecker {
         for param in parameters {
             let ty = match &param.type_annotation {
                 Some(ann) => Self::resolve_type_annotation(ann),
-                None => InferredType::Dynamic, // preserve parameter shadowing of state fields
+                None => InferredType::Dynamic(DynamicReason::UnannotatedParam), // preserve parameter shadowing of state fields
             };
             env.set(&param.name.name, ty);
         }
@@ -260,7 +260,7 @@ impl TypeChecker {
                 let inner_ty = Self::resolve_type_annotation(inner);
                 InferredType::union_of(&[inner_ty, InferredType::known("False")])
             }
-            TypeAnnotation::SelfType { .. } => InferredType::Dynamic,
+            TypeAnnotation::SelfType { .. } => InferredType::Dynamic(DynamicReason::Unknown),
             TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
         }
     }
@@ -323,7 +323,9 @@ impl TypeChecker {
                 match name {
                     "true" | "false" => InferredType::known("Boolean"),
                     "nil" => InferredType::known("UndefinedObject"),
-                    "self" => env.get("self").unwrap_or(InferredType::Dynamic),
+                    "self" => env
+                        .get("self")
+                        .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown)),
                     _ => {
                         // First check environment for local variables or parameters
                         if let Some(ty) = env.get(name) {
@@ -337,10 +339,10 @@ impl TypeChecker {
                                 {
                                     Self::resolve_type_name_string(&field_type)
                                 } else {
-                                    InferredType::Dynamic
+                                    InferredType::Dynamic(DynamicReason::Unknown)
                                 }
                             } else {
-                                InferredType::Dynamic
+                                InferredType::Dynamic(DynamicReason::Unknown)
                             }
                         }
                     }
@@ -354,7 +356,7 @@ impl TypeChecker {
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
-                let mut result = InferredType::Dynamic;
+                let mut result = InferredType::Dynamic(DynamicReason::Unknown);
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     if recv_id.name == "self" {
                         if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
@@ -374,7 +376,9 @@ impl TypeChecker {
             | Expression::Error { .. }
             | Expression::ExpectDirective { .. }
             | Expression::Spread { .. }
-            | Expression::MessageSend { is_cast: true, .. } => InferredType::Dynamic,
+            | Expression::MessageSend { is_cast: true, .. } => {
+                InferredType::Dynamic(DynamicReason::Unknown)
+            }
 
             // Message sends — the core of type checking
             Expression::MessageSend {
@@ -527,7 +531,10 @@ impl TypeChecker {
             Expression::Block(block) => {
                 let mut block_env = env.child();
                 for param in &block.parameters {
-                    block_env.set(param.name.as_str(), InferredType::Dynamic);
+                    block_env.set(
+                        param.name.as_str(),
+                        InferredType::Dynamic(DynamicReason::UnannotatedParam),
+                    );
                 }
                 self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
                 InferredType::known("Block")
@@ -543,7 +550,7 @@ impl TypeChecker {
                     }
                     self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
                 }
-                InferredType::Dynamic
+                InferredType::Dynamic(DynamicReason::AmbiguousControlFlow)
             }
 
             // Map literal → Dictionary
@@ -592,13 +599,13 @@ impl TypeChecker {
                         if let Some(ref parent) = class_info.superclass {
                             InferredType::known(parent.clone())
                         } else {
-                            InferredType::Dynamic
+                            InferredType::Dynamic(DynamicReason::Unknown)
                         }
                     } else {
-                        InferredType::Dynamic
+                        InferredType::Dynamic(DynamicReason::Unknown)
                     }
                 } else {
-                    InferredType::Dynamic
+                    InferredType::Dynamic(DynamicReason::Unknown)
                 }
             }
 
@@ -606,7 +613,7 @@ impl TypeChecker {
             Expression::DestructureAssignment { pattern, value, .. } => {
                 self.infer_expr(value, hierarchy, env, in_abstract_method);
                 Self::bind_pattern_vars(pattern, env);
-                InferredType::Dynamic
+                InferredType::Dynamic(DynamicReason::Unknown)
             }
         };
 
@@ -614,7 +621,7 @@ impl TypeChecker {
         // Skip Dynamic — it carries no useful info and all callers treat
         // `None` and `Some(Dynamic)` equivalently. Avoiding the insert saves
         // both a clone and a HashMap insertion for every unresolved expression.
-        if !matches!(ty, InferredType::Dynamic) {
+        if !matches!(ty, InferredType::Dynamic(_)) {
             self.type_map.insert(expr.span(), ty.clone());
         }
         ty
@@ -629,7 +636,7 @@ impl TypeChecker {
     pub(super) fn bind_pattern_vars(pattern: &Pattern, env: &mut TypeEnv) {
         let (bindings, _diagnostics) = crate::semantic_analysis::extract_pattern_bindings(pattern);
         for id in bindings {
-            env.set(&id.name, InferredType::Dynamic);
+            env.set(&id.name, InferredType::Dynamic(DynamicReason::Unknown));
         }
     }
 
@@ -801,7 +808,7 @@ impl TypeChecker {
                         &arg_types,
                     );
                 }
-                return InferredType::Dynamic;
+                return InferredType::Dynamic(DynamicReason::DynamicReceiver);
             }
 
             // ADR 0075: FFI call type inference for ErlangModule<module_name>.
@@ -886,7 +893,7 @@ impl TypeChecker {
                     // (single uppercase letter like E, T, V), fall back to Dynamic
                     // so downstream sends don't get false DNU warnings.
                     if super::is_generic_type_param(ret_ty) && !hierarchy.has_class(ret_ty) {
-                        return InferredType::Dynamic;
+                        return InferredType::Dynamic(DynamicReason::Unknown);
                     }
 
                     // BT-1576: If the return type is a generic like "Array(R)",
@@ -926,7 +933,7 @@ impl TypeChecker {
             return self.infer_union_message_send(members, &selector_name, span, hierarchy);
         }
 
-        InferredType::Dynamic
+        InferredType::Dynamic(DynamicReason::DynamicReceiver)
     }
 
     /// Infer the return type of an FFI call on an `ErlangModule<module_name>` receiver.
@@ -956,7 +963,7 @@ impl TypeChecker {
             ..
         }) = receiver_type_args.first()
         else {
-            return InferredType::Dynamic; // Dynamic module name
+            return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
         // Extract the Erlang function name from the selector.
@@ -973,7 +980,7 @@ impl TypeChecker {
             .cloned();
 
         let Some(sig) = sig else {
-            return InferredType::Dynamic;
+            return InferredType::Dynamic(DynamicReason::UntypedFfi);
         };
 
         // Emit keyword mismatch warnings (ADR 0075 footgun prevention)
@@ -1020,11 +1027,11 @@ impl TypeChecker {
     ) {
         for (i, (param, arg_ty)) in sig.params.iter().zip(arg_types.iter()).enumerate() {
             // Skip Dynamic args — we don't know the type
-            if matches!(arg_ty, InferredType::Dynamic) {
+            if matches!(arg_ty, InferredType::Dynamic(_)) {
                 continue;
             }
             // Skip Dynamic param types — anything is accepted
-            if matches!(param.type_, InferredType::Dynamic) {
+            if matches!(param.type_, InferredType::Dynamic(_)) {
                 continue;
             }
 
@@ -1197,9 +1204,11 @@ impl TypeChecker {
             m.as_known()
                 .is_some_and(|n| n.as_str() == "UndefinedObject")
         });
-        let has_dynamic = members.iter().any(|m| matches!(m, InferredType::Dynamic));
+        let has_dynamic = members
+            .iter()
+            .any(|m| matches!(m, InferredType::Dynamic(_)));
         if has_dynamic {
-            return InferredType::Dynamic;
+            return InferredType::Dynamic(DynamicReason::DynamicReceiver);
         }
 
         for member in members {
@@ -1207,7 +1216,7 @@ impl TypeChecker {
             let Some(member_name) = member.as_known() else {
                 // Dynamic member — handled above, but nested unions could
                 // still reach here; treat conservatively.
-                return_types.push(InferredType::Dynamic);
+                return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
             };
             // BT-1857: Skip Nil (UndefinedObject) for method resolution.
@@ -1218,12 +1227,12 @@ impl TypeChecker {
             }
             if !hierarchy.has_class(member_name) {
                 uncertain_member_count += 1;
-                return_types.push(InferredType::Dynamic);
+                return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
             }
             if hierarchy.has_instance_dnu_override(member_name) {
                 uncertain_member_count += 1;
-                return_types.push(InferredType::Dynamic);
+                return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
             }
             if hierarchy.resolves_selector(member_name, selector) {
@@ -1254,7 +1263,7 @@ impl TypeChecker {
                             } else if super::is_generic_type_param(ret_ty)
                                 && !hierarchy.has_class(ret_ty)
                             {
-                                return_types.push(InferredType::Dynamic);
+                                return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
                             } else if let Some(open) = ret_ty.find('(') {
                                 return_types
                                     .push(InferredType::known(EcoString::from(&ret_ty[..open])));
@@ -1263,10 +1272,10 @@ impl TypeChecker {
                             }
                         }
                     } else {
-                        return_types.push(InferredType::Dynamic);
+                        return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
                     }
                 } else {
-                    return_types.push(InferredType::Dynamic);
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 }
             } else {
                 missing_names.push(member_name.clone());
@@ -1372,7 +1381,7 @@ impl TypeChecker {
                     variable: var_name,
                     // Placeholder — refined by `refine_result_narrowing` once
                     // we know the variable's actual type from the env.
-                    true_type: InferredType::Dynamic,
+                    true_type: InferredType::Dynamic(DynamicReason::Unknown),
                     false_type: None,
                     is_nil_check: false,
                     is_result_ok_check: true,
@@ -1390,7 +1399,7 @@ impl TypeChecker {
                 let var_name = Self::extract_variable_name(inner_recv)?;
                 Some(NarrowingInfo {
                     variable: var_name,
-                    true_type: InferredType::Dynamic,
+                    true_type: InferredType::Dynamic(DynamicReason::Unknown),
                     false_type: None,
                     is_nil_check: false,
                     is_result_ok_check: false,
@@ -1413,7 +1422,7 @@ impl TypeChecker {
                         variable: var_name,
                         // Narrow to Dynamic — we know the object responds to the selector,
                         // but not its concrete class. Dynamic suppresses DNU warnings.
-                        true_type: InferredType::Dynamic,
+                        true_type: InferredType::Dynamic(DynamicReason::Unknown),
                         false_type: None,
                         is_nil_check: false,
                         is_result_ok_check: false,
@@ -1499,7 +1508,7 @@ impl TypeChecker {
         // Only refine to a protocol type when the variable is currently Dynamic.
         // If the variable already has a concrete type (e.g., Integer), narrowing
         // to a protocol (e.g., Printable) would lose type-specific APIs.
-        if matches!(info.true_type, InferredType::Dynamic) {
+        if matches!(info.true_type, InferredType::Dynamic(_)) {
             if let Some(ref selector) = info.responded_selector {
                 if let Some(ref registry) = self.protocol_registry {
                     if let Some(protocol_name) =
@@ -1528,7 +1537,9 @@ impl TypeChecker {
         if !info.is_result_ok_check && !info.is_result_error_check {
             return info;
         }
-        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+        let current_ty = env
+            .get(&info.variable)
+            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
         let is_result = matches!(
             &current_ty,
             InferredType::Known { class_name, .. } if class_name.as_str() == "Result"
@@ -1598,7 +1609,9 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifFalse: → variable is non-nil
-                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let current_ty = env
+                            .get(&info.variable)
+                            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             arg,
@@ -1643,7 +1656,9 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
-                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let current_ty = env
+                            .get(&info.variable)
+                            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
@@ -1691,7 +1706,10 @@ impl TypeChecker {
             let mut block_env = env.child();
             block_env.set(var_name, narrowed_type.clone());
             for param in &block.parameters {
-                block_env.set(param.name.as_str(), InferredType::Dynamic);
+                block_env.set(
+                    param.name.as_str(),
+                    InferredType::Dynamic(DynamicReason::UnannotatedParam),
+                );
             }
             self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
             let ty = InferredType::known("Block");
@@ -1746,7 +1764,7 @@ impl TypeChecker {
                     .cloned()
                     .collect();
                 match non_nil.len() {
-                    0 => InferredType::Dynamic,
+                    0 => InferredType::Dynamic(DynamicReason::Unknown),
                     1 => non_nil.into_iter().next().unwrap(),
                     _ => InferredType::Union {
                         members: non_nil,
@@ -1776,7 +1794,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        let mut body_type = InferredType::Dynamic;
+        let mut body_type = InferredType::Dynamic(DynamicReason::Unknown);
 
         for stmt in stmts {
             let expr = &stmt.expression;
@@ -1827,7 +1845,9 @@ impl TypeChecker {
                 if let Some(Expression::Block(block)) = arguments.first() {
                     if Self::block_has_return(block) {
                         // After this statement, the variable is non-nil
-                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let current_ty = env
+                            .get(&info.variable)
+                            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
                         let non_nil = Self::non_nil_type(&current_ty);
                         env.set(&info.variable, non_nil);
                     }
@@ -1955,7 +1975,7 @@ impl TypeChecker {
                         if let Some(arg) = current_args.get(*param_index) {
                             super_args.push(arg.clone());
                         } else {
-                            super_args.push(InferredType::Dynamic);
+                            super_args.push(InferredType::Dynamic(DynamicReason::Unknown));
                         }
                     }
                     SuperclassTypeArg::Concrete { type_name } => {
@@ -2040,7 +2060,7 @@ impl TypeChecker {
 
         // BT-1834: Unresolved bare type param (single uppercase letter) → Dynamic
         if super::is_generic_type_param(&ret_eco) {
-            return InferredType::Dynamic;
+            return InferredType::Dynamic(DynamicReason::Unknown);
         }
 
         // Not a type param — return as-is
@@ -2386,7 +2406,7 @@ mod tests {
         let ann = TypeAnnotation::SelfType { span: span() };
         assert_eq!(
             TypeChecker::resolve_type_annotation(&ann),
-            InferredType::Dynamic
+            InferredType::Dynamic(DynamicReason::Unknown)
         );
     }
 
@@ -2548,7 +2568,10 @@ mod tests {
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect respondsTo:");
         assert_eq!(info.variable.as_str(), "x");
-        assert_eq!(info.true_type, InferredType::Dynamic);
+        assert_eq!(
+            info.true_type,
+            InferredType::Dynamic(DynamicReason::Unknown)
+        );
         assert!(!info.is_nil_check);
         assert_eq!(info.responded_selector.as_deref(), Some("doSomething"));
     }
@@ -2674,7 +2697,7 @@ mod tests {
 
         let info = NarrowingInfo {
             variable: "r".into(),
-            true_type: InferredType::Dynamic,
+            true_type: InferredType::Dynamic(DynamicReason::Unknown),
             false_type: None,
             is_nil_check: false,
             is_result_ok_check: true,
@@ -2695,7 +2718,7 @@ mod tests {
 
         let info = NarrowingInfo {
             variable: "x".into(),
-            true_type: InferredType::Dynamic,
+            true_type: InferredType::Dynamic(DynamicReason::Unknown),
             false_type: None,
             is_nil_check: false,
             is_result_ok_check: true,
@@ -2734,7 +2757,7 @@ mod tests {
             provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
         };
         let result = TypeChecker::non_nil_type(&ty);
-        assert_eq!(result, InferredType::Dynamic);
+        assert_eq!(result, InferredType::Dynamic(DynamicReason::Unknown));
     }
 
     #[test]
@@ -2746,8 +2769,8 @@ mod tests {
 
     #[test]
     fn non_nil_type_dynamic_unchanged() {
-        let result = TypeChecker::non_nil_type(&InferredType::Dynamic);
-        assert_eq!(result, InferredType::Dynamic);
+        let result = TypeChecker::non_nil_type(&InferredType::Dynamic(DynamicReason::Unknown));
+        assert_eq!(result, InferredType::Dynamic(DynamicReason::Unknown));
     }
 
     #[test]
@@ -2923,7 +2946,7 @@ mod tests {
                 assert_eq!(class_name.as_str(), "Array");
                 assert_eq!(type_args.len(), 1);
                 // R not in subst → Dynamic (BT-1834)
-                assert_eq!(type_args[0], InferredType::Dynamic);
+                assert_eq!(type_args[0], InferredType::Dynamic(DynamicReason::Unknown));
             }
             other => panic!("Expected Known, got {other:?}"),
         }
@@ -2936,7 +2959,10 @@ mod tests {
         let params = vec![ParameterDefinition::new(ident("x"))];
         let mut env = TypeEnv::new();
         TypeChecker::set_param_types(&mut env, &params);
-        assert_eq!(env.get("x"), Some(InferredType::Dynamic));
+        assert_eq!(
+            env.get("x"),
+            Some(InferredType::Dynamic(DynamicReason::Unknown))
+        );
     }
 
     #[test]
@@ -2962,7 +2988,10 @@ mod tests {
         let mut env = TypeEnv::new();
         TypeChecker::set_param_types(&mut env, &params);
         assert_eq!(env.get("x"), Some(InferredType::known("String")));
-        assert_eq!(env.get("y"), Some(InferredType::Dynamic));
+        assert_eq!(
+            env.get("y"),
+            Some(InferredType::Dynamic(DynamicReason::Unknown))
+        );
     }
 
     // ---- infer_expr: core expression type inference ----
@@ -3038,7 +3067,7 @@ mod tests {
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
         let ty = checker.infer_expr(&var("unknownVar"), &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Dynamic);
+        assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
     }
 
     #[test]
@@ -3174,7 +3203,7 @@ mod tests {
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Dynamic);
+        assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
     }
 
     #[test]
@@ -3188,7 +3217,7 @@ mod tests {
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Dynamic);
+        assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
     }
 
     // ---- build_substitution_map ----
@@ -3208,7 +3237,7 @@ mod tests {
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
         let result = checker.infer_stmts(&[], &hierarchy, &mut env, false);
-        assert_eq!(result, InferredType::Dynamic);
+        assert_eq!(result, InferredType::Dynamic(DynamicReason::Unknown));
     }
 
     #[test]
@@ -3466,7 +3495,7 @@ mod tests {
     fn infer_method_local_params_dynamic_arg() {
         // Dynamic argument — no inference possible
         let method = method_info("assertOk:", vec![Some("Result(T, E)")], Some("T"));
-        let arg = InferredType::Dynamic;
+        let arg = InferredType::Dynamic(DynamicReason::Unknown);
         let hierarchy = ClassHierarchy::with_builtins();
         let result = TypeChecker::infer_method_local_params(
             &method,

@@ -22,7 +22,7 @@ use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
-use super::{InferredType, TypeChecker, TypeEnv};
+use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
 impl TypeChecker {
     /// Classify how well a union's known members match a predicate.
@@ -89,7 +89,7 @@ impl TypeChecker {
         arg_types: &[InferredType],
     ) -> InferredType {
         if !hierarchy.has_class(class_name) {
-            return InferredType::Dynamic;
+            return InferredType::Dynamic(DynamicReason::Unknown);
         }
 
         // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal class method
@@ -158,7 +158,7 @@ impl TypeChecker {
                                 .map(|p| {
                                     let p_eco: EcoString = (*p).into();
                                     if super::is_generic_type_param(&p_eco) {
-                                        super::InferredType::Dynamic
+                                        super::InferredType::Dynamic(DynamicReason::Unknown)
                                     } else {
                                         super::InferredType::known(p_eco)
                                     }
@@ -180,7 +180,7 @@ impl TypeChecker {
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
                     return InferredType::known(ret_ty.clone());
                 }
-                InferredType::Dynamic
+                InferredType::Dynamic(DynamicReason::UnannotatedReturn)
             }
         }
     }
@@ -225,7 +225,11 @@ impl TypeChecker {
         let type_args: Vec<InferredType> = class_info
             .type_params
             .iter()
-            .map(|p| inferred.remove(p).unwrap_or(InferredType::Dynamic))
+            .map(|p| {
+                inferred
+                    .remove(p)
+                    .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown))
+            })
             .collect();
 
         InferredType::Known {
@@ -559,7 +563,7 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                InferredType::Dynamic => {} // Dynamic arguments — skip (conservative)
+                InferredType::Dynamic(_) => {} // Dynamic arguments — skip (conservative)
             }
         }
     }
@@ -648,7 +652,7 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Dynamic => {} // Can't check
+            InferredType::Dynamic(_) => {} // Can't check
         }
     }
 
@@ -910,7 +914,7 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
-            InferredType::Dynamic => {} // Dynamic values — skip (conservative)
+            InferredType::Dynamic(_) => {} // Dynamic values — skip (conservative)
         }
     }
 
@@ -1335,7 +1339,7 @@ impl TypeChecker {
                     }
                 }
             }
-            InferredType::Dynamic => {
+            InferredType::Dynamic(_) => {
                 if protocol_registry.has_protocol(base_protocol) {
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -1540,7 +1544,7 @@ impl TypeChecker {
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
                 // Dynamic values: can't verify bounds (skip silently).
-                InferredType::Dynamic => {}
+                InferredType::Dynamic(_) => {}
             }
         }
     }

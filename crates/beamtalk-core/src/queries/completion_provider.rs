@@ -682,7 +682,7 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
                 });
             }
             None
@@ -694,7 +694,7 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
                 })
             } else {
                 None
@@ -715,7 +715,7 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
                 })
             } else {
                 None
@@ -733,7 +733,7 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
                 })
             } else {
                 find_receiver_in_expr(expression, offset, type_map)

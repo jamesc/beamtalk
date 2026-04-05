@@ -29,7 +29,7 @@
 //! ```
 
 use super::native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
-use super::types::{InferredType, TypeProvenance};
+use super::types::{DynamicReason, InferredType, TypeProvenance};
 use ecow::EcoString;
 
 /// Prefix for spec module lines in the build worker protocol.
@@ -46,7 +46,7 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 ///
 /// - Concrete type names (e.g., `"Integer"`, `"List"`) produce `Known` types
 ///   with `Extracted` provenance.
-/// - `"Dynamic"` produces `InferredType::Dynamic`.
+/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::UntypedFfi)`.
 /// - Union types (e.g., `"Integer | String"`) are split and produce `Union` types.
 ///
 /// ## Examples
@@ -61,7 +61,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
     let trimmed = type_name.trim();
 
     if trimmed == "Dynamic" {
-        return InferredType::Dynamic;
+        return InferredType::Dynamic(DynamicReason::UntypedFfi);
     }
 
     // Handle union types: "Integer | String"
@@ -79,7 +79,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
 /// Maps a single (non-union) type name to an [`InferredType`].
 fn map_single_type_name(name: &str) -> InferredType {
     if name == "Dynamic" {
-        return InferredType::Dynamic;
+        return InferredType::Dynamic(DynamicReason::UntypedFfi);
     }
 
     InferredType::Known {
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn map_type_name_dynamic() {
         let ty = map_type_name("Dynamic");
-        assert_eq!(ty, InferredType::Dynamic);
+        assert_eq!(ty, InferredType::Dynamic(DynamicReason::UntypedFfi));
     }
 
     #[test]
@@ -456,7 +456,7 @@ mod tests {
     fn map_type_name_union_with_dynamic() {
         // If any member is Dynamic, union_of returns Dynamic
         let ty = map_type_name("Integer | Dynamic");
-        assert_eq!(ty, InferredType::Dynamic);
+        assert_eq!(ty, InferredType::Dynamic(DynamicReason::UntypedFfi));
     }
 
     #[test]
@@ -610,7 +610,10 @@ mod tests {
         parse_specs_line(line, &mut reg);
 
         let sig = reg.lookup("erlang", "apply", 1).unwrap();
-        assert_eq!(sig.return_type, InferredType::Dynamic);
+        assert_eq!(
+            sig.return_type,
+            InferredType::Dynamic(DynamicReason::UntypedFfi)
+        );
     }
 
     #[test]

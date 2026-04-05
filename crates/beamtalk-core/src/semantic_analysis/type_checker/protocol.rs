@@ -448,7 +448,7 @@ impl TypeChecker {
                     EcoString::from(format!("{}({})", class_name, args.join(", ")))
                 }
             }
-            InferredType::Dynamic => EcoString::from("Dynamic"),
+            InferredType::Dynamic(_) => EcoString::from("Dynamic"),
             InferredType::Union { members, .. } => EcoString::from(
                 members
                     .iter()

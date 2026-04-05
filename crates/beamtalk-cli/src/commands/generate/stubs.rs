@@ -302,7 +302,7 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
     use beamtalk_core::semantic_analysis::type_checker::InferredType;
 
     match ty {
-        InferredType::Dynamic => "Dynamic".to_string(),
+        InferredType::Dynamic(_) => "Dynamic".to_string(),
         InferredType::Known {
             class_name,
             type_args,
@@ -326,7 +326,7 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
 mod tests {
     use super::*;
     use beamtalk_core::semantic_analysis::type_checker::{
-        FunctionSignature, InferredType, ParamType, TypeProvenance,
+        DynamicReason, FunctionSignature, InferredType, ParamType, TypeProvenance,
     };
 
     fn sig(
@@ -396,7 +396,7 @@ mod tests {
             "apply",
             1,
             vec![param("fun", "Block")],
-            InferredType::Dynamic,
+            InferredType::Dynamic(DynamicReason::UntypedFfi),
         );
         assert_eq!(format_signature(&s), "apply: fun :: Block -> Dynamic");
     }
