@@ -221,13 +221,17 @@ extract_specs_from_forms(Forms) ->
 %% Function forms have the shape `{function, Anno, Name, Arity, Clauses}'.
 %% We extract the line via `erl_anno:line/1' for goto-definition.
 -spec extract_function_lines([erl_parse:abstract_form()]) ->
-    #{{atom(), non_neg_integer()} => non_neg_integer()}.
+    #{{atom(), non_neg_integer()} => pos_integer()}.
 extract_function_lines(Forms) ->
     lists:foldl(
         fun
             ({function, Anno, Name, Arity, _Clauses}, Acc) ->
-                Line = erl_anno:line(Anno),
-                Acc#{{Name, Arity} => Line};
+                case erl_anno:line(Anno) of
+                    Line when is_integer(Line), Line > 0 ->
+                        Acc#{{Name, Arity} => Line};
+                    _ ->
+                        Acc
+                end;
             (_, Acc) ->
                 Acc
         end,

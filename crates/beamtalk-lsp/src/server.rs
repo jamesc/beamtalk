@@ -165,7 +165,7 @@ impl Backend {
     /// Search order:
     /// 1. `runtime/apps/*/src/<module>.erl` (project runtime)
     /// 2. `src/<module>.erl` (flat project layout)
-    /// 3. `_build/default/lib/*/src/<module>.erl` (rebar3 dependencies)
+    /// 3. `runtime/_build/default/lib/*/src/<module>.erl` (rebar3 dependencies)
     /// 4. `<otp_lib_dir>/*/src/<module>.erl` (OTP installation)
     fn find_erlang_source_file(&self, module_name: &str) -> Option<PathBuf> {
         // Reject module names containing path separators to prevent directory traversal.

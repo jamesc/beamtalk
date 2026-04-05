@@ -226,15 +226,9 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     // Pass 2 compilation so FFI type warnings appear in build output.
     // Results are cached in _build/type_cache/ — incremental builds read zero
     // .beam files when the cache is fresh.
-    let native_type_registry = extract_type_specs(&env);
+    let native_type_registry = extract_type_specs(&env).map(std::sync::Arc::new);
 
-    let passes = execute_build_passes(
-        &env,
-        options,
-        &dep_ctx,
-        force,
-        native_type_registry.as_ref(),
-    )?;
+    let passes = execute_build_passes(&env, options, &dep_ctx, force, native_type_registry)?;
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
     Ok(())
@@ -682,7 +676,7 @@ fn execute_build_passes(
     dep_ctx: &DependencyContext,
     force: bool,
     native_type_registry: Option<
-        &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
 ) -> Result<BuildPassesResult> {
     let index = build_class_index(env, dep_ctx, options, force)?;

@@ -137,7 +137,7 @@ pub struct SimpleLanguageService {
     /// Cross-file project index (merged class hierarchy).
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
-    native_types: Option<NativeTypeRegistry>,
+    native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -180,13 +180,13 @@ impl SimpleLanguageService {
     /// typed signatures (e.g., `reverse: list :: List -> List`) instead of
     /// just arity information.
     pub fn set_native_types(&mut self, registry: NativeTypeRegistry) {
-        self.native_types = Some(registry);
+        self.native_types = Some(std::sync::Arc::new(registry));
     }
 
     /// Returns a reference to the native type registry, if set.
     #[must_use]
     pub fn native_types(&self) -> Option<&NativeTypeRegistry> {
-        self.native_types.as_ref()
+        self.native_types.as_deref()
     }
 
     /// Returns a reference to the project index.
@@ -239,7 +239,7 @@ impl SimpleLanguageService {
         if !info.function_name.is_empty() {
             if let Some(sig) = self
                 .native_types
-                .as_ref()
+                .as_deref()
                 .and_then(|reg| reg.lookup(&info.module_name, &info.function_name, info.arity))
             {
                 info.line = sig.line;
@@ -663,7 +663,7 @@ impl LanguageService for SimpleLanguageService {
             position,
             self.project_index.hierarchy(),
             current_package.as_deref(),
-            self.native_types.as_ref(),
+            self.native_types.as_deref(),
         )
     }
 
@@ -675,7 +675,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            self.native_types.as_ref(),
+            self.native_types.as_deref(),
         )
     }
 
@@ -687,7 +687,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            self.native_types.as_ref(),
+            self.native_types.as_deref(),
         )
     }
 

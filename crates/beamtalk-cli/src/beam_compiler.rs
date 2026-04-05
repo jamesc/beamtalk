@@ -706,7 +706,7 @@ pub struct CompileContext<'a> {
     /// When set, semantic analysis uses [`beamtalk_core::semantic_analysis::analyse_with_natives`]
     /// so that `Erlang <module> <function>:` calls get return type inference and
     /// argument type checking in build output, not just the LSP.
-    pub native_type_registry: Option<&'a NativeTypeRegistry>,
+    pub native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
 }
 
 /// Writes Core Erlang code with primitive bindings.
@@ -859,7 +859,7 @@ pub(crate) fn compile_source_with_bindings(
         &module,
         options,
         cross_file_classes.clone(),
-        ctx.native_type_registry.cloned(),
+        ctx.native_type_registry.clone(),
     );
     diagnostics.extend(analysis_result.diagnostics);
 
