@@ -87,6 +87,8 @@ pub struct Backend {
     stdlib_paths: Mutex<HashSet<Utf8PathBuf>>,
     /// Workspace roots discovered at initialization; used for native delegate `.erl` lookup.
     workspace_roots: Mutex<Vec<PathBuf>>,
+    /// Cached OTP lib directory (e.g., `/usr/lib/erlang/lib`); resolved once at startup.
+    otp_lib_dir: Mutex<Option<PathBuf>>,
 }
 
 impl Backend {
@@ -100,6 +102,7 @@ impl Backend {
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
             workspace_roots: Mutex::new(Vec::new()),
+            otp_lib_dir: Mutex::new(None),
         }
     }
 
@@ -156,10 +159,14 @@ impl Backend {
         Some(first)
     }
 
-    /// Searches workspace roots for an Erlang source file matching a module name.
+    /// Searches workspace roots, OTP lib dirs, and dependency paths for an Erlang
+    /// source file matching a module name.
     ///
-    /// Looks in `runtime/apps/*/src/<module>.erl` and `src/<module>.erl` relative
-    /// to each workspace root. Returns the first match found.
+    /// Search order:
+    /// 1. `runtime/apps/*/src/<module>.erl` (project runtime)
+    /// 2. `src/<module>.erl` (flat project layout)
+    /// 3. `_build/default/lib/*/src/<module>.erl` (rebar3 dependencies)
+    /// 4. `<otp_lib_dir>/*/src/<module>.erl` (OTP installation)
     fn find_erlang_source_file(&self, module_name: &str) -> Option<PathBuf> {
         // Reject module names containing path separators to prevent directory traversal.
         if module_name.contains('/') || module_name.contains('\\') || module_name.contains("..") {
@@ -187,8 +194,71 @@ impl Backend {
             if flat.is_file() {
                 return Some(flat);
             }
+            // Check _build/default/lib/*/src/<module>.erl (rebar3 hex dependencies)
+            let rebar3_lib = root
+                .join("runtime")
+                .join("_build")
+                .join("default")
+                .join("lib");
+            if let Ok(entries) = std::fs::read_dir(&rebar3_lib) {
+                for entry in entries.flatten() {
+                    let candidate = entry.path().join("src").join(&filename);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
         }
+
+        // Check OTP lib dir (e.g., /usr/lib/erlang/lib/stdlib-6.2/src/lists.erl)
+        let otp_dir = self
+            .otp_lib_dir
+            .lock()
+            .expect("otp_lib_dir lock poisoned")
+            .clone();
+        if let Some(lib_dir) = otp_dir {
+            if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+                for entry in entries.flatten() {
+                    let candidate = entry.path().join("src").join(&filename);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+
         None
+    }
+
+    /// Resolves and caches the OTP lib directory.
+    ///
+    /// Runs `erl -noshell -eval 'io:format("~s", [code:lib_dir()]), halt().'`
+    /// once and stores the result. Subsequent calls return the cached value.
+    async fn resolve_otp_lib_dir(&self) {
+        let result = tokio::task::spawn_blocking(|| {
+            std::process::Command::new("erl")
+                .args([
+                    "-noshell",
+                    "-eval",
+                    "io:format(\"~s\", [code:lib_dir()]), halt().",
+                ])
+                .output()
+                .ok()
+                .and_then(|output| {
+                    if output.status.success() {
+                        String::from_utf8(output.stdout).ok().map(PathBuf::from)
+                    } else {
+                        None
+                    }
+                })
+        })
+        .await
+        .unwrap_or(None);
+
+        if let Some(ref dir) = result {
+            debug!("Resolved OTP lib dir: {}", dir.display());
+        }
+        *self.otp_lib_dir.lock().expect("otp_lib_dir lock poisoned") = result;
     }
 
     /// Loads the type cache from `_build/type_cache/` in workspace roots.
@@ -484,6 +554,9 @@ impl LanguageServer for Backend {
             self.load_type_cache(&config.roots).await;
         }
 
+        // Resolve OTP lib dir for FFI goto-definition.
+        self.resolve_otp_lib_dir().await;
+
         debug!("beamtalk-lsp initialized");
         self.client
             .log_message(
@@ -743,24 +816,25 @@ impl LanguageServer for Backend {
         };
 
         // Hold svc lock only for the definition lookup; release before checking stdlib_paths.
-        let (resolved, native_delegate) = {
+        let (resolved, native_delegate, ffi_call) = {
             let svc = self.service.lock().expect("service lock poisoned");
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
             let pos = to_bt_position(params.text_document_position_params.position, &source);
             let location = svc.goto_definition(&path, pos);
-            match location {
-                Some(loc) => {
-                    let delegate_info = svc.check_native_delegate(&loc);
-                    let target_source = svc.file_source(&loc.file);
-                    let resolved = target_source.map(|src| {
-                        let range = span_to_range(loc.span, &src);
-                        (loc.file.clone(), range)
-                    });
-                    (resolved, delegate_info)
-                }
-                None => (None, None),
+            if let Some(loc) = location {
+                let delegate_info = svc.check_native_delegate(&loc);
+                let target_source = svc.file_source(&loc.file);
+                let resolved = target_source.map(|src| {
+                    let range = span_to_range(loc.span, &src);
+                    (loc.file.clone(), range)
+                });
+                (resolved, delegate_info, None)
+            } else {
+                // No Beamtalk definition found — check if cursor is on an FFI call.
+                let ffi = svc.check_ffi_call(&path, pos);
+                (None, None, ffi)
             }
         };
 
@@ -777,6 +851,32 @@ impl LanguageServer for Backend {
                 }
             }
             // Fall through to .bt location if .erl file not found.
+        }
+
+        // If this is an Erlang FFI call, try to navigate to the .erl source file.
+        if let Some(ffi_info) = ffi_call {
+            if let Some(erl_path) = self.find_erlang_source_file(&ffi_info.module_name) {
+                if let Ok(target_uri) = Url::from_file_path(&erl_path) {
+                    // Use the function's source line from .beam abstract_code if available.
+                    // LSP lines are 0-based; abstract_code lines are 1-based.
+                    let range = ffi_info
+                        .line
+                        .map(|line| {
+                            let lsp_line = line.saturating_sub(1);
+                            tower_lsp::lsp_types::Range {
+                                start: tower_lsp::lsp_types::Position::new(lsp_line, 0),
+                                end: tower_lsp::lsp_types::Position::new(lsp_line, 0),
+                            }
+                        })
+                        .unwrap_or_default();
+                    return Ok(Some(GotoDefinitionResponse::Scalar(
+                        tower_lsp::lsp_types::Location {
+                            uri: target_uri,
+                            range,
+                        },
+                    )));
+                }
+            }
         }
 
         Ok(resolved.and_then(|(file, range)| {

@@ -220,6 +220,35 @@ impl SimpleLanguageService {
         )
     }
 
+    /// Check if a position is on an Erlang FFI call, returning module/function info.
+    ///
+    /// Used by the LSP to redirect goto-definition to the backing `.erl` source file
+    /// when the cursor is on `Erlang <module> <function>:`.
+    #[must_use]
+    pub fn check_ffi_call(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> Option<crate::queries::definition_provider::FfiCallInfo> {
+        let file_data = self.get_file(file)?;
+        let offset = position.to_byte_offset(&file_data.source)?;
+        let mut info =
+            crate::queries::definition_provider::check_ffi_call(&file_data.module, offset.get())?;
+
+        // Enrich with line number from the native type registry if available.
+        if !info.function_name.is_empty() {
+            if let Some(sig) = self
+                .native_types
+                .as_ref()
+                .and_then(|reg| reg.lookup(&info.module_name, &info.function_name, info.arity))
+            {
+                info.line = sig.line;
+            }
+        }
+
+        Some(info)
+    }
+
     /// Returns the cached source text for a file, if available.
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
@@ -1303,6 +1332,115 @@ mod tests {
         assert!(delegate_info.is_none());
     }
 
+    // ── FFI goto-definition tests ─────────────────────────────────────────
+
+    #[test]
+    fn check_ffi_call_on_selector() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("ffi.bt");
+        service.update_file(file.clone(), "Erlang lists reverse: items".to_string());
+
+        // Cursor on `reverse:` — should detect FFI call
+        let ffi = service.check_ffi_call(&file, Position::new(0, 20));
+        assert!(ffi.is_some(), "should detect FFI call on selector");
+        let info = ffi.unwrap();
+        assert_eq!(info.module_name, "lists");
+        assert_eq!(info.function_name, "reverse");
+    }
+
+    #[test]
+    fn check_ffi_call_on_module_name() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("ffi.bt");
+        service.update_file(file.clone(), "Erlang lists reverse: items".to_string());
+
+        // Cursor on `lists` — should detect FFI call with module but no function
+        let ffi = service.check_ffi_call(&file, Position::new(0, 8));
+        assert!(ffi.is_some(), "should detect FFI call on module name");
+        let info = ffi.unwrap();
+        assert_eq!(info.module_name, "lists");
+        assert!(info.function_name.is_empty());
+    }
+
+    #[test]
+    fn check_ffi_call_returns_none_for_normal_send() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("normal.bt");
+        service.update_file(file.clone(), "items reverse".to_string());
+
+        let ffi = service.check_ffi_call(&file, Position::new(0, 7));
+        assert!(
+            ffi.is_none(),
+            "should not detect FFI on normal message send"
+        );
+    }
+
+    #[test]
+    fn check_ffi_call_in_method_body() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("method.bt");
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  bar => Erlang io format: \"hello\"".to_string(),
+        );
+
+        // Cursor on `format:` inside method body
+        let ffi = service.check_ffi_call(&file, Position::new(1, 20));
+        assert!(ffi.is_some(), "should detect FFI in method body");
+        let info = ffi.unwrap();
+        assert_eq!(info.module_name, "io");
+        assert_eq!(info.function_name, "format");
+    }
+
+    #[test]
+    fn check_ffi_call_enriches_line_from_registry() {
+        use crate::semantic_analysis::InferredType;
+        use crate::semantic_analysis::type_checker::{
+            FunctionSignature, NativeTypeRegistry, ParamType, TypeProvenance,
+        };
+
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("ffi.bt");
+        service.update_file(file.clone(), "Erlang lists reverse: items".to_string());
+
+        // Set up registry with a line number for lists:reverse/1
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: Some(42),
+            }],
+        );
+        service.set_native_types(registry);
+
+        let ffi = service.check_ffi_call(&file, Position::new(0, 20));
+        assert!(ffi.is_some());
+        let info = ffi.unwrap();
+        assert_eq!(info.module_name, "lists");
+        assert_eq!(info.function_name, "reverse");
+        assert_eq!(info.line, Some(42));
+    }
+
+    #[test]
+    fn check_ffi_call_line_is_none_without_registry() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("ffi.bt");
+        service.update_file(file.clone(), "Erlang lists reverse: items".to_string());
+
+        // No registry set — line should be None
+        let ffi = service.check_ffi_call(&file, Position::new(0, 20));
+        assert!(ffi.is_some());
+        assert!(ffi.unwrap().line.is_none());
+    }
+
     // ── code_actions tests (BT-1067) ────────────────────────────────────────
 
     /// Helper: byte length of a source string as `u32` (test-only).
@@ -1549,6 +1687,7 @@ mod tests {
                 }],
                 return_type: InferredType::known("List"),
                 provenance: TypeProvenance::Extracted,
+                line: None,
             }],
         );
         service.set_native_types(registry);

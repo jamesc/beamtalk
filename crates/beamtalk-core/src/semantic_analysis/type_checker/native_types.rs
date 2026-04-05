@@ -255,6 +255,7 @@ fn parse_spec_map(map_str: &str) -> Option<FunctionSignature> {
     let arity = extract_integer_value(inner, "arity")?;
     let return_type_str = extract_binary_value(inner, "return_type")?;
     let params = extract_params_list(inner)?;
+    let line = extract_integer_value(inner, "line").and_then(|v| u32::try_from(v).ok());
 
     Some(FunctionSignature {
         name,
@@ -262,6 +263,7 @@ fn parse_spec_map(map_str: &str) -> Option<FunctionSignature> {
         params,
         return_type: map_type_name(&return_type_str),
         provenance: TypeProvenance::Extracted,
+        line,
     })
 }
 
@@ -620,5 +622,27 @@ mod tests {
 
         let sig = reg.lookup("lists", "reverse", 1).unwrap();
         assert_eq!(sig.provenance, TypeProvenance::Extracted);
+    }
+
+    #[test]
+    fn parse_specs_line_with_line_number() {
+        let mut reg = NativeTypeRegistry::new();
+        let line = "beamtalk-specs-module:lists:[#{arity => 1,line => 156,name => <<\"reverse\">>,params => [#{name => <<\"list\">>,type => <<\"List\">>}],return_type => <<\"List\">>}]";
+
+        parse_specs_line(line, &mut reg);
+
+        let sig = reg.lookup("lists", "reverse", 1).unwrap();
+        assert_eq!(sig.line, Some(156));
+    }
+
+    #[test]
+    fn parse_specs_line_without_line_number() {
+        let mut reg = NativeTypeRegistry::new();
+        let line = "beamtalk-specs-module:lists:[#{arity => 1,name => <<\"reverse\">>,params => [#{name => <<\"list\">>,type => <<\"List\">>}],return_type => <<\"List\">>}]";
+
+        parse_specs_line(line, &mut reg);
+
+        let sig = reg.lookup("lists", "reverse", 1).unwrap();
+        assert_eq!(sig.line, None);
     }
 }
