@@ -220,8 +220,9 @@ fn print_json_report(report: &CoverageReport, at_least: Option<f64>) {
     });
 
     if let Some(threshold) = at_least {
+        let unrounded = report.coverage_percent();
         json["threshold"] = serde_json::json!(threshold);
-        json["passed"] = serde_json::json!(pct >= threshold);
+        json["passed"] = serde_json::json!(unrounded >= threshold);
     }
 
     println!(
