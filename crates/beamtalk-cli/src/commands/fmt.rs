@@ -124,6 +124,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
 
     let mut changed_files: Vec<Utf8PathBuf> = Vec::new();
     let mut skipped_files: Vec<Utf8PathBuf> = Vec::new();
+    let mut erlfmt_error_files: Vec<Utf8PathBuf> = Vec::new();
 
     for file in &collected.bt_files {
         let original = std::fs::read_to_string(file.as_std_path())
@@ -182,7 +183,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         match erlfmt::run_erlfmt(&collected.erl_files, check_only, &root) {
             Ok(result) => {
                 changed_files.extend(result.changed_files);
-                skipped_files.extend(result.error_files);
+                erlfmt_error_files.extend(result.error_files);
             }
             Err(e) => {
                 eprintln!("warning: erlfmt failed: {e}");
@@ -202,6 +203,13 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
             let plural = if count == 1 { "" } else { "s" };
             parts.push(format!(
                 "{count} file{plural} could not be checked (parse errors)"
+            ));
+        }
+        if !erlfmt_error_files.is_empty() {
+            let count = erlfmt_error_files.len();
+            let plural = if count == 1 { "" } else { "s" };
+            parts.push(format!(
+                "{count} .erl file{plural} could not be checked (erlfmt errors)"
             ));
         }
         if !parts.is_empty() {

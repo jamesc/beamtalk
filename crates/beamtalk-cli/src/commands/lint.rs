@@ -277,6 +277,10 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 
     let mut dir = start_dir;
     loop {
+        // Guard against empty paths from single-component relative paths.
+        if dir.as_str().is_empty() {
+            return None;
+        }
         if dir.join("beamtalk.toml").exists() {
             return Some(dir.to_path_buf());
         }
