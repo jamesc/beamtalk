@@ -1517,8 +1517,9 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
 /// - Native Erlang ebin (`_build/dev/native/ebin/`)
 /// - Rebar3 hex dep ebins (`_build/dev/native/default/lib/*/ebin/`)
 ///
-/// These are combined with OTP beams in [`extract_beam_specs`] so the
-/// [`NativeTypeRegistry`] covers both OTP and project dependencies.
+/// The caller combines these with OTP beams before passing the full set to
+/// [`extract_beam_specs`], so the [`NativeTypeRegistry`] covers both OTP and
+/// project dependencies.
 pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8PathBuf> {
     let mut beam_files = Vec::new();
 
@@ -1527,6 +1528,7 @@ pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8Path
             continue;
         }
         let Ok(entries) = std::fs::read_dir(ebin_dir) else {
+            warn!(ebin = %ebin_dir, "Failed to read dependency ebin directory");
             continue;
         };
         for file in entries.flatten() {
@@ -2154,7 +2156,8 @@ end
 
     #[test]
     fn discover_dependency_beam_files_skips_missing_dirs() {
-        let nonexistent = Utf8PathBuf::from("/nonexistent/ebin");
+        let temp = TempDir::new().unwrap();
+        let nonexistent = Utf8PathBuf::from_path_buf(temp.path().join("missing")).unwrap();
         let result = discover_dependency_beam_files(&[nonexistent]);
         assert!(result.is_empty());
     }

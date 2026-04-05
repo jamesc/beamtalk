@@ -842,9 +842,22 @@ fn extract_type_specs(env: &BuildEnvironment) {
         dep_ebin_dirs.push(native_ebin);
     }
     dep_ebin_dirs.extend(collect_rebar3_ebin_paths(&env.layout));
+    dep_ebin_dirs.sort();
+    dep_ebin_dirs.dedup();
 
     let dep_beams = beam_compiler::discover_dependency_beam_files(&dep_ebin_dirs);
     beam_files.extend(dep_beams);
+
+    // De-duplicate by module name (file stem) so `extract_beam_specs` maps each
+    // module to exactly one .beam path. First occurrence wins, preserving the
+    // OTP-first, then dependency discovery order.
+    let mut seen_modules = std::collections::HashSet::new();
+    beam_files.retain(|beam_file| {
+        let Some(stem) = beam_file.file_stem() else {
+            return true;
+        };
+        seen_modules.insert(stem.to_owned())
+    });
 
     if beam_files.is_empty() {
         debug!("No .beam files found for type spec extraction");
