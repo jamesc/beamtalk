@@ -21,7 +21,7 @@ sealed typed Object subclass: BeamtalkInterface
   class current -> BeamtalkInterface => self.current
 
   /// Set the current singleton instance.
-  class current: instance :: BeamtalkInterface -> Nil =>
+  class current: instance :: BeamtalkInterface -> BeamtalkInterface =>
     self.current := instance
 
   /// Return a list of all registered class names.
