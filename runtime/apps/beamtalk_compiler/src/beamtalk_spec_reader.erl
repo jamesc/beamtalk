@@ -804,6 +804,10 @@ resolve_err_type(Types) ->
 
 %% Format Result(T, E) type string.
 -spec format_result_type(binary(), binary()) -> binary().
+format_result_type(<<"Dynamic">>, <<"Dynamic">>) ->
+    <<"Result">>;
+format_result_type(OkType, <<"Dynamic">>) ->
+    iolist_to_binary([<<"Result(">>, OkType, <<")">>]);
 format_result_type(OkType, ErrType) ->
     iolist_to_binary([<<"Result(">>, OkType, <<", ">>, ErrType, <<")">>]).
 

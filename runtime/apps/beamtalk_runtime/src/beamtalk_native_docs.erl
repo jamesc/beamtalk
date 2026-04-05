@@ -17,6 +17,7 @@
 -module(beamtalk_native_docs).
 
 -export([
+    is_hidden/3,
     lookup/3,
     module_doc/1
 ]).
@@ -31,12 +32,13 @@
 %% the documentation entry for the given function and arity.
 %%
 %% Returns `#{doc => Binary, sig => Binary, examples => Binary}` on success,
+%% `{error, hidden}` when the function is marked `@private`/hidden,
 %% `{error, no_docs}` when the module/function has no docs, or
 %% `{error, unsupported_format}` when the docs chunk uses a format newer
 %% than `docs_v1` (EEP-48).
 -spec lookup(module(), atom(), non_neg_integer()) ->
     #{doc := binary(), sig := binary(), examples := binary()}
-    | {error, no_docs | unsupported_format}.
+    | {error, hidden | no_docs | unsupported_format}.
 lookup(Module, Function, Arity) ->
     case read_docs_chunk(Module) of
         {ok, {docs_v1, _Anno, _Lang, _Format, _ModDoc, _Meta, FDocs}} ->
@@ -63,6 +65,17 @@ module_doc(Module) ->
             {error, unsupported_format};
         {error, _Reason} ->
             {error, no_docs}
+    end.
+
+%% @doc Check whether a function is marked as hidden (`@private`) in docs.
+%%
+%% Returns `true` when the function's doc entry is `hidden`, `false` otherwise
+%% (including when the module has no docs chunk at all).
+-spec is_hidden(module(), atom(), non_neg_integer()) -> boolean().
+is_hidden(Module, Function, Arity) ->
+    case lookup(Module, Function, Arity) of
+        {error, hidden} -> true;
+        _ -> false
     end.
 
 %%% ============================================================================
@@ -117,7 +130,7 @@ read_docs_from_beam(BeamPath) ->
 %% @private Find a specific function's documentation in the function doc list.
 -spec find_function_doc(atom(), non_neg_integer(), list()) ->
     #{doc := binary(), sig := binary(), examples := binary()}
-    | {error, no_docs}.
+    | {error, hidden | no_docs}.
 find_function_doc(Function, Arity, FDocs) ->
     Matches = [
         Entry
@@ -135,9 +148,9 @@ find_function_doc(Function, Arity, FDocs) ->
 %% @private Format a function doc entry into the return map.
 -spec format_function_doc(list(), map() | none | hidden) ->
     #{doc := binary(), sig := binary(), examples := binary()}
-    | {error, no_docs}.
+    | {error, hidden}.
 format_function_doc(_Sigs, hidden) ->
-    {error, no_docs};
+    {error, hidden};
 format_function_doc(Sigs, none) ->
     %% Function exists but has no doc text — still return the signature
     #{
