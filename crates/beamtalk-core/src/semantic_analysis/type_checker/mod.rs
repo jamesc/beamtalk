@@ -24,6 +24,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 mod inference;
 pub mod native_type_registry;
@@ -160,7 +161,7 @@ pub struct TypeChecker {
     /// When set, enables return type inference and keyword mismatch warnings
     /// for `Erlang <module> <function>:` calls. Populated from `.beam`
     /// abstract code at build time.
-    pub(super) native_type_registry: Option<NativeTypeRegistry>,
+    pub(super) native_type_registry: Option<Arc<NativeTypeRegistry>>,
 }
 
 impl TypeChecker {
@@ -197,8 +198,8 @@ impl TypeChecker {
     ///
     /// When set, `Erlang <module> <function>:` calls look up return types
     /// and parameter types in the registry instead of defaulting to `Dynamic`.
-    pub fn set_native_type_registry(&mut self, registry: NativeTypeRegistry) {
-        self.native_type_registry = Some(registry);
+    pub fn set_native_type_registry(&mut self, registry: impl Into<Arc<NativeTypeRegistry>>) {
+        self.native_type_registry = Some(registry.into());
     }
 
     /// Returns all diagnostics collected during type checking.

@@ -341,6 +341,7 @@ mod tests {
             params,
             return_type,
             provenance: TypeProvenance::Extracted,
+            line: None,
         }
     }
 

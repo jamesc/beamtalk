@@ -91,7 +91,9 @@ pub fn compute_diagnostics_with_known_vars(
 pub fn compute_diagnostics_with_native_types(
     module: &crate::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
-    native_types: Option<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+    native_types: Option<
+        std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+    >,
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
 

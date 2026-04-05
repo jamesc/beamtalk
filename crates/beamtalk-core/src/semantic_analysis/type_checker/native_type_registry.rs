@@ -47,6 +47,11 @@ pub struct FunctionSignature {
     pub return_type: InferredType,
     /// Where this signature came from (Extracted for .beam, Declared for stubs).
     pub provenance: TypeProvenance,
+    /// Source line number of the function definition (1-based), if available.
+    ///
+    /// Extracted from `{function, Line, _, _, _}` forms in `.beam` abstract code.
+    /// Used by goto-definition to navigate to the exact function in `.erl` files.
+    pub line: Option<u32>,
 }
 
 impl FunctionSignature {
@@ -186,6 +191,7 @@ mod tests {
             params,
             return_type,
             provenance: TypeProvenance::Extracted,
+            line: None,
         }
     }
 

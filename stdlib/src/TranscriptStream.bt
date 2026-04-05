@@ -21,7 +21,8 @@ typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
   class current -> TranscriptStream => self.current
 
   /// Set the current singleton instance.
-  class current: instance :: TranscriptStream -> Nil => self.current := instance
+  class current: instance :: TranscriptStream -> TranscriptStream =>
+    self.current := instance
 
   /// Clear the current singleton instance (reset to nil).
   class resetCurrent -> Nil => self.current := nil
