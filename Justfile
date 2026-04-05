@@ -509,10 +509,11 @@ test-stdlib *ARGS: build-stdlib
 
 # Run BUnit TestCase tests (ADR 0014 Phase 2)
 # Accepts optional path: just test-bunit test/dictionary_test.bt
+# Output: summary only (--quiet suppresses per-class lines)
 [working-directory: 'stdlib']
 test-bunit *ARGS: build-stdlib
     @echo "🧪 Running BUnit tests..."
-    @cargo run --bin beamtalk --quiet -- test --warnings-as-errors {{ ARGS }}
+    @cargo run --bin beamtalk --quiet -- test --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ BUnit tests complete"
 
 # Run learning guide doctests (docs/learning/ — separate from stdlib tests)
