@@ -132,9 +132,10 @@ pub fn clean_stale_deps(
 
 /// Remove stale dependency directories when no dependencies are declared.
 ///
-/// When a project's `beamtalk.toml` has no `[dependencies]` section (or no
-/// manifest at all), any existing `_build/deps/` contents are entirely stale.
-/// This is called from the early-return paths in `ensure_deps_resolved`.
+/// When a project's `beamtalk.toml` has no `[dependencies]` section, any
+/// existing `_build/deps/` contents are entirely stale.
+/// This is called from the empty-dependencies early-return path in
+/// `ensure_deps_resolved`.
 pub fn clean_all_stale_deps(project_root: &Utf8Path) -> Result<()> {
     clean_stale_deps(project_root, &[])
 }
