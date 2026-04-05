@@ -1510,6 +1510,42 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
     Ok(beam_files)
 }
 
+/// Discover `.beam` files from project dependency directories.
+///
+/// Collects beams from:
+/// - Path dependency ebin directories (`_build/deps/*/ebin/`)
+/// - Native Erlang ebin (`_build/dev/native/ebin/`)
+/// - Rebar3 hex dep ebins (`_build/dev/native/default/lib/*/ebin/`)
+///
+/// These are combined with OTP beams in [`extract_beam_specs`] so the
+/// [`NativeTypeRegistry`] covers both OTP and project dependencies.
+pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8PathBuf> {
+    let mut beam_files = Vec::new();
+
+    for ebin_dir in ebin_dirs {
+        if !ebin_dir.exists() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(ebin_dir) else {
+            continue;
+        };
+        for file in entries.flatten() {
+            let path = file.path();
+            if path.extension().is_some_and(|e| e == "beam") {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                    beam_files.push(utf8);
+                }
+            }
+        }
+    }
+
+    debug!(
+        count = beam_files.len(),
+        "Discovered dependency .beam files"
+    );
+    beam_files
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2094,5 +2130,32 @@ end
     #[test]
     fn sanitize_module_name_empty_string() {
         assert_eq!(sanitize_module_name(""), "");
+    }
+
+    #[test]
+    fn discover_dependency_beam_files_empty_dirs() {
+        let result = discover_dependency_beam_files(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn discover_dependency_beam_files_finds_beams() {
+        let temp = TempDir::new().unwrap();
+        let ebin = temp.path().join("ebin");
+        fs::create_dir_all(&ebin).unwrap();
+        fs::write(ebin.join("my_mod.beam"), b"fake beam").unwrap();
+        fs::write(ebin.join("other.erl"), b"not a beam").unwrap();
+
+        let ebin_path = Utf8PathBuf::from_path_buf(ebin).unwrap();
+        let result = discover_dependency_beam_files(&[ebin_path]);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].as_str().ends_with("my_mod.beam"));
+    }
+
+    #[test]
+    fn discover_dependency_beam_files_skips_missing_dirs() {
+        let nonexistent = Utf8PathBuf::from("/nonexistent/ebin");
+        let result = discover_dependency_beam_files(&[nonexistent]);
+        assert!(result.is_empty());
     }
 }
