@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk fmt` and `beamtalk fmt-check` — format Beamtalk source files.
+//! `beamtalk fmt` and `beamtalk fmt-check` — format source files.
 //!
 //! **DDD Context:** Language Service — Formatting
 //!
@@ -14,6 +14,10 @@
 //! `// => X` assertion comments that the btscript test runner expects on
 //! separate lines directly after each expression.
 //!
+//! Native `.erl` files in `native/` and `native/test/` are formatted via
+//! `erlfmt` (BT-1909). If erlfmt is unavailable, `.erl` files are skipped
+//! with a warning.
+//!
 //! `beamtalk fmt-check <path>...` performs the same parse/unparse pass but
 //! prints a unified diff for every file that would change and exits non-zero
 //! if any files need reformatting or could not be verified. No files are
@@ -22,11 +26,91 @@
 use std::collections::HashSet;
 
 use crate::commands::build::collect_formattable_files_from_dir;
+use crate::commands::erlfmt;
+use crate::commands::lint::find_package_root;
+use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 use similar::TextDiff;
+
+/// Collected files from path arguments, split by type.
+struct CollectedFiles {
+    bt_files: Vec<Utf8PathBuf>,
+    erl_files: Vec<Utf8PathBuf>,
+    project_root: Option<Utf8PathBuf>,
+}
+
+/// Discover formattable files from the given paths.
+fn collect_fmt_files(paths: &[String]) -> Result<CollectedFiles> {
+    let mut seen = HashSet::new();
+    let mut bt_files = Vec::new();
+    let mut erl_seen = HashSet::new();
+    let mut erl_files = Vec::new();
+    let mut project_root = None;
+
+    for path in paths {
+        let source_path = Utf8PathBuf::from(path);
+
+        if source_path.is_file() {
+            match source_path.extension() {
+                Some("bt" | "btscript") => {
+                    if seen.insert(source_path.clone()) {
+                        bt_files.push(source_path);
+                    }
+                }
+                Some("erl") => {
+                    if erl_seen.insert(source_path.clone()) {
+                        erl_files.push(source_path);
+                    }
+                }
+                _ => {
+                    miette::bail!(
+                        "File '{}' is not a .bt, .btscript, or .erl source file",
+                        path
+                    );
+                }
+            }
+        } else if source_path.is_dir() {
+            for file in collect_formattable_files_from_dir(&source_path)? {
+                if seen.insert(file.clone()) {
+                    bt_files.push(file);
+                }
+            }
+            // Collect native .erl files from native/ directory.
+            let root = find_package_root(&source_path).unwrap_or_else(|| source_path.clone());
+            let native_dir = root.join("native");
+            if native_dir.is_dir() {
+                match FileWalker::native_erl_files().walk(&native_dir) {
+                    Ok(files) => {
+                        for file in files {
+                            if erl_seen.insert(file.clone()) {
+                                erl_files.push(file);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("warning: failed to scan native directory: {e}");
+                    }
+                }
+            }
+            project_root = Some(root);
+        } else {
+            miette::bail!("Path '{}' does not exist", path);
+        }
+    }
+
+    if bt_files.is_empty() && erl_files.is_empty() {
+        miette::bail!("No .bt, .btscript, or .erl source files found");
+    }
+
+    Ok(CollectedFiles {
+        bt_files,
+        erl_files,
+        project_root,
+    })
+}
 
 /// Format (or check formatting of) the given paths.
 ///
@@ -36,39 +120,13 @@ use similar::TextDiff;
 /// `check_only` is `false` the command writes formatted output back to each
 /// file that has changed; files with parse errors are skipped with a warning.
 pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
-    let mut seen = HashSet::new();
-    let mut source_files = Vec::new();
-
-    for path in paths {
-        let source_path = Utf8PathBuf::from(path);
-
-        if source_path.is_file() {
-            if matches!(source_path.extension(), Some("bt" | "btscript")) {
-                if seen.insert(source_path.clone()) {
-                    source_files.push(source_path);
-                }
-            } else {
-                miette::bail!("File '{}' is not a .bt or .btscript source file", path);
-            }
-        } else if source_path.is_dir() {
-            for file in collect_formattable_files_from_dir(&source_path)? {
-                if seen.insert(file.clone()) {
-                    source_files.push(file);
-                }
-            }
-        } else {
-            miette::bail!("Path '{}' does not exist", path);
-        }
-    }
-
-    if source_files.is_empty() {
-        miette::bail!("No .bt or .btscript source files found");
-    }
+    let collected = collect_fmt_files(paths)?;
 
     let mut changed_files: Vec<Utf8PathBuf> = Vec::new();
     let mut skipped_files: Vec<Utf8PathBuf> = Vec::new();
+    let mut erlfmt_error_files: Vec<Utf8PathBuf> = Vec::new();
 
-    for file in &source_files {
+    for file in &collected.bt_files {
         let original = std::fs::read_to_string(file.as_std_path())
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
@@ -112,6 +170,27 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         }
     }
 
+    // Format native .erl files via erlfmt (BT-1909).
+    if !collected.erl_files.is_empty() {
+        let root = collected.project_root.unwrap_or_else(|| {
+            collected
+                .erl_files
+                .first()
+                .and_then(|f| find_package_root(f))
+                .unwrap_or_else(|| Utf8PathBuf::from("."))
+        });
+
+        match erlfmt::run_erlfmt(&collected.erl_files, check_only, &root) {
+            Ok(result) => {
+                changed_files.extend(result.changed_files);
+                erlfmt_error_files.extend(result.error_files);
+            }
+            Err(e) => {
+                eprintln!("warning: erlfmt failed: {e}");
+            }
+        }
+    }
+
     if check_only {
         let mut parts: Vec<String> = Vec::new();
         if !changed_files.is_empty() {
@@ -124,6 +203,13 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
             let plural = if count == 1 { "" } else { "s" };
             parts.push(format!(
                 "{count} file{plural} could not be checked (parse errors)"
+            ));
+        }
+        if !erlfmt_error_files.is_empty() {
+            let count = erlfmt_error_files.len();
+            let plural = if count == 1 { "" } else { "s" };
+            parts.push(format!(
+                "{count} .erl file{plural} could not be checked (erlfmt errors)"
             ));
         }
         if !parts.is_empty() {

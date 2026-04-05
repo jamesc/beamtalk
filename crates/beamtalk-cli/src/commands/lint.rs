@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk lint` — run style/redundancy lint checks on Beamtalk source files.
+//! `beamtalk lint` — run style/redundancy lint checks on source files.
 //!
 //! This command parses each `.bt` file, runs all lint passes, and reports
 //! [`Severity::Lint`] diagnostics. It also runs semantic analysis to collect
@@ -9,11 +9,17 @@
 //! applied (BT-1547). It exits non-zero if any unsuppressed lint diagnostics
 //! are found.
 //!
+//! Native `.erl` files in `native/` and `native/test/` are also checked for
+//! missing `-moduledoc`/`-doc` attributes and hardcoded `'bt@...'` module
+//! references (BT-1909).
+//!
 //! Lint diagnostics are suppressed during normal `check`/`compile` — this is
 //! the only command that surfaces them.
 
 use crate::commands::build::collect_source_files_from_dir;
+use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
+use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
@@ -76,22 +82,7 @@ fn collect_diagnostics(
 /// Prints each lint diagnostic and returns an error if any are found.
 pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
-
-    let source_files = if source_path.is_file() {
-        if source_path.extension() == Some("bt") {
-            vec![source_path.clone()]
-        } else {
-            miette::bail!("File '{}' is not a .bt source file", path);
-        }
-    } else if source_path.is_dir() {
-        collect_source_files_from_dir(&source_path)?
-    } else {
-        miette::bail!("Path '{}' does not exist", path);
-    };
-
-    if source_files.is_empty() {
-        miette::bail!("No .bt source files found in '{path}'");
-    }
+    let (source_files, erl_files) = collect_lint_files(&source_path, path)?;
 
     // Pass 1: Parse all files and extract class metadata so that cross-file
     // type/DNU diagnostics in Pass 2 match what `build` emits. Without this,
@@ -182,8 +173,11 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .count();
     }
 
+    // Lint native .erl files (BT-1909).
+    total_lint_count += lint_erl_files(&erl_files, format)?;
+
     if total_lint_count > 0 {
-        let files_checked = source_files.len();
+        let files_checked = source_files.len() + erl_files.len();
         let plural = if total_lint_count == 1 { "" } else { "s" };
         miette::bail!(
             "{total_lint_count} lint diagnostic{plural} found in {files_checked} file(s)"
@@ -193,10 +187,88 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// Collect `.bt` and `.erl` files from the given path.
+fn collect_lint_files(
+    source_path: &Utf8PathBuf,
+    path: &str,
+) -> Result<(Vec<Utf8PathBuf>, Vec<Utf8PathBuf>)> {
+    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
+
+    let source_files = if source_path.is_file() {
+        match source_path.extension() {
+            Some("bt") => vec![source_path.clone()],
+            Some("erl") => {
+                erl_files.push(source_path.clone());
+                Vec::new()
+            }
+            _ => miette::bail!("File '{}' is not a .bt or .erl source file", path),
+        }
+    } else if source_path.is_dir() {
+        let project_root = find_package_root(source_path).unwrap_or_else(|| source_path.clone());
+        let native_dir = project_root.join("native");
+        if native_dir.is_dir() {
+            match FileWalker::native_erl_files().walk(&native_dir) {
+                Ok(files) => erl_files = files,
+                Err(e) => warn!("failed to scan native directory: {e}"),
+            }
+        }
+        collect_source_files_from_dir(source_path)?
+    } else {
+        miette::bail!("Path '{}' does not exist", path);
+    };
+
+    if source_files.is_empty() && erl_files.is_empty() {
+        miette::bail!("No .bt or .erl source files found in '{path}'");
+    }
+
+    Ok((source_files, erl_files))
+}
+
+/// Lint native `.erl` files and print diagnostics. Returns the total count.
+fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usize> {
+    let mut count = 0;
+    for erl_file in erl_files {
+        let source = std::fs::read_to_string(erl_file)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to read '{}': {e}", erl_file))?;
+
+        let diags = erlang_lint::lint_erl_file(erl_file, &source);
+
+        for diag in &diags {
+            match format {
+                OutputFormat::Text => {
+                    eprintln!(
+                        "  × {}:{}:{}: {}",
+                        diag.file, diag.line, diag.column, diag.message,
+                    );
+                    if let Some(hint) = &diag.hint {
+                        eprintln!("  help: {hint}");
+                    }
+                    eprintln!();
+                }
+                OutputFormat::Json => {
+                    let json = serde_json::json!({
+                        "file": diag.file.as_str(),
+                        "severity": "lint",
+                        "message": diag.message,
+                        "line": diag.line,
+                        "column": diag.column,
+                        "hint": diag.hint,
+                    });
+                    println!("{json}");
+                }
+            }
+        }
+
+        count += diags.len();
+    }
+    Ok(count)
+}
+
 /// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
 ///
 /// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
-fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
+pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
     let start_dir = if start.is_file() {
         start.parent()?
     } else {
@@ -205,6 +277,10 @@ fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 
     let mut dir = start_dir;
     loop {
+        // Guard against empty paths from single-component relative paths.
+        if dir.as_str().is_empty() {
+            return None;
+        }
         if dir.join("beamtalk.toml").exists() {
             return Some(dir.to_path_buf());
         }

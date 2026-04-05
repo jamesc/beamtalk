@@ -143,6 +143,14 @@ impl FileWalker {
         Self::new().extensions(&["btscript"])
     }
 
+    /// Preset for collecting native `.erl` files.
+    ///
+    /// Recursive (covers both `native/*.erl` and `native/test/*.erl`),
+    /// excludes `include/` (header files are not linted/formatted).
+    pub fn native_erl_files() -> Self {
+        Self::new().extensions(&["erl"]).exclude_dirs(&["include"])
+    }
+
     /// Preset for LSP/IDE preloading with a file budget.
     ///
     /// Skips common non-source directories (`.git`, `target`, `node_modules`,
