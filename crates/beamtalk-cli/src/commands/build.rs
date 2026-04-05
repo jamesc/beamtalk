@@ -807,7 +807,8 @@ fn post_process_package_artifacts(
     Ok(())
 }
 
-/// ADR 0075 Phase 1: Extract type specs from OTP `.beam` files and cache them.
+/// ADR 0075 Phase 1: Extract type specs from OTP and dependency `.beam` files
+/// and cache them.
 ///
 /// Non-fatal: if spec extraction fails (e.g., runtime not compiled), the build
 /// succeeds without type information. The LSP will still provide untyped
@@ -826,16 +827,40 @@ fn extract_type_specs(env: &BuildEnvironment) {
     let cache_dir = env.layout.type_cache_dir();
 
     // Discover OTP .beam files on the code path
-    let beam_files = match beam_compiler::discover_otp_beam_files() {
+    let mut beam_files = match beam_compiler::discover_otp_beam_files() {
         Ok(files) => files,
         Err(e) => {
-            debug!("Skipping type spec extraction: {e}");
-            return;
+            debug!("Skipping OTP type spec extraction: {e}");
+            Vec::new()
         }
     };
 
+    // Discover dependency .beam files (path deps, native ebin, rebar3 hex deps)
+    let mut dep_ebin_dirs: Vec<_> = super::deps::collect_dep_ebin_paths(&env.layout);
+    let native_ebin = env.layout.native_ebin_dir();
+    if native_ebin.exists() {
+        dep_ebin_dirs.push(native_ebin);
+    }
+    dep_ebin_dirs.extend(collect_rebar3_ebin_paths(&env.layout));
+    dep_ebin_dirs.sort();
+    dep_ebin_dirs.dedup();
+
+    let dep_beams = beam_compiler::discover_dependency_beam_files(&dep_ebin_dirs);
+    beam_files.extend(dep_beams);
+
+    // De-duplicate by module name (file stem) so `extract_beam_specs` maps each
+    // module to exactly one .beam path. First occurrence wins, preserving the
+    // OTP-first, then dependency discovery order.
+    let mut seen_modules = std::collections::HashSet::new();
+    beam_files.retain(|beam_file| {
+        let Some(stem) = beam_file.file_stem() else {
+            return true;
+        };
+        seen_modules.insert(stem.to_owned())
+    });
+
     if beam_files.is_empty() {
-        debug!("No OTP .beam files found for type spec extraction");
+        debug!("No .beam files found for type spec extraction");
         return;
     }
 
