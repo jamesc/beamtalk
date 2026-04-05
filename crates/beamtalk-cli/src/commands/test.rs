@@ -1957,14 +1957,10 @@ fn report_results(
     if let Some(result) = &results.bunit {
         // Group test results by class name from the JSON "class" field.
         let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
-        let mut class_order: Vec<String> = Vec::new();
 
         for test in &result.tests {
             let class_name = test.class.clone().unwrap_or_else(|| test.name.clone());
 
-            if !class_results.contains_key(&class_name) {
-                class_order.push(class_name.clone());
-            }
             let (passed, failed, skipped) = class_results.entry(class_name).or_insert((0, 0, 0));
 
             match test.status.as_str() {
@@ -1984,20 +1980,23 @@ fn report_results(
             }
         }
 
-        // Print results per class (in discovery order)
-        for class_name in &class_order {
-            let (passed, failed, skipped) = class_results[class_name.as_str()];
-            let total = passed + failed + skipped;
-            if failed > 0 {
-                println!(
-                    "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
-                );
-            } else if skipped > 0 {
-                println!(
-                    "  {class_name}: {total} tests, {passed} passed, {skipped} skipped \u{2713}"
-                );
-            } else if !quiet {
-                println!("  {class_name}: {total} tests, {total} passed \u{2713}");
+        // Print results per class in deterministic compile order (not JSON result
+        // order, which varies when jobs > 1 due to concurrent class execution).
+        for compiled in &pipeline.compiled_tests {
+            let class_name = &compiled.test_class.class_name;
+            if let Some(&(passed, failed, skipped)) = class_results.get(class_name) {
+                let total = passed + failed + skipped;
+                if failed > 0 {
+                    println!(
+                        "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
+                    );
+                } else if skipped > 0 {
+                    println!(
+                        "  {class_name}: {total} tests, {passed} passed, {skipped} skipped \u{2713}"
+                    );
+                } else if !quiet {
+                    println!("  {class_name}: {total} tests, {total} passed \u{2713}");
+                }
             }
         }
 
@@ -2651,5 +2650,30 @@ mod tests {
         let sections = parse_eunit_module_sections(stdout, false, &modules);
         assert_eq!(sections.modules.len(), 1);
         assert_eq!(sections.modules[0], ("foo_tests".to_string(), 0, 1, 0));
+    }
+
+    #[test]
+    fn test_parse_bunit_result_json_with_class_field() {
+        let json = r#"{"total":3,"passed":2,"failed":1,"skipped":0,"duration":0.5,"tests":[{"name":"testAdd","class":"MathTest","status":"pass"},{"name":"testSub","class":"MathTest","status":"fail","error":"expected 1 got 2"},{"name":"testConcat","class":"StringTest","status":"pass"}]}"#;
+        let result = parse_bunit_result_json(json, "").unwrap();
+        assert_eq!(result.total, 3);
+        assert_eq!(result.passed, 2);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.tests.len(), 3);
+        // Class field is parsed
+        assert_eq!(result.tests[0].class.as_deref(), Some("MathTest"));
+        assert_eq!(result.tests[0].name, "testAdd");
+        assert_eq!(result.tests[2].class.as_deref(), Some("StringTest"));
+        // Error field is parsed on failures
+        assert_eq!(result.tests[1].error.as_deref(), Some("expected 1 got 2"));
+    }
+
+    #[test]
+    fn test_parse_bunit_result_json_without_class_field() {
+        // Older runners may omit the class field — name-only fallback
+        let json = r#"{"total":1,"passed":1,"failed":0,"skipped":0,"duration":0.1,"tests":[{"name":"testFoo","status":"pass"}]}"#;
+        let result = parse_bunit_result_json(json, "").unwrap();
+        assert_eq!(result.tests[0].class, None);
+        assert_eq!(result.tests[0].name, "testFoo");
     }
 }
