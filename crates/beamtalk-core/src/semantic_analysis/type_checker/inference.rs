@@ -1729,10 +1729,12 @@ impl TypeChecker {
                 members,
                 provenance,
             } => {
-                // Fast path: if no member is UndefinedObject, return unchanged.
+                // Fast path: if no member is nil-typed, return unchanged.
+                // Check both `UndefinedObject` (from lowercase `nil` annotations)
+                // and `Nil` (from uppercase `Nil` in type unions like `String | Nil`).
                 let has_nil = members.iter().any(|m| {
                     m.as_known()
-                        .is_some_and(|n| n.as_str() == "UndefinedObject")
+                        .is_some_and(|n| matches!(n.as_str(), "UndefinedObject" | "Nil"))
                 });
                 if !has_nil {
                     return ty.clone();
@@ -1741,7 +1743,7 @@ impl TypeChecker {
                     .iter()
                     .filter(|m| {
                         m.as_known()
-                            .is_none_or(|name| name.as_str() != "UndefinedObject")
+                            .is_none_or(|name| !matches!(name.as_str(), "UndefinedObject" | "Nil"))
                     })
                     .cloned()
                     .collect();

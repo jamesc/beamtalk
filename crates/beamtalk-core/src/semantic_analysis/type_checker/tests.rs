@@ -5348,6 +5348,20 @@ fn test_narrowing_union_with_nil_check() {
 }
 
 #[test]
+fn test_narrowing_union_with_capital_nil() {
+    // BT-1904: `String | Nil` (capital N) must also narrow to `String`.
+    // The parser preserves `Nil` as-is (only lowercase `nil` maps to
+    // `UndefinedObject`), so non_nil_type must recognise both names.
+    let union = InferredType::simple_union(&["String", "Nil"]);
+    let narrowed = TypeChecker::non_nil_type(&union);
+    assert_eq!(
+        narrowed,
+        InferredType::known("String"),
+        "Removing Nil from String|Nil should yield String"
+    );
+}
+
+#[test]
 fn test_narrowing_union_multi_member() {
     // String | Integer | UndefinedObject → String | Integer after non_nil
     let union = InferredType::simple_union(&["String", "Integer", "UndefinedObject"]);
