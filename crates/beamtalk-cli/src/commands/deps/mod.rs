@@ -52,7 +52,6 @@ pub fn ensure_deps_resolved(
 ) -> Result<Vec<path::ResolvedDependency>> {
     let manifest_path = project_root.join("beamtalk.toml");
     if !manifest_path.exists() {
-        clean_all_stale_deps(project_root)?;
         return Ok(Vec::new());
     }
 
@@ -77,12 +76,14 @@ pub fn ensure_deps_resolved(
 
 /// Remove stale dependency directories from `_build/deps/`.
 ///
-/// After dependency resolution, compares the expected set of dependency names
+/// Compares the expected set of dependency names derived from `resolved_deps`
 /// against directories that exist on disk under `_build/deps/`. Any directory
-/// not in the expected set is from a previously-removed dependency and is
-/// deleted to prevent its `.beam` files from polluting code paths and type specs.
+/// not in the expected set is treated as stale and is deleted to prevent its
+/// `.beam` files from polluting code paths and type specs.
 ///
-/// This is a no-op when there is no `_build/deps/` directory or no manifest.
+/// This is a no-op only when `_build/deps/` does not exist. If the expected
+/// set is empty, all dependency directories under `_build/deps/` are
+/// considered stale and deleted.
 pub fn clean_stale_deps(
     project_root: &Utf8Path,
     resolved_deps: &[path::ResolvedDependency],
