@@ -16871,7 +16871,7 @@
         "transform",
         "where"
       ],
-      "source": "// NumberList — a user-defined Collection subclass for testing BT-815\n// Implements only do:, size, and printString; all higher-order collection\n// methods (collect:, select:, inject:into:, etc.) are inherited from Collection\n\nCollection subclass: NumberList\n  field: items = #()\n\n  // Return number of elements\n  size -> Integer => self.items size\n\n  // Iterate over each element, evaluating block with each one\n  do: block :: Block -> Nil => self.items do: block\n\n  // Return a developer-readable string representation\n  printString -> String => \"NumberList\"",
+      "source": "// NumberList — a user-defined Collection subclass for testing BT-815\n// Implements only do:, size, and printString; all higher-order collection\n// methods (collect:, select:, inject:into:, etc.) are inherited from Collection\n\nCollection subclass: NumberList\n  field: items :: List = #()\n\n  // Return number of elements\n  size -> Integer => self.items size\n\n  // Iterate over each element, evaluating block with each one\n  do: block :: Block -> Nil => self.items do: block\n\n  // Return a developer-readable string representation\n  printString -> String => \"NumberList\"",
       "explanation": "NumberList — a user-defined Collection subclass for testing BT-815 Implements only do:, size, and printString; all higher-order collection methods (collect:, select:, inject:into:, etc.) are inherited from Collection"
     },
     {

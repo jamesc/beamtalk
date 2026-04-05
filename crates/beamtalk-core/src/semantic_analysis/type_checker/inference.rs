@@ -87,6 +87,11 @@ impl TypeChecker {
             // Determine if this class requires type annotations (typed modifier or inherited)
             let is_typed = hierarchy.is_typed(&class.name.name);
 
+            if is_typed {
+                self.check_typed_state_annotations(&class.state, &class.name.name);
+                self.check_typed_state_annotations(&class.class_variables, &class.name.name);
+            }
+
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::known(class.name.name.clone()));
