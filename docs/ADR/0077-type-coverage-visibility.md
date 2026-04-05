@@ -88,12 +88,12 @@ Type Coverage Report
 ====================
 
 File                          Class              Coverage
-stdlib/src/List.bt            List               92.3%  (48/52 expressions)
-stdlib/src/String.bt          String             87.1%  (54/62 expressions)
-stdlib/src/Dictionary.bt      Dictionary         71.4%  (30/42 expressions)
+src/AccountService.bt         AccountService     92.3%  (48/52 expressions)
+src/Router.bt                 Router             87.1%  (54/62 expressions)
+src/ConfigLoader.bt           ConfigLoader       71.4%  (30/42 expressions)
 src/MyApp.bt                  MyApp              45.0%  (9/20 expressions)
 ──────────────────────────────────────────────────────────────────────
-Total                                            76.2%  (141/176 expressions)
+Total                                            80.1%  (141/176 expressions)
 ```
 
 Coverage is defined as: **(expressions with non-Dynamic inferred type) / (total expressions in the TypeMap)**.
@@ -140,8 +140,8 @@ Type Coverage: MyApp (src/MyApp.bt) — 45.0% (9/20)
   "passed": true,
   "classes": [
     {
-      "name": "List",
-      "file": "stdlib/src/List.bt",
+      "name": "AccountService",
+      "file": "src/AccountService.bt",
       "total": 52,
       "typed": 48,
       "coverage_percent": 92.3
@@ -175,13 +175,19 @@ When an expression in a `typed` class infers as Dynamic, warn — the user opted
 
 ```beamtalk
 typed Actor subclass: BankAccount
-  process: handler :: Actor =>
-    @expect type
+  process: handler =>
     handler doWork    // warning: expression inferred as Dynamic in typed class
-                      //          `BankAccount` (receiver is Dynamic)
+                      //          `BankAccount` (parameter has no type annotation)
 ```
 
-This uses the new `DynamicReason` from Phase 1 to produce actionable messages. Suppressed with `@expect type` where Dynamic dispatch is intentional.
+This uses the new `DynamicReason` from Phase 1 to produce actionable messages. Where Dynamic dispatch is intentional, suppress with `@expect type`:
+
+```beamtalk
+typed Actor subclass: BankAccount
+  process: handler =>
+    @expect type
+    handler doWork    // no warning — suppressed
+```
 
 ## Prior Art
 
