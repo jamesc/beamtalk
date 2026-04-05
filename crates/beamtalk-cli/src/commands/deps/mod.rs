@@ -24,7 +24,7 @@ pub mod path;
 pub use path::collect_dep_ebin_paths;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use miette::Result;
+use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::{BTreeMap, VecDeque};
 use tracing::{debug, info};
 
@@ -52,21 +52,90 @@ pub fn ensure_deps_resolved(
 ) -> Result<Vec<path::ResolvedDependency>> {
     let manifest_path = project_root.join("beamtalk.toml");
     if !manifest_path.exists() {
+        clean_all_stale_deps(project_root)?;
         return Ok(Vec::new());
     }
 
     let parsed = manifest::parse_manifest_full(&manifest_path)?;
     if parsed.dependencies.is_empty() {
+        clean_all_stale_deps(project_root)?;
         return Ok(Vec::new());
     }
 
-    if deps_are_fresh(project_root, &parsed) {
+    let resolved = if deps_are_fresh(project_root, &parsed) {
         info!("Dependencies are fresh, skipping compilation");
-        return collect_fresh_deps(project_root, &parsed);
+        collect_fresh_deps(project_root, &parsed)?
+    } else {
+        info!("Dependencies need resolution, resolving...");
+        graph::resolve_dependency_graph(project_root, options)?
+    };
+
+    clean_stale_deps(project_root, &resolved)?;
+
+    Ok(resolved)
+}
+
+/// Remove stale dependency directories from `_build/deps/`.
+///
+/// After dependency resolution, compares the expected set of dependency names
+/// against directories that exist on disk under `_build/deps/`. Any directory
+/// not in the expected set is from a previously-removed dependency and is
+/// deleted to prevent its `.beam` files from polluting code paths and type specs.
+///
+/// This is a no-op when there is no `_build/deps/` directory or no manifest.
+pub fn clean_stale_deps(
+    project_root: &Utf8Path,
+    resolved_deps: &[path::ResolvedDependency],
+) -> Result<()> {
+    let layout = BuildLayout::new(project_root);
+    let deps_dir = layout.deps_dir();
+
+    if !deps_dir.exists() {
+        return Ok(());
     }
 
-    info!("Dependencies need resolution, resolving...");
-    graph::resolve_dependency_graph(project_root, options)
+    let expected: std::collections::HashSet<&str> =
+        resolved_deps.iter().map(|d| d.name.as_str()).collect();
+
+    let entries = std::fs::read_dir(&deps_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read deps directory '{deps_dir}'"))?;
+
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+
+        let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if !path.is_dir() {
+            continue;
+        }
+
+        if !expected.contains(dir_name) {
+            info!(dep = %dir_name, "Removing stale dependency directory");
+            std::fs::remove_dir_all(&path)
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "Failed to remove stale dependency directory '{}'",
+                        path.display()
+                    )
+                })?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Remove stale dependency directories when no dependencies are declared.
+///
+/// When a project's `beamtalk.toml` has no `[dependencies]` section (or no
+/// manifest at all), any existing `_build/deps/` contents are entirely stale.
+/// This is called from the early-return paths in `ensure_deps_resolved`.
+pub fn clean_all_stale_deps(project_root: &Utf8Path) -> Result<()> {
+    clean_stale_deps(project_root, &[])
 }
 
 /// A discovered dependency root (direct or transitive) for freshness checking.
@@ -375,6 +444,7 @@ fn newest_bt_mtime(dir: &std::path::Path) -> Option<std::time::SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::fs;
     use tempfile::TempDir;
 
@@ -898,6 +968,97 @@ mod tests {
         assert!(
             !deps_are_fresh(&root, &parsed),
             "Should detect transitive manifest change as stale"
+        );
+    }
+
+    #[test]
+    fn test_clean_stale_deps_removes_unknown_dirs() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        // Create ebin dirs for "utils" (expected) and "old_lib" (stale)
+        create_dep_ebin_with_beam(temp.path(), "utils");
+        create_dep_ebin_with_beam(temp.path(), "old_lib");
+
+        let resolved = vec![path::ResolvedDependency {
+            name: "utils".to_string(),
+            root: camino::Utf8PathBuf::from_path_buf(temp.path().join("utils")).unwrap(),
+            ebin_path: layout.dep_ebin_dir("utils"),
+            class_module_index: HashMap::default(),
+            class_infos: Vec::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+        }];
+
+        clean_stale_deps(&root, &resolved).unwrap();
+
+        // "utils" should still exist, "old_lib" should be gone
+        assert!(layout.dep_ebin_dir("utils").exists());
+        assert!(
+            !layout.dep_checkout_dir("old_lib").exists(),
+            "Stale dep 'old_lib' should have been removed"
+        );
+    }
+
+    #[test]
+    fn test_clean_stale_deps_preserves_all_expected() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        create_dep_ebin_with_beam(temp.path(), "a");
+        create_dep_ebin_with_beam(temp.path(), "b");
+
+        let resolved = vec![
+            path::ResolvedDependency {
+                name: "a".to_string(),
+                root: camino::Utf8PathBuf::from_path_buf(temp.path().join("a")).unwrap(),
+                ebin_path: layout.dep_ebin_dir("a"),
+                class_module_index: HashMap::default(),
+                class_infos: Vec::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+            },
+            path::ResolvedDependency {
+                name: "b".to_string(),
+                root: camino::Utf8PathBuf::from_path_buf(temp.path().join("b")).unwrap(),
+                ebin_path: layout.dep_ebin_dir("b"),
+                class_module_index: HashMap::default(),
+                class_infos: Vec::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+            },
+        ];
+
+        clean_stale_deps(&root, &resolved).unwrap();
+
+        assert!(layout.dep_ebin_dir("a").exists());
+        assert!(layout.dep_ebin_dir("b").exists());
+    }
+
+    #[test]
+    fn test_clean_stale_deps_no_deps_dir() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // No _build/deps/ directory — should be a no-op
+        clean_stale_deps(&root, &[]).unwrap();
+    }
+
+    #[test]
+    fn test_clean_all_stale_deps_removes_everything() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        create_dep_ebin_with_beam(temp.path(), "leftover");
+
+        clean_all_stale_deps(&root).unwrap();
+
+        assert!(
+            !layout.dep_checkout_dir("leftover").exists(),
+            "All deps should be removed when no deps are declared"
         );
     }
 }
