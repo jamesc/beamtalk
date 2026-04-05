@@ -40,7 +40,7 @@ pub use native_types::{
     is_specs_line, is_specs_result_error, is_specs_result_ok, map_type_name, parse_specs_line,
 };
 pub(in crate::semantic_analysis) use types::is_generic_type_param;
-pub use types::{InferredType, TypeProvenance};
+pub use types::{DynamicReason, InferredType, TypeProvenance};
 
 /// Map of expression spans to their inferred types.
 ///

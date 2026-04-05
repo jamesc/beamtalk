@@ -27,6 +27,8 @@
 //! This registry handles layers 4 and 5. Stub layers (1–3) will be
 //! added in Phase 2 (BT-1847).
 
+#[cfg(test)]
+use super::types::DynamicReason;
 use super::types::{InferredType, TypeProvenance};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -271,7 +273,7 @@ mod tests {
             "apply",
             1,
             vec![param("fun", "Block")],
-            InferredType::Dynamic,
+            InferredType::Dynamic(DynamicReason::UntypedFfi),
         );
         assert_eq!(sig.display_signature(), "apply: fun :: Block -> Dynamic");
     }
@@ -385,7 +387,7 @@ mod tests {
                 "get",
                 2,
                 vec![param("key", "Dynamic"), param("map", "Dictionary")],
-                InferredType::Dynamic,
+                InferredType::Dynamic(DynamicReason::UntypedFfi),
             )],
         );
 

@@ -8,6 +8,26 @@
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
+/// Why a type could not be determined — enables hover provenance,
+/// coverage detail, and diagnostic messages.
+///
+/// **References:** ADR 0077 Section 1
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicReason {
+    /// Parameter has no type annotation.
+    UnannotatedParam,
+    /// Method has no return type annotation and body could not be inferred.
+    UnannotatedReturn,
+    /// Receiver is Dynamic, so message send result is Dynamic.
+    DynamicReceiver,
+    /// Control flow produces incompatible types (pre-union-narrowing fallback).
+    AmbiguousControlFlow,
+    /// Erlang FFI call with no spec or all-Dynamic spec.
+    UntypedFfi,
+    /// Fallback — no specific reason available.
+    Unknown,
+}
+
 /// Tracks where a type came from — enables precise error messages
 /// and determines how far inference should propagate.
 ///
@@ -55,7 +75,11 @@ pub enum InferredType {
         provenance: TypeProvenance,
     },
     /// Type cannot be determined — skip all checking.
-    Dynamic,
+    ///
+    /// The [`DynamicReason`] explains *why* the type could not be determined,
+    /// enabling hover provenance, coverage detail, and diagnostic messages.
+    /// The `PartialEq` impl ignores the reason — all `Dynamic` values are equal.
+    Dynamic(DynamicReason),
 }
 
 impl PartialEq for InferredType {
@@ -79,7 +103,7 @@ impl PartialEq for InferredType {
             (Self::Union { members: a, .. }, Self::Union { members: b, .. }) => {
                 a.len() == b.len() && a.iter().all(|m| b.contains(m))
             }
-            (Self::Dynamic, Self::Dynamic) => true,
+            (Self::Dynamic(_), Self::Dynamic(_)) => true,
             _ => false,
         }
     }
@@ -129,7 +153,7 @@ impl InferredType {
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
             Self::Known { class_name, .. } => Some(class_name),
-            Self::Dynamic | Self::Union { .. } => None,
+            Self::Dynamic(_) | Self::Union { .. } => None,
         }
     }
 
@@ -138,7 +162,7 @@ impl InferredType {
     /// - `Known("Integer", [])` → `"Integer"`
     /// - `Known("Result", [Known("Integer"), Known("String")])` → `"Result(Integer, String)"`
     /// - `Union([Known("String"), Known("UndefinedObject")])` → `"String | UndefinedObject"`
-    /// - `Dynamic` → `None`
+    /// - `Dynamic(_)` → `"Dynamic"`
     #[must_use]
     pub fn display_name(&self) -> Option<EcoString> {
         match self {
@@ -178,7 +202,7 @@ impl InferredType {
                 }
                 Some(result)
             }
-            Self::Dynamic => None,
+            Self::Dynamic(_) => Some(EcoString::from("Dynamic")),
         }
     }
 
@@ -227,11 +251,11 @@ impl InferredType {
                         }
                     }
                 }
-                Self::Dynamic => return Self::Dynamic,
+                Self::Dynamic(reason) => return Self::Dynamic(*reason),
             }
         }
         match flat.len() {
-            0 => Self::Dynamic,
+            0 => Self::Dynamic(DynamicReason::Unknown),
             1 => match flat.into_iter().next().unwrap() {
                 Self::Known {
                     class_name,

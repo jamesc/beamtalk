@@ -498,7 +498,10 @@ fn test_unknown_variable_is_dynamic() {
     let mut env = TypeEnv::new();
 
     let ty = checker.infer_expr(&var("unknownVar"), &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::Dynamic);
+    match ty {
+        InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::Unknown),
+        other => panic!("expected Dynamic(Unknown), got {other:?}"),
+    }
 }
 
 #[test]
@@ -567,7 +570,10 @@ fn test_match_returns_dynamic() {
     };
 
     let ty = checker.infer_expr(&match_expr, &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::Dynamic);
+    match ty {
+        InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::AmbiguousControlFlow),
+        other => panic!("expected Dynamic(AmbiguousControlFlow), got {other:?}"),
+    }
 }
 
 #[test]
@@ -3467,7 +3473,7 @@ fn test_bind_pattern_vars_skips_wildcard() {
     );
     assert_eq!(
         env.get("y"),
-        Some(InferredType::Dynamic),
+        Some(InferredType::Dynamic(DynamicReason::Unknown)),
         "`y` must be bound as Dynamic"
     );
 }
@@ -3797,8 +3803,11 @@ fn union_of_preserves_different_types() {
 
 #[test]
 fn union_of_returns_dynamic_if_any_dynamic() {
-    let result = InferredType::union_of(&[InferredType::known("String"), InferredType::Dynamic]);
-    assert_eq!(result, InferredType::Dynamic);
+    let result = InferredType::union_of(&[
+        InferredType::known("String"),
+        InferredType::Dynamic(DynamicReason::Unknown),
+    ]);
+    assert_eq!(result, InferredType::Dynamic(DynamicReason::Unknown));
 }
 
 #[test]
@@ -3815,7 +3824,10 @@ fn known_display_name() {
 
 #[test]
 fn dynamic_display_name() {
-    assert_eq!(InferredType::Dynamic.display_name(), None);
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::Unknown).display_name(),
+        Some(ecow::EcoString::from("Dynamic"))
+    );
 }
 
 #[test]
@@ -4098,7 +4110,10 @@ fn union_receiver_dynamic_member_no_warning() {
     env.set(
         "x",
         InferredType::Union {
-            members: vec![InferredType::known("String"), InferredType::Dynamic],
+            members: vec![
+                InferredType::known("String"),
+                InferredType::Dynamic(DynamicReason::Unknown),
+            ],
             provenance: super::TypeProvenance::Inferred(span()),
         },
     );
@@ -4121,7 +4136,7 @@ fn union_receiver_dynamic_member_no_warning() {
     );
     // Dynamic poisons the union → result should be Dynamic
     assert!(
-        matches!(ty, InferredType::Dynamic),
+        matches!(ty, InferredType::Dynamic(_)),
         "Return type should be Dynamic when union contains Dynamic, got {ty:?}"
     );
 }
@@ -4274,7 +4289,7 @@ fn union_receiver_no_members_respond_returns_dynamic() {
     // Neither String nor Integer understand `nonExistentMethod`.
     // With no return types collected, union_of returns Dynamic as fallback.
     assert!(
-        matches!(ty, InferredType::Dynamic),
+        matches!(ty, InferredType::Dynamic(DynamicReason::Unknown)),
         "Return type should be Dynamic when no members respond, got {ty:?}"
     );
 }
@@ -4786,7 +4801,7 @@ fn constructor_inference_ok_infers_t_from_integer() {
                 "T should be inferred as Integer from argument"
             );
             assert!(
-                matches!(type_args[1], InferredType::Dynamic),
+                matches!(type_args[1], InferredType::Dynamic(DynamicReason::Unknown)),
                 "E should be Dynamic (not inferrable from ok:), got: {:?}",
                 type_args[1]
             );
@@ -4828,7 +4843,7 @@ fn constructor_inference_error_infers_e_from_symbol() {
             assert_eq!(class_name.as_str(), "GenResult");
             assert_eq!(type_args.len(), 2, "Should have 2 type args (T, E)");
             assert!(
-                matches!(type_args[0], InferredType::Dynamic),
+                matches!(type_args[0], InferredType::Dynamic(DynamicReason::Unknown)),
                 "T should be Dynamic (not inferrable from error:), got: {:?}",
                 type_args[0]
             );
@@ -5530,7 +5545,10 @@ fn test_detect_narrowing_responds_to_pattern() {
     assert!(info.is_some(), "Should detect respondsTo: narrowing");
     let info = info.unwrap();
     assert_eq!(info.variable.as_str(), "x");
-    assert_eq!(info.true_type, InferredType::Dynamic);
+    assert_eq!(
+        info.true_type,
+        InferredType::Dynamic(DynamicReason::Unknown)
+    );
     assert!(!info.is_nil_check);
     assert_eq!(
         info.responded_selector.as_deref(),
@@ -6652,7 +6670,7 @@ fn type_param_bounds_dynamic_skipped() {
     let mut checker = TypeChecker::new();
     checker.check_type_param_bounds(
         &"BoundedLogger".into(),
-        &[InferredType::Dynamic],
+        &[InferredType::Dynamic(DynamicReason::Unknown)],
         span(),
         &hierarchy,
         &registry,
@@ -7992,7 +8010,7 @@ fn union_arg_dynamic_still_skips() {
     checker.check_argument_types(
         &"Calculator".into(),
         "compute:",
-        &[InferredType::Dynamic],
+        &[InferredType::Dynamic(DynamicReason::Unknown)],
         span(),
         &hierarchy,
         false,
@@ -8838,7 +8856,7 @@ fn generic_unresolved_type_param_falls_back_to_dynamic() {
         false,
     );
     assert!(
-        matches!(result, InferredType::Dynamic),
+        matches!(result, InferredType::Dynamic(DynamicReason::Unknown)),
         "List (no type args) first should fall back to Dynamic, got: {result:?}"
     );
 }
@@ -9254,7 +9272,7 @@ fn lists_registry() -> NativeTypeRegistry {
                 params: vec![
                     ParamType {
                         keyword: Some(ecow::EcoString::from("elem")),
-                        type_: InferredType::Dynamic,
+                        type_: InferredType::Dynamic(DynamicReason::Unknown),
                     },
                     ParamType {
                         keyword: Some(ecow::EcoString::from("list")),
