@@ -71,11 +71,23 @@ lookup_preloaded_module_test() ->
 %%% ============================================================================
 
 lookup_hidden_function_test() ->
-    %% lists:zf/2 is hidden in OTP docs — should return {error, no_docs}
+    %% lists:zf/2 is hidden in OTP docs — should return {error, hidden}
     ?assertEqual(
-        {error, no_docs},
+        {error, hidden},
         beamtalk_native_docs:lookup(lists, zf, 2)
     ).
+
+is_hidden_returns_true_for_hidden_function_test() ->
+    %% lists:zf/2 is hidden — is_hidden/3 should return true
+    ?assert(beamtalk_native_docs:is_hidden(lists, zf, 2)).
+
+is_hidden_returns_false_for_public_function_test() ->
+    %% lists:reverse/1 is public — is_hidden/3 should return false
+    ?assertNot(beamtalk_native_docs:is_hidden(lists, reverse, 1)).
+
+is_hidden_returns_false_for_missing_function_test() ->
+    %% Nonexistent function — is_hidden/3 should return false, not crash
+    ?assertNot(beamtalk_native_docs:is_hidden(lists, no_such_function, 0)).
 
 lookup_undocumented_function_has_signature_test() ->
     %% Functions with `none` doc still have a signature
@@ -218,7 +230,7 @@ compile_with_doc_false_is_hidden_test() ->
     {BeamPath, Module} = create_beam_with_doc_attributes(),
     try
         ?assertEqual(
-            {error, no_docs},
+            {error, hidden},
             beamtalk_native_docs:lookup(Module, internal, 0)
         )
     after
