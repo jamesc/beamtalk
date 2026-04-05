@@ -151,16 +151,19 @@ fn generate_erlang_stub(
         "%% Generated from {class_name}.bt — fill in implementations"
     )
     .unwrap();
-    writeln!(
-        out,
-        "%% @doc Backing gen_server for the {class_name} native Actor."
-    )
-    .unwrap();
     writeln!(out).unwrap();
 
     // Module declaration
     writeln!(out, "-module({module_name}).").unwrap();
     writeln!(out, "-behaviour(gen_server).").unwrap();
+    writeln!(out).unwrap();
+
+    // EEP-59 module doc
+    writeln!(
+        out,
+        "-moduledoc \"Backing gen_server for the {class_name} native Actor.\"."
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // Exports
@@ -173,6 +176,7 @@ fn generate_erlang_stub(
     writeln!(out).unwrap();
 
     // Type spec and start_link
+    writeln!(out, "-doc \"Start and link the {class_name} gen_server.\".").unwrap();
     writeln!(
         out,
         "-spec start_link(map()) -> {{ok, pid()}} | {{error, term()}}."
@@ -183,6 +187,7 @@ fn generate_erlang_stub(
     writeln!(out).unwrap();
 
     // init/1
+    writeln!(out, "-doc \"Initialise the server state from Config.\".").unwrap();
     writeln!(out, "-spec init(map()) -> {{ok, map()}}.").unwrap();
     writeln!(out, "init(_Config) ->").unwrap();
     writeln!(out, "    %% TODO: initialise state from Config").unwrap();
@@ -190,6 +195,11 @@ fn generate_erlang_stub(
     writeln!(out).unwrap();
 
     // handle_call/3 clauses
+    writeln!(
+        out,
+        "-doc \"Handle synchronous calls delegated from {class_name}.\"."
+    )
+    .unwrap();
     writeln!(out, "%% --- Delegate methods from {class_name}.bt ---").unwrap();
     writeln!(out).unwrap();
 
@@ -208,16 +218,19 @@ fn generate_erlang_stub(
     writeln!(out).unwrap();
 
     // handle_cast/2
+    writeln!(out, "-doc \"Handle asynchronous casts.\".").unwrap();
     writeln!(out, "handle_cast(_Msg, State) ->").unwrap();
     writeln!(out, "    {{noreply, State}}.").unwrap();
     writeln!(out).unwrap();
 
     // handle_info/2
+    writeln!(out, "-doc \"Handle out-of-band messages.\".").unwrap();
     writeln!(out, "handle_info(_Info, State) ->").unwrap();
     writeln!(out, "    {{noreply, State}}.").unwrap();
     writeln!(out).unwrap();
 
     // terminate/2
+    writeln!(out, "-doc \"Clean up on server termination.\".").unwrap();
     writeln!(out, "terminate(_Reason, _State) ->").unwrap();
     writeln!(out, "    ok.").unwrap();
 
@@ -245,7 +258,7 @@ fn write_handle_call_clause(out: &mut String, method: &MethodDefinition) {
         selector_name.to_string()
     };
 
-    // Add doc comment with return type if available
+    // Add return type comment for this clause
     if let Some(ref ret_type) = method.return_type {
         let type_str = format_type_annotation(ret_type);
         writeln!(out, "%% {selector_name} -> {type_str}").unwrap();
@@ -556,5 +569,55 @@ Actor subclass: MyActor native: my_actor
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         assert!(output.contains("Generated from MyActor.bt"));
+        assert!(
+            output.contains("-moduledoc \"Backing gen_server for the MyActor native Actor.\"."),
+            "Expected -moduledoc attribute, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn generates_eep59_doc_attributes() {
+        let source = r"
+Actor subclass: MyActor native: my_actor
+  getValue -> Integer => self delegate
+";
+        let class = parse_class(source);
+        let delegates: Vec<&MethodDefinition> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_self_delegate())
+            .collect();
+        let output = generate_erlang_stub(&class, "my_actor", &delegates);
+
+        // EEP-59 attributes on exported functions
+        assert!(
+            output.contains("-doc \"Start and link the MyActor gen_server.\"."),
+            "Expected -doc for start_link, got:\n{output}"
+        );
+        assert!(
+            output.contains("-doc \"Initialise the server state from Config.\"."),
+            "Expected -doc for init, got:\n{output}"
+        );
+        assert!(
+            output.contains("-doc \"Handle synchronous calls delegated from MyActor.\"."),
+            "Expected -doc for handle_call, got:\n{output}"
+        );
+        assert!(
+            output.contains("-doc \"Handle asynchronous casts.\"."),
+            "Expected -doc for handle_cast, got:\n{output}"
+        );
+        assert!(
+            output.contains("-doc \"Handle out-of-band messages.\"."),
+            "Expected -doc for handle_info, got:\n{output}"
+        );
+        assert!(
+            output.contains("-doc \"Clean up on server termination.\"."),
+            "Expected -doc for terminate, got:\n{output}"
+        );
+        // No EDoc comments
+        assert!(
+            !output.contains("@doc"),
+            "Should not contain EDoc @doc comments"
+        );
     }
 }
