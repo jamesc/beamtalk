@@ -332,6 +332,18 @@ Add a `CoverageReport` struct that walks the `TypeMap` and classifies each entry
 - **Code lens** — per-class/method coverage displayed inline in the editor (LSP `textDocument/codeLens`)
 - **Differential coverage** — per-PR coverage delta for CI integration (like Codecov)
 
+## Implementation Tracking
+
+**Epic:** BT-1910
+**Issues:**
+- BT-1911: Add DynamicReason enum and update InferredType::Dynamic variant (M)
+- BT-1912: Show Dynamic with reason in LSP hover (S) — blocked by BT-1911
+- BT-1913: Warn on missing state field annotations in typed classes (S) — blocked by BT-1911
+- BT-1914: Warn on Dynamic inference in typed classes (S) — blocked by BT-1911
+- BT-1915: Add beamtalk type-coverage CLI command (M) — blocked by BT-1911
+- BT-1916: Update docs for type coverage visibility (S) — blocked by BT-1912, BT-1913, BT-1914, BT-1915
+**Status:** Planned
+
 ## References
 - Related ADRs: [ADR 0025 (Gradual Typing)](0025-gradual-typing-and-protocols.md), [ADR 0045 (REPL Type Inference)](0045-repl-expression-completion-type-inference.md), [ADR 0053 (Type Annotation Syntax)](0053-double-colon-type-annotation-syntax.md), [ADR 0068 (Parametric Types)](0068-parametric-types-and-protocols.md), [ADR 0075 (FFI Type Definitions)](0075-erlang-ffi-type-definitions.md)
 - External: [plantain-00/type-coverage](https://github.com/plantain-00/type-coverage), [Sorbet Metrics](https://sorbet.org/docs/metrics), [mypy coverage reports](https://mypy.readthedocs.io/en/stable/command_line.html#report-generation), [Flow coverage](https://flow.org/en/docs/cli/coverage/)
