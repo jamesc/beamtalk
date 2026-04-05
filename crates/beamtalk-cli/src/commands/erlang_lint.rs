@@ -227,6 +227,9 @@ fn extract_exports_from_buffer(buffer: &str, exports: &mut Vec<(String, usize)>)
         let item = item.trim();
         if let Some((name, arity_str)) = item.split_once('/') {
             let name = name.trim();
+            // Strip surrounding quotes from quoted atom names (e.g. 'foo' -> foo).
+            let name = name.strip_prefix('\'').and_then(|n| n.strip_suffix('\''))
+                .unwrap_or(name);
             if let Ok(arity) = arity_str.trim().parse::<usize>() {
                 exports.push((name.to_string(), arity));
             }

@@ -268,7 +268,7 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 /// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
 ///
 /// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
-pub fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
+pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
     let start_dir = if start.is_file() {
         start.parent()?
     } else {

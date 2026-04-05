@@ -145,7 +145,10 @@ fn invoke_erlfmt(
             format!(
                 "case erlfmt:format_file(\"{escaped_file}\", [{{print_width, 100}}]) of \
                     {{ok, Formatted, _}} -> \
-                        file:write_file(\"{escaped_file}\", Formatted), halt(0); \
+                        case file:write_file(\"{escaped_file}\", Formatted) of \
+                            ok -> halt(0); \
+                            {{error, _}} -> halt(2) \
+                        end; \
                     {{skip, _}} -> halt(0); \
                     {{error, _}} -> halt(2) \
                 end."
