@@ -100,6 +100,10 @@ pub fn run(
     if let Some(class_name) = class_filter {
         report.classes.retain(|c| c.name.as_str() == class_name);
 
+        if report.classes.is_empty() {
+            miette::bail!("no class named '{class_name}' found in project files");
+        }
+
         // Filter dynamic entries to matching class.
         report
             .dynamic_entries
@@ -121,13 +125,13 @@ pub fn run(
     }
 
     // --at-least: exit non-zero if coverage is below threshold.
+    // Compare unrounded coverage to avoid false passes (e.g. 79.96% rounding to 80.0%).
     if let Some(threshold) = at_least {
         let coverage = report.coverage_percent();
-        // Round to 1 decimal for display and comparison.
-        let coverage_rounded = (coverage * 10.0).round() / 10.0;
-        if coverage_rounded < threshold {
+        if coverage < threshold {
+            let display = (coverage * 10.0).round() / 10.0;
             miette::bail!(
-                "type coverage {coverage_rounded:.1}% is below threshold {threshold:.1}%"
+                "type coverage {display:.1}% is below threshold {threshold:.1}%"
             );
         }
     }
