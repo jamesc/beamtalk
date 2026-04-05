@@ -737,7 +737,9 @@ fn check_ffi_message_send(
     send_span: Span,
     offset: u32,
 ) -> Option<FfiCallInfo> {
-    // Pattern 1: receiver is `Erlang <module>`, cursor is on the outer selector
+    // Pattern 1: receiver is `Erlang <module>`, cursor is on the outer selector.
+    // Use selector_span_contains for proper multi-keyword hit testing (e.g.,
+    // `seq: 1 to: 10` — cursor on either `seq:` or `to:` should navigate).
     if let Expression::MessageSend {
         receiver: inner_receiver,
         selector: MessageSelector::Unary(module_name_str),
@@ -746,16 +748,14 @@ fn check_ffi_message_send(
     {
         if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
             if name.name == "Erlang" {
-                let selector_name = selector.name();
-                let function_name = selector_name
-                    .split(':')
-                    .next()
-                    .unwrap_or(selector_name.as_str());
-                let sel_start = receiver.span().end();
-                let sel_end = arguments
-                    .first()
-                    .map_or(send_span.end(), |arg| arg.span().start());
-                if offset >= sel_start && offset < sel_end {
+                let computed_span =
+                    selector_span_for_message_send(receiver.span(), arguments, send_span);
+                if selector_span_contains(selector, offset, computed_span).is_some() {
+                    let selector_name = selector.name();
+                    let function_name = selector_name
+                        .split(':')
+                        .next()
+                        .unwrap_or(selector_name.as_str());
                     let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
                     return Some(FfiCallInfo {
                         module_name: module_name_str.clone(),

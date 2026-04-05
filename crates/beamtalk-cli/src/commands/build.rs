@@ -221,14 +221,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
 
     let env = setup_build_environment(path)?;
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
-
-    // ADR 0075: Extract type specs from OTP and dependency .beam files before
-    // Pass 2 compilation so FFI type warnings appear in build output.
-    // Results are cached in _build/type_cache/ — incremental builds read zero
-    // .beam files when the cache is fresh.
-    let native_type_registry = extract_type_specs(&env).map(std::sync::Arc::new);
-
-    let passes = execute_build_passes(&env, options, &dep_ctx, force, native_type_registry)?;
+    let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
     Ok(())
@@ -675,14 +668,17 @@ fn execute_build_passes(
     options: &beamtalk_core::CompilerOptions,
     dep_ctx: &DependencyContext,
     force: bool,
-    native_type_registry: Option<
-        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-    >,
 ) -> Result<BuildPassesResult> {
     let index = build_class_index(env, dep_ctx, options, force)?;
     let force = if index.force_pass2 { true } else { force };
 
     let native_result = compile_native_sources(env, dep_ctx, &index.class_module_index)?;
+
+    // ADR 0075: Extract type specs from OTP and dependency .beam files after
+    // native compilation so freshly compiled native modules are included.
+    // Results are cached in _build/type_cache/ — incremental builds read zero
+    // .beam files when the cache is fresh.
+    let native_type_registry = extract_type_specs(env).map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 

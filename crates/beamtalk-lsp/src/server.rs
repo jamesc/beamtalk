@@ -235,25 +235,31 @@ impl Backend {
     /// Runs `erl -noshell -eval 'io:format("~s", [code:lib_dir()]), halt().'`
     /// once and stores the result. Subsequent calls return the cached value.
     async fn resolve_otp_lib_dir(&self) {
-        let result = tokio::task::spawn_blocking(|| {
-            std::process::Command::new("erl")
-                .args([
-                    "-noshell",
-                    "-eval",
-                    "io:format(\"~s\", [code:lib_dir()]), halt().",
-                ])
-                .output()
-                .ok()
-                .and_then(|output| {
-                    if output.status.success() {
-                        String::from_utf8(output.stdout).ok().map(PathBuf::from)
-                    } else {
-                        None
-                    }
-                })
-        })
+        let result = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(|| {
+                std::process::Command::new("erl")
+                    .args([
+                        "-noshell",
+                        "-eval",
+                        "io:format(\"~s\", [code:lib_dir()]), halt().",
+                    ])
+                    .output()
+                    .ok()
+                    .and_then(|output| {
+                        if output.status.success() {
+                            String::from_utf8(output.stdout).ok().map(PathBuf::from)
+                        } else {
+                            None
+                        }
+                    })
+            }),
+        )
         .await
-        .unwrap_or(None);
+        {
+            Ok(Ok(path)) => path,
+            _ => None,
+        };
 
         if let Some(ref dir) = result {
             debug!("Resolved OTP lib dir: {}", dir.display());
