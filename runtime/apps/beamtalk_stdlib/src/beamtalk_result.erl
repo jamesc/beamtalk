@@ -42,14 +42,14 @@ Field names match the `state:` declarations in `stdlib/src/Result.bt`.
 ]).
 
 -doc """
-Opaque type representing a Beamtalk Result tagged map.
+Type representing a Beamtalk Result tagged map.
 
 Use `t/0` for unparameterized specs (any ok/error types) or `t/2` when the
 ok-value and error-reason types are known:
 
 ```erlang
 -spec 'readAll:'(binary()) -> beamtalk_result:t().
--spec 'readAll:'(binary()) -> beamtalk_result:t(binary(), beamtalk_error:t()).
+-spec 'parse:'(binary()) -> beamtalk_result:t(map(), beamtalk_error:t()).
 ```
 """.
 -type t() :: t(term(), term()).
