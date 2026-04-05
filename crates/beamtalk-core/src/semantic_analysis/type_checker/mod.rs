@@ -69,9 +69,190 @@ impl TypeMap {
         self.types.get(&span)
     }
 
+    /// Returns an iterator over all `(Span, InferredType)` entries.
+    pub fn iter(&self) -> impl Iterator<Item = (Span, &InferredType)> {
+        self.types.iter().map(|(&span, ty)| (span, ty))
+    }
+
+    /// Returns the total number of entries in the type map.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.types.len()
+    }
+
+    /// Returns `true` if the type map is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.types.is_empty()
+    }
+
     /// Records an inferred type for an expression span.
     fn insert(&mut self, span: Span, ty: InferredType) {
         self.types.insert(span, ty);
+    }
+}
+
+/// Coverage statistics for a single class.
+#[derive(Debug, Clone)]
+pub struct ClassCoverage {
+    /// Class name.
+    pub name: EcoString,
+    /// Source file path.
+    pub file: String,
+    /// Total expressions in the `TypeMap` for this class.
+    pub total: usize,
+    /// Expressions with non-Dynamic inferred type.
+    pub typed: usize,
+}
+
+impl ClassCoverage {
+    /// Returns coverage as a percentage (0.0–100.0).
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "expression counts are far below f64 mantissa limit"
+    )]
+    pub fn coverage_percent(&self) -> f64 {
+        if self.total == 0 {
+            100.0
+        } else {
+            (self.typed as f64 / self.total as f64) * 100.0
+        }
+    }
+}
+
+/// A Dynamic expression entry for `--detail` output.
+#[derive(Debug, Clone)]
+pub struct DynamicEntry {
+    /// Source file path.
+    pub file: String,
+    /// Class this expression belongs to.
+    pub class_name: EcoString,
+    /// Byte offset span.
+    pub span: Span,
+    /// Why the type is Dynamic.
+    pub reason: DynamicReason,
+}
+
+/// Coverage report across an entire project.
+///
+/// Classifies `TypeMap` entries as typed (`Known`/`Union`) or untyped (`Dynamic`)
+/// and produces per-class and aggregate statistics.
+///
+/// **References:** ADR 0077 Section 3
+#[derive(Debug, Clone)]
+pub struct CoverageReport {
+    /// Per-class coverage statistics.
+    pub classes: Vec<ClassCoverage>,
+    /// All Dynamic expression entries (populated only when detail mode is requested).
+    pub dynamic_entries: Vec<DynamicEntry>,
+    /// Total expressions across all classes.
+    pub total_expressions: usize,
+    /// Typed expressions across all classes.
+    pub typed_expressions: usize,
+}
+
+impl CoverageReport {
+    /// Returns aggregate coverage as a percentage (0.0–100.0).
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "expression counts are far below f64 mantissa limit"
+    )]
+    pub fn coverage_percent(&self) -> f64 {
+        if self.total_expressions == 0 {
+            100.0
+        } else {
+            (self.typed_expressions as f64 / self.total_expressions as f64) * 100.0
+        }
+    }
+
+    /// Computes a coverage report from a module's type map.
+    ///
+    /// Each expression span in the `TypeMap` is assigned to the class whose
+    /// definition span contains it.  Expressions outside any class (top-level
+    /// scripts) are excluded from the report.
+    ///
+    /// When `detail` is true, all Dynamic entries are collected into
+    /// `dynamic_entries`.
+    #[must_use]
+    pub fn from_module(module: &Module, type_map: &TypeMap, file: &str, detail: bool) -> Self {
+        // Build (class_name, class_span) pairs for span containment.
+        let class_spans: Vec<(EcoString, Span)> = module
+            .classes
+            .iter()
+            .map(|c| (c.name.name.clone(), c.span))
+            .collect();
+
+        // Per-class accumulators: (total, typed)
+        let mut class_counts: HashMap<EcoString, (usize, usize)> = HashMap::new();
+        for (name, _) in &class_spans {
+            class_counts.insert(name.clone(), (0, 0));
+        }
+
+        let mut dynamic_entries = Vec::new();
+
+        for (span, ty) in type_map.iter() {
+            // Find which class this span belongs to.
+            let class_name = class_spans
+                .iter()
+                .find(|(_, cs)| cs.start() <= span.start() && span.end() <= cs.end())
+                .map(|(name, _)| name);
+
+            let Some(class_name) = class_name else {
+                continue; // top-level expression, skip
+            };
+
+            let Some(counts) = class_counts.get_mut(class_name) else {
+                continue;
+            };
+            counts.0 += 1;
+
+            if let InferredType::Dynamic(reason) = ty {
+                if detail {
+                    dynamic_entries.push(DynamicEntry {
+                        file: file.to_string(),
+                        class_name: class_name.clone(),
+                        span,
+                        reason: *reason,
+                    });
+                }
+            } else {
+                counts.1 += 1;
+            }
+        }
+
+        let mut classes: Vec<ClassCoverage> = class_spans
+            .iter()
+            .filter_map(|(name, _)| {
+                let (total, typed) = class_counts.get(name)?;
+                Some(ClassCoverage {
+                    name: name.clone(),
+                    file: file.to_string(),
+                    total: *total,
+                    typed: *typed,
+                })
+            })
+            .collect();
+        classes.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.name.cmp(&b.name)));
+
+        let total_expressions: usize = classes.iter().map(|c| c.total).sum();
+        let typed_expressions: usize = classes.iter().map(|c| c.typed).sum();
+
+        Self {
+            classes,
+            dynamic_entries,
+            total_expressions,
+            typed_expressions,
+        }
+    }
+
+    /// Merges another coverage report into this one.
+    pub fn merge(&mut self, other: Self) {
+        self.classes.extend(other.classes);
+        self.dynamic_entries.extend(other.dynamic_entries);
+        self.total_expressions += other.total_expressions;
+        self.typed_expressions += other.typed_expressions;
     }
 }
 

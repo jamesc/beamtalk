@@ -28,6 +28,21 @@ pub enum DynamicReason {
     Unknown,
 }
 
+impl DynamicReason {
+    /// Returns a human-readable description of why the type is Dynamic.
+    #[must_use]
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::UnannotatedParam => "parameter has no type annotation",
+            Self::UnannotatedReturn => "no return type annotation and body could not be inferred",
+            Self::DynamicReceiver => "receiver is Dynamic",
+            Self::AmbiguousControlFlow => "control flow produces incompatible types",
+            Self::UntypedFfi => "Erlang FFI call with no spec",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Tracks where a type came from — enables precise error messages
 /// and determines how far inference should propagate.
 ///
