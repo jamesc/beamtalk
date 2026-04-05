@@ -618,10 +618,10 @@ impl TypeChecker {
         };
 
         // Record inferred type for the expression's full span for LSP queries.
-        // Skip Dynamic — it carries no useful info and all callers treat
-        // `None` and `Some(Dynamic)` equivalently. Avoiding the insert saves
-        // both a clone and a HashMap insertion for every unresolved expression.
-        if !matches!(ty, InferredType::Dynamic(_)) {
+        // Dynamic types with a known reason (e.g., UnannotatedParam) are included
+        // so that hover can display "Dynamic (reason)" — see BT-1912.
+        // Only Dynamic(Unknown) is skipped since it carries no useful provenance.
+        if !matches!(ty, InferredType::Dynamic(DynamicReason::Unknown)) {
             self.type_map.insert(expr.span(), ty.clone());
         }
         ty

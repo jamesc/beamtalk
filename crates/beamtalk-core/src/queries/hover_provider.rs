@@ -2358,4 +2358,49 @@ mod tests {
             "FFI hover should indicate it is an Erlang FFI call. Got: {doc}"
         );
     }
+
+    #[test]
+    fn hover_on_unannotated_param_shows_dynamic_reason() {
+        // An unannotated parameter `x` should show Dynamic (unannotated parameter)
+        let source = "Object subclass: Foo\n  doSomething: x => x";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over the `x` in the method body (the return expression)
+        let body_x_offset = source.rfind('x').unwrap();
+        let pos = Position::from_offset(source, body_x_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = hover.expect("should get hover for unannotated param reference");
+        assert!(
+            hover.contents.contains("Dynamic (unannotated parameter)"),
+            "Unannotated param should show reason. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_annotated_param_shows_concrete_type() {
+        // An annotated parameter should show the declared type, not Dynamic
+        let source = "Object subclass: Foo\n  doSomething: x :: Integer => x";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over the `x` in the method body
+        let body_x_offset = source.rfind('x').unwrap();
+        let pos = Position::from_offset(source, body_x_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = hover.expect("should get hover for annotated param reference");
+        assert!(
+            hover.contents.contains("Integer"),
+            "Annotated param should show Integer. Got: {}",
+            hover.contents
+        );
+        assert!(
+            !hover.contents.contains("Dynamic"),
+            "Annotated param should not be Dynamic. Got: {}",
+            hover.contents
+        );
+    }
 }
