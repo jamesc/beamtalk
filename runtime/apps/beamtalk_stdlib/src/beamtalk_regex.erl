@@ -44,7 +44,7 @@
 %% @doc Compile a regex pattern string into a Regex object.
 %%
 %% Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
--spec 'from:'(binary()) -> map().
+-spec 'from:'(binary()) -> beamtalk_result:t().
 'from:'(Pattern) when is_binary(Pattern) ->
     case re:compile(Pattern) of
         {ok, MP} ->
@@ -72,7 +72,7 @@
 %%
 %% Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 %% Unknown options still raise (programming error).
--spec 'from:options:'(binary(), list()) -> map().
+-spec 'from:options:'(binary(), list()) -> beamtalk_result:t().
 'from:options:'(Pattern, Options) when is_binary(Pattern), is_list(Options) ->
     ErlOpts = translate_options(Options),
     case re:compile(Pattern, ErlOpts) of
@@ -102,11 +102,11 @@
 %%% ============================================================================
 
 %% @doc FFI alias for from:/1 — called via (Erlang beamtalk_regex) from: pattern.
--spec from(binary()) -> map().
+-spec from(binary()) -> beamtalk_result:t().
 from(Pattern) -> 'from:'(Pattern).
 
 %% @doc FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
--spec from(binary(), list()) -> map().
+-spec from(binary(), list()) -> beamtalk_result:t().
 from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 
 %%% ============================================================================

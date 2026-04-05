@@ -728,6 +728,43 @@ result value  // raises on error
 // => "badarg"
 ```
 
+### Type Specs for Native Modules
+
+When writing native Erlang modules that implement Beamtalk class methods, prefer the exported Dialyzer-facing types for `Result` and wrapped error values instead of bare `map()`. These types are primarily useful for Erlang `-spec` annotations and Dialyzer; Beamtalk's spec importer may resolve them to `Dictionary` in generated Beamtalk signatures rather than `Result(...)` / `Exception`.
+
+| Type | Description |
+|------|-------------|
+| `beamtalk_result:t()` | Any Result (unparameterized) |
+| `beamtalk_result:t(OkType, ErrType)` | Result with known ok/error types |
+| `beamtalk_error:t()` | Exception tagged map (the wrapped error visible to Beamtalk) |
+
+**Example specs:**
+
+```erlang
+-module(beamtalk_mylib).
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+%% Unparameterized — any Result
+-spec 'readConfig:'(binary()) -> beamtalk_result:t().
+'readConfig:'(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            beamtalk_result:from_tagged_tuple({ok, Bin});
+        {error, Reason} ->
+            Err0 = beamtalk_error:new(io_error, 'MyLib', 'readConfig:'),
+            Err1 = beamtalk_error:with_details(Err0, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Err1})
+    end.
+
+%% Parameterized — precise ok/error types for Dialyzer
+-spec 'parse:'(binary()) -> beamtalk_result:t(map(), beamtalk_error:t()).
+'parse:'(Data) -> ...
+```
+
+These types are defined in:
+- `runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl` — `t/0` and `t/2`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_error.erl` — `t/0` and `error/0`
+
 ### Loading Code into the Workspace
 
 Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` singleton. Loaded classes are immediately available — existing actors pick up new code on next dispatch.

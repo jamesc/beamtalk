@@ -49,7 +49,7 @@
 %%
 %% Returns `Result ok: value` on success, `Result error:` on invalid JSON.
 %% Type error (non-String argument) still raises.
--spec 'parse:'(binary()) -> map().
+-spec 'parse:'(binary()) -> beamtalk_result:t().
 'parse:'(JsonStr) when is_binary(JsonStr) ->
     try
         Value = json:decode(JsonStr),
