@@ -60,15 +60,15 @@ The `PartialEq` impl continues to ignore the reason (all `Dynamic` values are eq
 
 When an expression's inferred type is `Dynamic`, the hover provider displays it explicitly with the reason:
 
-```
+```text
 Identifier: `handler` — Type: Dynamic (no return annotation on getHandler)
 ```
 
-```
+```text
 Identifier: `result` — Type: Dynamic (receiver is Dynamic)
 ```
 
-```
+```text
 Identifier: `data` — Type: Dynamic (parameter has no type annotation)
 ```
 
@@ -82,7 +82,7 @@ Note: `display_name()` currently returns `None` for `Dynamic`, which all callers
 
 A new CLI command reports type coverage statistics per class and per file:
 
-```
+```console
 $ beamtalk type-coverage
 Type Coverage Report
 ====================
@@ -113,7 +113,7 @@ Coverage is defined as: **(expressions with non-Dynamic inferred type) / (total 
 
 #### Example: Detail Mode
 
-```
+```console
 $ beamtalk type-coverage --detail --class MyApp
 Type Coverage: MyApp (src/MyApp.bt) — 45.0% (9/20)
 
@@ -302,6 +302,8 @@ Show coverage only through LSP (hover, code lens, diagnostics) without a CLI too
 - `crates/beamtalk-core/src/semantic_analysis/type_checker/inference.rs` — update each site producing `InferredType::Dynamic` (~58 sites) to supply the appropriate `DynamicReason`
 - `crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs` — update `Dynamic` pattern matches (~9 sites)
 - `crates/beamtalk-core/src/semantic_analysis/type_checker/native_types.rs` — update FFI Dynamic sites (~6 sites) to use `UntypedFfi`
+- `crates/beamtalk-core/src/semantic_analysis/type_checker/native_type_registry.rs` — update ~2 Dynamic sites
+- `crates/beamtalk-core/src/semantic_analysis/type_checker/protocol.rs` — update ~1 Dynamic site
 - `crates/beamtalk-core/src/semantic_analysis/type_checker/types.rs` — `union_of` helper: propagate reason from Dynamic member; use `AmbiguousControlFlow` when multiple Dynamic members are present
 - `crates/beamtalk-core/src/queries/hover_provider.rs` — display Dynamic with reason string; audit all `display_name()` callers for the `None` → `Some` behavior change
 
