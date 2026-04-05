@@ -1,7 +1,7 @@
 # ADR 0077: Type Coverage Visibility
 
 ## Status
-Proposed (2026-04-05)
+Accepted (2026-04-05)
 
 ## Context
 
