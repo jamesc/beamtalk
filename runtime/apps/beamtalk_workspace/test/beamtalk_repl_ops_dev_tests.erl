@@ -884,6 +884,18 @@ dedupe_removes_multiple_aliases_test() ->
 dedupe_empty_list_test() ->
     ?assertEqual([], beamtalk_repl_ops_dev:dedupe_keyword_aliases([])).
 
+dedupe_removes_multi_keyword_alias_test() ->
+    %% BT-1904: run/2 is the dispatch alias for 'run:timeout:'/2
+    Specs = [
+        #{name => <<"run:">>, arity => 1, params => [], return_type => <<"String">>},
+        #{name => <<"run">>, arity => 1, params => [], return_type => <<"String">>},
+        #{name => <<"run:timeout:">>, arity => 2, params => [], return_type => <<"String">>},
+        #{name => <<"run">>, arity => 2, params => [], return_type => <<"String">>}
+    ],
+    Result = beamtalk_repl_ops_dev:dedupe_keyword_aliases(Specs),
+    Names = [{maps:get(name, S), maps:get(arity, S)} || S <- Result],
+    ?assertEqual([{<<"run:">>, 1}, {<<"run:timeout:">>, 2}], lists:sort(Names)).
+
 %%====================================================================
 %% format_beamtalk_signature/3 — double-colon fix
 %%====================================================================

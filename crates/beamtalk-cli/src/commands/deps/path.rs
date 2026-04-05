@@ -419,6 +419,7 @@ fn compile_dependency_with_context(
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
+        native_type_registry: None, // Dependencies don't need FFI type checking
     };
 
     let (core_files, module_names) = compile_sources_to_core(

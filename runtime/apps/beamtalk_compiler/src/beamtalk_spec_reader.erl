@@ -190,12 +190,13 @@ beam_file_to_module_name(BeamFile) ->
 -spec extract_specs_from_forms([erl_parse:abstract_form()]) -> [map()].
 extract_specs_from_forms(Forms) ->
     Exports = extract_exports(Forms),
+    LineMap = extract_function_lines(Forms),
     lists:filtermap(
         fun
             ({attribute, _, spec, {{Name, Arity}, Clauses}}) ->
                 case sets:is_element({Name, Arity}, Exports) of
                     true ->
-                        Entry = process_spec(Name, Arity, Clauses),
+                        Entry = process_spec(Name, Arity, Clauses, LineMap),
                         {true, Entry};
                     false ->
                         false
@@ -204,7 +205,7 @@ extract_specs_from_forms(Forms) ->
                 %% Remote spec form (module:function/arity)
                 case sets:is_element({Name, Arity}, Exports) of
                     true ->
-                        Entry = process_spec(Name, Arity, Clauses),
+                        Entry = process_spec(Name, Arity, Clauses, LineMap),
                         {true, Entry};
                     false ->
                         false
@@ -212,6 +213,29 @@ extract_specs_from_forms(Forms) ->
             (_) ->
                 false
         end,
+        Forms
+    ).
+
+%% Build a map of {Name, Arity} -> Line from function definition forms.
+%%
+%% Function forms have the shape `{function, Anno, Name, Arity, Clauses}'.
+%% We extract the line via `erl_anno:line/1' for goto-definition.
+-spec extract_function_lines([erl_parse:abstract_form()]) ->
+    #{{atom(), non_neg_integer()} => pos_integer()}.
+extract_function_lines(Forms) ->
+    lists:foldl(
+        fun
+            ({function, Anno, Name, Arity, _Clauses}, Acc) ->
+                case erl_anno:line(Anno) of
+                    Line when is_integer(Line), Line > 0 ->
+                        Acc#{{Name, Arity} => Line};
+                    _ ->
+                        Acc
+                end;
+            (_, Acc) ->
+                Acc
+        end,
+        #{},
         Forms
     ).
 
@@ -234,17 +258,23 @@ extract_exports(Forms) ->
 %% Multi-clause specs: parameter names and types come from the first clause
 %% (Erlang convention — all clauses share the same arity). The return type
 %% is the union (deduped) of all clause return types.
--spec process_spec(atom(), non_neg_integer(), [tuple()]) -> map().
-process_spec(Name, Arity, Clauses) ->
+%%
+%% `LineMap' maps `{Name, Arity}' to the source line of the function definition.
+-spec process_spec(atom(), non_neg_integer(), [tuple()], map()) -> map().
+process_spec(Name, Arity, Clauses, LineMap) ->
     %% Extract params from the first clause, return types from all clauses
     {Params, ReturnTypes} = extract_from_clauses(Clauses, Arity),
     ReturnType = merge_return_types(ReturnTypes),
-    #{
+    Base = #{
         name => atom_to_binary(Name, utf8),
         arity => Arity,
         params => Params,
         return_type => ReturnType
-    }.
+    },
+    case maps:find({Name, Arity}, LineMap) of
+        {ok, Line} -> Base#{line => Line};
+        error -> Base
+    end.
 
 %% Extract params (from first clause) and return types (from all clauses).
 -spec extract_from_clauses([tuple()], non_neg_integer()) ->

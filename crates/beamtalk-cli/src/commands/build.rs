@@ -224,11 +224,6 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
-    // ADR 0075 Phase 1: Extract type specs from OTP .beam files on the code
-    // path. Results are cached in _build/type_cache/ — incremental builds
-    // read zero .beam files when the cache is fresh.
-    extract_type_specs(&env);
-
     Ok(())
 }
 
@@ -679,6 +674,12 @@ fn execute_build_passes(
 
     let native_result = compile_native_sources(env, dep_ctx, &index.class_module_index)?;
 
+    // ADR 0075: Extract type specs from OTP and dependency .beam files after
+    // native compilation so freshly compiled native modules are included.
+    // Results are cached in _build/type_cache/ — incremental builds read zero
+    // .beam files when the cache is fresh.
+    let native_type_registry = extract_type_specs(env).map(std::sync::Arc::new);
+
     let file_module_pairs = compute_file_module_pairs(env)?;
 
     // BT-1682: Per-file change detection — only recompile files whose source
@@ -724,6 +725,7 @@ fn execute_build_passes(
         },
         dep_registry: registry_ref,
         strict_deps,
+        native_type_registry,
     };
     for (file, module_name, core_file) in &file_module_pairs {
         module_names.push(module_name.clone());
@@ -816,13 +818,13 @@ fn post_process_package_artifacts(
 ///
 /// Only runs in package mode (when `beamtalk.toml` exists) — single-file builds
 /// don't create the `_build/` directory.
-fn extract_type_specs(env: &BuildEnvironment) {
+fn extract_type_specs(
+    env: &BuildEnvironment,
+) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
     use crate::beam_compiler;
 
     // Skip in single-file mode — no _build/ directory to cache into.
-    if env.pkg_manifest().is_none() {
-        return;
-    }
+    env.pkg_manifest()?;
 
     let cache_dir = env.layout.type_cache_dir();
 
@@ -861,7 +863,7 @@ fn extract_type_specs(env: &BuildEnvironment) {
 
     if beam_files.is_empty() {
         debug!("No .beam files found for type spec extraction");
-        return;
+        return None;
     }
 
     match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
@@ -873,9 +875,11 @@ fn extract_type_specs(env: &BuildEnvironment) {
                     "Extracted Erlang FFI type specs"
                 );
             }
+            Some(registry)
         }
         Err(e) => {
             debug!("Type spec extraction failed (non-fatal): {e}");
+            None
         }
     }
 }

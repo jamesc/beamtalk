@@ -9229,6 +9229,7 @@ fn lists_registry() -> NativeTypeRegistry {
                 }],
                 return_type: InferredType::known("List"),
                 provenance: TypeProvenance::Extracted,
+                line: None,
             },
             FunctionSignature {
                 name: "seq".to_string(),
@@ -9245,6 +9246,7 @@ fn lists_registry() -> NativeTypeRegistry {
                 ],
                 return_type: InferredType::known("List"),
                 provenance: TypeProvenance::Extracted,
+                line: None,
             },
             FunctionSignature {
                 name: "member".to_string(),
@@ -9261,6 +9263,7 @@ fn lists_registry() -> NativeTypeRegistry {
                 ],
                 return_type: InferredType::known("Boolean"),
                 provenance: TypeProvenance::Extracted,
+                line: None,
             },
             FunctionSignature {
                 name: "node".to_string(),
@@ -9268,6 +9271,7 @@ fn lists_registry() -> NativeTypeRegistry {
                 params: vec![],
                 return_type: InferredType::known("Symbol"),
                 provenance: TypeProvenance::Extracted,
+                line: None,
             },
         ],
     );

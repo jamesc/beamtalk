@@ -676,6 +676,7 @@ mod tests {
                 ],
                 return_type: InferredType::known("List"),
                 provenance: TypeProvenance::Extracted,
+                line: None,
             }],
         );
 
