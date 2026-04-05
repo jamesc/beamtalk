@@ -82,11 +82,16 @@ fn collect_fmt_files(paths: &[String]) -> Result<CollectedFiles> {
             let root = find_package_root(&source_path).unwrap_or_else(|| source_path.clone());
             let native_dir = root.join("native");
             if native_dir.is_dir() {
-                if let Ok(files) = FileWalker::native_erl_files().walk(&native_dir) {
-                    for file in files {
-                        if erl_seen.insert(file.clone()) {
-                            erl_files.push(file);
+                match FileWalker::native_erl_files().walk(&native_dir) {
+                    Ok(files) => {
+                        for file in files {
+                            if erl_seen.insert(file.clone()) {
+                                erl_files.push(file);
+                            }
                         }
+                    }
+                    Err(e) => {
+                        eprintln!("warning: failed to scan native directory: {e}");
                     }
                 }
             }

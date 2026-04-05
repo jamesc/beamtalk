@@ -308,7 +308,8 @@ fn count_function_arity(line: &str) -> usize {
 /// Check if a `-doc` attribute appears in the lines immediately preceding `line_no`.
 ///
 /// Scans backwards over blank lines, comments, and `-spec` attributes (including
-/// multi-line specs) to find a `-doc` attribute.
+/// multi-line specs) to find a `-doc` attribute. Stops at function boundaries
+/// to avoid borrowing a previous function's `-doc`.
 fn has_preceding_doc(line_no: usize, lines: &[&str]) -> bool {
     let mut i = line_no;
     let mut in_spec = false;
@@ -322,7 +323,7 @@ fn has_preceding_doc(line_no: usize, lines: &[&str]) -> bool {
             return true;
         }
         if trimmed.starts_with("-spec") {
-            // Found start of a spec — keep scanning for -doc above it.
+            // Found start of a (possibly multi-line) spec — keep scanning.
             in_spec = false;
             continue;
         }
@@ -330,10 +331,15 @@ fn has_preceding_doc(line_no: usize, lines: &[&str]) -> bool {
             // Inside a multi-line spec (scanning backwards) — skip.
             continue;
         }
-        // Check if this looks like the end of a multi-line spec or attribute.
-        // If it doesn't start with `-` and isn't a function definition, treat
-        // it as a continuation line and enter "in_spec" mode to scan backwards
-        // for the `-spec` start.
+        // If this line looks like a function clause (starts with a function
+        // name at column 0 — not indented), it's a boundary — stop to avoid
+        // borrowing the previous function's `-doc`. Erlang function definitions
+        // always start at column 0; spec continuations are indented.
+        if trimmed.len() == lines[i].len() && parse_function_head(trimmed).is_some() {
+            break;
+        }
+        // Otherwise it's likely a continuation of a multi-line attribute
+        // (e.g. the tail of a multi-line spec). Enter spec-scanning mode.
         if !trimmed.starts_with('-') {
             in_spec = true;
             continue;
@@ -484,6 +490,21 @@ mod tests {
         assert!(
             diags.is_empty(),
             "multi-line spec between -doc and function should not trigger; got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn undocumented_function_does_not_borrow_previous_doc() {
+        // bar() should not borrow foo()'s -doc attribute.
+        let source = "-module(foo).\n-moduledoc \"Foo.\".\n-export([foo/0, bar/0]).\n-doc \"Foo.\"\nfoo() -> ok.\n\nbar() -> ok.\n";
+        let diags: Vec<_> = lint(source)
+            .into_iter()
+            .filter(|d| d.message.contains("bar/0"))
+            .collect();
+        assert_eq!(
+            diags.len(),
+            1,
+            "bar/0 should be flagged as missing -doc; got: {diags:?}"
         );
     }
 

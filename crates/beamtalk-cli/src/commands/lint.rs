@@ -207,8 +207,9 @@ fn collect_lint_files(
         let project_root = find_package_root(source_path).unwrap_or_else(|| source_path.clone());
         let native_dir = project_root.join("native");
         if native_dir.is_dir() {
-            if let Ok(files) = FileWalker::native_erl_files().walk(&native_dir) {
-                erl_files = files;
+            match FileWalker::native_erl_files().walk(&native_dir) {
+                Ok(files) => erl_files = files,
+                Err(e) => warn!("failed to scan native directory: {e}"),
             }
         }
         collect_source_files_from_dir(source_path)?

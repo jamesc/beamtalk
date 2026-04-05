@@ -123,7 +123,8 @@ fn invoke_erlfmt(
     for file in files {
         let action = if check_only { "check" } else { "write" };
         // Escape the file path for embedding in an Erlang string literal.
-        let escaped_file = file.as_str().replace('\\', "\\\\").replace('"', "\\\"");
+        // Must handle: backslash, double-quote, and control characters.
+        let escaped_file = escape_for_erlang_string(file.as_str());
         // Build an Erlang expression that formats a single file.
         // erlfmt:format_file/2 returns {ok, Code, Warnings} | {skip, Reason} | {error, Error}
         // For check mode we compare the formatted output with the original.
@@ -184,4 +185,24 @@ fn invoke_erlfmt(
     }
 
     Ok(result)
+}
+
+/// Escape a string for embedding in an Erlang string literal.
+///
+/// Handles backslashes, double-quotes, and control characters that the
+/// Erlang parser would otherwise interpret.
+fn escape_for_erlang_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c => out.push(c),
+        }
+    }
+    out
 }
