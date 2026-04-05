@@ -2060,16 +2060,20 @@ format_eep48_signatures_or_exports(Module) ->
     try Module:module_info(exports) of
         Exports ->
             Filtered = [{F, A} || {F, A} <- Exports, F =/= module_info],
-            %% Filter out hidden (@private) functions
+            %% Single lookup per function: filter hidden and get signature in one pass
+            Lookups = [
+                {{F, A}, beamtalk_native_docs:lookup(Module, F, A)}
+             || {F, A} <- Filtered
+            ],
             Visible = [
-                {F, A}
-             || {F, A} <- Filtered,
-                not beamtalk_native_docs:is_hidden(Module, F, A)
+                {{F, A}, Doc}
+             || {{F, A}, Doc} <- Lookups,
+                Doc =/= {error, hidden}
             ],
             Sorted = lists:sort(Visible),
             Lines = lists:map(
-                fun({F, A}) ->
-                    case beamtalk_native_docs:lookup(Module, F, A) of
+                fun({{F, A}, Doc}) ->
+                    case Doc of
                         #{sig := Sig} when Sig =/= <<>> ->
                             iolist_to_binary([<<"  ">>, Sig]);
                         _ ->
@@ -2103,9 +2107,16 @@ format_specs_list(Module, Specs) ->
             Arity = maps:get(arity, Spec),
             FnAtom =
                 if
-                    is_atom(Name) -> Name;
-                    is_binary(Name) -> binary_to_atom(Name, utf8);
-                    true -> Name
+                    is_atom(Name) ->
+                        Name;
+                    is_binary(Name) ->
+                        try
+                            binary_to_existing_atom(Name, utf8)
+                        catch
+                            error:badarg -> Name
+                        end;
+                    true ->
+                        Name
                 end,
             not beamtalk_native_docs:is_hidden(Module, FnAtom, Arity)
         end,
@@ -2257,12 +2268,12 @@ format_erlang_function_with_docs(Module, Function, BeamPath, Msg) ->
     ModName = atom_to_binary(Module, utf8),
     %% Find all arities for this function
     Arities = find_function_arities(Module, Function),
-    %% Filter out arities where the function is hidden (@private)
-    VisibleArities = [
-        A
-     || A <- Arities,
-        not beamtalk_native_docs:is_hidden(Module, Function, A)
+    %% Single lookup per arity: filter hidden and collect docs in one pass
+    ArityDocs = [
+        {A, beamtalk_native_docs:lookup(Module, Function, A)}
+     || A <- Arities
     ],
+    VisibleArities = [A || {A, Doc} <- ArityDocs, Doc =/= {error, hidden}],
     case VisibleArities of
         [] ->
             %% No visible exported function — fall through to type lookup
@@ -2350,15 +2361,15 @@ format_erlang_function_with_docs(Module, Function, BeamPath, Msg) ->
                     <<>> -> BtSigSection;
                     _ -> iolist_to_binary([ErlSpecSection, <<"\n">>, BtSigSection])
                 end,
-            %% Read EEP-48 docs for each arity
+            %% Extract docs from pre-fetched lookups (no second disk read)
             DocSections = lists:filtermap(
-                fun(Arity) ->
-                    case beamtalk_native_docs:lookup(Module, Function, Arity) of
-                        #{doc := Doc, examples := Examples} ->
+                fun({_Arity, Doc}) ->
+                    case Doc of
+                        #{doc := DocText, examples := Examples} ->
                             DocPart =
-                                case Doc of
+                                case DocText of
                                     <<>> -> [];
-                                    _ -> [Doc]
+                                    _ -> [DocText]
                                 end,
                             ExPart =
                                 case Examples of
@@ -2373,7 +2384,7 @@ format_erlang_function_with_docs(Module, Function, BeamPath, Msg) ->
                             false
                     end
                 end,
-                VisibleArities
+                [{A, D} || {A, D} <- ArityDocs, D =/= {error, hidden}]
             ),
             FnDocText =
                 case DocSections of
