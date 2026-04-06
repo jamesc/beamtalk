@@ -68,7 +68,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
