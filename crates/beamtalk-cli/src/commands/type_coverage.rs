@@ -189,7 +189,7 @@ fn print_text_report(
                 format!("{}:?:?", entry.file)
             };
             let reason = entry.reason.description().unwrap_or("unknown");
-            println!("  {:<40} ({reason})", location);
+            println!("  {location:<40} ({reason})");
         }
     }
 }
