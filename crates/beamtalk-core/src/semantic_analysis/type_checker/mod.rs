@@ -343,6 +343,11 @@ pub struct TypeChecker {
     /// for `Erlang <module> <function>:` calls. Populated from `.beam`
     /// abstract code at build time.
     pub(super) native_type_registry: Option<Arc<NativeTypeRegistry>>,
+    /// When set, the type checker is processing a `typed` class and should
+    /// emit warnings for expressions that infer as Dynamic (ADR 0077, BT-1914).
+    ///
+    /// The value is the class name, used in the diagnostic message.
+    pub(super) typed_class_context: Option<EcoString>,
 }
 
 impl TypeChecker {
@@ -356,6 +361,7 @@ impl TypeChecker {
             current_package: None,
             protocol_registry: None,
             native_type_registry: None,
+            typed_class_context: None,
         }
     }
 
@@ -372,6 +378,7 @@ impl TypeChecker {
             current_package: Some(EcoString::from(package)),
             protocol_registry: None,
             native_type_registry: None,
+            typed_class_context: None,
         }
     }
 
