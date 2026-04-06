@@ -9,7 +9,7 @@ use crate::ast::{
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
-use crate::source_analysis::Span;
+use crate::source_analysis::{DiagnosticCategory, Span};
 
 fn span() -> Span {
     Span::new(0, 1)
@@ -10919,6 +10919,173 @@ fn coverage_percent_calculation() {
         typed: 0,
     };
     assert!((empty.coverage_percent() - 100.0).abs() < f64::EPSILON);
+}
+
+// ---- BT-1914: Dynamic inference warnings in typed classes ----
+
+#[test]
+fn test_dynamic_inference_warning_in_typed_class() {
+    // BT-1914: unannotated parameter in typed class should produce a warning
+    // when referenced in the method body.
+    let class_def = ClassDefinition::with_modifiers(
+        ident("StrictCounter"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("process:", span())]),
+            vec![ParameterDefinition::new(ident("handler"))], // no type annotation
+            // Body references `handler` — this is an identifier expression
+            // that infers as Dynamic(UnannotatedParam)
+            vec![bare(Expression::Identifier(ident("handler")))],
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        !dynamic_warnings.is_empty(),
+        "typed class should warn about Dynamic inference from unannotated param"
+    );
+    assert!(
+        dynamic_warnings[0].message.contains("StrictCounter"),
+        "warning should mention the class name: {:?}",
+        dynamic_warnings[0].message
+    );
+    assert!(
+        dynamic_warnings[0]
+            .message
+            .contains("unannotated parameter"),
+        "warning should include the DynamicReason description: {:?}",
+        dynamic_warnings[0].message
+    );
+    assert_eq!(
+        dynamic_warnings[0].category,
+        Some(DiagnosticCategory::Type),
+        "warning should have Type category"
+    );
+}
+
+#[test]
+fn test_no_dynamic_inference_warning_in_untyped_class() {
+    // BT-1914: non-typed class should NOT warn about Dynamic inference
+    let class_def = ClassDefinition::with_modifiers(
+        ident("SimpleCounter"),
+        Some(ident("Object")),
+        ClassModifiers::default(), // NOT typed
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("process:", span())]),
+            vec![ParameterDefinition::new(ident("handler"))],
+            vec![bare(Expression::Identifier(ident("handler")))],
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "non-typed class should NOT warn about Dynamic inference, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn test_no_dynamic_inference_warning_for_known_types() {
+    // BT-1914: expressions with known types in typed class should NOT warn
+    let class_def = ClassDefinition::with_modifiers(
+        ident("StrictCounter"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Unary("getValue".into()),
+            vec![],
+            vec![bare(int_lit(42))], // Integer literal — known type
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "known type should NOT produce Dynamic inference warning, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn test_expect_type_suppresses_dynamic_inference_warning() {
+    // BT-1914: @expect type should suppress Dynamic inference warnings.
+    // Uses parse_source for real spans so apply_expect_directives can match.
+    let source =
+        "typed Object subclass: Processor\n  process: handler =>\n    @expect type\n    handler";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "@expect type should suppress Dynamic inference warning, got: {dynamic_warnings:?}"
+    );
+    // No stale @expect warning
+    let stale: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("stale"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "should not produce stale @expect warning, got: {stale:?}"
+    );
+}
+
+#[test]
+fn test_expect_type_stale_when_no_dynamic_warning() {
+    // BT-1914: @expect type on a fully-typed expression in a typed class
+    // should produce a stale @expect warning.
+    let source = "typed Object subclass: Processor\n  getValue =>\n    @expect type\n    42";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let stale: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("stale"))
+        .collect();
+    assert!(
+        !stale.is_empty(),
+        "@expect type on `42` in typed class should produce stale warning, got diags: {diags:?}"
+    );
 }
 
 #[test]

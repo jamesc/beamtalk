@@ -17,7 +17,7 @@ use crate::ast::{
     Expression, ExpressionStatement, Literal, MessageSelector, Module, Pattern, TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
@@ -90,6 +90,8 @@ impl TypeChecker {
             if is_typed {
                 self.check_typed_state_annotations(&class.state, &class.name.name);
                 self.check_typed_state_annotations(&class.class_variables, &class.name.name);
+                // Enable Dynamic inference warnings for typed classes (BT-1914)
+                self.typed_class_context = Some(class.name.name.clone());
             }
 
             for method in &class.methods {
@@ -158,12 +160,21 @@ impl TypeChecker {
 
             // Warn about typed state fields with no default that aren't nilable
             self.check_uninitialized_state(class);
+
+            // Clear typed class context after processing all methods
+            self.typed_class_context = None;
         }
 
         // Check standalone method definitions (Tonel-style: `Counter >> increment => ...`)
         for standalone in &module.method_definitions {
             let class_name = &standalone.class_name.name;
             let is_abstract = hierarchy.is_abstract(class_name);
+            let is_typed = hierarchy.is_typed(class_name);
+
+            if is_typed {
+                self.typed_class_context = Some(class_name.clone());
+            }
+
             let mut method_env = TypeEnv::new();
             method_env.in_class_method = standalone.is_class_method;
             method_env.set("self", InferredType::known(class_name.clone()));
@@ -198,6 +209,8 @@ impl TypeChecker {
                     );
                 }
             }
+
+            self.typed_class_context = None;
         }
 
         // Check top-level expressions last — method return types are now available.
@@ -629,6 +642,32 @@ impl TypeChecker {
         if !matches!(ty, InferredType::Dynamic(DynamicReason::Unknown)) {
             self.type_map.insert(expr.span(), ty.clone());
         }
+
+        // BT-1914: Warn when an expression in a typed class infers as Dynamic.
+        // Only warn for root-cause Dynamic reasons (not DynamicReceiver, which is
+        // propagated from a receiver that already produced its own warning).
+        // Unknown is also skipped — no actionable message.
+        if let InferredType::Dynamic(reason) = &ty {
+            if !matches!(
+                reason,
+                DynamicReason::DynamicReceiver | DynamicReason::Unknown
+            ) {
+                if let Some(ref class_name) = self.typed_class_context {
+                    if let Some(description) = reason.description() {
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "expression inferred as Dynamic in typed class `{class_name}` ({description})"
+                                ),
+                                expr.span(),
+                            )
+                            .with_category(DiagnosticCategory::Type),
+                        );
+                    }
+                }
+            }
+        }
+
         ty
     }
 
