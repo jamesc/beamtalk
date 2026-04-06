@@ -130,9 +130,7 @@ pub fn run(
         let coverage = report.coverage_percent();
         if coverage < threshold {
             let display = (coverage * 10.0).round() / 10.0;
-            miette::bail!(
-                "type coverage {display:.1}% is below threshold {threshold:.1}%"
-            );
+            miette::bail!("type coverage {display:.1}% is below threshold {threshold:.1}%");
         }
     }
 

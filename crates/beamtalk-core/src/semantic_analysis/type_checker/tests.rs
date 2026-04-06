@@ -10931,9 +10931,6 @@ fn dynamic_reason_descriptions() {
         DynamicReason::DynamicReceiver.description(),
         Some("dynamic receiver")
     );
-    assert_eq!(
-        DynamicReason::UntypedFfi.description(),
-        Some("untyped FFI")
-    );
+    assert_eq!(DynamicReason::UntypedFfi.description(), Some("untyped FFI"));
     assert_eq!(DynamicReason::Unknown.description(), None);
 }
