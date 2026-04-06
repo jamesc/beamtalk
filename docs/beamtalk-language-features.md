@@ -850,6 +850,75 @@ collect: block :: Block -> Self =>
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
+### Dynamic Type Visibility (ADR 0077)
+
+When the compiler cannot determine an expression's type, it infers `Dynamic`. Beamtalk makes Dynamic visible so you can see exactly where the compiler lacks type information and why.
+
+#### Dynamic with Reasons
+
+Each `Dynamic` type carries a reason explaining why the type could not be determined:
+
+| Reason | Description | What to fix |
+|--------|-------------|-------------|
+| unannotated parameter | Parameter has no type annotation | Add `:: Type` to the parameter |
+| unannotated return | Method has no return type and body could not be inferred | Add `-> Type` return annotation |
+| dynamic receiver | Receiver is Dynamic, so message send result is Dynamic | Fix the receiver's type first |
+| ambiguous control flow | Control flow produces incompatible types | Add type annotations to branches |
+| untyped FFI | Erlang FFI call with no spec or all-Dynamic spec | Add `-spec` to the Erlang module |
+| *(none)* | Fallback — no specific reason available | Shown as plain `Dynamic` |
+
+#### LSP Hover
+
+When hovering over an expression in the editor, the LSP shows the inferred type including Dynamic with its reason:
+
+```text
+Identifier: `handler` — Type: Dynamic (unannotated return)
+Identifier: `result` — Type: Dynamic (dynamic receiver)
+Identifier: `data` — Type: Dynamic (unannotated parameter)
+Identifier: `count` — Type: Integer
+```
+
+When the reason is Unknown, the hover shows just `Type: Dynamic`. Previously, Dynamic expressions showed no type information at all — the type line was omitted entirely.
+
+### Typed Class Diagnostics
+
+`typed` classes opt into thorough type checking. In addition to requiring parameter and return annotations on methods, `typed` classes produce warnings for:
+
+#### Missing State Field Annotations
+
+State fields without type annotations produce a warning:
+
+```beamtalk
+typed Actor subclass: BankAccount
+  state: balance = 0          // warning: Missing type annotation for state field
+                               //          `balance` in typed class `BankAccount`
+  state: owner :: String = ""  // OK — annotated
+```
+
+#### Dynamic Inference Warnings
+
+When an expression in a `typed` class infers as Dynamic (for a root-cause reason like `unannotated parameter` or `unannotated return`), the compiler warns. Propagated reasons like `dynamic receiver` are not warned on separately since the root cause already has its own warning.
+
+```beamtalk
+typed Actor subclass: BankAccount
+  process: handler =>
+    handler doWork    // warning: expression inferred as Dynamic in typed class
+                      //          `BankAccount` (unannotated parameter)
+```
+
+### Suppressing Type Warnings with `@expect type`
+
+When Dynamic dispatch is intentional (e.g., a method that deliberately accepts any object), suppress the warning with `@expect type` on the preceding line:
+
+```beamtalk
+typed Actor subclass: BankAccount
+  process: handler =>
+    @expect type
+    handler doWork    // no warning — suppressed
+```
+
+`@expect type` suppresses all type-related warnings on the next expression, including type mismatches, does-not-understand hints, and Dynamic inference warnings. `@expect all` also works as a broader suppression.
+
 ---
 
 ## Parametric Types — Generics (ADR 0068)

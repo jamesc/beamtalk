@@ -21,6 +21,14 @@ beamtalk deps update        # Update lockfile
 beamtalk repl               # Interactive REPL (connects to workspace)
 beamtalk test               # Run test suite
 
+# Type coverage (ADR 0077)
+beamtalk type-coverage              # Per-class coverage report
+beamtalk type-coverage --detail     # Show each Dynamic expression with location and reason
+beamtalk type-coverage --format json          # Machine-readable JSON output
+beamtalk type-coverage --at-least 75          # Exit non-zero if coverage < 75% (CI ratchet)
+beamtalk type-coverage --class MyApp          # Filter to a specific class
+beamtalk type-coverage --detail --class MyApp # Detail for one class
+
 # Native Erlang
 beamtalk gen-native MyActor # Generate skeleton gen_server from a native: Actor class
 ```
@@ -795,6 +803,94 @@ TestCase subclass: TracingTest
 ```
 
 Serial classes run alone, sequentially, after all concurrent classes complete.
+
+## Type Coverage (ADR 0077)
+
+`beamtalk type-coverage` reports what percentage of expressions in your project have non-Dynamic inferred types. This helps track type adoption progress and gate CI on coverage regressions.
+
+### Basic Usage
+
+```console
+$ beamtalk type-coverage
+Type Coverage Report
+====================
+
+File                          Class              Coverage
+src/AccountService.bt         AccountService     92.3%  (48/52 expressions)
+src/Router.bt                 Router             87.1%  (54/62 expressions)
+src/ConfigLoader.bt           ConfigLoader       71.4%  (30/42 expressions)
+src/MyApp.bt                  MyApp              45.0%  (9/20 expressions)
+──────────────────────────────────────────────────────────────────────
+Total                                            80.1%  (141/176 expressions)
+```
+
+Coverage is defined as **(expressions with non-Dynamic inferred type) / (total expressions in the TypeMap)**. Every AST node that produces a TypeMap entry is counted — identifiers, message sends, assignments, literals, block bodies, and binary operations. Sub-expressions are counted individually.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--detail` | Show each Dynamic expression with `file:line:col` location and reason |
+| `--format json` | Machine-readable JSON output for dashboards and CI |
+| `--at-least N` | Exit non-zero if total coverage < N% (CI ratchet) |
+| `--class ClassName` | Filter to a specific class |
+
+### Detail Mode
+
+```console
+$ beamtalk type-coverage --detail --class MyApp
+Type Coverage Report
+====================
+
+File                          Class              Coverage
+src/MyApp.bt                  MyApp              45.0%  (9/20 expressions)
+──────────────────────────────────────────────────────────────────────
+Total                                            45.0%  (9/20 expressions)
+
+Dynamic expressions:
+  src/MyApp.bt:12:5                              (unannotated return)
+  src/MyApp.bt:15:9                              (dynamic receiver)
+  src/MyApp.bt:18:5                              (dynamic receiver)
+  ...
+```
+
+Each Dynamic expression shows its `file:line:col` location and the reason the type could not be determined. The reason strings match those shown in LSP hover (see [Dynamic Type Visibility](beamtalk-language-features.md#dynamic-type-visibility-adr-0077)).
+
+### CI Integration
+
+Use `--at-least` to prevent coverage regressions in CI pipelines:
+
+```yaml
+# In CI pipeline
+- run: beamtalk type-coverage --at-least 75 --format json
+```
+
+The command exits non-zero if total coverage falls below the threshold. JSON output includes a `passed` field for easy scripting:
+
+```json
+{
+  "total_expressions": 176,
+  "typed_expressions": 141,
+  "coverage_percent": 80.1,
+  "threshold": 75,
+  "passed": true,
+  "classes": [
+    {
+      "name": "AccountService",
+      "file": "src/AccountService.bt",
+      "total": 52,
+      "typed": 48,
+      "coverage_percent": 92.3
+    }
+  ]
+}
+```
+
+### Scope and Limitations
+
+- Coverage reports only the project's own classes. Dependencies and stdlib classes are excluded.
+- Block parameters and block bodies in collection methods (`collect:`, `inject:into:`) often infer as Dynamic because stored blocks lose type context. Classes using heavy iteration idioms may show systematically lower coverage.
+- Coverage measures what the compiler knows, not what you annotated — good type inference yields high coverage with few annotations. Well-spec'd Erlang FFI modules (via `NativeTypeRegistry`) also contribute positively.
 
 ## Shared Protocol Architecture
 
