@@ -57,7 +57,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       # Node.js only needed on Linux for fmt-check-js (Windows fmt-check skips JS/Erlang checks)
       - name: Setup Node.js
@@ -124,7 +124,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -170,7 +170,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -212,7 +212,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -281,7 +281,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -332,7 +332,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
