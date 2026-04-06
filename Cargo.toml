@@ -79,7 +79,7 @@ tokio-tungstenite = "0.29"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 # Diff generation (for beamtalk fmt-check unified diff output)
-similar = "2"
+similar = "3"
 
 # Testing
 insta = { version = "1", features = ["yaml"] }
