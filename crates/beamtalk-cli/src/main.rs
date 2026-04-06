@@ -306,6 +306,33 @@ enum Command {
         #[arg(long, default_value = "docs")]
         docs_path: String,
     },
+
+    /// Report type coverage statistics per class and per file
+    ///
+    /// Walks the `TypeMap` produced by type inference and reports what percentage of
+    /// expressions have non-Dynamic types. Useful for tracking type adoption progress
+    /// and gating CI on coverage regressions.
+    TypeCoverage {
+        /// Source file or directory to analyse
+        #[arg(default_value = ".")]
+        path: String,
+
+        /// Show each Dynamic expression with `file:line:col` and reason
+        #[arg(long)]
+        detail: bool,
+
+        /// Output format (text or json)
+        #[arg(long, default_value = "text")]
+        format: commands::type_coverage::OutputFormat,
+
+        /// Exit non-zero if total coverage < N% (CI ratchet)
+        #[arg(long)]
+        at_least: Option<f64>,
+
+        /// Filter to a specific class
+        #[arg(long = "class")]
+        class_filter: Option<String>,
+    },
 }
 
 /// The default stack size (1 MiB on Windows) is too small for deep AST recursion
@@ -523,5 +550,12 @@ fn run() -> Result<()> {
                 commands::doc::run(&path, &output)
             }
         }
+        Command::TypeCoverage {
+            path,
+            detail,
+            format,
+            at_least,
+            class_filter,
+        } => commands::type_coverage::run(&path, detail, format, at_least, class_filter.as_deref()),
     }
 }

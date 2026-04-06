@@ -10798,3 +10798,139 @@ fn generic_list_partition_returns_dictionary() {
         "List(Integer) partition: should return Dictionary, got: {result:?}"
     );
 }
+
+// ── CoverageReport tests (BT-1915) ─────────────────────────────────
+
+#[test]
+fn coverage_report_from_module_counts_typed_vs_dynamic() {
+    let source = r"
+Object subclass: Counter
+  state: count :: Integer = 0
+  increment => self.count := self.count + 1
+  value => self.count
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let type_map = infer_types(&module, &hierarchy);
+
+    let report = CoverageReport::from_module(&module, &type_map, "test.bt", false);
+
+    assert_eq!(report.classes.len(), 1, "should have one class");
+    assert_eq!(report.classes[0].name.as_str(), "Counter");
+    assert!(report.total_expressions > 0, "should have some expressions");
+    assert!(
+        report.typed_expressions <= report.total_expressions,
+        "typed <= total"
+    );
+    assert!(
+        report.dynamic_entries.is_empty(),
+        "no detail entries without detail mode"
+    );
+}
+
+#[test]
+fn coverage_report_detail_mode_collects_dynamic_entries() {
+    let source = r"
+Object subclass: Greeter
+  greet: name => name hello
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let type_map = infer_types(&module, &hierarchy);
+
+    let report = CoverageReport::from_module(&module, &type_map, "greeter.bt", true);
+
+    assert_eq!(report.classes.len(), 1);
+    // With detail mode, any Dynamic entries should be collected
+    // (name parameter is untyped -> Dynamic)
+    let dynamic_count = report.total_expressions - report.typed_expressions;
+    assert_eq!(
+        report.dynamic_entries.len(),
+        dynamic_count,
+        "detail mode should collect all dynamic entries"
+    );
+}
+
+#[test]
+fn coverage_report_empty_module() {
+    let module = make_module(vec![]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let type_map = infer_types(&module, &hierarchy);
+
+    let report = CoverageReport::from_module(&module, &type_map, "empty.bt", false);
+
+    assert!(report.classes.is_empty());
+    assert_eq!(report.total_expressions, 0);
+    assert_eq!(report.typed_expressions, 0);
+    // 100% coverage for empty module (nothing to cover)
+    assert!((report.coverage_percent() - 100.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn coverage_report_merge() {
+    let mut report_a = CoverageReport {
+        classes: vec![ClassCoverage {
+            name: "A".into(),
+            file: "a.bt".to_string(),
+            total: 10,
+            typed: 8,
+        }],
+        dynamic_entries: vec![],
+        total_expressions: 10,
+        typed_expressions: 8,
+    };
+    let report_b = CoverageReport {
+        classes: vec![ClassCoverage {
+            name: "B".into(),
+            file: "b.bt".to_string(),
+            total: 5,
+            typed: 5,
+        }],
+        dynamic_entries: vec![],
+        total_expressions: 5,
+        typed_expressions: 5,
+    };
+
+    report_a.merge(report_b);
+
+    assert_eq!(report_a.classes.len(), 2);
+    assert_eq!(report_a.total_expressions, 15);
+    assert_eq!(report_a.typed_expressions, 13);
+}
+
+#[test]
+fn coverage_percent_calculation() {
+    let coverage = ClassCoverage {
+        name: "Test".into(),
+        file: "test.bt".to_string(),
+        total: 100,
+        typed: 75,
+    };
+    assert!((coverage.coverage_percent() - 75.0).abs() < f64::EPSILON);
+
+    let empty = ClassCoverage {
+        name: "Empty".into(),
+        file: "empty.bt".to_string(),
+        total: 0,
+        typed: 0,
+    };
+    assert!((empty.coverage_percent() - 100.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn dynamic_reason_descriptions() {
+    assert_eq!(
+        DynamicReason::UnannotatedParam.description(),
+        Some("unannotated parameter")
+    );
+    assert_eq!(
+        DynamicReason::DynamicReceiver.description(),
+        Some("dynamic receiver")
+    );
+    assert_eq!(DynamicReason::UntypedFfi.description(), Some("untyped FFI"));
+    assert_eq!(DynamicReason::Unknown.description(), None);
+}
