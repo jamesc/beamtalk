@@ -297,6 +297,9 @@ pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
     // renames to port.  A crash between those two steps leaves a stale tmp file.
     remove_file_if_exists(&ws_dir.join("port.tmp"))?;
     remove_file_if_exists(&ws_dir.join("pid"))?;
+    // Clear previous crash diagnostics so read_startup_log_detail() cannot
+    // accidentally surface a stale run's error for the current attempt.
+    remove_file_if_exists(&ws_dir.join("startup.log"))?;
     remove_file_if_exists(&ws_dir.join("starting"))?;
     Ok(())
 }
