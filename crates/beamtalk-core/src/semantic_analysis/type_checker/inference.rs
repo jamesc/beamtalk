@@ -1016,12 +1016,19 @@ impl TypeChecker {
         // modules) or the stripped form (`reverse/1` in OTP modules). Try both.
         let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
 
+        // Look up the spec using multiple name forms. Erlang FFI modules use
+        // different naming conventions:
+        //   1. Full selector with colons: `readAll:` or `writeAll:contents:`
+        //   2. First keyword with colon: `addDays:` (for `addDays:by:` selector)
+        //   3. Bare name without colons: `reverse` (OTP modules)
         // Clone the signature to release the borrow on self before emitting diagnostics.
+        let first_kw_colon = format!("{}:", function_name);
         let sig = self
             .native_type_registry
             .as_ref()
             .and_then(|reg| {
                 reg.lookup(module_name, selector_name.as_str(), arity)
+                    .or_else(|| reg.lookup(module_name, &first_kw_colon, arity))
                     .or_else(|| reg.lookup(module_name, &function_name, arity))
             })
             .cloned();
