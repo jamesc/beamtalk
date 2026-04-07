@@ -81,7 +81,7 @@ impl Analyser {
                                  = help: use control flow directly: `items do: [:item | self.{name} := value]`"
                             ),
                             mutation.span,
-                        ));
+                        ).with_hint("Inline the block at the call site, or extract the field assignment into a separate method"));
                     }
                 }
                 MutationKind::CapturedVariable { .. } | MutationKind::LocalVariable { .. } => {

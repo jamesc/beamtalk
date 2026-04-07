@@ -49,6 +49,9 @@ fn abstract_class_error(class_name: &str, span: Span) -> Diagnostic {
         format!("Cannot instantiate abstract class `{class_name}`. Subclass it first."),
         span,
     )
+    .with_hint(format!(
+        "Create a concrete subclass of `{class_name}` and instantiate that instead"
+    ))
     .with_category(DiagnosticCategory::Type)
 }
 
@@ -489,6 +492,7 @@ pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagno
                         .to_string(),
                     class.name.span,
                 )
+                .with_hint("Choose a different class name — `Self` refers to the current class type in return annotations")
                 .with_category(DiagnosticCategory::Type),
             );
         }
@@ -696,6 +700,7 @@ fn visit_cast_on_value_type(
                         ),
                         *span,
                     )
+                    .with_hint("Remove the `!` — value types are not actors and cannot be cast to a message target")
                     .with_category(DiagnosticCategory::Type),
                 );
             }
@@ -899,6 +904,9 @@ fn check_keyword_for_kind(
                     ),
                     span,
                 )
+                .with_hint(format!(
+                    "Replace 'state: {field_name}' with 'field: {field_name}'"
+                ))
                 .with_category(DiagnosticCategory::Type),
             );
         }
@@ -913,6 +921,9 @@ fn check_keyword_for_kind(
                     ),
                     span,
                 )
+                .with_hint(format!(
+                    "Replace 'field: {field_name}' with 'state: {field_name}'"
+                ))
                 .with_category(DiagnosticCategory::Type),
             );
         }
@@ -927,6 +938,7 @@ fn check_keyword_for_kind(
                     ),
                     span,
                 )
+                .with_hint("Change the superclass to 'Value subclass:' or 'Actor subclass:' to allow data declarations")
                 .with_category(DiagnosticCategory::Type),
             );
         }

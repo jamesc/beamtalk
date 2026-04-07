@@ -1551,11 +1551,15 @@ impl CoreErlangGenerator {
         if self.codegen_diagnostics_enabled {
             if self.warn_stateacc {
                 self.add_codegen_warning(
-                    Diagnostic::warning(message, span).with_category(DiagnosticCategory::Type),
+                    Diagnostic::warning(message, span)
+                        .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
+                        .with_category(DiagnosticCategory::Type),
                 );
             } else {
                 self.add_codegen_warning(
-                    Diagnostic::hint(message, span).with_category(DiagnosticCategory::Type),
+                    Diagnostic::hint(message, span)
+                        .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
+                        .with_category(DiagnosticCategory::Type),
                 );
             }
         }
@@ -1583,6 +1587,7 @@ impl CoreErlangGenerator {
                 ),
                 span,
             )
+            .with_hint("Extract the block body into a method, or use a stateless block")
             .with_category(DiagnosticCategory::Type),
         );
     }
@@ -1602,6 +1607,7 @@ impl CoreErlangGenerator {
                 ),
                 span,
             )
+            .with_hint("Use a block literal directly, or extract into a method to avoid ambiguity")
             .with_category(DiagnosticCategory::Type),
         );
     }
@@ -2918,6 +2924,7 @@ impl CoreErlangGenerator {
                         ),
                         span,
                     )
+                    .with_hint(format!("Add the '{runtime_module}' module to the stdlib build, or check the @primitive name for typos"))
                     .with_category(DiagnosticCategory::Type),
                 );
             }

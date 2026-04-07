@@ -214,7 +214,10 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
                 cat.as_str()
             )
         };
-        diagnostics.push(Diagnostic::warning(message, span));
+        diagnostics.push(
+            Diagnostic::warning(message, span)
+                .with_hint("Remove the `@expect` directive if the diagnostic was fixed"),
+        );
     }
 }
 

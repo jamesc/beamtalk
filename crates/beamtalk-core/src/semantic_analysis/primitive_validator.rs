@@ -241,6 +241,7 @@ fn validate_stdlib_restriction(
                 "Using primitives outside stdlib — ensure you understand safety implications",
                 span,
             )
+            .with_hint("Primitives bypass normal dispatch — prefer Erlang FFI unless implementing a core stdlib binding")
             .with_category(DiagnosticCategory::Type),
         );
     } else {
