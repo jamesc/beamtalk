@@ -262,15 +262,12 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         "Set beamtalk.server.path in settings or ensure `beamtalk` is on the extension host PATH."
     );
     const action = await vscode.window.showWarningMessage(
-      "Could not find beamtalk-lsp. If Beamtalk is installed, set \"beamtalk.server.path\" in settings.",
+      'Could not find beamtalk-lsp. If Beamtalk is installed, set "beamtalk.server.path" in settings.',
       "Open Settings",
       "Install Beamtalk"
     );
     if (action === "Open Settings") {
-      void vscode.commands.executeCommand(
-        "workbench.action.openSettings",
-        "beamtalk.server.path"
-      );
+      void vscode.commands.executeCommand("workbench.action.openSettings", "beamtalk.server.path");
     } else if (action === "Install Beamtalk") {
       void vscode.env.openExternal(
         vscode.Uri.parse("https://github.com/jamesc/beamtalk#installation")
