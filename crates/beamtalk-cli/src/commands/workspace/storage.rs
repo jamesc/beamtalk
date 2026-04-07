@@ -389,14 +389,28 @@ mod tests {
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
 
-        // Write all runtime files including the tombstone.
-        for name in &["node.info", "port", "port.tmp", "pid", "starting"] {
+        // Write all runtime files including the tombstone and startup log.
+        for name in &[
+            "node.info",
+            "port",
+            "port.tmp",
+            "pid",
+            "startup.log",
+            "starting",
+        ] {
             fs::write(ws_dir.join(name), b"dummy").unwrap();
         }
 
         remove_stale_runtime_files(&ws_id).expect("remove_stale_runtime_files should not fail");
 
-        for name in &["node.info", "port", "port.tmp", "pid", "starting"] {
+        for name in &[
+            "node.info",
+            "port",
+            "port.tmp",
+            "pid",
+            "startup.log",
+            "starting",
+        ] {
             assert!(
                 !ws_dir.join(name).exists(),
                 "{name} should have been removed by remove_stale_runtime_files"
