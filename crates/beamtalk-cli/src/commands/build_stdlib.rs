@@ -12,9 +12,7 @@
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
-use crate::beam_compiler::{
-    BeamCompiler, CompileContext, compile_source_with_bindings,
-};
+use crate::beam_compiler::{BeamCompiler, CompileContext, compile_source_with_bindings};
 use crate::commands::util;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -379,9 +377,8 @@ fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
     }
 
     // Cache directory under the runtime _build to avoid re-extracting specs
-    let cache_dir: Utf8PathBuf =
-        Utf8PathBuf::from_path_buf(runtime_dir.join("_build/type_cache"))
-            .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
+    let cache_dir: Utf8PathBuf = Utf8PathBuf::from_path_buf(runtime_dir.join("_build/type_cache"))
+        .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
 
     match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
         Ok(registry) => {
