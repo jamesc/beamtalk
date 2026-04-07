@@ -47,6 +47,9 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+-type t() :: #{'$beamtalk_class' := 'Random', atom() => term()}.
+-export_type([t/0]).
+
 %%% ============================================================================
 %%% Class-side Methods (process dictionary seed)
 %%% ============================================================================
@@ -76,7 +79,7 @@
 %%% ============================================================================
 
 %% @doc Create a new Random instance with an auto-generated seed.
--spec 'new'() -> map().
+-spec 'new'() -> t().
 'new'() ->
     State = rand:seed_s(exsss),
     #{
@@ -85,7 +88,7 @@
     }.
 
 %% @doc Create a new Random instance with a specific seed.
--spec 'seed:'(integer()) -> map().
+-spec 'seed:'(integer()) -> t().
 'seed:'(Seed) when is_integer(Seed) ->
     State = rand:seed_s(exsss, {Seed, Seed, Seed}),
     #{
@@ -105,7 +108,7 @@
 %% @doc Return a random float from instance state.
 %% Random instances are immutable value types — calling next on the same
 %% instance always returns the same value.
--spec 'instanceNext'(map()) -> float().
+-spec 'instanceNext'(t()) -> float().
 'instanceNext'(#{state := State0}) ->
     {Value, _State1} = rand:uniform_s(State0),
     Value;
@@ -118,7 +121,7 @@
 %% @doc Return a random integer between 1 and Max from instance state.
 %% Random instances are immutable value types — calling nextInteger: on
 %% the same instance always returns the same value.
--spec 'instanceNextInteger:'(map(), integer()) -> integer().
+-spec 'instanceNextInteger:'(t(), integer()) -> integer().
 'instanceNextInteger:'(#{state := State0}, Max) when is_integer(Max), Max > 0 ->
     {Value, _State1} = rand:uniform_s(Max, State0),
     Value;
@@ -188,9 +191,9 @@
 nextInteger(Max) -> 'nextInteger:'(Max).
 
 %% @doc FFI shim: `(Erlang beamtalk_random) seed: seed`
--spec seed(integer()) -> map().
+-spec seed(integer()) -> t().
 seed(Seed) -> 'seed:'(Seed).
 
 %% @doc FFI shim: `(Erlang beamtalk_random) instanceNextInteger: self with: max`
--spec instanceNextInteger(map(), integer()) -> integer().
+-spec instanceNextInteger(t(), integer()) -> integer().
 instanceNextInteger(Self, Max) -> 'instanceNextInteger:'(Self, Max).

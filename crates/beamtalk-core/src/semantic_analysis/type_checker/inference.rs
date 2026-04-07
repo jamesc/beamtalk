@@ -1010,17 +1010,20 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
-        // Extract the Erlang function name from the selector.
-        // For `reverse: xs` → function = "reverse", arity = 1
-        // For `seq: 1 to: 10` → function = "seq", arity = 2
+        // Extract the Erlang function name and arity from the selector.
+        // Beamtalk selectors include colons (`readAll:`, `writeAll:contents:`).
+        // Erlang specs may use either the colon'd form (`'readAll:'/1` in beamtalk_*
+        // modules) or the stripped form (`reverse/1` in OTP modules). Try both.
         let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
 
-        // Look up in the native type registry.
         // Clone the signature to release the borrow on self before emitting diagnostics.
         let sig = self
             .native_type_registry
             .as_ref()
-            .and_then(|reg| reg.lookup(module_name, &function_name, arity))
+            .and_then(|reg| {
+                reg.lookup(module_name, selector_name.as_str(), arity)
+                    .or_else(|| reg.lookup(module_name, &function_name, arity))
+            })
             .cloned();
 
         let Some(sig) = sig else {
@@ -1089,18 +1092,22 @@ impl TypeChecker {
                 },
             ) = (&param.type_, arg_ty)
             {
-                if expected != actual {
-                    let param_pos = i + 1;
-                    let fallback_label = format!("parameter {param_pos}");
-                    let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
-                    self.diagnostics.push(Diagnostic::warning(
-                        format!(
-                            "{module_name}:{function_name}/{arity} {param_label} expects {expected}, got {actual}",
-                            arity = sig.arity,
-                        ),
-                        span,
-                    ));
+                // In Erlang specs, `map()` maps to "Dictionary". But Beamtalk
+                // objects are tagged maps, so any class type should be accepted
+                // where the spec says `map()`.
+                if expected == actual || expected.as_str() == "Dictionary" {
+                    continue;
                 }
+                let param_pos = i + 1;
+                let fallback_label = format!("parameter {param_pos}");
+                let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "{module_name}:{function_name}/{arity} {param_label} expects {expected}, got {actual}",
+                        arity = sig.arity,
+                    ),
+                    span,
+                ));
             }
         }
     }

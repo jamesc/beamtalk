@@ -52,12 +52,15 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+-type t() :: #{'$beamtalk_class' := 'Stream', atom() => term()}.
+-export_type([t/0]).
+
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
 
 %% @doc Create a Stream tagged map from a generator and description.
--spec make_stream(fun(() -> {term(), fun()} | done), binary()) -> map().
+-spec make_stream(fun(() -> {term(), fun()} | done), binary()) -> t().
 make_stream(Generator, Description) ->
     #{
         '$beamtalk_class' => 'Stream',
@@ -67,7 +70,7 @@ make_stream(Generator, Description) ->
 
 %% @doc Create a Stream tagged map with an optional finalizer callback.
 %% The finalizer is called when any terminal operation completes (for cleanup of resources like file handles).
--spec make_stream(fun(() -> {term(), fun()} | done), binary(), fun(() -> term())) -> map().
+-spec make_stream(fun(() -> {term(), fun()} | done), binary(), fun(() -> term())) -> t().
 make_stream(Generator, Description, Finalizer) when is_function(Finalizer, 0) ->
     #{
         '$beamtalk_class' => 'Stream',
@@ -82,7 +85,7 @@ make_stream(Generator, Description, Finalizer) when is_function(Finalizer, 0) ->
 
 %% @doc Create an infinite Stream starting from Start, incrementing by 1.
 %% `Stream from: 1` => 1, 2, 3, ...
--spec from(integer()) -> map().
+-spec from(integer()) -> t().
 from(Start) when is_integer(Start) ->
     make_stream(
         make_successor_gen(Start),
@@ -93,7 +96,7 @@ from(_) ->
 
 %% @doc Create an infinite Stream starting from Start, applying StepFun to get next.
 %% `Stream from: 1 by: [:n | n * 2]` => 1, 2, 4, 8, ...
--spec from_by(term(), fun((term()) -> term())) -> map().
+-spec from_by(term(), fun((term()) -> term())) -> t().
 from_by(Start, StepFun) when is_function(StepFun, 1) ->
     make_stream(
         make_step_gen(Start, StepFun),
@@ -105,7 +108,7 @@ from_by(_, _) ->
 %% @doc Create a Stream from a collection (list, set, or string).
 %% `Stream on: #(1, 2, 3)` => 1, 2, 3
 %% BT-514: Extended to support Set and String.
--spec on(term()) -> map().
+-spec on(term()) -> t().
 on(List) when is_list(List) ->
     make_stream(make_list_gen(List), <<"Stream(on: [...])">>);
 on(Str) when is_binary(Str) ->
@@ -138,7 +141,7 @@ on(_) ->
 %%% ============================================================================
 
 %% @doc Filter elements matching predicate.
--spec 'select'(map(), fun((term()) -> boolean())) -> map().
+-spec 'select'(t(), fun((term()) -> boolean())) -> t().
 'select'(
     #{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, Pred
 ) when is_function(Pred, 1) ->
@@ -149,7 +152,7 @@ on(_) ->
     raise_type_error('select:', <<"Expected a Block with 1 argument">>).
 
 %% @doc Transform each element.
--spec 'collect'(map(), fun((term()) -> term())) -> map().
+-spec 'collect'(t(), fun((term()) -> term())) -> t().
 'collect'(
     #{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, MapFun
 ) when is_function(MapFun, 1) ->
@@ -160,7 +163,7 @@ on(_) ->
     raise_type_error('collect:', <<"Expected a Block with 1 argument">>).
 
 %% @doc Inverse filter — exclude elements matching predicate.
--spec 'reject'(map(), fun((term()) -> boolean())) -> map().
+-spec 'reject'(t(), fun((term()) -> boolean())) -> t().
 'reject'(
     #{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, Pred
 ) when is_function(Pred, 1) ->
@@ -171,7 +174,7 @@ on(_) ->
     raise_type_error('reject:', <<"Expected a Block with 1 argument">>).
 
 %% @doc Skip first N elements.
--spec 'drop'(map(), non_neg_integer()) -> map().
+-spec 'drop'(t(), non_neg_integer()) -> t().
 'drop'(#{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, N) when
     is_integer(N), N >= 0
 ->
@@ -186,7 +189,7 @@ on(_) ->
 %%% ============================================================================
 
 %% @doc Return first N elements as a List.
--spec take(map(), non_neg_integer()) -> list().
+-spec take(t(), non_neg_integer()) -> list().
 take(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, N) when is_integer(N), N >= 0 ->
     try
         take_loop(Gen, N, [])
@@ -197,7 +200,7 @@ take(_, _) ->
     raise_type_error('take:', <<"Expected a non-negative Integer">>).
 
 %% @doc Iterate with side effects, return nil.
--spec do(map(), fun((term()) -> term())) -> 'nil'.
+-spec do(t(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Block) when is_function(Block, 1) ->
     try
         do_loop(Gen, Block)
@@ -209,7 +212,7 @@ do(_, _) ->
     raise_type_error('do:', <<"Expected a Block with 1 argument">>).
 
 %% @doc Fold/reduce: inject initial value, accumulate with block.
--spec inject_into(map(), term(), fun((term(), term()) -> term())) -> term().
+-spec inject_into(t(), term(), fun((term(), term()) -> term())) -> term().
 inject_into(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Initial, Block) when
     is_function(Block, 2)
 ->
@@ -222,7 +225,7 @@ inject_into(_, _, _) ->
     raise_type_error('inject:into:', <<"Expected a Block with 2 arguments">>).
 
 %% @doc Return first element matching predicate, or nil if none.
--spec detect(map(), fun((term()) -> boolean())) -> term().
+-spec detect(t(), fun((term()) -> boolean())) -> term().
 detect(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
@@ -235,7 +238,7 @@ detect(_, _) ->
     raise_type_error('detect:', <<"Expected a Block with 1 argument">>).
 
 %% @doc Materialize entire stream to a List.
--spec as_list(map()) -> list().
+-spec as_list(t()) -> list().
 as_list(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream) ->
     try
         as_list_loop(Gen, [])
@@ -244,7 +247,7 @@ as_list(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream) ->
     end.
 
 %% @doc Return true if any element satisfies predicate.
--spec any_satisfy(map(), fun((term()) -> boolean())) -> boolean().
+-spec any_satisfy(t(), fun((term()) -> boolean())) -> boolean().
 any_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
@@ -257,7 +260,7 @@ any_satisfy(_, _) ->
     raise_type_error('anySatisfy:', <<"Expected a Block with 1 argument">>).
 
 %% @doc Return true if all elements satisfy predicate.
--spec all_satisfy(map(), fun((term()) -> boolean())) -> boolean().
+-spec all_satisfy(t(), fun((term()) -> boolean())) -> boolean().
 all_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
@@ -274,7 +277,7 @@ all_satisfy(_, _) ->
 %%% ============================================================================
 
 %% @doc Return pipeline description string.
--spec print_string(map()) -> binary().
+-spec print_string(t()) -> binary().
 print_string(#{'$beamtalk_class' := 'Stream', description := Desc}) ->
     Desc.
 
@@ -428,7 +431,7 @@ all_satisfy_loop(Gen, Pred) ->
 
 %% @doc Safely invoke a stream's finalizer if present.
 %% Uses catch to handle double-close and missing finalizer gracefully.
--spec call_finalizer(map()) -> ok.
+-spec call_finalizer(t()) -> ok.
 call_finalizer(#{finalizer := Finalizer}) when is_function(Finalizer, 0) ->
     catch Finalizer(),
     ok;
@@ -436,7 +439,7 @@ call_finalizer(_) ->
     ok.
 
 %% @doc Copy finalizer from source stream to a new stream, if present.
--spec propagate_finalizer(map(), map()) -> map().
+-spec propagate_finalizer(t(), t()) -> t().
 propagate_finalizer(#{finalizer := Finalizer}, NewStream) ->
     NewStream#{finalizer => Finalizer};
 propagate_finalizer(_, NewStream) ->

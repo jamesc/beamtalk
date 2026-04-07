@@ -12,8 +12,11 @@
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
-use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use crate::beam_compiler::{
+    BeamCompiler, CompileContext, compile_source_with_bindings,
+};
 use crate::commands::util;
+use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write;
@@ -97,6 +100,15 @@ pub fn build_stdlib(quiet: bool) -> Result<()> {
         "Loaded primitive bindings from stdlib"
     );
 
+    // Extract native type specs from runtime .beam files so FFI calls in stdlib
+    // get proper type inference instead of Dynamic (ADR 0075).
+    let native_type_registry = extract_stdlib_type_specs();
+
+    let compile_ctx = CompileContext {
+        native_type_registry: native_type_registry.map(std::sync::Arc::new),
+        ..CompileContext::default()
+    };
+
     // Compile each .bt file to .core (files are independent, no ordering required)
     let mut core_files = Vec::new();
     let mut class_metadata = Vec::new();
@@ -112,7 +124,14 @@ pub fn build_stdlib(quiet: bool) -> Result<()> {
             if !quiet {
                 println!("  Compiling {source_file} (protocol)...");
             }
-            compile_stdlib_file(source_file, &module_name, &core_file, &options, &bindings)?;
+            compile_stdlib_file(
+                source_file,
+                &module_name,
+                &core_file,
+                &options,
+                &bindings,
+                &compile_ctx,
+            )?;
             core_files.push(core_file);
             protocol_modules.push(module_name);
             continue;
@@ -125,7 +144,14 @@ pub fn build_stdlib(quiet: bool) -> Result<()> {
         if !quiet {
             println!("  Compiling {source_file}...");
         }
-        compile_stdlib_file(source_file, &module_name, &core_file, &options, &bindings)?;
+        compile_stdlib_file(
+            source_file,
+            &module_name,
+            &core_file,
+            &options,
+            &bindings,
+            &compile_ctx,
+        )?;
         core_files.push(core_file);
     }
 
@@ -301,6 +327,49 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     Ok(format!("bt@stdlib@{snake}"))
 }
 
+/// Extract native type specs from runtime `.beam` files for FFI type inference.
+///
+/// Discovers `.beam` files from the runtime and stdlib Erlang ebin directories
+/// and extracts their `-spec` attributes. Returns `None` if no specs could be
+/// extracted (e.g., runtime not yet compiled).
+fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
+    use crate::beam_compiler;
+
+    // Runtime ebin directories where Erlang FFI modules live
+    let ebin_dirs = [
+        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_runtime/ebin"),
+        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_stdlib/ebin"),
+        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_workspace/ebin"),
+        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_compiler/ebin"),
+    ];
+
+    let beam_files = beam_compiler::discover_dependency_beam_files(&ebin_dirs);
+    if beam_files.is_empty() {
+        debug!("No runtime .beam files found for stdlib FFI type specs");
+        return None;
+    }
+
+    // Use a cache directory under the runtime _build to avoid re-extracting specs
+    let cache_dir = Utf8PathBuf::from("runtime/_build/type_cache");
+
+    match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
+        Ok(registry) => {
+            if registry.module_count() > 0 {
+                info!(
+                    modules = registry.module_count(),
+                    functions = registry.function_count(),
+                    "Extracted FFI type specs for stdlib build"
+                );
+            }
+            Some(registry)
+        }
+        Err(e) => {
+            debug!("Failed to extract type specs for stdlib build: {e}");
+            None
+        }
+    }
+}
+
 /// Compile a single stdlib `.bt` file to Core Erlang.
 fn compile_stdlib_file(
     path: &Utf8Path,
@@ -308,16 +377,9 @@ fn compile_stdlib_file(
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    ctx: &CompileContext<'_>,
 ) -> Result<()> {
-    compile_source_with_bindings(
-        path,
-        module_name,
-        core_file,
-        options,
-        bindings,
-        &crate::beam_compiler::CompileContext::default(),
-        None,
-    )
+    compile_source_with_bindings(path, module_name, core_file, options, bindings, ctx, None)
 }
 
 /// Class modifier flags from class hierarchy analysis.

@@ -663,7 +663,14 @@ map_type({type, _, nonempty_list, _}) ->
 %% Tuple types
 map_type({type, _, tuple, _}) ->
     <<"Tuple">>;
-%% Map types
+%% Map types — check for Beamtalk tagged maps before falling back to Dictionary.
+%% A typed map with '$beamtalk_class' := ClassName is a Beamtalk object, not a
+%% Dictionary. E.g., beamtalk_result:t() defines #{'$beamtalk_class' := 'Result', ...}.
+map_type({type, _, map, Fields}) when is_list(Fields) ->
+    case extract_beamtalk_class(Fields) of
+        {ok, ClassName} -> atom_to_binary(ClassName, utf8);
+        error -> <<"Dictionary">>
+    end;
 map_type({type, _, map, _}) ->
     <<"Dictionary">>;
 %% Literal atoms
@@ -722,6 +729,20 @@ map_type({integer, _, _}) ->
 %% Anything else
 map_type(_) ->
     <<"Dynamic">>.
+
+%% @doc Extract the Beamtalk class name from a typed map's field list.
+%%
+%% Looks for a `'$beamtalk_class' := ClassName` exact field. Returns
+%% `{ok, ClassName}` if found, `error` otherwise.
+-spec extract_beamtalk_class([tuple()]) -> {ok, atom()} | error.
+extract_beamtalk_class([]) ->
+    error;
+extract_beamtalk_class([{type, _, map_field_exact,
+                         [{atom, _, '$beamtalk_class'}, {atom, _, ClassName}]}
+                        | _]) ->
+    {ok, ClassName};
+extract_beamtalk_class([_ | Rest]) ->
+    extract_beamtalk_class(Rest).
 
 %% @doc Classify union branches and emit Result(T, E) for ok/error patterns.
 %%

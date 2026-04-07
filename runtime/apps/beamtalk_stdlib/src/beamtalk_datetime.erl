@@ -42,6 +42,9 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+-type t() :: #{'$beamtalk_class' := 'DateTime', atom() => term()}.
+-export_type([t/0]).
+
 %% Gregorian seconds at Unix epoch (1970-01-01 00:00:00)
 -define(EPOCH_GREGORIAN, 62167219200).
 
@@ -50,7 +53,7 @@
 %%% ============================================================================
 
 %% @doc Current UTC time as a DateTime.
--spec now() -> map().
+-spec now() -> t().
 now() ->
     {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
     make_datetime(Y, Mo, D, H, Mi, S).
@@ -61,7 +64,7 @@ now() ->
     erlang:monotonic_time(nanosecond).
 
 %% @doc Construct a DateTime from year, month, day (time defaults to 00:00:00).
--spec 'year:month:day:'(integer(), integer(), integer()) -> map().
+-spec 'year:month:day:'(integer(), integer(), integer()) -> t().
 'year:month:day:'(Y, Mo, D) when is_integer(Y), is_integer(Mo), is_integer(D) ->
     validate_date(Y, Mo, D, 'year:month:day:'),
     make_datetime(Y, Mo, D, 0, 0, 0);
@@ -76,7 +79,7 @@ now() ->
     integer(),
     integer(),
     integer()
-) -> map().
+) -> t().
 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S) when
     is_integer(Y),
     is_integer(Mo),
@@ -92,7 +95,7 @@ now() ->
     raise_type_error('year:month:day:hour:minute:second:', <<"Arguments must be Integers">>).
 
 %% @doc Construct a DateTime from a Unix epoch timestamp (seconds).
--spec 'fromTimestamp:'(integer()) -> map().
+-spec 'fromTimestamp:'(integer()) -> t().
 'fromTimestamp:'(Ts) when is_integer(Ts) ->
     GregSec = Ts + ?EPOCH_GREGORIAN,
     {{Y, Mo, D}, {H, Mi, S}} = calendar:gregorian_seconds_to_datetime(GregSec),
@@ -101,7 +104,7 @@ now() ->
     raise_type_error('fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>).
 
 %% @doc Parse an ISO 8601 string into a DateTime.
--spec 'fromString:'(binary()) -> map().
+-spec 'fromString:'(binary()) -> t().
 'fromString:'(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
         {ok, Y, Mo, D, H, Mi, S} ->
@@ -121,22 +124,22 @@ now() ->
 %%% Instance Methods — Accessors
 %%% ============================================================================
 
--spec year(map()) -> integer().
+-spec year(t()) -> integer().
 year(#{year := V}) -> V.
 
--spec month(map()) -> integer().
+-spec month(t()) -> integer().
 month(#{month := V}) -> V.
 
--spec day(map()) -> integer().
+-spec day(t()) -> integer().
 day(#{day := V}) -> V.
 
--spec hour(map()) -> integer().
+-spec hour(t()) -> integer().
 hour(#{hour := V}) -> V.
 
--spec minute(map()) -> integer().
+-spec minute(t()) -> integer().
 minute(#{minute := V}) -> V.
 
--spec second(map()) -> integer().
+-spec second(t()) -> integer().
 second(#{second := V}) -> V.
 
 %%% ============================================================================
@@ -144,7 +147,7 @@ second(#{second := V}) -> V.
 %%% ============================================================================
 
 %% @doc Convert to Unix epoch timestamp (seconds).
--spec 'asTimestamp'(map()) -> integer().
+-spec 'asTimestamp'(t()) -> integer().
 'asTimestamp'(#{
     year := Y,
     month := Mo,
@@ -157,7 +160,7 @@ second(#{second := V}) -> V.
     GregSec - ?EPOCH_GREGORIAN.
 
 %% @doc Format as ISO 8601 string.
--spec 'asString'(map()) -> binary().
+-spec 'asString'(t()) -> binary().
 'asString'(#{
     year := Y,
     month := Mo,
@@ -174,7 +177,7 @@ second(#{second := V}) -> V.
     ).
 
 %% @doc Human-readable representation.
--spec 'printString'(map()) -> binary().
+-spec 'printString'(t()) -> binary().
 'printString'(Self) ->
     iolist_to_binary([<<"a DateTime(">>, 'asString'(Self), <<")">>]).
 
@@ -183,7 +186,7 @@ second(#{second := V}) -> V.
 %%% ============================================================================
 
 %% @doc Add seconds, return new DateTime.
--spec 'addSeconds:'(map(), integer()) -> map().
+-spec 'addSeconds:'(t(), integer()) -> t().
 'addSeconds:'(Self, Secs) when is_integer(Secs) ->
     Ts = 'asTimestamp'(Self) + Secs,
     'fromTimestamp:'(Ts);
@@ -191,14 +194,14 @@ second(#{second := V}) -> V.
     raise_type_error('addSeconds:', <<"Argument must be an Integer">>).
 
 %% @doc Add days, return new DateTime.
--spec 'addDays:'(map(), integer()) -> map().
+-spec 'addDays:'(t(), integer()) -> t().
 'addDays:'(Self, Days) when is_integer(Days) ->
     'addSeconds:'(Self, Days * 86400);
 'addDays:'(_, _) ->
     raise_type_error('addDays:', <<"Argument must be an Integer">>).
 
 %% @doc Difference in seconds between this and another DateTime.
--spec 'diffSeconds:'(map(), map()) -> integer().
+-spec 'diffSeconds:'(t(), t()) -> integer().
 'diffSeconds:'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) - 'asTimestamp'(Other);
 'diffSeconds:'(_, _) ->
@@ -208,37 +211,37 @@ second(#{second := V}) -> V.
 %%% Instance Methods — Comparison
 %%% ============================================================================
 
--spec '<'(map(), map()) -> boolean().
+-spec '<'(t(), t()) -> boolean().
 '<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) < 'asTimestamp'(Other);
 '<'(_, _) ->
     raise_type_error('<', <<"Argument must be a DateTime">>).
 
--spec '>'(map(), map()) -> boolean().
+-spec '>'(t(), t()) -> boolean().
 '>'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) > 'asTimestamp'(Other);
 '>'(_, _) ->
     raise_type_error('>', <<"Argument must be a DateTime">>).
 
--spec '=<'(map(), map()) -> boolean().
+-spec '=<'(t(), t()) -> boolean().
 '=<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =< 'asTimestamp'(Other);
 '=<'(_, _) ->
     raise_type_error('=<', <<"Argument must be a DateTime">>).
 
--spec '>='(map(), map()) -> boolean().
+-spec '>='(t(), t()) -> boolean().
 '>='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) >= 'asTimestamp'(Other);
 '>='(_, _) ->
     raise_type_error('>=', <<"Argument must be a DateTime">>).
 
--spec '=:='(map(), map()) -> boolean().
+-spec '=:='(t(), t()) -> boolean().
 '=:='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =:= 'asTimestamp'(Other);
 '=:='(_, _) ->
     raise_type_error('=:=', <<"Argument must be a DateTime">>).
 
--spec '/='(map(), map()) -> boolean().
+-spec '/='(t(), t()) -> boolean().
 '/='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) /= 'asTimestamp'(Other);
 '/='(_, _) ->
@@ -308,7 +311,7 @@ sneq(_, _) ->
     integer(),
     integer(),
     integer()
-) -> map().
+) -> t().
 make_datetime(Y, Mo, D, H, Mi, S) ->
     #{
         '$beamtalk_class' => 'DateTime',
