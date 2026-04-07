@@ -1023,7 +1023,7 @@ impl TypeChecker {
         //   2. First keyword with colon: `addDays:` (for `addDays:by:` selector)
         //   3. Bare name without colons: `reverse` (OTP modules)
         // Clone the signature to release the borrow on self before emitting diagnostics.
-        let first_kw_colon = format!("{}:", function_name);
+        let first_kw_colon = format!("{function_name}:");
         let sig = self
             .native_type_registry
             .as_ref()
