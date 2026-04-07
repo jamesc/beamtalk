@@ -277,24 +277,31 @@ addDays(Self, Days) -> 'addDays:'(Self, Days).
 diffSeconds(Self, Other) -> 'diffSeconds:'(Self, Other).
 
 %% `lt:with:` → strips to `lt`, arity 2
+-spec lt(t(), t()) -> boolean().
 lt(Self, Other) -> '<'(Self, Other).
 
 %% `gt:with:` → strips to `gt`, arity 2
+-spec gt(t(), t()) -> boolean().
 gt(Self, Other) -> '>'(Self, Other).
 
 %% `lte:with:` → strips to `lte`, arity 2
+-spec lte(t(), t()) -> boolean().
 lte(Self, Other) -> '=<'(Self, Other).
 
 %% `gte:with:` → strips to `gte`, arity 2
+-spec gte(t(), t()) -> boolean().
 gte(Self, Other) -> '>='(Self, Other).
 
 %% `eql:with:` → strips to `eql`, arity 2
+-spec eql(t(), t()) -> boolean().
 eql(Self, Other) -> '=:='(Self, Other).
 
 %% `neq:with:` → strips to `neq`, arity 2
+-spec neq(t(), t()) -> boolean().
 neq(Self, Other) -> '/='(Self, Other).
 
 %% `sneq:with:` → strips to `sneq`, arity 2 (strict inequality)
+-spec sneq(t(), t()) -> boolean().
 sneq(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =/= 'asTimestamp'(Other);
 sneq(_, _) ->

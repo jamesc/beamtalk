@@ -736,26 +736,39 @@ safe_split(N, List) ->
 %%====================================================================
 
 %% runAll → runAll/0  (TestRunner runAll)
+-spec runAll() -> map().
 runAll() -> run_all().
 
 %% runAll: → runAll/1  (TestRunner runAll: maxJobs)
+-spec runAll(non_neg_integer()) -> map().
 runAll(MaxJobs) -> run_all(MaxJobs).
 
 %% run: → run/1  (TestRunner run: testClass)
+-spec run(tuple()) -> map().
 run(TestClass) -> run_class(TestClass).
 
 %% run:method: → run/2  (TestRunner run: testClass method: testName)
+-spec run(tuple(), atom()) -> map().
 run(TestClass, TestName) -> run_method(TestClass, TestName).
 
 %% TestResult instance shims — passed: → passed/1, etc.
+-spec passed(map()) -> non_neg_integer().
 passed(Self) -> result_passed(Self).
+-spec failed(map()) -> non_neg_integer().
 failed(Self) -> result_failed(Self).
+-spec skipped(map()) -> non_neg_integer().
 skipped(Self) -> result_skipped(Self).
+-spec total(map()) -> non_neg_integer().
 total(Self) -> result_total(Self).
+-spec duration(map()) -> float().
 duration(Self) -> result_duration(Self).
+-spec failures(map()) -> [map()].
 failures(Self) -> result_failures(Self).
+-spec hasPassed(map()) -> boolean().
 hasPassed(Self) -> result_has_passed(Self).
+-spec summary(map()) -> binary().
 summary(Self) -> result_summary(Self).
+-spec printString(map()) -> binary().
 printString(Self) -> result_print_string(Self).
 
 %%====================================================================

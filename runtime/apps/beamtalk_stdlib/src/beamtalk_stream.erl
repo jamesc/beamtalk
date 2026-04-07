@@ -289,21 +289,27 @@ print_string(#{'$beamtalk_class' := 'Stream', description := Desc}) ->
 %% These shims bridge camelCase FFI names to the snake_case implementations.
 
 %% `from:by:` → selector strips to `from`, arity 2
+-spec from(term(), fun((term()) -> term())) -> t().
 from(Start, StepFun) -> from_by(Start, StepFun).
 
 %% `inject:init:into:` → selector strips to `inject`, arity 3
+-spec inject(t(), term(), fun((term(), term()) -> term())) -> term().
 inject(Self, Init, Block) -> inject_into(Self, Init, Block).
 
 %% `asList:` → selector strips to `asList`, arity 1
+-spec asList(t()) -> list().
 asList(Self) -> as_list(Self).
 
 %% `anySatisfy:with:` → selector strips to `anySatisfy`, arity 2
+-spec anySatisfy(t(), fun((term()) -> boolean())) -> boolean().
 anySatisfy(Self, Pred) -> any_satisfy(Self, Pred).
 
 %% `allSatisfy:with:` → selector strips to `allSatisfy`, arity 2
+-spec allSatisfy(t(), fun((term()) -> boolean())) -> boolean().
 allSatisfy(Self, Pred) -> all_satisfy(Self, Pred).
 
 %% `printString:` → selector strips to `printString`, arity 1
+-spec printString(t()) -> binary().
 printString(Self) -> print_string(Self).
 
 %%% ============================================================================

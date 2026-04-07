@@ -850,6 +850,7 @@ deleteAll(Path) -> 'deleteAll:'(Path).
 rename(From, To) -> 'rename:to:'(From, To).
 absolutePath(Path) -> 'absolutePath:'(Path).
 lastModified(Path) -> 'lastModified:'(Path).
+-spec handleLines(map()) -> map().
 handleLines(Handle) -> handle_lines(Handle).
 
 %%% ============================================================================
