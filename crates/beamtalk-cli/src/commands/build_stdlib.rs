@@ -347,12 +347,11 @@ fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
     // Use the same runtime discovery as the build worker so paths stay in sync
     // with the runtime layout (dev vs installed).
     let (runtime_dir, layout): (std::path::PathBuf, _) =
-        match repl_startup::find_runtime_dir_with_layout() {
-            Ok(result) => result,
-            Err(_) => {
-                debug!("Runtime not found — skipping FFI type spec extraction");
-                return None;
-            }
+        if let Ok(result) = repl_startup::find_runtime_dir_with_layout() {
+            result
+        } else {
+            debug!("Runtime not found — skipping FFI type spec extraction");
+            return None;
         };
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
