@@ -45,8 +45,6 @@
 %% FFI shims for (Erlang beamtalk_random) dispatch
 -export([nextInteger/1, seed/1, instanceNextInteger/2]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'Random', atom() => term()}.
 -export_type([t/0]).
 

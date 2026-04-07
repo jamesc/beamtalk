@@ -16,7 +16,6 @@
 %% FFI shim
 -export([setLevel/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================

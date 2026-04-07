@@ -35,7 +35,6 @@
 -export([prettify_term/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Public API

@@ -28,8 +28,6 @@
     reverse_group_values/1
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 %% @doc Access element at 1-based index with bounds checking.
 -spec at(list(), term()) -> term().
 at(List, N) when is_list(List), not is_integer(N) ->

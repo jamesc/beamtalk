@@ -59,9 +59,6 @@
 %% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
 -export([new/2, named/1, exists/1, newOrExisting/2]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'Ets', atom() => term()}.
 -export_type([t/0]).
 

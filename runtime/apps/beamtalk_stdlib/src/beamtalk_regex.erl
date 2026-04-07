@@ -34,9 +34,6 @@
     split_regex/2
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 %%% ============================================================================
 %%% Class Methods — Constructors
 %%% ============================================================================

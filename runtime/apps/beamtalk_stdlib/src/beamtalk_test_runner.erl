@@ -17,7 +17,6 @@
 %%% ```
 
 -module(beamtalk_test_runner).
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([

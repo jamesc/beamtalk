@@ -25,8 +25,6 @@
 
 -module(beamtalk_subprocess_port).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -export([
     split_lines/1,
     flush_and_collect/2,

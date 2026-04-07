@@ -39,9 +39,6 @@
 -export([addSeconds/2, addDays/2, diffSeconds/2]).
 -export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'DateTime', atom() => term()}.
 -export_type([t/0]).
 
