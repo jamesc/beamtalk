@@ -101,7 +101,7 @@ protocols. The `Info` map must contain:
 - `type_params` (list of atoms): Type parameter names, or `[]`
 - `extending` (atom or `undefined`): Parent protocol name
 
-Duplicate registrations are silently ignored (idempotent for hot reload).
+Duplicate registrations overwrite the previous entry (idempotent for hot reload).
 """.
 -spec register_protocol(map()) -> ok.
 register_protocol(#{name := Name} = Info) ->

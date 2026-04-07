@@ -3,6 +3,8 @@
 
 -module(beamtalk_bootstrap_tests).
 
+%%% **DDD Context:** Object System Context
+
 -moduledoc """
 Bootstrap tests.
 

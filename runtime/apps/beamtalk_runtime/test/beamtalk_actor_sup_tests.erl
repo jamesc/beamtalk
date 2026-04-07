@@ -3,6 +3,8 @@
 
 -module(beamtalk_actor_sup_tests).
 
+%%% **DDD Context:** Actor System Context
+
 -moduledoc """
 Unit tests for beamtalk_actor_sup module
 

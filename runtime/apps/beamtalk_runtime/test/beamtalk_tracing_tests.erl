@@ -3,6 +3,8 @@
 
 -module(beamtalk_tracing_tests).
 
+%%% **DDD Context:** Actor System Context
+
 -moduledoc """
 EUnit tests for beamtalk_tracing shim (ADR 0069 Phase 3).
 

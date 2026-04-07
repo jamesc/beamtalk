@@ -4,6 +4,8 @@
 -module(beamtalk_test_native_counter).
 -behaviour(gen_server).
 
+%%% **DDD Context:** Object System Context
+
 -moduledoc """
 Test backing gen_server for native: facade e2e tests (BT-1210).
 

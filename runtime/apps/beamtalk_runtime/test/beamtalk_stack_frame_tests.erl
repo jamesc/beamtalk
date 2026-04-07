@@ -3,6 +3,8 @@
 
 -module(beamtalk_stack_frame_tests).
 
+%%% **DDD Context:** Object System Context
+
 -moduledoc """
 Unit tests for beamtalk_stack_frame module (BT-624).
 

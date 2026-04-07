@@ -3,6 +3,8 @@
 
 -module(beamtalk_extensions_tests).
 
+%%% **DDD Context:** Object System Context
+
 -moduledoc """
 EUnit tests for beamtalk_extensions module.
 

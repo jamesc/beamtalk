@@ -4,6 +4,8 @@
 -module(test_crashing_init_actor).
 -behaviour(gen_server).
 
+%%% **DDD Context:** Actor System Context
+
 -moduledoc """
 Test actor that crashes during handle_continue (simulating an
 initialize method that raises an error). Used to verify that

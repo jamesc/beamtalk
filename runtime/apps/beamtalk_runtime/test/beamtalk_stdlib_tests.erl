@@ -3,6 +3,8 @@
 
 -module(beamtalk_stdlib_tests).
 
+%%% **DDD Context:** Object System Context
+
 -moduledoc "Unit tests for beamtalk_stdlib module.".
 
 -include_lib("eunit/include/eunit.hrl").

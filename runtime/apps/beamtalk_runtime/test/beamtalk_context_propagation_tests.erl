@@ -3,6 +3,8 @@
 
 -module(beamtalk_context_propagation_tests).
 
+%%% **DDD Context:** Actor System Context
+
 -moduledoc """
 EUnit tests for propagated context across actor boundaries (ADR 0069 Phase 2b).
 

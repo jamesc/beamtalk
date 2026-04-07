@@ -3,6 +3,8 @@
 
 -module(beamtalk_activity_tracking_tests).
 
+%%% **DDD Context:** Workspace Context
+
 -moduledoc """
 Unit tests for workspace_meta activity tracking API
 

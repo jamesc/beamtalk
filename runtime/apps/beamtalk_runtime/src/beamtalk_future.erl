@@ -49,10 +49,11 @@ end),
 %% Await the result (blocks until resolved)
 Value = beamtalk_future:await(Future),
 
-%% Or use a timeout
-case beamtalk_future:await(Future, 5000) of
-    {ok, Value} -> Value;
-    {error, timeout} -> default_value
+%% Or use a timeout (throws on timeout)
+try beamtalk_future:await(Future, 5000) of
+    Value -> Value
+catch
+    throw:#beamtalk_error{type = timeout_error} -> default_value
 end.
 ```
 

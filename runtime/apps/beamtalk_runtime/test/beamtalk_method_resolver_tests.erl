@@ -3,6 +3,8 @@
 
 -module(beamtalk_method_resolver_tests).
 
+%%% **DDD Context:** Object System Context
+
 -moduledoc """
 Unit tests for beamtalk_method_resolver module (BT-623).
 

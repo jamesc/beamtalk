@@ -3,6 +3,8 @@
 
 -module(beamtalk_actor_tracing_tests).
 
+%%% **DDD Context:** Actor System Context
+
 -moduledoc """
 EUnit tests for actor send wrapper telemetry instrumentation (ADR 0069 Phase 2a).
 

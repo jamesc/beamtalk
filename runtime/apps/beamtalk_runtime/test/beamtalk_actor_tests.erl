@@ -3,6 +3,8 @@
 
 -module(beamtalk_actor_tests).
 
+%%% **DDD Context:** Actor System Context
+
 -moduledoc """
 EUnit tests for beamtalk_actor module
 
