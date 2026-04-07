@@ -708,6 +708,12 @@ impl Parser {
                 let message =
                     format!("unknown @expect category '{name}', valid categories are: {valid}");
                 self.diagnostics.push(Diagnostic::error(message, span));
+                // Consume trailing reason string to avoid secondary parse errors.
+                if matches!(self.current_kind(), TokenKind::String(_))
+                    && !self.current_token().has_leading_newline()
+                {
+                    self.advance();
+                }
                 (ExpectCategory::All, None, span)
             }
         } else {

@@ -2009,6 +2009,12 @@ impl Parser {
                         .into();
                 self.diagnostics
                     .push(Diagnostic::error(message.clone(), span));
+                // Consume trailing reason string to avoid secondary parse errors.
+                if matches!(self.current_kind(), TokenKind::String(_))
+                    && !self.current_token().has_leading_newline()
+                {
+                    self.advance();
+                }
                 Expression::Error { message, span }
             }
         } else {
