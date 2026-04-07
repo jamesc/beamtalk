@@ -46,7 +46,7 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 ///
 /// - Concrete type names (e.g., `"Integer"`, `"List"`) produce `Known` types
 ///   with `Extracted` provenance.
-/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::UntypedFfi)`.
+/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::DynamicSpec)`.
 /// - Union types (e.g., `"Integer | String"`) are split and produce `Union` types.
 ///
 /// ## Examples
@@ -61,7 +61,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
     let trimmed = type_name.trim();
 
     if trimmed == "Dynamic" {
-        return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
 
     // Handle union types: "Integer | String"
@@ -79,7 +79,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
 /// Maps a single (non-union) type name to an [`InferredType`].
 fn map_single_type_name(name: &str) -> InferredType {
     if name == "Dynamic" {
-        return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
 
     InferredType::Known {
@@ -366,8 +366,8 @@ mod tests {
     fn map_type_name_dynamic() {
         let ty = map_type_name("Dynamic");
         match ty {
-            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::UntypedFfi),
-            other => panic!("expected Dynamic(UntypedFfi), got {other:?}"),
+            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::DynamicSpec),
+            other => panic!("expected Dynamic(DynamicSpec), got {other:?}"),
         }
     }
 
@@ -460,8 +460,8 @@ mod tests {
         // If any member is Dynamic, union_of returns Dynamic
         let ty = map_type_name("Integer | Dynamic");
         match ty {
-            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::UntypedFfi),
-            other => panic!("expected Dynamic(UntypedFfi), got {other:?}"),
+            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::DynamicSpec),
+            other => panic!("expected Dynamic(DynamicSpec), got {other:?}"),
         }
     }
 
@@ -618,7 +618,7 @@ mod tests {
         let sig = reg.lookup("erlang", "apply", 1).unwrap();
         assert_eq!(
             sig.return_type,
-            InferredType::Dynamic(DynamicReason::UntypedFfi)
+            InferredType::Dynamic(DynamicReason::DynamicSpec)
         );
     }
 

@@ -22,8 +22,13 @@ pub enum DynamicReason {
     DynamicReceiver,
     /// Control flow produces incompatible types (pre-union-narrowing fallback).
     AmbiguousControlFlow,
-    /// Erlang FFI call with no spec or all-Dynamic spec.
+    /// Erlang FFI call with no spec in the native type registry.
     UntypedFfi,
+    /// Erlang FFI call has a spec but the return type is `any()`/`term()`.
+    ///
+    /// Distinguished from `UntypedFfi` because the spec EXISTS — the function
+    /// simply has a broad return type.  Not actionable in typed classes.
+    DynamicSpec,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -39,6 +44,7 @@ impl DynamicReason {
             Self::DynamicReceiver => Some("dynamic receiver"),
             Self::AmbiguousControlFlow => Some("ambiguous control flow"),
             Self::UntypedFfi => Some("untyped FFI"),
+            Self::DynamicSpec => Some("FFI spec returns Dynamic"),
             Self::Unknown => None,
         }
     }

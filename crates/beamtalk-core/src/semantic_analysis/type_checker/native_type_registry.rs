@@ -273,11 +273,11 @@ mod tests {
             "apply",
             1,
             vec![param("fun", "Block")],
-            InferredType::Dynamic(DynamicReason::UntypedFfi),
+            InferredType::Dynamic(DynamicReason::DynamicSpec),
         );
         assert_eq!(
             sig.display_signature(),
-            "apply: fun :: Block -> Dynamic (untyped FFI)"
+            "apply: fun :: Block -> Dynamic (FFI spec returns Dynamic)"
         );
     }
 
@@ -390,7 +390,7 @@ mod tests {
                 "get",
                 2,
                 vec![param("key", "Dynamic"), param("map", "Dictionary")],
-                InferredType::Dynamic(DynamicReason::UntypedFfi),
+                InferredType::Dynamic(DynamicReason::DynamicSpec),
             )],
         );
 
