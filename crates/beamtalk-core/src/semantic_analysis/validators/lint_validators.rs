@@ -144,7 +144,8 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
                             format!("Condition is always `{literal_name}`"),
                             msg.span,
                         )
-                        .with_hint(dead_branch_hint(is_true, &selector_str)),
+                        .with_hint(dead_branch_hint(is_true, &selector_str))
+                        .with_category(DiagnosticCategory::Lint),
                     );
                 }
             }
