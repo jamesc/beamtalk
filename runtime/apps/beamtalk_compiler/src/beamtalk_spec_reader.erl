@@ -279,8 +279,13 @@ process_spec(Name, Arity, Clauses, LineMap) ->
     %% Extract params from the first clause, return types from all clauses
     {Params, ReturnTypes} = extract_from_clauses(Clauses, Arity),
     ReturnType = merge_return_types(ReturnTypes),
+    %% Normalize the function name to match selector_to_function/1 in
+    %% beamtalk_erlang_proxy: strip everything from the first colon onward.
+    %% E.g., 'readAll:' → <<"readAll">>, 'new:type:' → <<"new">>.
+    %% Unary names without colons pass through unchanged.
+    CanonicalName = normalize_function_name(Name),
     Base = #{
-        name => atom_to_binary(Name, utf8),
+        name => CanonicalName,
         arity => Arity,
         params => Params,
         return_type => ReturnType
@@ -893,3 +898,19 @@ normalize_param_name(Name) ->
 -spec positional_name(pos_integer()) -> binary().
 positional_name(N) ->
     iolist_to_binary([<<"arg">>, integer_to_binary(N)]).
+
+%% Normalize an Erlang function name atom to the canonical bare name binary.
+%%
+%% Mirrors the logic in beamtalk_erlang_proxy:selector_to_function/1:
+%% keyword selectors ('readAll:', 'new:type:') → first keyword (<<"readAll">>, <<"new">>),
+%% unary selectors ('reverse') → unchanged (<<"reverse">>).
+-spec normalize_function_name(atom()) -> binary().
+normalize_function_name(Name) ->
+    NameStr = atom_to_list(Name),
+    case lists:member($:, NameStr) of
+        true ->
+            [FunStr | _] = string:split(NameStr, ":"),
+            list_to_binary(FunStr);
+        false ->
+            atom_to_binary(Name, utf8)
+    end.
