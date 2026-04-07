@@ -95,6 +95,17 @@ const WS_HEALTH_MAX_DELAY_MS: u64 = 2000;
 /// loop uses its own fixed liveness-check interval.
 const LIVENESS_CHECK_INTERVAL: usize = 25;
 
+/// Escape a filesystem path for embedding in an Erlang double-quoted string literal.
+///
+/// Handles backslashes (Windows) and double quotes (all platforms) so the path
+/// can be safely interpolated into a `-eval` command without breaking syntax or
+/// enabling eval injection.
+fn escape_path_for_erlang(path: &str) -> String {
+    // Backslashes must be escaped first to avoid double-escaping quotes.
+    let s = path.replace('\\', "\\\\");
+    s.replace('"', "\\\"")
+}
+
 /// Prepare workspace paths and the eval command string for a detached node.
 ///
 /// Resolves the project path, cleans up stale runtime files, writes the
@@ -116,12 +127,8 @@ fn prepare_workspace_paths(
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
     let project_path_str = project_path
         .to_str()
-        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?
-        .to_owned();
-
-    // On Windows, escape backslashes in the project path for Erlang string syntax (BT-661)
-    #[cfg(windows)]
-    let project_path_str = project_path_str.replace('\\', "\\\\");
+        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
+    let project_path_str = escape_path_for_erlang(project_path_str);
 
     // If a `starting` tombstone is present, a previous startup was interrupted
     // mid-flight (crash, OOM, SIGKILL, etc.).  Clean up all runtime files —
@@ -145,25 +152,19 @@ fn prepare_workspace_paths(
     let pid_file_path = workspace_dir(workspace_id)?.join("pid");
     let pid_file_path_str = pid_file_path
         .to_str()
-        .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?
-        .to_owned();
-    #[cfg(windows)]
-    let pid_file_path_str = pid_file_path_str.replace('\\', "\\\\");
+        .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?;
+    let pid_file_path_str = escape_path_for_erlang(pid_file_path_str);
 
     // Compute the startup log path so the eval command's try/catch can write
     // crash diagnostics from within the VM (bypassing -detached's fd redirect).
     let startup_log_path = workspace_dir(workspace_id)?.join("startup.log");
-    let startup_log_path_str = startup_log_path
-        .to_str()
-        .ok_or_else(|| {
-            miette!(
-                "Startup log path contains invalid UTF-8: {:?}",
-                startup_log_path
-            )
-        })?
-        .to_owned();
-    #[cfg(windows)]
-    let startup_log_path_str = startup_log_path_str.replace('\\', "\\\\");
+    let startup_log_path_str = startup_log_path.to_str().ok_or_else(|| {
+        miette!(
+            "Startup log path contains invalid UTF-8: {:?}",
+            startup_log_path
+        )
+    })?;
+    let startup_log_path_str = escape_path_for_erlang(startup_log_path_str);
 
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(config.bind_addr);
@@ -537,10 +538,17 @@ fn ws_health_delay_ms(attempt: usize) -> u64 {
     delay.min(WS_HEALTH_MAX_DELAY_MS)
 }
 
+/// Maximum bytes of `startup.log` to inline in an error message.
+///
+/// 4 KiB is enough for a typical Erlang crash reason + stacktrace while
+/// keeping terminal output manageable.
+const STARTUP_LOG_MAX_BYTES: usize = 4096;
+
 /// Read crash diagnostics from `startup.log` written by the eval try/catch.
 ///
 /// Returns a formatted detail string suitable for appending to an error message.
-/// If the log contains content, it's shown inline; otherwise a generic hint is returned.
+/// If the log contains content, it's shown inline (truncated to `STARTUP_LOG_MAX_BYTES`);
+/// otherwise a generic hint is returned.
 fn read_startup_log_detail(workspace_id: &str) -> String {
     workspace_dir(workspace_id)
         .ok()
@@ -549,7 +557,21 @@ fn read_startup_log_detail(workspace_id: &str) -> String {
         .filter(|s| !s.is_empty())
         .map_or_else(
             || "\nCheck Erlang/OTP is installed.".to_string(),
-            |log| format!("\nStartup log:\n{log}"),
+            |log| {
+                if log.len() <= STARTUP_LOG_MAX_BYTES {
+                    format!("\nStartup log:\n{log}")
+                } else {
+                    // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
+                    // recent (and usually most relevant) output.
+                    let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
+                    // Find the first newline to avoid cutting mid-line.
+                    let start = tail.find('\n').map_or(0, |i| i + 1);
+                    format!(
+                        "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
+                        &tail[start..]
+                    )
+                }
+            },
         )
 }
 
@@ -604,7 +626,7 @@ fn build_workspace_eval_cmd(
          receive stop -> ok end \
          catch C___:R___:S___ -> \
          Msg___ = iolist_to_binary(io_lib:format(\"~p:~p~n~p~n\", [C___, R___, S___])), \
-         file:write_file(\"{startup_log_path_str}\", Msg___), \
+         file:write_file(\"{startup_log_path_str}\", Msg___, [append]), \
          halt(1) \
          end."
     )
