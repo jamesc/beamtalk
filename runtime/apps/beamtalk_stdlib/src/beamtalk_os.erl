@@ -19,9 +19,6 @@
 
 -export(['run:'/1, run/1, 'run:timeout:'/2, run/2]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 %% Default wall-clock timeout for OS run: (30 seconds).
 -define(DEFAULT_TIMEOUT_MS, 30000).
 

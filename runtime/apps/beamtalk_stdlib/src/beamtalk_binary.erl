@@ -55,9 +55,6 @@
 -export([as_string/1, as_string_unchecked/1, print_string/1]).
 -export([deserialize_with_used/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================

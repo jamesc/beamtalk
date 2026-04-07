@@ -44,9 +44,6 @@
 %% FFI shims for (Erlang beamtalk_timer) dispatch
 -export(['after'/2, every/2, sleep/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'Timer', atom() => term()}.
 -export_type([t/0]).
 

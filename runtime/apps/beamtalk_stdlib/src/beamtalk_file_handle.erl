@@ -16,8 +16,6 @@
 
 -export([dispatch/3, has_method/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 %% @doc Dispatch a message to a FileHandle instance.
 %%
 %% Handles the `lines` selector directly and falls through to the base

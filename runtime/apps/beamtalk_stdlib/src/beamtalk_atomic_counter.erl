@@ -61,9 +61,6 @@
 %% FFI shims for class methods
 -export([new/1, named/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'AtomicCounter', atom() => term()}.
 -export_type([t/0]).
 

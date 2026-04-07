@@ -47,9 +47,6 @@
 %% Instance methods — no-colon forms used by the FFI proxy
 -export([enqueue/2, dequeue/1, peek/1, isEmpty/1, size/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'Queue', atom() => term()}.
 -export_type([t/0]).
 

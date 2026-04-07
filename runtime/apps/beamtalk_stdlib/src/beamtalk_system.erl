@@ -33,7 +33,6 @@
 -export([getEnv/1, getEnv/2]).
 -export([setEnv/2, unsetEnv/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================

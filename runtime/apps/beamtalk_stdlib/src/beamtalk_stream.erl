@@ -50,8 +50,6 @@
     printString/1
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'Stream', atom() => term()}.
 -export_type([t/0]).
 

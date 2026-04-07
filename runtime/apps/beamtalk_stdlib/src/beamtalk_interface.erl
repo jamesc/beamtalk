@@ -29,7 +29,6 @@
 -module(beamtalk_interface).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 -export([dispatch/3]).
 %% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
