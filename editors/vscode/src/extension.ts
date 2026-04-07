@@ -259,10 +259,11 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     outputChannel.warn(
       "Could not find beamtalk-lsp. Searched: beamtalk.server.path setting, " +
         "sysroot via `beamtalk --print-sysroot`, and PATH. " +
-        "Set beamtalk.server.path in settings or ensure `beamtalk` is on the extension host PATH."
+        'Set "beamtalk.server.path" in settings, ensure `beamtalk-lsp` is on the extension host PATH, ' +
+        "or ensure `beamtalk` is on the extension host PATH for sysroot discovery."
     );
     const action = await vscode.window.showWarningMessage(
-      'Could not find beamtalk-lsp. If Beamtalk is installed, set "beamtalk.server.path" in settings.',
+      'Could not find beamtalk-lsp. Set "beamtalk.server.path" in settings, ensure `beamtalk-lsp` is on the extension host PATH, or ensure `beamtalk` is on PATH for sysroot discovery.',
       "Open Settings",
       "Install Beamtalk"
     );
