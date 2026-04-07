@@ -3306,6 +3306,7 @@ mod tests {
             ExpressionStatement::bare(int_lit(42)),
             ExpressionStatement::bare(Expression::ExpectDirective {
                 category: ExpectCategory::Dnu,
+                reason: None,
                 span: span(),
             }),
         ];

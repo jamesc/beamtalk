@@ -7,6 +7,7 @@
 //! and [`MethodKind`].
 
 use crate::source_analysis::Span;
+use ecow::EcoString;
 
 use super::CommentAttachment;
 use super::ExpressionStatement;
@@ -97,13 +98,14 @@ pub struct MethodDefinition {
     pub is_internal: bool,
     /// The kind of method.
     pub kind: MethodKind,
-    /// Optional `@expect` directive attached to this method declaration (BT-1856).
+    /// Optional `@expect` directive attached to this method declaration (BT-1856, BT-1918).
     ///
     /// When present, diagnostics matching this category that fire on the
     /// method declaration are suppressed. If no matching diagnostic fires,
     /// a "stale @expect" warning is emitted. The span is the source location
     /// of the `@expect category` directive itself (for stale warnings).
-    pub expect: Option<(ExpectCategory, Span)>,
+    /// The optional reason string is included in stale warnings for context.
+    pub expect: Option<(ExpectCategory, Option<EcoString>, Span)>,
     /// Non-doc comments (`//` and `/* */`) appearing before this method.
     pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).

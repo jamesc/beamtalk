@@ -15,6 +15,7 @@ use crate::ast::{
     StandaloneMethodDefinition, StateDeclaration, TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
+use ecow::EcoString;
 
 use super::{Diagnostic, Parser};
 
@@ -401,7 +402,7 @@ impl Parser {
                 }
             } else {
                 // BT-1856: @expect before an invalid position (e.g., end of class body)
-                if let Some((_, span)) = pending_expect {
+                if let Some((_, _, span)) = pending_expect {
                     self.diagnostics.push(Diagnostic::error(
                         "@expect in a class body must precede a state/field or method declaration",
                         span,
@@ -679,34 +680,57 @@ impl Parser {
         self.is_keyword_method_params_at(start_offset)
     }
 
-    /// Parses an `@expect category` that precedes a declaration (BT-1856).
+    /// Parses an `@expect category` or `@expect category "reason"` that
+    /// precedes a declaration (BT-1856, BT-1918).
     ///
-    /// Consumes the `@expect` token and the category identifier, returning
-    /// the parsed category and the span of the directive. If the category is
-    /// unknown, emits a parse error and returns `ExpectCategory::All` as a
-    /// fallback so parsing can continue.
-    fn parse_declaration_expect(&mut self) -> (ExpectCategory, Span) {
+    /// Consumes the `@expect` token, the category identifier, and an
+    /// optional reason string, returning the parsed category, optional
+    /// reason, and the span of the directive. If the category is unknown,
+    /// emits a parse error and returns `ExpectCategory::All` as a fallback
+    /// so parsing can continue.
+    fn parse_declaration_expect(&mut self) -> (ExpectCategory, Option<EcoString>, Span) {
         let start_token = self.advance(); // consume AtExpect
         let start = start_token.span();
 
         if let TokenKind::Identifier(name) = self.current_kind() {
             let name = name.clone();
             let end_token = self.advance();
-            let span = start.merge(end_token.span());
+            let mut span = start.merge(end_token.span());
             if let Some(category) = ExpectCategory::from_name(&name) {
-                (category, span)
+                // BT-1918: Parse optional reason string after category (same line only).
+                let reason = if matches!(self.current_kind(), TokenKind::String(_))
+                    && !self.current_token().has_leading_newline()
+                {
+                    let reason_str = if let TokenKind::String(s) = self.current_kind() {
+                        s.clone()
+                    } else {
+                        unreachable!()
+                    };
+                    let reason_token = self.advance();
+                    span = start.merge(reason_token.span());
+                    Some(reason_str)
+                } else {
+                    None
+                };
+                (category, reason, span)
             } else {
                 let valid = ExpectCategory::valid_names().join(", ");
                 let message =
                     format!("unknown @expect category '{name}', valid categories are: {valid}");
                 self.diagnostics.push(Diagnostic::error(message, span));
-                (ExpectCategory::All, span)
+                // Consume trailing reason string to avoid secondary parse errors.
+                if matches!(self.current_kind(), TokenKind::String(_))
+                    && !self.current_token().has_leading_newline()
+                {
+                    self.advance();
+                }
+                (ExpectCategory::All, None, span)
             }
         } else {
             let valid = ExpectCategory::valid_names().join(", ");
             let message = format!("@expect must be followed by a category name ({valid})");
             self.diagnostics.push(Diagnostic::error(message, start));
-            (ExpectCategory::All, start)
+            (ExpectCategory::All, None, start)
         }
     }
 
