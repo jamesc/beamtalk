@@ -815,6 +815,7 @@ pub(crate) fn unparse_expression_statement(stmt: &ExpressionStatement) -> Docume
 
 /// Builds a [`Document`] for an [`Expression`].
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
     match expr {
         Expression::Literal(lit, _) => unparse_literal(lit),
@@ -897,7 +898,12 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         } => {
             let base = docvec!["@expect ", unparse_expect_category(*category)];
             if let Some(reason) = reason {
-                docvec![base, " \"", Document::String(escape_string_literal(reason)), "\""]
+                docvec![
+                    base,
+                    " \"",
+                    Document::String(escape_string_literal(reason)),
+                    "\""
+                ]
             } else {
                 base
             }
