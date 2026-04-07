@@ -27,7 +27,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, Module};
+use crate::ast::{ClassDefinition, ClassKind, Expression, MethodDefinition, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
@@ -35,6 +35,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use crate::semantic_analysis::{ClassHierarchy, InferredType};
+use crate::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -160,6 +161,19 @@ pub fn compute_completions(
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
 
+    // Check for `self.` context — if cursor is right after `self.` inside an
+    // instance method, return state fields + instance methods (fields are only
+    // accessible via `self.`).
+    if is_after_self_dot(source, offset) {
+        let self_class_name = match &context {
+            ClassContext::InstanceMethod(class) => Some(class.name.name.as_str()),
+            _ => find_standalone_instance_class(module, offset),
+        };
+        if let Some(class_name) = self_class_name {
+            return compute_self_dot_completions(class_name, hierarchy, current_package);
+        }
+    }
+
     // Enrich hierarchy with inferred return types and get the type map in a single
     // TypeChecker pass (BT-1014, BT-1047). The TypeChecker now consults its own
     // inferred method_return_types during chain resolution, so a second pass is
@@ -183,8 +197,8 @@ pub fn compute_completions(
     // Add keyword completions (context-aware for field:/state: by class kind, BT-1537)
     add_keyword_completions(&mut completions, &context, hierarchy);
 
-    // Add identifiers from the current scope
-    add_identifier_completions(module, &mut completions);
+    // Add identifiers from the current scope (including method-local variables)
+    add_identifier_completions(module, offset, &mut completions);
 
     // Add class names as completions (filtering internal classes from other packages)
     add_class_name_completions(module, hierarchy, current_package, &mut completions);
@@ -436,13 +450,114 @@ fn add_keyword_completions(
     }
 }
 
-/// Adds identifier completions from the module.
-fn add_identifier_completions(module: &Module, completions: &mut Vec<Completion>) {
+/// Returns `true` if the cursor is after `self.` (possibly followed by a
+/// partial identifier the user is typing, e.g., `self.co|`).
+fn is_after_self_dot(source: &str, offset: u32) -> bool {
+    let bytes = source.as_bytes();
+    let offset = offset as usize;
+    // Back up over any trailing identifier fragment (e.g., `self.co|` → `self.|`).
+    let mut cursor = offset;
+    while cursor > 0
+        && bytes
+            .get(cursor - 1)
+            .is_some_and(|&b| is_identifier_char(b))
+    {
+        cursor -= 1;
+    }
+    if cursor < 5 {
+        return false;
+    }
+    // Use safe slicing to avoid panicking on UTF-8 boundary misalignment.
+    let Some(slice) = source.get(cursor - 5..cursor) else {
+        return false;
+    };
+    if slice != "self." {
+        return false;
+    }
+    // Ensure `self` is a standalone keyword, not the tail of another identifier
+    // (e.g., `doself.` should not match).
+    cursor == 5
+        || bytes
+            .get(cursor - 6)
+            .is_none_or(|&b| !is_identifier_char(b))
+}
+
+/// Computes completions for the `self.` context: state fields + instance methods.
+fn compute_self_dot_completions(
+    class_name: &str,
+    hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
+) -> Vec<Completion> {
+    let mut completions = Vec::new();
+
+    // Add state fields (including inherited from superclasses)
+    for field_name in hierarchy.all_state(class_name) {
+        completions.push(
+            Completion::new(field_name.as_str(), CompletionKind::Field)
+                .with_documentation(format!("Field: {field_name}")),
+        );
+    }
+
+    // Add instance methods (delegate filtering uses receiver_class, not context)
+    let mut seen = HashSet::new();
+    for method in hierarchy.all_methods(class_name) {
+        if method.selector == "delegate"
+            && method.defined_in == "Actor"
+            && !hierarchy.is_native(class_name)
+        {
+            continue;
+        }
+        // Filter internal methods from other packages (ADR 0071, BT-1703)
+        if is_cross_package_internal_method(&method, hierarchy, current_package) {
+            continue;
+        }
+        if seen.insert(method.selector.clone()) {
+            let doc = method_completion_doc(&method, false);
+            completions.push(
+                Completion::new(method.selector.as_str(), CompletionKind::Function)
+                    .with_documentation(doc)
+                    .with_detail(method_completion_detail(&method, class_name)),
+            );
+        }
+    }
+
+    completions
+}
+
+/// Returns the class name if the cursor is inside a standalone instance method.
+fn find_standalone_instance_class(module: &Module, offset: u32) -> Option<&str> {
+    let probe = offset.saturating_sub(1);
+    for smd in &module.method_definitions {
+        if smd.is_class_method {
+            continue;
+        }
+        let span = smd.method.span;
+        if (offset >= span.start() && offset < span.end())
+            || (probe >= span.start() && probe < span.end())
+        {
+            return Some(smd.class_name.name.as_str());
+        }
+    }
+    None
+}
+
+/// Adds identifier completions from the module and the current method scope.
+fn add_identifier_completions(module: &Module, offset: u32, completions: &mut Vec<Completion>) {
     let mut identifiers = HashSet::new();
 
-    // Collect all identifiers from the module
+    // Collect all identifiers from top-level expressions
     for stmt in &module.expressions {
         collect_identifiers_from_expr(&stmt.expression, &mut identifiers);
+    }
+
+    // Collect identifiers from the method body containing the cursor
+    if let Some(method) = find_method_at_offset(module, offset) {
+        for param in &method.parameters {
+            identifiers.insert(param.name.name.clone());
+        }
+        for stmt in &method.body {
+            collect_identifiers_from_expr(&stmt.expression, &mut identifiers);
+        }
     }
 
     // Add them as completions
@@ -451,29 +566,63 @@ fn add_identifier_completions(module: &Module, completions: &mut Vec<Completion>
     }
 }
 
+/// Finds the method definition containing the given byte offset.
+///
+/// Uses `Span::end()` (exclusive) correctly: checks `offset < end`, then
+/// probes `offset - 1` for the cursor-at-end-of-method boundary case
+/// (common when typing at the end of a method body).
+fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefinition> {
+    let probe = offset.saturating_sub(1);
+    // Check instance and class methods in classes
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            let span = method.span;
+            if (offset >= span.start() && offset < span.end())
+                || (probe >= span.start() && probe < span.end())
+            {
+                return Some(method);
+            }
+        }
+    }
+    // Check standalone method definitions
+    for smd in &module.method_definitions {
+        let span = smd.method.span;
+        if (offset >= span.start() && offset < span.end())
+            || (probe >= span.start() && probe < span.end())
+        {
+            return Some(&smd.method);
+        }
+    }
+    None
+}
+
 /// Determines the class context at a given byte offset.
 ///
 /// Walks the module's class definitions to find if the offset is inside
 /// an instance method or a class-side method.
 fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
+    // Probe one byte back so cursor at end-of-span (exclusive) still matches.
+    let probe = offset.saturating_sub(1);
+    let in_span = |span: Span| {
+        (offset >= span.start() && offset < span.end())
+            || (probe >= span.start() && probe < span.end())
+    };
+
     for class in &module.classes {
         // Check instance methods
         for method in &class.methods {
-            let span = method.span;
-            if offset >= span.start() && offset < span.end() {
+            if in_span(method.span) {
                 return ClassContext::InstanceMethod(class);
             }
         }
         // Check class-side methods
         for method in &class.class_methods {
-            let span = method.span;
-            if offset >= span.start() && offset < span.end() {
+            if in_span(method.span) {
                 return ClassContext::ClassMethod(class);
             }
         }
         // Check if inside class body but not in any method (BT-1537)
-        let class_span = class.span;
-        if offset >= class_span.start() && offset < class_span.end() {
+        if in_span(class.span) {
             return ClassContext::ClassBody(class);
         }
     }
@@ -564,10 +713,9 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
         Expression::Parenthesized { expression, .. } => {
             collect_identifiers_from_expr(expression, identifiers);
         }
-        Expression::FieldAccess {
-            receiver, field, ..
-        } => {
-            identifiers.insert(field.name.clone());
+        Expression::FieldAccess { receiver, .. } => {
+            // Only recurse into the receiver — the field name is accessed on
+            // the receiver, not a standalone variable in scope.
             collect_identifiers_from_expr(receiver, identifiers);
         }
         Expression::Cascade {
@@ -940,13 +1088,9 @@ fn add_hierarchy_completions(
                 &mut seen,
                 completions,
             );
-            // Add state variable names as field completions
-            for state_var in &class.state {
-                completions.push(
-                    Completion::new(state_var.name.name.as_str(), CompletionKind::Field)
-                        .with_documentation(format!("Field: {}", state_var.name.name)),
-                );
-            }
+            // State/field completions are only offered after `self.` — see
+            // the `is_after_self_dot` early-return path in
+            // `compute_self_dot_completions`.
         }
         ClassContext::ClassMethod(class) => {
             let class_name = class.name.name.as_str();
@@ -1313,17 +1457,18 @@ mod tests {
     }
 
     #[test]
-    fn completions_in_instance_method_include_state_fields() {
-        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+    fn completions_after_self_dot_include_state_fields() {
+        // Cursor right after `self.` — state fields should appear.
+        // Trailing `c` simulates the user starting to type a field name.
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.c";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        // Position inside the method body
         let completions = compute_completions(
             &module,
             source,
-            Position::new(3, 17),
+            Position::new(3, 20),
             &hierarchy,
             None,
             None,
@@ -1334,7 +1479,95 @@ mod tests {
             completions
                 .iter()
                 .any(|c| c.label == "count" && c.kind == CompletionKind::Field),
-            "Should include state variable 'count' as Field"
+            "Should include state variable 'count' as Field after self., got: {:?}",
+            completions
+                .iter()
+                .map(|c| (&c.label, &c.kind))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn completions_without_self_dot_exclude_state_fields() {
+        // Cursor inside method body but NOT after `self.` — state fields should NOT appear
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Position at col 17 — after `self.count := s` (not after self.)
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(3, 17),
+            &hierarchy,
+            None,
+            None,
+        );
+
+        // Should NOT include bare state variable
+        assert!(
+            !completions
+                .iter()
+                .any(|c| c.label == "count" && c.kind == CompletionKind::Field),
+            "Should NOT include state 'count' as bare Field (only after self.)"
+        );
+    }
+
+    #[test]
+    fn completions_in_method_include_local_variables() {
+        let source = "Object subclass: Foo\n  test =>\n    first := \"foo\"\n    first ++ \"bar\"\n    b := fi";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Position at end of last line (after "fi")
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(4, 10),
+            &hierarchy,
+            None,
+            None,
+        );
+
+        // Should include 'first' as a variable from the method body
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "first" && c.kind == CompletionKind::Variable),
+            "Should include local variable 'first' from method body, got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn completions_in_method_include_parameters() {
+        let source =
+            "Object subclass: Foo\n  greet: name =>\n    msg := \"Hello \" ++ name\n    ms";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Position at end of last line (after "ms")
+        let completions =
+            compute_completions(&module, source, Position::new(3, 6), &hierarchy, None, None);
+
+        // Should include 'name' parameter
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "name" && c.kind == CompletionKind::Variable),
+            "Should include method parameter 'name', got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        // Should include 'msg' local variable
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "msg" && c.kind == CompletionKind::Variable),
+            "Should include local variable 'msg', got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
 
@@ -2466,5 +2699,38 @@ mod tests {
             !completions.iter().any(|c| c.label == "internalHelper"),
             "Internal method from other package should be excluded from typed receiver completions"
         );
+    }
+
+    // --- is_after_self_dot unit tests ---
+
+    #[test]
+    fn is_after_self_dot_basic() {
+        assert!(is_after_self_dot("self.", 5));
+        assert!(is_after_self_dot("x := self.c", 10));
+    }
+
+    #[test]
+    fn is_after_self_dot_rejects_tail_of_identifier() {
+        // "doself." should not match — `self` is part of a larger identifier
+        assert!(!is_after_self_dot("doself.", 7));
+        assert!(!is_after_self_dot("myself.", 7));
+    }
+
+    #[test]
+    fn is_after_self_dot_accepts_after_non_identifier() {
+        // After space, paren, operator — `self` is standalone
+        assert!(is_after_self_dot(" self.", 6));
+        assert!(is_after_self_dot("(self.", 6));
+        assert!(is_after_self_dot("=self.", 6));
+    }
+
+    #[test]
+    fn is_after_self_dot_with_partial_identifier() {
+        // Cursor after `self.co` — should back up over `co` and match `self.`
+        assert!(is_after_self_dot("self.co", 7));
+        assert!(is_after_self_dot(" self.count", 11));
+        assert!(is_after_self_dot("x := self.c", 11));
+        // But not for `doself.co`
+        assert!(!is_after_self_dot("doself.co", 9));
     }
 }
