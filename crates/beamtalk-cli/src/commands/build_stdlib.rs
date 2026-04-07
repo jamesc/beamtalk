@@ -258,20 +258,28 @@ fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bo
         Err(_) => return false,
     }
 
-    // Check runtime .beam files — if directory missing, force rebuild
-    let runtime_ebin = "runtime/_build/default/lib/beamtalk_runtime/ebin";
-    let Ok(entries) = fs::read_dir(runtime_ebin) else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        if entry.path().extension().is_some_and(|ext| ext == "beam") {
-            match entry.metadata().and_then(|m| m.modified()) {
-                Ok(t) if t > oldest_output => {
-                    info!("Runtime .beam newer than stdlib output");
-                    return false;
+    // Check runtime .beam files — if any runtime/stdlib/workspace/compiler ebin
+    // has a newer .beam, force rebuild (specs may have changed).
+    let runtime_ebins = [
+        "runtime/_build/default/lib/beamtalk_runtime/ebin",
+        "runtime/_build/default/lib/beamtalk_stdlib/ebin",
+        "runtime/_build/default/lib/beamtalk_workspace/ebin",
+        "runtime/_build/default/lib/beamtalk_compiler/ebin",
+    ];
+    for runtime_ebin in &runtime_ebins {
+        let Ok(entries) = fs::read_dir(runtime_ebin) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|ext| ext == "beam") {
+                match entry.metadata().and_then(|m| m.modified()) {
+                    Ok(t) if t > oldest_output => {
+                        info!("Runtime .beam newer than stdlib output");
+                        return false;
+                    }
+                    Err(_) => return false,
+                    _ => {}
                 }
-                Err(_) => return false,
-                _ => {}
             }
         }
     }
@@ -339,7 +347,13 @@ fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
     // Use the same runtime discovery as the build worker so paths stay in sync
     // with the runtime layout (dev vs installed).
     let (runtime_dir, layout): (std::path::PathBuf, _) =
-        repl_startup::find_runtime_dir_with_layout().ok()?;
+        match repl_startup::find_runtime_dir_with_layout() {
+            Ok(result) => result,
+            Err(_) => {
+                debug!("Runtime not found — skipping FFI type spec extraction");
+                return None;
+            }
+        };
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
     // Collect ebin directories that contain Erlang FFI modules with -spec attributes.

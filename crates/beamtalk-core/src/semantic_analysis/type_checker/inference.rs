@@ -1010,7 +1010,6 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
-
         // Extract the Erlang function name and arity from the selector.
         // Beamtalk selectors include colons (`readAll:`, `writeAll:contents:`).
         // Erlang specs may use either the colon'd form (`'readAll:'/1` in beamtalk_*
