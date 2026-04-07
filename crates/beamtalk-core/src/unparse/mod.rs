@@ -584,7 +584,7 @@ fn unparse_method_definition_with_prefix(
             docs.push(docvec![
                 base,
                 " \"",
-                Document::String(reason.to_string()),
+                Document::String(escape_string_literal(reason)),
                 "\""
             ]);
         } else {
@@ -751,7 +751,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
                 "@expect ",
                 unparse_expect_category(cat),
                 " \"",
-                Document::String(reason.to_string()),
+                Document::String(escape_string_literal(reason)),
                 "\""
             ]);
         } else {
@@ -897,7 +897,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         } => {
             let base = docvec!["@expect ", unparse_expect_category(*category)];
             if let Some(reason) = reason {
-                docvec![base, " \"", Document::String(reason.to_string()), "\""]
+                docvec![base, " \"", Document::String(escape_string_literal(reason)), "\""]
             } else {
                 base
             }

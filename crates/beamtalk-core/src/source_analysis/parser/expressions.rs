@@ -1982,9 +1982,15 @@ impl Parser {
             let end_token = self.advance();
             let mut span = start.merge(end_token.span());
             if let Some(category) = ExpectCategory::from_name(&name) {
-                // BT-1918: Parse optional reason string after category.
-                let reason = if let TokenKind::String(reason_str) = self.current_kind() {
-                    let reason_str = reason_str.clone();
+                // BT-1918: Parse optional reason string after category (same line only).
+                let reason = if matches!(self.current_kind(), TokenKind::String(_))
+                    && !self.current_token().has_leading_newline()
+                {
+                    let reason_str = if let TokenKind::String(s) = self.current_kind() {
+                        s.clone()
+                    } else {
+                        unreachable!()
+                    };
                     let reason_token = self.advance();
                     span = start.merge(reason_token.span());
                     Some(reason_str)
