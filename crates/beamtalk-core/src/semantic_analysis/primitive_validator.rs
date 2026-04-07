@@ -12,7 +12,7 @@
 
 use crate::CompilerOptions;
 use crate::ast::{Expression, Module};
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Known structural intrinsic names (ADR 0007).
 ///
@@ -236,10 +236,13 @@ fn validate_stdlib_restriction(
 
     if options.allow_primitives {
         // Escape hatch: warning instead of error
-        diagnostics.push(Diagnostic::warning(
-            "Using primitives outside stdlib — ensure you understand safety implications",
-            span,
-        ));
+        diagnostics.push(
+            Diagnostic::warning(
+                "Using primitives outside stdlib — ensure you understand safety implications",
+                span,
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
     } else {
         // Default: hard error
         diagnostics.push(

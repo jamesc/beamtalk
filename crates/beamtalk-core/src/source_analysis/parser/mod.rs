@@ -197,11 +197,14 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
     remaining.sort_unstable(); // stable diagnostic order
     for idx in remaining {
         if let Some(token) = parser.tokens.get(idx) {
-            parser.diagnostics.push(Diagnostic::warning(
-                "doc comment not attached to any declaration \
-                 (/// only attaches to class, method, or state declarations)",
-                token.span(),
-            ));
+            parser.diagnostics.push(
+                Diagnostic::warning(
+                    "doc comment not attached to any declaration \
+                     (/// only attaches to class, method, or state declarations)",
+                    token.span(),
+                )
+                .with_category(DiagnosticCategory::Lint),
+            );
         }
     }
 
@@ -525,6 +528,11 @@ pub enum DiagnosticCategory {
     ArityMismatch,
     /// Workspace binding shadows class (BT-1759) — REPL binding hides a class name.
     ShadowedClass,
+    /// Missing type annotation in typed class (BT-1918).
+    ///
+    /// Separate from `Type` so that `@expect type_annotation` suppresses
+    /// only missing-annotation warnings without hiding real type mismatches.
+    TypeAnnotation,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).
@@ -858,11 +866,14 @@ impl Parser {
         }
 
         if had_unattached {
-            self.diagnostics.push(Diagnostic::warning(
-                "doc comment not attached to any declaration \
-                 (blank line or // comment breaks attachment)",
-                current_span,
-            ));
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    "doc comment not attached to any declaration \
+                     (blank line or // comment breaks attachment)",
+                    current_span,
+                )
+                .with_category(DiagnosticCategory::Lint),
+            );
             // Remove from pre-scan set so the post-parse sweep does not
             // emit a second warning for the same token.
             self.unattached_doc_comment_indices.remove(&current_idx);
@@ -992,6 +1003,14 @@ impl Parser {
     pub(super) fn error(&mut self, message: impl Into<EcoString>) {
         let span = self.current_token().span();
         self.diagnostics.push(Diagnostic::error(message, span));
+    }
+
+    /// Reports a "cast in expression" error when `!` is used on a non-MessageSend.
+    pub(super) fn cast_in_expression_error(&mut self, span: Span) {
+        self.diagnostics.push(Diagnostic::error(
+            "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
+            span,
+        ));
     }
 
     /// Increments the nesting depth and returns `Err(Expression::Error)` if
@@ -1141,10 +1160,7 @@ impl Parser {
                             Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                             Some(last) => {
                                 let span = last.span();
-                                self.diagnostics.push(Diagnostic::error(
-                                    "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
-                                    span,
-                                ));
+                                self.cast_in_expression_error(span);
                             }
                             None => {}
                         }

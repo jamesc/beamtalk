@@ -276,7 +276,8 @@ fn check_cross_package_ref(
             )
             .with_hint(format!(
                 "'{class_name}' is declared 'internal' in package '{pkg}'"
-            )),
+            ))
+            .with_category(DiagnosticCategory::Visibility),
         );
     }
     // info.package == None: builtins or REPL classes — no package boundary to enforce
@@ -482,7 +483,8 @@ fn check_leaked_ref(
         )
         .with_hint(format!(
             "'{type_name}' is declared 'internal' — make it public, or change the type"
-        )),
+        ))
+        .with_category(DiagnosticCategory::Visibility),
     );
 }
 

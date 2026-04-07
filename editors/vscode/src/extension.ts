@@ -116,7 +116,7 @@ function lspIsOnPath(): Promise<boolean> {
   return new Promise((resolve) => {
     execFile(
       withPlatformExecutable("beamtalk-lsp"),
-      ["--version"],
+      ["--help"],
       { timeout: 3000, windowsHide: true },
       (error) => resolve(!error)
     );
@@ -247,15 +247,32 @@ class BeamtalkTaskProvider implements vscode.TaskProvider {
 
 /** Creates the LSP client and starts it. */
 async function startClient(context: vscode.ExtensionContext): Promise<void> {
+  // Create the output channel early so discovery failures are visible.
+  outputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server", { log: true });
+  traceOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server Trace", {
+    log: true,
+  });
+
   const resolved = await resolveServerPath(context);
 
   if (!resolved) {
-    const action = await vscode.window.showInformationMessage(
-      "Install Beamtalk to enable language features (hover, go-to-definition, diagnostics).",
+    outputChannel.warn(
+      "Could not find beamtalk-lsp. Searched: beamtalk.server.path setting, " +
+        "sysroot via `beamtalk --print-sysroot`, and PATH. " +
+        'Set "beamtalk.server.path" in settings, ensure `beamtalk-lsp` is on the extension host PATH, ' +
+        "or ensure `beamtalk` is on the extension host PATH for sysroot discovery."
+    );
+    const action = await vscode.window.showWarningMessage(
+      'Could not find beamtalk-lsp. Set "beamtalk.server.path" in settings, ensure `beamtalk-lsp` is on the extension host PATH, or ensure `beamtalk` is on PATH for sysroot discovery.',
+      "Open Settings",
       "Install Beamtalk"
     );
-    if (action === "Install Beamtalk") {
-      vscode.env.openExternal(vscode.Uri.parse("https://github.com/jamesc/beamtalk#installation"));
+    if (action === "Open Settings") {
+      void vscode.commands.executeCommand("workbench.action.openSettings", "beamtalk.server.path");
+    } else if (action === "Install Beamtalk") {
+      void vscode.env.openExternal(
+        vscode.Uri.parse("https://github.com/jamesc/beamtalk#installation")
+      );
     }
     return;
   }
@@ -266,11 +283,6 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     command: serverPath,
     args: [],
   };
-
-  outputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server", { log: true });
-  traceOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server Trace", {
-    log: true,
-  });
 
   if (resolved.warning) {
     outputChannel.warn(resolved.warning);

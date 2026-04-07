@@ -421,7 +421,8 @@ impl NameResolver {
                         .with_hint(format!(
                             "Outer variable defined at offset {}. Use a different name to avoid confusion",
                             outer_span.start()
-                        )),
+                        ))
+                        .with_category(DiagnosticCategory::Lint),
                 );
             }
         }
@@ -442,7 +443,8 @@ impl NameResolver {
                 // First unreachable expression after early return — warn once
                 self.diagnostics.push(
                     Diagnostic::warning("Unreachable code after early return", expr.span())
-                        .with_hint("Code after an early return (^) will never execute"),
+                        .with_hint("Code after an early return (^) will never execute")
+                        .with_category(DiagnosticCategory::Lint),
                 );
                 warned = true;
             }
