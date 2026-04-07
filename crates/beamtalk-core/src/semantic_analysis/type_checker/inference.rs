@@ -651,7 +651,9 @@ impl TypeChecker {
         if let InferredType::Dynamic(reason) = &ty {
             if !matches!(
                 reason,
-                DynamicReason::DynamicReceiver | DynamicReason::Unknown
+                DynamicReason::DynamicReceiver
+                    | DynamicReason::DynamicSpec
+                    | DynamicReason::Unknown
             ) {
                 if let Some(ref class_name) = self.typed_class_context {
                     if let Some(description) = reason.description() {

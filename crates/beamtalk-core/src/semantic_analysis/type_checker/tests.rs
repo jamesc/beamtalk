@@ -4081,6 +4081,14 @@ fn dynamic_display_name_untyped_ffi() {
 }
 
 #[test]
+fn dynamic_display_name_dynamic_spec() {
+    assert_eq!(
+        InferredType::Dynamic(DynamicReason::DynamicSpec).display_name(),
+        Some(ecow::EcoString::from("Dynamic (FFI spec is Dynamic)"))
+    );
+}
+
+#[test]
 fn resolve_type_annotation_simple() {
     let ann = TypeAnnotation::Simple(ident("Integer"));
     let result = TypeChecker::resolve_type_annotation(&ann);
@@ -11099,5 +11107,9 @@ fn dynamic_reason_descriptions() {
         Some("dynamic receiver")
     );
     assert_eq!(DynamicReason::UntypedFfi.description(), Some("untyped FFI"));
+    assert_eq!(
+        DynamicReason::DynamicSpec.description(),
+        Some("FFI spec is Dynamic")
+    );
     assert_eq!(DynamicReason::Unknown.description(), None);
 }
