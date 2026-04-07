@@ -737,9 +737,10 @@ map_type(_) ->
 -spec extract_beamtalk_class([tuple()]) -> {ok, atom()} | error.
 extract_beamtalk_class([]) ->
     error;
-extract_beamtalk_class([{type, _, map_field_exact,
-                         [{atom, _, '$beamtalk_class'}, {atom, _, ClassName}]}
-                        | _]) ->
+extract_beamtalk_class([
+    {type, _, map_field_exact, [{atom, _, '$beamtalk_class'}, {atom, _, ClassName}]}
+    | _
+]) ->
     {ok, ClassName};
 extract_beamtalk_class([_ | Rest]) ->
     extract_beamtalk_class(Rest).
