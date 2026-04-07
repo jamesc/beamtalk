@@ -450,14 +450,25 @@ fn add_keyword_completions(
     }
 }
 
-/// Returns `true` if the cursor is immediately after `self.` in the source.
+/// Returns `true` if the cursor is after `self.` (possibly followed by a
+/// partial identifier the user is typing, e.g., `self.co|`).
 fn is_after_self_dot(source: &str, offset: u32) -> bool {
+    let bytes = source.as_bytes();
     let offset = offset as usize;
-    if offset < 5 {
+    // Back up over any trailing identifier fragment (e.g., `self.co|` → `self.|`).
+    let mut cursor = offset;
+    while cursor > 0
+        && bytes
+            .get(cursor - 1)
+            .is_some_and(|&b| is_identifier_char(b))
+    {
+        cursor -= 1;
+    }
+    if cursor < 5 {
         return false;
     }
     // Use safe slicing to avoid panicking on UTF-8 boundary misalignment.
-    let Some(slice) = source.get(offset - 5..offset) else {
+    let Some(slice) = source.get(cursor - 5..cursor) else {
         return false;
     };
     if slice != "self." {
@@ -465,10 +476,9 @@ fn is_after_self_dot(source: &str, offset: u32) -> bool {
     }
     // Ensure `self` is a standalone keyword, not the tail of another identifier
     // (e.g., `doself.` should not match).
-    offset == 5
-        || source
-            .as_bytes()
-            .get(offset - 6)
+    cursor == 5
+        || bytes
+            .get(cursor - 6)
             .is_none_or(|&b| !is_identifier_char(b))
 }
 
@@ -2712,5 +2722,15 @@ mod tests {
         assert!(is_after_self_dot(" self.", 6));
         assert!(is_after_self_dot("(self.", 6));
         assert!(is_after_self_dot("=self.", 6));
+    }
+
+    #[test]
+    fn is_after_self_dot_with_partial_identifier() {
+        // Cursor after `self.co` — should back up over `co` and match `self.`
+        assert!(is_after_self_dot("self.co", 7));
+        assert!(is_after_self_dot(" self.count", 11));
+        assert!(is_after_self_dot("x := self.c", 11));
+        // But not for `doself.co`
+        assert!(!is_after_self_dot("doself.co", 9));
     }
 }
