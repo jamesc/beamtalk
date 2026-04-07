@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test helper that raises a beamtalk_error in on_actor_spawned/4.
-
 -module(test_spawn_callback_bt_error).
+
+-moduledoc "Test helper that raises a beamtalk_error in on_actor_spawned/4.".
 
 -include("beamtalk.hrl").
 

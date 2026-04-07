@@ -1,16 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_file_handle module (BT-1173, BT-1762).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests dispatch/3 and has_method/1 for FileHandle instances.
-%%% dispatch/3 routes 'lines' to beamtalk_file:handle_lines/1 and
-%%% delegates Object protocol selectors to beamtalk_object_ops.
-%%% Unknown selectors raise case_clause (BT-1762: catch-all removed).
-
 -module(beamtalk_file_handle_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_file_handle module (BT-1173, BT-1762).
+
+Tests dispatch/3 and has_method/1 for FileHandle instances.
+dispatch/3 routes 'lines' to beamtalk_file:handle_lines/1 and
+delegates Object protocol selectors to beamtalk_object_ops.
+Unknown selectors raise case_clause (BT-1762: catch-all removed).
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -19,7 +21,7 @@
 %%% Helpers
 %%% ============================================================================
 
-%% @doc Build a FileHandle map backed by a real open file descriptor.
+-doc "Build a FileHandle map backed by a real open file descriptor.".
 with_temp_handle(Contents, Fun) ->
     TmpPath =
         "beamtalk_file_handle_test_" ++ integer_to_list(erlang:unique_integer([positive])) ++

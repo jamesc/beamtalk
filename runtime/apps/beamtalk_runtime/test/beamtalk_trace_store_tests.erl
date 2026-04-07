@@ -1,12 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_trace_store (ADR 0069 Phase 1).
-%%%
-%%% Tests cover: direct insert, query, ring buffer eviction, counters aggregates,
-%%% clear, composite key uniqueness, gen_server crash recovery (heir),
-%%% telemetry handler callbacks, and telemetry_poller VM stats.
 -module(beamtalk_trace_store_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_trace_store (ADR 0069 Phase 1).
+
+Tests cover: direct insert, query, ring buffer eviction, counters aggregates,
+clear, composite key uniqueness, gen_server crash recovery (heir),
+telemetry handler callbacks, and telemetry_poller VM stats.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
@@ -1599,7 +1602,7 @@ unknown_request_test_() ->
         ]
     end}.
 
-%% @private Generate a unique temporary export path.
+-doc "Generate a unique temporary export path.".
 tmp_export_path(Tag) ->
     iolist_to_binary([
         "beamtalk_test_export_",

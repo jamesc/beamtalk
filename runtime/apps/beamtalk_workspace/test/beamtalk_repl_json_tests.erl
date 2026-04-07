@@ -2,13 +2,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** REPL Session Context
 
-%%% @doc EUnit tests for beamtalk_repl_json (BT-708).
-%%%
-%%% Tests JSON formatting for REPL protocol responses: format_response,
-%%% format_error, format_bindings, format_actors, format_modules,
-%%% format_docs, term_to_json, format_error_message, parse_json.
-
 -module(beamtalk_repl_json_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_repl_json (BT-708).
+
+Tests JSON formatting for REPL protocol responses: format_response,
+format_error, format_bindings, format_actors, format_modules,
+format_docs, term_to_json, format_error_message, parse_json.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

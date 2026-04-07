@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_file module.
-%%%
-%%% Tests cover:
-%%% - File existence checks (exists:/1)
-%%% - File read/write operations and error paths
-%%% - Stream creation (lines:/1)
-%%% - Block-scoped handles (open:do:/2)
-%%% - FFI shims (exists/1, readAll/1, etc.)
-%%% - handle_has_method/1
-%%% - strip_newline/1 edge cases
-%%% - Type error guards
-%%% - Absolute path operations (ADR 0063)
-
 -module(beamtalk_file_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_file module.
+
+Tests cover:
+- File existence checks (exists:/1)
+- File read/write operations and error paths
+- Stream creation (lines:/1)
+- Block-scoped handles (open:do:/2)
+- FFI shims (exists/1, readAll/1, etc.)
+- handle_has_method/1
+- strip_newline/1 edge cases
+- Type error guards
+- Absolute path operations (ADR 0063)
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -23,7 +25,7 @@
 %%% Test Helpers
 %%% ============================================================================
 
-%% @doc Create a temporary file with given contents, run Fun, then clean up.
+-doc "Create a temporary file with given contents, run Fun, then clean up.".
 with_temp_file(Name, Contents, Fun) ->
     ok = file:write_file(Name, Contents),
     try
@@ -863,7 +865,7 @@ handle_lines_wrong_map_test() ->
 %%% Test Helpers (Directory)
 %%% ============================================================================
 
-%% @doc Create a temporary directory tree, run Fun, then recursively delete it.
+-doc "Create a temporary directory tree, run Fun, then recursively delete it.".
 with_temp_dir(Name, Fun) ->
     ok = filelib:ensure_path(Name),
     try

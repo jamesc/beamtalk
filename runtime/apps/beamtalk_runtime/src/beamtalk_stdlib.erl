@@ -1,37 +1,40 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Standard library initialization for Beamtalk.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% This module loads all compiled stdlib modules (from stdlib/src/*.bt) at runtime
-%%% startup. All class registrations are handled by compiled stdlib modules
-%%% themselves — no hand-written registrations remain.
-%%%
-%%% ## Design: No Hand-Written Registrations
-%%%
-%%% All class registrations are handled by compiled stdlib modules themselves.
-%%% Each compiled module has an on_load function that calls register_class/0,
-%%% which creates the class process with the correct method maps generated
-%%% from the .bt source files.
-%%%
-%%% This eliminates the previous pattern of hand-written register_*_class()
-%%% functions which were a source of bugs (e.g., swapped maps, stale methods).
-%%%
-%%% ## Startup Order (BT-446)
-%%%
-%%% 1. beamtalk_bootstrap starts pg (process group for class registry)
-%%% 2. This module reads class metadata from beamtalk_stdlib.app env
-%%% 3. Topologically sorts by superclass dependency
-%%% 4. Loads ALL modules in order (including ProtoObject, Object, Actor)
-%%% 5. Each module's on_load → register_class/0 creates its class process
-%%%
-%%% ## Adding a New Stdlib Class
-%%%
-%%% Just add a .bt file to stdlib/src/ and run `beamtalk build-stdlib`.
-%%% No Erlang code changes needed.
 -module(beamtalk_stdlib).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Standard library initialization for Beamtalk.
+
+This module loads all compiled stdlib modules (from stdlib/src/*.bt) at runtime
+startup. All class registrations are handled by compiled stdlib modules
+themselves — no hand-written registrations remain.
+
+## Design: No Hand-Written Registrations
+
+All class registrations are handled by compiled stdlib modules themselves.
+Each compiled module has an on_load function that calls register_class/0,
+which creates the class process with the correct method maps generated
+from the .bt source files.
+
+This eliminates the previous pattern of hand-written register_*_class()
+functions which were a source of bugs (e.g., swapped maps, stale methods).
+
+## Startup Order (BT-446)
+
+1. beamtalk_bootstrap starts pg (process group for class registry)
+2. This module reads class metadata from beamtalk_stdlib.app env
+3. Topologically sorts by superclass dependency
+4. Loads ALL modules in order (including ProtoObject, Object, Actor)
+5. Each module's on_load → register_class/0 creates its class process
+
+## Adding a New Stdlib Class
+
+Just add a .bt file to stdlib/src/ and run `beamtalk build-stdlib`.
+No Erlang code changes needed.
+""".
 -include_lib("kernel/include/logger.hrl").
 
 -export([start_link/0, init/0, init/1]).
@@ -42,29 +45,35 @@
 %% Re-export for backwards compatibility (tests reference beamtalk_stdlib:topo_sort/1)
 -export([topo_sort/1]).
 
-%% @doc Start the stdlib initializer as a supervised process.
-%%
-%% This is called by the supervisor after beamtalk_bootstrap completes.
-%% Uses proc_lib for proper OTP integration.
+-doc """
+Start the stdlib initializer as a supervised process.
+
+This is called by the supervisor after beamtalk_bootstrap completes.
+Uses proc_lib for proper OTP integration.
+""".
 -spec start_link() -> {ok, pid()}.
 start_link() ->
     proc_lib:start_link(?MODULE, init, [self()]).
 
-%% @doc Initialize stdlib for manual/testing use.
-%%
-%% Call this after bootstrap is complete to register primitive classes.
-%% For production use, prefer start_link/0 via supervisor.
+-doc """
+Initialize stdlib for manual/testing use.
+
+Call this after bootstrap is complete to register primitive classes.
+For production use, prefer start_link/0 via supervisor.
+""".
 -spec init() -> ok.
 init() ->
     do_init(),
     ok.
 
-%% @doc Initialize the standard library by loading compiled modules.
-%%
-%% This function should be called after beamtalk_bootstrap has completed,
-%% ensuring that ProtoObject, Object, and Actor classes exist.
-%%
-%% Returns ok on success, or logs warnings for any failed registrations.
+-doc """
+Initialize the standard library by loading compiled modules.
+
+This function should be called after beamtalk_bootstrap has completed,
+ensuring that ProtoObject, Object, and Actor classes exist.
+
+Returns ok on success, or logs warnings for any failed registrations.
+""".
 -spec init(pid()) -> no_return().
 init(Parent) ->
     do_init(),
@@ -73,8 +82,7 @@ init(Parent) ->
     %% Enter idle loop - this process stays alive but doesn't do anything
     stdlib_loop().
 
-%% @private
-%% @doc Shared initialization logic for stdlib loading.
+-doc "Shared initialization logic for stdlib loading.".
 -spec do_init() -> ok.
 do_init() ->
     ?LOG_INFO("Loading compiled stdlib modules", #{domain => [beamtalk, stdlib]}),
@@ -87,8 +95,7 @@ do_init() ->
     load_protocol_modules(),
     ok.
 
-%% @private
-%% @doc Idle receive loop to keep the stdlib process alive.
+-doc "Idle receive loop to keep the stdlib process alive.".
 -spec stdlib_loop() -> no_return().
 stdlib_loop() ->
     receive
@@ -99,14 +106,16 @@ stdlib_loop() ->
 %%% Compiled Stdlib Module Loading
 %%% ============================================================================
 
-%% @doc Load all compiled stdlib modules in dependency order.
-%%
-%% Reads class hierarchy from the beamtalk_stdlib app env (embedded in .app file
-%% by build-stdlib), then loads modules in topological order (superclass before
-%% subclass). Each module's on_load → register_class/0 creates its class process.
-%%
-%% BT-446: All classes are loaded from compiled stdlib, including ProtoObject,
-%% Object, and Actor. The bootstrap no longer registers these classes.
+-doc """
+Load all compiled stdlib modules in dependency order.
+
+Reads class hierarchy from the beamtalk_stdlib app env (embedded in .app file
+by build-stdlib), then loads modules in topological order (superclass before
+subclass). Each module's on_load → register_class/0 creates its class process.
+
+BT-446: All classes are loaded from compiled stdlib, including ProtoObject,
+Object, and Actor. The bootstrap no longer registers these classes.
+""".
 -spec load_compiled_stdlib_modules() -> ok.
 load_compiled_stdlib_modules() ->
     %% Ensure the beamtalk_stdlib app is loaded (not started — just metadata)
@@ -135,14 +144,15 @@ load_compiled_stdlib_modules() ->
             discover_and_load_fallback(EbinDir)
     end.
 
-%% @private
-%% @doc Load protocol-only modules from the stdlib app env (BT-1766).
-%%
-%% Protocol-only files (e.g. Printable.bt) define structural protocols but
-%% contain no class definition. They are compiled to BEAM modules with on_load
-%% callbacks that register the protocol with beamtalk_protocol_registry.
-%% Since they have no class, they are not in the `classes` env key and must
-%% be loaded explicitly.
+-doc """
+Load protocol-only modules from the stdlib app env (BT-1766).
+
+Protocol-only files (e.g. Printable.bt) define structural protocols but
+contain no class definition. They are compiled to BEAM modules with on_load
+callbacks that register the protocol with beamtalk_protocol_registry.
+Since they have no class, they are not in the `classes` env key and must
+be loaded explicitly.
+""".
 -spec load_protocol_modules() -> ok.
 load_protocol_modules() ->
     _ = application:load(beamtalk_stdlib),
@@ -173,8 +183,7 @@ load_protocol_modules() ->
             ok
     end.
 
-%% @private
-%% @doc Find the stdlib ebin directory (for fallback loading).
+-doc "Find the stdlib ebin directory (for fallback loading).".
 -spec find_stdlib_ebin() -> file:filename().
 find_stdlib_ebin() ->
     case code:lib_dir(beamtalk_stdlib) of
@@ -182,21 +191,23 @@ find_stdlib_ebin() ->
         Dir -> filename:join(Dir, "ebin")
     end.
 
-%% @private
-%% @doc Extract module name from a class entry (map or legacy tuple).
+-doc "Extract module name from a class entry (map or legacy tuple).".
 class_entry_module(#{module := Mod}) -> Mod;
 class_entry_module({Mod, _Name, _Super}) -> Mod.
 
-%% @doc Delegate to beamtalk_module_activation:topo_sort/1.
-%% Kept as a public export for backwards compatibility with tests.
+-doc """
+Delegate to beamtalk_module_activation:topo_sort/1.
+Kept as a public export for backwards compatibility with tests.
+""".
 -spec topo_sort([map() | {module(), atom(), atom()}]) -> [map() | {module(), atom(), atom()}].
 topo_sort(Entries) ->
     beamtalk_module_activation:topo_sort(Entries).
 
-%% @private
-%% @doc Fallback: discover .beam files and load them all.
-%%
-%% Used when stdlib_classes.term is missing (e.g., development without build-stdlib).
+-doc """
+Fallback: discover .beam files and load them all.
+
+Used when stdlib_classes.term is missing (e.g., development without build-stdlib).
+""".
 -spec discover_and_load_fallback(file:filename()) -> ok.
 discover_and_load_fallback(Dir) ->
     case file:list_dir(Dir) of
@@ -241,13 +252,15 @@ discover_and_load_fallback(Dir) ->
 %%% Beamtalk Class Method Dispatch
 %%% ============================================================================
 
-%% @doc Dispatch a class method on the Beamtalk global class.
-%%
-%% The Beamtalk class provides system reflection methods:
-%% - allClasses: Returns list of all registered class names
-%% - classNamed: Look up a class by name (returns class pid or nil)
-%% - globals: Returns global namespace (placeholder - returns empty map)
-%% - version: Returns Beamtalk version string
+-doc """
+Dispatch a class method on the Beamtalk global class.
+
+The Beamtalk class provides system reflection methods:
+- allClasses: Returns list of all registered class names
+- classNamed: Look up a class by name (returns class pid or nil)
+- globals: Returns global namespace (placeholder - returns empty map)
+- version: Returns Beamtalk version string
+""".
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Receiver) ->
     %% Return list of all registered class names
@@ -291,13 +304,15 @@ dispatch(Selector, _Args, _Receiver) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @doc Format an Erlang module atom as a Beamtalk dotted path.
-%% e.g. 'bt@sicp@scheme@lambda' -> "bt.sicp.scheme.lambda"
+-doc """
+Format an Erlang module atom as a Beamtalk dotted path.
+e.g. 'bt@sicp@scheme@lambda' -> "bt.sicp.scheme.lambda"
+""".
 -spec format_bt_module(module()) -> string().
 format_bt_module(Mod) ->
     re:replace(atom_to_list(Mod), "@", ".", [global, {return, list}]).
 
-%% @doc Check if the Beamtalk class responds to the given selector.
+-doc "Check if the Beamtalk class responds to the given selector.".
 -spec has_method(atom()) -> boolean().
 has_method(allClasses) -> true;
 has_method('classNamed:') -> true;

@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_workspace_bootstrap module (ADR 0019 Phase 2).
-%%%
-%%% Tests the bootstrap worker that wires singleton class variables
-%%% during workspace startup.
-
 -module(beamtalk_workspace_bootstrap_tests).
+
+-moduledoc """
+Unit tests for beamtalk_workspace_bootstrap module (ADR 0019 Phase 2).
+
+Tests the bootstrap worker that wires singleton class variables
+during workspace startup.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
@@ -416,14 +418,18 @@ remove_temp_project_dir(Dir) ->
     file:del_dir(Dir),
     ok.
 
-%% @private Build a minimal bt@ module with register_class/0 using abstract forms.
-%% The function calls beamtalk_object_class:start/2 to register the class.
+-doc """
+Build a minimal bt@ module with register_class/0 using abstract forms.
+The function calls beamtalk_object_class:start/2 to register the class.
+""".
 compile_activation_fixture(ModName, ClassName) ->
     compile_activation_fixture(ModName, ClassName, 'Object').
 
-%% @private Build a minimal bt@ module with register_class/0 and a specified superclass.
-%% BT-745: Also emits a -beamtalk_class([{ClassName, Superclass}]) attribute for
-%% dependency-ordered loading.
+-doc """
+Build a minimal bt@ module with register_class/0 and a specified superclass.
+BT-745: Also emits a -beamtalk_class([{ClassName, Superclass}]) attribute for
+dependency-ordered loading.
+""".
 compile_activation_fixture(ModName, ClassName, Superclass) ->
     Forms = [
         {attribute, 1, module, ModName},

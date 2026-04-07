@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_class_hierarchy_table (BT-1062).
-%%%
-%%% Tests the encapsulated ETS table API: new/0, insert/2, delete/1,
-%%% lookup/1, foldl/2, and match_subclasses/1.
-
 -module(beamtalk_class_hierarchy_table_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_class_hierarchy_table (BT-1062).
+
+Tests the encapsulated ETS table API: new/0, insert/2, delete/1,
+lookup/1, foldl/2, and match_subclasses/1.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================

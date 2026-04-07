@@ -1,12 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_method_resolver module (BT-623).
-%%%
-%%% Tests method resolution from various class reference formats:
-%%% pid, atom, class object tuple, and invalid inputs.
-
 -module(beamtalk_method_resolver_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Unit tests for beamtalk_method_resolver module (BT-623).
+
+Tests method resolution from various class reference formats:
+pid, atom, class object tuple, and invalid inputs.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

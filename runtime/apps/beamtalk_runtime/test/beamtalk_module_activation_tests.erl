@@ -2,13 +2,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_module_activation module.
-%%%
-%%% Tests the unified module discovery, topological sorting, activation,
-%%% and OTP application loading used by stdlib, workspace bootstrap,
-%%% and load-project.
-
 -module(beamtalk_module_activation_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_module_activation module.
+
+Tests the unified module discovery, topological sorting, activation,
+and OTP application loading used by stdlib, workspace bootstrap,
+and load-project.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -200,7 +202,7 @@ create_temp_dir() ->
     ok = filelib:ensure_dir(filename:join(Base, "dummy")),
     Base.
 
-%% @private Platform-agnostic temp directory.
+-doc "Platform-agnostic temp directory.".
 get_tmp_base() ->
     case os:getenv("TMPDIR") of
         false ->

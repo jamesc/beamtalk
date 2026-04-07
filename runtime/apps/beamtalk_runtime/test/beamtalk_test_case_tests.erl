@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_test_case module.
-%%%
-%%% Tests assertion methods, test discovery, test execution,
-%%% result formatting, and error extraction.
-
 -module(beamtalk_test_case_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_test_case module.
+
+Tests assertion methods, test discovery, test execution,
+result formatting, and error extraction.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

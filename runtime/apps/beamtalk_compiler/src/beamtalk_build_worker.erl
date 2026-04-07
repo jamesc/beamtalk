@@ -1,32 +1,34 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Batch compiler worker for `beamtalk build' (ADR 0022, Phase 3).
-%%
-%%% **DDD Context:** Compilation (Anti-Corruption Layer)
-%%
-%% Replaces `compile.escript' with an in-memory compilation pipeline.
-%% Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'
-%% to compile Core Erlang to BEAM bytecode without temporary files.
-%% Includes `debug_info' for hot code reload support.
-%%
-%% Also supports spec reading for ADR 0075 (Erlang FFI Type Definitions).
-%%
-%% Protocol:
-%%   INPUT:  Erlang term on stdin, one of:
-%%     {OutputDir, [CoreFile1, CoreFile2, ...]}  — compile Core Erlang
-%%     {read_specs, [BeamFile1, BeamFile2, ...]} — read specs from .beam files
-%%   OUTPUT (compile):
-%%     "beamtalk-compile-module:<module_name>" for each compiled module
-%%     "beamtalk-compile-result-ok" on success
-%%     "beamtalk-compile-result-error" on failure
-%%     Compilation errors/warnings printed to stderr
-%%   OUTPUT (read_specs):
-%%     "beamtalk-specs-module:<module_name>:<erlang_term>" per module
-%%     "beamtalk-specs-result-ok" on success
-%%     "beamtalk-specs-result-error" on failure
-
 -module(beamtalk_build_worker).
+
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
+
+-moduledoc """
+Batch compiler worker for `beamtalk build' (ADR 0022, Phase 3).
+
+Replaces `compile.escript' with an in-memory compilation pipeline.
+Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'
+to compile Core Erlang to BEAM bytecode without temporary files.
+Includes `debug_info' for hot code reload support.
+
+Also supports spec reading for ADR 0075 (Erlang FFI Type Definitions).
+
+Protocol:
+  INPUT:  Erlang term on stdin, one of:
+    {OutputDir, [CoreFile1, CoreFile2, ...]}  — compile Core Erlang
+    {read_specs, [BeamFile1, BeamFile2, ...]} — read specs from .beam files
+  OUTPUT (compile):
+    "beamtalk-compile-module:<module_name>" for each compiled module
+    "beamtalk-compile-result-ok" on success
+    "beamtalk-compile-result-error" on failure
+    Compilation errors/warnings printed to stderr
+  OUTPUT (read_specs):
+    "beamtalk-specs-module:<module_name>:<erlang_term>" per module
+    "beamtalk-specs-result-ok" on success
+    "beamtalk-specs-result-error" on failure
+""".
 
 -export([main/0]).
 

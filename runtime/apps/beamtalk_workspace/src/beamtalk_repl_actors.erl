@@ -1,34 +1,36 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Actor registry for REPL sessions
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Tracks actor PIDs spawned during a REPL session to keep them alive
-%%% across eval cycles. Each actor is registered with metadata including
-%%% its class name, module, and spawn time.
-%%%
-%%% ## Lifecycle
-%%%
-%%% - Registry is started when a REPL session starts
-%%% - Actors register themselves after spawn
-%%% - Actors are automatically unregistered when they terminate (via monitor)
-%%% - Registry terminates when REPL session ends, killing all actors
-%%%
-%%% ## Actor Metadata
-%%%
-%%% ```erlang
-%%% #{
-%%%   pid => pid(),
-%%%   class => atom(),        %% Class name (e.g., 'Counter')
-%%%   module => atom(),       %% Module name (e.g., beamtalk_repl_eval_42)
-%%%   spawned_at => integer() %% erlang:system_time(second)
-%%% }
-%%% ```
-
 -module(beamtalk_repl_actors).
 -behaviour(gen_server).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Actor registry for REPL sessions
+
+Tracks actor PIDs spawned during a REPL session to keep them alive
+across eval cycles. Each actor is registered with metadata including
+its class name, module, and spawn time.
+
+## Lifecycle
+
+- Registry is started when a REPL session starts
+- Actors register themselves after spawn
+- Actors are automatically unregistered when they terminate (via monitor)
+- Registry terminates when REPL session ends, killing all actors
+
+## Actor Metadata
+
+```erlang
+#{
+  pid => pid(),
+  class => atom(),        %% Class name (e.g., 'Counter')
+  module => atom(),       %% Module name (e.g., beamtalk_repl_eval_42)
+  spawned_at => integer() %% erlang:system_time(second)
+}
+```
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -75,35 +77,41 @@
 
 %%% Public API
 
-%% @doc Start the actor registry with a registered name (workspace mode).
+-doc "Start the actor registry with a registered name (workspace mode).".
 -spec start_link(registered) -> {ok, pid()} | {error, term()}.
 start_link(registered) ->
     gen_server:start_link({local, beamtalk_actor_registry}, ?MODULE, [], []).
 
-%% @doc Subscribe the calling process to actor lifecycle events.
-%% Subscriber receives:
-%%   `{actor_spawned, Metadata}' when an actor registers
-%%   `{actor_stopped, #{pid => Pid, class => Class, reason => Reason}}' when an actor terminates
+-doc """
+Subscribe the calling process to actor lifecycle events.
+Subscriber receives:
+  `{actor_spawned, Metadata}' when an actor registers
+  `{actor_stopped, #{pid => Pid, class => Class, reason => Reason}}' when an actor terminates
+""".
 -spec subscribe() -> ok.
 subscribe() ->
     gen_server:cast(beamtalk_actor_registry, {subscribe_lifecycle, self()}).
 
-%% @doc Unsubscribe the calling process from actor lifecycle events.
+-doc "Unsubscribe the calling process from actor lifecycle events.".
 -spec unsubscribe() -> ok.
 unsubscribe() ->
     gen_server:cast(beamtalk_actor_registry, {unsubscribe_lifecycle, self()}).
 
-%% @doc Register an actor with the registry.
-%% Monitors the actor so it can be automatically unregistered on termination.
+-doc """
+Register an actor with the registry.
+Monitors the actor so it can be automatically unregistered on termination.
+""".
 -spec register_actor(pid(), pid(), atom(), atom()) -> ok.
 register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     gen_server:call(RegistryPid, {register, ActorPid, ClassName, ModuleName}).
 
-%% @doc Actor spawn callback for beamtalk_runtime integration.
-%% This is registered via application:set_env by beamtalk_workspace_app:start/2.
-%% Handles each tracking step individually: if registry registration fails,
-%% we skip workspace_meta registration to avoid inconsistent state.
-%% Returns ok on success, {error, Reason} on failure.
+-doc """
+Actor spawn callback for beamtalk_runtime integration.
+This is registered via application:set_env by beamtalk_workspace_app:start/2.
+Handles each tracking step individually: if registry registration fails,
+we skip workspace_meta registration to avoid inconsistent state.
+Returns ok on success, {error, Reason} on failure.
+""".
 -spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
     case try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) of
@@ -125,8 +133,10 @@ on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
             {error, {registry_failed, Reason}}
     end.
 
-%% @doc Register actor with the REPL actor registry (gen_server:call).
-%% Returns ok on success, or {error, Reason} if registration fails.
+-doc """
+Register actor with the REPL actor registry (gen_server:call).
+Returns ok on success, or {error, Reason} if registration fails.
+""".
 -spec try_register_actor(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
 try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     try
@@ -140,9 +150,11 @@ try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
             {error, {Kind, Reason}}
     end.
 
-%% @doc Register actor with workspace_meta (gen_server:cast).
-%% Logs a warning if workspace_meta is not running, but does not fail
-%% since the actor is already tracked by the registry.
+-doc """
+Register actor with workspace_meta (gen_server:cast).
+Logs a warning if workspace_meta is not running, but does not fail
+since the actor is already tracked by the registry.
+""".
 -spec try_register_workspace_meta(pid(), atom()) -> ok.
 try_register_workspace_meta(ActorPid, ClassName) ->
     try
@@ -159,47 +171,53 @@ try_register_workspace_meta(ActorPid, ClassName) ->
             ok
     end.
 
-%% @doc Unregister an actor from the registry.
+-doc "Unregister an actor from the registry.".
 -spec unregister_actor(pid(), pid()) -> ok.
 unregister_actor(RegistryPid, ActorPid) ->
     gen_server:call(RegistryPid, {unregister, ActorPid}).
 
-%% @doc List all registered actors with their metadata.
+-doc "List all registered actors with their metadata.".
 -spec list_actors(pid()) -> [actor_metadata()].
 list_actors(RegistryPid) ->
     gen_server:call(RegistryPid, list_actors).
 
-%% @doc Kill a specific actor.
-%% Returns ok if killed, {error, not_found} if not registered.
+-doc """
+Kill a specific actor.
+Returns ok if killed, {error, not_found} if not registered.
+""".
 -spec kill_actor(pid(), pid()) -> ok | {error, not_found}.
 kill_actor(RegistryPid, ActorPid) ->
     gen_server:call(RegistryPid, {kill, ActorPid}).
 
-%% @doc Get metadata for a specific actor.
-%% Returns {ok, Metadata} or {error, not_found}.
+-doc """
+Get metadata for a specific actor.
+Returns {ok, Metadata} or {error, not_found}.
+""".
 -spec get_actor(pid(), pid()) -> {ok, actor_metadata()} | {error, not_found}.
 get_actor(RegistryPid, ActorPid) ->
     gen_server:call(RegistryPid, {get_actor, ActorPid}).
 
-%% @doc Count how many actors are using a specific module.
-%% Returns {ok, Count} where Count is the number of actors from that module.
+-doc """
+Count how many actors are using a specific module.
+Returns {ok, Count} where Count is the number of actors from that module.
+""".
 -spec count_actors_for_module(pid(), atom()) -> {ok, non_neg_integer()} | {error, term()}.
 count_actors_for_module(RegistryPid, ModuleName) ->
     gen_server:call(RegistryPid, {count_for_module, ModuleName}).
 
-%% @doc Get PIDs of all actors using a specific module.
-%% Used by hot reload to trigger sys:change_code/4 after module reload.
+-doc """
+Get PIDs of all actors using a specific module.
+Used by hot reload to trigger sys:change_code/4 after module reload.
+""".
 -spec get_pids_for_module(pid(), atom()) -> {ok, [pid()]} | {error, term()}.
 get_pids_for_module(RegistryPid, ModuleName) ->
     gen_server:call(RegistryPid, {pids_for_module, ModuleName}).
 
 %%% gen_server callbacks
 
-%% @private
 init([]) ->
     {ok, #state{actors = #{}, monitors = #{}, subscribers = #{}}}.
 
-%% @private
 handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
 
@@ -298,7 +316,6 @@ handle_call({pids_for_module, ModuleName}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
 handle_cast({subscribe_lifecycle, Pid}, State) when is_pid(Pid) ->
     #state{subscribers = Subs} = State,
     case maps:is_key(Pid, Subs) of
@@ -320,7 +337,6 @@ handle_cast({unsubscribe_lifecycle, Pid}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
 handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
     #state{actors = Actors, monitors = Monitors, subscribers = Subs} = State,
     case maps:find(MonitorRef, Monitors) of
@@ -350,7 +366,6 @@ handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(_Reason, State) ->
     %% Kill all registered actors when registry terminates
     #state{actors = Actors} = State,
@@ -364,8 +379,7 @@ terminate(_Reason, State) ->
 
 %%% Internal Functions
 
-%% @private
-%% @doc Send lifecycle event to all subscribers.
+-doc "Send lifecycle event to all subscribers.".
 -spec notify_subscribers(term(), #state{}) -> ok.
 notify_subscribers(Event, #state{subscribers = Subs}) ->
     maps:foreach(
@@ -376,6 +390,5 @@ notify_subscribers(Event, #state{subscribers = Subs}) ->
     ),
     ok.
 
-%% @private
 code_change(OldVsn, State, Extra) ->
     beamtalk_runtime_api:hot_reload_code_change(OldVsn, State, Extra).

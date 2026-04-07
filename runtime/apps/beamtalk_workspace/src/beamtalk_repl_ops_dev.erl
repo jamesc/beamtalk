@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for complete, docs, describe, and show-codegen operations.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Extracted from beamtalk_repl_server (BT-705).
-
 -module(beamtalk_repl_ops_dev).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Op handlers for complete, docs, describe, and show-codegen operations.
+
+Extracted from beamtalk_repl_server (BT-705).
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -64,7 +66,7 @@
     'perform:withArguments:'
 ]).
 
-%% @doc Handle complete/docs/describe ops.
+-doc "Handle complete/docs/describe ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"complete">>, Params, Msg, SessionPid) ->
     Code = maps:get(<<"code">>, Params, <<>>),
@@ -448,8 +450,7 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
 
 %%% show-codegen helpers
 
-%% @private
-%% @doc Encode a successful Core Erlang codegen response.
+-doc "Encode a successful Core Erlang codegen response.".
 -spec encode_codegen_response(binary(), [binary()], beamtalk_repl_protocol:protocol_msg()) ->
     binary().
 encode_codegen_response(CoreErlang, Warnings, Msg) ->
@@ -462,16 +463,17 @@ encode_codegen_response(CoreErlang, Warnings, Msg) ->
         end,
     iolist_to_binary(json:encode(Result1)).
 
-%% @private
-%% @doc Handle show-codegen for a loaded class method (BT-1236).
-%%
-%% Looks up the class in the runtime, validates the selector (if given),
-%% retrieves the authoritative live source from workspace metadata (falling back
-%% to the on-disk file), re-compiles for codegen, and returns Core Erlang.
-%%
-%% All gen_server calls on ClassPid are guarded against TOCTOU races: if the
-%% class is unloaded between the whereis_class/1 lookup and subsequent calls,
-%% the noproc exit is translated to a structured class_not_found error.
+-doc """
+Handle show-codegen for a loaded class method (BT-1236).
+
+Looks up the class in the runtime, validates the selector (if given),
+retrieves the authoritative live source from workspace metadata (falling back
+to the on-disk file), re-compiles for codegen, and returns Core Erlang.
+
+All gen_server calls on ClassPid are guarded against TOCTOU races: if the
+class is unloaded between the whereis_class/1 lookup and subsequent calls,
+the noproc exit is translated to a structured class_not_found error.
+""".
 -spec show_codegen_class_method(
     binary(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
@@ -529,11 +531,12 @@ show_codegen_class_method(ClassBin, SelectorBin, Msg) ->
             end
     end.
 
-%% @private
-%% @doc Retrieve the authoritative source for a loaded class and compile it for codegen.
-%%
-%% Reads from workspace_meta first (updated by :load and method patching), falling
-%% back to the on-disk file recorded in the beamtalk_source module attribute.
+-doc """
+Retrieve the authoritative source for a loaded class and compile it for codegen.
+
+Reads from workspace_meta first (updated by :load and method patching), falling
+back to the on-disk file recorded in the beamtalk_source module attribute.
+""".
 -spec compile_class_source(
     binary(), atom(), pid(), beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
@@ -593,10 +596,11 @@ compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
             )
     end.
 
-%% @private
-%% @doc Validate that SelectorBin exists on the class (instance-side or class-side).
-%% Returns ok when selector is undefined (no validation needed) or when found.
-%% Returns {error, EncodedResponse} when the selector is unknown.
+-doc """
+Validate that SelectorBin exists on the class (instance-side or class-side).
+Returns ok when selector is undefined (no validation needed) or when found.
+Returns {error, EncodedResponse} when the selector is unknown.
+""".
 -spec validate_selector_if_present(
     binary(), atom(), pid(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
 ) -> ok | {error, binary()}.
@@ -634,9 +638,10 @@ validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin, Msg) ->
                 )}
     end.
 
-%% @private
-%% @doc Return the value if it is a non-empty binary, otherwise return undefined.
-%% Used to normalise optional params so that "" is treated the same as absent.
+-doc """
+Return the value if it is a non-empty binary, otherwise return undefined.
+Used to normalise optional params so that "" is treated the same as absent.
+""".
 -spec nonempty_or_undefined(binary() | undefined) -> binary() | undefined.
 nonempty_or_undefined(<<>>) -> undefined;
 nonempty_or_undefined(undefined) -> undefined;
@@ -644,11 +649,12 @@ nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin.
 
 %%% Test op helpers
 
-%% @private
-%% @doc Execute a test run and encode the result.
-%%
-%% When ClassName is undefined, runs all discovered TestCase subclasses.
-%% When ClassName is a binary, runs tests for that specific class.
+-doc """
+Execute a test run and encode the result.
+
+When ClassName is undefined, runs all discovered TestCase subclasses.
+When ClassName is a binary, runs tests for that specific class.
+""".
 -spec run_test_op(binary() | undefined, beamtalk_repl_protocol:protocol_msg()) -> binary().
 run_test_op(undefined, Msg) ->
     try
@@ -703,11 +709,12 @@ run_test_op(ClassName, Msg) when is_binary(ClassName) ->
             end
     end.
 
-%% @private
-%% @doc Execute a file-scoped test run and encode the result.
-%%
-%% Discovers all TestCase subclasses whose beamtalk_source attribute matches
-%% FilePath (by path suffix) and runs them. Returns an aggregated TestResult.
+-doc """
+Execute a file-scoped test run and encode the result.
+
+Discovers all TestCase subclasses whose beamtalk_source attribute matches
+FilePath (by path suffix) and runs them. Returns an aggregated TestResult.
+""".
 -spec run_test_op_file(binary(), beamtalk_repl_protocol:protocol_msg()) -> binary().
 run_test_op_file(FilePath, Msg) ->
     try
@@ -736,7 +743,6 @@ run_test_op_file(FilePath, Msg) ->
 
 %%% Internal helpers
 
-%% @private
 -spec base_protocol_response(term()) -> map().
 base_protocol_response(Msg) ->
     Id = beamtalk_repl_protocol:get_id(Msg),
@@ -752,7 +758,6 @@ base_protocol_response(Msg) ->
         _ -> M1#{<<"session">> => Session}
     end.
 
-%% @private
 -spec get_completions(binary()) -> [binary()].
 get_completions(<<>>) ->
     [];
@@ -800,16 +805,16 @@ get_completions(Prefix) when is_binary(Prefix) ->
             PrefixStr =/= ""
         ].
 
-%% @private
-%% @doc Context-aware completion: parses the line to find a receiver and returns
-%% matching method selectors (BT-783).  Falls back to get_completions/1 when
-%% no receiver is detected.  Wrapper with no binding context.
+-doc """
+Context-aware completion: parses the line to find a receiver and returns
+matching method selectors (BT-783).  Falls back to get_completions/1 when
+no receiver is detected.  Wrapper with no binding context.
+""".
 -spec get_context_completions(binary()) -> [binary()].
 get_context_completions(Line) ->
     get_context_completions(Line, #{}).
 
-%% @private
-%% @doc Context-aware completion with session bindings for variable lookup.
+-doc "Context-aware completion with session bindings for variable lookup.".
 -spec get_context_completions(binary(), map()) -> [binary()].
 get_context_completions(<<>>, _Bindings) ->
     [];
@@ -839,21 +844,22 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
             ])
     end.
 
-%% @private
-%% @doc Parse the line up to the cursor into a receiver and prefix.
-%%
-%% Returns:
-%%   {undefined, Prefix}                — no receiver (bare prefix, e.g. <<"s">>)
-%%   {ReceiverToken, Prefix}            — single-token receiver (e.g. <<"Integer">>, <<"42">>)
-%%   {expression, ReceiverExpr, Prefix} — multi-token receiver expression (e.g. <<"\"hello\" size">>) (BT-1006)
-%%
-%% Examples:
-%%   <<"Integer s">>       → {<<"Integer">>, <<"s">>}
-%%   <<"Integer ">>        → {<<"Integer">>, <<>>}
-%%   <<"42 s">>            → {<<"42">>, <<"s">>}
-%%   <<"\"hello\" size c">>→ {expression, <<"\"hello\" size">>, <<"c">>}
-%%   <<"s">>               → {undefined, <<"s">>}
-%%   <<>>                  → {undefined, <<>>}
+-doc """
+Parse the line up to the cursor into a receiver and prefix.
+
+Returns:
+  {undefined, Prefix}                — no receiver (bare prefix, e.g. <<"s">>)
+  {ReceiverToken, Prefix}            — single-token receiver (e.g. <<"Integer">>, <<"42">>)
+  {expression, ReceiverExpr, Prefix} — multi-token receiver expression (e.g. <<"\"hello\" size">>) (BT-1006)
+
+Examples:
+  <<"Integer s">>       → {<<"Integer">>, <<"s">>}
+  <<"Integer ">>        → {<<"Integer">>, <<>>}
+  <<"42 s">>            → {<<"42">>, <<"s">>}
+  <<"\"hello\" size c">>→ {expression, <<"\"hello\" size">>, <<"c">>}
+  <<"s">>               → {undefined, <<"s">>}
+  <<>>                  → {undefined, <<>>}
+""".
 -spec parse_receiver_and_prefix(binary()) ->
     {binary() | undefined, binary()} | {expression, binary(), binary()}.
 parse_receiver_and_prefix(<<>>) ->
@@ -901,7 +907,6 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
             end
     end.
 
-%% @private
 -spec is_identifier_char(char()) -> boolean().
 is_identifier_char(C) ->
     (C >= $a andalso C =< $z) orelse
@@ -918,19 +923,20 @@ is_identifier_char(C) ->
 
 %%% Chain resolution (BT-1006)
 
-%% @private
-%% @doc Parse a binary expression into a receiver token and a list of unary selectors.
-%%
-%% Accepts only simple unary send chains: whitespace-separated tokens where the first
-%% is a receiver (literal, class name, or variable) and the rest are unary selectors.
-%% Returns `error` for keyword sends mid-chain, parenthesised subexpressions, or `>>`.
-%%
-%% Examples:
-%%   <<"\"hello\" size">>    → {ok, <<"\"hello\"">>, [size]}
-%%   <<"counter getValue">>  → {ok, <<"counter">>, [getValue]}
-%%   <<"\"hello\" size abs">>→ {ok, <<"\"hello\"">>, [size, abs]}
-%%   <<"inject: 0 into:">>   → error  (keyword send)
-%%   <<"(myList size)">>     → error  (paren)
+-doc """
+Parse a binary expression into a receiver token and a list of unary selectors.
+
+Accepts only simple unary send chains: whitespace-separated tokens where the first
+is a receiver (literal, class name, or variable) and the rest are unary selectors.
+Returns `error` for keyword sends mid-chain, parenthesised subexpressions, or `>>`.
+
+Examples:
+  <<"\"hello\" size">>    → {ok, <<"\"hello\"">>, [size]}
+  <<"counter getValue">>  → {ok, <<"counter">>, [getValue]}
+  <<"\"hello\" size abs">>→ {ok, <<"\"hello\"">>, [size, abs]}
+  <<"inject: 0 into:">>   → error  (keyword send)
+  <<"(myList size)">>     → error  (paren)
+""".
 -spec tokenise_send_chain(binary()) -> {ok, binary(), [atom()]} | error.
 tokenise_send_chain(<<>>) ->
     error;
@@ -959,7 +965,6 @@ tokenise_send_chain(Expr) when is_binary(Expr) ->
             end
     end.
 
-%% @private
 -spec validate_chain_tokens(binary(), [binary()]) -> ok | error.
 validate_chain_tokens(ReceiverToken, Selectors) ->
     AllTokens = [ReceiverToken | Selectors],
@@ -981,8 +986,9 @@ validate_chain_tokens(ReceiverToken, Selectors) ->
             end
     end.
 
-%% @private
-%% @doc A valid unary selector starts with a letter or underscore and contains no colon.
+-doc """
+A valid unary selector starts with a letter or underscore and contains no colon.
+""".
 -spec is_valid_unary_selector(binary()) -> boolean().
 is_valid_unary_selector(<<>>) ->
     false;
@@ -993,45 +999,48 @@ is_valid_unary_selector(<<H, _/binary>> = Sel) when
 is_valid_unary_selector(_) ->
     false.
 
-%% @private
-%% @doc Returns true if the first character of a token is a binary selector character.
-%%
-%% Binary selector characters: + - * / < > = ~ % & ? , \
-%% These are the same characters recognised by the Beamtalk lexer.
+-doc """
+Returns true if the first character of a token is a binary selector character.
+
+Binary selector characters: + - * / < > = ~ % & ? , \
+These are the same characters recognised by the Beamtalk lexer.
+""".
 -spec is_binary_selector_token(binary()) -> boolean().
 is_binary_selector_token(<<H, _/binary>>) ->
     lists:member(H, "+-*/<>=~%&?,\\");
 is_binary_selector_token(<<>>) ->
     false.
 
-%% @private
-%% @doc Returns true if the token contains characters that make it un-parseable
-%% as part of a simple chain (parentheses or the `>>` method-reference operator).
+-doc """
+Returns true if the token contains characters that make it un-parseable
+as part of a simple chain (parentheses or the `>>` method-reference operator).
+""".
 -spec has_invalid_chain_chars(binary()) -> boolean().
 has_invalid_chain_chars(T) ->
     binary:match(T, <<"(">>) =/= nomatch orelse
         binary:match(T, <<")">>) =/= nomatch orelse
         binary:match(T, <<">>">>) =/= nomatch.
 
-%% @private
-%% @doc Parse a whitespace-separated expression into a receiver token and a list
-%% of mixed unary/binary hops (BT-1071).
-%%
-%% Extends `tokenise_send_chain/1` to handle binary message sends mid-chain:
-%% each binary operator token consumes the following token as its argument.
-%% Binary hops are tagged `{binary, Selector}` and unary hops `{unary, Selector}`.
-%%
-%% Returns `error` for:
-%% - Empty or single-token expressions (no chain to walk)
-%% - Tokens containing parentheses or `>>` (complex sub-expressions)
-%% - Binary operators with no following argument token
-%% - Keyword sends (tokens containing `:`)
-%%
-%% Examples:
-%%   <<"counter value + 1">>  → {ok, <<"counter">>, [{unary, value}, {binary, '+'}]}
-%%   <<"\"foo\" , \"bar\"">>  → {ok, <<"\"foo\"">>, [{binary, ','}]}
-%%   <<"myList size + offset">>→ {ok, <<"myList">>, [{unary, size}, {binary, '+'}]}
-%%   <<"x + 1 * 2">>          → {ok, <<"x">>, [{binary, '+'}, {binary, '*'}]}
+-doc """
+Parse a whitespace-separated expression into a receiver token and a list
+of mixed unary/binary hops (BT-1071).
+
+Extends `tokenise_send_chain/1` to handle binary message sends mid-chain:
+each binary operator token consumes the following token as its argument.
+Binary hops are tagged `{binary, Selector}` and unary hops `{unary, Selector}`.
+
+Returns `error` for:
+- Empty or single-token expressions (no chain to walk)
+- Tokens containing parentheses or `>>` (complex sub-expressions)
+- Binary operators with no following argument token
+- Keyword sends (tokens containing `:`)
+
+Examples:
+  <<"counter value + 1">>  → {ok, <<"counter">>, [{unary, value}, {binary, '+'}]}
+  <<"\"foo\" , \"bar\"">>  → {ok, <<"\"foo\"">>, [{binary, ','}]}
+  <<"myList size + offset">>→ {ok, <<"myList">>, [{unary, size}, {binary, '+'}]}
+  <<"x + 1 * 2">>          → {ok, <<"x">>, [{binary, '+'}, {binary, '*'}]}
+""".
 -type chain_hop() :: {unary, atom()} | {binary, atom()}.
 -spec tokenise_binary_chain(binary()) -> {ok, binary(), [chain_hop()]} | error.
 tokenise_binary_chain(<<>>) ->
@@ -1057,7 +1066,6 @@ tokenise_binary_chain(Expr) when is_binary(Expr) ->
             end
     end.
 
-%% @private
 -spec parse_binary_hops([binary()]) -> {ok, [chain_hop()]} | error.
 parse_binary_hops([]) ->
     {ok, []};
@@ -1112,12 +1120,13 @@ parse_binary_hops([Token | Rest]) ->
             end
     end.
 
-%% @private
-%% @doc Walk an instance-side send chain containing mixed unary and binary hops (BT-1071).
-%%
-%% For each `{unary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
-%% For each `{binary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
-%% Returns `undefined` (graceful fallback) when any hop lacks a return-type annotation.
+-doc """
+Walk an instance-side send chain containing mixed unary and binary hops (BT-1071).
+
+For each `{unary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
+For each `{binary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
+Returns `undefined` (graceful fallback) when any hop lacks a return-type annotation.
+""".
 -spec walk_mixed_chain(atom(), [chain_hop()]) -> {ok, atom(), instance | class} | undefined.
 walk_mixed_chain(ClassName, Hops) ->
     walk_mixed_chain(ClassName, Hops, 0).
@@ -1143,11 +1152,12 @@ walk_mixed_chain(ClassName, [{_Kind, Sel} | Rest], Depth) ->
             undefined
     end.
 
-%% @private
-%% @doc Walk a chain starting from the class side with mixed unary/binary hops (BT-1071).
-%%
-%% The first hop uses `get_class_method_return_type`; subsequent hops transition to
-%% instance-side via `walk_mixed_chain/3`.
+-doc """
+Walk a chain starting from the class side with mixed unary/binary hops (BT-1071).
+
+The first hop uses `get_class_method_return_type`; subsequent hops transition to
+instance-side via `walk_mixed_chain/3`.
+""".
 -spec walk_mixed_chain_class(atom(), [chain_hop()]) -> {ok, atom(), instance | class} | undefined.
 walk_mixed_chain_class(ClassName, []) ->
     {ok, ClassName, class};
@@ -1165,15 +1175,16 @@ walk_mixed_chain_class(ClassName, [{_Kind, Sel} | Rest]) ->
             undefined
     end.
 
-%% @private
-%% @doc Resolve the type at the end of a send chain using static return-type metadata.
-%%
-%% Tokenises the expression, classifies the receiver, then walks the chain by
-%% looking up each send's return type in `method_return_types` on the class registry.
-%%
-%% When the unary tokenizer fails, tries the binary/mixed tokenizer (BT-1071).
-%% When both tokenizers fail (e.g. parenthesised subexpressions, keyword sends
-%% mid-chain), falls back to compiler-based type resolution (BT-1068, ADR 0045 Option C).
+-doc """
+Resolve the type at the end of a send chain using static return-type metadata.
+
+Tokenises the expression, classifies the receiver, then walks the chain by
+looking up each send's return type in `method_return_types` on the class registry.
+
+When the unary tokenizer fails, tries the binary/mixed tokenizer (BT-1071).
+When both tokenizers fail (e.g. parenthesised subexpressions, keyword sends
+mid-chain), falls back to compiler-based type resolution (BT-1068, ADR 0045 Option C).
+""".
 -spec resolve_chain_type(binary(), map()) -> {ok, atom(), instance | class} | undefined.
 resolve_chain_type(Expr, Bindings) ->
     case tokenise_send_chain(Expr) of
@@ -1202,12 +1213,13 @@ resolve_chain_type(Expr, Bindings) ->
             end
     end.
 
-%% @private
-%% @doc Compiler-based type resolution fallback for complex expressions (BT-1068).
-%%
-%% Sends the expression to the Rust compiler via the port. The compiler parses
-%% it fully, runs type inference, and returns the type of the last expression.
-%% Falls back to `undefined' if the compiler is unavailable or the type is unknown.
+-doc """
+Compiler-based type resolution fallback for complex expressions (BT-1068).
+
+Sends the expression to the Rust compiler via the port. The compiler parses
+it fully, runs type inference, and returns the type of the last expression.
+Falls back to `undefined' if the compiler is unavailable or the type is unknown.
+""".
 -spec resolve_type_via_compiler(binary()) -> {ok, atom(), instance | class} | undefined.
 resolve_type_via_compiler(Expr) ->
     try beamtalk_compiler:resolve_completion_type(Expr) of
@@ -1217,11 +1229,12 @@ resolve_type_via_compiler(Expr) ->
         _:_ -> undefined
     end.
 
-%% @private
-%% @doc Walk an instance-side send chain, following method return types at each hop.
-%%
-%% Returns `{ok, FinalClassName}` when every hop has a known return type,
-%% or `undefined` when any hop breaks (annotation absent or non-Simple).
+-doc """
+Walk an instance-side send chain, following method return types at each hop.
+
+Returns `{ok, FinalClassName}` when every hop has a known return type,
+or `undefined` when any hop breaks (annotation absent or non-Simple).
+""".
 -spec walk_chain(atom(), [atom()]) -> {ok, atom(), instance | class} | undefined.
 walk_chain(ClassName, Selectors) ->
     walk_chain(ClassName, Selectors, 0).
@@ -1245,16 +1258,17 @@ walk_chain(ClassName, [Selector | Rest], Depth) ->
             undefined
     end.
 
-%% @private
-%% @doc Walk a chain starting from the class side.
-%%
-%% The first hop uses `class_method_return_types`; subsequent hops transition to the
-%% instance side via `walk_chain/2`.
-%%
-%% Special case: `class` is an instance method on ProtoObject (not annotated with a
-%% return type). When a class object receives `class`, it returns its metaclass, which
-%% has the same class-side methods for completion purposes. We stay on the class side
-%% rather than failing the chain.
+-doc """
+Walk a chain starting from the class side.
+
+The first hop uses `class_method_return_types`; subsequent hops transition to the
+instance side via `walk_chain/2`.
+
+Special case: `class` is an instance method on ProtoObject (not annotated with a
+return type). When a class object receives `class`, it returns its metaclass, which
+has the same class-side methods for completion purposes. We stay on the class side
+rather than failing the chain.
+""".
 -spec walk_chain_class(atom(), [atom()]) -> {ok, atom(), instance | class} | undefined.
 walk_chain_class(ClassName, []) ->
     {ok, ClassName, class};
@@ -1272,29 +1286,32 @@ walk_chain_class(ClassName, [Selector | Rest]) ->
             undefined
     end.
 
-%% @private
-%% @doc Remove methods that are internal Object protocol and should not appear
-%% in user-facing completions. See ?COMPLETION_HIDDEN_METHODS.
+-doc """
+Remove methods that are internal Object protocol and should not appear
+in user-facing completions. See ?COMPLETION_HIDDEN_METHODS.
+""".
 -spec filter_hidden_methods([atom()]) -> [atom()].
 filter_hidden_methods(Selectors) ->
     Hidden = sets:from_list(?COMPLETION_HIDDEN_METHODS, [{version, 2}]),
     [S || S <- Selectors, not sets:is_element(S, Hidden)].
 
-%% @private
-%% @doc Return all instance methods of a class filtered by the given prefix.
-%% ADR 0071 Phase 5: Also filters internal methods from cross-package classes.
+-doc """
+Return all instance methods of a class filtered by the given prefix.
+ADR 0071 Phase 5: Also filters internal methods from cross-package classes.
+""".
 -spec complete_instance_methods(atom(), binary()) -> [binary()].
 complete_instance_methods(ClassName, Prefix) ->
     MethodSelectors = filter_hidden_methods(collect_all_methods(ClassName, 0)),
     Filtered = filter_internal_methods(MethodSelectors, ClassName),
     filter_by_prefix(Filtered, Prefix).
 
-%% @private
-%% @doc Return all class-side methods of a class filtered by the given prefix.
-%%
-%% Includes class methods plus ProtoObject instance methods (e.g. `class`,
-%% `respondsTo:`) since class objects are also objects.
-%% ADR 0071 Phase 5: Also filters internal methods from cross-package classes.
+-doc """
+Return all class-side methods of a class filtered by the given prefix.
+
+Includes class methods plus ProtoObject instance methods (e.g. `class`,
+`respondsTo:`) since class objects are also objects.
+ADR 0071 Phase 5: Also filters internal methods from cross-package classes.
+""".
 -spec complete_class_methods(atom(), binary()) -> [binary()].
 complete_class_methods(ClassName, Prefix) ->
     ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
@@ -1303,8 +1320,7 @@ complete_class_methods(ClassName, Prefix) ->
     FilteredClassMethods = filter_internal_methods(ClassMethods, ClassName, class),
     filter_by_prefix(FilteredClassMethods ++ ProtoObjMethods, Prefix).
 
-%% @private
-%% @doc Filter method selectors by a binary prefix, returning sorted binaries.
+-doc "Filter method selectors by a binary prefix, returning sorted binaries.".
 -spec filter_by_prefix([atom()], binary()) -> [binary()].
 filter_by_prefix(MethodSelectors, Prefix) ->
     All = [atom_to_binary(S, utf8) || S <- MethodSelectors],
@@ -1319,11 +1335,12 @@ filter_by_prefix(MethodSelectors, Prefix) ->
             ])
     end.
 
-%% @private
-%% @doc Get method selectors for a given receiver token.
-%% For class-name receivers (uppercase), returns only class-side methods (via hierarchy
-%% walk). Instance methods are excluded — they cannot be called on the class object.
-%% For instance receivers (literals, bindings), returns instance methods.
+-doc """
+Get method selectors for a given receiver token.
+For class-name receivers (uppercase), returns only class-side methods (via hierarchy
+walk). Instance methods are excluded — they cannot be called on the class object.
+For instance receivers (literals, bindings), returns instance methods.
+""".
 -spec get_methods_for_receiver(binary(), map()) -> [atom()].
 get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
     case classify_receiver(Receiver, Bindings) of
@@ -1348,10 +1365,11 @@ get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
             filter_internal_methods(Selectors, ClassName)
     end.
 
-%% @private
-%% @doc Classify a receiver token as a class object or instance, with optional binding lookup.
-%% Returns {class, ClassName} for class-object receivers (uppercase class names),
-%% {instance, ClassName} for instance receivers (literals, bindings), or undefined.
+-doc """
+Classify a receiver token as a class object or instance, with optional binding lookup.
+Returns {class, ClassName} for class-object receivers (uppercase class names),
+{instance, ClassName} for instance receivers (literals, bindings), or undefined.
+""".
 -spec classify_receiver(binary(), map()) -> {class, atom()} | {instance, atom()} | undefined.
 classify_receiver(<<>>, _Bindings) ->
     undefined;
@@ -1422,10 +1440,11 @@ classify_receiver(Receiver, Bindings) ->
             end
     end.
 
-%% @private
-%% @doc Classify a receiver by looking it up in the bindings map.
-%% Uses beamtalk_runtime_api:primitive_class_of/1 as the canonical type classifier,
-%% which handles actors, tagged maps, primitives, symbols, blocks, nil, etc.
+-doc """
+Classify a receiver by looking it up in the bindings map.
+Uses beamtalk_runtime_api:primitive_class_of/1 as the canonical type classifier,
+which handles actors, tagged maps, primitives, symbols, blocks, nil, etc.
+""".
 -spec classify_by_binding(atom(), map()) -> {instance, atom()} | undefined.
 classify_by_binding(VarAtom, Bindings) ->
     case maps:find(VarAtom, Bindings) of
@@ -1439,7 +1458,6 @@ classify_by_binding(VarAtom, Bindings) ->
             undefined
     end.
 
-%% @private
 -spec maybe_class(atom()) -> atom() | undefined.
 maybe_class(ClassName) ->
     case
@@ -1453,9 +1471,10 @@ maybe_class(ClassName) ->
         _Pid -> ClassName
     end.
 
-%% @private
-%% @doc Get the session bindings map from a session PID.
-%% Returns empty map if session is unavailable.
+-doc """
+Get the session bindings map from a session PID.
+Returns empty map if session is unavailable.
+""".
 -spec get_session_bindings(pid()) -> map().
 get_session_bindings(SessionPid) ->
     try
@@ -1465,10 +1484,11 @@ get_session_bindings(SessionPid) ->
         _:_ -> #{}
     end.
 
-%% @private
-%% @doc Get workspace-level global bindings (e.g. Transcript, Beamtalk, Workspace).
-%% Uses get_session_bindings/0 to include singletons as well as bind:as: entries.
-%% Returns empty map if workspace interface is unavailable.
+-doc """
+Get workspace-level global bindings (e.g. Transcript, Beamtalk, Workspace).
+Uses get_session_bindings/0 to include singletons as well as bind:as: entries.
+Returns empty map if workspace interface is unavailable.
+""".
 -spec get_workspace_bindings() -> map().
 get_workspace_bindings() ->
     try
@@ -1477,22 +1497,23 @@ get_workspace_bindings() ->
         _:_ -> #{}
     end.
 
-%% @private
-%% @doc Collect all class-side method selectors for a class by walking the superclass chain.
-%% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
+-doc """
+Collect all class-side method selectors for a class by walking the superclass chain.
+Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
+""".
 -spec collect_all_class_methods(atom(), non_neg_integer()) -> [atom()].
 collect_all_class_methods(ClassName, Depth) ->
     collect_methods_with_fun(ClassName, Depth, fun beamtalk_runtime_api:local_class_methods/1).
 
-%% @private
-%% @doc Collect all instance method selectors for a class by walking the superclass chain.
-%% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
+-doc """
+Collect all instance method selectors for a class by walking the superclass chain.
+Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
+""".
 -spec collect_all_methods(atom(), non_neg_integer()) -> [atom()].
 collect_all_methods(ClassName, Depth) ->
     collect_methods_with_fun(ClassName, Depth, fun beamtalk_runtime_api:class_methods/1).
 
-%% @private
-%% @doc Walk the superclass chain collecting methods via a caller-supplied getter fun.
+-doc "Walk the superclass chain collecting methods via a caller-supplied getter fun.".
 -spec collect_methods_with_fun(atom(), non_neg_integer(), fun((pid()) -> [atom()])) -> [atom()].
 collect_methods_with_fun(_ClassName, Depth, _Fun) when Depth > ?MAX_HIERARCHY_DEPTH ->
     [];
@@ -1527,11 +1548,12 @@ collect_methods_with_fun(ClassName, Depth, Fun) ->
             LocalMethods ++ InheritedMethods
     end.
 
-%% @private
-%% @doc ADR 0071 Phase 5: Check if a class is internal and belongs to a different
-%% package than the REPL's implicit nil package. Returns true for internal classes
-%% from named packages (e.g. stdlib). Returns false for public classes and for
-%% internal classes with no package (user-loaded in REPL, same nil package).
+-doc """
+ADR 0071 Phase 5: Check if a class is internal and belongs to a different
+package than the REPL's implicit nil package. Returns true for internal classes
+from named packages (e.g. stdlib). Returns false for public classes and for
+internal classes with no package (user-loaded in REPL, same nil package).
+""".
 -spec is_cross_package_internal(pid()) -> boolean().
 is_cross_package_internal(Pid) ->
     try
@@ -1557,17 +1579,18 @@ is_cross_package_internal(Pid) ->
         _:_ -> false
     end.
 
-%% @private
-%% @doc ADR 0071 Phase 5: Filter internal methods from a list of method selectors.
-%% Reads method visibility from __beamtalk_meta/0 and removes internal methods
-%% when the class belongs to a different package than the REPL.
-%%
-%% Walks the class hierarchy to also filter inherited internal methods from
-%% ancestor classes. Checks method_info for instance side and class_method_info
-%% for class side.
-%%
-%% Uses the class hierarchy table (ETS) for module lookup to avoid gen_server
-%% calls that can timeout on mock class processes in tests.
+-doc """
+ADR 0071 Phase 5: Filter internal methods from a list of method selectors.
+Reads method visibility from __beamtalk_meta/0 and removes internal methods
+when the class belongs to a different package than the REPL.
+
+Walks the class hierarchy to also filter inherited internal methods from
+ancestor classes. Checks method_info for instance side and class_method_info
+for class side.
+
+Uses the class hierarchy table (ETS) for module lookup to avoid gen_server
+calls that can timeout on mock class processes in tests.
+""".
 -spec filter_internal_methods([atom()], atom()) -> [atom()].
 filter_internal_methods(Selectors, ClassName) ->
     filter_internal_methods(Selectors, ClassName, instance).
@@ -1581,8 +1604,7 @@ filter_internal_methods(Selectors, ClassName, Side) ->
         _ -> [S || S <- Selectors, not maps:is_key(S, InternalSet)]
     end.
 
-%% @private
-%% @doc Walk the hierarchy collecting internal selectors from cross-package classes.
+-doc "Walk the hierarchy collecting internal selectors from cross-package classes.".
 -spec collect_internal_selectors(atom(), instance | class, non_neg_integer()) -> map().
 collect_internal_selectors(_ClassName, _Side, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     #{};
@@ -1602,8 +1624,7 @@ collect_internal_selectors(ClassName, Side, Depth) ->
         end,
     maps:merge(Super, Local).
 
-%% @private
-%% @doc Get internal selectors from a single class's meta (if cross-package).
+-doc "Get internal selectors from a single class's meta (if cross-package).".
 -spec collect_internal_selectors_for_class(atom(), instance | class) -> map().
 collect_internal_selectors_for_class(ClassName, Side) ->
     case
@@ -1639,9 +1660,10 @@ collect_internal_selectors_for_class(ClassName, Side) ->
             end
     end.
 
-%% @private
-%% @doc Extract the package name from a BEAM module name.
-%% Returns a binary package name or nil.
+-doc """
+Extract the package name from a BEAM module name.
+Returns a binary package name or nil.
+""".
 -spec extract_package_from_module_name(atom()) -> binary() | nil.
 extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
     ModStr = atom_to_list(ModuleName),
@@ -1654,9 +1676,10 @@ extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
             nil
     end.
 
-%% @private
-%% @doc Read __beamtalk_meta/0 from a compiled module.
-%% Returns the meta map or #{} if unavailable.
+-doc """
+Read __beamtalk_meta/0 from a compiled module.
+Returns the meta map or #{} if unavailable.
+""".
 -spec read_class_meta(atom()) -> map().
 read_class_meta(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
@@ -1671,7 +1694,6 @@ read_class_meta(Module) ->
             #{}
     end.
 
-%% @private
 -spec builtin_keywords() -> [binary()].
 builtin_keywords() ->
     [
@@ -1690,11 +1712,12 @@ builtin_keywords() ->
         <<"new">>
     ].
 
-%% @private
-%% @doc Describe available protocol operations.
-%%
-%% Deprecated ops (BT-849 / ADR 0040 Phase 6) include a `deprecated` flag
-%% and a `migrate_to` hint so WebSocket clients can discover the migration path.
+-doc """
+Describe available protocol operations.
+
+Deprecated ops (BT-849 / ADR 0040 Phase 6) include a `deprecated` flag
+and a `migrate_to` hint so WebSocket clients can discover the migration path.
+""".
 -spec describe_ops() -> map().
 describe_ops() ->
     BaseOps = base_ops(),
@@ -1702,7 +1725,7 @@ describe_ops() ->
     PerfOps = beamtalk_repl_ops_perf:describe_ops(),
     maps:merge(BaseOps, PerfOps).
 
-%% @private Core ops defined in this module and beamtalk_repl_server.
+-doc "Core ops defined in this module and beamtalk_repl_server.".
 -spec base_ops() -> map().
 base_ops() ->
     #{
@@ -1768,11 +1791,13 @@ base_ops() ->
         <<"shutdown">> => #{<<"params">> => [<<"cookie">>]}
     }.
 
-%% @doc Return a list of method descriptors for a class by name (BT-1026).
-%%
-%% Collects local instance methods and local class-side methods for the named
-%% class. Returns an empty list if the class name is unknown or not loaded.
-%% Each entry is a map with <<"name">>, <<"selector">>, and <<"side">> keys.
+-doc """
+Return a list of method descriptors for a class by name (BT-1026).
+
+Collects local instance methods and local class-side methods for the named
+class. Returns an empty list if the class name is unknown or not loaded.
+Each entry is a map with <<"name">>, <<"selector">>, and <<"side">> keys.
+""".
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
     %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
@@ -1808,7 +1833,6 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
             end
     end.
 
-%% @private
 -spec list_state_vars_for_ws(binary()) -> [binary()].
 list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
@@ -1824,14 +1848,16 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
             end
     end.
 
-%% @doc Resolve a class name that may be package-qualified (ADR 0070 Phase 6, BT-1659).
-%%
-%% Parses `<<"json@Parser">>` into `{ok, 'Parser'}` by looking up the
-%% package-qualified BEAM module name (`bt@json@parser`) in the class registry.
-%% Plain class names (`<<"Counter">>`) are resolved directly via `safe_to_existing_atom`.
-%%
-%% Returns `{ok, ClassAtom}` on success, or `{error, badarg}` if the class
-%% is not found (whether qualified or unqualified).
+-doc """
+Resolve a class name that may be package-qualified (ADR 0070 Phase 6, BT-1659).
+
+Parses `<<"json@Parser">>` into `{ok, 'Parser'}` by looking up the
+package-qualified BEAM module name (`bt@json@parser`) in the class registry.
+Plain class names (`<<"Counter">>`) are resolved directly via `safe_to_existing_atom`.
+
+Returns `{ok, ClassAtom}` on success, or `{error, badarg}` if the class
+is not found (whether qualified or unqualified).
+""".
 -spec resolve_qualified_class_name(binary()) -> {ok, atom()} | {error, badarg}.
 resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
     case binary:match(ClassBin, <<"@">>) of
@@ -1855,8 +1881,10 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
             end
     end.
 
-%% @private CamelCase string to snake_case string conversion.
-%% Mirrors beamtalk_primitive:camel_to_snake/1 for use in REPL ops.
+-doc """
+CamelCase string to snake_case string conversion.
+Mirrors beamtalk_primitive:camel_to_snake/1 for use in REPL ops.
+""".
 -spec camel_to_snake(string()) -> string().
 camel_to_snake(Str) ->
     camel_to_snake(Str, false, []).
@@ -1872,7 +1900,6 @@ camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
 camel_to_snake([H | T], _PrevWasLower, Acc) ->
     camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
 
-%% @private
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->
     NameBin = to_binary(ClassName),
@@ -1886,13 +1913,14 @@ make_class_not_found_error(ClassName) ->
         <<"Use Workspace classes to see loaded classes.">>
     ).
 
-%% @private
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
 to_binary(B) when is_binary(B) -> B.
 
-%% @private Extract the first line of a binary string (up to the first newline).
-%% BT-1404: Used to produce one-line class descriptions from full doc strings.
+-doc """
+Extract the first line of a binary string (up to the first newline).
+BT-1404: Used to produce one-line class descriptions from full doc strings.
+""".
 -spec first_line(binary()) -> binary().
 first_line(Bin) when is_binary(Bin) ->
     case binary:split(Bin, <<"\n">>) of
@@ -1900,12 +1928,14 @@ first_line(Bin) when is_binary(Bin) ->
         _ -> Bin
     end.
 
-%% @private Validate and normalize the list-classes filter parameter.
-%% Returns the filter in a form ready for should_include_class/4:
-%%   undefined     → pass through
-%%   <<"stdlib">>  → pass through
-%%   <<"user">>    → pass through
-%%   Other binary  → resolve to {superclass, Atom} or {error, FilterBin}
+-doc """
+Validate and normalize the list-classes filter parameter.
+Returns the filter in a form ready for should_include_class/4:
+  undefined     → pass through
+  <<"stdlib">>  → pass through
+  <<"user">>    → pass through
+  Other binary  → resolve to {superclass, Atom} or {error, FilterBin}
+""".
 -spec validate_list_classes_filter(term()) ->
     undefined | binary() | {superclass, atom()} | {error, binary()}.
 validate_list_classes_filter(undefined) ->
@@ -1922,8 +1952,10 @@ validate_list_classes_filter(FilterBin) when is_binary(FilterBin) ->
 validate_list_classes_filter(Other) ->
     {error, iolist_to_binary(io_lib:format("~p", [Other]))}.
 
-%% @private Filter predicate for list-classes op (BT-1404).
-%% Uses the pre-validated filter from validate_list_classes_filter/1.
+-doc """
+Filter predicate for list-classes op (BT-1404).
+Uses the pre-validated filter from validate_list_classes_filter/1.
+""".
 -spec should_include_class(
     atom(),
     atom() | none,
@@ -1943,7 +1975,7 @@ should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
 %%% Erlang FFI Help (BT-1852)
 %%% ============================================================================
 
-%% @private Encode a "not found" error for Erlang help lookups.
+-doc "Encode a \"not found\" error for Erlang help lookups.".
 -spec format_erlang_not_found_error(binary(), binary(), beamtalk_repl_protocol:protocol_msg()) ->
     binary().
 format_erlang_not_found_error(What, Hint, Msg) ->
@@ -1956,10 +1988,12 @@ format_erlang_not_found_error(What, Hint, Msg) ->
         Err2, Msg, fun beamtalk_repl_json:format_error_message/1
     ).
 
-%% @private Format help for an entire Erlang module.
-%%
-%% Shows type signatures from `-spec` attributes when available, plus
-%% module-level EEP-48 documentation if present.
+-doc """
+Format help for an entire Erlang module.
+
+Shows type signatures from `-spec` attributes when available, plus
+module-level EEP-48 documentation if present.
+""".
 -spec format_erlang_module_help(module(), beamtalk_repl_protocol:protocol_msg()) -> binary().
 format_erlang_module_help(Module, Msg) ->
     case code:which(Module) of
@@ -1982,7 +2016,7 @@ format_erlang_module_help(Module, Msg) ->
             format_erlang_module_with_specs(Module, BeamPath, Msg)
     end.
 
-%% @private Format module help when we have a .beam path (specs + docs).
+-doc "Format module help when we have a .beam path (specs + docs).".
 -spec format_erlang_module_with_specs(
     module(), file:filename(), beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
@@ -2018,7 +2052,7 @@ format_erlang_module_with_specs(Module, BeamPath, Msg) ->
     FullText = iolist_to_binary([Header, DocSection, <<"\n">>, FnSection]),
     beamtalk_repl_protocol:encode_docs(FullText, Msg).
 
-%% @private Format module help when we only have exports (preloaded/cover_compiled).
+-doc "Format module help when we only have exports (preloaded/cover_compiled).".
 -spec format_erlang_module_exports(module(), beamtalk_repl_protocol:protocol_msg()) -> binary().
 format_erlang_module_exports(Module, Msg) ->
     ModName = atom_to_binary(Module, utf8),
@@ -2027,7 +2061,7 @@ format_erlang_module_exports(Module, Msg) ->
     DocText = iolist_to_binary([Header, <<"\n">>, FnSection]),
     beamtalk_repl_protocol:encode_docs(DocText, Msg).
 
-%% @private Format a bare exports list for modules without specs.
+-doc "Format a bare exports list for modules without specs.".
 -spec format_exports_list(module()) -> binary().
 format_exports_list(Module) ->
     try Module:module_info(exports) of
@@ -2053,8 +2087,10 @@ format_exports_list(Module) ->
         _:_ -> <<"(no export information available)\n">>
     end.
 
-%% @private Try to show EEP-48 signatures for exported functions; fall back to
-%% bare exports list when no EEP-48 docs are available.
+-doc """
+Try to show EEP-48 signatures for exported functions; fall back to
+bare exports list when no EEP-48 docs are available.
+""".
 -spec format_eep48_signatures_or_exports(module()) -> binary().
 format_eep48_signatures_or_exports(Module) ->
     try Module:module_info(exports) of
@@ -2092,8 +2128,10 @@ format_eep48_signatures_or_exports(Module) ->
         _:_ -> <<"(no export information available)\n">>
     end.
 
-%% @private Format specs into a readable list with Beamtalk-style signatures.
-%% Filters out functions marked as hidden (@private) in EEP-48 docs.
+-doc """
+Format specs into a readable list with Beamtalk-style signatures.
+Filters out functions marked as hidden (@private) in EEP-48 docs.
+""".
 -spec format_specs_list(module(), [map()]) -> binary().
 format_specs_list(Module, Specs) ->
     %% Deduplicate: when both foo/N and 'foo:'/N exist, keep only 'foo:'/N
@@ -2147,13 +2185,15 @@ format_specs_list(Module, Specs) ->
     ),
     iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>]).
 
-%% @private Remove dispatch-alias specs that duplicate keyword messages.
-%%
-%% When a Beamtalk native module exports both `parse/1` (FFI alias) and
-%% `'parse:'/1` (keyword message), both appear in specs.  The plain variant
-%% is just a compiler-generated dispatch alias, so we hide it when the
-%% colon-suffixed variant exists at the same arity.  This also handles
-%% multi-keyword selectors: `run/2` is the alias for `'run:timeout:'/2`.
+-doc """
+Remove dispatch-alias specs that duplicate keyword messages.
+
+When a Beamtalk native module exports both `parse/1` (FFI alias) and
+`'parse:'/1` (keyword message), both appear in specs.  The plain variant
+is just a compiler-generated dispatch alias, so we hide it when the
+colon-suffixed variant exists at the same arity.  This also handles
+multi-keyword selectors: `run/2` is the alias for `'run:timeout:'/2`.
+""".
 -spec dedupe_keyword_aliases([map()]) -> [map()].
 dedupe_keyword_aliases(Specs) ->
     %% Build a set of {BaseName, Arity} for all colon-suffixed names
@@ -2169,8 +2209,10 @@ dedupe_keyword_aliases(Specs) ->
         not is_keyword_alias(maps:get(name, S), maps:get(arity, S), ColonSet)
     ].
 
-%% @private True when the spec name does NOT end in ':' but a colon-suffixed
-%% variant at the same arity exists in the set.
+-doc """
+True when the spec name does NOT end in ':' but a colon-suffixed
+variant at the same arity exists in the set.
+""".
 -spec is_keyword_alias(binary(), non_neg_integer(), sets:set()) -> boolean().
 is_keyword_alias(Name, Arity, ColonSet) ->
     case is_keyword_name(Name) of
@@ -2179,14 +2221,16 @@ is_keyword_alias(Name, Arity, ColonSet) ->
         false -> sets:is_element({Name, Arity}, ColonSet)
     end.
 
-%% @private True when a binary name ends with ':'.
+-doc "True when a binary name ends with ':'.".
 -spec is_keyword_name(binary()) -> boolean().
 is_keyword_name(<<>>) -> false;
 is_keyword_name(Name) -> binary:last(Name) =:= $:.
 
-%% @private Extract the base name from a keyword selector — the segment before
-%% the first colon.  Works for both single-keyword (`parse:` → `parse`) and
-%% multi-keyword selectors (`run:timeout:` → `run`).
+-doc """
+Extract the base name from a keyword selector — the segment before
+the first colon.  Works for both single-keyword (`parse:` → `parse`) and
+multi-keyword selectors (`run:timeout:` → `run`).
+""".
 -spec base_keyword_name(binary()) -> binary().
 base_keyword_name(Name) ->
     case binary:match(Name, <<":">>) of
@@ -2194,12 +2238,14 @@ base_keyword_name(Name) ->
         nomatch -> Name
     end.
 
-%% @private Format a single function as a Beamtalk-style type signature.
-%%
-%% Examples:
-%%   reverse: list :: List -> List
-%%   seq: from :: Integer to: to :: Integer -> List
-%%   node -> Symbol  (nullary)
+-doc """
+Format a single function as a Beamtalk-style type signature.
+
+Examples:
+  reverse: list :: List -> List
+  seq: from :: Integer to: to :: Integer -> List
+  node -> Symbol  (nullary)
+""".
 -spec format_beamtalk_signature(binary(), [map()], binary()) -> binary().
 format_beamtalk_signature(Name, [], RetType) ->
     iolist_to_binary([Name, <<" -> ">>, RetType]);
@@ -2207,7 +2253,7 @@ format_beamtalk_signature(Name, Params, RetType) ->
     ParamParts = format_params(Name, Params, 0),
     iolist_to_binary([lists:join(<<" ">>, ParamParts), <<" -> ">>, RetType]).
 
-%% @private Format parameter list with keywords.
+-doc "Format parameter list with keywords.".
 -spec format_params(binary(), [map()], non_neg_integer()) -> [iodata()].
 format_params(_Name, [], _Idx) ->
     [];
@@ -2229,14 +2275,16 @@ format_params(Name, [Param | Rest], Idx) ->
     Part = iolist_to_binary([Keyword, <<" ">>, format_param_name(ParamName), <<" :: ">>, ParamType]),
     [Part | format_params(Name, Rest, Idx + 1)].
 
-%% @private Format a parameter name, using a fallback for empty/missing names.
+-doc "Format a parameter name, using a fallback for empty/missing names.".
 -spec format_param_name(binary()) -> binary().
 format_param_name(<<>>) -> <<"arg">>;
 format_param_name(Name) -> Name.
 
-%% @private Format help for a specific Erlang function in a module.
-%%
-%% Shows the type signature plus EEP-48 doc with examples when available.
+-doc """
+Format help for a specific Erlang function in a module.
+
+Shows the type signature plus EEP-48 doc with examples when available.
+""".
 -spec format_erlang_function_help(
     module(), atom(), beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
@@ -2262,7 +2310,7 @@ format_erlang_function_help(Module, Function, Msg) ->
             format_erlang_function_with_docs(Module, Function, BeamPath, Msg)
     end.
 
-%% @private Format help for a specific function, combining specs and docs.
+-doc "Format help for a specific function, combining specs and docs.".
 -spec format_erlang_function_with_docs(
     module(),
     atom(),
@@ -2402,10 +2450,12 @@ format_erlang_function_with_docs(Module, Function, BeamPath, Msg) ->
             beamtalk_repl_protocol:encode_docs(FullText, Msg)
     end.
 
-%% @private Fall through to type definition lookup when no exported function matches.
-%%
-%% Searches the module's abstract_code for a `-type` definition matching the
-%% given name (as atom). If found, pretty-prints it. Otherwise shows not-found.
+-doc """
+Fall through to type definition lookup when no exported function matches.
+
+Searches the module's abstract_code for a `-type` definition matching the
+given name (as atom). If found, pretty-prints it. Otherwise shows not-found.
+""".
 -spec format_erlang_type_or_not_found(
     module(),
     atom(),
@@ -2417,10 +2467,12 @@ format_erlang_type_or_not_found(Module, Name, BeamPath, Msg) ->
     TypeResult = find_types_in_beam(BeamPath, fun(N) -> N =:= Name end),
     render_type_result_or_not_found(Module, NameBin, TypeResult, Msg).
 
-%% @private Type lookup by binary name — used when the atom doesn't exist yet.
-%%
-%% Searches abstract_code for type definitions matching the binary name,
-%% comparing via atom_to_binary. This avoids creating atoms for user typos.
+-doc """
+Type lookup by binary name — used when the atom doesn't exist yet.
+
+Searches abstract_code for type definitions matching the binary name,
+comparing via atom_to_binary. This avoids creating atoms for user typos.
+""".
 -spec format_erlang_type_by_name_or_not_found(
     module(), binary(), beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
@@ -2429,7 +2481,7 @@ format_erlang_type_by_name_or_not_found(Module, NameBin, Msg) ->
     TypeResult = find_types_in_beam(BeamPath, fun(N) -> atom_to_binary(N, utf8) =:= NameBin end),
     render_type_result_or_not_found(Module, NameBin, TypeResult, Msg).
 
-%% @private Search for type definitions in a beam file matching a predicate.
+-doc "Search for type definitions in a beam file matching a predicate.".
 -spec find_types_in_beam(
     file:filename() | preloaded | cover_compiled | non_existing,
     fun((atom()) -> boolean())
@@ -2452,7 +2504,7 @@ find_types_in_beam(Path, Pred) ->
             {error, Reason}
     end.
 
-%% @private Render matched type definitions, or show a not-found error.
+-doc "Render matched type definitions, or show a not-found error.".
 -spec render_type_result_or_not_found(
     module(),
     binary(),
@@ -2486,7 +2538,7 @@ render_type_result_or_not_found(Module, NameBin, {error, _}, Msg) ->
         Msg
     ).
 
-%% @private Find all arities for a function exported by a module.
+-doc "Find all arities for a function exported by a module.".
 -spec find_function_arities(module(), atom()) -> [non_neg_integer()].
 find_function_arities(Module, Function) ->
     try Module:module_info(exports) of

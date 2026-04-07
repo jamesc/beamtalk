@@ -1,31 +1,34 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Telemetry validation spike tests (ADR 0069 Phase 0).
-%%%
-%%% Proves core assumptions about the telemetry library before committing
-%%% to the full actor observability architecture:
-%%%
-%%% 1. telemetry:span/3 emits stop events with correct duration
-%%% 2. telemetry:span/3 exception events preserve exit:{timeout, _} shape
-%%% 3. telemetry handlers can increment counters:add/3 from the calling process
-%%% 4. beamtalk_object_instances reverse lookup (Pid -> Class) works with measured overhead
-%%% 5. Microbenchmark: telemetry:span/3 + counters:add/3 overhead
-%%% 6. telemetry_poller emits periodic VM stats as telemetry events
-%%% 7. telemetry/try-catch composition with sync_send/3 pattern
 -module(beamtalk_telemetry_spike_tests).
+
+-moduledoc """
+Telemetry validation spike tests (ADR 0069 Phase 0).
+
+Proves core assumptions about the telemetry library before committing
+to the full actor observability architecture:
+
+1. telemetry:span/3 emits stop events with correct duration
+2. telemetry:span/3 exception events preserve exit:{timeout, _} shape
+3. telemetry handlers can increment counters:add/3 from the calling process
+4. beamtalk_object_instances reverse lookup (Pid -> Class) works with measured overhead
+5. Microbenchmark: telemetry:span/3 + counters:add/3 overhead
+6. telemetry_poller emits periodic VM stats as telemetry events
+7. telemetry/try-catch composition with sync_send/3 pattern
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
 %% Helpers
 %%====================================================================
 
-%% @doc Ensure the telemetry application is started.
+-doc "Ensure the telemetry application is started.".
 ensure_telemetry() ->
     _ = application:ensure_all_started(telemetry),
     ok.
 
-%% @doc Start a minimal gen_server for testing telemetry:span/3 wrapping.
+-doc "Start a minimal gen_server for testing telemetry:span/3 wrapping.".
 -spec start_echo_server() -> pid().
 start_echo_server() ->
     {ok, Pid} = gen_server:start(
@@ -35,7 +38,7 @@ start_echo_server() ->
     ),
     Pid.
 
-%% @doc Attach a telemetry handler and return a unique handler ID.
+-doc "Attach a telemetry handler and return a unique handler ID.".
 attach_handler(EventName, DestPid) ->
     HandlerId = {telemetry_spike, make_ref()},
     ok = telemetry:attach(
@@ -48,7 +51,7 @@ attach_handler(EventName, DestPid) ->
     ),
     HandlerId.
 
-%% @doc Detach a telemetry handler, ignoring errors.
+-doc "Detach a telemetry handler, ignoring errors.".
 detach_handler(HandlerId) ->
     telemetry:detach(HandlerId).
 

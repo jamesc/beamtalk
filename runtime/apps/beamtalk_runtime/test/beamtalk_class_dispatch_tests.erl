@@ -1,23 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_class_dispatch (BT-1085).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Coverage target: ≥ 60% of beamtalk_class_dispatch.erl.
-%%%
-%%% Test groups:
-%%%
-%%%   1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
-%%%   2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
-%%%   3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
-%%%   4. unwrap_class_call/1 — ok and error paths
-%%%   5. undef classification — module_not_loaded vs method_not_found (BT-999)
-%%%   6. class_send/3 — undefined class, unknown selector, new/spawn
-%%%   7. class_name_from_pid/1 — via registered/unregistered processes
-
 -module(beamtalk_class_dispatch_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_class_dispatch (BT-1085).
+
+Coverage target: ≥ 60% of beamtalk_class_dispatch.erl.
+
+Test groups:
+
+  1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
+  2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
+  3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
+  4. unwrap_class_call/1 — ok and error paths
+  5. undef classification — module_not_loaded vs method_not_found (BT-999)
+  6. class_send/3 — undefined class, unknown selector, new/spawn
+  7. class_name_from_pid/1 — via registered/unregistered processes
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

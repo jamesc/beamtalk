@@ -1,17 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for propagated context across actor boundaries (ADR 0069 Phase 2b).
-%%%
-%%% Tests cover:
-%%% - get_propagated_ctx/0 returns a map with otel key
-%%% - restore_propagated_ctx/1 is a no-op when OTel is not loaded
-%%% - restore_propagated_ctx/1 with undefined otel context
-%%% - erlang:function_exported guard works correctly
-%%% - Context is attached to sync_send messages (3-tuple format)
-%%% - Context is attached to async_send messages (4-tuple format)
-%%% - Context is attached to cast_send messages (4-tuple format)
 -module(beamtalk_context_propagation_tests).
+
+%%% **DDD Context:** Actor System Context
+
+-moduledoc """
+EUnit tests for propagated context across actor boundaries (ADR 0069 Phase 2b).
+
+Tests cover:
+- get_propagated_ctx/0 returns a map with otel key
+- restore_propagated_ctx/1 is a no-op when OTel is not loaded
+- restore_propagated_ctx/1 with undefined otel context
+- erlang:function_exported guard works correctly
+- Context is attached to sync_send messages (3-tuple format)
+- Context is attached to async_send messages (4-tuple format)
+- Context is attached to cast_send messages (4-tuple format)
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -32,7 +37,7 @@ setup() ->
 cleanup(_) ->
     ok.
 
-%% @doc Start a test counter actor and register it in the instance registry.
+-doc "Start a test counter actor and register it in the instance registry.".
 start_test_counter() ->
     start_test_counter(0).
 

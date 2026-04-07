@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_compiler_port (ADR 0022, Phase 0 wire check).
-
 -module(beamtalk_compiler_port_tests).
+
+-moduledoc "Tests for beamtalk_compiler_port (ADR 0022, Phase 0 wire check).".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").

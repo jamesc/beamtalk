@@ -1,16 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Supervisor for the Beamtalk compiler application (ADR 0022, Phase 1).
-%%
-%%% **DDD Context:** Compilation (Anti-Corruption Layer)
-%%
-%% Supervises the compiler server (which owns the OTP Port to the Rust binary).
-%% Uses `one_for_one' strategy — if the server crashes, restart it (and the port).
-
 -module(beamtalk_compiler_sup).
 
 -behaviour(supervisor).
+
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
+
+-moduledoc """
+Supervisor for the Beamtalk compiler application (ADR 0022, Phase 1).
+
+Supervises the compiler server (which owns the OTP Port to the Rust binary).
+Uses `one_for_one' strategy — if the server crashes, restart it (and the port).
+""".
 
 -export([start_link/0]).
 -export([init/1]).

@@ -3,16 +3,19 @@
 
 %%% **DDD Context:** Object System Context
 %%%
-%%% @doc Unit tests for beamtalk_class_module_table.
-%%%
-%%% Tests cover:
-%%% - new/0 is idempotent
-%%% - insert/2 and lookup/1 round-trip
-%%% - delete/1 removes the entry
-%%% - lookup/1 returns not_found for unknown class
-%%% - insert/2 overwrites on hot-reload
-%%% - lookup/1 returns not_found when table is absent
 -module(beamtalk_class_module_table_tests).
+
+-moduledoc """
+Unit tests for beamtalk_class_module_table.
+
+Tests cover:
+- new/0 is idempotent
+- insert/2 and lookup/1 round-trip
+- delete/1 removes the entry
+- lookup/1 returns not_found for unknown class
+- insert/2 overwrites on hot-reload
+- lookup/1 returns not_found when table is absent
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

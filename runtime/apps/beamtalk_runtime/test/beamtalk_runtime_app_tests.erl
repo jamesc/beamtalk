@@ -1,15 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_runtime_app module
-%%%
-%%% Tests application behavior callbacks (start/stop).
-%%%
-%%% Note: These tests may run in a shared BEAM node where the runtime
-%%% is already started by other tests. We handle `already_started`
-%%% gracefully to avoid test pollution issues.
-
 -module(beamtalk_runtime_app_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Unit tests for beamtalk_runtime_app module
+
+Tests application behavior callbacks (start/stop).
+
+Note: These tests may run in a shared BEAM node where the runtime
+is already started by other tests. We handle `already_started`
+gracefully to avoid test pollution issues.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

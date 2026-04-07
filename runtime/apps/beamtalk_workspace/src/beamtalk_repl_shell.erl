@@ -1,21 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc REPL session shell for workspace
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Maintains per-session state including:
-%%% - Variable bindings (counter := Counter spawn)
-%%% - Session ID
-%%% - Evaluation state and counter
-%%%
-%%% Each REPL connection gets its own session process, allowing
-%%% multiple users to work in the same workspace with independent
-%%% bindings while sharing access to actors and loaded modules.
-
 -module(beamtalk_repl_shell).
 -behaviour(gen_server).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+REPL session shell for workspace
+
+Maintains per-session state including:
+- Variable bindings (counter := Counter spawn)
+- Session ID
+- Evaluation state and counter
+
+Each REPL connection gets its own session process, allowing
+multiple users to work in the same workspace with independent
+bindings while sharing access to actors and loaded modules.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -51,94 +53,105 @@
 
 %%% Public API
 
-%% @doc Start a REPL shell session.
+-doc "Start a REPL shell session.".
 -spec start_link(binary()) -> {ok, pid()} | {error, term()}.
 start_link(SessionId) ->
     gen_server:start_link(?MODULE, SessionId, []).
 
-%% @doc Stop a REPL shell session.
+-doc "Stop a REPL shell session.".
 -spec stop(pid()) -> ok.
 stop(SessionPid) ->
     gen_server:stop(SessionPid, normal, 5000).
 
-%% @doc Evaluate an expression in this session.
+-doc "Evaluate an expression in this session.".
 -spec eval(pid(), string()) ->
     {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
 
-%% @doc Evaluate an expression in trace mode (BT-1238).
-%% Returns `{ok, Steps, Output, Warnings}' or `{error, Reason, Output, Warnings}'.
+-doc """
+Evaluate an expression in trace mode (BT-1238).
+Returns `{ok, Steps, Output, Warnings}' or `{error, Reason, Output, Warnings}'.
+""".
 -spec eval_trace(pid(), string()) ->
     {ok, [{binary(), term()}], binary(), [binary()]}
     | {error, term(), binary(), [binary()]}.
 eval_trace(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval_trace, Expression}, 30000).
 
-%% @doc Evaluate an expression with streaming subscriber (BT-696).
-%% Subscriber receives {eval_out, Chunk} messages during eval.
+-doc """
+Evaluate an expression with streaming subscriber (BT-696).
+Subscriber receives {eval_out, Chunk} messages during eval.
+""".
 -spec eval_async(pid(), string(), pid()) -> ok.
 eval_async(SessionPid, Expression, Subscriber) ->
     gen_server:cast(SessionPid, {eval_async, Expression, Subscriber}).
 
-%% @doc Compile expression and return Core Erlang source (BT-700).
-%% Does NOT evaluate the code.
+-doc """
+Compile expression and return Core Erlang source (BT-700).
+Does NOT evaluate the code.
+""".
 -spec show_codegen(pid(), string()) -> {ok, binary(), [binary()]} | {error, term(), [binary()]}.
 show_codegen(SessionPid, Expression) ->
     gen_server:call(SessionPid, {show_codegen, Expression}, 30000).
 
-%% @doc Interrupt a running evaluation in this session.
-%% If no evaluation is in progress, returns ok immediately.
+-doc """
+Interrupt a running evaluation in this session.
+If no evaluation is in progress, returns ok immediately.
+""".
 -spec interrupt(pid()) -> ok.
 interrupt(SessionPid) ->
     gen_server:call(SessionPid, interrupt, 5000).
 
-%% @doc Get current variable bindings for this session.
+-doc "Get current variable bindings for this session.".
 -spec get_bindings(pid()) -> {ok, map()}.
 get_bindings(SessionPid) ->
     gen_server:call(SessionPid, get_bindings).
 
-%% @doc Clear all variable bindings for this session.
+-doc "Clear all variable bindings for this session.".
 -spec clear_bindings(pid()) -> ok.
 clear_bindings(SessionPid) ->
     gen_server:call(SessionPid, clear_bindings).
 
-%% @doc Load a Beamtalk source file in this session.
+-doc "Load a Beamtalk source file in this session.".
 -spec load_file(pid(), string()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path) ->
     gen_server:call(SessionPid, {load_file, Path}, 30000).
 
-%% @doc Load a Beamtalk source file with pre-built class indexes (BT-1543).
+-doc "Load a Beamtalk source file with pre-built class indexes (BT-1543).".
 -spec load_file(pid(), string(), map()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path, PrebuiltIndexes) ->
     gen_server:call(SessionPid, {load_file, Path, PrebuiltIndexes}, 30000).
 
-%% @doc Load Beamtalk source from an inline binary string.
+-doc "Load Beamtalk source from an inline binary string.".
 -spec load_source(pid(), binary()) -> {ok, [map()]} | {error, term()}.
 load_source(SessionPid, Source) ->
     gen_server:call(SessionPid, {load_source, Source}, 30000).
 
-%% @doc Get the module tracker for this session (user-loaded modules only).
+-doc "Get the module tracker for this session (user-loaded modules only).".
 -spec get_module_tracker(pid()) -> {ok, beamtalk_repl_modules:module_tracker()}.
 get_module_tracker(SessionPid) ->
     gen_server:call(SessionPid, get_module_tracker, 5000).
 
-%% @doc Unload a module from this session, purging its code and removing it from the tracker.
+-doc """
+Unload a module from this session, purging its code and removing it from the tracker.
+""".
 -spec unload_module(pid(), atom()) -> ok | {error, #beamtalk_error{}}.
 unload_module(SessionPid, Module) ->
     gen_server:call(SessionPid, {unload_module, Module}, 5000).
 
-%% @doc Remove a module from the session tracker only (no BEAM purge).
-%%
-%% BT-1239: Used when class removal has already purged the BEAM module
-%% (e.g., via removeFromSystem), so we only need to clean up the tracker.
+-doc """
+Remove a module from the session tracker only (no BEAM purge).
+
+BT-1239: Used when class removal has already purged the BEAM module
+(e.g., via removeFromSystem), so we only need to clean up the tracker.
+""".
 -spec remove_from_tracker(pid(), atom()) -> ok.
 remove_from_tracker(SessionPid, Module) ->
     gen_server:call(SessionPid, {remove_from_tracker, Module}, 5000).
 
 %%% gen_server callbacks
 
-%% @private
 init(SessionId) ->
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
@@ -173,7 +186,6 @@ init(SessionId) ->
 
     {ok, {SessionId, State1, undefined}}.
 
-%% @private
 handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
     %% Spawn eval in a monitored worker process so it can be interrupted (BT-666)
     Self = self(),
@@ -311,8 +323,7 @@ handle_call({show_codegen, Expression}, _From, {SessionId, State, undefined}) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
-%% BT-696: Async eval with streaming subscriber
+-doc "BT-696: Async eval with streaming subscriber".
 handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
     Self = self(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
@@ -332,13 +343,14 @@ handle_cast(
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
-%% Worker completed eval successfully (BT-666)
-%%
-%% BT-1242: Use ShellState (gen_server state) instead of discarding it: it
-%% carries pending_module_removals collected while the worker ran.  Apply them
-%% to the worker's returned WorkerState so modules removed inside the expression
-%% being executed are not reinstated when the worker snapshot is merged back.
+-doc """
+Worker completed eval successfully (BT-666)
+
+BT-1242: Use ShellState (gen_server state) instead of discarding it: it
+carries pending_module_removals collected while the worker ran.  Apply them
+to the worker's returned WorkerState so modules removed inside the expression
+being executed are not reinstated when the worker snapshot is merged back.
+""".
 handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid, MonRef, From}}) ->
     erlang:demonitor(MonRef, [flush]),
     case Result of
@@ -389,7 +401,6 @@ handle_info({class_removed, _ClassName, Module}, {SessionId, State, Worker}) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(Reason, {SessionId, _State, {WorkerPid, MonRef, _From}}) ->
     %% BT-666: Kill any running worker to avoid zombie evaluations
     erlang:demonitor(MonRef, [flush]),
@@ -407,23 +418,26 @@ terminate(Reason, _State) ->
     ?LOG_INFO("REPL session terminated", #{reason => Reason, domain => [beamtalk, runtime]}),
     ok.
 
-%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal functions
 
-%% @private BT-883: Inject workspace globals (minus class objects) as session bindings.
-%% Walks Workspace globals via beamtalk_workspace_interface_primitives:get_session_bindings/0
-%% instead of the hardcoded singletons list. Returns singletons (Transcript,
-%% Beamtalk, Workspace) plus any user-registered bind:as: names.
+-doc """
+BT-883: Inject workspace globals (minus class objects) as session bindings.
+Walks Workspace globals via beamtalk_workspace_interface_primitives:get_session_bindings/0
+instead of the hardcoded singletons list. Returns singletons (Transcript,
+Beamtalk, Workspace) plus any user-registered bind:as: names.
+""".
 inject_workspace_bindings(Bindings) ->
     maps:merge(Bindings, beamtalk_workspace_interface_primitives:get_session_bindings()).
 
-%% @private Refresh workspace bindings in session state after an eval.
-%% Removes stale workspace-injected keys and overlays fresh ETS bindings,
-%% so that bind:as:/unbind: changes are reflected immediately in the next eval
-%% and in get_bindings queries.
+-doc """
+Refresh workspace bindings in session state after an eval.
+Removes stale workspace-injected keys and overlays fresh ETS bindings,
+so that bind:as:/unbind: changes are reflected immediately in the next eval
+and in get_bindings queries.
+""".
 -spec refresh_ws_bindings(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
 refresh_ws_bindings(State) ->
     InjectedWsKeys = beamtalk_repl_state:get_injected_ws_keys(State),
@@ -434,15 +448,17 @@ refresh_ws_bindings(State) ->
     State1 = beamtalk_repl_state:set_bindings(FreshBindings, State),
     beamtalk_repl_state:set_injected_ws_keys(maps:keys(FreshWs), State1).
 
-%% @private BT-1242: Apply pending module removals from ShellState to WorkerState.
-%%
-%% ShellState is the gen_server state at eval_result time (may have accumulated
-%% pending_module_removals while the worker ran).  WorkerState is the worker's
-%% returned snapshot, based on the pre-expression state so it still has those
-%% modules in its tracker.  We remove them here so the tracker stays consistent.
-%%
-%% The pending_module_removals field in WorkerState is always [] (the worker
-%% never sets it), so the returned state has a clean pending list.
+-doc """
+BT-1242: Apply pending module removals from ShellState to WorkerState.
+
+ShellState is the gen_server state at eval_result time (may have accumulated
+pending_module_removals while the worker ran).  WorkerState is the worker's
+returned snapshot, based on the pre-expression state so it still has those
+modules in its tracker.  We remove them here so the tracker stays consistent.
+
+The pending_module_removals field in WorkerState is always [] (the worker
+never sets it), so the returned state has a clean pending list.
+""".
 -spec apply_pending_removals(beamtalk_repl_state:state(), beamtalk_repl_state:state()) ->
     beamtalk_repl_state:state().
 apply_pending_removals(ShellState, WorkerState) ->
@@ -459,11 +475,13 @@ apply_pending_removals(ShellState, WorkerState) ->
             beamtalk_repl_state:set_module_tracker(NewTracker, WorkerState)
     end.
 
-%% @private BT-1242: Apply pending module removals directly to State and clear the list.
-%%
-%% Used when the worker exits via interrupt or crash (no WorkerState is returned).
-%% In those paths the shell resumes using its own ShellState, so we fold the
-%% pending list over that state's tracker and reset the list to [].
+-doc """
+BT-1242: Apply pending module removals directly to State and clear the list.
+
+Used when the worker exits via interrupt or crash (no WorkerState is returned).
+In those paths the shell resumes using its own ShellState, so we fold the
+pending list over that state's tracker and reset the list to [].
+""".
 -spec drain_pending_removals(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
 drain_pending_removals(State) ->
     case beamtalk_repl_state:get_pending_module_removals(State) of
@@ -480,7 +498,7 @@ drain_pending_removals(State) ->
             beamtalk_repl_state:clear_pending_module_removals(State1)
     end.
 
-%% @private BT-696: Dispatch eval result to sync caller or async subscriber.
+-doc "BT-696: Dispatch eval result to sync caller or async subscriber.".
 reply_eval({async, Subscriber}, Msg) ->
     Subscriber ! Msg,
     ok;

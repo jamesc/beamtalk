@@ -1,27 +1,29 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Single source of truth for workspace singleton configuration.
-%%%
-%%% Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
-%%% class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
-%%% and Erlang modules (beamtalk_transcript_stream, etc.).
-%%%
-%%% Singletons are split into two categories:
-%%% - Actor singletons: `singletons/0` — started as gen_server children by the
-%%%   workspace supervisor, registered under their binding_name.
-%%% - Value singletons: `value_singletons/0` — `sealed Object subclass:` instances
-%%%   (tagged maps, no process). Bootstrapped by `beamtalk_workspace_bootstrap`
-%%%   via `Module:new()`.
-%%%
-%%% Used by:
-%%% - beamtalk_workspace_sup — to build supervisor child specs (actor singletons only)
-%%% - beamtalk_workspace_bootstrap — to wire class variables (both kinds)
-%%% - beamtalk_repl_ops_eval / beamtalk_repl_ops_dev — to filter workspace binding names
-%%%
+-module(beamtalk_workspace_config).
+
 %%% **DDD Context:** Workspace Context
 
--module(beamtalk_workspace_config).
+-moduledoc """
+Single source of truth for workspace singleton configuration.
+
+Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
+class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
+and Erlang modules (beamtalk_transcript_stream, etc.).
+
+Singletons are split into two categories:
+- Actor singletons: `singletons/0` — started as gen_server children by the
+  workspace supervisor, registered under their binding_name.
+- Value singletons: `value_singletons/0` — `sealed Object subclass:` instances
+  (tagged maps, no process). Bootstrapped by `beamtalk_workspace_bootstrap`
+  via `Module:new()`.
+
+Used by:
+- beamtalk_workspace_sup — to build supervisor child specs (actor singletons only)
+- beamtalk_workspace_bootstrap — to wire class variables (both kinds)
+- beamtalk_repl_ops_eval / beamtalk_repl_ops_dev — to filter workspace binding names
+""".
 
 -export([singletons/0, value_singletons/0, binding_names/0, binding_name_for_class/1]).
 
@@ -40,16 +42,18 @@
 
 -export_type([singleton_config/0, value_singleton_config/0]).
 
-%% @doc Return the actor workspace singleton definitions.
-%%
-%% Each entry defines a workspace singleton backed by a gen_server:
-%% - binding_name: the REPL convenience name (e.g. 'Transcript')
-%% - class_name: the Beamtalk class name (e.g. 'TranscriptStream')
-%% - module: the Erlang implementation module
-%% - start_args: extra arguments after the registration tuple for start_link
-%%
-%% Order matters: the supervisor starts children in list order, and
-%% actor registry interleaving is managed by beamtalk_workspace_sup.
+-doc """
+Return the actor workspace singleton definitions.
+
+Each entry defines a workspace singleton backed by a gen_server:
+- binding_name: the REPL convenience name (e.g. 'Transcript')
+- class_name: the Beamtalk class name (e.g. 'TranscriptStream')
+- module: the Erlang implementation module
+- start_args: extra arguments after the registration tuple for start_link
+
+Order matters: the supervisor starts children in list order, and
+actor registry interleaving is managed by beamtalk_workspace_sup.
+""".
 -spec singletons() -> [singleton_config()].
 singletons() ->
     [
@@ -61,13 +65,15 @@ singletons() ->
         }
     ].
 
-%% @doc Return value singleton definitions (sealed Object subclass:, no process).
-%%
-%% Each entry defines a singleton that is a value type (tagged map, no gen_server).
-%% Bootstrapped by calling `Module:new()` and setting the class variable `current`.
-%% - binding_name: the REPL convenience name (e.g. 'Beamtalk')
-%% - class_name: the Beamtalk class name
-%% - module: the compiled Erlang module (provides new/0)
+-doc """
+Return value singleton definitions (sealed Object subclass:, no process).
+
+Each entry defines a singleton that is a value type (tagged map, no gen_server).
+Bootstrapped by calling `Module:new()` and setting the class variable `current`.
+- binding_name: the REPL convenience name (e.g. 'Beamtalk')
+- class_name: the Beamtalk class name
+- module: the compiled Erlang module (provides new/0)
+""".
 -spec value_singletons() -> [value_singleton_config()].
 value_singletons() ->
     [
@@ -83,19 +89,23 @@ value_singletons() ->
         }
     ].
 
-%% @doc Return the list of all workspace binding names (actor + value singletons).
-%% Used to filter these from :bindings display.
+-doc """
+Return the list of all workspace binding names (actor + value singletons).
+Used to filter these from :bindings display.
+""".
 -spec binding_names() -> [atom()].
 binding_names() ->
     ActorNames = [maps:get(binding_name, S) || S <- singletons()],
     ValueNames = [maps:get(binding_name, S) || S <- value_singletons()],
     ActorNames ++ ValueNames.
 
-%% @doc Map a singleton class name to its user-facing binding name.
-%%
-%% Returns `{ok, BindingName}` if the class is a known singleton,
-%% `undefined` otherwise. Used by error formatting to show binding names
-%% (e.g., "Workspace" instead of "WorkspaceInterface") in REPL errors.
+-doc """
+Map a singleton class name to its user-facing binding name.
+
+Returns `{ok, BindingName}` if the class is a known singleton,
+`undefined` otherwise. Used by error formatting to show binding names
+(e.g., "Workspace" instead of "WorkspaceInterface") in REPL errors.
+""".
 -spec binding_name_for_class(atom()) -> {ok, atom()} | undefined.
 binding_name_for_class(ClassName) ->
     All = singletons() ++ value_singletons(),

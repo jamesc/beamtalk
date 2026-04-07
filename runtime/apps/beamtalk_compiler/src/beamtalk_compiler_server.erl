@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Gen_server wrapping the compiler OTP Port (ADR 0022, Phase 1).
-%%
-%%% **DDD Context:** Compilation (Anti-Corruption Layer)
-%%
-%% Owns the port process and serializes compilation requests. The supervisor
-%% restarts this server (and thus re-opens the port) on crashes.
-%%
-%% Implements in-memory Core Erlang compilation via
-%% `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'
-%% to avoid temp files on disk (BT-48).
-
 -module(beamtalk_compiler_server).
 
 -behaviour(gen_server).
+
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
+
+-moduledoc """
+Gen_server wrapping the compiler OTP Port (ADR 0022, Phase 1).
+
+Owns the port process and serializes compilation requests. The supervisor
+restarts this server (and thus re-opens the port) on crashes.
+
+Implements in-memory Core Erlang compilation via
+`core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'
+to avoid temp files on disk (BT-48).
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -62,12 +64,14 @@ start_link() ->
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
-%% @doc Compile a REPL expression.
-%% Returns `{ok, CoreErlang, Warnings}' for expressions,
-%% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
-%% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
-%% `message', `line' (1-based), and optionally `hint'.
+-doc """
+Compile a REPL expression.
+Returns `{ok, CoreErlang, Warnings}' for expressions,
+`{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
+`{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+`message', `line' (1-based), and optionally `hint'.
+""".
 -spec compile_expression(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -77,10 +81,12 @@ start_link(Args) ->
 compile_expression(Source, ModuleName, KnownVars) ->
     compile_expression(Source, ModuleName, KnownVars, #{}).
 
-%% @doc Compile a REPL expression with optional compilation options.
-%%
-%% Options:
-%%   class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+-doc """
+Compile a REPL expression with optional compilation options.
+
+Options:
+  class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+""".
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -92,7 +98,7 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
         ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
     ).
 
-%% @doc Compile a REPL expression in trace mode (BT-1238).
+-doc "Compile a REPL expression in trace mode (BT-1238).".
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
@@ -105,49 +111,55 @@ compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
         ?MODULE, {compile_expression_trace, Source, ModuleName, KnownVars, Options}, 30000
     ).
 
-%% @doc Compile a file/class definition.
-%% Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
-%% Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or `{error, Diagnostics}'.
+-doc """
+Compile a file/class definition.
+Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
+Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or `{error, Diagnostics}'.
+""".
 -spec compile(binary(), map()) ->
     {ok, map()} | {error, [map()]}.
 compile(Source, Options) ->
     gen_server:call(?MODULE, {compile, Source, Options}, 30000).
 
-%% @doc Get diagnostics for source code (no code generation).
+-doc "Get diagnostics for source code (no code generation).".
 -spec diagnostics(binary()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source) ->
     gen_server:call(?MODULE, {diagnostics, Source}, 30000).
 
-%% @doc Get compiler version.
+-doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
 version() ->
     gen_server:call(?MODULE, version, 5000).
 
 -ifdef(TEST).
-%% @doc Return the current class cache map (test use only).
+-doc "Return the current class cache map (test use only).".
 -spec get_classes() -> #{atom() => map()}.
 get_classes() ->
     gen_server:call(?MODULE, get_classes, 5000).
 
-%% @doc Clear all cached class metadata (test use only).
-%%
-%% ADR 0050 Phase 3: Used for test isolation — call before tests that need a
-%% clean class cache. Synchronous so the next compile sees an empty cache.
+-doc """
+Clear all cached class metadata (test use only).
+
+ADR 0050 Phase 3: Used for test isolation — call before tests that need a
+clean class cache. Synchronous so the next compile sees an empty cache.
+""".
 -spec clear_classes() -> ok.
 clear_classes() ->
     gen_server:call(?MODULE, clear_classes, 5000).
 -endif.
 
-%% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
-%%
-%% `Expression' is the receiver expression-up-to-cursor with the incomplete
-%% prefix already stripped. The class hierarchy is injected automatically from
-%% the server state (ADR 0050 Phase 4).
-%%
-%% Returns `{ok, ClassName}' when the type is statically known, or
-%% `{error, type_unknown}' when the type cannot be determined or the compiler
-%% is unavailable.
+-doc """
+Resolve the type of an expression for REPL completion fallback (BT-1068).
+
+`Expression' is the receiver expression-up-to-cursor with the incomplete
+prefix already stripped. The class hierarchy is injected automatically from
+the server state (ADR 0050 Phase 4).
+
+Returns `{ok, ClassName}' when the type is statically known, or
+`{error, type_unknown}' when the type cannot be determined or the compiler
+is unavailable.
+""".
 -spec resolve_completion_type(binary()) -> {ok, atom()} | {error, type_unknown}.
 resolve_completion_type(Expression) ->
     try
@@ -157,17 +169,21 @@ resolve_completion_type(Expression) ->
         exit:timeout -> {error, type_unknown}
     end.
 
-%% @doc Register a class with its metadata in the compiler server cache.
-%%
-%% ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
-%% not running (e.g. non-REPL compilation or test runs without the server).
+-doc """
+Register a class with its metadata in the compiler server cache.
+
+ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
+not running (e.g. non-REPL compilation or test runs without the server).
+""".
 -spec register_class(atom(), map()) -> ok.
 register_class(ClassName, MetaMap) ->
     catch gen_server:cast(?MODULE, {register_class, ClassName, MetaMap}),
     ok.
 
-%% @doc Compile Core Erlang source to BEAM bytecode in memory.
-%% Uses core_scan → core_parse → compile:forms (no temp files).
+-doc """
+Compile Core Erlang source to BEAM bytecode in memory.
+Uses core_scan → core_parse → compile:forms (no temp files).
+""".
 -spec compile_core_erlang(binary()) -> {ok, atom(), binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin) ->
     CoreErlangStr = binary_to_list(CoreErlangBin),
@@ -274,17 +290,19 @@ terminate(_Reason, _State) ->
 
 %%% Internal functions
 
-%% @private Scan all currently loaded BEAM modules and recover user-class metadata.
-%%
-%% ADR 0050 Phase 3 (crash recovery): On compiler server restart the port process
-%% is gone but every Beamtalk class BEAM module is still loaded in the VM.  We
-%% call `__beamtalk_meta/0` on each loaded module and collect the metadata, skipping:
-%%   * Modules that do not export `__beamtalk_meta/0` (non-Beamtalk modules).
-%%   * Classes in `all_builtins/0` — the Rust compiler already has richer data.
-%%   * Old-format modules (no `meta_version` key) are included with their partial
-%%     data; absent keys are treated as zero-values by the Rust deserializer.
-%%
-%% Runs synchronously in `init/1` so compile requests queue during recovery.
+-doc """
+Scan all currently loaded BEAM modules and recover user-class metadata.
+
+ADR 0050 Phase 3 (crash recovery): On compiler server restart the port process
+is gone but every Beamtalk class BEAM module is still loaded in the VM.  We
+call `__beamtalk_meta/0` on each loaded module and collect the metadata, skipping:
+  * Modules that do not export `__beamtalk_meta/0` (non-Beamtalk modules).
+  * Classes in `all_builtins/0` — the Rust compiler already has richer data.
+  * Old-format modules (no `meta_version` key) are included with their partial
+    data; absent keys are treated as zero-values by the Rust deserializer.
+
+Runs synchronously in `init/1` so compile requests queue during recovery.
+""".
 -spec recover_from_beam_modules() -> #{atom() => map()}.
 recover_from_beam_modules() ->
     %% Guard: beamtalk_class_hierarchy_table may not be loaded if the runtime

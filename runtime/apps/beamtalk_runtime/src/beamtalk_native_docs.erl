@@ -1,20 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc On-demand EEP-48 documentation reader for Erlang modules.
-%%
-%%% **DDD Context:** Runtime Context
-%%
-%% Reads EEP-48 `"Docs"` chunks from compiled `.beam` files at runtime.
-%% Single codepath shared by REPL (`:help Erlang <module>`), LSP hover,
-%% and MCP tools.
-%%
-%% Always reads fresh from disk via `beam_lib:chunks/2` — no caching.
-%% Graceful fallback when the Docs chunk is absent (pre-OTP 25, stripped
-%% modules, or preloaded modules).
-%%
-%% @see <a href="https://www.erlang.org/eeps/eep-0048">EEP-48</a>
 -module(beamtalk_native_docs).
+
+%%% **DDD Context:** Runtime Context
+
+-moduledoc """
+On-demand EEP-48 documentation reader for Erlang modules.
+
+Reads EEP-48 `"Docs"` chunks from compiled `.beam` files at runtime.
+Single codepath shared by REPL (`:help Erlang <module>`), LSP hover,
+and MCP tools.
+
+Always reads fresh from disk via `beam_lib:chunks/2` — no caching.
+Graceful fallback when the Docs chunk is absent (pre-OTP 25, stripped
+modules, or preloaded modules).
+
+See also: <a href="https://www.erlang.org/eeps/eep-0048">EEP-48</a>
+""".
 
 -export([
     is_hidden/3,
@@ -26,16 +29,18 @@
 %%% Public API
 %%% ============================================================================
 
-%% @doc Look up documentation for a specific function in a module.
-%%
-%% Reads the EEP-48 Docs chunk from the module's `.beam` file and extracts
-%% the documentation entry for the given function and arity.
-%%
-%% Returns `#{doc => Binary, sig => Binary, examples => Binary}` on success,
-%% `{error, hidden}` when the function is marked `@private`/hidden,
-%% `{error, no_docs}` when the module/function has no docs, or
-%% `{error, unsupported_format}` when the docs chunk uses a format newer
-%% than `docs_v1` (EEP-48).
+-doc """
+Look up documentation for a specific function in a module.
+
+Reads the EEP-48 Docs chunk from the module's `.beam` file and extracts
+the documentation entry for the given function and arity.
+
+Returns `#{doc => Binary, sig => Binary, examples => Binary}` on success,
+`{error, hidden}` when the function is marked `@private`/hidden,
+`{error, no_docs}` when the module/function has no docs, or
+`{error, unsupported_format}` when the docs chunk uses a format newer
+than `docs_v1` (EEP-48).
+""".
 -spec lookup(module(), atom(), non_neg_integer()) ->
     #{doc := binary(), sig := binary(), examples := binary()}
     | {error, hidden | no_docs | unsupported_format}.
@@ -49,12 +54,14 @@ lookup(Module, Function, Arity) ->
             {error, no_docs}
     end.
 
-%% @doc Look up module-level documentation.
-%%
-%% Returns `#{doc => Binary}` with the module's top-level documentation,
-%% `{error, no_docs}` when the module has no Docs chunk or the module
-%% doc is marked as `none` or `hidden`, or `{error, unsupported_format}`
-%% when the docs chunk uses a format newer than `docs_v1`.
+-doc """
+Look up module-level documentation.
+
+Returns `#{doc => Binary}` with the module's top-level documentation,
+`{error, no_docs}` when the module has no Docs chunk or the module
+doc is marked as `none` or `hidden`, or `{error, unsupported_format}`
+when the docs chunk uses a format newer than `docs_v1`.
+""".
 -spec module_doc(module()) ->
     #{doc := binary()} | {error, no_docs | unsupported_format}.
 module_doc(Module) ->
@@ -67,10 +74,12 @@ module_doc(Module) ->
             {error, no_docs}
     end.
 
-%% @doc Check whether a function is marked as hidden (`@private`) in docs.
-%%
-%% Returns `true` when the function's doc entry is `hidden`, `false` otherwise
-%% (including when the module has no docs chunk at all).
+-doc """
+Check whether a function is marked as hidden (`@private`) in docs.
+
+Returns `true` when the function's doc entry is `hidden`, `false` otherwise
+(including when the module has no docs chunk at all).
+""".
 -spec is_hidden(module(), atom(), non_neg_integer()) -> boolean().
 is_hidden(Module, Function, Arity) ->
     case lookup(Module, Function, Arity) of
@@ -82,7 +91,7 @@ is_hidden(Module, Function, Arity) ->
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private Read the raw Docs chunk from a module's .beam file.
+-doc "Read the raw Docs chunk from a module's .beam file.".
 -spec read_docs_chunk(module()) ->
     {ok, tuple()} | {error, term()}.
 read_docs_chunk(Module) ->
@@ -98,7 +107,7 @@ read_docs_chunk(Module) ->
             read_docs_from_beam(BeamPath)
     end.
 
-%% @private Read and decode the Docs chunk from a .beam file path.
+-doc "Read and decode the Docs chunk from a .beam file path.".
 -spec read_docs_from_beam(file:filename()) ->
     {ok, tuple()} | {error, term()}.
 read_docs_from_beam(BeamPath) ->
@@ -127,7 +136,7 @@ read_docs_from_beam(BeamPath) ->
             {error, Reason}
     end.
 
-%% @private Find a specific function's documentation in the function doc list.
+-doc "Find a specific function's documentation in the function doc list.".
 -spec find_function_doc(atom(), non_neg_integer(), list()) ->
     #{doc := binary(), sig := binary(), examples := binary()}
     | {error, hidden | no_docs}.
@@ -145,7 +154,7 @@ find_function_doc(Function, Arity, FDocs) ->
             {error, no_docs}
     end.
 
-%% @private Format a function doc entry into the return map.
+-doc "Format a function doc entry into the return map.".
 -spec format_function_doc(list(), map() | none | hidden) ->
     #{doc := binary(), sig := binary(), examples := binary()}
     | {error, hidden}.
@@ -167,7 +176,7 @@ format_function_doc(Sigs, DocMap) when is_map(DocMap) ->
         examples => Examples
     }.
 
-%% @private Extract the documentation text, preferring English.
+-doc "Extract the documentation text, preferring English.".
 -spec extract_lang_doc(map()) -> binary().
 extract_lang_doc(DocMap) ->
     case maps:find(<<"en">>, DocMap) of
@@ -181,8 +190,10 @@ extract_lang_doc(DocMap) ->
             end
     end.
 
-%% @private Split doc text into main documentation and examples section.
-%% Looks for "## Examples" or "### Examples" markdown headers.
+-doc """
+Split doc text into main documentation and examples section.
+Looks for "## Examples" or "### Examples" markdown headers.
+""".
 -spec split_examples(binary()) -> {binary(), binary()}.
 split_examples(DocText) ->
     %% Look for Examples section header (## Examples or ### Examples)
@@ -195,13 +206,13 @@ split_examples(DocText) ->
             {DocText, <<>>}
     end.
 
-%% @private Format signature list into a single binary.
+-doc "Format signature list into a single binary.".
 -spec format_signatures([binary()]) -> binary().
 format_signatures([]) -> <<>>;
 format_signatures([Sig]) -> Sig;
 format_signatures(Sigs) -> iolist_to_binary(lists:join(<<"\n">>, Sigs)).
 
-%% @private Extract module-level documentation.
+-doc "Extract module-level documentation.".
 -spec extract_module_doc(map() | none | hidden) ->
     #{doc := binary()} | {error, no_docs}.
 extract_module_doc(none) ->

@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc WebSocket handler for Beamtalk REPL protocol (ADR 0020).
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Handles WebSocket connections from CLI, browser, and MCP clients.
-%%% Implements cookie-based authentication on first message before
-%%% accepting any protocol operations.
-
 -module(beamtalk_ws_handler).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+WebSocket handler for Beamtalk REPL protocol (ADR 0020).
+
+Handles WebSocket connections from CLI, browser, and MCP clients.
+Implements cookie-based authentication on first message before
+accepting any protocol operations.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -36,7 +38,7 @@
     log_subscribed :: boolean()
 }).
 
-%% @doc HTTP upgrade to WebSocket.
+-doc "HTTP upgrade to WebSocket.".
 init(Req, _Opts) ->
     Peer = cowboy_req:peer(Req),
     {cowboy_websocket, Req,
@@ -50,16 +52,20 @@ init(Req, _Opts) ->
         },
         #{idle_timeout => infinity, max_frame_size => 1048576}}.
 
-%% @doc WebSocket connection initialized — send auth challenge.
-%% Session is NOT created yet; deferred until after successful auth (security).
+-doc """
+WebSocket connection initialized — send auth challenge.
+Session is NOT created yet; deferred until after successful auth (security).
+""".
 websocket_init(State) ->
     %% Send a minimal welcome so clients know the connection is alive.
     %% Session details are sent after successful authentication.
     Welcome = iolist_to_binary(json:encode(#{<<"op">> => <<"auth-required">>})),
     {[{text, Welcome}], State}.
 
-%% @doc Handle incoming WebSocket text frame.
-%% First message must be auth; subsequent messages are protocol ops.
+-doc """
+Handle incoming WebSocket text frame.
+First message must be auth; subsequent messages are protocol ops.
+""".
 websocket_handle({text, Data}, State = #ws_state{authenticated = false}) ->
     handle_auth(Data, State);
 websocket_handle({text, Data}, State = #ws_state{authenticated = true, session_pid = SessionPid}) ->
@@ -67,8 +73,10 @@ websocket_handle({text, Data}, State = #ws_state{authenticated = true, session_p
 websocket_handle(_Frame, State) ->
     {ok, State}.
 
-%% @doc Handle Erlang messages sent to the handler process.
-%% BT-696: Streaming stdout chunk from eval
+-doc """
+Handle Erlang messages sent to the handler process.
+BT-696: Streaming stdout chunk from eval
+""".
 websocket_info(
     {eval_out, Chunk},
     State = #ws_state{
@@ -229,7 +237,7 @@ websocket_info(
 websocket_info(_Info, State) ->
     {ok, State}.
 
-%% @doc Connection terminated — clean up or keep session for resume.
+-doc "Connection terminated — clean up or keep session for resume.".
 terminate(_Reason, _Req, #ws_state{session_id = undefined}) ->
     ok;
 terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = SessionPid, peer = Peer}) ->
@@ -255,9 +263,10 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
 
 %%% Internal — Authentication
 
-%% @private
-%% Validate the first WebSocket message as a cookie auth handshake.
-%% Expected: {"type":"auth","cookie":"<workspace cookie>"}
+-doc """
+Validate the first WebSocket message as a cookie auth handshake.
+Expected: {"type":"auth","cookie":"<workspace cookie>"}
+""".
 handle_auth(Data, State) ->
     try json:decode(Data) of
         #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when
@@ -321,8 +330,7 @@ handle_auth(Data, State) ->
 
 %%% Internal — Protocol Dispatch
 
-%% @private
-%% Dispatch a protocol message after authentication.
+-doc "Dispatch a protocol message after authentication.".
 handle_protocol(Data, SessionPid, State) ->
     case beamtalk_repl_protocol:decode(Data) of
         {ok, Msg} ->
@@ -351,8 +359,7 @@ handle_protocol(Data, SessionPid, State) ->
             {[{text, ErrorJson}], State}
     end.
 
-%% @private
-%% Start a new session or resume an existing one if session ID is provided.
+-doc "Start a new session or resume an existing one if session ID is provided.".
 start_or_resume_session(undefined, State) ->
     %% No resume — create a new session
     SessionId = beamtalk_repl_server:generate_session_id(),
@@ -413,8 +420,7 @@ start_or_resume_session(_Invalid, State) ->
     SessionId = beamtalk_repl_server:generate_session_id(),
     create_session(SessionId, State).
 
-%% @private
-%% Create a fresh session and send auth_ok + session-started messages.
+-doc "Create a fresh session and send auth_ok + session-started messages.".
 create_session(SessionId, State) ->
     case beamtalk_session_sup:start_session(SessionId) of
         {ok, SessionPid} ->
@@ -460,8 +466,7 @@ create_session(SessionId, State) ->
             {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
     end.
 
-%% @private
-%% BT-696: Start async eval with this handler as the streaming subscriber.
+-doc "BT-696: Start async eval with this handler as the streaming subscriber.".
 handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     case maps:get(<<"code">>, Params, <<>>) of
@@ -516,8 +521,9 @@ handle_eval_async(Msg, _SessionPid, State) ->
     ),
     {[{text, Response}], State}.
 
-%% @private
-%% BT-698: Handle stdin op — route input to IO capture process with ref correlation.
+-doc """
+BT-698: Handle stdin op — route input to IO capture process with ref correlation.
+""".
 handle_stdin(
     Msg,
     State = #ws_state{
@@ -559,10 +565,11 @@ handle_stdin(Msg, State) ->
     ),
     {[{text, Response}], State}.
 
-%% @private
-%% Handle shutdown op — re-validates cookie as an extra security measure.
-%% Even though WebSocket is already authenticated, shutdown is a privileged
-%% operation that requires explicit cookie authorization in the message.
+-doc """
+Handle shutdown op — re-validates cookie as an extra security measure.
+Even though WebSocket is already authenticated, shutdown is a privileged
+operation that requires explicit cookie authorization in the message.
+""".
 handle_shutdown(Msg, State) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     case maps:get(<<"cookie">>, Params, undefined) of
@@ -605,10 +612,11 @@ handle_shutdown(Msg, State) ->
 
 %%% Internal — Actor lifecycle encoding (BT-690)
 
-%% @private
-%% Build WebSocket text frames for all currently live actors.
-%% Used to send an initial snapshot on connect/resume so the browser
-%% sees actors that were already running before it subscribed.
+-doc """
+Build WebSocket text frames for all currently live actors.
+Used to send an initial snapshot on connect/resume so the browser
+sees actors that were already running before it subscribed.
+""".
 actor_snapshot_frames() ->
     case whereis(beamtalk_actor_registry) of
         RegPid when is_pid(RegPid) ->
@@ -639,8 +647,7 @@ actor_snapshot_frames() ->
             []
     end.
 
-%% @private
-%% Encode actor metadata for push message JSON.
+-doc "Encode actor metadata for push message JSON.".
 encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
     Base = #{
         <<"class">> => atom_to_binary(Class, utf8),
@@ -651,8 +658,7 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
         error -> Base
     end.
 
-%% @private
-%% Encode actor stop info for push message JSON.
+-doc "Encode actor stop info for push message JSON.".
 encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
     %% Limit reason: cap nesting depth, then enforce max byte length
     ReasonStr = iolist_to_binary(io_lib:format("~P", [Reason, 10])),
@@ -667,9 +673,10 @@ encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
         <<"reason">> => TruncatedReason
     }.
 
-%% @private
-%% BT-1235: Extract line/hint metadata from a compile error for inclusion in JSON response.
-%% Returns a map with `<<"line">>' and optionally `<<"hint">>' keys, or an empty map.
+-doc """
+BT-1235: Extract line/hint metadata from a compile error for inclusion in JSON response.
+Returns a map with `<<"line">>' and optionally `<<"hint">>' keys, or an empty map.
+""".
 -spec extract_compile_error_location(term()) -> map().
 extract_compile_error_location({compile_error, [DiagMap | _]}) when is_map(DiagMap) ->
     case maps:find(line, DiagMap) of
@@ -685,8 +692,7 @@ extract_compile_error_location({compile_error, [DiagMap | _]}) when is_map(DiagM
 extract_compile_error_location(_) ->
     #{}.
 
-%% @private
-%% Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.
+-doc "Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.".
 truncate_utf8(Bin, MaxBytes) when byte_size(Bin) =< MaxBytes ->
     Bin;
 truncate_utf8(Bin, MaxBytes) ->
@@ -699,8 +705,7 @@ truncate_utf8(Bin, MaxBytes) ->
 
 %%% Internal — Log streaming (BT-1433)
 
-%% @private
-%% Subscribe to live log events. Accepts an optional level parameter.
+-doc "Subscribe to live log events. Accepts an optional level parameter.".
 handle_subscribe_logs(Msg, State = #ws_state{log_subscribed = true}) ->
     %% Already subscribed — unsubscribe first to update the level filter
     beamtalk_ws_log_handler:unsubscribe(),
@@ -708,7 +713,6 @@ handle_subscribe_logs(Msg, State = #ws_state{log_subscribed = true}) ->
 handle_subscribe_logs(Msg, State) ->
     do_subscribe_logs(Msg, State).
 
-%% @private
 do_subscribe_logs(Msg, State) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     Level = parse_log_level(maps:get(<<"level">>, Params, undefined)),
@@ -718,7 +722,6 @@ do_subscribe_logs(Msg, State) ->
     ),
     {[{text, Response}], State#ws_state{log_subscribed = true}}.
 
-%% @private
 handle_unsubscribe_logs(Msg, State) ->
     beamtalk_ws_log_handler:unsubscribe(),
     Response = beamtalk_repl_protocol:encode_status(
@@ -726,8 +729,7 @@ handle_unsubscribe_logs(Msg, State) ->
     ),
     {[{text, Response}], State#ws_state{log_subscribed = false}}.
 
-%% @private
-%% Parse a log level from a binary or default to debug.
+-doc "Parse a log level from a binary or default to debug.".
 -spec parse_log_level(binary() | undefined) -> logger:level().
 parse_log_level(undefined) -> debug;
 parse_log_level(<<"emergency">>) -> emergency;
@@ -740,9 +742,10 @@ parse_log_level(<<"info">>) -> info;
 parse_log_level(<<"debug">>) -> debug;
 parse_log_level(_) -> debug.
 
-%% @private
-%% Encode a log event map for JSON push. Converts atom keys to binary keys
-%% and strips undefined values.
+-doc """
+Encode a log event map for JSON push. Converts atom keys to binary keys
+and strips undefined values.
+""".
 -spec encode_log_event(map()) -> map().
 encode_log_event(EventData) ->
     maps:fold(

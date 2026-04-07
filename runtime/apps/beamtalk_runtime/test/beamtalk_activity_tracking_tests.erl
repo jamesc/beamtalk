@@ -1,15 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for workspace_meta activity tracking API
-%%%
-%%% Tests that workspace_meta:update_activity/0 correctly updates the
-%%% last_activity timestamp. These are unit tests for the activity tracking
-%%% mechanism itself. Integration tests that exercise the real call sites
-%%% (repl_server session creation, actor spawn, code reload) are in
-%%% their respective test modules.
-
 -module(beamtalk_activity_tracking_tests).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Unit tests for workspace_meta activity tracking API
+
+Tests that workspace_meta:update_activity/0 correctly updates the
+last_activity timestamp. These are unit tests for the activity tracking
+mechanism itself. Integration tests that exercise the real call sites
+(repl_server session creation, actor spawn, code reload) are in
+their respective test modules.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

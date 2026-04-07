@@ -1,13 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Unit tests for beamtalk_native_docs module (BT-1851, BT-1876).
-%%
-%% Tests the EEP-48 documentation reader against real OTP modules.
-%% Uses `lists` and `maps` as known-good sources of EEP-48 docs.
-%% Also tests security hardening: safe binary_to_term, non-v1 format
-%% handling, and binary path support from code:which/1.
 -module(beamtalk_native_docs_tests).
+
+-moduledoc """
+Unit tests for beamtalk_native_docs module (BT-1851, BT-1876).
+
+Tests the EEP-48 documentation reader against real OTP modules.
+Uses `lists` and `maps` as known-good sources of EEP-48 docs.
+Also tests security hardening: safe binary_to_term, non-v1 format
+handling, and binary path support from code:which/1.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
@@ -253,14 +256,16 @@ compile_with_moduledoc_test() ->
 %%% Helpers
 %%% ============================================================================
 
-%% @private Create a temporary .beam file with a custom Docs chunk.
-%% The DocsTerm is serialized with term_to_binary and embedded
-%% into the Docs chunk of a minimal .beam file.
+-doc """
+Create a temporary .beam file with a custom Docs chunk.
+The DocsTerm is serialized with term_to_binary and embedded
+into the Docs chunk of a minimal .beam file.
+""".
 create_beam_with_docs_chunk(DocsTerm) ->
     DocsBin = term_to_binary(DocsTerm),
     create_beam_with_raw_docs_chunk(DocsBin).
 
-%% @private Create a temporary .beam with raw bytes in the Docs chunk.
+-doc "Create a temporary .beam with raw bytes in the Docs chunk.".
 create_beam_with_raw_docs_chunk(RawDocsBin) ->
     Module = beamtalk_native_docs_test_fake,
     %% Compile a minimal module to get a valid .beam
@@ -281,8 +286,10 @@ create_beam_with_raw_docs_chunk(RawDocsBin) ->
     {module, Module} = code:load_abs(filename:rootname(BeamPath)),
     {BeamPath, Module}.
 
-%% @private Create a temporary .beam with -doc/-moduledoc attributes (OTP 27+).
-%% Uses compile:file/2 to produce a beam binary with a real Docs chunk.
+-doc """
+Create a temporary .beam with -doc/-moduledoc attributes (OTP 27+).
+Uses compile:file/2 to produce a beam binary with a real Docs chunk.
+""".
 create_beam_with_doc_attributes() ->
     Module = beamtalk_native_docs_test_docattr,
     %% Write a temporary .erl file with -doc attributes, then compile it.
@@ -311,7 +318,7 @@ create_beam_with_doc_attributes() ->
     _ = file:delete(SrcFile),
     {BeamPath, Module}.
 
-%% @private Clean up a fake beam file and purge the module.
+-doc "Clean up a fake beam file and purge the module.".
 cleanup_fake_beam(BeamPath, Module) ->
     code:purge(Module),
     code:delete(Module),

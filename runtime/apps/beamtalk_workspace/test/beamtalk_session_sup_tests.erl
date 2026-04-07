@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_session_sup module
-%%%
-%%% Tests session supervisor behavior.
-
 -module(beamtalk_session_sup_tests).
+
+-moduledoc """
+Unit tests for beamtalk_session_sup module
+
+Tests session supervisor behavior.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

@@ -1,38 +1,40 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Exception handling runtime support for Beamtalk.
-%%%
-%%% Provides exception wrapping, class matching, and Exception object field
-%%% access. Wraps `#beamtalk_error{}' records as exception hierarchy value
-%%% type objects (tagged maps). Called by compiler-generated try/catch code.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Exception objects are value types (tagged maps), not actors.
-%%% The `$beamtalk_class' is set based on error kind (BT-452), or from the
-%%% error's class field if it is a user-defined exception subclass (BT-480):
-%%% ```
-%%% #{
-%%%   '$beamtalk_class' => 'MyCustomError',  %% user-defined, or RuntimeError, TypeError, etc.
-%%%   error => #beamtalk_error{kind, class, selector, message, hint, details}
-%%% }
-%%% ```
-%%%
-%%% **BT-480: User-defined error subclasses.** When `signal` or `signal:` is
-%%% called on an instance of a user-defined Exception subclass (e.g.,
-%%% `Error subclass: MyCustomError`), the class name is preserved in the
-%%% `#beamtalk_error.class' field. `wrap/1' and `matches_class_name/2' check
-%%% whether `error.class' is a registered exception subclass via
-%%% `is_exception_class/1'. If so, it is used directly as `$beamtalk_class'
-%%% and for hierarchy matching. For built-in errors (where `error.class' is
-%%% the originating class like `Integer'), `kind_to_class/1' is used as before.
-%%%
-%%% The compiler generates inline Core Erlang try/catch for `on:do:` and
-%%% `ensure:` (structural intrinsics). This module provides the runtime
-%%% helpers called by that generated code: `wrap/1` and `matches_class/2`.
-
 -module(beamtalk_exception_handler).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Exception handling runtime support for Beamtalk.
+
+Provides exception wrapping, class matching, and Exception object field
+access. Wraps `#beamtalk_error{}' records as exception hierarchy value
+type objects (tagged maps). Called by compiler-generated try/catch code.
+
+Exception objects are value types (tagged maps), not actors.
+The `$beamtalk_class' is set based on error kind (BT-452), or from the
+error's class field if it is a user-defined exception subclass (BT-480):
+```
+#{
+  '$beamtalk_class' => 'MyCustomError',  %% user-defined, or RuntimeError, TypeError, etc.
+  error => #beamtalk_error{kind, class, selector, message, hint, details}
+}
+```
+
+**BT-480: User-defined error subclasses.** When `signal` or `signal:` is
+called on an instance of a user-defined Exception subclass (e.g.,
+`Error subclass: MyCustomError`), the class name is preserved in the
+`#beamtalk_error.class' field. `wrap/1' and `matches_class_name/2' check
+whether `error.class' is a registered exception subclass via
+`is_exception_class/1'. If so, it is used directly as `$beamtalk_class'
+and for hierarchy matching. For built-in errors (where `error.class' is
+the originating class like `Integer'), `kind_to_class/1' is used as before.
+
+The compiler generates inline Core Erlang try/catch for `on:do:` and
+`ensure:` (structural intrinsics). This module provides the runtime
+helpers called by that generated code: `wrap/1` and `matches_class/2`.
+""".
 -include("beamtalk.hrl").
 
 -export([
@@ -54,14 +56,16 @@
     is_exception_class/1
 ]).
 
-%% @doc Map an error kind atom to the appropriate exception class name.
-%%
-%% Used by wrap/1 to set `$beamtalk_class` based on the error's kind field.
-%% Falls back to 'Error' for unknown kinds (safe bootstrap default).
-%%
-%% NOTE: When adding new error subclasses (e.g., IOError), add a clause here.
-%% is_exception_class/1 and matches_class_name/2 derive hierarchy from the
-%% class system automatically (BT-475).
+-doc """
+Map an error kind atom to the appropriate exception class name.
+
+Used by wrap/1 to set `$beamtalk_class` based on the error's kind field.
+Falls back to 'Error' for unknown kinds (safe bootstrap default).
+
+NOTE: When adding new error subclasses (e.g., IOError), add a clause here.
+is_exception_class/1 and matches_class_name/2 derive hierarchy from the
+class system automatically (BT-475).
+""".
 -spec kind_to_class(atom()) -> atom().
 kind_to_class(does_not_understand) -> 'RuntimeError';
 kind_to_class(arity_mismatch) -> 'RuntimeError';
@@ -86,37 +90,43 @@ kind_to_class(erlang_throw) -> 'ThrowError';
 kind_to_class(signal) -> 'Error';
 kind_to_class(_) -> 'Error'.
 
-%% @doc Derive the canonical error kind for a named exception class.
-%%
-%% Inverse of kind_to_class/1 for the stdlib exception subclasses that have
-%% a dedicated kind (BT-1056: InstantiationError and TypeError have canonical kinds
-%% so that `SomeClass new signal: msg` produces the correct catchable kind).
-%% User-defined subclasses without a dedicated kind use `signal`.
+-doc """
+Derive the canonical error kind for a named exception class.
+
+Inverse of kind_to_class/1 for the stdlib exception subclasses that have
+a dedicated kind (BT-1056: InstantiationError and TypeError have canonical kinds
+so that `SomeClass new signal: msg` produces the correct catchable kind).
+User-defined subclasses without a dedicated kind use `signal`.
+""".
 -spec class_to_kind(atom()) -> atom().
 class_to_kind('InstantiationError') -> instantiation_error;
 class_to_kind('TypeError') -> type_error;
 class_to_kind(_) -> signal.
 
-%% @doc Check if a class name belongs to the exception hierarchy.
-%%
-%% Delegates to the class system's superclass chain (BT-475).
-%% Returns true if ClassName is 'Exception' or any subclass of 'Exception'.
-%% Returns false if class is not registered (safe during bootstrap).
+-doc """
+Check if a class name belongs to the exception hierarchy.
+
+Delegates to the class system's superclass chain (BT-475).
+Returns true if ClassName is 'Exception' or any subclass of 'Exception'.
+Returns false if class is not registered (safe during bootstrap).
+""".
 -spec is_exception_class(atom()) -> boolean().
 is_exception_class(ClassName) ->
     beamtalk_class_registry:inherits_from(ClassName, 'Exception').
 
-%% @doc Check if an error matches the requested exception class.
-%%
-%% Handles both raw `#beamtalk_error{}` records and wrapped Exception
-%% tagged maps (ADR 0015). After signal-time wrapping, caught errors are
-%% typically wrapped maps.
-%%
-%% - nil → match all (no filter)
-%% - Exception class object → match all (root of hierarchy)
-%% - Error class object → match all (subclass of Exception)
-%% - Other class object → match by error kind atom
-%% - Atom → match by error kind directly
+-doc """
+Check if an error matches the requested exception class.
+
+Handles both raw `#beamtalk_error{}` records and wrapped Exception
+tagged maps (ADR 0015). After signal-time wrapping, caught errors are
+typically wrapped maps.
+
+- nil → match all (no filter)
+- Exception class object → match all (root of hierarchy)
+- Error class object → match all (subclass of Exception)
+- Other class object → match by error kind atom
+- Atom → match by error kind directly
+""".
 -spec matches_class(term(), term()) -> boolean().
 matches_class(nil, _Error) ->
     true;
@@ -130,15 +140,16 @@ matches_class(_Other, _Error) ->
     %% Unknown filter type — catch all for safety
     true.
 
-%% @private
-%% @doc Match by class name atom with hierarchy-aware matching (BT-475).
-%%
-%% Derives the error's class from kind_to_class/1, then uses the class
-%% system's superclass chain to check if it matches the requested filter.
-%% If the error's class field is itself an exception class (BT-480:
-%% user-defined error subclasses), uses it directly instead of kind_to_class.
-%% Handles both "ClassName" and "ClassName class" variants (metaclass refs).
-%% Raw Erlang errors (not #beamtalk_error{}) are wrapped first.
+-doc """
+Match by class name atom with hierarchy-aware matching (BT-475).
+
+Derives the error's class from kind_to_class/1, then uses the class
+system's superclass chain to check if it matches the requested filter.
+If the error's class field is itself an exception class (BT-480:
+user-defined error subclasses), uses it directly instead of kind_to_class.
+Handles both "ClassName" and "ClassName class" variants (metaclass refs).
+Raw Erlang errors (not #beamtalk_error{}) are wrapped first.
+""".
 -spec matches_class_name(atom(), term()) -> boolean().
 matches_class_name(ClassName, #beamtalk_error{kind = Kind, class = ErrorClass}) ->
     %% Strip " class" suffix if present (metaclass reference from class objects)
@@ -158,9 +169,10 @@ matches_class_name(ClassName, RawError) when not is_map(RawError) ->
 matches_class_name(_ClassName, _Other) ->
     false.
 
-%% @private
-%% @doc Strip " class" suffix from metaclass names.
-%% e.g., 'RuntimeError class' → 'RuntimeError', 'TypeError' → 'TypeError'
+-doc """
+Strip " class" suffix from metaclass names.
+e.g., 'RuntimeError class' → 'RuntimeError', 'TypeError' → 'TypeError'
+""".
 -spec strip_class_suffix(atom()) -> atom().
 strip_class_suffix(ClassName) ->
     Str = atom_to_list(ClassName),
@@ -169,11 +181,13 @@ strip_class_suffix(ClassName) ->
         false -> ClassName
     end.
 
-%% @doc Wrap a `#beamtalk_error{}` record as an Exception tagged map.
-%%
-%% Sets `$beamtalk_class` based on the error kind (BT-452), or uses the
-%% error's class field directly if it is a registered exception subclass
-%% (BT-480: user-defined error subclasses).
+-doc """
+Wrap a `#beamtalk_error{}` record as an Exception tagged map.
+
+Sets `$beamtalk_class` based on the error kind (BT-452), or uses the
+error's class field directly if it is a registered exception subclass
+(BT-480: user-defined error subclasses).
+""".
 -spec wrap(#beamtalk_error{} | term()) -> map().
 wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
     Class =
@@ -185,8 +199,10 @@ wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
 wrap(Other) ->
     wrap_raw(Other).
 
-%% @doc Wrap raw Erlang errors into structured beamtalk errors.
-%% Recognizes common Erlang error patterns and produces better messages.
+-doc """
+Wrap raw Erlang errors into structured beamtalk errors.
+Recognizes common Erlang error patterns and produces better messages.
+""".
 wrap_raw({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
     {arity, Expected} = erlang:fun_info(Fun, arity),
     Actual = length(Args),
@@ -218,21 +234,25 @@ wrap_raw(Other) ->
     },
     #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError}.
 
-%% @doc Idempotent exception wrapper (ADR 0015).
-%%
-%% Ensures the value is a wrapped Exception tagged map. If already wrapped,
-%% passes through unchanged. Used in `on:do:` catch clauses to handle both
-%% pre-wrapped exceptions (from raise/1) and raw Erlang exceptions.
+-doc """
+Idempotent exception wrapper (ADR 0015).
+
+Ensures the value is a wrapped Exception tagged map. If already wrapped,
+passes through unchanged. Used in `on:do:` catch clauses to handle both
+pre-wrapped exceptions (from raise/1) and raw Erlang exceptions.
+""".
 -spec ensure_wrapped(term()) -> map().
 ensure_wrapped(#{'$beamtalk_class' := _} = Already) ->
     Already;
 ensure_wrapped(Other) ->
     wrap(Other).
 
-%% @doc Idempotent exception wrapper with stacktrace capture (BT-107).
-%%
-%% Like ensure_wrapped/1 but also stores the Erlang stacktrace as a list
-%% of StackFrame objects on the exception tagged map.
+-doc """
+Idempotent exception wrapper with stacktrace capture (BT-107).
+
+Like ensure_wrapped/1 but also stores the Erlang stacktrace as a list
+of StackFrame objects on the exception tagged map.
+""".
 -spec ensure_wrapped(term(), list()) -> map().
 ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
     Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
@@ -240,12 +260,14 @@ ensure_wrapped(Other, Stacktrace) ->
     Wrapped = wrap(Other),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
 
-%% @doc Idempotent exception wrapper with Erlang exception type (BT-728).
-%%
-%% Like ensure_wrapped/2 but also accepts the Erlang exception class atom
-%% (error, exit, throw) from the try/catch <Type, Error, Stack> triple.
-%% Maps exit → erlang_exit kind, throw → erlang_throw kind so that
-%% ExitError/ThrowError classes are used instead of RuntimeError.
+-doc """
+Idempotent exception wrapper with Erlang exception type (BT-728).
+
+Like ensure_wrapped/2 but also accepts the Erlang exception class atom
+(error, exit, throw) from the try/catch <Type, Error, Stack> triple.
+Maps exit → erlang_exit kind, throw → erlang_throw kind so that
+ExitError/ThrowError classes are used instead of RuntimeError.
+""".
 -spec ensure_wrapped(atom(), term(), list()) -> map().
 ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
     Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
@@ -319,10 +341,12 @@ ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap(Other),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
 
-%% @doc Dispatch a message to an Exception object.
-%%
-%% Exception objects expose the underlying `#beamtalk_error{}` fields.
-%% Matches any exception hierarchy class (Exception, Error, RuntimeError, etc.).
+-doc """
+Dispatch a message to an Exception object.
+
+Exception objects expose the underlying `#beamtalk_error{}` fields.
+Matches any exception hierarchy class (Exception, Error, RuntimeError, etc.).
+""".
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch('message', [], #{error := Error}) ->
     Error#beamtalk_error.message;
@@ -358,7 +382,7 @@ dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% BT-480: Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
 
-%% @doc Check if Exception responds to a selector.
+-doc "Check if Exception responds to a selector.".
 -spec has_method(atom()) -> boolean().
 has_method('message') -> true;
 has_method('hint') -> true;
@@ -372,17 +396,21 @@ has_method('signal') -> true;
 has_method('signal:') -> true;
 has_method(_) -> false.
 
-%% @doc Raise an exception.
-%%
-%% Used internally for various error signaling scenarios.
+-doc """
+Raise an exception.
+
+Used internally for various error signaling scenarios.
+""".
 -spec signal(Kind :: atom()) -> no_return().
 signal(Kind) when is_atom(Kind) ->
     Error = beamtalk_error:new(Kind, 'Exception'),
     beamtalk_error:raise(Error).
 
-%% @doc Raise a new Error exception with the given message.
-%%
-%% Usage: `Exception signal: 'something went wrong'`
+-doc """
+Raise a new Error exception with the given message.
+
+Usage: `Exception signal: 'something went wrong'`
+""".
 -spec signal_message(term()) -> no_return().
 signal_message(Message) when is_binary(Message) ->
     Error = #beamtalk_error{
@@ -400,10 +428,12 @@ signal_message(Message) ->
     %% Convert other types to binary for robustness
     signal_message(iolist_to_binary(io_lib:format("~p", [Message]))).
 
-%% @doc Raise a new exception with a message, preserving the exception class.
-%%
-%% BT-480: Used when signal: is called on a user-defined exception instance.
-%% The exception class is taken from the signaling object's $beamtalk_class.
+-doc """
+Raise a new exception with a message, preserving the exception class.
+
+BT-480: Used when signal: is called on a user-defined exception instance.
+The exception class is taken from the signaling object's $beamtalk_class.
+""".
 -spec signal_message(term(), atom()) -> no_return().
 signal_message(Message, ExceptionClass) when is_binary(Message) ->
     Error = #beamtalk_error{
@@ -420,10 +450,12 @@ signal_message(Message, ExceptionClass) when is_atom(Message) ->
 signal_message(Message, ExceptionClass) ->
     signal_message(iolist_to_binary(io_lib:format("~p", [Message])), ExceptionClass).
 
-%% @doc Raise a new exception from a class instance without a message.
-%%
-%% BT-480: Used when signal (no args) is called on a new exception instance
-%% that has $beamtalk_class but no error field yet.
+-doc """
+Raise a new exception from a class instance without a message.
+
+BT-480: Used when signal (no args) is called on a new exception instance
+that has $beamtalk_class but no error field yet.
+""".
 -spec signal_from_class(atom()) -> no_return().
 signal_from_class(ClassName) ->
     Error = #beamtalk_error{
@@ -436,10 +468,12 @@ signal_from_class(ClassName) ->
     },
     beamtalk_error:raise(Error).
 
-%% @doc Class-side signal: raise an exception with message from a class object.
-%%
-%% BT-1524: Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
-%% Extracts the class name from the ClassSelf record and delegates to signal_message/2.
+-doc """
+Class-side signal: raise an exception with message from a class object.
+
+BT-1524: Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
+Extracts the class name from the ClassSelf record and delegates to signal_message/2.
+""".
 -spec class_signal_message(term(), #beamtalk_object{} | term()) -> no_return().
 class_signal_message(Message, #beamtalk_object{class = ClassTag}) ->
     ClassName = strip_class_suffix(ClassTag),
@@ -448,10 +482,12 @@ class_signal_message(Message, _ClassSelf) ->
     %% Fallback: if ClassSelf is not a beamtalk_object, signal as generic Exception
     signal_message(Message, 'Exception').
 
-%% @doc Class-side signal: raise an exception from a class object (no message).
-%%
-%% BT-1524: Called by `Exception signal` or `MyCustomError signal`.
-%% Extracts the class name from the ClassSelf record and delegates to signal_from_class/1.
+-doc """
+Class-side signal: raise an exception from a class object (no message).
+
+BT-1524: Called by `Exception signal` or `MyCustomError signal`.
+Extracts the class name from the ClassSelf record and delegates to signal_from_class/1.
+""".
 -spec class_signal(#beamtalk_object{} | term()) -> no_return().
 class_signal(#beamtalk_object{class = ClassTag}) ->
     ClassName = strip_class_suffix(ClassTag),

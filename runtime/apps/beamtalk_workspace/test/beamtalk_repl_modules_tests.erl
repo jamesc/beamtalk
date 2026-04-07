@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** REPL Session Context
 
-%%% @doc EUnit tests for beamtalk_repl_modules module.
-%%%
-%%% Tests module registration, lookup, source file tracking, and load-time metadata.
-
 -module(beamtalk_repl_modules_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_repl_modules module.
+
+Tests module registration, lookup, source file tracking, and load-time metadata.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

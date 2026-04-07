@@ -1,12 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_tracing shim (ADR 0069 Phase 3).
-%%%
-%%% Tests cover: lifecycle (enable/disable/isEnabled/clear), query delegation,
-%%% pid extraction from #beamtalk_object{} records, error behavior for
-%%% invalid arguments, and graceful degradation when trace store is not running.
 -module(beamtalk_tracing_tests).
+
+%%% **DDD Context:** Actor System Context
+
+-moduledoc """
+EUnit tests for beamtalk_tracing shim (ADR 0069 Phase 3).
+
+Tests cover: lifecycle (enable/disable/isEnabled/clear), query delegation,
+pid extraction from #beamtalk_object{} records, error behavior for
+invalid arguments, and graceful degradation when trace store is not running.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_workspace_meta module
-%%%
-%%% Tests workspace metadata tracking and activity updates.
-
 -module(beamtalk_workspace_meta_tests).
+
+-moduledoc """
+Unit tests for beamtalk_workspace_meta module
+
+Tests workspace metadata tracking and activity updates.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

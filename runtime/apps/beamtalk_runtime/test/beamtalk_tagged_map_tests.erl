@@ -1,9 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_tagged_map module.
-
 -module(beamtalk_tagged_map_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc "EUnit tests for beamtalk_tagged_map module.".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================

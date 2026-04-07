@@ -1,18 +1,20 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_behaviour_intrinsics module (BT-1088).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests intrinsic functions for class reflection: metaclassNew, classClass,
-%%% className, classLocalMethods, classFieldNames, classIncludesSelector,
-%%% classDoc, classSetDoc, classSetMethodDoc, and classSubclasses.
-%%%
-%%% Uses a minimal setup (pg + ETS hierarchy table) with dynamically-created
-%%% test classes via beamtalk_class_builder.
-
 -module(beamtalk_behaviour_intrinsics_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_behaviour_intrinsics module (BT-1088).
+
+Tests intrinsic functions for class reflection: metaclassNew, classClass,
+className, classLocalMethods, classFieldNames, classIncludesSelector,
+classDoc, classSetDoc, classSetMethodDoc, and classSubclasses.
+
+Uses a minimal setup (pg + ETS hierarchy table) with dynamically-created
+test classes via beamtalk_class_builder.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

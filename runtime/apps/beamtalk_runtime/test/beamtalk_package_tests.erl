@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_package module.
-%%%
-%%% Tests package reflection: enumeration, lookup, reverse-lookup,
-%%% class listing, and dependency queries.
-
 -module(beamtalk_package_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_package module.
+
+Tests package reflection: enumeration, lookup, reverse-lookup,
+class listing, and dependency queries.
+""".
 
 -include("beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").

@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Runtime Context
 
-%%% @doc EUnit tests for beamtalk_logging_config module.
-%%%
-%%% Tests log-level management, debug-target toggling, and logger
-%%% introspection.
-
 -module(beamtalk_logging_config_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_logging_config module.
+
+Tests log-level management, debug-target toggling, and logger
+introspection.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -444,7 +446,7 @@ mcp_signal_file_with_workspace_test_() ->
 %% Test helpers
 %%====================================================================
 
-%% @doc Install a temporary beamtalk_file_log handler for format-switching tests.
+-doc "Install a temporary beamtalk_file_log handler for format-switching tests.".
 install_test_file_handler() ->
     _ = logger:remove_handler(beamtalk_file_log),
     logger:add_handler(beamtalk_file_log, logger_std_h, #{
@@ -457,7 +459,7 @@ install_test_file_handler() ->
             }}
     }).
 
-%% @doc Remove the temporary beamtalk_file_log handler.
+-doc "Remove the temporary beamtalk_file_log handler.".
 remove_test_file_handler() ->
     _ = logger:remove_handler(beamtalk_file_log),
     ok.

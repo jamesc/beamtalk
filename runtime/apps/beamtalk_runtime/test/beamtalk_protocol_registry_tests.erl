@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_protocol_registry (ADR 0068 Phase 2c).
-%%%
-%%% Tests cover:
-%%% - Protocol registration and lookup
-%%% - Conformance checking (structural — class responds to required methods)
-%%% - Protocol queries: protocols_for_class, required_methods, conforming_classes
-%%% - Edge cases: unknown protocols, extending protocols, duplicate registration
-
 -module(beamtalk_protocol_registry_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_protocol_registry (ADR 0068 Phase 2c).
+
+Tests cover:
+- Protocol registration and lookup
+- Conformance checking (structural — class responds to required methods)
+- Protocol queries: protocols_for_class, required_methods, conforming_classes
+- Edge cases: unknown protocols, extending protocols, duplicate registration
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -17,7 +19,7 @@
 %%% Setup / Teardown
 %%% ============================================================================
 
-%% @doc Ensure the protocol registry ETS table exists and is clean.
+-doc "Ensure the protocol registry ETS table exists and is clean.".
 setup() ->
     beamtalk_protocol_registry:init(),
     %% Clean any existing protocols
@@ -213,8 +215,10 @@ conforming_classes_unknown_protocol_test() ->
 %%% Class Method Extension Conformance Tests (BT-1617)
 %%% ============================================================================
 
-%% @doc Protocol with class method requirement satisfied via class-side extension
-%% should report conformance.
+-doc """
+Protocol with class method requirement satisfied via class-side extension
+should report conformance.
+""".
 class_method_extension_conforms_test() ->
     setup(),
     %% Ensure extensions ETS table exists
@@ -238,8 +242,10 @@ class_method_extension_conforms_test() ->
         ets:delete(beamtalk_extensions, {'TestExtClass class', 'fromString:'})
     end.
 
-%% @doc Protocol with class method requirement NOT satisfied (no extension, no process)
-%% should report non-conformance.
+-doc """
+Protocol with class method requirement NOT satisfied (no extension, no process)
+should report non-conformance.
+""".
 class_method_no_extension_does_not_conform_test() ->
     setup(),
     %% Ensure extensions ETS table exists

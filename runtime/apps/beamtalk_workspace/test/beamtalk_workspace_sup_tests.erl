@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_workspace_sup module
-%%%
-%%% Tests workspace supervisor behavior, child specifications, and startup.
-
 -module(beamtalk_workspace_sup_tests).
+
+-moduledoc """
+Unit tests for beamtalk_workspace_sup module
+
+Tests workspace supervisor behavior, child specifications, and startup.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

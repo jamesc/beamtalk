@@ -1,15 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Runtime helper for complex List operations.
-%%
-%%% **DDD Context:** Object System Context
-%%
-%% Provides implementations for List methods that require custom logic
-%% beyond simple BIF calls (bounds checking, error formatting, iteration).
-%%
-%% BT-419: Created as part of Array→List rename and compiled stdlib migration.
 -module(beamtalk_list).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Runtime helper for complex List operations.
+
+Provides implementations for List methods that require custom logic
+beyond simple BIF calls (bounds checking, error formatting, iteration).
+
+BT-419: Created as part of Array→List rename and compiled stdlib migration.
+""".
 
 -export([
     at/2,
@@ -28,7 +31,9 @@
     reverse_group_values/1
 ]).
 
-%% @doc Access element at 1-based index with bounds checking.
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+-doc "Access element at 1-based index with bounds checking.".
 -spec at(list(), term()) -> term().
 at(List, N) when is_list(List), not is_integer(N) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
@@ -68,7 +73,7 @@ at(List, N) when is_list(List), is_integer(N), N >= 1 ->
             beamtalk_error:raise(Error2)
     end.
 
-%% @doc Find first element matching block, error if not found.
+-doc "Find first element matching block, error if not found.".
 -spec detect(list(), function()) -> term().
 detect(List, Block) when is_list(List), is_function(Block, 1) ->
     case detect_helper(Block, List) of
@@ -89,7 +94,7 @@ detect(List, Block) when is_list(List) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Find first element matching block, return default if not found.
+-doc "Find first element matching block, return default if not found.".
 -spec detect_if_none(list(), function(), term()) -> term().
 detect_if_none(List, Block, Default) when is_list(List), is_function(Block, 1) ->
     case detect_helper(Block, List) of
@@ -106,7 +111,7 @@ detect_if_none(List, Block, _Default) when is_list(List) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Iterate over elements with side effects.
+-doc "Iterate over elements with side effects.".
 -spec do(list(), function()) -> 'nil'.
 do(List, Block) when is_list(List), is_function(Block, 1) ->
     lists:foreach(Block, List),
@@ -120,7 +125,7 @@ do(List, Block) when is_list(List) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Filter out elements matching block.
+-doc "Filter out elements matching block.".
 -spec reject(list(), function()) -> list().
 reject(List, Block) when is_list(List), is_function(Block, 1) ->
     lists:filter(fun(Item) -> not Block(Item) end, List);
@@ -133,7 +138,7 @@ reject(List, Block) when is_list(List) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Take N elements with validation.
+-doc "Take N elements with validation.".
 -spec take(list(), term()) -> list().
 take(List, N) when is_list(List), not is_integer(N) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
@@ -154,7 +159,7 @@ take(List, N) when is_list(List), is_integer(N), N < 0 ->
 take(List, N) when is_list(List), is_integer(N), N >= 0 ->
     lists:sublist(List, N).
 
-%% @doc Drop N elements with validation.
+-doc "Drop N elements with validation.".
 -spec drop(list(), term()) -> list().
 drop(List, N) when is_list(List), not is_integer(N) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
@@ -175,7 +180,7 @@ drop(List, N) when is_list(List), is_integer(N), N < 0 ->
 drop(List, N) when is_list(List), is_integer(N), N >= 0 ->
     safe_nthtail(N, List).
 
-%% @doc Sort with comparator block, with validation.
+-doc "Sort with comparator block, with validation.".
 -spec sort_with(list(), term()) -> list().
 sort_with(List, Block) when is_list(List), is_function(Block, 2) ->
     lists:sort(Block, List);
@@ -188,7 +193,7 @@ sort_with(_List, Block) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Zip two lists into a list of 2-element List pairs [Elem1, Elem2].
+-doc "Zip two lists into a list of 2-element List pairs [Elem1, Elem2].".
 -spec zip(list(), list()) -> list().
 zip(List, Other) when is_list(List), is_list(Other) ->
     zip_to_pairs(List, Other);
@@ -201,7 +206,7 @@ zip(List, Other) when is_list(List) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Group elements by block result into a map.
+-doc "Group elements by block result into a map.".
 -spec group_by(list(), function()) -> map().
 group_by(List, Block) when is_list(List), is_function(Block, 1) ->
     Map0 = lists:foldl(
@@ -223,7 +228,7 @@ group_by(_List, Block) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Partition list into matching and non-matching.
+-doc "Partition list into matching and non-matching.".
 -spec partition(list(), function()) -> map().
 partition(List, Block) when is_list(List), is_function(Block, 1) ->
     {Matching, NonMatching} = lists:partition(Block, List),
@@ -237,13 +242,13 @@ partition(_List, Block) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Intersperse separator between elements.
+-doc "Intersperse separator between elements.".
 -spec intersperse(list(), term()) -> list().
 intersperse([], _Sep) -> [];
 intersperse([X], _Sep) -> [X];
 intersperse([H | T], Sep) -> [H, Sep | intersperse(T, Sep)].
 
-%% @doc Extract subsequence from Start to End (1-based, inclusive).
+-doc "Extract subsequence from Start to End (1-based, inclusive).".
 -spec from_to(list(), term(), term()) -> list().
 from_to(List, Start, End) when
     is_list(List),
@@ -305,19 +310,23 @@ zip_to_pairs([], _) -> [];
 zip_to_pairs(_, []) -> [];
 zip_to_pairs([H1 | T1], [H2 | T2]) -> [[H1, H2] | zip_to_pairs(T1, T2)].
 
-%% @doc BT-1487: Reverse the value lists in a groupBy result map.
-%%
-%% During foldl-based groupBy with state threading, elements are prepended
-%% to each group (building reversed lists). This reverses them to restore
-%% the original order.
+-doc """
+BT-1487: Reverse the value lists in a groupBy result map.
+
+During foldl-based groupBy with state threading, elements are prepended
+to each group (building reversed lists). This reverses them to restore
+the original order.
+""".
 -spec reverse_group_values(map()) -> map().
 reverse_group_values(Map) when is_map(Map) ->
     maps:map(fun(_Key, Values) -> lists:reverse(Values) end, Map).
 
-%% @doc Return a human-readable description of a value for error messages.
-%%
-%% For blocks, includes the arity so wrong-arity errors are clear.
-%% For other values, shows the Beamtalk class name.
+-doc """
+Return a human-readable description of a value for error messages.
+
+For blocks, includes the arity so wrong-arity errors are clear.
+For other values, shows the Beamtalk class name.
+""".
 -spec describe_value(term()) -> binary().
 describe_value(V) when is_function(V) ->
     {arity, A} = erlang:fun_info(V, arity),

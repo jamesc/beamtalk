@@ -1,16 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_repl_ops_dev module.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Tests pure parsing functions (parse_receiver_and_prefix, tokenise_send_chain),
-%%% chain-resolution helpers (walk_chain, walk_chain_class, resolve_chain_type),
-%%% protocol helpers (base_protocol_response, make_class_not_found_error),
-%%% and handle/4 operations that do not require a running workspace.
-
 -module(beamtalk_repl_ops_dev_tests).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+EUnit tests for beamtalk_repl_ops_dev module.
+
+Tests pure parsing functions (parse_receiver_and_prefix, tokenise_send_chain),
+chain-resolution helpers (walk_chain, walk_chain_class, resolve_chain_type),
+protocol helpers (base_protocol_response, make_class_not_found_error),
+and handle/4 operations that do not require a running workspace.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -356,11 +358,13 @@ validate_selector_undefined_returns_ok_test() ->
     ),
     ?assertEqual(ok, Result).
 
-%% @doc Unit test for compile_file_for_codegen/2 success path (BT-1236).
-%%
-%% Tests that the compiler can take a Beamtalk class source binary and
-%% return Core Erlang text without loading a module into the runtime.
-%% This exercises the compilation side of show_codegen_class_method/3.
+-doc """
+Unit test for compile_file_for_codegen/2 success path (BT-1236).
+
+Tests that the compiler can take a Beamtalk class source binary and
+return Core Erlang text without loading a module into the runtime.
+This exercises the compilation side of show_codegen_class_method/3.
+""".
 compile_file_for_codegen_success_test() ->
     Source = <<"Object subclass: TestCodegenClass\n  greet => 42\n">>,
     Result = beamtalk_repl_compiler:compile_file_for_codegen(Source, undefined),

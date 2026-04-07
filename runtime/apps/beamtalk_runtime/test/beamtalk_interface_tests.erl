@@ -1,19 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_interface module.
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests the Phase 2 dispatch/3 interface for BeamtalkInterface primitives:
-%%% - allClasses selector
-%%% - classNamed: selector
-%%% - globals selector
-%%% - help: selector
-%%% - help:selector: selector
-%%% - version selector
-%%% - unknown selectors (does_not_understand)
-
 -module(beamtalk_interface_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_interface module.
+
+Tests the Phase 2 dispatch/3 interface for BeamtalkInterface primitives:
+- allClasses selector
+- classNamed: selector
+- globals selector
+- help: selector
+- help:selector: selector
+- version selector
+- unknown selectors (does_not_understand)
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Integration tests for workspace singleton registration (BT-491).
-%%%
-%%% Tests that TranscriptStream and BeamtalkInterface singletons
-%%% register themselves via gen_server name registration when
-%%% started with a named server reference.
-
 -module(beamtalk_workspace_binding_tests).
+
+-moduledoc """
+Integration tests for workspace singleton registration (BT-491).
+
+Tests that TranscriptStream and BeamtalkInterface singletons
+register themselves via gen_server name registration when
+started with a named server reference.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

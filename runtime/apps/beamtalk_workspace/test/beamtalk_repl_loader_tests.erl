@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_repl_loader module
-
 -module(beamtalk_repl_loader_tests).
+
+-moduledoc "Unit tests for beamtalk_repl_loader module".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

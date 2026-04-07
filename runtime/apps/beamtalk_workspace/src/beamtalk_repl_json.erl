@@ -1,16 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc JSON formatting for REPL protocol responses.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Pure formatting logic extracted from beamtalk_repl_server.
-%%% Converts Erlang terms to JSON-encodable values and builds
-%%% JSON response/error binaries for the REPL protocol.
-%%% Uses OTP `json` module (OTP 27+) for encoding/decoding.
-
 -module(beamtalk_repl_json).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+JSON formatting for REPL protocol responses.
+
+Pure formatting logic extracted from beamtalk_repl_server.
+Converts Erlang terms to JSON-encodable values and builds
+JSON response/error binaries for the REPL protocol.
+Uses OTP `json` module (OTP 27+) for encoding/decoding.
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -33,7 +35,7 @@
 
 %%% JSON Parsing
 
-%% @doc Parse JSON binary into an Erlang term (maps, lists, binaries, etc.).
+-doc "Parse JSON binary into an Erlang term (maps, lists, binaries, etc.).".
 -spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
@@ -53,7 +55,7 @@ parse_json(Data) ->
 
 %%% Response Formatting
 
-%% @doc Format a successful response as JSON.
+-doc "Format a successful response as JSON.".
 -spec format_response(term()) -> binary().
 format_response(Value) ->
     try
@@ -70,7 +72,7 @@ format_response(Value) ->
             )
     end.
 
-%% @doc Format an error response as JSON.
+-doc "Format an error response as JSON.".
 -spec format_error(term()) -> binary().
 format_error(Reason) ->
     try
@@ -93,7 +95,7 @@ format_error(Reason) ->
             )
     end.
 
-%% @doc Format a successful response with warnings as JSON.
+-doc "Format a successful response with warnings as JSON.".
 -spec format_response_with_warnings(term(), [binary()]) -> binary().
 format_response_with_warnings(Value, Warnings) ->
     try
@@ -114,7 +116,7 @@ format_response_with_warnings(Value, Warnings) ->
             )
     end.
 
-%% @doc Format an error response with warnings as JSON.
+-doc "Format an error response with warnings as JSON.".
 -spec format_error_with_warnings(term(), [binary()]) -> binary().
 format_error_with_warnings(Reason, Warnings) ->
     try
@@ -141,7 +143,7 @@ format_error_with_warnings(Reason, Warnings) ->
             )
     end.
 
-%% @doc Format bindings response as JSON.
+-doc "Format bindings response as JSON.".
 -spec format_bindings(map()) -> binary().
 format_bindings(Bindings) ->
     JsonBindings = maps:fold(
@@ -160,19 +162,21 @@ format_bindings(Bindings) ->
     ),
     iolist_to_binary(json:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings})).
 
-%% @doc Format a documentation response as JSON.
+-doc "Format a documentation response as JSON.".
 -spec format_docs(binary()) -> binary().
 format_docs(DocText) ->
     iolist_to_binary(json:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText})).
 
-%% @doc Format a loaded file response as JSON.
-%% Classes is a list of #{name => string(), superclass => string()} maps.
+-doc """
+Format a loaded file response as JSON.
+Classes is a list of #{name => string(), superclass => string()} maps.
+""".
 -spec format_loaded([map()]) -> binary().
 format_loaded(Classes) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
     iolist_to_binary(json:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames})).
 
-%% @doc Format an actors list response as JSON.
+-doc "Format an actors list response as JSON.".
 -spec format_actors([beamtalk_repl_actors:actor_metadata()]) -> binary().
 format_actors(Actors) ->
     JsonActors = lists:map(
@@ -188,7 +192,7 @@ format_actors(Actors) ->
     ),
     iolist_to_binary(json:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors})).
 
-%% @doc Format a modules list response as JSON.
+-doc "Format a modules list response as JSON.".
 -spec format_modules([{atom(), map()}]) -> binary().
 format_modules(ModulesWithInfo) ->
     JsonModules = lists:map(
@@ -205,7 +209,9 @@ format_modules(ModulesWithInfo) ->
     ),
     iolist_to_binary(json:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules})).
 
-%% @doc Encode reload response with classes, affected actor count, and migration results.
+-doc """
+Encode reload response with classes, affected actor count, and migration results.
+""".
 -spec encode_reloaded(
     [map()],
     non_neg_integer(),
@@ -215,8 +221,10 @@ format_modules(ModulesWithInfo) ->
 encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
     encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, []).
 
-%% @doc Encode a reload response with optional class collision warnings.
-%% BT-737: Warnings are surfaced when a reload causes a cross-package class collision.
+-doc """
+Encode a reload response with optional class collision warnings.
+BT-737: Warnings are surfaced when a reload causes a cross-package class collision.
+""".
 -spec encode_reloaded(
     [map()],
     non_neg_integer(),
@@ -236,14 +244,13 @@ encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
     },
     iolist_to_binary(json:encode(maybe_add_warnings_reloaded(Full, Warnings))).
 
-%% @private
 -spec maybe_add_warnings_reloaded(map(), [binary()]) -> map().
 maybe_add_warnings_reloaded(Map, []) -> Map;
 maybe_add_warnings_reloaded(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
 
 %%% Term-to-JSON Conversion
 
-%% @doc Convert an Erlang term to a JSON-encodable value.
+-doc "Convert an Erlang term to a JSON-encodable value.".
 -spec term_to_json(term()) -> term().
 term_to_json(Value) when is_integer(Value); is_boolean(Value) ->
     Value;
@@ -367,7 +374,7 @@ term_to_json(Value) ->
         iolist_to_binary(io_lib:format("~p", [Value]))
     ).
 
-%% @private Format a tagged future's underlying pid for display.
+-doc "Format a tagged future's underlying pid for display.".
 -spec term_to_json_future_pid(pid()) -> binary().
 term_to_json_future_pid(Pid) ->
     case is_process_alive(Pid) of
@@ -388,7 +395,7 @@ term_to_json_future_pid(Pid) ->
 
 %%% Error Formatting
 
-%% @doc Format an error reason as a human-readable message.
+-doc "Format an error reason as a human-readable message.".
 -spec format_error_message(term()) -> binary().
 format_error_message(#{'$beamtalk_class' := Class, error := Error}) ->
     Enriched = maybe_use_singleton_binding_name(Error),
@@ -499,8 +506,10 @@ format_error_message(Reason) ->
 
 %%% Internal Helpers
 
-%% @doc Format a float as a binary string, ensuring a decimal point is always present.
-%% BT-1336: Uses ~p for clean representation, then appends ".0" if ~p omits the decimal.
+-doc """
+Format a float as a binary string, ensuring a decimal point is always present.
+BT-1336: Uses ~p for clean representation, then appends ".0" if ~p omits the decimal.
+""".
 -spec format_float(float()) -> binary().
 format_float(Value) ->
     Bin = iolist_to_binary(io_lib:format("~p", [Value])),
@@ -509,14 +518,14 @@ format_float(Value) ->
         _ -> Bin
     end.
 
-%% @doc Format a rejection reason for display in #Future<rejected: ...>.
+-doc "Format a rejection reason for display in #Future<rejected: ...>.".
 -spec format_rejection_reason(term()) -> binary().
 format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
-%% @doc Format a term as a binary name for use in error messages.
+-doc "Format a term as a binary name for use in error messages.".
 -spec format_name(term()) -> binary().
 format_name(Name) when is_atom(Name) ->
     atom_to_binary(Name, utf8);
@@ -527,16 +536,18 @@ format_name(Name) when is_list(Name) ->
 format_name(Name) ->
     iolist_to_binary(io_lib:format("~p", [Name])).
 
-%% @doc Convert atom or binary to binary.
+-doc "Convert atom or binary to binary.".
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
 to_binary(V) when is_binary(V) -> V.
 
-%% @private Rewrite DNU error class names for singleton instances.
-%%
-%% When a singleton instance (e.g., Workspace) gets a DNU, the error uses the
-%% class name (WorkspaceInterface) which is confusing — the user typed "Workspace".
-%% Replace the class name with the binding name so errors read naturally.
+-doc """
+Rewrite DNU error class names for singleton instances.
+
+When a singleton instance (e.g., Workspace) gets a DNU, the error uses the
+class name (WorkspaceInterface) which is confusing — the user typed "Workspace".
+Replace the class name with the binding name so errors read naturally.
+""".
 -spec maybe_use_singleton_binding_name(beamtalk_error:error()) -> beamtalk_error:error().
 maybe_use_singleton_binding_name(
     #beamtalk_error{kind = does_not_understand, class = Class} = Error

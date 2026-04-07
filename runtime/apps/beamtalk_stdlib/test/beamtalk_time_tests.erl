@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_time module (BT-1551).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests the Time class backing functions: nowS/0, nowMs/0, nowUs/0.
-
 -module(beamtalk_time_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_time module (BT-1551).
+
+Tests the Time class backing functions: nowS/0, nowMs/0, nowUs/0.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

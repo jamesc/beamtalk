@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test helper that throws a generic error in on_actor_spawned/4.
-%%% Uses throw (not error) to exercise the Kind:Reason catch-all clause
-%%% in register_spawned/4, which is distinct from the error:undef and
-%%% error:#beamtalk_error{} clauses tested by other helpers.
-
 -module(test_spawn_callback_generic_error).
+
+-moduledoc """
+Test helper that throws a generic error in on_actor_spawned/4.
+Uses throw (not error) to exercise the Kind:Reason catch-all clause
+in register_spawned/4, which is distinct from the error:undef and
+error:#beamtalk_error{} clauses tested by other helpers.
+""".
 
 -include("beamtalk.hrl").
 

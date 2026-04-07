@@ -1,19 +1,21 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_exec_port module.
-%%%
-%%% **DDD Context:** runtime
-%%%
-%%% Tests cover:
-%%% - find_exec_binary/0 (finds the dev build)
-%%% - find_project_root/0 (finds Cargo.toml)
-%%% - open/close lifecycle (opens the port and closes cleanly)
-%%% - spawn_child: sends spawn command, receives exit event
-%%% - write_stdin: sends data to a subprocess
-%%% - kill_child: terminates a running subprocess
-
 -module(beamtalk_exec_port_tests).
+
+%%% **DDD Context:** runtime
+
+-moduledoc """
+EUnit tests for beamtalk_exec_port module.
+
+Tests cover:
+- find_exec_binary/0 (finds the dev build)
+- find_project_root/0 (finds Cargo.toml)
+- open/close lifecycle (opens the port and closes cleanly)
+- spawn_child: sends spawn command, receives exit event
+- write_stdin: sends data to a subprocess
+- kill_child: terminates a running subprocess
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -21,30 +23,32 @@
 %%% Cross-platform command helpers
 %%% ============================================================================
 
-%% @private Return {Executable, Args} for a process that exits immediately with 0.
+-doc "Return {Executable, Args} for a process that exits immediately with 0.".
 true_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/usr/bin/env">>, [<<"true">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 0">>]}
     end.
 
-%% @private Return {Executable, Args} for a process that exits with non-zero.
+-doc "Return {Executable, Args} for a process that exits with non-zero.".
 false_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/usr/bin/env">>, [<<"false">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 1">>]}
     end.
 
-%% @private Return {Executable, Args} for a long-running process.
+-doc "Return {Executable, Args} for a long-running process.".
 sleep_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/bin/sleep">>, [<<"60">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"ping -n 60 127.0.0.1 >nul">>]}
     end.
 
-%% @private Return {Executable, Args} for a process that echoes stdin to stdout.
-%% On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
-%% mode that explicitly flushes stdout, bypassing pipe buffering).
+-doc """
+Return {Executable, Args} for a process that echoes stdin to stdout.
+On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
+mode that explicitly flushes stdout, bypassing pipe buffering).
+""".
 cat_cmd() ->
     case os:type() of
         {unix, _} ->

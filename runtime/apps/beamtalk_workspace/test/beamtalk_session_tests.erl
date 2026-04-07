@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Integration tests for REPL sessions
-%%%
-%%% Tests the session-per-connection architecture implemented in BT-262.
-
 -module(beamtalk_session_tests).
+
+-moduledoc """
+Integration tests for REPL sessions
+
+Tests the session-per-connection architecture implemented in BT-262.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

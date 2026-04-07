@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Tests for REPL actor registry
-
 -module(beamtalk_repl_actors_tests).
+
+-moduledoc "Tests for REPL actor registry".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ===========================================================================

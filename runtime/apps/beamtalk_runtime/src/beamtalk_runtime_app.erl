@@ -1,19 +1,21 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Application callback module for the Beamtalk runtime.
-%%%
-%%% **DDD Context:** Object System Context
 -module(beamtalk_runtime_app).
 -behaviour(application).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc "Application callback module for the Beamtalk runtime.".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([start/2, stop/1]).
 
-%% @private
-%% @doc Start the Beamtalk runtime application, initializing ETS tables and supervisor tree.
+-doc """
+Start the Beamtalk runtime application, initializing ETS tables and supervisor tree.
+""".
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
     %% BT-1424: Configure SASL before it starts (started as a beamtalk_workspace dep).
@@ -62,12 +64,13 @@ start(_StartType, _StartArgs) ->
             Error
     end.
 
-%% @private
-%% @doc Verify the ADR 0036 metaclass self-grounding invariant after bootstrap.
-%%
-%% The invariant: `Metaclass class class == Metaclass class`
-%% In Erlang terms: class_of_object(class_of_object(MetaclassRef)) =:= class_of_object(MetaclassRef)
-%% This holds because class_of_object/1 is idempotent for 'Metaclass'-tagged objects.
+-doc """
+Verify the ADR 0036 metaclass self-grounding invariant after bootstrap.
+
+The invariant: `Metaclass class class == Metaclass class`
+In Erlang terms: class_of_object(class_of_object(MetaclassRef)) =:= class_of_object(MetaclassRef)
+This holds because class_of_object/1 is idempotent for 'Metaclass'-tagged objects.
+""".
 -spec verify_metaclass_self_grounding() -> ok.
 verify_metaclass_self_grounding() ->
     case beamtalk_class_registry:whereis_class('Metaclass') of
@@ -104,8 +107,7 @@ verify_metaclass_self_grounding() ->
             end
     end.
 
-%% @private
-%% @doc Stop the Beamtalk runtime application.
+-doc "Stop the Beamtalk runtime application.".
 -spec stop(term()) -> ok.
 stop(_State) ->
     ok.

@@ -1,34 +1,36 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Per-workspace supervisor
-%%%
-%%% **DDD Context:** Workspace Context
-%%%
-%%% This supervisor manages all components of a persistent workspace:
-%%% - Actor registry (workspace-wide actor tracking)
-%%% - REPL TCP server for client connections
-%%% - Idle monitor for auto-cleanup
-%%% - Workspace metadata tracking
-%%% - Actor supervision (shared across sessions)
-%%% - Session supervision (one per REPL connection)
-%%%
-%%% Architecture (from ADR 0004, implemented in BT-262):
-%%% ```
-%%% beamtalk_workspace_sup
-%%%   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
-%%%   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
-%%%   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
-%%%   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
-%%%   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
-%%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
-%%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
-%%%   ├─ beamtalk_actor_sup           % Supervises user actors
-%%%   └─ beamtalk_session_sup         % Supervises session shell processes
-%%% ```
-
 -module(beamtalk_workspace_sup).
 -behaviour(supervisor).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Per-workspace supervisor
+
+This supervisor manages all components of a persistent workspace:
+- Actor registry (workspace-wide actor tracking)
+- REPL TCP server for client connections
+- Idle monitor for auto-cleanup
+- Workspace metadata tracking
+- Actor supervision (shared across sessions)
+- Session supervision (one per REPL connection)
+
+Architecture (from ADR 0004, implemented in BT-262):
+```
+beamtalk_workspace_sup
+  ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
+  ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
+  ├─ beamtalk_actor_registry       % Workspace-wide actor registry
+  ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
+  │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
+  ├─ beamtalk_repl_server         % TCP server (session-per-connection)
+  ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
+  ├─ beamtalk_actor_sup           % Supervises user actors
+  └─ beamtalk_session_sup         % Supervises session shell processes
+```
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -47,12 +49,11 @@
 
 -export_type([workspace_config/0]).
 
-%% @doc Start the workspace supervisor.
+-doc "Start the workspace supervisor.".
 -spec start_link(workspace_config()) -> {ok, pid()} | {error, term()}.
 start_link(Config) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, Config).
 
-%% @private
 init(Config) ->
     SupFlags = #{
         strategy => one_for_one,
@@ -184,9 +185,11 @@ init(Config) ->
 
 %%% REPL Child Specs
 
-%% @private Return child specs for REPL-mode children.
-%% When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
-%% no per-connection session supervisor.
+-doc """
+Return child specs for REPL-mode children.
+When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
+no per-connection session supervisor.
+""".
 repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _WebPort, _AutoCleanup, _MaxIdleSeconds) ->
     [];
 repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, MaxIdleSeconds) ->
@@ -238,10 +241,12 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, Max
 
 %%% Singleton Child Specs
 
-%% @private Generate supervisor child specs for actor workspace singletons.
-%% Starts actor singletons from beamtalk_workspace_config:singletons/0, then
-%% the actor registry. Value singletons (BeamtalkInterface, WorkspaceInterface)
-%% are not started here — they are bootstrapped by beamtalk_workspace_bootstrap.
+-doc """
+Generate supervisor child specs for actor workspace singletons.
+Starts actor singletons from beamtalk_workspace_config:singletons/0, then
+the actor registry. Value singletons (BeamtalkInterface, WorkspaceInterface)
+are not started here — they are bootstrapped by beamtalk_workspace_bootstrap.
+""".
 singleton_child_specs() ->
     Singletons = beamtalk_workspace_config:singletons(),
     lists:map(fun singleton_to_child_spec/1, Singletons) ++
@@ -256,7 +261,7 @@ singleton_child_specs() ->
             }
         ].
 
-%% @private Convert a singleton config to a supervisor child spec.
+-doc "Convert a singleton config to a supervisor child spec.".
 singleton_to_child_spec(#{binding_name := BindingName, module := Module, start_args := Args}) ->
     #{
         id => Module,
@@ -269,10 +274,11 @@ singleton_to_child_spec(#{binding_name := BindingName, module := Module, start_a
 
 %%% File Logging
 
-%% @private
-%% @doc Set up a file-based logger handler for the workspace node.
-%% Writes to ~/.beamtalk/workspaces/{workspace_id}/workspace.log with rotation.
-%% Disabled when BEAMTALK_NO_FILE_LOG=1 is set.
+-doc """
+Set up a file-based logger handler for the workspace node.
+Writes to ~/.beamtalk/workspaces/{workspace_id}/workspace.log with rotation.
+Disabled when BEAMTALK_NO_FILE_LOG=1 is set.
+""".
 -spec setup_file_logger(binary()) -> ok.
 setup_file_logger(WorkspaceId) ->
     case os:getenv("BEAMTALK_NO_FILE_LOG") of
@@ -282,7 +288,6 @@ setup_file_logger(WorkspaceId) ->
             do_setup_file_logger(WorkspaceId)
     end.
 
-%% @private
 do_setup_file_logger(WorkspaceId) ->
     case beamtalk_platform:home_dir() of
         false ->
@@ -356,9 +361,10 @@ do_setup_file_logger(WorkspaceId) ->
 
 %%% WebSocket Log Handler (BT-1433)
 
-%% @private
-%% @doc Register the WebSocket log handler with OTP logger.
-%% The handler forwards log events to subscribed WebSocket sessions.
+-doc """
+Register the WebSocket log handler with OTP logger.
+The handler forwards log events to subscribed WebSocket sessions.
+""".
 -spec setup_ws_log_handler() -> ok.
 setup_ws_log_handler() ->
     case

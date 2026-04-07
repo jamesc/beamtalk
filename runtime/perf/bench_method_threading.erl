@@ -3,35 +3,38 @@
 
 %%% **DDD Context:** Runtime benchmark — method-level state-threading overhead
 %%%
-%%% @doc Erlang simulations of Beamtalk's method-level state threading.
-%%%
-%%% Unlike block/loop state threading (bench_block_threading.erl), this module
-%%% benchmarks straight-line code in method bodies:
-%%%   - Sequential field mutations: self.x := 1. self.y := 2. self.z := 3
-%%%   - Field read-after-write: self.x := 5. self.y := self.x + 1
-%%%   - Mixed local vars + field mutations
-%%%
-%%% In Beamtalk's codegen, each field assignment emits:
-%%%   let Val = <rhs> in let StateN = call 'maps':'put'('field', Val, StateN-1) in ...
-%%%
-%%% Local variable assignments are zero-overhead (standard let bindings).
-%%%
-%%% All functions take a pre-existing State map as input (simulating the
-%%% gen_server state already in scope), so we benchmark only the mutation
-%%% overhead, not map construction.
-%%%
-%%% Findings (2026-03-17):
-%%%   - Small-map overhead: ~1.5-1.9x vs native map update syntax
-%%%   - Large-map overhead: 3-8x vs small-map equivalents (HAMT penalty)
-%%%   - Batched map update syntax (State#{...}) is NOT inherently faster
-%%%     than sequential maps:put on BEAM's JIT — roughly neutral
-%%%   - Shadow locals (eliminating maps:get for just-written fields) give
-%%%     ~1.1-1.3x on method body execution, but this is negligible vs
-%%%     gen_server dispatch overhead (~2000ns per call)
-%%%   - Loop-level optimizations (BT-1275/1276/1342) remain the priority
-%%%     due to N-iteration amplification
 
 -module(bench_method_threading).
+
+-moduledoc """
+Erlang simulations of Beamtalk's method-level state threading.
+
+Unlike block/loop state threading (bench_block_threading.erl), this module
+benchmarks straight-line code in method bodies:
+  - Sequential field mutations: self.x := 1. self.y := 2. self.z := 3
+  - Field read-after-write: self.x := 5. self.y := self.x + 1
+  - Mixed local vars + field mutations
+
+In Beamtalk's codegen, each field assignment emits:
+  let Val = <rhs> in let StateN = call 'maps':'put'('field', Val, StateN-1) in ...
+
+Local variable assignments are zero-overhead (standard let bindings).
+
+All functions take a pre-existing State map as input (simulating the
+gen_server state already in scope), so we benchmark only the mutation
+overhead, not map construction.
+
+Findings (2026-03-17):
+  - Small-map overhead: ~1.5-1.9x vs native map update syntax
+  - Large-map overhead: 3-8x vs small-map equivalents (HAMT penalty)
+  - Batched map update syntax (State#{...}) is NOT inherently faster
+    than sequential maps:put on BEAM's JIT — roughly neutral
+  - Shadow locals (eliminating maps:get for just-written fields) give
+    ~1.1-1.3x on method body execution, but this is negligible vs
+    gen_server dispatch overhead (~2000ns per call)
+  - Loop-level optimizations (BT-1275/1276/1342) remain the priority
+    due to N-iteration amplification
+""".
 
 -export([
     %% State constructors (called once per benchmark, not per iteration)
@@ -64,7 +67,7 @@
 %% State constructors
 %%====================================================================
 
-%% @doc Small actor state (~13 keys, within BEAM small-map JIT threshold).
+-doc "Small actor state (~13 keys, within BEAM small-map JIT threshold).".
 -spec small_state() -> map().
 small_state() ->
     #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
@@ -72,7 +75,7 @@ small_state() ->
       x => 0, y => 0, z => 0, a => 0, b => 0, c => 0,
       d => 0, e => 0, f => 0, g => 0}.
 
-%% @doc Large actor state (37 keys, past BEAM small-map threshold).
+-doc "Large actor state (37 keys, past BEAM small-map threshold).".
 -spec big_state() -> map().
 big_state() ->
     lists:foldl(

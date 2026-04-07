@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_idle_monitor module
-%%%
-%%% Tests idle monitoring and auto-cleanup logic.
-
 -module(beamtalk_idle_monitor_tests).
+
+-moduledoc """
+Unit tests for beamtalk_idle_monitor module
+
+Tests idle monitoring and auto-cleanup logic.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

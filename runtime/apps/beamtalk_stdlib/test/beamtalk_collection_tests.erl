@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_collection module (BT-1088).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests inject_into/3 and to_list/1 for list inputs.
-
 -module(beamtalk_collection_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_collection module (BT-1088).
+
+Tests inject_into/3 and to_list/1 for list inputs.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

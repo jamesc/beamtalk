@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_io_capture, focused on the BT-1172
-%%% dead-process guard in reset_captured_group_leaders/2.
-%%%
-%%% General start/stop and io_capture_with_output coverage lives in
-%%% beamtalk_repl_eval_tests.erl.
-
 -module(beamtalk_io_capture_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_io_capture, focused on the BT-1172
+dead-process guard in reset_captured_group_leaders/2.
+
+General start/stop and io_capture_with_output coverage lives in
+beamtalk_repl_eval_tests.erl.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

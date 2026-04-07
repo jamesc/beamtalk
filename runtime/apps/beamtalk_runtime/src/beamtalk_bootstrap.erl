@@ -1,56 +1,63 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Bootstrap the runtime environment.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% BT-446: Bootstrap no longer creates class processes for ProtoObject,
-%%% Object, and Actor. Those are now registered by their compiled stdlib
-%%% modules' on_load via beamtalk_stdlib:load_compiled_stdlib_modules().
-%%%
-%%% Bootstrap only ensures pg (process group) is started, which is needed
-%%% by the class registry (beamtalk_object_class) before any classes load.
-%%%
-%%% ADR 0032 Phase 0 (BT-732): Bootstrap registers the 'Class' stub
-%%% (beamtalk_class_bt) immediately after pg starts, before stdlib loads.
-%%% This is safe because dispatch works via beamtalk_class_bt:has_method/1
-%%% and dispatch/4 even before the superclass (Object) is registered.
-%%% See beamtalk_class_bt for the stub details.
-%%%
-%%% ADR 0036 Phase 1 (BT-802): Bootstrap also registers the 'Metaclass' stub
-%%% (beamtalk_metaclass_bt) immediately after 'Class', completing the bootstrap
-%%% order: ProtoObject → Object → Behaviour → Class → Metaclass → Actor → user modules.
-%%%
-%%% ADR 0038 Phase 1 (BT-835): Bootstrap also registers the 'ClassBuilder' stub
-%%% (beamtalk_class_builder_bt) immediately after 'Metaclass', before Actor.
-%%% New sequence: ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor.
 -module(beamtalk_bootstrap).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Bootstrap the runtime environment.
+
+BT-446: Bootstrap no longer creates class processes for ProtoObject,
+Object, and Actor. Those are now registered by their compiled stdlib
+modules' on_load via beamtalk_stdlib:load_compiled_stdlib_modules().
+
+Bootstrap only ensures pg (process group) is started, which is needed
+by the class registry (beamtalk_object_class) before any classes load.
+
+ADR 0032 Phase 0 (BT-732): Bootstrap registers the 'Class' stub
+(beamtalk_class_bt) immediately after pg starts, before stdlib loads.
+This is safe because dispatch works via beamtalk_class_bt:has_method/1
+and dispatch/4 even before the superclass (Object) is registered.
+See beamtalk_class_bt for the stub details.
+
+ADR 0036 Phase 1 (BT-802): Bootstrap also registers the 'Metaclass' stub
+(beamtalk_metaclass_bt) immediately after 'Class', completing the bootstrap
+order: ProtoObject → Object → Behaviour → Class → Metaclass → Actor → user modules.
+
+ADR 0038 Phase 1 (BT-835): Bootstrap also registers the 'ClassBuilder' stub
+(beamtalk_class_builder_bt) immediately after 'Metaclass', before Actor.
+New sequence: ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor.
+""".
 
 -export([start_link/0, init/1]).
 
-%% @doc Start the bootstrap process.
-%%
-%% This is typically called during application startup to ensure pg is
-%% running before class modules load.
+-doc """
+Start the bootstrap process.
+
+This is typically called during application startup to ensure pg is
+running before class modules load.
+""".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     proc_lib:start_link(?MODULE, init, [self()]).
 
-%% @doc Initialize the runtime environment.
-%%
-%% Starts pg (process group) which is required by the class registry.
-%% Class processes are created by compiled stdlib modules' on_load.
-%%
-%% ADR 0032 Phase 0 (BT-732): Also registers the 'Class' stub so the
-%% class chain dispatch fallthrough is available from startup.
-%%
-%% ADR 0036 Phase 1 (BT-802): Also registers the 'Metaclass' stub so that
-%% metaclass objects dispatch through the Metaclass → Class chain.
-%%
-%% ADR 0038 Phase 1 (BT-835): Also registers the 'ClassBuilder' stub so that
-%% compiled class on_load hooks can call ClassBuilder before user modules load.
-%% Bootstrap order: ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor.
+-doc """
+Initialize the runtime environment.
+
+Starts pg (process group) which is required by the class registry.
+Class processes are created by compiled stdlib modules' on_load.
+
+ADR 0032 Phase 0 (BT-732): Also registers the 'Class' stub so the
+class chain dispatch fallthrough is available from startup.
+
+ADR 0036 Phase 1 (BT-802): Also registers the 'Metaclass' stub so that
+metaclass objects dispatch through the Metaclass → Class chain.
+
+ADR 0038 Phase 1 (BT-835): Also registers the 'ClassBuilder' stub so that
+compiled class on_load hooks can call ClassBuilder before user modules load.
+Bootstrap order: ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor.
+""".
 -spec init(pid()) -> no_return().
 init(Parent) ->
     %% Ensure pg is started (required by beamtalk_object_class for class registry)
@@ -80,8 +87,7 @@ init(Parent) ->
     proc_lib:init_ack(Parent, {ok, self()}),
     bootstrap_loop().
 
-%% @private
-%% Bootstrap process loop - stays alive as part of the supervision tree
+-doc "Bootstrap process loop - stays alive as part of the supervision tree".
 bootstrap_loop() ->
     receive
         _Any -> bootstrap_loop()

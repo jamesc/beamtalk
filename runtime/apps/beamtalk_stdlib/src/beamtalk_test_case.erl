@@ -1,17 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc TestCase primitive implementations for BUnit test framework.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% This module provides the runtime support for TestCase assertion methods.
-%%% All assertions create structured #beamtalk_error{} records with kind
-%%% `assertion_failed` when they fail.
-%%%
-%%% Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
-
 -module(beamtalk_test_case).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+TestCase primitive implementations for BUnit test framework.
+
+This module provides the runtime support for TestCase assertion methods.
+All assertions create structured #beamtalk_error{} records with kind
+`assertion_failed` when they fail.
+
+Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
+""".
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
@@ -44,17 +46,19 @@
 -export([format_stacktrace/1, ensure_test_context/4]).
 -endif.
 
-%% @doc Assert that a block raises an error of the specified kind.
-%%
-%% Executes the block and verifies that it raises an error with the
-%% given kind atom. If the block completes normally or raises a different
-%% kind of error, the assertion fails.
-%%
-%% Example:
-%%   Block = fun() -> error(my_error) end,
-%%   should_raise(Block, my_error)  % => passes
-%%
-%% Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
+-doc """
+Assert that a block raises an error of the specified kind.
+
+Executes the block and verifies that it raises an error with the
+given kind atom. If the block completes normally or raises a different
+kind of error, the assertion fails.
+
+Example:
+  Block = fun() -> error(my_error) end,
+  should_raise(Block, my_error)  % => passes
+
+Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
+""".
 -spec should_raise(fun(() -> term()), atom()) -> 'nil'.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
     try Block() of
@@ -110,13 +114,15 @@ should_raise(Block, ExpectedKind) ->
     Error2 = beamtalk_error:with_message(Error1, Message),
     beamtalk_error:raise(Error2).
 
-%% @doc Unconditionally fail with a message.
-%%
-%% Always raises an assertion_failed error with the given message.
-%% Used when a test detects an invariant violation.
-%%
-%% Example:
-%%   fail(<<"This should not happen">>)
+-doc """
+Unconditionally fail with a message.
+
+Always raises an assertion_failed error with the given message.
+Used when a test detects an invariant violation.
+
+Example:
+  fail(<<"This should not happen">>)
+""".
 -spec fail(binary() | atom()) -> no_return().
 fail(Message) when is_binary(Message) ->
     Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
@@ -128,13 +134,15 @@ fail(Message) when is_atom(Message) ->
 fail(Message) ->
     fail(beamtalk_primitive:print_string(Message)).
 
-%% @doc Signal that the current test should be skipped.
-%%
-%% Throws {bunit_skip, Reason}, caught by run_test_method/4 as a {skip, ...}
-%% result. A skipped test is neither a pass nor a failure.
-%%
-%% Example:
-%%   skip(<<"Unix only">>)
+-doc """
+Signal that the current test should be skipped.
+
+Throws {bunit_skip, Reason}, caught by run_test_method/4 as a {skip, ...}
+result. A skipped test is neither a pass nor a failure.
+
+Example:
+  skip(<<"Unix only">>)
+""".
 -spec skip(binary() | atom()) -> no_return().
 skip(Reason) when is_binary(Reason) ->
     throw({bunit_skip, Reason});
@@ -143,11 +151,13 @@ skip(Reason) when is_atom(Reason) ->
 skip(Reason) ->
     throw({bunit_skip, beamtalk_primitive:print_string(Reason)}).
 
-%% @doc Execute tests from class-side dispatch (BT-440).
-%%
-%% Called from beamtalk_object_class handle_call via spawned process.
-%% Receives Selector (runAll | 'run:'), Args, ClassName, Module, and
-%% FlatMethods directly from gen_server state — no gen_server calls needed.
+-doc """
+Execute tests from class-side dispatch (BT-440).
+
+Called from beamtalk_object_class handle_call via spawned process.
+Receives Selector (runAll | 'run:'), Args, ClassName, Module, and
+FlatMethods directly from gen_server state — no gen_server calls needed.
+""".
 -spec execute_tests(atom(), list(), atom(), atom(), map()) -> binary().
 execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
     TestMethods = discover_test_methods(FlatMethods),
@@ -202,10 +212,12 @@ execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
             format_results(Results, Duration)
     end.
 
-%% @doc Run all test methods (BT-440 — BIF fallback path).
-%% WARNING: May deadlock if called from within a class gen_server handle_call.
-%% Prefer execute_tests/5 which receives gen_server state directly and avoids
-%% any gen_server:call back to the class process.
+-doc """
+Run all test methods (BT-440 — BIF fallback path).
+WARNING: May deadlock if called from within a class gen_server handle_call.
+Prefer execute_tests/5 which receives gen_server state directly and avoids
+any gen_server:call back to the class process.
+""".
 -spec run_all(atom()) -> binary().
 run_all(ClassName) ->
     Module = resolve_module(ClassName),
@@ -238,8 +250,10 @@ run_all(ClassName) ->
             format_results(Results, Duration)
     end.
 
-%% @doc Run a single test method (BT-440 — BIF fallback path).
-%% WARNING: May deadlock if called from within a class gen_server handle_call.
+-doc """
+Run a single test method (BT-440 — BIF fallback path).
+WARNING: May deadlock if called from within a class gen_server handle_call.
+""".
 -spec run_single(atom(), atom()) -> binary().
 run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Module = resolve_module(ClassName),
@@ -257,10 +271,12 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Duration = (EndTime - StartTime) / 1000.0,
     format_results(Results, Duration).
 
-%% @doc Run all tests for a class and return structured results (BT-699).
-%%
-%% Returns a map with per-test results suitable for JSON encoding.
-%% Uses the BIF fallback path (safe outside gen_server).
+-doc """
+Run all tests for a class and return structured results (BT-699).
+
+Returns a map with per-test results suitable for JSON encoding.
+Uses the BIF fallback path (safe outside gen_server).
+""".
 -spec run_all_structured(atom()) ->
     #{
         class := atom(),
@@ -314,7 +330,7 @@ run_all_structured(ClassName) ->
             structure_results(ClassName, Results, Duration)
     end.
 
-%% @doc Run a single test method and return structured results (BT-699).
+-doc "Run a single test method and return structured results (BT-699).".
 -spec run_single_structured(atom(), atom()) ->
     #{
         class := atom(),
@@ -349,20 +365,24 @@ run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Duration = (EndTime - StartTime) / 1000.0,
     structure_results(ClassName, Results, Duration).
 
-%% @doc Find all loaded TestCase subclasses (BT-699).
-%%
-%% Uses the class hierarchy ETS table to find all classes that inherit
-%% from TestCase. Returns class names as atoms.
+-doc """
+Find all loaded TestCase subclasses (BT-699).
+
+Uses the class hierarchy ETS table to find all classes that inherit
+from TestCase. Returns class names as atoms.
+""".
 -spec find_test_classes() -> [atom()].
 find_test_classes() ->
     beamtalk_class_registry:all_subclasses('TestCase').
 
 %%% Internal helpers
 
-%% @doc Decode a BEAM error term into a human-readable binary message.
-%%
-%% Translates common Erlang error shapes and Beamtalk wrappers into
-%% readable messages instead of raw ~p formatting.
+-doc """
+Decode a BEAM error term into a human-readable binary message.
+
+Translates common Erlang error shapes and Beamtalk wrappers into
+readable messages instead of raw ~p formatting.
+""".
 -spec decode_beam_error(term()) -> binary().
 decode_beam_error({future_rejected, Inner}) ->
     iolist_to_binary([<<"future rejected: ">>, decode_beam_error(Inner)]);
@@ -413,11 +433,13 @@ decode_beam_error(timeout) ->
 decode_beam_error(Other) ->
     beamtalk_primitive:print_string(Other).
 
-%% @doc Format a BEAM stacktrace for display in test failure messages.
-%%
-%% Filters out internal test runner and OTP frames; shows up to 3 user frames.
-%% Error location (innermost frame) is shown first, with callers going outward.
-%% Returns an empty binary when no relevant frames exist.
+-doc """
+Format a BEAM stacktrace for display in test failure messages.
+
+Filters out internal test runner and OTP frames; shows up to 3 user frames.
+Error location (innermost frame) is shown first, with callers going outward.
+Returns an empty binary when no relevant frames exist.
+""".
 -spec format_stacktrace(list()) -> binary().
 format_stacktrace([]) ->
     <<>>;
@@ -436,12 +458,14 @@ format_stacktrace(Frames) ->
             iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
     end.
 
-%% @doc Format a single stacktrace frame for display using Beamtalk names.
-%%
-%% Translates Erlang module names to Beamtalk class names where possible.
-%% Stdlib frames show just the basename (the absolute path baked at compile time
-%% won't exist on the user's machine). User code frames show workspace-relative
-%% paths for terminal clickability.
+-doc """
+Format a single stacktrace frame for display using Beamtalk names.
+
+Translates Erlang module names to Beamtalk class names where possible.
+Stdlib frames show just the basename (the absolute path baked at compile time
+won't exist on the user's machine). User code frames show workspace-relative
+paths for terminal clickability.
+""".
 -spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> iolist().
 format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
     DisplayMod = format_module(Mod),
@@ -460,11 +484,13 @@ format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
             ])
     end.
 
-%% @doc Format a file path for display based on module origin.
-%%
-%% Stdlib modules (bt@stdlib@*) use basename only — the compile-time absolute
-%% path won't exist on the user's machine. User code paths are made relative
-%% to CWD for terminal clickability in VS Code.
+-doc """
+Format a file path for display based on module origin.
+
+Stdlib modules (bt@stdlib@*) use basename only — the compile-time absolute
+path won't exist on the user's machine. User code paths are made relative
+to CWD for terminal clickability in VS Code.
+""".
 -spec format_file_path(atom(), string()) -> string().
 format_file_path(Mod, File) ->
     ModStr = atom_to_list(Mod),
@@ -475,7 +501,7 @@ format_file_path(Mod, File) ->
             make_relative(File)
     end.
 
-%% @doc Make a file path relative to CWD if it's under it, otherwise basename.
+-doc "Make a file path relative to CWD if it's under it, otherwise basename.".
 -spec make_relative(string()) -> string().
 make_relative(File) ->
     case file:get_cwd() of
@@ -493,7 +519,7 @@ make_relative(File) ->
             filename:basename(File)
     end.
 
-%% @doc Translate an Erlang module name to a Beamtalk class name for display.
+-doc "Translate an Erlang module name to a Beamtalk class name for display.".
 -spec format_module(atom()) -> string().
 format_module(Mod) ->
     case beamtalk_stack_frame:module_to_class(Mod) of
@@ -501,10 +527,12 @@ format_module(Mod) ->
         ClassName -> atom_to_list(ClassName)
     end.
 
-%% @doc Clean up Erlang function names for display.
-%%
-%% Strips anonymous fun wrappers (e.g., '-sync_send/3-fun-1-' → 'sync_send')
-%% and returns the base function name as a string.
+-doc """
+Clean up Erlang function names for display.
+
+Strips anonymous fun wrappers (e.g., '-sync_send/3-fun-1-' → 'sync_send')
+and returns the base function name as a string.
+""".
 -spec format_fun_name(atom()) -> string().
 format_fun_name(Fun) ->
     FunStr = atom_to_list(Fun),
@@ -517,7 +545,7 @@ format_fun_name(Fun) ->
             FunStr
     end.
 
-%% @doc Filter stacktrace frames, removing internal test runner and OTP frames.
+-doc "Filter stacktrace frames, removing internal test runner and OTP frames.".
 -spec filter_stackframes(list()) -> list().
 filter_stackframes(Frames) ->
     lists:filter(
@@ -535,19 +563,21 @@ filter_stackframes(Frames) ->
         Frames
     ).
 
-%% @doc Select up to 3 representative frames from a filtered stacktrace.
-%%
-%% When 3 or fewer frames exist, return all of them. When more than 3,
-%% keep the 2 innermost (error site) plus the outermost (test method)
-%% so the caller's file/line info is preserved rather than being truncated
-%% and replaced by a synthetic frame from ensure_test_context/4.
+-doc """
+Select up to 3 representative frames from a filtered stacktrace.
+
+When 3 or fewer frames exist, return all of them. When more than 3,
+keep the 2 innermost (error site) plus the outermost (test method)
+so the caller's file/line info is preserved rather than being truncated
+and replaced by a synthetic frame from ensure_test_context/4.
+""".
 -spec select_frames(list()) -> list().
 select_frames(Frames) when length(Frames) =< 3 ->
     Frames;
 select_frames([First, Second | _] = Frames) ->
     [First, Second, lists:last(Frames)].
 
-%% @doc Format a test failure message combining error description and stacktrace.
+-doc "Format a test failure message combining error description and stacktrace.".
 -spec format_test_error(atom(), term(), list()) -> binary().
 format_test_error(error, Reason, Stacktrace) ->
     Msg = decode_beam_error(Reason),
@@ -570,12 +600,14 @@ format_test_error(Class, Reason, Stacktrace) ->
     ST = format_stacktrace(Stacktrace),
     <<Msg/binary, ST/binary>>.
 
-%% @doc Ensure the test method location appears in the failure message.
-%%
-%% When the BEAM stacktrace is truncated (default depth is 8), the test method
-%% frame can be lost. This function checks whether the test module appears in
-%% the filtered stacktrace; if not, it prepends a synthetic frame so the user
-%% always sees where the failing test is defined.
+-doc """
+Ensure the test method location appears in the failure message.
+
+When the BEAM stacktrace is truncated (default depth is 8), the test method
+frame can be lost. This function checks whether the test module appears in
+the filtered stacktrace; if not, it prepends a synthetic frame so the user
+always sees where the failing test is defined.
+""".
 -spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
 ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
     %% Check the rendered frames (after filter + select), not the full stack.
@@ -600,19 +632,23 @@ ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
             inject_test_context(FailMsg, Context)
     end.
 
-%% @doc Insert the test context line after existing stacktrace frames.
-%%
-%% With innermost-first ordering, the synthetic test context (outermost
-%% caller) should appear after the existing frames, not before them.
-%% If no "\n  at " lines exist yet, appends directly.
+-doc """
+Insert the test context line after existing stacktrace frames.
+
+With innermost-first ordering, the synthetic test context (outermost
+caller) should appear after the existing frames, not before them.
+If no "\n  at " lines exist yet, appends directly.
+""".
 -spec inject_test_context(binary(), binary()) -> binary().
 inject_test_context(FailMsg, Context) ->
     <<FailMsg/binary, Context/binary>>.
 
-%% @doc Extract the error kind from an exception.
-%%
-%% Handles #beamtalk_error{} records, wrapped Exception objects (ADR 0015),
-%% and raw Erlang atom errors (e.g., badarith, badarg).
+-doc """
+Extract the error kind from an exception.
+
+Handles #beamtalk_error{} records, wrapped Exception objects (ADR 0015),
+and raw Erlang atom errors (e.g., badarith, badarg).
+""".
 -spec extract_error_kind(term()) -> atom().
 extract_error_kind({future_rejected, Reason}) ->
     %% BT-838: Futures rejected by actor errors wrap the error.
@@ -637,8 +673,10 @@ extract_error_kind(_) ->
     % Unknown error format - return generic 'error' kind
     error.
 
-%% @doc Discover test methods from flattened methods map (no gen_server call).
-%% FlatMethods is #{Selector => {DefiningClass, MethodInfo}}.
+-doc """
+Discover test methods from flattened methods map (no gen_server call).
+FlatMethods is #{Selector => {DefiningClass, MethodInfo}}.
+""".
 -spec discover_test_methods(map()) -> [atom()].
 discover_test_methods(FlatMethods) ->
     TestMethods = maps:fold(
@@ -653,7 +691,7 @@ discover_test_methods(FlatMethods) ->
     ),
     lists:sort(TestMethods).
 
-%% @doc Discover test methods from module exports (BIF fallback path).
+-doc "Discover test methods from module exports (BIF fallback path).".
 -spec discover_test_methods_from_module(atom()) -> [atom()].
 discover_test_methods_from_module(Module) ->
     Exports = Module:module_info(exports),
@@ -668,9 +706,11 @@ discover_test_methods_from_module(Module) ->
     ),
     lists:sort(TestMethods).
 
-%% @doc Resolve the BEAM module atom for a class name (no gen_server call).
-%% Uses the beamtalk compiler naming convention: bt@snake_case_name.
-%% Falls back to bt@stdlib@snake_case_name for stdlib classes.
+-doc """
+Resolve the BEAM module atom for a class name (no gen_server call).
+Uses the beamtalk compiler naming convention: bt@snake_case_name.
+Falls back to bt@stdlib@snake_case_name for stdlib classes.
+""".
 -spec resolve_module(atom()) -> atom().
 resolve_module(ClassName) ->
     SnakeName = class_name_to_snake(atom_to_list(ClassName)),
@@ -698,8 +738,10 @@ resolve_module(ClassName) ->
             end
     end.
 
-%% @doc Convert CamelCase class name to snake_case module name component.
-%% Matches the Rust to_module_name() convention.
+-doc """
+Convert CamelCase class name to snake_case module name component.
+Matches the Rust to_module_name() convention.
+""".
 -spec class_name_to_snake(string()) -> string().
 class_name_to_snake(Name) ->
     class_name_to_snake(Name, false, []).
@@ -716,21 +758,25 @@ class_name_to_snake([H | T], PrevLower, Acc) when H >= $A, H =< $Z ->
 class_name_to_snake([H | T], _PrevLower, Acc) ->
     class_name_to_snake(T, H >= $a andalso H =< $z, [H | Acc]).
 
-%% @doc Run a single test method with setUp/tearDown lifecycle (BT-440).
-%%
-%% FlatMethods is either a map (from gen_server state) or 'none' (BIF fallback).
-%% When 'none', uses module_info(exports) to check for setUp/tearDown.
-%% Creates fresh instance, runs lifecycle, returns pass/fail.
-%% tearDown always runs, even if the test fails.
+-doc """
+Run a single test method with setUp/tearDown lifecycle (BT-440).
+
+FlatMethods is either a map (from gen_server state) or 'none' (BIF fallback).
+When 'none', uses module_info(exports) to check for setUp/tearDown.
+Creates fresh instance, runs lifecycle, returns pass/fail.
+tearDown always runs, even if the test fails.
+""".
 -spec run_test_method(atom(), atom(), atom(), map() | none) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(ClassName, Module, MethodName, FlatMethods) ->
     run_test_method(ClassName, Module, MethodName, FlatMethods, nil).
 
-%% @doc Run a single test method with setUp/tearDown lifecycle and suite fixture (BT-1549).
-%%
-%% Like run_test_method/4 but injects `suiteFixture => SuiteFixture` into the
-%% instance map after setUp, so test methods can access `self.suiteFixture`.
+-doc """
+Run a single test method with setUp/tearDown lifecycle and suite fixture (BT-1549).
+
+Like run_test_method/4 but injects `suiteFixture => SuiteFixture` into the
+instance map after setUp, so test methods can access `self.suiteFixture`.
+""".
 -spec run_test_method(atom(), atom(), atom(), map() | none, term()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
@@ -828,7 +874,7 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
             {fail, MethodName, SetupMsg}
     end.
 
-%% @doc Check for setUp/tearDown methods, using FlatMethods map or module exports.
+-doc "Check for setUp/tearDown methods, using FlatMethods map or module exports.".
 -spec check_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
 check_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
     {maps:is_key(setUp, FlatMethods), maps:is_key(tearDown, FlatMethods)};
@@ -836,13 +882,15 @@ check_lifecycle_methods(Module, none) ->
     Exports = Module:module_info(exports),
     {lists:keymember(setUp, 1, Exports), lists:keymember(tearDown, 1, Exports)}.
 
-%% @doc Return true when setUp's result is a valid instance of the same class.
-%%
-%% BT-1293: Prevents setUp's accidental non-instance return (e.g. `false` from
-%% an untaken `ifTrue:` branch) from replacing `self` in test method dispatch.
-%% A valid result is a map carrying the same `'$beamtalk_class'` tag as the
-%% original instance — i.e. the normal BT-900 value-object case where setUp
-%% assignments return an updated copy of self.
+-doc """
+Return true when setUp's result is a valid instance of the same class.
+
+BT-1293: Prevents setUp's accidental non-instance return (e.g. `false` from
+an untaken `ifTrue:` branch) from replacing `self` in test method dispatch.
+A valid result is a map carrying the same `'$beamtalk_class'` tag as the
+original instance — i.e. the normal BT-900 value-object case where setUp
+assignments return an updated copy of self.
+""".
 -spec is_valid_setUp_result(term(), term()) -> boolean().
 is_valid_setUp_result(Instance, Result) when is_map(Instance), is_map(Result) ->
     %% Use maps:find/2 so that two maps both lacking '$beamtalk_class' are NOT
@@ -854,24 +902,28 @@ is_valid_setUp_result(Instance, Result) when is_map(Instance), is_map(Result) ->
 is_valid_setUp_result(_Instance, _Result) ->
     false.
 
-%% @doc Inject suite fixture into instance map (BT-1549).
-%%
-%% Adds `suiteFixture => Value` to the instance so test methods and tearDown
-%% can access it via `self.suiteFixture`. Always injects (even nil) so access
-%% never crashes with badkey.
+-doc """
+Inject suite fixture into instance map (BT-1549).
+
+Adds `suiteFixture => Value` to the instance so test methods and tearDown
+can access it via `self.suiteFixture`. Always injects (even nil) so access
+never crashes with badkey.
+""".
 -spec inject_suite_fixture(map(), term()) -> map().
 inject_suite_fixture(Instance, SuiteFixture) when is_map(Instance) ->
     Instance#{suiteFixture => SuiteFixture};
 inject_suite_fixture(Instance, _SuiteFixture) ->
     Instance.
 
-%% @doc Run a batch of tests wrapped with setUpOnce/tearDownOnce lifecycle (BT-1549).
-%%
-%% 1. Creates temp instance, dispatches setUpOnce, captures return as Fixture
-%% 2. Calls TestFun(Fixture) which returns [{pass|fail|skip, ...}]
-%% 3. In `after`: creates temp instance, injects fixture, dispatches tearDownOnce
-%%
-%% If setUpOnce fails, all test methods are failed with "setUpOnce failed: ..." message.
+-doc """
+Run a batch of tests wrapped with setUpOnce/tearDownOnce lifecycle (BT-1549).
+
+1. Creates temp instance, dispatches setUpOnce, captures return as Fixture
+2. Calls TestFun(Fixture) which returns [{pass|fail|skip, ...}]
+3. In `after`: creates temp instance, injects fixture, dispatches tearDownOnce
+
+If setUpOnce fails, all test methods are failed with "setUpOnce failed: ..." message.
+""".
 -spec run_suite_lifecycle(
     atom(),
     atom(),
@@ -910,7 +962,7 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
             end
     end.
 
-%% @doc Check for setUpOnce/tearDownOnce methods (BT-1549).
+-doc "Check for setUpOnce/tearDownOnce methods (BT-1549).".
 -spec check_suite_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
 check_suite_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
     {maps:is_key(setUpOnce, FlatMethods), maps:is_key(tearDownOnce, FlatMethods)};
@@ -918,7 +970,7 @@ check_suite_lifecycle_methods(Module, none) ->
     Exports = Module:module_info(exports),
     {lists:keymember(setUpOnce, 1, Exports), lists:keymember(tearDownOnce, 1, Exports)}.
 
-%% @doc Run tearDownOnce, swallowing errors to avoid masking test results (BT-1549).
+-doc "Run tearDownOnce, swallowing errors to avoid masking test results (BT-1549).".
 -spec run_teardown_once(atom(), term(), boolean()) -> ok.
 run_teardown_once(Module, Fixture, true) ->
     try
@@ -932,7 +984,7 @@ run_teardown_once(Module, Fixture, true) ->
 run_teardown_once(_Module, _Fixture, false) ->
     ok.
 
-%% @doc Format test results for REPL display.
+-doc "Format test results for REPL display.".
 -spec format_results(
     [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
 ) -> binary().
@@ -975,7 +1027,7 @@ format_results(Results, Duration) ->
         end,
     unicode:characters_to_binary(IoList).
 
-%% @doc Convert raw test results to structured map (BT-699).
+-doc "Convert raw test results to structured map (BT-699).".
 -spec structure_results(
     atom(), [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
 ) ->
@@ -1022,10 +1074,12 @@ structure_results(ClassName, Results, Duration) ->
         tests => Tests
     }.
 
-%% @doc Spawn test execution in a separate process to avoid gen_server deadlock.
-%%
-%% BT-440/BT-704: Test execution calls back into the class system,
-%% so it must run outside the class process.
+-doc """
+Spawn test execution in a separate process to avoid gen_server deadlock.
+
+BT-440/BT-704: Test execution calls back into the class system,
+so it must run outside the class process.
+""".
 -spec spawn_test_execution(atom(), list(), atom(), atom(), map(), {pid(), term()}) -> pid().
 spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) ->
     spawn(fun() ->

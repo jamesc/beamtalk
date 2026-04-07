@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_reflection module.
-%%%
-%%% Tests field name extraction, struct reflection, and runtime introspection helpers.
-
 -module(beamtalk_reflection_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_reflection module.
+
+Tests field name extraction, struct reflection, and runtime introspection helpers.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

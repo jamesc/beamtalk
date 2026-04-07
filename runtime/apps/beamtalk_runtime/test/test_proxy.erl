@@ -1,10 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test proxy actor with doesNotUnderstand handler
-
 -module(test_proxy).
 -behaviour(gen_server).
+
+-moduledoc "Test proxy actor with doesNotUnderstand handler".
 
 %% API
 -export([start_link/1]).

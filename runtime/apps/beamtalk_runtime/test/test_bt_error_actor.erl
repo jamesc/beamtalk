@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor that throws #beamtalk_error{} records in methods.
-%%% Used to verify that structured errors are preserved through dispatch.
-
 -module(test_bt_error_actor).
 -behaviour(gen_server).
+
+-moduledoc """
+Test actor that throws #beamtalk_error{} records in methods.
+Used to verify that structured errors are preserved through dispatch.
+""".
 -include("beamtalk.hrl").
 
 %% API

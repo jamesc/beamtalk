@@ -1,46 +1,48 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Runtime protocol registry and query engine (ADR 0068 Phase 2c).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Provides an ETS-based registry of protocol definitions and runtime query
-%%% functions for protocol introspection. Protocol metadata is registered by
-%%% compiled modules during `on_load` via `register_protocol/1`.
-%%%
-%%% ## Protocol Registration
-%%%
-%%% Each protocol is stored as a map:
-%%% ```erlang
-%%% #{name => 'Printable',
-%%%   required_methods => [#{'selector' => 'asString', 'arity' => 0}],
-%%%   type_params => [],
-%%%   extending => undefined}
-%%% ```
-%%%
-%%% ## Query API
-%%%
-%%% | Function                    | Description                                    |
-%%% |-----------------------------|------------------------------------------------|
-%%% | conforms_to/2               | Check if class conforms to protocol             |
-%%% | protocols_for_class/1       | List protocols a class conforms to              |
-%%% | required_methods/1          | Required method selectors for a protocol        |
-%%% | conforming_classes/1        | Classes conforming to a protocol                |
-%%% | protocol_info/1             | Full protocol metadata                          |
-%%% | is_protocol/1               | Check if a name is a registered protocol        |
-%%%
-%%% ## Conformance Model
-%%%
-%%% Runtime conformance uses structural checking — a class conforms if it
-%%% responds to all required selectors. This mirrors the compile-time
-%%% `ProtocolRegistry::check_conformance` but operates on live runtime data
-%%% via `beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`.
-%%%
-%%% @see docs/ADR/0068-parametric-types-and-protocols.md — Stage 2
-%%% @see beamtalk_behaviour_intrinsics — backs the class-side primitives
-
 -module(beamtalk_protocol_registry).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Runtime protocol registry and query engine (ADR 0068 Phase 2c).
+
+Provides an ETS-based registry of protocol definitions and runtime query
+functions for protocol introspection. Protocol metadata is registered by
+compiled modules during `on_load` via `register_protocol/1`.
+
+## Protocol Registration
+
+Each protocol is stored as a map:
+```erlang
+#{name => 'Printable',
+  required_methods => [#{'selector' => 'asString', 'arity' => 0}],
+  type_params => [],
+  extending => undefined}
+```
+
+## Query API
+
+| Function                    | Description                                    |
+|-----------------------------|------------------------------------------------|
+| conforms_to/2               | Check if class conforms to protocol             |
+| protocols_for_class/1       | List protocols a class conforms to              |
+| required_methods/1          | Required method selectors for a protocol        |
+| conforming_classes/1        | Classes conforming to a protocol                |
+| protocol_info/1             | Full protocol metadata                          |
+| is_protocol/1               | Check if a name is a registered protocol        |
+
+## Conformance Model
+
+Runtime conformance uses structural checking — a class conforms if it
+responds to all required selectors. This mirrors the compile-time
+`ProtocolRegistry::check_conformance` but operates on live runtime data
+via `beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`.
+
+See also: docs/ADR/0068-parametric-types-and-protocols.md — Stage 2
+See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -63,10 +65,12 @@
 %%% Initialization
 %%% ============================================================================
 
-%% @doc Initialize the protocol registry ETS table.
-%%
-%% Called during application startup (beamtalk_runtime_app:start/2) before
-%% any compiled modules load their protocol definitions.
+-doc """
+Initialize the protocol registry ETS table.
+
+Called during application startup (beamtalk_runtime_app:start/2) before
+any compiled modules load their protocol definitions.
+""".
 -spec init() -> ok.
 init() ->
     case ets:info(?PROTOCOL_TABLE) of
@@ -87,16 +91,18 @@ init() ->
 %%% Registration
 %%% ============================================================================
 
-%% @doc Register a protocol definition.
-%%
-%% Called from compiled module `on_load` callbacks when a module defines
-%% protocols. The `Info` map must contain:
-%% - `name` (atom): Protocol name (e.g., 'Printable')
-%% - `required_methods` (list of maps): Each with `selector` (atom) and `arity` (integer)
-%% - `type_params` (list of atoms): Type parameter names, or `[]`
-%% - `extending` (atom or `undefined`): Parent protocol name
-%%
-%% Duplicate registrations are silently ignored (idempotent for hot reload).
+-doc """
+Register a protocol definition.
+
+Called from compiled module `on_load` callbacks when a module defines
+protocols. The `Info` map must contain:
+- `name` (atom): Protocol name (e.g., 'Printable')
+- `required_methods` (list of maps): Each with `selector` (atom) and `arity` (integer)
+- `type_params` (list of atoms): Type parameter names, or `[]`
+- `extending` (atom or `undefined`): Parent protocol name
+
+Duplicate registrations overwrite the previous entry (idempotent for hot reload).
+""".
 -spec register_protocol(map()) -> ok.
 register_protocol(#{name := Name} = Info) ->
     ets:insert(?PROTOCOL_TABLE, {Name, Info}),
@@ -118,19 +124,21 @@ register_protocol(BadInfo) ->
 %%% Query API
 %%% ============================================================================
 
-%% @doc Check if a class conforms to a protocol.
-%%
-%% Structural conformance: a class conforms if it responds to all required
-%% selectors of the protocol (including inherited requirements from
-%% `extending` protocols), and all required class methods (BT-1611).
-%%
-%% Returns `true` if:
-%% - The class responds to all required instance selectors
-%% - The class responds to all required class method selectors
-%% - The protocol is not registered (unknown protocols — conservative)
-%%
-%% Returns `false` if:
-%% - The class is missing one or more required selectors (instance or class)
+-doc """
+Check if a class conforms to a protocol.
+
+Structural conformance: a class conforms if it responds to all required
+selectors of the protocol (including inherited requirements from
+`extending` protocols), and all required class methods (BT-1611).
+
+Returns `true` if:
+- The class responds to all required instance selectors
+- The class responds to all required class method selectors
+- The protocol is not registered (unknown protocols — conservative)
+
+Returns `false` if:
+- The class is missing one or more required selectors (instance or class)
+""".
 -spec conforms_to(atom(), atom()) -> boolean().
 conforms_to(ClassName, ProtocolName) ->
     case protocol_info(ProtocolName) of
@@ -168,22 +176,26 @@ conforms_to(ClassName, ProtocolName) ->
             end
     end.
 
-%% @doc Return the list of protocols a class conforms to.
-%%
-%% Checks all registered protocols against the class. Returns a list of
-%% protocol name atoms, sorted alphabetically for deterministic output.
+-doc """
+Return the list of protocols a class conforms to.
+
+Checks all registered protocols against the class. Returns a list of
+protocol name atoms, sorted alphabetically for deterministic output.
+""".
 -spec protocols_for_class(atom()) -> [atom()].
 protocols_for_class(ClassName) ->
     Names = all_protocol_names(),
     Conforming = [N || N <- Names, conforms_to(ClassName, N)],
     lists:sort(Conforming).
 
-%% @doc Return the required method selectors for a protocol.
-%%
-%% Returns a list of selector atoms. Includes methods from extended protocols.
-%% BT-1611: Class method selectors are included with a `class ` prefix atom
-%% (e.g., `'class fromString:'`) to distinguish them from instance methods.
-%% Returns `[]` if the protocol is not registered.
+-doc """
+Return the required method selectors for a protocol.
+
+Returns a list of selector atoms. Includes methods from extended protocols.
+BT-1611: Class method selectors are included with a `class ` prefix atom
+(e.g., `'class fromString:'`) to distinguish them from instance methods.
+Returns `[]` if the protocol is not registered.
+""".
 -spec required_methods(atom()) -> [atom()].
 required_methods(ProtocolName) ->
     case protocol_info(ProtocolName) of
@@ -200,10 +212,12 @@ required_methods(ProtocolName) ->
             InstanceSels ++ ClassSels
     end.
 
-%% @doc Return the list of classes conforming to a protocol.
-%%
-%% Checks all registered classes against the protocol. Returns a list of
-%% class name atoms, sorted alphabetically for deterministic output.
+-doc """
+Return the list of classes conforming to a protocol.
+
+Checks all registered classes against the protocol. Returns a list of
+class name atoms, sorted alphabetically for deterministic output.
+""".
 -spec conforming_classes(atom()) -> [atom()].
 conforming_classes(ProtocolName) ->
     case protocol_info(ProtocolName) of
@@ -223,9 +237,11 @@ conforming_classes(ProtocolName) ->
             end
     end.
 
-%% @doc Retrieve full protocol metadata by name.
-%%
-%% Returns the protocol info map, or `undefined` if not registered.
+-doc """
+Retrieve full protocol metadata by name.
+
+Returns the protocol info map, or `undefined` if not registered.
+""".
 -spec protocol_info(atom()) -> map() | undefined.
 protocol_info(ProtocolName) ->
     case ets:info(?PROTOCOL_TABLE) of
@@ -238,7 +254,7 @@ protocol_info(ProtocolName) ->
             end
     end.
 
-%% @doc Check if a name is a registered protocol.
+-doc "Check if a name is a registered protocol.".
 -spec is_protocol(atom()) -> boolean().
 is_protocol(Name) ->
     case ets:info(?PROTOCOL_TABLE) of
@@ -251,7 +267,7 @@ is_protocol(Name) ->
             end
     end.
 
-%% @doc Return all registered protocol names.
+-doc "Return all registered protocol names.".
 -spec all_protocol_names() -> [atom()].
 all_protocol_names() ->
     case ets:info(?PROTOCOL_TABLE) of
@@ -263,7 +279,7 @@ all_protocol_names() ->
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private Collect all required instance methods including from extending protocols.
+-doc "Collect all required instance methods including from extending protocols.".
 -spec all_required_methods(map()) -> [map()].
 all_required_methods(#{required_methods := Methods} = Info) ->
     ParentMethods =
@@ -287,7 +303,9 @@ all_required_methods(#{required_methods := Methods} = Info) ->
 all_required_methods(_) ->
     [].
 
-%% @private Collect all required class methods including from extending protocols (BT-1611).
+-doc """
+Collect all required class methods including from extending protocols (BT-1611).
+""".
 -spec all_required_class_methods(map()) -> [map()].
 all_required_class_methods(Info) ->
     ClassMethods = maps:get(required_class_methods, Info, []),
@@ -310,12 +328,14 @@ all_required_class_methods(Info) ->
     ],
     ClassMethods ++ FilteredParent.
 
-%% @private Check if a class has a class-side method (walks hierarchy + extensions) (BT-1611/BT-1617).
-%%
-%% Walks the superclass chain checking each class's local class methods map.
-%% Falls back to the extensions ETS table for class-side extensions registered
-%% via `Class class >> selector` (keyed as `{'ClassName class', Selector}`).
-%% This mirrors the actual class-side dispatch path.
+-doc """
+Check if a class has a class-side method (walks hierarchy + extensions) (BT-1611/BT-1617).
+
+Walks the superclass chain checking each class's local class methods map.
+Falls back to the extensions ETS table for class-side extensions registered
+via `Class class >> selector` (keyed as `{'ClassName class', Selector}`).
+This mirrors the actual class-side dispatch path.
+""".
 -spec class_has_class_method(atom(), atom()) -> boolean().
 class_has_class_method(ClassName, Selector) ->
     case class_has_class_method_in_chain(ClassName, Selector) of
@@ -329,7 +349,7 @@ class_has_class_method(ClassName, Selector) ->
             check_class_extension(MetaclassTag, Selector)
     end.
 
-%% @private Walk the superclass chain checking local class methods maps.
+-doc "Walk the superclass chain checking local class methods maps.".
 -spec class_has_class_method_in_chain(atom(), atom()) -> boolean().
 class_has_class_method_in_chain(ClassName, Selector) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -353,9 +373,11 @@ class_has_class_method_in_chain(ClassName, Selector) ->
             end
     end.
 
-%% @private Safe extension registry lookup for class-side methods (BT-1617).
-%%
-%% Guards against the ETS table not existing (e.g., during early bootstrap).
+-doc """
+Safe extension registry lookup for class-side methods (BT-1617).
+
+Guards against the ETS table not existing (e.g., during early bootstrap).
+""".
 -spec check_class_extension(atom(), atom()) -> boolean().
 check_class_extension(MetaclassTag, Selector) ->
     try

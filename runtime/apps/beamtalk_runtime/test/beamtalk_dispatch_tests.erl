@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_dispatch module.
-%%%
-%%% Tests the method dispatch domain service including:
-%%% - Hierarchy walking (lookup/5)
-%%% - Super send dispatch (super/5)
-%%% - Extension method checking
-%%% - Error handling (structured #beamtalk_error{})
-%%%
-%%% ## Test Strategy
-%%%
-%%% Uses the real compiled Counter fixture (tests/e2e/fixtures/counter.bt)
-%%% and beamtalk_object_class registry for realistic testing.
-
 -module(beamtalk_dispatch_tests).
+
+-moduledoc """
+Unit tests for beamtalk_dispatch module.
+
+Tests the method dispatch domain service including:
+- Hierarchy walking (lookup/5)
+- Super send dispatch (super/5)
+- Extension method checking
+- Error handling (structured #beamtalk_error{})
+
+## Test Strategy
+
+Uses the real compiled Counter fixture (tests/e2e/fixtures/counter.bt)
+and beamtalk_object_class registry for realistic testing.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").

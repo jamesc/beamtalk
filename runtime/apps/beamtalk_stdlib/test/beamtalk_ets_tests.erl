@@ -1,24 +1,26 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_ets module (BT-1189).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover:
-%%% - new:type:/2 — table creation (all four types, type errors, duplicate name)
-%%% - named:/1 — named table lookup (success, not_found, type error)
-%%% - lookup/2 — key lookup (present, absent, type error)
-%%% - insert/3 — insert and update (success, type error)
-%%% - lookupIfAbsent/3 — lookup with default block
-%%% - includesKey/2 — membership test
-%%% - removeKey/2 — key deletion
-%%% - keys/1 — all keys as list
-%%% - tableSize/1 — entry count
-%%% - deleteTable/1 — table destruction
-%%% - FFI shims: new/2, named/1
-
 -module(beamtalk_ets_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_ets module (BT-1189).
+
+Tests cover:
+- new:type:/2 — table creation (all four types, type errors, duplicate name)
+- named:/1 — named table lookup (success, not_found, type error)
+- lookup/2 — key lookup (present, absent, type error)
+- insert/3 — insert and update (success, type error)
+- lookupIfAbsent/3 — lookup with default block
+- includesKey/2 — membership test
+- removeKey/2 — key deletion
+- keys/1 — all keys as list
+- tableSize/1 — entry count
+- deleteTable/1 — table destruction
+- FFI shims: new/2, named/1
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -27,7 +29,7 @@
 %%% Test Helpers
 %%% ============================================================================
 
-%% @doc Create a fresh table with a unique name, run Fun(Table), then clean up.
+-doc "Create a fresh table with a unique name, run Fun(Table), then clean up.".
 with_table(Name, Fun) ->
     %% Delete any leftover table from a previous failed run
     catch ets:delete(Name),

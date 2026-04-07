@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_random module (BT-1165).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests class-side methods (next, nextInteger:, new, seed:),
-%%% instance methods (instanceNext, instanceNextInteger:),
-%%% collection integration (atRandom), FFI shims, and error paths.
-
 -module(beamtalk_random_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_random module (BT-1165).
+
+Tests class-side methods (next, nextInteger:, new, seed:),
+instance methods (instanceNext, instanceNextInteger:),
+collection integration (atRandom), FFI shims, and error paths.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_repl_state module
-%%%
-%%% Tests REPL state management: bindings, counters, loaded modules, and configuration.
-
 -module(beamtalk_repl_state_tests).
+
+-moduledoc """
+Unit tests for beamtalk_repl_state module
+
+Tests REPL state management: bindings, counters, loaded modules, and configuration.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

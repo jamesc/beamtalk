@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_build_worker (ADR 0022, Phase 3).
-%%
-%% Tests the batch compiler worker's in-memory compilation pipeline,
-%% file I/O, and parallel worker management.
-
 -module(beamtalk_build_worker_tests).
+
+-moduledoc """
+Tests for beamtalk_build_worker (ADR 0022, Phase 3).
+
+Tests the batch compiler worker's in-memory compilation pipeline,
+file I/O, and parallel worker management.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

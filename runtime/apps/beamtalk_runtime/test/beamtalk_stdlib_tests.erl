@@ -1,8 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_stdlib module.
 -module(beamtalk_stdlib_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc "Unit tests for beamtalk_stdlib module.".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

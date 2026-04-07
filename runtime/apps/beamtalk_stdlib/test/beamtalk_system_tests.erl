@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_system module.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests getEnv:/1, getEnv:default:/2, setEnv:value:/2, unsetEnv:/1,
-%%% osPlatform/0, osFamily/0, architecture/0, hostname/0, erlangVersion/0,
-%%% pid/0, uniqueId/0, and type error paths.
-
 -module(beamtalk_system_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_system module.
+
+Tests getEnv:/1, getEnv:default:/2, setEnv:value:/2, unsetEnv:/1,
+osPlatform/0, osFamily/0, architecture/0, hostname/0, erlangVersion/0,
+pid/0, uniqueId/0, and type error paths.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
