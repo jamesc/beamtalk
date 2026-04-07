@@ -41,6 +41,9 @@
     result_to_json/1
 ]).
 
+-type test_result() :: #{'$beamtalk_class' := 'TestResult', atom() => term()}.
+-export_type([test_result/0]).
+
 %% FFI shims for (Erlang beamtalk_test_runner) dispatch
 -export([runAll/0, runAll/1, run/1, run/2]).
 %% Exported for testing
@@ -67,7 +70,7 @@
 %% @doc Run all tests across all loaded TestCase subclasses (sequential).
 %%
 %% Equivalent to `run_all(1)` — runs all classes sequentially.
--spec run_all() -> map().
+-spec run_all() -> test_result().
 run_all() ->
     run_all(1).
 
@@ -81,7 +84,7 @@ run_all() ->
 %% Classes declaring `serial => true` are run sequentially after all
 %% concurrent classes complete. Classes that do not override `serial`
 %% (default `false`) run concurrently.
--spec run_all(non_neg_integer()) -> map().
+-spec run_all(non_neg_integer()) -> test_result().
 run_all(0) ->
     run_all(erlang:system_info(schedulers));
 run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
@@ -99,7 +102,7 @@ run_all(Invalid) ->
     beamtalk_error:raise(Error2).
 
 %% @private Implementation of run_all after argument validation.
--spec run_all_impl(pos_integer()) -> map().
+-spec run_all_impl(pos_integer()) -> test_result().
 run_all_impl(MaxJobs) ->
     Classes = beamtalk_test_case:find_test_classes(),
     case Classes of
@@ -132,7 +135,7 @@ run_all_impl(MaxJobs) ->
 %%
 %% Returns an aggregated TestResult. If no matching classes are found,
 %% returns an empty TestResult.
--spec run_file(binary()) -> map().
+-spec run_file(binary()) -> test_result().
 run_file(FilePath) when is_binary(FilePath) ->
     AllTestClasses = beamtalk_test_case:find_test_classes(),
     MatchingClasses = lists:filter(
@@ -152,7 +155,7 @@ run_file(FilePath) when is_binary(FilePath) ->
 %% @doc Run all tests in a single class.
 %%
 %% ClassRef is a class tuple — element 2 is 'ClassName class' atom.
--spec run_class(tuple()) -> map().
+-spec run_class(tuple()) -> test_result().
 run_class(ClassRef) ->
     ClassName = extract_class_name(ClassRef),
     run_class_by_name(ClassName).
@@ -373,7 +376,7 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
 %% Discovers test methods via the class gen_server (not module_info,
 %% which is unavailable on Core Erlang compiled modules from .bt files).
 %% Public so op handlers can call it directly by class name atom.
--spec run_class_by_name(atom()) -> map().
+-spec run_class_by_name(atom()) -> test_result().
 run_class_by_name(ClassName) ->
     {TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
     case TestMethods of
@@ -551,7 +554,7 @@ extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     non_neg_integer(),
     float(),
     list()
-) -> map().
+) -> test_result().
 make_test_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
     #{
         '$beamtalk_class' => 'TestResult',
@@ -564,7 +567,7 @@ make_test_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
     }.
 
 %% @doc Aggregate results from multiple classes into a single TestResult.
--spec aggregate_results([map()]) -> map().
+-spec aggregate_results([test_result()]) -> test_result().
 aggregate_results(ClassResults) ->
     {TotalSum, PassedSum, FailedSum, SkippedSum, DurationSum, RevTests} =
         lists:foldl(
@@ -629,7 +632,7 @@ is_serial(ClassName) ->
 %%
 %% Spawns up to MaxJobs processes at a time, each running one test class.
 %% Collects results via message passing as each process completes.
--spec run_classes_concurrent([atom()], pos_integer()) -> [map()].
+-spec run_classes_concurrent([atom()], pos_integer()) -> [test_result()].
 run_classes_concurrent([], _MaxJobs) ->
     [];
 run_classes_concurrent(Classes, MaxJobs) ->
@@ -736,26 +739,39 @@ safe_split(N, List) ->
 %%====================================================================
 
 %% runAll → runAll/0  (TestRunner runAll)
+-spec runAll() -> test_result().
 runAll() -> run_all().
 
 %% runAll: → runAll/1  (TestRunner runAll: maxJobs)
+-spec runAll(non_neg_integer()) -> test_result().
 runAll(MaxJobs) -> run_all(MaxJobs).
 
 %% run: → run/1  (TestRunner run: testClass)
+-spec run(tuple()) -> test_result().
 run(TestClass) -> run_class(TestClass).
 
 %% run:method: → run/2  (TestRunner run: testClass method: testName)
+-spec run(tuple(), atom()) -> test_result().
 run(TestClass, TestName) -> run_method(TestClass, TestName).
 
 %% TestResult instance shims — passed: → passed/1, etc.
+-spec passed(test_result()) -> non_neg_integer().
 passed(Self) -> result_passed(Self).
+-spec failed(test_result()) -> non_neg_integer().
 failed(Self) -> result_failed(Self).
+-spec skipped(test_result()) -> non_neg_integer().
 skipped(Self) -> result_skipped(Self).
+-spec total(test_result()) -> non_neg_integer().
 total(Self) -> result_total(Self).
+-spec duration(test_result()) -> float().
 duration(Self) -> result_duration(Self).
+-spec failures(test_result()) -> [map()].
 failures(Self) -> result_failures(Self).
+-spec hasPassed(test_result()) -> boolean().
 hasPassed(Self) -> result_has_passed(Self).
+-spec summary(test_result()) -> binary().
 summary(Self) -> result_summary(Self).
+-spec printString(test_result()) -> binary().
 printString(Self) -> result_print_string(Self).
 
 %%====================================================================

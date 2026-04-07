@@ -1360,12 +1360,25 @@ fn spawn_build_worker_for_specs() -> Result<std::process::Child> {
         ));
     }
 
-    #[cfg(windows)]
-    let compiler_path = paths.compiler_ebin.to_string_lossy().replace('\\', "/");
-    #[cfg(not(windows))]
-    let compiler_path = paths.compiler_ebin.display().to_string();
-
-    let pa_args = vec!["-pa".to_string(), compiler_path];
+    // Add all runtime ebin directories to the code path so the spec reader
+    // can resolve remote types (e.g., `beamtalk_result:t()` needs the
+    // beamtalk_stdlib ebin on the path for `code:which/1` to find it).
+    let ebin_dirs = [
+        &paths.compiler_ebin,
+        &paths.runtime_ebin,
+        &paths.stdlib_erlang_ebin,
+        &paths.workspace_ebin,
+    ];
+    let mut pa_args = Vec::new();
+    for ebin in &ebin_dirs {
+        if ebin.exists() {
+            pa_args.push("-pa".to_string());
+            #[cfg(windows)]
+            pa_args.push(ebin.to_string_lossy().replace('\\', "/"));
+            #[cfg(not(windows))]
+            pa_args.push(ebin.display().to_string());
+        }
+    }
     let temp_dir = std::env::temp_dir();
 
     Command::new("erl")

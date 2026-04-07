@@ -50,12 +50,15 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+-type t() :: #{'$beamtalk_class' := 'Queue', atom() => term()}.
+-export_type([t/0]).
+
 %%% ============================================================================
 %%% Class Methods
 %%% ============================================================================
 
 %% @doc Create a new empty Queue.
--spec 'new'() -> map().
+-spec 'new'() -> t().
 'new'() ->
     make_queue(queue:new()).
 
@@ -70,7 +73,7 @@
 %% @doc Add an element to the back of the queue. Returns a new Queue.
 %%
 %% O(1) amortised.
--spec enqueue(map(), term()) -> map().
+-spec enqueue(t(), term()) -> t().
 enqueue(#{'$beamtalk_class' := 'Queue', queue := Q}, Elem) ->
     make_queue(queue:in(Elem, Q));
 enqueue(_Self, _Elem) ->
@@ -80,7 +83,7 @@ enqueue(_Self, _Elem) ->
 %%
 %% Returns a 2-tuple `{Value, NewQueue}` where `NewQueue` is a Queue map.
 %% Raises `empty_queue` if the queue is empty.
--spec dequeue(map()) -> {term(), map()}.
+-spec dequeue(t()) -> {term(), t()}.
 dequeue(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
     case queue:out(Q) of
         {empty, _} ->
@@ -94,7 +97,7 @@ dequeue(_Self) ->
 %% @doc Return the front element without removing it.
 %%
 %% Raises `empty_queue` if the queue is empty.
--spec peek(map()) -> term().
+-spec peek(t()) -> term().
 peek(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
     case queue:peek(Q) of
         empty -> empty_queue_error('peek');
@@ -104,14 +107,14 @@ peek(_Self) ->
     type_error('peek').
 
 %% @doc Return true if the queue contains no elements.
--spec isEmpty(map()) -> boolean().
+-spec isEmpty(t()) -> boolean().
 isEmpty(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
     queue:is_empty(Q);
 isEmpty(_Self) ->
     type_error('isEmpty').
 
 %% @doc Return the number of elements in the queue.
--spec size(map()) -> non_neg_integer().
+-spec size(t()) -> non_neg_integer().
 size(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
     queue:len(Q);
 size(_Self) ->
@@ -123,7 +126,7 @@ size(_Self) ->
 
 %% @private
 %% @doc Build a Queue tagged map wrapping the given Erlang queue data structure.
--spec make_queue(term()) -> map().
+-spec make_queue(term()) -> t().
 make_queue(Q) ->
     #{'$beamtalk_class' => 'Queue', queue => Q}.
 

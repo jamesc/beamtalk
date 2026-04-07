@@ -442,6 +442,37 @@ gen_server:call(ActorPid, {Selector, Args})
 | nil | `nil` atom | Not `undefined` |
 | true/false | `true`/`false` atoms | |
 
+### Tagged Map Types for FFI Specs
+
+Beamtalk objects are Erlang tagged maps with a `'$beamtalk_class'` key. When
+writing `-spec` attributes for FFI modules, use typed map types instead of bare
+`map()` so the type checker infers the correct Beamtalk class:
+
+```erlang
+%% Define a tagged map type for the class
+-type t() :: #{'$beamtalk_class' := 'AtomicCounter', atom() => term()}.
+-export_type([t/0]).
+
+%% Use t() in specs instead of map()
+-spec increment(t()) -> integer().        %% Good — infers AtomicCounter
+-spec increment(map()) -> integer().      %% Bad — infers Dictionary
+```
+
+The spec reader (`beamtalk_spec_reader.erl`) recognizes the `'$beamtalk_class'`
+field and maps it to the Beamtalk class name. Without it, `map()` still maps to
+`Dictionary`, which loses class-specific inference and can surface downstream
+false positives.
+
+For complex types, use remote type references:
+
+```erlang
+-spec 'readAll:'(binary()) -> beamtalk_result:t().   %% Resolves to Result
+```
+
+**Edge case:** The `'$beamtalk_class'` tag must appear as a literal
+`map_field_exact` in the type definition — type aliases or indirect references
+to the tag are not recognized by the spec reader.
+
 ### Atoms
 
 ```erlang
