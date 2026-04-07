@@ -45,6 +45,16 @@ fn is_comma_opt(kind: Option<&TokenKind>) -> bool {
 }
 
 impl Parser {
+    /// Reports a "use `::` not `:`" error for type annotations and advances past the `:`.
+    fn type_annotation_colon_error(&mut self) {
+        let span = self.current_token().span();
+        self.diagnostics.push(
+            Diagnostic::error("Use `::` for type annotations, not `:`", span)
+                .with_hint("Replace `:` with `::`"),
+        );
+        self.advance(); // consume legacy `:`
+    }
+
     // ========================================================================
     // Class Definition Parsing
     // ========================================================================
@@ -733,12 +743,7 @@ impl Parser {
             let type_ann = if self.match_token(&TokenKind::DoubleColon) {
                 Some(self.parse_type_annotation())
             } else if matches!(self.current_kind(), TokenKind::Colon) {
-                let span = self.current_token().span();
-                self.diagnostics.push(
-                    Diagnostic::error("Use `::` for type annotations, not `:`", span)
-                        .with_hint("Replace `:` with `::`"),
-                );
-                self.advance(); // consume legacy `:`
+                self.type_annotation_colon_error();
                 Some(self.parse_type_annotation())
             } else {
                 None
@@ -804,12 +809,7 @@ impl Parser {
             let type_ann = if self.match_token(&TokenKind::DoubleColon) {
                 Some(self.parse_type_annotation())
             } else if matches!(self.current_kind(), TokenKind::Colon) {
-                let span = self.current_token().span();
-                self.diagnostics.push(
-                    Diagnostic::error("Use `::` for type annotations, not `:`", span)
-                        .with_hint("Replace `:` with `::`"),
-                );
-                self.advance(); // consume legacy `:`
+                self.type_annotation_colon_error();
                 Some(self.parse_type_annotation())
             } else {
                 None
@@ -1099,12 +1099,7 @@ impl Parser {
         if self.match_token(&TokenKind::DoubleColon) {
             Some(self.parse_type_annotation())
         } else if matches!(self.current_kind(), TokenKind::Colon) {
-            let span = self.current_token().span();
-            self.diagnostics.push(
-                Diagnostic::error("Use `::` for type annotations, not `:`", span)
-                    .with_hint("Replace `:` with `::`"),
-            );
-            self.advance(); // consume legacy `:`
+            self.type_annotation_colon_error();
             Some(self.parse_type_annotation())
         } else {
             None
@@ -1227,10 +1222,7 @@ impl Parser {
                     Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                     Some(last) => {
                         let span = last.span();
-                        self.diagnostics.push(Diagnostic::error(
-                            "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
-                            span,
-                        ));
+                        self.cast_in_expression_error(span);
                     }
                     None => {}
                 }

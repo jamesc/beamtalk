@@ -994,6 +994,14 @@ impl Parser {
         self.diagnostics.push(Diagnostic::error(message, span));
     }
 
+    /// Reports a "cast in expression" error when `!` is used on a non-MessageSend.
+    pub(super) fn cast_in_expression_error(&mut self, span: Span) {
+        self.diagnostics.push(Diagnostic::error(
+            "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
+            span,
+        ));
+    }
+
     /// Increments the nesting depth and returns `Err(Expression::Error)` if
     /// it exceeds [`MAX_NESTING_DEPTH`].  Call [`leave_nesting`] on every
     /// exit path when this returns `Ok(())`.
@@ -1141,10 +1149,7 @@ impl Parser {
                             Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                             Some(last) => {
                                 let span = last.span();
-                                self.diagnostics.push(Diagnostic::error(
-                                    "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
-                                    span,
-                                ));
+                                self.cast_in_expression_error(span);
                             }
                             None => {}
                         }

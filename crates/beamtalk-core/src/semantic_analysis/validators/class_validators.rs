@@ -22,7 +22,7 @@ use crate::ast::{
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 /// BT-105: Check for attempts to instantiate abstract classes.
@@ -41,6 +41,14 @@ pub(crate) fn check_abstract_instantiation(
 /// Returns true if the selector name is an instantiation method (spawn, new, etc.)
 fn is_instantiation_selector(name: &str) -> bool {
     matches!(name, "spawn" | "spawnWith:" | "new" | "new:")
+}
+
+/// Creates a diagnostic for attempting to instantiate an abstract class.
+fn abstract_class_error(class_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        format!("Cannot instantiate abstract class `{class_name}`. Subclass it first."),
+        span,
+    )
 }
 
 /// Visitor for abstract class instantiation checks (BT-105).
@@ -69,10 +77,7 @@ fn visit_abstract_instantiation(
                 let selector_name = selector.name();
 
                 if is_instantiation_selector(&selector_name) && hierarchy.is_abstract(name) {
-                    diagnostics.push(Diagnostic::error(
-                        format!("Cannot instantiate abstract class `{name}`. Subclass it first.",),
-                        *span,
-                    ));
+                    diagnostics.push(abstract_class_error(name, *span));
                 }
             }
         }
@@ -88,12 +93,7 @@ fn visit_abstract_instantiation(
                 for msg in messages {
                     let sel = msg.selector.name();
                     if is_instantiation_selector(&sel) && hierarchy.is_abstract(name) {
-                        diagnostics.push(Diagnostic::error(
-                            format!(
-                                "Cannot instantiate abstract class `{name}`. Subclass it first.",
-                            ),
-                            msg.span,
-                        ));
+                        diagnostics.push(abstract_class_error(name, msg.span));
                     }
                 }
             }
@@ -140,6 +140,16 @@ pub(crate) fn check_actor_new_usage(
     walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_actor_new);
 }
 
+/// Creates a diagnostic for using `new`/`new:` on an actor subclass.
+fn actor_must_spawn_error(class_name: &str, selector: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        format!("Actor subclass `{class_name}` must use `spawn` instead of `{selector}`"),
+        span,
+    )
+    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:")
+    .with_category(DiagnosticCategory::ActorNew)
+}
+
 fn visit_actor_new(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
@@ -158,16 +168,7 @@ fn visit_actor_new(
                 && class_name != "Actor"
                 && hierarchy.is_actor_subclass(class_name)
             {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Actor subclass `{class_name}` must use `spawn` instead of `{sel}`"
-                        ),
-                        *span,
-                    )
-                    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:")
-                    .with_category(DiagnosticCategory::ActorNew),
-                );
+                diagnostics.push(actor_must_spawn_error(class_name, &sel, *span));
             }
         }
     }
@@ -183,18 +184,7 @@ fn visit_actor_new(
                     && class_name != "Actor"
                     && hierarchy.is_actor_subclass(class_name)
                 {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "Actor subclass `{class_name}` must use `spawn` instead of `{sel}`"
-                            ),
-                            msg.span,
-                        )
-                        .with_hint(
-                            "Actors are processes — use spawn/spawnWith: instead of new/new:",
-                        )
-                        .with_category(DiagnosticCategory::ActorNew),
-                    );
+                    diagnostics.push(actor_must_spawn_error(class_name, &sel, msg.span));
                 }
             }
         }
