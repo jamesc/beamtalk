@@ -4084,7 +4084,7 @@ fn dynamic_display_name_untyped_ffi() {
 fn dynamic_display_name_dynamic_spec() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::DynamicSpec).display_name(),
-        Some(ecow::EcoString::from("Dynamic (FFI spec returns Dynamic)"))
+        Some(ecow::EcoString::from("Dynamic (FFI spec is Dynamic)"))
     );
 }
 
@@ -11109,7 +11109,7 @@ fn dynamic_reason_descriptions() {
     assert_eq!(DynamicReason::UntypedFfi.description(), Some("untyped FFI"));
     assert_eq!(
         DynamicReason::DynamicSpec.description(),
-        Some("FFI spec returns Dynamic")
+        Some("FFI spec is Dynamic")
     );
     assert_eq!(DynamicReason::Unknown.description(), None);
 }

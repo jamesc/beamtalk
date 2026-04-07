@@ -277,7 +277,7 @@ mod tests {
         );
         assert_eq!(
             sig.display_signature(),
-            "apply: fun :: Block -> Dynamic (FFI spec returns Dynamic)"
+            "apply: fun :: Block -> Dynamic (FFI spec is Dynamic)"
         );
     }
 

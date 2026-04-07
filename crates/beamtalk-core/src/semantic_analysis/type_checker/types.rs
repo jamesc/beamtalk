@@ -44,7 +44,7 @@ impl DynamicReason {
             Self::DynamicReceiver => Some("dynamic receiver"),
             Self::AmbiguousControlFlow => Some("ambiguous control flow"),
             Self::UntypedFfi => Some("untyped FFI"),
-            Self::DynamicSpec => Some("FFI spec returns Dynamic"),
+            Self::DynamicSpec => Some("FFI spec is Dynamic"),
             Self::Unknown => None,
         }
     }
