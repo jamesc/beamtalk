@@ -35,6 +35,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use crate::semantic_analysis::{ClassHierarchy, InferredType};
+use crate::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -164,8 +165,12 @@ pub fn compute_completions(
     // instance method, return state fields + instance methods (fields are only
     // accessible via `self.`).
     if is_after_self_dot(source, offset) {
-        if let ClassContext::InstanceMethod(class) = &context {
-            return compute_self_dot_completions(class, hierarchy, current_package);
+        let self_class_name = match &context {
+            ClassContext::InstanceMethod(class) => Some(class.name.name.as_str()),
+            _ => find_standalone_instance_class(module, offset),
+        };
+        if let Some(class_name) = self_class_name {
+            return compute_self_dot_completions(class_name, hierarchy, current_package);
         }
     }
 
@@ -458,13 +463,11 @@ fn is_after_self_dot(source: &str, offset: u32) -> bool {
 
 /// Computes completions for the `self.` context: state fields + instance methods.
 fn compute_self_dot_completions(
-    class: &ClassDefinition,
+    class_name: &str,
     hierarchy: &ClassHierarchy,
     current_package: Option<&str>,
 ) -> Vec<Completion> {
     let mut completions = Vec::new();
-    let class_name = class.name.name.as_str();
-    let context = ClassContext::InstanceMethod(class);
 
     // Add state fields (including inherited from superclasses)
     for field_name in hierarchy.all_state(class_name) {
@@ -474,16 +477,13 @@ fn compute_self_dot_completions(
         );
     }
 
-    // Add instance methods
+    // Add instance methods (delegate filtering uses receiver_class, not context)
     let mut seen = HashSet::new();
     for method in hierarchy.all_methods(class_name) {
-        if should_exclude_delegate(
-            &method.selector,
-            &method.defined_in,
-            &context,
-            Some(class_name),
-            hierarchy,
-        ) {
+        if method.selector == "delegate"
+            && method.defined_in == "Actor"
+            && !hierarchy.is_native(class_name)
+        {
             continue;
         }
         // Filter internal methods from other packages (ADR 0071, BT-1703)
@@ -501,6 +501,23 @@ fn compute_self_dot_completions(
     }
 
     completions
+}
+
+/// Returns the class name if the cursor is inside a standalone instance method.
+fn find_standalone_instance_class(module: &Module, offset: u32) -> Option<&str> {
+    let probe = offset.saturating_sub(1);
+    for smd in &module.method_definitions {
+        if smd.is_class_method {
+            continue;
+        }
+        let span = smd.method.span;
+        if (offset >= span.start() && offset < span.end())
+            || (probe >= span.start() && probe < span.end())
+        {
+            return Some(smd.class_name.name.as_str());
+        }
+    }
+    None
 }
 
 /// Adds identifier completions from the module and the current method scope.
@@ -529,12 +546,19 @@ fn add_identifier_completions(module: &Module, offset: u32, completions: &mut Ve
 }
 
 /// Finds the method definition containing the given byte offset.
+///
+/// Uses `Span::end()` (exclusive) correctly: checks `offset < end`, then
+/// probes `offset - 1` for the cursor-at-end-of-method boundary case
+/// (common when typing at the end of a method body).
 fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefinition> {
+    let probe = offset.saturating_sub(1);
     // Check instance and class methods in classes
     for class in &module.classes {
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             let span = method.span;
-            if offset >= span.start() && offset <= span.end() {
+            if (offset >= span.start() && offset < span.end())
+                || (probe >= span.start() && probe < span.end())
+            {
                 return Some(method);
             }
         }
@@ -542,7 +566,9 @@ fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefiniti
     // Check standalone method definitions
     for smd in &module.method_definitions {
         let span = smd.method.span;
-        if offset >= span.start() && offset <= span.end() {
+        if (offset >= span.start() && offset < span.end())
+            || (probe >= span.start() && probe < span.end())
+        {
             return Some(&smd.method);
         }
     }
@@ -554,24 +580,28 @@ fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefiniti
 /// Walks the module's class definitions to find if the offset is inside
 /// an instance method or a class-side method.
 fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
+    // Probe one byte back so cursor at end-of-span (exclusive) still matches.
+    let probe = offset.saturating_sub(1);
+    let in_span = |span: Span| {
+        (offset >= span.start() && offset < span.end())
+            || (probe >= span.start() && probe < span.end())
+    };
+
     for class in &module.classes {
-        // Check instance methods (use <= so cursor at end-of-method still matches)
+        // Check instance methods
         for method in &class.methods {
-            let span = method.span;
-            if offset >= span.start() && offset <= span.end() {
+            if in_span(method.span) {
                 return ClassContext::InstanceMethod(class);
             }
         }
         // Check class-side methods
         for method in &class.class_methods {
-            let span = method.span;
-            if offset >= span.start() && offset <= span.end() {
+            if in_span(method.span) {
                 return ClassContext::ClassMethod(class);
             }
         }
         // Check if inside class body but not in any method (BT-1537)
-        let class_span = class.span;
-        if offset >= class_span.start() && offset <= class_span.end() {
+        if in_span(class.span) {
             return ClassContext::ClassBody(class);
         }
     }
@@ -1038,7 +1068,8 @@ fn add_hierarchy_completions(
                 completions,
             );
             // State/field completions are only offered after `self.` — see
-            // add_receiver_type_completions (ReceiverSide::Instance path).
+            // the `is_after_self_dot` early-return path in
+            // `compute_self_dot_completions`.
         }
         ClassContext::ClassMethod(class) => {
             let class_name = class.name.name.as_str();
