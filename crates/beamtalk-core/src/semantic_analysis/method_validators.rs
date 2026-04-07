@@ -406,9 +406,11 @@ impl MethodValidator for BlockArityValidator {
         );
         let hint = block_arity_hint(&selector_name, expected);
 
-        vec![Diagnostic::error(message, block.span)
-            .with_hint(hint)
-            .with_category(DiagnosticCategory::Type)]
+        vec![
+            Diagnostic::error(message, block.span)
+                .with_hint(hint)
+                .with_category(DiagnosticCategory::Type),
+        ]
     }
 }
 
