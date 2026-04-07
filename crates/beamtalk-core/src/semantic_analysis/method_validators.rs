@@ -472,7 +472,8 @@ impl MethodValidator for IntegerArgumentValidator {
                             format!("{selector_name} expects an integer argument, got {type_name}"),
                             *lit_span,
                         )
-                        .with_hint(integer_arg_hint(&selector_name)),
+                        .with_hint(integer_arg_hint(&selector_name))
+                        .with_category(DiagnosticCategory::Type),
                     );
                 }
                 _ => {}

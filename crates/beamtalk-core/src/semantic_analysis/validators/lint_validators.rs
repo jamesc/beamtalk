@@ -42,7 +42,8 @@ pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<
                             format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
                             *span,
                         )
-                        .with_hint("Remove this assignment or assign a different value."),
+                        .with_hint("Remove this assignment or assign a different value.")
+                        .with_category(DiagnosticCategory::Lint),
                     );
                 }
             }
@@ -116,7 +117,8 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
                 let literal_name = if is_true { "true" } else { "false" };
                 diagnostics.push(
                     Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span)
-                        .with_hint(dead_branch_hint(is_true, &selector_str)),
+                        .with_hint(dead_branch_hint(is_true, &selector_str))
+                        .with_category(DiagnosticCategory::Lint),
                 );
             }
         }
