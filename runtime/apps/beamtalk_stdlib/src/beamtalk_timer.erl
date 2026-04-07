@@ -47,12 +47,15 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+-type t() :: #{'$beamtalk_class' := 'Timer', atom() => term()}.
+-export_type([t/0]).
+
 %%% ============================================================================
 %%% Class Methods
 %%% ============================================================================
 
 %% @doc Evaluate `Block` once after `Ms` milliseconds. Returns a Timer.
--spec 'after:do:'(integer(), function()) -> map().
+-spec 'after:do:'(integer(), function()) -> t().
 'after:do:'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() ->
         receive
@@ -72,7 +75,7 @@
     raise_error('after:do:', <<"Expected an Integer duration and a Block">>).
 
 %% @doc Evaluate `Block` every `Ms` milliseconds. Returns a Timer.
--spec 'every:do:'(integer(), function()) -> map().
+-spec 'every:do:'(integer(), function()) -> t().
 'every:do:'(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
@@ -100,7 +103,7 @@
 %% Uses an ack-based protocol: sends {cancel, self(), Ref} and waits for
 %% {Ref, canceled}. If the timer process has already exited, the process
 %% monitor DOWN message arrives instead and we return false.
--spec cancel(map()) -> boolean().
+-spec cancel(t()) -> boolean().
 cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
     Ref = make_ref(),
     Mon = erlang:monitor(process, Pid),
@@ -117,12 +120,12 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
     end.
 
 %% @doc True if this timer is still scheduled to fire.
--spec 'isActive'(map()) -> boolean().
+-spec 'isActive'(t()) -> boolean().
 'isActive'(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
     erlang:is_process_alive(Pid).
 
 %% @doc Human-readable representation.
--spec 'printString'(map()) -> binary().
+-spec 'printString'(t()) -> binary().
 'printString'(#{'$beamtalk_class' := 'Timer', pid := Pid} = _Self) ->
     case erlang:is_process_alive(Pid) of
         true -> <<"a Timer(active)">>;
@@ -146,11 +149,11 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 %%% ============================================================================
 
 %% @doc FFI shim: `(Erlang beamtalk_timer) after: ms do: block`
--spec 'after'(integer(), function()) -> map().
+-spec 'after'(integer(), function()) -> t().
 'after'(Ms, Block) -> 'after:do:'(Ms, Block).
 
 %% @doc FFI shim: `(Erlang beamtalk_timer) every: ms do: block`
--spec every(integer(), function()) -> map().
+-spec every(integer(), function()) -> t().
 every(Ms, Block) -> 'every:do:'(Ms, Block).
 
 %% @doc FFI shim: `(Erlang beamtalk_timer) sleep: ms`
@@ -161,7 +164,7 @@ sleep(Ms) -> 'sleep:'(Ms).
 %%% Internal Functions
 %%% ============================================================================
 
--spec make_timer(pid()) -> map().
+-spec make_timer(pid()) -> t().
 make_timer(Pid) ->
     #{'$beamtalk_class' => 'Timer', pid => Pid}.
 

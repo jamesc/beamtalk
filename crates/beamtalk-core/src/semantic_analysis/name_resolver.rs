@@ -206,12 +206,15 @@ impl NameResolver {
                         self.diagnostics.push(Diagnostic::error(
                             "self can only be used inside a method body",
                             id.span,
-                        ));
+                        ).with_hint("Move this code into a method definition, or use a class method for class-level logic"));
                     } else {
-                        self.diagnostics.push(Diagnostic::error(
-                            format!("Undefined variable: {}", id.name),
-                            id.span,
-                        ));
+                        self.diagnostics.push(
+                            Diagnostic::error(format!("Undefined variable: {}", id.name), id.span)
+                                .with_hint(format!(
+                                    "Check the spelling of `{}`, or assign it with `:=` before use",
+                                    id.name
+                                )),
+                        );
                     }
                 }
             }
@@ -309,7 +312,7 @@ impl NameResolver {
                     self.diagnostics.push(Diagnostic::error(
                         "super can only be used inside a method body",
                         *span,
-                    ));
+                    ).with_hint("Move this code into a method — `super` sends the same message to the parent class implementation"));
                 }
             }
 
@@ -421,7 +424,8 @@ impl NameResolver {
                         .with_hint(format!(
                             "Outer variable defined at offset {}. Use a different name to avoid confusion",
                             outer_span.start()
-                        )),
+                        ))
+                        .with_category(DiagnosticCategory::Lint),
                 );
             }
         }
@@ -442,7 +446,8 @@ impl NameResolver {
                 // First unreachable expression after early return — warn once
                 self.diagnostics.push(
                     Diagnostic::warning("Unreachable code after early return", expr.span())
-                        .with_hint("Code after an early return (^) will never execute"),
+                        .with_hint("Code after an early return (^) will never execute")
+                        .with_category(DiagnosticCategory::Lint),
                 );
                 warned = true;
             }

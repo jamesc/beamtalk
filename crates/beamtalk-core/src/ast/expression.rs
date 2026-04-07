@@ -37,6 +37,8 @@ pub enum ExpectCategory {
     ArityMismatch,
     /// Suppress workspace-binding-shadows-class warnings (BT-1759).
     ShadowedClass,
+    /// Suppress missing type annotation warnings in typed classes (BT-1918).
+    TypeAnnotation,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -57,6 +59,7 @@ impl ExpectCategory {
             "unresolved_ffi" => Some(Self::UnresolvedFfi),
             "arity_mismatch" => Some(Self::ArityMismatch),
             "shadowed_class" => Some(Self::ShadowedClass),
+            "type_annotation" => Some(Self::TypeAnnotation),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -77,6 +80,7 @@ impl ExpectCategory {
             Self::UnresolvedFfi => "unresolved_ffi",
             Self::ArityMismatch => "arity_mismatch",
             Self::ShadowedClass => "shadowed_class",
+            Self::TypeAnnotation => "type_annotation",
             Self::All => "all",
         }
     }
@@ -96,6 +100,7 @@ impl ExpectCategory {
             "unresolved_ffi",
             "arity_mismatch",
             "shadowed_class",
+            "type_annotation",
             "all",
         ]
     }
@@ -310,6 +315,11 @@ pub enum Expression {
     ExpectDirective {
         /// The category of diagnostic to suppress.
         category: ExpectCategory,
+        /// Optional human-readable reason for the suppression (BT-1918).
+        ///
+        /// Parsed from `@expect category "reason string"`. When present, the
+        /// reason is included in stale `@expect` warnings for better diagnostics.
+        reason: Option<EcoString>,
         /// Source location of the entire `@expect category` expression.
         span: Span,
     },

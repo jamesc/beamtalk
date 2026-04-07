@@ -111,7 +111,7 @@ pub use util::to_module_name;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
 use crate::docvec;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use document::{Document, INDENT, line, nest};
 use ecow::EcoString;
 use primitive_bindings::PrimitiveBindingTable;
@@ -1538,7 +1538,9 @@ impl CoreErlangGenerator {
     /// dynamic dispatch, NLR throw/catch, etc.). Emitted as `Diagnostic::hint` by default.
     pub(super) fn emit_codegen_diagnostic(&mut self, message: String, span: Span) {
         if self.codegen_diagnostics_enabled {
-            self.add_codegen_warning(Diagnostic::hint(message, span));
+            self.add_codegen_warning(
+                Diagnostic::hint(message, span).with_category(DiagnosticCategory::Type),
+            );
         }
     }
 
@@ -1548,9 +1550,17 @@ impl CoreErlangGenerator {
     pub(super) fn emit_stateacc_fallback_diagnostic(&mut self, message: String, span: Span) {
         if self.codegen_diagnostics_enabled {
             if self.warn_stateacc {
-                self.add_codegen_warning(Diagnostic::warning(message, span));
+                self.add_codegen_warning(
+                    Diagnostic::warning(message, span)
+                        .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
+                        .with_category(DiagnosticCategory::Type),
+                );
             } else {
-                self.add_codegen_warning(Diagnostic::hint(message, span));
+                self.add_codegen_warning(
+                    Diagnostic::hint(message, span)
+                        .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
+                        .with_category(DiagnosticCategory::Type),
+                );
             }
         }
     }
@@ -1568,14 +1578,18 @@ impl CoreErlangGenerator {
         erlang_target: &str,
         span: Span,
     ) {
-        self.add_codegen_warning(Diagnostic::warning(
-            format!(
-                "stateful block passed to Erlang {erlang_target} — mutations inside \
-                 the block will be silently dropped (Erlang cannot propagate the updated \
-                 StateAcc back to the Beamtalk caller)"
-            ),
-            span,
-        ));
+        self.add_codegen_warning(
+            Diagnostic::warning(
+                format!(
+                    "stateful block passed to Erlang {erlang_target} — mutations inside \
+                     the block will be silently dropped (Erlang cannot propagate the updated \
+                     StateAcc back to the Beamtalk caller)"
+                ),
+                span,
+            )
+            .with_hint("Extract the block body into a method, or use a stateless block")
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 
     /// BT-909: Emits a warning for a non-literal callable at an Erlang call boundary.
@@ -1584,14 +1598,18 @@ impl CoreErlangGenerator {
         erlang_target: &str,
         span: Span,
     ) {
-        self.add_codegen_warning(Diagnostic::warning(
-            format!(
-                "non-literal callable passed to Erlang {erlang_target} — if this is a \
-                 stateful block, mutations inside the block will be silently dropped \
-                 (runtime arity check inserted to prevent badarity crash)"
-            ),
-            span,
-        ));
+        self.add_codegen_warning(
+            Diagnostic::warning(
+                format!(
+                    "non-literal callable passed to Erlang {erlang_target} — if this is a \
+                     stateful block, mutations inside the block will be silently dropped \
+                     (runtime arity check inserted to prevent badarity crash)"
+                ),
+                span,
+            )
+            .with_hint("Use a block literal directly, or extract into a method to avoid ambiguity")
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 
     /// BT-833: Resets the Self version to 0 (call at the start of each value type method).
@@ -2899,12 +2917,16 @@ impl CoreErlangGenerator {
         if is_quoted && !self.primitive_bindings.is_empty() {
             let known = self.primitive_bindings.known_runtime_modules();
             if !known.contains(&runtime_module) {
-                self.add_codegen_warning(Diagnostic::warning(
-                    format!(
-                        "@primitive \"{name}\" references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
-                    ),
-                    span,
-                ));
+                self.add_codegen_warning(
+                    Diagnostic::warning(
+                        format!(
+                            "@primitive \"{name}\" references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
+                        ),
+                        span,
+                    )
+                    .with_hint(format!("Add the '{runtime_module}' module to the stdlib build, or check the @primitive name for typos"))
+                    .with_category(DiagnosticCategory::Type),
+                );
             }
         }
 

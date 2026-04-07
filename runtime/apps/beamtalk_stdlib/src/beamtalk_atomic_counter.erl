@@ -64,6 +64,9 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+-type t() :: #{'$beamtalk_class' := 'AtomicCounter', atom() => term()}.
+-export_type([t/0]).
+
 %%% ============================================================================
 %%% Class Methods
 %%% ============================================================================
@@ -73,7 +76,7 @@
 %% Creates a named ETS table with a single entry `{value, 0}`.
 %% Raises `already_exists` if a counter with this name already exists.
 %% Raises `type_error` if the argument is not an atom.
--spec 'new:'(atom()) -> map().
+-spec 'new:'(atom()) -> t().
 'new:'(Name) when is_atom(Name) ->
     try
         ets:new(Name, [set, named_table, public, {keypos, 1}]),
@@ -100,7 +103,7 @@
 %% Returns an AtomicCounter instance if a counter with the given name exists.
 %% Raises `not_found` if no counter with that name has been created.
 %% Raises `type_error` if the argument is not an atom.
--spec 'named:'(atom()) -> map().
+-spec 'named:'(atom()) -> t().
 'named:'(Name) when is_atom(Name) ->
     case ets:whereis(Name) of
         undefined ->
@@ -130,7 +133,7 @@
 %%% ============================================================================
 
 %% @doc Atomically add 1. Returns the new value.
--spec increment(map()) -> integer().
+-spec increment(t()) -> integer().
 increment(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
     try
         ets:update_counter(TableName, value, 1)
@@ -141,7 +144,7 @@ increment(_Self) ->
     receiver_type_error('increment').
 
 %% @doc Atomically add N. Returns the new value.
--spec incrementBy(map(), integer()) -> integer().
+-spec incrementBy(t(), integer()) -> integer().
 incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
     try
         ets:update_counter(TableName, value, N)
@@ -157,7 +160,7 @@ incrementBy(_Self, _N) ->
     receiver_type_error('incrementBy:').
 
 %% @doc Atomically subtract 1. Returns the new value.
--spec decrement(map()) -> integer().
+-spec decrement(t()) -> integer().
 decrement(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
     try
         ets:update_counter(TableName, value, -1)
@@ -168,7 +171,7 @@ decrement(_Self) ->
     receiver_type_error('decrement').
 
 %% @doc Atomically subtract N. Returns the new value.
--spec decrementBy(map(), integer()) -> integer().
+-spec decrementBy(t(), integer()) -> integer().
 decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
     try
         ets:update_counter(TableName, value, -N)
@@ -184,7 +187,7 @@ decrementBy(_Self, _N) ->
     receiver_type_error('decrementBy:').
 
 %% @doc Read the current value.
--spec value(map()) -> integer().
+-spec value(t()) -> integer().
 value(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
     try
         case ets:lookup(TableName, value) of
@@ -203,11 +206,11 @@ value(_Self) ->
 %% selector `value:` as a block evaluation before the Erlang FFI path is reached.
 %% Using `readValue:` bypasses the intercept and calls this shim, which delegates
 %% to `value/1`.
--spec readValue(map()) -> integer().
+-spec readValue(t()) -> integer().
 readValue(Self) -> value(Self).
 
 %% @doc Reset the counter to 0. Returns nil.
--spec reset(map()) -> nil.
+-spec reset(t()) -> nil.
 reset(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
     try
         ets:insert(TableName, {value, 0}),
@@ -222,7 +225,7 @@ reset(_Self) ->
 %%
 %% Raises `stale_counter` if the table no longer exists (already deleted or owner exited).
 %% Raises `permission_error` if the table still exists but the caller does not own it.
--spec delete(map()) -> nil.
+-spec delete(t()) -> nil.
 delete(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
     try
         ets:delete(TableName),
@@ -256,11 +259,11 @@ delete(_Self) ->
 %%% ============================================================================
 
 %% @doc FFI shim for new: — called via (Erlang beamtalk_atomic_counter) new: name.
--spec new(atom()) -> map().
+-spec new(atom()) -> t().
 new(Name) -> 'new:'(Name).
 
 %% @doc FFI shim for named: — called via (Erlang beamtalk_atomic_counter) named: name.
--spec named(atom()) -> map().
+-spec named(atom()) -> t().
 named(Name) -> 'named:'(Name).
 
 %%% ============================================================================
@@ -269,7 +272,7 @@ named(Name) -> 'named:'(Name).
 
 %% @private
 %% @doc Build an AtomicCounter tagged map for the given table name.
--spec make_counter(atom()) -> map().
+-spec make_counter(atom()) -> t().
 make_counter(Name) ->
     #{'$beamtalk_class' => 'AtomicCounter', table => Name}.
 

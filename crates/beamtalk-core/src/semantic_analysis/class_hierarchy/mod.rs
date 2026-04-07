@@ -16,7 +16,7 @@
 use crate::ast::{ClassDefinition, MethodKind, Module};
 use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -463,7 +463,8 @@ impl ClassHierarchy {
                     .with_hint(format!(
                         "A {label} with this selector is already defined at offset {}",
                         first_span.start()
-                    )),
+                    ))
+                    .with_category(DiagnosticCategory::Type),
                 );
             } else {
                 seen.insert(key, method.span);
@@ -496,10 +497,16 @@ impl ClassHierarchy {
         if stdlib_mode && Self::is_builtin_class(class.name.name.as_str()) {
             return None;
         }
-        Some(Diagnostic::error(
-            format!("Cannot subclass sealed class `{}`", superclass.name),
-            superclass.span,
-        ))
+        Some(
+            Diagnostic::error(
+                format!("Cannot subclass sealed class `{}`", superclass.name),
+                superclass.span,
+            )
+            .with_hint(format!(
+                "Class `{}` is sealed and cannot be extended — use composition instead",
+                superclass.name
+            )),
+        )
     }
 
     /// Add classes from a parsed module. Returns diagnostics for errors.
@@ -577,7 +584,7 @@ impl ClassHierarchy {
                                     "Cannot override sealed method `{selector}` from class `{sealed_class}`"
                                 ),
                                 method.span,
-                            ));
+                            ).with_hint(format!("Method `{selector}` is sealed in `{sealed_class}` — use a different method name")));
                         }
                     }
                 }
@@ -599,7 +606,7 @@ impl ClassHierarchy {
                                     "Cannot override sealed method `{selector}` from class `{sealed_class}`"
                                 ),
                                 method.span,
-                            ));
+                            ).with_hint(format!("Method `{selector}` is sealed in `{sealed_class}` — use a different method name")));
                         }
                     }
                 }

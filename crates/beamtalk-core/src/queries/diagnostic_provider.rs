@@ -30,6 +30,7 @@
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::semantic_analysis;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use ecow::EcoString;
 
 /// Computes diagnostics for a module.
 ///
@@ -144,7 +145,8 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
 /// This is called by both the language service (LSP/diagnostic provider) and
 /// the CLI compiler after all diagnostics have been collected.
 pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    let mut directives: Vec<(ExpectCategory, Span, Span)> = Vec::new(); // (cat, directive_span, target_span)
+    // (cat, reason, directive_span, target_span)
+    let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span)> = Vec::new();
 
     collect_directives_from_exprs(&module.expressions, &mut directives);
     for class in &module.classes {
@@ -152,21 +154,21 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
         // directive_span = the @expect token span (for stale warnings),
         // target_span = the declaration span (for matching diagnostics).
         for state_decl in class.state.iter().chain(class.class_variables.iter()) {
-            if let Some((cat, expect_span)) = state_decl.expect {
-                directives.push((cat, expect_span, state_decl.span));
+            if let Some((cat, ref reason, expect_span)) = state_decl.expect {
+                directives.push((cat, reason.clone(), expect_span, state_decl.span));
             }
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             // BT-1856: Collect declaration-level @expect from method declarations
-            if let Some((cat, expect_span)) = method.expect {
-                directives.push((cat, expect_span, method.span));
+            if let Some((cat, ref reason, expect_span)) = method.expect {
+                directives.push((cat, reason.clone(), expect_span, method.span));
             }
             collect_directives_from_exprs(&method.body, &mut directives);
         }
     }
     for standalone in &module.method_definitions {
-        if let Some((cat, expect_span)) = standalone.method.expect {
-            directives.push((cat, expect_span, standalone.method.span));
+        if let Some((cat, ref reason, expect_span)) = standalone.method.expect {
+            directives.push((cat, reason.clone(), expect_span, standalone.method.span));
         }
         collect_directives_from_exprs(&standalone.method.body, &mut directives);
     }
@@ -176,9 +178,9 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
     }
 
     let mut suppressed_indices: Vec<usize> = Vec::new();
-    let mut stale_directives: Vec<(ExpectCategory, Span)> = Vec::new();
+    let mut stale_directives: Vec<(ExpectCategory, Option<EcoString>, Span)> = Vec::new();
 
-    for (cat, directive_span, target_span) in &directives {
+    for (cat, reason, directive_span, target_span) in &directives {
         let mut matched = false;
         for (i, diag) in diagnostics.iter().enumerate() {
             if target_span.contains(diag.span) && category_matches(*cat, diag.category) {
@@ -187,7 +189,7 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
             }
         }
         if !matched {
-            stale_directives.push((*cat, *directive_span));
+            stale_directives.push((*cat, reason.clone(), *directive_span));
         }
     }
 
@@ -200,14 +202,22 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
 
     // Emit warnings for stale directives (BT-1412: warning, not error, so
     // compilation can proceed — the annotation is just unnecessary).
-    for (cat, span) in stale_directives {
-        diagnostics.push(Diagnostic::warning(
+    for (cat, reason, span) in stale_directives {
+        let message = if let Some(reason) = reason {
+            format!(
+                "stale @expect {} \"{reason}\": no matching diagnostic found on the following expression — consider removing it",
+                cat.as_str()
+            )
+        } else {
             format!(
                 "stale @expect {}: no matching diagnostic found on the following expression — consider removing it",
                 cat.as_str()
-            ),
-            span,
-        ));
+            )
+        };
+        diagnostics.push(
+            Diagnostic::warning(message, span)
+                .with_hint("Remove the `@expect` directive if the diagnostic was fixed"),
+        );
     }
 }
 
@@ -224,10 +234,16 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
             (expect_cat, diag_cat),
             // BT-1273: @expect type also covers method-not-found (Dnu) hints so that
             // callers can use a single annotation for all type-related suppressions.
+            // BT-1918: @expect type also covers missing type-annotation warnings
+            // (TypeAnnotation) for backward compatibility.
             (
                 ExpectCategory::Dnu | ExpectCategory::Type,
                 Some(DiagnosticCategory::Dnu)
             ) | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
+                | (
+                    ExpectCategory::Type | ExpectCategory::TypeAnnotation,
+                    Some(DiagnosticCategory::TypeAnnotation)
+                )
                 | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
                 | (
                     ExpectCategory::DeadAssignment,
@@ -267,17 +283,22 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
 /// the expression at index `i + 1` (if present).
 fn collect_directives_from_exprs(
     exprs: &[ExpressionStatement],
-    directives: &mut Vec<(ExpectCategory, Span, Span)>,
+    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
 ) {
     for (i, stmt) in exprs.iter().enumerate() {
-        if let Expression::ExpectDirective { category, span } = &stmt.expression {
+        if let Expression::ExpectDirective {
+            category,
+            reason,
+            span,
+        } = &stmt.expression
+        {
             if let Some(next) = exprs.get(i + 1) {
-                directives.push((*category, *span, next.expression.span()));
+                directives.push((*category, reason.clone(), *span, next.expression.span()));
             } else {
                 // Trailing @expect with no following expression — treat as stale.
                 // Use the directive's own span as the target span so it will
                 // never match any real diagnostic and will always be reported stale.
-                directives.push((*category, *span, *span));
+                directives.push((*category, reason.clone(), *span, *span));
             }
         }
     }
@@ -1067,5 +1088,289 @@ Object subclass: Bar
             invalid_pos,
             "@expect before invalid position should produce error, got: {parse_diags:?}"
         );
+    }
+
+    // ── BT-1918: TypeAnnotation category ──
+
+    #[test]
+    fn expect_type_annotation_suppresses_missing_annotation() {
+        // @expect type_annotation before a method in a typed class should suppress
+        // missing-type-annotation warnings but not type mismatch warnings.
+        let source = "\
+typed Object subclass: MyTyped
+  @expect type_annotation
+  first => 42
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let missing_annotation = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Missing") && d.message.contains("type annotation"));
+        assert!(
+            !missing_annotation,
+            "@expect type_annotation should suppress missing annotation warnings, got: {diagnostics:?}"
+        );
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect type_annotation should not be stale, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_type_annotation_does_not_suppress_type_mismatch() {
+        // @expect type_annotation should NOT suppress DNU/type-mismatch warnings.
+        let source = "@expect type_annotation\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            dnu,
+            "@expect type_annotation should NOT suppress DNU hints, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_type_annotation_on_state_field() {
+        // @expect type_annotation on a state field in a typed class should suppress
+        // the missing-annotation warning for that field.
+        let source = "\
+typed Object subclass: MyTyped
+  @expect type_annotation
+  state: count = 0
+  getValue -> Integer => 42
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let missing_state = diagnostics.iter().any(|d| {
+            d.message
+                .contains("Missing type annotation for state field `count`")
+        });
+        assert!(
+            !missing_state,
+            "@expect type_annotation should suppress state field warning, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-1918: @expect reason strings ──
+
+    #[test]
+    fn expect_with_reason_parses_correctly() {
+        // @expect dnu "FFI boundary" should parse without errors.
+        let source = "@expect dnu \"FFI boundary\"\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.is_empty(),
+            "Should have no parse errors, got: {parse_diags:?}"
+        );
+        let diagnostics = compute_diagnostics(&module, Vec::new());
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu with reason should still suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn stale_expect_with_reason_includes_reason_text() {
+        // Stale @expect with reason should include the reason in the warning message.
+        let source = "@expect dnu \"FFI boundary\"\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .find(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale.is_some(),
+            "Should emit stale warning, got: {diagnostics:?}"
+        );
+        assert!(
+            stale.unwrap().message.contains("FFI boundary"),
+            "Stale warning should include reason text, got: {}",
+            stale.unwrap().message
+        );
+    }
+
+    #[test]
+    fn expect_with_reason_round_trips_through_unparse() {
+        // @expect type "reason" should round-trip through unparse.
+        let source = "@expect dnu \"FFI boundary\"\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let output = crate::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect dnu \"FFI boundary\""),
+            "Unparsed output should contain reason string, got: {output}"
+        );
+    }
+
+    #[test]
+    fn expect_with_reason_on_declaration_round_trips() {
+        // @expect type_annotation "migrating" on a declaration should round-trip.
+        let source = "\
+typed Object subclass: MyTyped
+  @expect type_annotation \"migrating\"
+  first => 42
+";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let output = crate::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect type_annotation \"migrating\""),
+            "Unparsed output should contain reason string, got: {output}"
+        );
+    }
+
+    // ── BT-1923: Drift prevention — every Warning/Hint must have a category ──
+
+    /// Compiles a source snippet and returns only the Warning/Hint diagnostics.
+    fn warnings_and_hints(source: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let all = compute_diagnostics(&module, parse_diags);
+        all.into_iter()
+            .filter(|d| {
+                matches!(
+                    d.severity,
+                    crate::source_analysis::Severity::Warning
+                        | crate::source_analysis::Severity::Hint
+                        | crate::source_analysis::Severity::Lint
+                )
+            })
+            .collect()
+    }
+
+    /// BT-1923: Every Warning/Hint/Lint diagnostic MUST have a category.
+    ///
+    /// This test compiles source snippets that trigger diagnostics from every
+    /// compiler phase (parser, name resolver, semantic analysis, type checker,
+    /// lint validators, etc.). If a new warning or hint is added anywhere in
+    /// the compiler without setting `.with_category(...)`, this test will fail.
+    ///
+    /// To fix a failure: find the `Diagnostic::warning(...)` or
+    /// `Diagnostic::hint(...)` call that produces the uncategorised diagnostic
+    /// and chain `.with_category(DiagnosticCategory::Foo)` onto it.
+    #[test]
+    fn all_warnings_and_hints_have_categories() {
+        // Each snippet is designed to trigger one or more Warning/Hint diagnostics
+        // from a specific compiler phase. We collect them all and assert that every
+        // single one has `category.is_some()`.
+        let snippets: Vec<(&str, &str)> = vec![
+            // ── Name resolver: unused variable ──
+            (
+                "unused variable",
+                "Object subclass: Foo\n  bar => x := 42. 0",
+            ),
+            // ── Name resolver: variable shadowing ──
+            (
+                "variable shadowing",
+                "Object subclass: Foo\n  bar =>\n    x := 1.\n    [| :x | x + 1] value: 2",
+            ),
+            // ── Name resolver: unreachable code ──
+            (
+                "unreachable code after early return",
+                "Object subclass: Foo\n  bar => ^1. 2",
+            ),
+            // ── Type checker: DNU hint ──
+            (
+                "DNU hint on unknown method",
+                "typed Object subclass: Foo\n  state: x :: Integer = 0\n  bar => self.x noSuchMethod",
+            ),
+            // ── Type checker: type mismatch hint ──
+            (
+                "type mismatch in typed class",
+                "typed Object subclass: Foo\n  state: x :: Integer = 0\n  bar => self.x := \"hello\"",
+            ),
+            // ── Lint validator: always-true condition ──
+            ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
+            // ── Actor new error ──
+            (
+                "actor new",
+                "Actor subclass: A\n  state: v = 0\n  go => self.v\n\nA new",
+            ),
+            // ── Type checker: missing type annotation in typed class ──
+            (
+                "missing type annotation in typed class",
+                "typed Object subclass: Foo\n  state: x = 0\n  bar => self.x",
+            ),
+            // ── Type checker: Dynamic inference warning in typed class ──
+            (
+                "dynamic inference in typed class",
+                "typed Object subclass: Foo\n  state: x :: Integer = 0\n  bar :: Integer => self.x abs",
+            ),
+        ];
+
+        let mut failures: Vec<String> = Vec::new();
+
+        for (label, source) in &snippets {
+            let diags = warnings_and_hints(source);
+            for diag in &diags {
+                if diag.category.is_none() {
+                    failures.push(format!(
+                        "[{label}] {severity:?} diagnostic has no category: \"{msg}\"",
+                        severity = diag.severity,
+                        msg = diag.message
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "Found Warning/Hint/Lint diagnostics without categories \
+             (drift prevention BT-1923):\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    /// BT-1923: Sanity check — the drift prevention snippets actually produce diagnostics.
+    ///
+    /// If this test fails, it means the snippets no longer trigger any warnings/hints,
+    /// which would make the category assertion vacuously true (and useless).
+    #[test]
+    fn drift_prevention_snippets_produce_diagnostics() {
+        // A subset of snippets that should always produce at least one warning/hint.
+        let must_produce = vec![
+            (
+                "unused variable",
+                "Object subclass: Foo\n  bar => x := 42. 0",
+            ),
+            ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
+            (
+                "actor new",
+                "Actor subclass: A\n  state: v = 0\n  go => self.v\n\nA new",
+            ),
+            (
+                "missing type annotation in typed class",
+                "typed Object subclass: Foo\n  state: x = 0\n  bar => self.x",
+            ),
+        ];
+
+        for (label, source) in must_produce {
+            let diags = warnings_and_hints(source);
+            assert!(
+                !diags.is_empty(),
+                "Snippet [{label}] should produce at least one Warning/Hint/Lint diagnostic \
+                 but produced none — update the drift prevention test snippets"
+            );
+        }
     }
 }

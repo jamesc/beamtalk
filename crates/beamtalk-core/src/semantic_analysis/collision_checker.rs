@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use crate::ast::{Expression, Module};
 use crate::ast_walker;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// A record of which package exports a given class name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,7 +407,7 @@ fn check_transitive_reference(
                 let diag = if strict_deps {
                     Diagnostic::error(message, span)
                 } else {
-                    Diagnostic::warning(message, span)
+                    Diagnostic::warning(message, span).with_category(DiagnosticCategory::Type)
                 };
 
                 diagnostics.push(diag.with_hint(format!(
