@@ -258,12 +258,22 @@ fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bo
 
     // Check runtime .beam files — if any runtime/stdlib/workspace/compiler ebin
     // has a newer .beam, force rebuild (specs may have changed).
-    let runtime_ebins = [
-        "runtime/_build/default/lib/beamtalk_runtime/ebin",
-        "runtime/_build/default/lib/beamtalk_stdlib/ebin",
-        "runtime/_build/default/lib/beamtalk_workspace/ebin",
-        "runtime/_build/default/lib/beamtalk_compiler/ebin",
-    ];
+    // Use layout-aware discovery so invalidation matches spec extraction paths.
+    let runtime_ebins: Vec<std::path::PathBuf> = {
+        use beamtalk_cli::repl_startup;
+        if let Ok((runtime_dir, layout)) = repl_startup::find_runtime_dir_with_layout() {
+            let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+            vec![
+                paths.runtime_ebin,
+                paths.stdlib_erlang_ebin,
+                paths.workspace_ebin,
+                paths.compiler_ebin,
+            ]
+        } else {
+            // Can't find runtime — force rebuild to be safe.
+            return false;
+        }
+    };
     for runtime_ebin in &runtime_ebins {
         let Ok(entries) = fs::read_dir(runtime_ebin) else {
             continue;

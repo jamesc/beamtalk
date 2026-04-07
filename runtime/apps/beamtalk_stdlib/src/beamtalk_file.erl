@@ -64,6 +64,9 @@
 ]).
 -export([handle_lines/1, handle_has_method/1]).
 
+-type file_handle() :: #{'$beamtalk_class' := 'FileHandle', fd := file:io_device()}.
+-export_type([file_handle/0]).
+
 %% FFI shims for (Erlang beamtalk_file) dispatch
 -export([
     exists/1,
@@ -850,7 +853,7 @@ deleteAll(Path) -> 'deleteAll:'(Path).
 rename(From, To) -> 'rename:to:'(From, To).
 absolutePath(Path) -> 'absolutePath:'(Path).
 lastModified(Path) -> 'lastModified:'(Path).
--spec handleLines(map()) -> map().
+-spec handleLines(file_handle()) -> beamtalk_stream:t().
 handleLines(Handle) -> handle_lines(Handle).
 
 %%% ============================================================================
@@ -861,7 +864,7 @@ handleLines(Handle) -> handle_lines(Handle).
 %%
 %% Used within File open:do: blocks. The Stream reads lines from the
 %% already-open file handle. The handle's lifetime is managed by open:do:.
--spec handle_lines(map()) -> map().
+-spec handle_lines(file_handle()) -> beamtalk_stream:t().
 handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd}) ->
     make_line_stream_from_fd(Fd);
 handle_lines(_) ->

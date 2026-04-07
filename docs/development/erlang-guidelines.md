@@ -459,8 +459,9 @@ writing `-spec` attributes for FFI modules, use typed map types instead of bare
 ```
 
 The spec reader (`beamtalk_spec_reader.erl`) recognizes the `'$beamtalk_class'`
-field and maps it to the Beamtalk class name. Without it, `map()` maps to
-`Dictionary`, causing false type mismatch warnings.
+field and maps it to the Beamtalk class name. Without it, `map()` still maps to
+`Dictionary`, which loses class-specific inference and can surface downstream
+false positives.
 
 For complex types, use remote type references:
 

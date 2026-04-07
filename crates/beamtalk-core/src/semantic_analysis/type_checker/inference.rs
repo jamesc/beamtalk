@@ -1100,13 +1100,7 @@ impl TypeChecker {
                 },
             ) = (&param.type_, arg_ty)
             {
-                // In Erlang specs, bare `map()` maps to "Dictionary". Beamtalk
-                // objects are tagged maps, so any class type is compatible where
-                // the spec says `map()`. This is a pragmatic workaround — the
-                // proper fix is adding `-type t() :: #{'$beamtalk_class' := ...}`
-                // to each Erlang module so specs use the class name directly.
-                // TODO: Remove this workaround once all FFI modules define t().
-                if expected == actual || expected.as_str() == "Dictionary" {
+                if expected == actual {
                     continue;
                 }
                 let param_pos = i + 1;
