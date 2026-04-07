@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Tests for beamtalk_ws_handler WebSocket push behaviour (BT-1020).
-%%%
-%%% Tests the class-loaded push event pub/sub via beamtalk_class_events,
-%%% which is the server-side mechanism that delivers class-loaded events
-%%% to authenticated WebSocket subscribers.
-
 -module(beamtalk_ws_handler_tests).
+
+-moduledoc """
+Tests for beamtalk_ws_handler WebSocket push behaviour (BT-1020).
+
+Tests the class-loaded push event pub/sub via beamtalk_class_events,
+which is the server-side mechanism that delivers class-loaded events
+to authenticated WebSocket subscribers.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ===========================================================================

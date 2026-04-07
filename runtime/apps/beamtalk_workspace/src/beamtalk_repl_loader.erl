@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Module loading and class activation for the Beamtalk REPL
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Handles loading compiled Beamtalk modules into the BEAM runtime,
-%%% registering classes, triggering hot reload, and managing file paths.
-%%% Extracted from beamtalk_repl_eval (BT-863).
-
 -module(beamtalk_repl_loader).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Module loading and class activation for the Beamtalk REPL
+
+Handles loading compiled Beamtalk modules into the BEAM runtime,
+registering classes, triggering hot reload, and managing file paths.
+Extracted from beamtalk_repl_eval (BT-863).
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -51,7 +53,7 @@
 
 %%% Public API
 
-%% @doc Load a Beamtalk file and register its classes.
+-doc "Load a Beamtalk file and register its classes.".
 -spec handle_load(string(), beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State) ->
@@ -81,10 +83,12 @@ handle_load(Path, State) ->
             end
     end.
 
-%% @doc Load a Beamtalk file with pre-built class indexes (BT-1543).
-%%
-%% Like `handle_load/2' but accepts pre-built class indexes to avoid
-%% redundant class registry scans during batch loads (e.g. :load dir).
+-doc """
+Load a Beamtalk file with pre-built class indexes (BT-1543).
+
+Like `handle_load/2' but accepts pre-built class indexes to avoid
+redundant class registry scans during batch loads (e.g. :load dir).
+""".
 -spec handle_load(string(), beamtalk_repl_state:state(), map()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State, PrebuiltIndexes) ->
@@ -114,7 +118,7 @@ handle_load(Path, State, PrebuiltIndexes) ->
             end
     end.
 
-%% @doc Load Beamtalk source from an inline binary string (no file path).
+-doc "Load Beamtalk source from an inline binary string (no file path).".
 -spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load_source(SourceBin, Label, State) ->
@@ -126,12 +130,14 @@ handle_load_source(SourceBin, Label, State) ->
             {error, Reason, State}
     end.
 
-%% @doc Load a compiled class module, activate it, and update REPL state.
-%%
-%% Returns:
-%%   {ok, ClassName, no_trailing, NewState}    - class loaded, no trailing expressions
-%%   {ok, ClassName, {trailing, ModName, Bin}, NewState} - has trailing expressions to eval
-%%   {error, Reason, NewState}
+-doc """
+Load a compiled class module, activate it, and update REPL state.
+
+Returns:
+  {ok, ClassName, no_trailing, NewState}    - class loaded, no trailing expressions
+  {ok, ClassName, {trailing, ModName, Bin}, NewState} - has trailing expressions to eval
+  {error, Reason, NewState}
+""".
 -spec load_class_module(map(), string(), beamtalk_repl_state:state()) ->
     {ok, term(), no_trailing | {trailing, atom(), binary()}, beamtalk_repl_state:state()}
     | {error, term(), beamtalk_repl_state:state()}.
@@ -156,7 +162,7 @@ load_class_module(ClassInfo, Expression, State) ->
             end
     end.
 
-%% @doc Recompile and reload a class after a standalone method definition (BT-571).
+-doc "Recompile and reload a class after a standalone method definition (BT-571).".
 -spec reload_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -175,15 +181,19 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
             )
     end.
 
-%% @doc Activate a loaded module: register classes, trigger hot reload,
-%% and update workspace metadata.
+-doc """
+Activate a loaded module: register classes, trigger hot reload,
+and update workspace metadata.
+""".
 -spec activate_module(atom(), [map()]) -> ok.
 activate_module(ModuleName, Classes) ->
     activate_module(ModuleName, Classes, undefined).
 
-%% @doc Activate a loaded module with an optional source path for workspace metadata.
-%% Passing SourcePath ensures the source file is recorded in workspace_meta so that
-%% new VS Code sessions (which have an empty session tracker) can still navigate to source.
+-doc """
+Activate a loaded module with an optional source path for workspace metadata.
+Passing SourcePath ensures the source file is recorded in workspace_meta so that
+new VS Code sessions (which have an empty session tracker) can still navigate to source.
+""".
 -spec activate_module(atom(), [map()], string() | undefined) -> ok.
 activate_module(ModuleName, Classes, SourcePath) ->
     register_classes(Classes, ModuleName),
@@ -191,7 +201,7 @@ activate_module(ModuleName, Classes, SourcePath) ->
     beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
     beamtalk_workspace_meta:update_activity().
 
-%% @doc Register loaded classes by calling the module's register_class/0 function.
+-doc "Register loaded classes by calling the module's register_class/0 function.".
 -spec register_classes([map()], atom()) -> ok.
 register_classes(_ClassInfoList, ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
@@ -205,7 +215,7 @@ register_classes(_ClassInfoList, ModuleName) ->
             ok
     end.
 
-%% @doc Trigger hot reload for existing actors after module reload (BT-572).
+-doc "Trigger hot reload for existing actors after module reload (BT-572).".
 -spec trigger_hot_reload(atom(), [map()]) -> ok.
 trigger_hot_reload(ModuleName, Classes) ->
     lists:foreach(
@@ -216,10 +226,12 @@ trigger_hot_reload(ModuleName, Classes) ->
     ),
     ok.
 
-%% @doc Compile and load a source file without REPL session state (BT-845).
-%%
-%% Called from beamtalk_behaviour_intrinsics:classReload/1 via erlang:apply/3
-%% to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
+-doc """
+Compile and load a source file without REPL session state (BT-845).
+
+Called from beamtalk_behaviour_intrinsics:classReload/1 via erlang:apply/3
+to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
+""".
 -spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path) ->
     reload_class_file_impl(Path, undefined).
@@ -229,7 +241,7 @@ reload_class_file(Path) ->
 reload_class_file(Path, ExpectedClassName) ->
     reload_class_file_impl(Path, ExpectedClassName).
 
-%% @doc Check if a file path refers to a stdlib file (under stdlib/src/ directory).
+-doc "Check if a file path refers to a stdlib file (under stdlib/src/ directory).".
 -spec is_stdlib_path(string()) -> boolean().
 is_stdlib_path("stdlib/src/" ++ _) ->
     true;
@@ -239,9 +251,11 @@ is_stdlib_path(Path) ->
         _ -> true
     end.
 
-%% @doc Convert a string to snake_case (e.g., "SchemeSymbol" -> "scheme_symbol").
-%% Matches the Rust to_module_name() convention: inserts underscore before
-%% uppercase only when the previous character was lowercase.
+-doc """
+Convert a string to snake_case (e.g., "SchemeSymbol" -> "scheme_symbol").
+Matches the Rust to_module_name() convention: inserts underscore before
+uppercase only when the previous character was lowercase.
+""".
 -spec to_snake_case(string()) -> string().
 to_snake_case([]) ->
     [];
@@ -260,7 +274,9 @@ to_snake_case([C | Rest], Acc, PrevWasLower) when C >= $A, C =< $Z ->
 to_snake_case([C | Rest], Acc, _PrevWasLower) ->
     to_snake_case(Rest, [C | Acc], C >= $a andalso C =< $z).
 
-%% @doc Verify that the expected class name appears in the compiled class list (BT-868).
+-doc """
+Verify that the expected class name appears in the compiled class list (BT-868).
+""".
 -spec verify_class_present(atom() | undefined, [#{name := string()}], string()) ->
     ok | {error, term()}.
 verify_class_present(undefined, _ClassNames, _Path) ->

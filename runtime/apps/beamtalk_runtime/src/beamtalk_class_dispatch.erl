@@ -1,20 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Class method dispatch for Beamtalk class objects.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Handles class-level message sending protocol, translating Beamtalk messages
-%%% to gen_server calls. Also provides helpers for class method execution
-%%% including test execution detection and result unwrapping.
-%%%
-%%% ADR 0032 Phase 0 (BT-732): Added class chain fallthrough.
-%%% When a class-side message is not found in user-defined class methods,
-%%% dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/5.
-%%%
-%%% Extracted from beamtalk_object_class.erl (BT-704).
 -module(beamtalk_class_dispatch).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Class method dispatch for Beamtalk class objects.
+
+Handles class-level message sending protocol, translating Beamtalk messages
+to gen_server calls. Also provides helpers for class method execution
+including test execution detection and result unwrapping.
+
+ADR 0032 Phase 0 (BT-732): Added class chain fallthrough.
+When a class-side message is not found in user-defined class methods,
+dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/5.
+
+Extracted from beamtalk_object_class.erl (BT-704).
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -32,11 +35,13 @@
 -type selector() :: atom().
 -type class_name() :: atom().
 
-%% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
-%%
-%% Dispatches messages to the class gen_server, translating the Beamtalk
-%% message protocol ({Selector, Args}) to the class process message format.
-%% Unwraps {ok, Value} / {error, Error} results for seamless integration.
+-doc """
+Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
+
+Dispatches messages to the class gen_server, translating the Beamtalk
+message protocol ({Selector, Args}) to the class process message format.
+Unwraps {ok, Value} / {error, Error} results for seamless integration.
+""".
 -spec class_send(pid() | undefined, atom(), list()) -> term().
 class_send(undefined, Selector, _Args) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
@@ -83,7 +88,7 @@ class_send(ClassPid, Selector, Args) ->
         class_send_dispatch(P, Selector, Args)
     end).
 
-%% @private Dispatch a class method call (the main logic for the catch-all clause).
+-doc "Dispatch a class method call (the main logic for the catch-all clause).".
 -spec class_send_dispatch(pid(), selector(), list()) -> term().
 class_send_dispatch(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
@@ -139,18 +144,20 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             unwrap_class_call(Other)
     end.
 
-%% @doc Send a message to a metaclass object (ADR 0036, BT-823).
-%%
-%% Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
-%%   1. `{metaclass_method_call, Selector, Args}` to the class gen_server via
-%%      `gen_server:call/2` — resolves user-defined class methods (e.g. `withAll:`)
-%%      via the superclass chain (ADR-0036 Phase 2).
-%%   2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
-%%      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain for
-%%      built-in messages (`new`, `class`, etc.).
-%%
-%% The class pid is the same as the described class (virtual tag approach, ADR 0013).
-%% Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
+-doc """
+Send a message to a metaclass object (ADR 0036, BT-823).
+
+Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
+  1. `{metaclass_method_call, Selector, Args}` to the class gen_server via
+     `gen_server:call/2` — resolves user-defined class methods (e.g. `withAll:`)
+     via the superclass chain (ADR-0036 Phase 2).
+  2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
+     walks the Metaclass → Class → Behaviour → Object → ProtoObject chain for
+     built-in messages (`new`, `class`, etc.).
+
+The class pid is the same as the described class (virtual tag approach, ADR 0013).
+Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
+""".
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send(Pid, Selector, Args, Self) ->
     %% BT-1768: Wrap in crash recovery, same as class_send.
@@ -159,7 +166,7 @@ metaclass_send(Pid, Selector, Args, Self) ->
         metaclass_send_dispatch(P, Selector, Args, Self#beamtalk_object{pid = P})
     end).
 
-%% @private Dispatch a metaclass method call (the main logic for metaclass_send).
+-doc "Dispatch a metaclass method call (the main logic for metaclass_send).".
 -spec metaclass_send_dispatch(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send_dispatch(Pid, Selector, Args, Self) ->
     %% ADR-0036 Phase 2 (BT-823): Use metaclass_method_call so that
@@ -195,12 +202,14 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             unwrap_class_call(Other)
     end.
 
-%% @doc Unwrap a class gen_server call result for use in class_send.
-%%
-%% Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
-%% Handles both raw #beamtalk_error{} records and already-wrapped Exception
-%% maps (from raise/1 inside handle_call). Uses ensure_wrapped/1 for
-%% idempotent wrapping (BT-525).
+-doc """
+Unwrap a class gen_server call result for use in class_send.
+
+Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
+Handles both raw #beamtalk_error{} records and already-wrapped Exception
+maps (from raise/1 inside handle_call). Uses ensure_wrapped/1 for
+idempotent wrapping (BT-525).
+""".
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) ->
     Value;
@@ -208,17 +217,19 @@ unwrap_class_call({error, Error}) ->
     Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
     error(Wrapped).
 
-%% @doc Handle a class method call from the gen_server.
-%%
-%% BT-411: User-defined class method dispatch.
-%% BT-412: Passes class variables to method and handles updates.
-%% BT-440: For test execution (runAll, run:), spawns in a separate process
-%% to avoid gen_server deadlock.
-%%
-%% ADR 0032 Phase 1: Receives local class_methods (not flattened table).
-%% Walks the superclass chain if the method is not found locally.
-%%
-%% Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
+-doc """
+Handle a class method call from the gen_server.
+
+BT-411: User-defined class method dispatch.
+BT-412: Passes class variables to method and handles updates.
+BT-440: For test execution (runAll, run:), spawns in a separate process
+to avoid gen_server deadlock.
+
+ADR 0032 Phase 1: Receives local class_methods (not flattened table).
+Walks the superclass chain if the method is not found locally.
+
+Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
+""".
 -spec handle_class_method_call(
     selector(),
     list(),
@@ -244,8 +255,7 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
             end
     end.
 
-%% @private
-%% @doc Invoke a class method (local or inherited), handling test execution specially.
+-doc "Invoke a class method (local or inherited), handling test execution specially.".
 -spec invoke_class_method(
     selector(),
     list(),
@@ -351,13 +361,14 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
             end
     end.
 
-%% @private
-%% @doc Walk the superclass chain to find an inherited class method.
-%%
-%% Uses the ETS hierarchy table for O(1) superclass lookup per level.
-%% Makes gen_server calls to each ancestor to check its local class_methods.
-%% Safe to call from within a gen_server handle_call because we only walk
-%% UP the hierarchy (no circular dependency possible).
+-doc """
+Walk the superclass chain to find an inherited class method.
+
+Uses the ETS hierarchy table for O(1) superclass lookup per level.
+Makes gen_server calls to each ancestor to check its local class_methods.
+Safe to call from within a gen_server handle_call because we only walk
+UP the hierarchy (no circular dependency possible).
+""".
 -spec find_class_method_in_chain(selector(), class_name()) ->
     {ok, class_name(), atom()} | not_found.
 find_class_method_in_chain(Selector, ClassName) ->
@@ -423,8 +434,7 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
             end
     end.
 
-%% @private
-%% @doc Read the superclass name from the hierarchy table (no gen_server call).
+-doc "Read the superclass name from the hierarchy table (no gen_server call).".
 -spec superclass_from_ets(class_name()) -> class_name() | none.
 superclass_from_ets(ClassName) ->
     case beamtalk_class_hierarchy_table:lookup(ClassName) of
@@ -432,23 +442,27 @@ superclass_from_ets(ClassName) ->
         not_found -> none
     end.
 
-%% @doc Convert a class method selector to its module function name.
-%% Class methods are generated with a 'class_' prefix, e.g.
-%% `class defaultValue => 42` becomes `class_defaultValue/2`.
-%% (Zero-arg selector: arity 0 + ClassSelf + ClassVars => arity 2.)
-%%
-%% Uses list_to_atom rather than list_to_existing_atom because the class_
-%% prefixed atom may not yet be in the atom table (e.g. when the module is
-%% not loaded or the method is absent).  Atom exhaustion is not a concern:
-%% selectors are bound atoms from user programs, so the class_ versions are
-%% equally bounded.  If the resulting function does not exist in the module,
-%% erlang:apply will raise undef, which invoke_class_method already handles.
+-doc """
+Convert a class method selector to its module function name.
+Class methods are generated with a 'class_' prefix, e.g.
+`class defaultValue => 42` becomes `class_defaultValue/2`.
+(Zero-arg selector: arity 0 + ClassSelf + ClassVars => arity 2.)
+
+Uses list_to_atom rather than list_to_existing_atom because the class_
+prefixed atom may not yet be in the atom table (e.g. when the module is
+not loaded or the method is absent).  Atom exhaustion is not a concern:
+selectors are bound atoms from user programs, so the class_ versions are
+equally bounded.  If the resulting function does not exist in the module,
+erlang:apply will raise undef, which invoke_class_method already handles.
+""".
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
     list_to_atom("class_" ++ atom_to_list(Selector)).
 
-%% @doc Check if a class method selector is a test execution command.
-%% BT-440: These selectors need special handling to avoid gen_server deadlock.
+-doc """
+Check if a class method selector is a test execution command.
+BT-440: These selectors need special handling to avoid gen_server deadlock.
+""".
 -spec is_test_execution_selector(selector()) -> boolean().
 is_test_execution_selector(runAll) -> true;
 is_test_execution_selector('runAll:') -> true;
@@ -456,14 +470,16 @@ is_test_execution_selector('run:') -> true;
 is_test_execution_selector('run:method:') -> true;
 is_test_execution_selector(_) -> false.
 
-%% @doc Handle async cast message dispatch for Future protocol.
-%%
-%% Dispatches class query messages asynchronously, resolving or rejecting
-%% the associated Future process.
-%%
-%% ADR 0032 Phase 1: Receives local instance_methods (not flattened table).
-%% The methods response returns local-only selectors; full hierarchy walk
-%% will be done by Behaviour.methods in Phase 2.
+-doc """
+Handle async cast message dispatch for Future protocol.
+
+Dispatches class query messages asynchronously, resolving or rejecting
+the associated Future process.
+
+ADR 0032 Phase 1: Receives local instance_methods (not flattened table).
+The methods response returns local-only selectors; full hierarchy walk
+will be done by Behaviour.methods in Phase 2.
+""".
 -spec handle_async_dispatch(
     term(),
     class_name(),
@@ -497,19 +513,20 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, S
 handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) ->
     ok.
 
-%% @private
-%% @doc Classify an `undef` error as either a dispatch-level failure or one
-%% raised from inside the method body.
-%%
-%% When `erlang:apply(Module, Fun, Args)` is called and Module:Fun/Arity does
-%% not exist, the top stacktrace frame is `{Module, Fun, ActualArgs, []}`.
-%% If the undef originated from code inside the method, the top frame belongs
-%% to some other module/function.
-%%
-%% Returns:
-%%   `{true, module_not_loaded}` — Module is not loaded; class failed to load.
-%%   `{true, method_not_found}`  — Module is loaded but Fun/Arity is not exported.
-%%   `false`                     — undef was raised from inside the method body.
+-doc """
+Classify an `undef` error as either a dispatch-level failure or one
+raised from inside the method body.
+
+When `erlang:apply(Module, Fun, Args)` is called and Module:Fun/Arity does
+not exist, the top stacktrace frame is `{Module, Fun, ActualArgs, []}`.
+If the undef originated from code inside the method, the top frame belongs
+to some other module/function.
+
+Returns:
+  `{true, module_not_loaded}` — Module is not loaded; class failed to load.
+  `{true, method_not_found}`  — Module is loaded but Fun/Arity is not exported.
+  `false`                     — undef was raised from inside the method body.
+""".
 -spec is_dispatch_undef(atom(), atom(), list()) ->
     {true, module_not_loaded | method_not_found} | false.
 is_dispatch_undef(Module, FunName, [{Module, FunName, _, _} | _]) ->
@@ -524,15 +541,16 @@ is_dispatch_undef(_Module, _FunName, _ST) ->
 %%% Internal Functions — BT-1768 (Class Process Crash Recovery)
 %%% ============================================================================
 
-%% @private
-%% @doc Execute a class_send operation with automatic crash detection and recovery.
-%%
-%% BT-1768: Wraps a gen_server call in a try/catch. If the target class process
-%% has crashed (noproc), looks up the class name from the pid reverse index,
-%% attempts auto-restart via `beamtalk_class_registry:restart_class/1`, and
-%% retries the operation with the new pid. If restart fails, raises a clear error.
-%%
-%% Only attempts recovery once to avoid infinite loops.
+-doc """
+Execute a class_send operation with automatic crash detection and recovery.
+
+BT-1768: Wraps a gen_server call in a try/catch. If the target class process
+has crashed (noproc), looks up the class name from the pid reverse index,
+attempts auto-restart via `beamtalk_class_registry:restart_class/1`, and
+retries the operation with the new pid. If restart fails, raises a clear error.
+
+Only attempts recovery once to avoid infinite loops.
+""".
 -spec class_send_with_recovery(pid(), selector(), fun((pid()) -> term())) -> term().
 class_send_with_recovery(ClassPid, Selector, Action) ->
     try
@@ -544,8 +562,7 @@ class_send_with_recovery(ClassPid, Selector, Action) ->
             handle_class_crash_recovery(ClassPid, Selector, Action)
     end.
 
-%% @private
-%% @doc Attempt to recover from a crashed class process and retry the operation.
+-doc "Attempt to recover from a crashed class process and retry the operation.".
 -spec handle_class_crash_recovery(pid(), selector(), fun((pid()) -> term())) -> term().
 handle_class_crash_recovery(ClassPid, Selector, Action) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
@@ -591,13 +608,14 @@ handle_class_crash_recovery(ClassPid, Selector, Action) ->
 %%% Internal Functions — BT-893 (Self-Instantiation)
 %%% ============================================================================
 
-%% @private
-%% @doc Perform instantiation directly when a class method self-sends new/spawn.
-%%
-%% BT-893: Replaces BT-755's error-raising approach. Instead of raising an error
-%% when a class method sends new/spawn to itself, we bypass gen_server and call
-%% beamtalk_class_instantiation directly. Class name and module are read from the
-%% process dictionary (set during beamtalk_object_class:init/1).
+-doc """
+Perform instantiation directly when a class method self-sends new/spawn.
+
+BT-893: Replaces BT-755's error-raising approach. Instead of raising an error
+when a class method sends new/spawn to itself, we bypass gen_server and call
+beamtalk_class_instantiation directly. Class name and module are read from the
+process dictionary (set during beamtalk_object_class:init/1).
+""".
 -spec handle_self_instantiation(new | spawn, atom(), list()) -> term().
 handle_self_instantiation(Type, Selector, Args) ->
     ClassName = get(beamtalk_class_name),
@@ -623,11 +641,12 @@ handle_self_instantiation(Type, Selector, Args) ->
             handle_self_instantiation_error(Selector)
     end.
 
-%% @private
-%% @doc Fallback error when process dictionary metadata is missing.
-%%
-%% Preserves the original selector and attempts to extract the class name from
-%% the process's registered name for diagnostic purposes.
+-doc """
+Fallback error when process dictionary metadata is missing.
+
+Preserves the original selector and attempts to extract the class name from
+the process's registered name for diagnostic purposes.
+""".
 -spec handle_self_instantiation_error(atom()) -> no_return().
 handle_self_instantiation_error(Selector) ->
     ClassName = class_name_from_pid(self()),
@@ -642,11 +661,12 @@ handle_self_instantiation_error(Selector) ->
     ),
     beamtalk_error:raise(Error1).
 
-%% @private
-%% @doc Extract the Beamtalk class name from a class gen_server pid's registered name.
-%%
-%% Class processes are registered as 'beamtalk_class_<ClassName>'. This strips
-%% that prefix to recover the class name for use in error messages.
+-doc """
+Extract the Beamtalk class name from a class gen_server pid's registered name.
+
+Class processes are registered as 'beamtalk_class_<ClassName>'. This strips
+that prefix to recover the class name for use in error messages.
+""".
 -spec class_name_from_pid(pid()) -> atom().
 class_name_from_pid(ClassPid) ->
     case erlang:process_info(ClassPid, registered_name) of
@@ -672,23 +692,25 @@ class_name_from_pid(ClassPid) ->
 %%% Internal Functions — ADR 0032 Phase 0
 %%% ============================================================================
 
-%% @doc Try dispatching through the Class chain (ADR 0032 Phase 0, BT-732).
-%%
-%% When a class-side message is not found in user-defined class methods,
-%% fall through to instance methods of 'Class'. This implements the
-%% Smalltalk metaclass protocol: every class object is an instance of 'Class'.
-%%
-%% ClassSelf has the metaclass tag (e.g., 'Counter class') so methods in
-%% 'Class' receive the correct self when invoked.
-%%
-%% Returns {ok, Result} if the method is found in the Class chain.
-%% Returns not_found if 'Class' does not understand the selector (does_not_understand).
-%% Re-raises any other error (type_error, arity_mismatch, etc.) from Class methods
-%% so callers see real errors rather than a misleading DNU on the original class.
-%%
-%% NOTE: NewState from Class methods is intentionally dropped. Class has no
-%% persistent instance state in Phase 0-1; if stateful Class methods are added
-%% in Phase 2+, this must be revisited.
+-doc """
+Try dispatching through the Class chain (ADR 0032 Phase 0, BT-732).
+
+When a class-side message is not found in user-defined class methods,
+fall through to instance methods of 'Class'. This implements the
+Smalltalk metaclass protocol: every class object is an instance of 'Class'.
+
+ClassSelf has the metaclass tag (e.g., 'Counter class') so methods in
+'Class' receive the correct self when invoked.
+
+Returns {ok, Result} if the method is found in the Class chain.
+Returns not_found if 'Class' does not understand the selector (does_not_understand).
+Re-raises any other error (type_error, arity_mismatch, etc.) from Class methods
+so callers see real errors rather than a misleading DNU on the original class.
+
+NOTE: NewState from Class methods is intentionally dropped. Class has no
+persistent instance state in Phase 0-1; if stateful Class methods are added
+in Phase 2+, this must be revisited.
+""".
 -spec try_class_chain_fallthrough(#beamtalk_object{}, atom(), list()) ->
     {ok, term()} | not_found.
 try_class_chain_fallthrough(ClassSelf, Selector, Args) ->

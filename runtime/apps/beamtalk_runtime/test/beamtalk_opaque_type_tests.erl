@@ -2,13 +2,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for opaque BEAM type dispatch (BT-681).
-%%%
-%%% Tests Pid, Port, and Reference Object protocol methods:
-%%% asString, printString, class, ==, =:=, hash, isAlive (Pid only).
-%%% Also tests does_not_understand for unknown messages.
-
 -module(beamtalk_opaque_type_tests).
+
+-moduledoc """
+EUnit tests for opaque BEAM type dispatch (BT-681).
+
+Tests Pid, Port, and Reference Object protocol methods:
+asString, printString, class, ==, =:=, hash, isAlive (Pid only).
+Also tests does_not_understand for unknown messages.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_timer module (BT-1121, BT-1165).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests class methods (after:do:, every:do:, sleep:), instance methods
-%%% (cancel, isActive, printString), the ack-based cancel protocol,
-%%% FFI shims (after/2, every/2, sleep/1), and error paths.
-
 -module(beamtalk_timer_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_timer module (BT-1121, BT-1165).
+
+Tests class methods (after:do:, every:do:, sleep:), instance methods
+(cancel, isActive, printString), the ack-based cancel protocol,
+FFI shims (after/2, every/2, sleep/1), and error paths.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -18,8 +20,10 @@
 %%% Helpers
 %%% ============================================================================
 
-%% @doc Block until the given process exits or the timeout (ms) elapses.
-%% Fails the test if the process does not exit within Timeout ms.
+-doc """
+Block until the given process exits or the timeout (ms) elapses.
+Fails the test if the process does not exit within Timeout ms.
+""".
 wait_for_exit(Pid, Timeout) ->
     MRef = erlang:monitor(process, Pid),
     receive

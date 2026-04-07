@@ -1,23 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc REPL message protocol encoder/decoder
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Implements the nREPL-inspired message protocol for REPL communication.
-%%% Supports both the new protocol format (op/id/session) and the legacy
-%%% format (type/expression) for backward compatibility.
-%%%
-%%% New protocol format:
-%%%   Request:  {"op": "eval", "id": "msg-001", "session": "s1", "code": "1 + 2"}
-%%%   Response: {"id": "msg-001", "session": "s1", "value": "3", "status": ["done"]}
-%%%
-%%% Legacy format (backward compatible):
-%%%   Request:  {"type": "eval", "expression": "1 + 2"}
-%%%   Response: {"type": "result", "value": "3"}
-
 -module(beamtalk_repl_protocol).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+REPL message protocol encoder/decoder
+
+Implements the nREPL-inspired message protocol for REPL communication.
+Supports both the new protocol format (op/id/session) and the legacy
+format (type/expression) for backward compatibility.
+
+New protocol format:
+  Request:  {"op": "eval", "id": "msg-001", "session": "s1", "code": "1 + 2"}
+  Response: {"id": "msg-001", "session": "s1", "value": "3", "status": ["done"]}
+
+Legacy format (backward compatible):
+  Request:  {"type": "eval", "expression": "1 + 2"}
+  Response: {"type": "result", "value": "3"}
+""".
 
 -export([
     decode/1,
@@ -64,9 +66,11 @@
 
 %%% Legacy request parsing (deprecated — new code should use decode/1)
 
-%% @doc Parse a request from the CLI (legacy interface).
-%% Expected format: JSON with "type" field.
-%% New code should use beamtalk_repl_protocol:decode/1 instead.
+-doc """
+Parse a request from the CLI (legacy interface).
+Expected format: JSON with "type" field.
+New code should use beamtalk_repl_protocol:decode/1 instead.
+""".
 -spec parse_request(binary()) ->
     {eval, string()}
     | {clear_bindings}
@@ -121,8 +125,7 @@ parse_request(Data) when is_binary(Data) ->
             {error, {parse_error, Error}}
     end.
 
-%% @private
-%% @doc Translate a protocol operation name to an internal request tuple.
+-doc "Translate a protocol operation name to an internal request tuple.".
 -spec op_to_request(binary(), map()) ->
     {eval, string()}
     | {clear_bindings}
@@ -176,8 +179,10 @@ op_to_request(Op, _Map) ->
 
 %%% Decoding
 
-%% @doc Decode a raw binary message into a protocol message.
-%% Supports both new format (op field) and legacy format (type field).
+-doc """
+Decode a raw binary message into a protocol message.
+Supports both new format (op field) and legacy format (type field).
+""".
 -spec decode(binary()) -> {ok, protocol_msg()} | {error, term()}.
 decode(Data) when is_binary(Data) ->
     Trimmed = string:trim(Data),
@@ -202,39 +207,39 @@ decode(Data) when is_binary(Data) ->
             end
     end.
 
-%% @doc Check if a decoded message used the legacy format.
+-doc "Check if a decoded message used the legacy format.".
 -spec is_legacy(protocol_msg()) -> boolean().
 is_legacy(#protocol_msg{legacy = Legacy}) -> Legacy.
 
-%% @doc Get the operation name from a protocol message.
+-doc "Get the operation name from a protocol message.".
 -spec get_op(protocol_msg()) -> binary().
 get_op(#protocol_msg{op = Op}) -> Op.
 
-%% @doc Get the message correlation ID.
+-doc "Get the message correlation ID.".
 -spec get_id(protocol_msg()) -> binary() | undefined.
 get_id(#protocol_msg{id = Id}) -> Id.
 
-%% @doc Get the session identifier.
+-doc "Get the session identifier.".
 -spec get_session(protocol_msg()) -> binary() | undefined.
 get_session(#protocol_msg{session = Session}) -> Session.
 
-%% @doc Get the operation-specific parameters.
+-doc "Get the operation-specific parameters.".
 -spec get_params(protocol_msg()) -> map().
 get_params(#protocol_msg{params = Params}) -> Params.
 
 %%% Encoding
 
-%% @doc Encode a successful result response.
+-doc "Encode a successful result response.".
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_result(Value, Msg, TermToJson) ->
     encode_result(Value, Msg, TermToJson, <<>>, []).
 
-%% @doc Encode a successful result response with captured stdout.
+-doc "Encode a successful result response with captured stdout.".
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary()) -> binary().
 encode_result(Value, Msg, TermToJson, Output) ->
     encode_result(Value, Msg, TermToJson, Output, []).
 
-%% @doc Encode a successful result response with captured stdout and warnings.
+-doc "Encode a successful result response with captured stdout and warnings.".
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [binary()]) ->
     binary().
 encode_result(Value, Msg, TermToJson, Output, Warnings) ->
@@ -253,24 +258,26 @@ encode_result(Value, Msg, TermToJson, Output, Warnings) ->
             )
     end.
 
-%% @doc Encode an error response.
+-doc "Encode an error response.".
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary())) -> binary().
 encode_error(Reason, Msg, FormatError) ->
     encode_error(Reason, Msg, FormatError, <<>>, []).
 
-%% @doc Encode an error response with captured stdout.
+-doc "Encode an error response with captured stdout.".
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary()) -> binary().
 encode_error(Reason, Msg, FormatError, Output) ->
     encode_error(Reason, Msg, FormatError, Output, []).
 
-%% @doc Encode an error response with captured stdout and warnings.
+-doc "Encode an error response with captured stdout and warnings.".
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()]) ->
     binary().
 encode_error(Reason, Msg, FormatError, Output, Warnings) ->
     encode_error(Reason, Msg, FormatError, Output, Warnings, #{}).
 
-%% @doc Encode an error response with captured stdout, warnings, and extra metadata fields.
-%% BT-1235: Metadata may include `<<"line">>' and `<<"hint">>' for compile errors.
+-doc """
+Encode an error response with captured stdout, warnings, and extra metadata fields.
+BT-1235: Metadata may include `<<"line">>' and `<<"hint">>' for compile errors.
+""".
 -spec encode_error(
     term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()], map()
 ) -> binary().
@@ -292,7 +299,7 @@ encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
             )
     end.
 
-%% @doc Encode a status-only response (e.g., for clear, close).
+-doc "Encode a status-only response (e.g., for clear, close).".
 -spec encode_status(atom(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_status(Status, Msg, TermToJson) ->
     case Msg#protocol_msg.legacy of
@@ -307,9 +314,11 @@ encode_status(Status, Msg, TermToJson) ->
             )
     end.
 
-%% @doc Encode a streaming stdout chunk (BT-696).
-%% Sent as an intermediate message during eval before the final done message.
-%% In legacy mode, this is a no-op (output is buffered in the final response).
+-doc """
+Encode a streaming stdout chunk (BT-696).
+Sent as an intermediate message during eval before the final done message.
+In legacy mode, this is a no-op (output is buffered in the final response).
+""".
 -spec encode_out(binary(), protocol_msg(), binary()) -> binary().
 encode_out(_Chunk, #protocol_msg{legacy = true}, _Stream) ->
     %% Legacy clients don't support streaming — output will be in final response
@@ -318,8 +327,10 @@ encode_out(Chunk, Msg, Stream) ->
     Base = base_response(Msg),
     iolist_to_binary(json:encode(Base#{Stream => Chunk})).
 
-%% @doc Encode a need-input status message (BT-698).
-%% Sent when eval code requests stdin input (e.g. io:get_line).
+-doc """
+Encode a need-input status message (BT-698).
+Sent when eval code requests stdin input (e.g. io:get_line).
+""".
 -spec encode_need_input(binary(), protocol_msg()) -> binary().
 encode_need_input(Prompt, Msg) ->
     Base = base_response(Msg),
@@ -327,7 +338,7 @@ encode_need_input(Prompt, Msg) ->
         json:encode(Base#{<<"status">> => [<<"need-input">>], <<"prompt">> => Prompt})
     ).
 
-%% @doc Encode a bindings response.
+-doc "Encode a bindings response.".
 -spec encode_bindings(map(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_bindings(Bindings, Msg, TermToJson) ->
     JsonBindings = maps:fold(
@@ -350,14 +361,16 @@ encode_bindings(Bindings, Msg, TermToJson) ->
             )
     end.
 
-%% @doc Encode a loaded file response.
+-doc "Encode a loaded file response.".
 -spec encode_loaded([map()], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_loaded(Classes, Msg, TermToJson) ->
     encode_loaded(Classes, Msg, TermToJson, []).
 
-%% @doc Encode a loaded file response with warnings.
-%% BT-737: Warnings are class collision warnings from loading classes that
-%% shadow classes already registered from a different module.
+-doc """
+Encode a loaded file response with warnings.
+BT-737: Warnings are class collision warnings from loading classes that
+shadow classes already registered from a different module.
+""".
 -spec encode_loaded([map()], protocol_msg(), fun((term()) -> term()), [binary()]) -> binary().
 encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
@@ -371,7 +384,7 @@ encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
             iolist_to_binary(json:encode(maybe_add_warnings(Full, Warnings)))
     end.
 
-%% @doc Encode an actors list response.
+-doc "Encode an actors list response.".
 -spec encode_actors([map()], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_actors(Actors, Msg, _TermToJson) ->
     JsonActors = lists:map(
@@ -397,7 +410,7 @@ encode_actors(Actors, Msg, _TermToJson) ->
             )
     end.
 
-%% @doc Encode a modules list response.
+-doc "Encode a modules list response.".
 -spec encode_modules([{atom(), map()}], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_modules(ModulesWithInfo, Msg, _TermToJson) ->
     JsonModules = lists:map(
@@ -424,7 +437,7 @@ encode_modules(ModulesWithInfo, Msg, _TermToJson) ->
             )
     end.
 
-%% @doc Encode a sessions list response.
+-doc "Encode a sessions list response.".
 -spec encode_sessions([map()], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_sessions(Sessions, Msg, _TermToJson) ->
     JsonSessions = lists:map(
@@ -449,7 +462,7 @@ encode_sessions(Sessions, Msg, _TermToJson) ->
             )
     end.
 
-%% @doc Encode an actor inspect response with a pre-formatted string.
+-doc "Encode an actor inspect response with a pre-formatted string.".
 -spec encode_inspect(binary(), protocol_msg()) -> binary().
 encode_inspect(InspectStr, Msg) ->
     case Msg#protocol_msg.legacy of
@@ -464,7 +477,7 @@ encode_inspect(InspectStr, Msg) ->
             )
     end.
 
-%% @doc Encode an actor inspect response.
+-doc "Encode an actor inspect response.".
 -spec encode_inspect(map(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_inspect(ActorState, Msg, TermToJson) ->
     JsonState = maps:fold(
@@ -484,7 +497,7 @@ encode_inspect(ActorState, Msg, TermToJson) ->
             )
     end.
 
-%% @doc Encode a documentation response.
+-doc "Encode a documentation response.".
 -spec encode_docs(binary(), protocol_msg()) -> binary().
 encode_docs(DocText, Msg) ->
     case Msg#protocol_msg.legacy of
@@ -497,7 +510,7 @@ encode_docs(DocText, Msg) ->
             )
     end.
 
-%% @doc Encode a describe response with ops, versions, and capabilities.
+-doc "Encode a describe response with ops, versions, and capabilities.".
 -spec encode_describe(map(), map(), protocol_msg()) -> binary().
 encode_describe(Ops, Versions, Msg) ->
     case Msg#protocol_msg.legacy of
@@ -520,11 +533,13 @@ encode_describe(Ops, Versions, Msg) ->
             )
     end.
 
-%% @doc Encode a test results response.
-%%
-%% Uses `["done", "test-error"]` status when any tests failed, `["done"]`
-%% otherwise. The `results` field contains a JSON map with `passed`,
-%% `failed`, `total`, `duration`, and `tests` keys.
+-doc """
+Encode a test results response.
+
+Uses `["done", "test-error"]` status when any tests failed, `["done"]`
+otherwise. The `results` field contains a JSON map with `passed`,
+`failed`, `total`, `duration`, and `tests` keys.
+""".
 -spec encode_test_results(map(), protocol_msg()) -> binary().
 encode_test_results(
     #{
@@ -554,7 +569,6 @@ encode_test_results(
     Base = base_response(Msg),
     iolist_to_binary(json:encode(Base#{<<"status">> => Status, <<"results">> => ResultMap})).
 
-%% @private
 -spec encode_test_entry(map()) -> map().
 encode_test_entry(#{name := Name, status := pass} = Entry) ->
     maybe_add_class(
@@ -598,17 +612,19 @@ encode_test_entry(Entry) ->
         Entry
     ).
 
-%% @private Add class name to encoded test entry if available.
+-doc "Add class name to encoded test entry if available.".
 -spec maybe_add_class(map(), map()) -> map().
 maybe_add_class(Encoded, #{class := ClassName}) when is_atom(ClassName) ->
     Encoded#{<<"class">> => atom_to_binary(ClassName, utf8)};
 maybe_add_class(Encoded, _Entry) ->
     Encoded.
 
-%% @doc Encode a trace result response (BT-1238).
-%%
-%% `Steps' is `[{SourceBin, Value}]' — one entry per top-level statement.
-%% The response includes a `steps' array where each entry has `src' and `value' fields.
+-doc """
+Encode a trace result response (BT-1238).
+
+`Steps' is `[{SourceBin, Value}]' — one entry per top-level statement.
+The response includes a `steps' array where each entry has `src' and `value' fields.
+""".
 -spec encode_trace_result(
     [{binary(), term()}], protocol_msg(), fun((term()) -> term()), binary(), [binary()]
 ) -> binary().
@@ -633,8 +649,7 @@ encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
 
 %%% Internal functions
 
-%% @private
-%% @doc Decode a parsed JSON map into a protocol message.
+-doc "Decode a parsed JSON map into a protocol message.".
 -spec decode_map(map()) -> {ok, protocol_msg()} | {error, term()}.
 decode_map(#{<<"op">> := Op} = Map) ->
     %% New protocol format
@@ -658,8 +673,7 @@ decode_map(#{<<"type">> := Type} = Map) ->
 decode_map(_) ->
     {error, {invalid_request, missing_op_or_type}}.
 
-%% @private
-%% @doc Translate legacy type+fields to op+params.
+-doc "Translate legacy type+fields to op+params.".
 -spec legacy_to_op(binary(), map()) -> {binary(), map()}.
 legacy_to_op(<<"eval">>, Map) ->
     Code = maps:get(<<"expression">>, Map, <<>>),
@@ -684,7 +698,7 @@ legacy_to_op(<<"kill">>, Map) ->
 legacy_to_op(Type, _Map) ->
     {Type, #{}}.
 
-%% @doc Build base response map with id and session fields.
+-doc "Build base response map with id and session fields.".
 -spec base_response(protocol_msg()) -> map().
 base_response(#protocol_msg{id = Id, session = Session}) ->
     M0 = #{},
@@ -698,8 +712,7 @@ base_response(#protocol_msg{id = Id, session = Session}) ->
         _ -> M1#{<<"session">> => Session}
     end.
 
-%% @private
-%% @doc Parse a JSON binary into a decoded term.
+-doc "Parse a JSON binary into a decoded term.".
 -spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
@@ -709,8 +722,7 @@ parse_json(Data) ->
         _:_ -> {error, not_json}
     end.
 
-%% @private
-%% @doc Convert a term to binary for use as a JSON key.
+-doc "Convert a term to binary for use as a JSON key.".
 -spec to_binary(term()) -> binary().
 to_binary(Name) when is_atom(Name) ->
     atom_to_binary(Name, utf8);
@@ -721,16 +733,14 @@ to_binary(Name) when is_list(Name) ->
 to_binary(Name) ->
     list_to_binary(io_lib:format("~p", [Name])).
 
-%% @private
-%% @doc Add output field to response map only when non-empty.
+-doc "Add output field to response map only when non-empty.".
 -spec maybe_add_output(map(), binary()) -> map().
 maybe_add_output(Map, <<>>) ->
     Map;
 maybe_add_output(Map, Output) when is_binary(Output) ->
     Map#{<<"output">> => Output}.
 
-%% @private
-%% @doc Add warnings field to response map only when non-empty.
+-doc "Add warnings field to response map only when non-empty.".
 -spec maybe_add_warnings(map(), [binary()]) -> map().
 maybe_add_warnings(Map, []) -> Map;
 maybe_add_warnings(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.

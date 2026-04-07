@@ -3,12 +3,14 @@
 
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_test_runner module.
-%%%
-%%% Covers path_suffix_match/2 which is the core logic for the `file`
-%%% parameter of the `test` MCP tool (BT-1234).
-
 -module(beamtalk_test_runner_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_test_runner module.
+
+Covers path_suffix_match/2 which is the core logic for the `file`
+parameter of the `test` MCP tool (BT-1234).
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================

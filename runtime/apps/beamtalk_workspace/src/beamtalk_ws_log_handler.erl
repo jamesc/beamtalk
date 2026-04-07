@@ -1,40 +1,42 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Custom OTP logger handler that forwards log events to subscribed
-%%% WebSocket sessions.
-%%%
-%%% **DDD Context:** Workspace Context
-%%%
-%%% Each WebSocket handler process (cowboy_websocket) can subscribe to
-%%% receive log events by calling `subscribe/0` or `subscribe/1` with a
-%%% minimum log level. Events below the subscriber's level filter are
-%%% silently dropped. Subscribers are automatically cleaned up when the
-%%% process terminates (via monitor).
-%%%
-%%% The handler is registered with OTP logger during workspace startup
-%%% (`beamtalk_workspace_sup`) and removed on shutdown.
-%%%
-%%% Follows the same subscribe/unsubscribe pattern as
-%%% `beamtalk_repl_actors`, `beamtalk_class_events`, etc.
-%%%
-%%% ## Log Event Format
-%%%
-%%% Subscribers receive `{log_event, Map}` messages where Map contains:
-%%% ```erlang
-%%% #{
-%%%   level => atom(),
-%%%   time => binary(),           % ISO 8601 UTC
-%%%   msg => binary(),
-%%%   domain => binary() | undefined,
-%%%   class => binary() | undefined,
-%%%   selector => binary() | undefined,
-%%%   mfa => binary() | undefined,
-%%%   pid => binary() | undefined
-%%% }
-%%% ```
-
 -module(beamtalk_ws_log_handler).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Custom OTP logger handler that forwards log events to subscribed
+WebSocket sessions.
+
+Each WebSocket handler process (cowboy_websocket) can subscribe to
+receive log events by calling `subscribe/0` or `subscribe/1` with a
+minimum log level. Events below the subscriber's level filter are
+silently dropped. Subscribers are automatically cleaned up when the
+process terminates (via monitor).
+
+The handler is registered with OTP logger during workspace startup
+(`beamtalk_workspace_sup`) and removed on shutdown.
+
+Follows the same subscribe/unsubscribe pattern as
+`beamtalk_repl_actors`, `beamtalk_class_events`, etc.
+
+## Log Event Format
+
+Subscribers receive `{log_event, Map}` messages where Map contains:
+```erlang
+#{
+  level => atom(),
+  time => binary(),           % ISO 8601 UTC
+  msg => binary(),
+  domain => binary() | undefined,
+  class => binary() | undefined,
+  selector => binary() | undefined,
+  mfa => binary() | undefined,
+  pid => binary() | undefined
+}
+```
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -68,12 +70,12 @@
 %% Public API
 %%====================================================================
 
-%% @doc Subscribe the calling process to all log events (debug and above).
+-doc "Subscribe the calling process to all log events (debug and above).".
 -spec subscribe() -> ok.
 subscribe() ->
     subscribe(debug).
 
-%% @doc Subscribe the calling process to log events at or above `Level`.
+-doc "Subscribe the calling process to log events at or above `Level`.".
 -spec subscribe(logger:level()) -> ok.
 subscribe(Level) when is_atom(Level) ->
     ensure_table(),
@@ -90,7 +92,7 @@ subscribe(Level) when is_atom(Level) ->
     spawn(fun() -> monitor_subscriber(Pid) end),
     ok.
 
-%% @doc Unsubscribe the calling process from log events.
+-doc "Unsubscribe the calling process from log events.".
 -spec unsubscribe() -> ok.
 unsubscribe() ->
     case ets:info(?SUB_TABLE) of
@@ -103,15 +105,19 @@ unsubscribe() ->
 %% OTP logger handler callbacks
 %%====================================================================
 
-%% @doc Called by OTP logger when this handler is added.
-%% Creates the ETS table for subscriber tracking.
+-doc """
+Called by OTP logger when this handler is added.
+Creates the ETS table for subscriber tracking.
+""".
 -spec adding_handler(logger:handler_config()) -> {ok, logger:handler_config()}.
 adding_handler(Config) ->
     ensure_table(),
     {ok, Config}.
 
-%% @doc Called by OTP logger when this handler is removed.
-%% Deletes the ETS table.
+-doc """
+Called by OTP logger when this handler is removed.
+Deletes the ETS table.
+""".
 -spec removing_handler(logger:handler_config()) -> ok.
 removing_handler(_Config) ->
     case ets:info(?SUB_TABLE) of
@@ -120,8 +126,10 @@ removing_handler(_Config) ->
     end,
     ok.
 
-%% @doc Called by OTP logger for each log event.
-%% Formats the event and sends it to all subscribers whose level filter passes.
+-doc """
+Called by OTP logger for each log event.
+Formats the event and sends it to all subscribers whose level filter passes.
+""".
 -spec log(logger:log_event(), logger:handler_config()) -> ok.
 log(#{level := Level} = LogEvent, _Config) ->
     case ets:info(?SUB_TABLE) of
@@ -164,8 +172,7 @@ log(#{level := Level} = LogEvent, _Config) ->
 %% Internal helpers
 %%====================================================================
 
-%% @private
-%% @doc Monitor a subscriber and clean up its ETS entry when it dies.
+-doc "Monitor a subscriber and clean up its ETS entry when it dies.".
 -spec monitor_subscriber(pid()) -> ok.
 monitor_subscriber(Pid) ->
     MonRef = erlang:monitor(process, Pid),
@@ -178,8 +185,7 @@ monitor_subscriber(Pid) ->
             ok
     end.
 
-%% @private
-%% @doc Ensure the subscriber ETS table exists.
+-doc "Ensure the subscriber ETS table exists.".
 -spec ensure_table() -> ok.
 ensure_table() ->
     case ets:info(?SUB_TABLE) of
@@ -201,8 +207,7 @@ ensure_table() ->
             ok
     end.
 
-%% @private
-%% @doc Format a log event into a map suitable for JSON encoding.
+-doc "Format a log event into a map suitable for JSON encoding.".
 -spec format_event(logger:log_event()) -> map().
 format_event(#{level := Level, msg := Msg, meta := Meta}) ->
     Base = #{
@@ -216,7 +221,6 @@ format_event(#{level := Level, msg := Msg, meta := Meta}) ->
     M4 = maybe_put(mfa, format_mfa(Meta), M3),
     maybe_put(pid, format_pid(Meta), M4).
 
-%% @private
 -spec format_time(map()) -> binary().
 format_time(#{time := Timestamp}) ->
     Micros = Timestamp rem 1000000,
@@ -232,7 +236,6 @@ format_time(#{time := Timestamp}) ->
 format_time(_) ->
     <<"unknown">>.
 
-%% @private
 -spec format_msg(term(), map()) -> binary().
 format_msg({string, Msg}, _Meta) ->
     iolist_to_binary(Msg);
@@ -251,7 +254,6 @@ format_msg({report, Report}, Meta) ->
 format_msg({Format, Args}, _Meta) ->
     iolist_to_binary(io_lib:format(Format, Args)).
 
-%% @private
 -spec format_msg_report_list(term(), map()) -> binary().
 format_msg_report_list(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
@@ -264,28 +266,24 @@ format_msg_report_list(Report, Meta) ->
             iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end.
 
-%% @private
 -spec format_domain(map()) -> binary() | undefined.
 format_domain(#{domain := Domain}) when is_list(Domain) ->
     iolist_to_binary(lists:join($., [atom_to_list(D) || D <- Domain]));
 format_domain(_) ->
     undefined.
 
-%% @private
 -spec format_class(map()) -> binary() | undefined.
 format_class(#{beamtalk_class := Class}) when is_atom(Class) ->
     atom_to_binary(Class, utf8);
 format_class(_) ->
     undefined.
 
-%% @private
 -spec format_selector(map()) -> binary() | undefined.
 format_selector(#{beamtalk_selector := Sel}) when is_atom(Sel) ->
     atom_to_binary(Sel, utf8);
 format_selector(_) ->
     undefined.
 
-%% @private
 -spec format_mfa(map()) -> binary() | undefined.
 format_mfa(#{mfa := {M, F, A}}) when is_atom(M), is_atom(F), is_integer(A) ->
     iolist_to_binary(
@@ -294,14 +292,12 @@ format_mfa(#{mfa := {M, F, A}}) when is_atom(M), is_atom(F), is_integer(A) ->
 format_mfa(_) ->
     undefined.
 
-%% @private
 -spec format_pid(map()) -> binary() | undefined.
 format_pid(#{pid := Pid}) when is_pid(Pid) ->
     list_to_binary(pid_to_list(Pid));
 format_pid(_) ->
     undefined.
 
-%% @private
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->
     Map;

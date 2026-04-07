@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_repl_docs module
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Tests runtime-embedded documentation formatting and error handling.
-%%% Uses pure formatting functions for unit tests, and running runtime
-%%% for integration tests.
-
 -module(beamtalk_repl_docs_tests).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Unit tests for beamtalk_repl_docs module
+
+Tests runtime-embedded documentation formatting and error handling.
+Uses pure formatting functions for unit tests, and running runtime
+for integration tests.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test helper for actor spawn callback tests.
-%%% Implements on_actor_spawned/4 and sends a message to a registered
-%%% test process so tests can verify the callback was invoked.
-
 -module(test_spawn_callback).
+
+-moduledoc """
+Test helper for actor spawn callback tests.
+Implements on_actor_spawned/4 and sends a message to a registered
+test process so tests can verify the callback was invoked.
+""".
 
 -export([on_actor_spawned/4]).
 

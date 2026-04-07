@@ -1,12 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_message_dispatch module (BT-430).
-%%%
-%%% Tests unified dispatch routing for actors, class objects, and primitives.
-%%% Note: Compiled stdlib modules (bt@stdlib@integer etc.) require `just build-stdlib`.
-%%% These tests focus on routing logic that works without compiled stdlib.
 -module(beamtalk_message_dispatch_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_message_dispatch module (BT-430).
+
+Tests unified dispatch routing for actors, class objects, and primitives.
+Note: Compiled stdlib modules (bt@stdlib@integer etc.) require `just build-stdlib`.
+These tests focus on routing logic that works without compiled stdlib.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 -export([init/1]).
@@ -150,11 +153,11 @@ primitive_list_dispatch() ->
 %% Supervisor dispatch tests (ADR 0059)
 %% ============================================================================
 
-%% @private Minimal OTP supervisor callback for dispatch tests.
+-doc "Minimal OTP supervisor callback for dispatch tests.".
 init({SupFlags, ChildSpecs}) ->
     {ok, {SupFlags, ChildSpecs}}.
 
-%% @private Start an anonymous OTP supervisor with no children.
+-doc "Start an anonymous OTP supervisor with no children.".
 anon_sup() ->
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, []}),

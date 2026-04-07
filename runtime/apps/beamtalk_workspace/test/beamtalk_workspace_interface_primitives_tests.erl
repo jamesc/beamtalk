@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_workspace_interface_primitives module.
-%%%
-%%% Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
-%%% - actors selector
-%%% - actorAt: selector
-%%% - classes selector
-%%% - load: selector
-%%% - globals selector
-%%% - bind:as: selector
-%%% - unbind: selector
-%%% - get_user_bindings/0 external API
-%%% - get_session_bindings/0 external API
-
 -module(beamtalk_workspace_interface_primitives_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_workspace_interface_primitives module.
+
+Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
+- actors selector
+- actorAt: selector
+- classes selector
+- load: selector
+- globals selector
+- bind:as: selector
+- unbind: selector
+- get_user_bindings/0 external API
+- get_session_bindings/0 external API
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

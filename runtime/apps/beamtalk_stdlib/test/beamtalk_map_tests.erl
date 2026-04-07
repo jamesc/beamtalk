@@ -1,9 +1,12 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_map helper module and compiled
-%% bt@stdlib@dictionary stdlib dispatch (BT-418).
 -module(beamtalk_map_tests).
+
+-moduledoc """
+Tests for beamtalk_map helper module and compiled
+bt@stdlib@dictionary stdlib dispatch (BT-418).
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

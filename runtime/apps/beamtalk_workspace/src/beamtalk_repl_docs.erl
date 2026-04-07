@@ -1,17 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc REPL documentation helper — fetches and formats runtime docs.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Provides documentation lookup for `:help ClassName` and
-%%% `:help ClassName selector` commands. Uses the runtime-embedded
-%%% documentation system (ADR 0033) via message sends on live objects.
-%%% Class docs are retrieved via `gen_server:call(ClassPid, get_doc)`.
-%%% Method docs are retrieved via `>> #selector` (CompiledMethod maps).
-
 -module(beamtalk_repl_docs).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+REPL documentation helper — fetches and formats runtime docs.
+
+Provides documentation lookup for `:help ClassName` and
+`:help ClassName selector` commands. Uses the runtime-embedded
+documentation system (ADR 0033) via message sends on live objects.
+Class docs are retrieved via `gen_server:call(ClassPid, get_doc)`.
+Method docs are retrieved via `>> #selector` (CompiledMethod maps).
+""".
 
 -export([
     format_class_docs/1,
@@ -47,8 +49,10 @@
 ]).
 -endif.
 
-%% @doc Format documentation for a class, including method listing.
-%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-doc """
+Format documentation for a class, including method listing.
+Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+""".
 -spec format_class_docs(atom()) -> {ok, binary()} | {error, term()}.
 format_class_docs('Metaclass') ->
     {ok, format_metaclass_docs()};
@@ -133,9 +137,11 @@ format_class_docs(ClassName) ->
             end
     end.
 
-%% @doc Format documentation for a specific method on a class.
-%% Walks class hierarchy to find the method.
-%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-doc """
+Format documentation for a specific method on a class.
+Walks class hierarchy to find the method.
+Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+""".
 -spec format_method_doc(atom(), binary()) -> {ok, binary()} | {error, term()}.
 format_method_doc('Metaclass', SelectorBin) ->
     format_metaclass_method_doc(SelectorBin);
@@ -166,9 +172,11 @@ format_method_doc(ClassName, SelectorBin) ->
             end
     end.
 
-%% @doc Format documentation for a specific method on a class object (class-side).
-%% Uses the class-object lookup path (class methods + class-protocol fallthrough).
-%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-doc """
+Format documentation for a specific method on a class object (class-side).
+Uses the class-object lookup path (class methods + class-protocol fallthrough).
+Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+""".
 -spec format_method_doc_class_side(atom(), binary()) -> {ok, binary()} | {error, term()}.
 format_method_doc_class_side('Metaclass', SelectorBin) ->
     format_metaclass_method_doc(SelectorBin);
@@ -201,9 +209,11 @@ format_method_doc_class_side(ClassName, SelectorBin) ->
             end
     end.
 
-%% @doc Format documentation for the class-object side of a class (`:h ClassName class`).
-%% Shows class methods and class-protocol methods separately.
-%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-doc """
+Format documentation for the class-object side of a class (`:h ClassName class`).
+Shows class methods and class-protocol methods separately.
+Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+""".
 -spec format_class_docs_class_side(atom()) -> {ok, binary()} | {error, term()}.
 format_class_docs_class_side('Metaclass') ->
     {ok, format_metaclass_docs()};
@@ -261,13 +271,15 @@ format_class_docs_class_side(ClassName) ->
 
 %%% Internal functions
 
-%% @doc Try instance-side and class-side lookup strategies for a method:
-%%   1. Instance-side resolution  (42 foo — instance method chain)
-%%   2. Class-side lookup         (explicitly defined class methods, walked up hierarchy)
-%%
-%% Class-protocol fallthrough (Class→Behaviour→Object) is intentionally excluded:
-%% methods like `allMethods`, `name`, `reload` are class-object methods and should
-%% only appear under `:h ClassName class selector`, not `:h ClassName selector`.
+-doc """
+Try instance-side and class-side lookup strategies for a method:
+  1. Instance-side resolution  (42 foo — instance method chain)
+  2. Class-side lookup         (explicitly defined class methods, walked up hierarchy)
+
+Class-protocol fallthrough (Class→Behaviour→Object) is intentionally excluded:
+methods like `allMethods`, `name`, `reload` are class-object methods and should
+only appear under `:h ClassName class selector`, not `:h ClassName selector`.
+""".
 -spec resolve_method_obj(pid(), atom()) -> {ok, map(), atom()} | not_found.
 resolve_method_obj(ClassPid, Selector) ->
     case beamtalk_method_resolver:resolve(ClassPid, Selector) of
@@ -282,9 +294,11 @@ resolve_method_obj(ClassPid, Selector) ->
             end
     end.
 
-%% @doc Try class-side lookup strategies for a class object (Integer foo, not 42 foo):
-%%   1. Class-side methods (explicitly declared class methods, walked up hierarchy)
-%%   2. Class-protocol fallthrough (Class→Behaviour→Object instance methods)
+-doc """
+Try class-side lookup strategies for a class object (Integer foo, not 42 foo):
+  1. Class-side methods (explicitly declared class methods, walked up hierarchy)
+  2. Class-protocol fallthrough (Class→Behaviour→Object instance methods)
+""".
 -spec resolve_class_side_method_obj(pid(), atom()) -> {ok, map(), atom()} | not_found.
 resolve_class_side_method_obj(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {class_method, Selector}, 5000) of
@@ -304,7 +318,7 @@ resolve_class_side_method_obj(ClassPid, Selector) ->
             end
     end.
 
-%% @doc Return hardcoded documentation for the Metaclass terminal sentinel.
+-doc "Return hardcoded documentation for the Metaclass terminal sentinel.".
 -spec format_metaclass_docs() -> binary().
 format_metaclass_docs() ->
     iolist_to_binary([
@@ -320,7 +334,7 @@ format_metaclass_docs() ->
         <<"\nUse :help ClassName for docs on a specific class.">>
     ]).
 
-%% @doc Return documentation for a Metaclass method.
+-doc "Return documentation for a Metaclass method.".
 -spec format_metaclass_method_doc(binary()) -> {ok, binary()} | {error, term()}.
 format_metaclass_method_doc(SelectorBin) ->
     case metaclass_method_doc(SelectorBin) of
@@ -339,7 +353,7 @@ format_metaclass_method_doc(SelectorBin) ->
             {error, {method_not_found, 'Metaclass', SelectorBin}}
     end.
 
-%% @doc Lookup doc text for known Metaclass class-side methods.
+-doc "Lookup doc text for known Metaclass class-side methods.".
 -spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
 metaclass_method_doc(<<"new">>) ->
     {ok, <<"Create a new instance of the class.">>};
@@ -350,7 +364,7 @@ metaclass_method_doc(<<"spawnWith:">>) ->
 metaclass_method_doc(_) ->
     not_found.
 
-%% @doc Safe atom conversion — returns error instead of creating new atoms.
+-doc "Safe atom conversion — returns error instead of creating new atoms.".
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(<<>>) ->
     {error, badarg};
@@ -361,9 +375,11 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
         error:badarg -> {error, badarg}
     end.
 
-%% @doc Get method doc info from a CompiledMethod map.
-%% Returns {Signature, DocText | none, IsSealed, IsInternal}.
-%% ADR 0071 Phase 5: Now includes method-level visibility.
+-doc """
+Get method doc info from a CompiledMethod map.
+Returns {Signature, DocText | none, IsSealed, IsInternal}.
+ADR 0071 Phase 5: Now includes method-level visibility.
+""".
 -spec method_doc_info(map(), atom()) -> {binary(), binary() | none, boolean(), boolean()}.
 method_doc_info(MethodObj, SelectorAtom) ->
     %% Extract doc from __doc__ field
@@ -391,8 +407,10 @@ method_doc_info(MethodObj, SelectorAtom) ->
         end,
     {Signature, Doc, IsSealed, IsInternal}.
 
-%% @doc Get method signatures and docs with both sealed and internal flags.
-%% ADR 0071 Phase 5: Extended version that includes method visibility.
+-doc """
+Get method signatures and docs with both sealed and internal flags.
+ADR 0071 Phase 5: Extended version that includes method visibility.
+""".
 -spec get_method_signatures_with_modifiers(pid(), [atom()], map(), map()) ->
     [{atom(), binary(), binary() | none, boolean(), boolean()}].
 get_method_signatures_with_modifiers(ClassPid, Selectors, SealedMap, InternalMap) ->
@@ -406,7 +424,7 @@ get_method_signatures_with_modifiers(ClassPid, Selectors, SealedMap, InternalMap
         Selectors
     ).
 
-%% @doc Get method signature and doc text from a class's runtime state.
+-doc "Get method signature and doc text from a class's runtime state.".
 -spec get_method_doc_from_class(pid(), atom()) -> {binary(), binary() | none}.
 get_method_doc_from_class(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}, 5000) of
@@ -417,8 +435,10 @@ get_method_doc_from_class(ClassPid, Selector) ->
             {Sig, Doc}
     end.
 
-%% @doc Find which class in the hierarchy defines a selector.
-%% Returns the class name atom.
+-doc """
+Find which class in the hierarchy defines a selector.
+Returns the class name atom.
+""".
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
     find_defining_class(ClassPid, Selector, 0).
@@ -450,10 +470,12 @@ find_defining_class(ClassPid, Selector, Depth) ->
             ClassName
     end.
 
-%% @doc Find which class in the hierarchy defines a class-side method.
-%% Uses {class_method, Selector} which walks the chain internally;
-%% we query each class locally via get_local_class_methods to find
-%% exactly where the method is defined.
+-doc """
+Find which class in the hierarchy defines a class-side method.
+Uses {class_method, Selector} which walks the chain internally;
+we query each class locally via get_local_class_methods to find
+exactly where the method is defined.
+""".
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
     find_defining_class_method(ClassPid, Selector, 0).
@@ -479,14 +501,16 @@ find_defining_class_method(ClassPid, Selector, Depth) ->
             end
     end.
 
-%% @doc Find which class in the Class chain defines a class-protocol method.
-%%
-%% Used by the class-side lookup path (`resolve_class_side_method_obj`).
-%% Class-protocol methods (name, printString, allMethods, methods, canUnderstand:,
-%% reload, etc.) are instance methods of the Class→Behaviour→Object chain that class
-%% objects inherit via the class-chain fallthrough mechanism (try_class_chain_fallthrough
-%% dispatches from 'Class'). This function walks from 'Class' upward to find the
-%% exact defining class.
+-doc """
+Find which class in the Class chain defines a class-protocol method.
+
+Used by the class-side lookup path (`resolve_class_side_method_obj`).
+Class-protocol methods (name, printString, allMethods, methods, canUnderstand:,
+reload, etc.) are instance methods of the Class→Behaviour→Object chain that class
+objects inherit via the class-chain fallthrough mechanism (try_class_chain_fallthrough
+dispatches from 'Class'). This function walks from 'Class' upward to find the
+exact defining class.
+""".
 -spec find_class_protocol_defining_class(atom()) -> atom().
 find_class_protocol_defining_class(Selector) ->
     case beamtalk_runtime_api:whereis_class('Class') of
@@ -494,7 +518,7 @@ find_class_protocol_defining_class(Selector) ->
         ClassPid -> find_defining_class(ClassPid, Selector, 0)
     end.
 
-%% @doc Group inherited methods by defining class.
+-doc "Group inherited methods by defining class.".
 -spec group_by_class([{atom(), atom()}]) -> [{atom(), [atom()]}].
 group_by_class(Methods) ->
     Grouped = lists:foldl(
@@ -516,8 +540,10 @@ group_by_class(Methods) ->
         )
     ).
 
-%% @doc Format the complete class documentation output.
-%% ADR 0071 Phase 5: OwnDocs may be 5-tuples with internal flag.
+-doc """
+Format the complete class documentation output.
+ADR 0071 Phase 5: OwnDocs may be 5-tuples with internal flag.
+""".
 -spec format_class_output(
     atom(),
     atom() | none,
@@ -600,13 +626,15 @@ format_class_output(
         )
     ).
 
-%% @doc Format superclass portion of header.
+-doc "Format superclass portion of header.".
 -spec format_superclass(atom() | none) -> iolist().
 format_superclass(none) -> [];
 format_superclass(Superclass) -> [<<" < ">>, atom_to_binary(Superclass, utf8)].
 
-%% @doc Format class modifiers (sealed/abstract/internal) for display.
-%% ADR 0071 Phase 5: Include [internal] annotation when present.
+-doc """
+Format class modifiers (sealed/abstract/internal) for display.
+ADR 0071 Phase 5: Include [internal] annotation when present.
+""".
 -spec format_modifiers(map()) -> binary().
 format_modifiers(Modifiers) ->
     Tags = lists:filter(fun(T) -> T =/= <<>> end, [
@@ -628,8 +656,10 @@ format_modifiers(Modifiers) ->
         _ -> iolist_to_binary([<<"\n">>, lists:join(<<" ">>, Tags)])
     end.
 
-%% @doc Format a single method line in the class doc method listing.
-%% ADR 0071 Phase 5: Handles 5-tuple with both sealed and internal flags.
+-doc """
+Format a single method line in the class doc method listing.
+ADR 0071 Phase 5: Handles 5-tuple with both sealed and internal flags.
+""".
 -spec format_method_line({atom(), binary(), binary() | none, boolean(), boolean()}) -> binary().
 format_method_line({_Sel, Sig, _Doc, IsSealed, IsInternal}) ->
     Tags = lists:filter(fun(T) -> T =/= <<>> end, [
@@ -647,10 +677,12 @@ format_method_line({_Sel, Sig, _Doc, IsSealed, IsInternal}) ->
         _ -> iolist_to_binary([<<"  ">>, Sig, <<" ">>, lists:join(<<" ">>, Tags)])
     end.
 
-%% @doc Format package provenance for a class (ADR 0070 Phase 5, BT-1658).
-%%
-%% Shows which package a class belongs to using `beamtalk_package:package_name/1`.
-%% Returns an empty binary if the class has no package or the lookup fails.
+-doc """
+Format package provenance for a class (ADR 0070 Phase 5, BT-1658).
+
+Shows which package a class belongs to using `beamtalk_package:package_name/1`.
+Returns an empty binary if the class has no package or the lookup fails.
+""".
 -spec format_package_provenance(atom()) -> binary().
 format_package_provenance(ClassName) ->
     try beamtalk_package:package_name(ClassName) of
@@ -662,12 +694,14 @@ format_package_provenance(ClassName) ->
         _:_ -> <<>>
     end.
 
-%% @doc Extract @see references from doc text.
-%%
-%% Matches `@see ClassName` and `@see ClassName (description)` patterns.
-%% Use one @see per line for multiple references.
-%%
-%% Returns a list of {ClassName, Description} tuples.
+-doc """
+Extract @see references from doc text.
+
+Matches `@see ClassName` and `@see ClassName (description)` patterns.
+Use one @see per line for multiple references.
+
+Returns a list of {ClassName, Description} tuples.
+""".
 -spec extract_see_also(binary() | none) -> [{atom(), binary()}].
 extract_see_also(none) ->
     [];
@@ -701,7 +735,7 @@ extract_see_also(DocText) ->
             []
     end.
 
-%% @doc Well-known alternative base class suggestions.
+-doc "Well-known alternative base class suggestions.".
 -spec alternative_classes(atom()) -> [{atom(), binary()}].
 alternative_classes('Object') ->
     [
@@ -721,8 +755,10 @@ alternative_classes('Actor') ->
 alternative_classes(_) ->
     [].
 
-%% @doc Find sibling classes (other direct subclasses of the same parent).
-%% Limited to 5 entries to avoid overwhelming output.
+-doc """
+Find sibling classes (other direct subclasses of the same parent).
+Limited to 5 entries to avoid overwhelming output.
+""".
 -spec sibling_classes(atom(), atom() | none) -> [{atom(), binary()}].
 sibling_classes(_ClassName, none) ->
     [];
@@ -748,7 +784,7 @@ sibling_classes(ClassName, Superclass) ->
         _:_ -> []
     end.
 
-%% @doc Build the complete see-also list from all sources, deduplicated.
+-doc "Build the complete see-also list from all sources, deduplicated.".
 -spec build_see_also(atom(), atom() | none, binary() | none) -> [{atom(), binary()}].
 build_see_also(ClassName, Superclass, ModuleDoc) ->
     %% Collect from all three sources
@@ -760,7 +796,7 @@ build_see_also(ClassName, Superclass, ModuleDoc) ->
     All = FromDoc ++ FromAlternatives ++ FromSiblings,
     deduplicate_see_also(All, #{}, []).
 
-%% @doc Deduplicate see-also entries, keeping the first occurrence of each class name.
+-doc "Deduplicate see-also entries, keeping the first occurrence of each class name.".
 -spec deduplicate_see_also([{atom(), binary()}], map(), [{atom(), binary()}]) ->
     [{atom(), binary()}].
 deduplicate_see_also([], _Seen, Acc) ->
@@ -771,7 +807,7 @@ deduplicate_see_also([{Name, Desc} | Rest], Seen, Acc) ->
         false -> deduplicate_see_also(Rest, Seen#{Name => true}, [{Name, Desc} | Acc])
     end.
 
-%% @doc Format the see-also section for display.
+-doc "Format the see-also section for display.".
 -spec format_see_also([{atom(), binary()}]) -> binary().
 format_see_also([]) ->
     <<>>;
@@ -785,12 +821,13 @@ format_see_also(Entries) ->
     ],
     iolist_to_binary([<<"\nSee also:\n">>, lists:join(<<"\n">>, Lines)]).
 
-%% @private
-%% @doc Walk the class hierarchy and build a flattened method map.
-%%
-%% ADR 0032 Phase 1: Replaces get_flattened_methods gen_server call.
-%% Returns #{Selector => {DefiningClass, MethodInfo}} where local methods
-%% shadow inherited ones, walking from ClassName upward.
+-doc """
+Walk the class hierarchy and build a flattened method map.
+
+ADR 0032 Phase 1: Replaces get_flattened_methods gen_server call.
+Returns #{Selector => {DefiningClass, MethodInfo}} where local methods
+shadow inherited ones, walking from ClassName upward.
+""".
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
     collect_flattened_methods(ClassName, ClassPid, 0).
@@ -819,7 +856,7 @@ collect_chain_methods(SuperName, Depth) ->
         SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
     end.
 
-%% @doc Format method-specific documentation output.
+-doc "Format method-specific documentation output.".
 -spec format_method_output(
     atom(),
     binary(),
@@ -871,7 +908,7 @@ format_method_output(
         end,
     iolist_to_binary([Header, SealedLine, Inherited, SignatureLine, Doc]).
 
-%% @doc Format a summary of selectors: show all if ≤5, else first 3 + count.
+-doc "Format a summary of selectors: show all if ≤5, else first 3 + count.".
 -spec format_selector_summary(non_neg_integer(), [atom()]) -> iolist().
 format_selector_summary(Count, Selectors) ->
     case Count =< 5 of
@@ -888,7 +925,7 @@ format_selector_summary(Count, Selectors) ->
             ]
     end.
 
-%% @doc Format the class-object side documentation output.
+-doc "Format the class-object side documentation output.".
 -spec format_class_side_output(atom(), map(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
     binary().
 format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped) ->
@@ -954,8 +991,10 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
         )
     ).
 
-%% @doc Walk the class hierarchy collecting class-side methods.
-%% Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
+-doc """
+Walk the class hierarchy collecting class-side methods.
+Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
+""".
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
     collect_flattened_class_methods(ClassName, ClassPid, 0).

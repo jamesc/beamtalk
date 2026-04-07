@@ -1,22 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc TestRunner and TestResult primitive implementations (BT-762).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% TestRunner provides programmatic test execution returning structured
-%%% TestResult objects. TestResult wraps the structured maps from
-%%% beamtalk_test_case into first-class Beamtalk value objects.
-%%%
-%%% TestResult is a tagged map:
-%%% ```
-%%% #{'$beamtalk_class' => 'TestResult',
-%%%    passed => integer(), failed => integer(), skipped => integer(), total => integer(),
-%%%    duration => float(), tests => [#{name, status, error?}]}
-%%% ```
-
 -module(beamtalk_test_runner).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+TestRunner and TestResult primitive implementations (BT-762).
+
+TestRunner provides programmatic test execution returning structured
+TestResult objects. TestResult wraps the structured maps from
+beamtalk_test_case into first-class Beamtalk value objects.
+
+TestResult is a tagged map:
+```
+#{'$beamtalk_class' => 'TestResult',
+   passed => integer(), failed => integer(), skipped => integer(), total => integer(),
+   duration => float(), tests => [#{name, status, error?}]}
+```
+""".
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([
@@ -66,23 +69,27 @@
 %% TestRunner primitives
 %%====================================================================
 
-%% @doc Run all tests across all loaded TestCase subclasses (sequential).
-%%
-%% Equivalent to `run_all(1)` — runs all classes sequentially.
+-doc """
+Run all tests across all loaded TestCase subclasses (sequential).
+
+Equivalent to `run_all(1)` — runs all classes sequentially.
+""".
 -spec run_all() -> test_result().
 run_all() ->
     run_all(1).
 
-%% @doc Run all tests across all loaded TestCase subclasses with concurrency.
-%%
-%% MaxJobs controls how many test classes run concurrently:
-%% - `0`: auto (uses `erlang:system_info(schedulers)`)
-%% - `1`: sequential (backward-compatible)
-%% - `N > 1`: up to N concurrent classes
-%%
-%% Classes declaring `serial => true` are run sequentially after all
-%% concurrent classes complete. Classes that do not override `serial`
-%% (default `false`) run concurrently.
+-doc """
+Run all tests across all loaded TestCase subclasses with concurrency.
+
+MaxJobs controls how many test classes run concurrently:
+- `0`: auto (uses `erlang:system_info(schedulers)`)
+- `1`: sequential (backward-compatible)
+- `N > 1`: up to N concurrent classes
+
+Classes declaring `serial => true` are run sequentially after all
+concurrent classes complete. Classes that do not override `serial`
+(default `false`) run concurrently.
+""".
 -spec run_all(non_neg_integer()) -> test_result().
 run_all(0) ->
     run_all(erlang:system_info(schedulers));
@@ -100,7 +107,7 @@ run_all(Invalid) ->
     Error2 = beamtalk_error:with_message(Error1, Msg),
     beamtalk_error:raise(Error2).
 
-%% @private Implementation of run_all after argument validation.
+-doc "Implementation of run_all after argument validation.".
 -spec run_all_impl(pos_integer()) -> test_result().
 run_all_impl(MaxJobs) ->
     Classes = beamtalk_test_case:find_test_classes(),
@@ -126,14 +133,16 @@ run_all_impl(MaxJobs) ->
             Aggregated#{duration => WallDuration}
     end.
 
-%% @doc Run all TestCase subclasses whose source file matches FilePath.
-%%
-%% FilePath is a binary, matched as a path suffix against the absolute path
-%% stored in each compiled module's beamtalk_source attribute. This allows
-%% passing relative paths like <<"test/foo_test.bt">> to match the full path.
-%%
-%% Returns an aggregated TestResult. If no matching classes are found,
-%% returns an empty TestResult.
+-doc """
+Run all TestCase subclasses whose source file matches FilePath.
+
+FilePath is a binary, matched as a path suffix against the absolute path
+stored in each compiled module's beamtalk_source attribute. This allows
+passing relative paths like <<"test/foo_test.bt">> to match the full path.
+
+Returns an aggregated TestResult. If no matching classes are found,
+returns an empty TestResult.
+""".
 -spec run_file(binary()) -> test_result().
 run_file(FilePath) when is_binary(FilePath) ->
     AllTestClasses = beamtalk_test_case:find_test_classes(),
@@ -151,17 +160,21 @@ run_file(FilePath) when is_binary(FilePath) ->
             aggregate_results(ClassResults)
     end.
 
-%% @doc Run all tests in a single class.
-%%
-%% ClassRef is a class tuple — element 2 is 'ClassName class' atom.
+-doc """
+Run all tests in a single class.
+
+ClassRef is a class tuple — element 2 is 'ClassName class' atom.
+""".
 -spec run_class(tuple()) -> test_result().
 run_class(ClassRef) ->
     ClassName = extract_class_name(ClassRef),
     run_class_by_name(ClassName).
 
-%% @doc Run a single test method in a class.
-%%
-%% ClassRef is a class tuple, TestName is a symbol atom.
+-doc """
+Run a single test method in a class.
+
+ClassRef is a class tuple, TestName is a symbol atom.
+""".
 -spec run_method(tuple(), atom()) -> map().
 run_method(ClassRef, TestName) when is_atom(TestName) ->
     ClassName = extract_class_name(ClassRef),
@@ -171,34 +184,36 @@ run_method(ClassRef, TestName) when is_atom(TestName) ->
 %% TestResult instance primitives
 %%====================================================================
 
-%% @doc Number of passing tests.
+-doc "Number of passing tests.".
 -spec result_passed(map()) -> non_neg_integer().
 result_passed(#{'$beamtalk_class' := 'TestResult', passed := Passed}) ->
     Passed.
 
-%% @doc Number of failing tests.
+-doc "Number of failing tests.".
 -spec result_failed(map()) -> non_neg_integer().
 result_failed(#{'$beamtalk_class' := 'TestResult', failed := Failed}) ->
     Failed.
 
-%% @doc Number of skipped tests.
+-doc "Number of skipped tests.".
 -spec result_skipped(map()) -> non_neg_integer().
 result_skipped(#{'$beamtalk_class' := 'TestResult', skipped := Skipped}) ->
     Skipped.
 
-%% @doc Total test count.
+-doc "Total test count.".
 -spec result_total(map()) -> non_neg_integer().
 result_total(#{'$beamtalk_class' := 'TestResult', total := Total}) ->
     Total.
 
-%% @doc Elapsed time in seconds.
+-doc "Elapsed time in seconds.".
 -spec result_duration(map()) -> float().
 result_duration(#{'$beamtalk_class' := 'TestResult', duration := Duration}) ->
     Duration.
 
-%% @doc Collection of failure details.
-%%
-%% Returns a list of maps with name and error keys.
+-doc """
+Collection of failure details.
+
+Returns a list of maps with name and error keys.
+""".
 -spec result_failures(map()) -> [map()].
 result_failures(#{'$beamtalk_class' := 'TestResult', tests := Tests}) ->
     [
@@ -206,14 +221,14 @@ result_failures(#{'$beamtalk_class' := 'TestResult', tests := Tests}) ->
      || #{name := Name, status := fail, error := Error} <- Tests
     ].
 
-%% @doc True if all tests passed.
+-doc "True if all tests passed.".
 -spec result_has_passed(map()) -> boolean().
 result_has_passed(#{'$beamtalk_class' := 'TestResult', failed := 0}) ->
     true;
 result_has_passed(#{'$beamtalk_class' := 'TestResult'}) ->
     false.
 
-%% @doc Formatted summary string.
+-doc "Formatted summary string.".
 -spec result_summary(map()) -> binary().
 result_summary(#{
     '$beamtalk_class' := 'TestResult',
@@ -253,11 +268,13 @@ result_summary(#{
             )
     end.
 
-%% @doc printString representation for REPL display.
-%%
-%% When there are failures, prints each failure with class>>method, error
-%% message, and source location before the summary line. This matches the
-%% output format of `beamtalk test` (CLI).
+-doc """
+printString representation for REPL display.
+
+When there are failures, prints each failure with class>>method, error
+message, and source location before the summary line. This matches the
+output format of `beamtalk test` (CLI).
+""".
 -spec result_print_string(map()) -> binary().
 result_print_string(#{'$beamtalk_class' := 'TestResult', tests := Tests} = Result) ->
     Summary = result_summary(Result),
@@ -268,12 +285,14 @@ result_print_string(#{'$beamtalk_class' := 'TestResult', tests := Tests} = Resul
         _ -> <<FailureLines/binary, SummaryLine/binary>>
     end.
 
-%% @doc Format failure details for display.
-%%
-%% Returns a binary with one line per failure in the format:
-%%   ✗ ClassName>>testMethod
-%%     Error message (source_file.bt:42)
-%% Returns an empty binary if there are no failures.
+-doc """
+Format failure details for display.
+
+Returns a binary with one line per failure in the format:
+  ✗ ClassName>>testMethod
+    Error message (source_file.bt:42)
+Returns an empty binary if there are no failures.
+""".
 -spec format_failure_details([map()]) -> binary().
 format_failure_details(Tests) ->
     Failures = [T || #{status := fail} = T <- Tests],
@@ -285,7 +304,7 @@ format_failure_details(Tests) ->
             iolist_to_binary(Lines)
     end.
 
-%% @doc Format a single test failure for display.
+-doc "Format a single test failure for display.".
 -spec format_single_failure(map()) -> iolist().
 format_single_failure(#{name := Name, error := Error} = Entry) ->
     ClassName = maps:get(class, Entry, unknown),
@@ -319,10 +338,12 @@ format_single_failure(#{name := Name} = Entry) ->
         "\n"
     ].
 
-%% @doc Serialize a TestResult to JSON for CLI consumption.
-%%
-%% Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
-%% Includes all test details (pass/fail/skip per test, durations, errors).
+-doc """
+Serialize a TestResult to JSON for CLI consumption.
+
+Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
+Includes all test details (pass/fail/skip per test, durations, errors).
+""".
 -spec result_to_json(map()) -> binary().
 result_to_json(#{
     '$beamtalk_class' := 'TestResult',
@@ -343,7 +364,7 @@ result_to_json(#{
     },
     iolist_to_binary(json:encode(JsonStruct)).
 
-%% @doc Serialize a single test result.
+-doc "Serialize a single test result.".
 -spec serialize_test_result(map()) -> map().
 serialize_test_result(#{name := Name, status := Status} = Test) ->
     Base0 = #{
@@ -370,11 +391,13 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
 %% Internal: test execution (uses class registry, not module_info)
 %%====================================================================
 
-%% @doc Run all tests in a named class.
-%%
-%% Discovers test methods via the class gen_server (not module_info,
-%% which is unavailable on Core Erlang compiled modules from .bt files).
-%% Public so op handlers can call it directly by class name atom.
+-doc """
+Run all tests in a named class.
+
+Discovers test methods via the class gen_server (not module_info,
+which is unavailable on Core Erlang compiled modules from .bt files).
+Public so op handlers can call it directly by class name atom.
+""".
 -spec run_class_by_name(atom()) -> test_result().
 run_class_by_name(ClassName) ->
     {TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
@@ -405,7 +428,7 @@ run_class_by_name(ClassName) ->
             structured_to_test_result(Structured)
     end.
 
-%% @doc Run a single test method in a class by name.
+-doc "Run a single test method in a class by name.".
 -spec run_method_by_name(atom(), atom()) -> map().
 run_method_by_name(ClassName, TestName) ->
     {_TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
@@ -428,17 +451,19 @@ run_method_by_name(ClassName, TestName) ->
     Structured = beamtalk_test_case:structure_results(ClassName, Results, Duration),
     structured_to_test_result(Structured).
 
-%% @doc Discover methods and module via class registry gen_server.
-%%
-%% Returns {TestMethods, FlatMethods, Module} where:
-%% - TestMethods is the sorted list of test* selectors
-%% - FlatMethods is a map of all methods (for setUp/tearDown detection)
-%% - Module is the authoritative BEAM module atom from the class gen_server
-%%
-%% Using Module from gen_server state (rather than resolve_module/1) ensures
-%% we use the exact module atom the class was compiled with, avoiding the
-%% "setUp failed: error:undef" misdiagnosis when module naming differs.
-%% Raises a structured error if the class is not registered.
+-doc """
+Discover methods and module via class registry gen_server.
+
+Returns {TestMethods, FlatMethods, Module} where:
+- TestMethods is the sorted list of test* selectors
+- FlatMethods is a map of all methods (for setUp/tearDown detection)
+- Module is the authoritative BEAM module atom from the class gen_server
+
+Using Module from gen_server state (rather than resolve_module/1) ensures
+we use the exact module atom the class was compiled with, avoiding the
+"setUp failed: error:undef" misdiagnosis when module naming differs.
+Raises a structured error if the class is not registered.
+""".
 -spec discover_methods_via_registry(atom()) -> {[atom()], map(), atom()}.
 discover_methods_via_registry(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -466,11 +491,13 @@ discover_methods_via_registry(ClassName) ->
 %% Internal helpers
 %%====================================================================
 
-%% @doc Check whether a class's source file matches the given path.
-%%
-%% Looks up the class in the registry, reads its module's beamtalk_source
-%% attribute, and checks if the stored path ends with FilePath.
-%% Returns false if the class is not registered or has no source attribute.
+-doc """
+Check whether a class's source file matches the given path.
+
+Looks up the class in the registry, reads its module's beamtalk_source
+attribute, and checks if the stored path ends with FilePath.
+Returns false if the class is not registered or has no source attribute.
+""".
 -spec class_source_matches(atom(), binary()) -> boolean().
 class_source_matches(ClassName, FilePath) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -489,12 +516,14 @@ class_source_matches(ClassName, FilePath) ->
             end
     end.
 
-%% @doc Check whether Stored (absolute) ends with Suffix (relative or absolute).
-%%
-%% Both inputs are normalised to forward slashes before comparison, so that
-%% Windows-style stored paths (backslash separators from canonicalize) and
-%% Unix-style suffix arguments both work correctly. Exact match, or the stored
-%% path ends with "/Suffix" (path-boundary safe).
+-doc """
+Check whether Stored (absolute) ends with Suffix (relative or absolute).
+
+Both inputs are normalised to forward slashes before comparison, so that
+Windows-style stored paths (backslash separators from canonicalize) and
+Unix-style suffix arguments both work correctly. Exact match, or the stored
+path ends with "/Suffix" (path-boundary safe).
+""".
 -spec path_suffix_match(binary(), binary()) -> boolean().
 path_suffix_match(Stored, Suffix) when is_binary(Stored), is_binary(Suffix) ->
     StoredStr = normalize_separators(binary_to_list(Stored)),
@@ -506,11 +535,13 @@ path_suffix_match(Stored, Suffix) when is_binary(Stored), is_binary(Suffix) ->
             lists:suffix(SuffixStr, StoredStr) andalso
             lists:nth(SL - SuffL, StoredStr) =:= $/).
 
-%% @doc Normalise path separators to forward slash.
-%%
-%% Converts backslashes to forward slashes so that Windows paths stored in
-%% the beamtalk_source module attribute compare correctly against Unix-style
-%% relative paths passed by callers.
+-doc """
+Normalise path separators to forward slash.
+
+Converts backslashes to forward slashes so that Windows paths stored in
+the beamtalk_source module attribute compare correctly against Unix-style
+relative paths passed by callers.
+""".
 -spec normalize_separators(string()) -> string().
 normalize_separators(S) ->
     [
@@ -521,7 +552,7 @@ normalize_separators(S) ->
      || C <- S
     ].
 
-%% @doc Convert a structured result map to a TestResult tagged map.
+-doc "Convert a structured result map to a TestResult tagged map.".
 -spec structured_to_test_result(map()) -> map().
 structured_to_test_result(#{
     total := T,
@@ -533,10 +564,12 @@ structured_to_test_result(#{
 }) ->
     make_test_result(T, P, F, S, D, Tests).
 
-%% @doc Extract class name from a class reference tuple.
-%%
-%% Class references have element 2 = 'ClassName class' atom.
-%% Strip the trailing " class" (6 chars) to get the bare class name.
+-doc """
+Extract class name from a class reference tuple.
+
+Class references have element 2 = 'ClassName class' atom.
+Strip the trailing " class" (6 chars) to get the bare class name.
+""".
 -spec extract_class_name(tuple()) -> atom().
 extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     Tag = element(2, ClassRef),
@@ -545,7 +578,7 @@ extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     NameStr = lists:sublist(TagStr, Len - 6),
     list_to_atom(NameStr).
 
-%% @doc Create a TestResult tagged map.
+-doc "Create a TestResult tagged map.".
 -spec make_test_result(
     non_neg_integer(),
     non_neg_integer(),
@@ -565,7 +598,7 @@ make_test_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
         tests => Tests
     }.
 
-%% @doc Aggregate results from multiple classes into a single TestResult.
+-doc "Aggregate results from multiple classes into a single TestResult.".
 -spec aggregate_results([test_result()]) -> test_result().
 aggregate_results(ClassResults) ->
     {TotalSum, PassedSum, FailedSum, SkippedSum, DurationSum, RevTests} =
@@ -599,10 +632,12 @@ aggregate_results(ClassResults) ->
 %% Internal: concurrent test execution (BT-1624)
 %%====================================================================
 
-%% @doc Partition classes into concurrent (default) and serial sets.
-%%
-%% Queries each class's `serial` class method. Classes returning `true`
-%% go into the serial list; all others are concurrent.
+-doc """
+Partition classes into concurrent (default) and serial sets.
+
+Queries each class's `serial` class method. Classes returning `true`
+go into the serial list; all others are concurrent.
+""".
 -spec partition_classes([atom()]) -> {[atom()], [atom()]}.
 partition_classes(Classes) ->
     lists:partition(
@@ -610,10 +645,12 @@ partition_classes(Classes) ->
         Classes
     ).
 
-%% @doc Check whether a class declares `serial => true`.
-%%
-%% Sends the `serial` class method message to the class process.
-%% Returns `false` if the class is not registered or doesn't respond.
+-doc """
+Check whether a class declares `serial => true`.
+
+Sends the `serial` class method message to the class process.
+Returns `false` if the class is not registered or doesn't respond.
+""".
 -spec is_serial(atom()) -> boolean().
 is_serial(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -627,10 +664,12 @@ is_serial(ClassName) ->
             end
     end.
 
-%% @doc Run test classes concurrently with bounded parallelism.
-%%
-%% Spawns up to MaxJobs processes at a time, each running one test class.
-%% Collects results via message passing as each process completes.
+-doc """
+Run test classes concurrently with bounded parallelism.
+
+Spawns up to MaxJobs processes at a time, each running one test class.
+Collects results via message passing as each process completes.
+""".
 -spec run_classes_concurrent([atom()], pos_integer()) -> [test_result()].
 run_classes_concurrent([], _MaxJobs) ->
     [];
@@ -650,12 +689,14 @@ run_classes_concurrent(Classes, MaxJobs) ->
     %% Run the feed-and-collect loop
     run_concurrent_loop(Rest, Ref, self(), Total, [], PidMap).
 
-%% @doc Feed remaining classes as workers complete, collecting all results.
-%%
-%% Each time a result arrives, we spawn the next class (if any remain)
-%% and accumulate the result. Handles 'DOWN' messages for workers that
-%% die without sending a result (OOM, kill signal, etc.) to prevent
-%% indefinite hangs.
+-doc """
+Feed remaining classes as workers complete, collecting all results.
+
+Each time a result arrives, we spawn the next class (if any remain)
+and accumulate the result. Handles 'DOWN' messages for workers that
+die without sending a result (OOM, kill signal, etc.) to prevent
+indefinite hangs.
+""".
 -spec run_concurrent_loop([atom()], reference(), pid(), non_neg_integer(), [map()], map()) ->
     [map()].
 run_concurrent_loop(_Remaining, _Ref, _Self, 0, Acc, _PidMap) ->
@@ -697,11 +738,13 @@ run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap) ->
             end
     end.
 
-%% @doc Spawn a monitored worker process to run a test class.
-%%
-%% Uses spawn_monitor so the runner detects worker crashes (OOM, kill,
-%% etc.) that bypass the try/catch. Returns {Pid, MonitorRef}.
-%% The worker still catches trapped exceptions to produce friendly errors.
+-doc """
+Spawn a monitored worker process to run a test class.
+
+Uses spawn_monitor so the runner detects worker crashes (OOM, kill,
+etc.) that bypass the try/catch. Returns {Pid, MonitorRef}.
+The worker still catches trapped exceptions to produce friendly errors.
+""".
 -spec spawn_class_worker(atom(), pid(), reference()) -> {pid(), reference()}.
 spawn_class_worker(ClassName, Parent, Ref) ->
     spawn_monitor(fun() ->
@@ -725,7 +768,7 @@ spawn_class_worker(ClassName, Parent, Ref) ->
         Parent ! {Ref, Result}
     end).
 
-%% @doc Split a list at position N, clamping to list length.
+-doc "Split a list at position N, clamping to list length.".
 -spec safe_split(non_neg_integer(), [T]) -> {[T], [T]} when T :: term().
 safe_split(N, List) ->
     case length(List) of
@@ -777,10 +820,12 @@ printString(Self) -> result_print_string(Self).
 %% BT-1732: Module loading with on_load failure reporting
 %%====================================================================
 
-%% @doc Load a module via code:ensure_loaded/1, logging a warning via OTP logger
-%% if loading fails (e.g., on_load hook crashes). This replaces bare
-%% code:ensure_loaded/1 calls in the test harness eval command so that
-%% class on_load failures are reported instead of silently ignored.
+-doc """
+Load a module via code:ensure_loaded/1, logging a warning via OTP logger
+if loading fails (e.g., on_load hook crashes). This replaces bare
+code:ensure_loaded/1 calls in the test harness eval command so that
+class on_load failures are reported instead of silently ignored.
+""".
 -spec ensure_loaded_or_warn(module()) -> ok.
 ensure_loaded_or_warn(Module) ->
     case code:ensure_loaded(Module) of

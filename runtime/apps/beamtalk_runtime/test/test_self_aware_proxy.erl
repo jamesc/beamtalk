@@ -1,10 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor with new-style (Fun/3) doesNotUnderstand handler for BT-159 testing
-
 -module(test_self_aware_proxy).
 -behaviour(gen_server).
+
+-moduledoc "Test actor with new-style (Fun/3) doesNotUnderstand handler for BT-159 testing".
 
 -include("beamtalk.hrl").
 

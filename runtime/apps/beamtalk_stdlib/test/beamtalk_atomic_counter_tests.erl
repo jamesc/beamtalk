@@ -1,24 +1,26 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_atomic_counter module (BT-1250).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover:
-%%% - new:/1 — counter creation (success, already_exists, type error)
-%%% - named:/1 — counter lookup (success, not_found, type error)
-%%% - increment/1 — atomic add 1 (success, stale, type error)
-%%% - incrementBy/2 — atomic add N (success, type error)
-%%% - decrement/1 — atomic subtract 1 (success, type error)
-%%% - decrementBy/2 — atomic subtract N (success, type error)
-%%% - value/1 — read current value (success, type error)
-%%% - reset/1 — set to 0 (success, type error)
-%%% - delete/1 — destroy table (success, type error)
-%%% - FFI shims: new/1, named/1
-%%% - concurrent increment test
-
 -module(beamtalk_atomic_counter_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_atomic_counter module (BT-1250).
+
+Tests cover:
+- new:/1 — counter creation (success, already_exists, type error)
+- named:/1 — counter lookup (success, not_found, type error)
+- increment/1 — atomic add 1 (success, stale, type error)
+- incrementBy/2 — atomic add N (success, type error)
+- decrement/1 — atomic subtract 1 (success, type error)
+- decrementBy/2 — atomic subtract N (success, type error)
+- value/1 — read current value (success, type error)
+- reset/1 — set to 0 (success, type error)
+- delete/1 — destroy table (success, type error)
+- FFI shims: new/1, named/1
+- concurrent increment test
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -27,7 +29,7 @@
 %%% Test Helpers
 %%% ============================================================================
 
-%% @doc Create a fresh counter with a unique name, run Fun(Counter), then clean up.
+-doc "Create a fresh counter with a unique name, run Fun(Counter), then clean up.".
 with_counter(Name, Fun) ->
     %% Delete any leftover table from a previous failed run
     catch ets:delete(Name),

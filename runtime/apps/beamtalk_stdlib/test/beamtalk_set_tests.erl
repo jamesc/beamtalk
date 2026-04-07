@@ -1,16 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_set helper module and compiled
-%% bt@stdlib@set stdlib dispatch (BT-73).
-%%
-%% Tests cover:
-%% - beamtalk_set: tagged map operations using ordsets
-%% - 'bt@stdlib@set':dispatch/3: compiled stdlib dispatch
-%% - 'bt@stdlib@set':has_method/1: method reflection
-%% - beamtalk_primitive:send/3: runtime dispatch integration
-%% - Error handling: type_error, does_not_understand
 -module(beamtalk_set_tests).
+
+-moduledoc """
+Tests for beamtalk_set helper module and compiled
+bt@stdlib@set stdlib dispatch (BT-73).
+
+Tests cover:
+- beamtalk_set: tagged map operations using ordsets
+- 'bt@stdlib@set':dispatch/3: compiled stdlib dispatch
+- 'bt@stdlib@set':has_method/1: method reflection
+- beamtalk_primitive:send/3: runtime dispatch integration
+- Error handling: type_error, does_not_understand
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

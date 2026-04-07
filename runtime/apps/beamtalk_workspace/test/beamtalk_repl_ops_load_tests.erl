@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_repl_ops_load module.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Tests the load-project helpers: find_bt_files, extract_bt_class_info,
-%%% sort_bt_files_by_deps, and structured_file_errors. These are pure
-%%% filesystem/parsing functions that do not require a running REPL workspace.
-
 -module(beamtalk_repl_ops_load_tests).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+EUnit tests for beamtalk_repl_ops_load module.
+
+Tests the load-project helpers: find_bt_files, extract_bt_class_info,
+sort_bt_files_by_deps, and structured_file_errors. These are pure
+filesystem/parsing functions that do not require a running REPL workspace.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

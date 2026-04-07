@@ -1,16 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_binary module (BT-1554, BT-1591).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover class methods (serialize:/1, deserialize:/1, size:/1, fromIolist:/1),
-%%% FFI no-colon aliases, and instance methods (do/2, at/2, byte_at/2, byte_size/1,
-%%% part/3, concat/2, to_bytes/1, from_bytes/1, as_string/1, as_string_unchecked/1,
-%%% print_string/1, deserialize_with_used/1).
-
 -module(beamtalk_binary_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_binary module (BT-1554, BT-1591).
+
+Tests cover class methods (serialize:/1, deserialize:/1, size:/1, fromIolist:/1),
+FFI no-colon aliases, and instance methods (do/2, at/2, byte_at/2, byte_size/1,
+part/3, concat/2, to_bytes/1, from_bytes/1, as_string/1, as_string_unchecked/1,
+print_string/1, deserialize_with_used/1).
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

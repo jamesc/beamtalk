@@ -1,33 +1,35 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Tests for compiler-generated code patterns using real compiled Beamtalk.
-%%%
-%%% These tests verify runtime behavior by using the counter module compiled
-%%% from tests/e2e/fixtures/counter.bt (unified fixture - BT-239). This tests
-%%% the actual code generation, not simulated patterns.
-%%%
-%%% **Note:** These are NOT true end-to-end tests. For real E2E tests that
-%%% compile actual Beamtalk source files in full, see `tests/e2e/cases/*.bt`.
-%%%
-%%% Test categories:
-%%% - spawn/0 tests (Counter spawn) - returns #beamtalk_object{}
-%%% - spawn/1 tests (Counter spawnWith: #{...})
-%%% - State merging behavior (InitArgs override defaults)
-%%% - Async message protocol (BT-79) - futures, awaits, errors, concurrency
-%%% - Block Evaluation Tests (value, value:, value:value:, closures)
-%%% - Control Flow Tests (whileTrue:, whileFalse:, repeat)
-%%% - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
-%%% - Cascade message sends (BT-133)
-%%% - Multi-keyword messages (BT-133)
-%%% - Actor interaction patterns (BT-133)
-%%% - Error handling (BT-133)
-%%% - Instance variable access patterns (BT-133)
-%%% - Nested message sends and binary operators (BT-133)
-%%%
-%%% @see beamtalk_actor for the runtime implementation
-
 -module(beamtalk_codegen_simulation_tests).
+
+-moduledoc """
+Tests for compiler-generated code patterns using real compiled Beamtalk.
+
+These tests verify runtime behavior by using the counter module compiled
+from tests/e2e/fixtures/counter.bt (unified fixture - BT-239). This tests
+the actual code generation, not simulated patterns.
+
+**Note:** These are NOT true end-to-end tests. For real E2E tests that
+compile actual Beamtalk source files in full, see `tests/e2e/cases/*.bt`.
+
+Test categories:
+- spawn/0 tests (Counter spawn) - returns #beamtalk_object{}
+- spawn/1 tests (Counter spawnWith: #{...})
+- State merging behavior (InitArgs override defaults)
+- Async message protocol (BT-79) - futures, awaits, errors, concurrency
+- Block Evaluation Tests (value, value:, value:value:, closures)
+- Control Flow Tests (whileTrue:, whileFalse:, repeat)
+- Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
+- Cascade message sends (BT-133)
+- Multi-keyword messages (BT-133)
+- Actor interaction patterns (BT-133)
+- Error handling (BT-133)
+- Instance variable access patterns (BT-133)
+- Nested message sends and binary operators (BT-133)
+
+See also: beamtalk_actor for the runtime implementation
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -42,15 +44,17 @@
 %% For other tests that need manual state manipulation (async, cascade, etc.),
 %% we use simulated state structures below.
 
-%% @doc Creates a Counter module structure as the compiler would generate.
-%% This mirrors the output of compiling:
-%%
-%% ```beamtalk
-%% value := 0.
-%% increment := [self.value := self.value + 1. ^self.value].
-%% getValue := [^self.value].
-%% divide: n := [^self.value / n].
-%% ```
+-doc """
+Creates a Counter module structure as the compiler would generate.
+This mirrors the output of compiling:
+
+```beamtalk
+value := 0.
+increment := [self.value := self.value + 1. ^self.value].
+getValue := [^self.value].
+divide: n := [^self.value / n].
+```
+""".
 -spec counter_module_state(InitArgs :: map()) -> map().
 counter_module_state(InitArgs) ->
     DefaultState = #{
@@ -551,36 +555,46 @@ spawn_preserves_class_and_methods_test() ->
 %%% Block Evaluation Tests (value, value:, value:value:, etc.)
 %%% ===========================================================================
 
-%% @doc Test: [42] value => 42
-%% Block with no arguments, evaluated with value message
+-doc """
+Test: [42] value => 42
+Block with no arguments, evaluated with value message
+""".
 block_value_no_args_test() ->
     Block = fun() -> 42 end,
     Result = Block(),
     ?assertEqual(42, Result).
 
-%% @doc Test: [:x | x + 1] value: 5 => 6
-%% Block with one parameter, evaluated with value: message
+-doc """
+Test: [:x | x + 1] value: 5 => 6
+Block with one parameter, evaluated with value: message
+""".
 block_value_one_arg_test() ->
     Block = fun(X) -> X + 1 end,
     Result = Block(5),
     ?assertEqual(6, Result).
 
-%% @doc Test: [:x :y | x + y] value: 3 value: 4 => 7
-%% Block with two parameters, evaluated with value:value: message
+-doc """
+Test: [:x :y | x + y] value: 3 value: 4 => 7
+Block with two parameters, evaluated with value:value: message
+""".
 block_value_two_args_test() ->
     Block = fun(X, Y) -> X + Y end,
     Result = Block(3, 4),
     ?assertEqual(7, Result).
 
-%% @doc Test: [:x :y :z | x + y + z] value: 1 value: 2 value: 3 => 6
-%% Block with three parameters, evaluated with value:value:value: message
+-doc """
+Test: [:x :y :z | x + y + z] value: 1 value: 2 value: 3 => 6
+Block with three parameters, evaluated with value:value:value: message
+""".
 block_value_three_args_test() ->
     Block = fun(X, Y, Z) -> X + Y + Z end,
     Result = Block(1, 2, 3),
     ?assertEqual(6, Result).
 
-%% @doc Test: [:x | [:y | x + y]] value: 10 value: 5 => 15
-%% Nested blocks - outer block returns inner block, which captures x
+-doc """
+Test: [:x | [:y | x + y]] value: 10 value: 5 => 15
+Nested blocks - outer block returns inner block, which captures x
+""".
 block_nested_evaluation_test() ->
     %% Outer block: [:x | [:y | x + y]]
     OuterBlock = fun(X) ->
@@ -595,8 +609,10 @@ block_nested_evaluation_test() ->
     Result = InnerBlock(5),
     ?assertEqual(15, Result).
 
-%% @doc Test closures capture lexical scope
-%% captured := 100. [:x | x + captured] value: 5 => 105
+-doc """
+Test closures capture lexical scope
+captured := 100. [:x | x + captured] value: 5 => 105
+""".
 block_captures_lexical_scope_test() ->
     %% Simulate captured variable from lexical scope
     Captured = 100,
@@ -608,10 +624,12 @@ block_captures_lexical_scope_test() ->
     Result = Block(5),
     ?assertEqual(105, Result).
 
-%% @doc Test block that returns another block
-%% makeAdder := [:n | [:x | x + n]].
-%% addFive := makeAdder value: 5.
-%% addFive value: 10 => 15
+-doc """
+Test block that returns another block
+makeAdder := [:n | [:x | x + n]].
+addFive := makeAdder value: 5.
+addFive value: 10 => 15
+""".
 block_returns_closure_test() ->
     %% makeAdder returns a closure that adds n to its argument
     MakeAdder = fun(N) ->
@@ -625,8 +643,10 @@ block_returns_closure_test() ->
     ?assertEqual(15, AddFive(10)),
     ?assertEqual(8, AddFive(3)).
 
-%% @doc Test block with multiple statements
-%% [:x | temp := x * 2. temp + 1] value: 5 => 11
+-doc """
+Test block with multiple statements
+[:x | temp := x * 2. temp + 1] value: 5 => 11
+""".
 block_multiple_statements_test() ->
     Block = fun(X) ->
         Temp = X * 2,
@@ -639,8 +659,10 @@ block_multiple_statements_test() ->
 %%% Control Flow Tests (whileTrue:, whileFalse:, repeat)
 %%% ===========================================================================
 
-%% @doc Test: [counter < 5] whileTrue: [counter := counter + 1]
-%% Loop while condition is true
+-doc """
+Test: [counter < 5] whileTrue: [counter := counter + 1]
+Loop while condition is true
+""".
 block_while_true_loop_test() ->
     %% Simulate: counter := 0. [counter < 5] whileTrue: [counter := counter + 1]
     %% We'll use a recursive function to simulate the letrec loop
@@ -658,8 +680,10 @@ while_true_loop(Counter, Limit) ->
             Counter
     end.
 
-%% @doc Test: [counter >= 10] whileFalse: [counter := counter + 1]
-%% Loop while condition is false
+-doc """
+Test: [counter >= 10] whileFalse: [counter := counter + 1]
+Loop while condition is false
+""".
 block_while_false_loop_test() ->
     %% Start at 0, increment until counter >= 10
     InitialCounter = 0,
@@ -676,8 +700,10 @@ while_false_loop(Counter, Target) ->
             Counter
     end.
 
-%% @doc Test: [counter < 100] whileTrue: [counter := counter + 1. process: counter]
-%% whileTrue: executes body multiple times
+-doc """
+Test: [counter < 100] whileTrue: [counter := counter + 1. process: counter]
+whileTrue: executes body multiple times
+""".
 block_while_true_accumulates_test() ->
     %% Sum numbers 1 to 10
     {_Counter, Sum} = while_true_accumulate(1, 0),
@@ -694,9 +720,11 @@ while_true_accumulate(Counter, Sum) ->
             {Counter, Sum}
     end.
 
-%% @doc Test: repeat loop with early termination
-%% counter := 0. [counter := counter + 1. counter < 5] repeat => loops forever
-%% We simulate with a bounded version that terminates
+-doc """
+Test: repeat loop with early termination
+counter := 0. [counter := counter + 1. counter < 5] repeat => loops forever
+We simulate with a bounded version that terminates
+""".
 block_repeat_with_termination_test() ->
     %% Simulate repeat that increments until threshold
     %% [counter := counter + 1. counter >= 5 ifTrue: [^counter]] repeat
@@ -714,13 +742,15 @@ repeat_until_threshold(Counter, Threshold) ->
             repeat_until_threshold(NewCounter, Threshold)
     end.
 
-%% @doc Test: nested loops with whileTrue:
-%% outer := 0. inner := 0.
-%% [outer < 3] whileTrue: [
-%%   inner := 0.
-%%   [inner < 3] whileTrue: [inner := inner + 1].
-%%   outer := outer + 1
-%% ]
+-doc """
+Test: nested loops with whileTrue:
+outer := 0. inner := 0.
+[outer < 3] whileTrue: [
+  inner := 0.
+  [inner < 3] whileTrue: [inner := inner + 1].
+  outer := outer + 1
+]
+""".
 block_nested_while_true_test() ->
     %% Count total iterations in nested loop (3 * 3 = 9)
     TotalIterations = nested_while_loops(0, 0),
@@ -760,8 +790,8 @@ inner_while_loop(Inner, Total) ->
 %%% - Short-circuit behavior prevents evaluation of unused blocks
 %%% - Return values match Beamtalk semantics
 %%%
-%%% @see lib/True.bt for True control flow API
-%%% @see lib/False.bt for False control flow API
+%%% See also: lib/True.bt for True control flow API
+%%% See also: lib/False.bt for False control flow API
 
 %%% ---------------------------------------------------------------------------
 %%% Boolean method implementations (simulating compiled Beamtalk methods)
@@ -1541,8 +1571,8 @@ chained_binary_operators_test() ->
 %%% **Setup:** These tests require beamtalk_classes registry to be running
 %%% with Counter and LoggingCounter classes registered.
 %%%
-%%% @see tests/fixtures/logging_counter.bt
-%%% @see BT-152 for runtime super_dispatch/3 implementation
+%%% See also: tests/fixtures/logging_counter.bt
+%%% See also: BT-152 for runtime super_dispatch/3 implementation
 %%%
 %%% **DISABLED (BT-211):** These tests are commented out because subclass init
 %%% doesn't include inherited state fields from parent classes. The compiled

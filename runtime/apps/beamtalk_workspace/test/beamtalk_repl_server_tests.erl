@@ -2,13 +2,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** REPL Session Context
 
-%%% @doc Unit tests for beamtalk_repl_server module
-%%%
-%%% Tests TCP client handling, JSON protocol parsing, and server-side
-%%% request/response behaviour. Formatting tests live in
-%%% beamtalk_repl_json_tests.
-
 -module(beamtalk_repl_server_tests).
+
+-moduledoc """
+Unit tests for beamtalk_repl_server module
+
+Tests TCP client handling, JSON protocol parsing, and server-side
+request/response behaviour. Formatting tests live in
+beamtalk_repl_json_tests.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

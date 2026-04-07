@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_repl_ops_perf module (ADR 0069 Phase 4).
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Tests the enable-tracing, get-traces, and actor-stats REPL protocol ops.
-%%% Uses a running trace store for integration-style tests.
-
 -module(beamtalk_repl_ops_perf_tests).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+EUnit tests for beamtalk_repl_ops_perf module (ADR 0069 Phase 4).
+
+Tests the enable-tracing, get-traces, and actor-stats REPL protocol ops.
+Uses a running trace store for integration-style tests.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -23,8 +25,10 @@ make_msg(Op) ->
 decode_response(Bin) ->
     json:decode(Bin).
 
-%% @private Start trace store if not running.
-%% Returns `{started, Pid}` when we started it, `{existing, Pid}` if already running.
+-doc """
+Start trace store if not running.
+Returns `{started, Pid}` when we started it, `{existing, Pid}` if already running.
+""".
 setup_trace_store() ->
     case whereis(beamtalk_trace_store) of
         undefined ->
@@ -212,7 +216,7 @@ export_traces_test_() ->
         ]
     end}.
 
-%% @private Generate a unique temporary export path.
+-doc "Generate a unique temporary export path.".
 tmp_export_path(Tag) ->
     iolist_to_binary([
         "beamtalk_test_ops_export_",

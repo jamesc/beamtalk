@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_regex module (BT-1088).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests constructors, instance methods, string helper functions,
-%%% and error paths.
-
 -module(beamtalk_regex_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_regex module (BT-1088).
+
+Tests constructors, instance methods, string helper functions,
+and error paths.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

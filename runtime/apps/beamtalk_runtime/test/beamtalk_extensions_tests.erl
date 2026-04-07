@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_extensions module.
-%%%
-%%% Tests extension registration, lookup, conflict tracking, and tooling APIs.
-
 -module(beamtalk_extensions_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_extensions module.
+
+Tests extension registration, lookup, conflict tracking, and tooling APIs.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================

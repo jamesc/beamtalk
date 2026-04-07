@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Runtime Context
 
-%%% @doc EUnit tests for beamtalk_json_formatter module.
-%%%
-%%% Tests JSON log formatting: field inclusion, time formatting, and
-%%% metadata extraction.
-
 -module(beamtalk_json_formatter_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_json_formatter module.
+
+Tests JSON log formatting: field inclusion, time formatting, and
+metadata extraction.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

@@ -1,39 +1,42 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc CompiledMethod primitive class implementation (BT-101).
-%%%
-%%% This module provides method dispatch for CompiledMethod objects, enabling
-%%% method introspection in Beamtalk. CompiledMethod objects are maps with
-%%% `'$beamtalk_class' => 'CompiledMethod'` returned by the `>>` operator:
-%%%
-%%% ```beamtalk
-%%% method := Counter >> #increment
-%%% method selector         // => #increment
-%%% method source           // => "increment => self.value := self.value + 1"
-%%% method argumentCount    // => 0
-%%% ```
-%%%
-%%% ## Builtin Methods
-%%%
-%%% | Selector         | Args | Description                        |
-%%% |------------------|------|------------------------------------|
-%%% | `selector`       | []   | Returns the method's selector atom |
-%%% | `source`         | []   | Returns the method's source code   |
-%%% | `doc`            | []   | Returns the method's doc string    |
-%%% | `argumentCount`  | []   | Returns the method's arity         |
-%%% | `class`          | []   | Returns `'CompiledMethod'`         |
-%%% | `printString`    | []   | Human-readable representation      |
-%%% | `asString`       | []   | Same as printString                |
-%%% | `respondsTo:`    | [S]  | Check if responds to selector S    |
-%%%
-%%% **DDD Context:** Object System Context
 -module(beamtalk_compiled_method_ops).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+CompiledMethod primitive class implementation (BT-101).
+
+This module provides method dispatch for CompiledMethod objects, enabling
+method introspection in Beamtalk. CompiledMethod objects are maps with
+`'$beamtalk_class' => 'CompiledMethod'` returned by the `>>` operator:
+
+```beamtalk
+method := Counter >> #increment
+method selector         // => #increment
+method source           // => "increment => self.value := self.value + 1"
+method argumentCount    // => 0
+```
+
+## Builtin Methods
+
+| Selector         | Args | Description                        |
+|------------------|------|------------------------------------|
+| `selector`       | []   | Returns the method's selector atom |
+| `source`         | []   | Returns the method's source code   |
+| `doc`            | []   | Returns the method's doc string    |
+| `argumentCount`  | []   | Returns the method's arity         |
+| `class`          | []   | Returns `'CompiledMethod'`         |
+| `printString`    | []   | Human-readable representation      |
+| `asString`       | []   | Same as printString                |
+| `respondsTo:`    | [S]  | Check if responds to selector S    |
+""".
 -export([dispatch/3, has_method/1]).
 
 -include("beamtalk.hrl").
 
-%% @doc Dispatch a message to a CompiledMethod map.
+-doc "Dispatch a message to a CompiledMethod map.".
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch(Selector, Args, Value) ->
     case builtin_dispatch(Selector, Args, Value) of
@@ -41,12 +44,12 @@ dispatch(Selector, Args, Value) ->
         not_found -> does_not_understand(Selector, Args, Value)
     end.
 
-%% @doc Check if CompiledMethod responds to the given selector.
+-doc "Check if CompiledMethod responds to the given selector.".
 -spec has_method(atom()) -> boolean().
 has_method(Selector) ->
     is_builtin(Selector).
 
-%% @doc Return true if the given selector is a builtin CompiledMethod method.
+-doc "Return true if the given selector is a builtin CompiledMethod method.".
 -spec is_builtin(atom()) -> boolean().
 is_builtin('selector') -> true;
 is_builtin('source') -> true;
@@ -62,8 +65,10 @@ is_builtin(_) -> false.
 %%% Builtin Dispatch
 %%% ============================================================================
 
-%% @doc Dispatch a builtin selector on a CompiledMethod map, returning
-%% `{ok, Result}' or `not_found'.
+-doc """
+Dispatch a builtin selector on a CompiledMethod map, returning
+`{ok, Result}' or `not_found'.
+""".
 -spec builtin_dispatch(atom(), list(), map()) -> {ok, term()} | not_found.
 
 %% selector => returns the method's selector atom
@@ -99,7 +104,7 @@ builtin_dispatch(_Selector, _Args, _Value) ->
 %%% Error Handling
 %%% ============================================================================
 
-%% @doc Raise a does_not_understand error for an unknown CompiledMethod selector.
+-doc "Raise a does_not_understand error for an unknown CompiledMethod selector.".
 -spec does_not_understand(atom(), list(), map()) -> no_return().
 does_not_understand(Selector, _Args, _Value) ->
     Error0 = beamtalk_error:new(does_not_understand, 'CompiledMethod'),

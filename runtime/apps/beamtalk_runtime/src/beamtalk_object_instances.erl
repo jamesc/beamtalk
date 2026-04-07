@@ -1,21 +1,24 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Instance tracking registry for Beamtalk.
-%%%
-%%% **DDD Context:** Object System Context
-%%
-%% Tracks all instances of each class to support Smalltalk-style reflection:
-%% - `allInstances` - get all instances of a class
-%% - `instanceCount` - count instances of a class
-%% - hot-patching notifications (iterate instances when class changes)
-%%
-%% Each instance is registered as a `{Class, Pid}` entry in an ETS bag table.
-%% A monitor process automatically cleans up entries when instances terminate.
-%%
-%% @see docs/beamtalk-object-model.md Part 5 "Instance Tracking"
 -module(beamtalk_object_instances).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Instance tracking registry for Beamtalk.
+
+Tracks all instances of each class to support Smalltalk-style reflection:
+- `allInstances` - get all instances of a class
+- `instanceCount` - count instances of a class
+- hot-patching notifications (iterate instances when class changes)
+
+Each instance is registered as a `{Class, Pid}` entry in an ETS bag table.
+A monitor process automatically cleans up entries when instances terminate.
+
+See also: docs/beamtalk-object-model.md Part 5 "Instance Tracking"
+""".
 
 %% API
 -export([
@@ -49,33 +52,39 @@
 %% API
 %%====================================================================
 
-%% @doc Start the instance registry server.
+-doc "Start the instance registry server.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% @doc Register an instance of a class.
-%% The instance will be automatically unregistered when the process terminates.
+-doc """
+Register an instance of a class.
+The instance will be automatically unregistered when the process terminates.
+""".
 -spec register(class_name(), pid()) -> ok.
 register(Class, Pid) when is_atom(Class), is_pid(Pid) ->
     gen_server:call(?MODULE, {register, Class, Pid}).
 
-%% @doc Manually unregister an instance of a class.
+-doc "Manually unregister an instance of a class.".
 -spec unregister(class_name(), pid()) -> ok.
 unregister(Class, Pid) when is_atom(Class), is_pid(Pid) ->
     gen_server:call(?MODULE, {unregister, Class, Pid}).
 
-%% @doc Get all live instances of a class.
-%% Filters out dead processes.
-%%
-%% NOTE: There is a race condition where a process may die between the alive
-%% check and when the caller uses the pid. Callers must handle `noproc` errors.
+-doc """
+Get all live instances of a class.
+Filters out dead processes.
+
+NOTE: There is a race condition where a process may die between the alive
+check and when the caller uses the pid. Callers must handle `noproc` errors.
+""".
 -spec all(class_name()) -> [pid()].
 all(Class) when is_atom(Class) ->
     [Pid || {_, Pid} <- ets:lookup(?INSTANCE_REGISTRY, Class), erlang:is_process_alive(Pid)].
 
-%% @doc Count the live instances of a class.
-%% More efficient than `length(all(Class))` for large instance counts.
+-doc """
+Count the live instances of a class.
+More efficient than `length(all(Class))` for large instance counts.
+""".
 -spec count(class_name()) -> non_neg_integer().
 count(Class) when is_atom(Class) ->
     lists:foldl(
@@ -89,8 +98,10 @@ count(Class) when is_atom(Class) ->
         ets:lookup(?INSTANCE_REGISTRY, Class)
     ).
 
-%% @doc Iterate all live instances of a class with a function.
-%% The function is called as `Fun(Pid)` for each instance.
+-doc """
+Iterate all live instances of a class with a function.
+The function is called as `Fun(Pid)` for each instance.
+""".
 -spec each(class_name(), fun((pid()) -> any())) -> ok.
 each(Class, Fun) when is_atom(Class), is_function(Fun, 1) ->
     lists:foreach(Fun, all(Class)).
@@ -99,14 +110,12 @@ each(Class, Fun) when is_atom(Class), is_function(Fun, 1) ->
 %% gen_server callbacks
 %%====================================================================
 
-%% @private
 init([]) ->
     %% Create the ETS table owned by this process so it survives
     %% until the gen_server terminates
     ?INSTANCE_REGISTRY = ets:new(?INSTANCE_REGISTRY, [named_table, public, bag]),
     {ok, #state{}}.
 
-%% @private
 handle_call({register, Class, Pid}, _From, State) ->
     Key = {Class, Pid},
     case maps:is_key(Key, State#state.monitors) of
@@ -135,11 +144,9 @@ handle_call({unregister, Class, Pid}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Find which classes this Pid was registered under
     %% This is more efficient than scanning all monitors when there are many instances
@@ -166,11 +173,9 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(_Reason, _State) ->
     %% ETS table is owned by this process, will be deleted automatically
     ok.
 
-%% @private
 code_change(OldVsn, State, Extra) ->
     beamtalk_hot_reload:code_change(OldVsn, State, Extra).

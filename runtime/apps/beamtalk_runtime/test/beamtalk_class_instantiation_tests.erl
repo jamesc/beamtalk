@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_class_instantiation module (BT-623).
-%%%
-%%% Tests instance creation logic including spawn/new protocols,
-%%% constructibility checks, abstract class errors, and dynamic
-%%% method validation.
-
 -module(beamtalk_class_instantiation_tests).
+
+-moduledoc """
+Unit tests for beamtalk_class_instantiation module (BT-623).
+
+Tests instance creation logic including spawn/new protocols,
+constructibility checks, abstract class errors, and dynamic
+method validation.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

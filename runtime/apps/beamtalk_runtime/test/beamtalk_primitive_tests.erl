@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_primitive module.
-%%%
-%%% Tests class_of/1, send/3, and responds_to/2 for all primitive types.
-
 -module(beamtalk_primitive_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_primitive module.
+
+Tests class_of/1, send/3, and responds_to/2 for all primitive types.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -614,9 +616,11 @@ value_type_inst_var_at_reads_slot_test() ->
 %%% Test Helpers
 %%% ============================================================================
 
-%% @doc Create a mock value type module with field accessor methods.
-%% FieldMethods: [{MethodName, FieldAtom}] - generates MethodName(Self) -> maps:get(Field, Self)
-%% Pass [] for a module with no instance methods.
+-doc """
+Create a mock value type module with field accessor methods.
+FieldMethods: [{MethodName, FieldAtom}] - generates MethodName(Self) -> maps:get(Field, Self)
+Pass [] for a module with no instance methods.
+""".
 create_mock_value_type_module(ModuleName, _ClassName, FieldMethods) ->
     ModuleForm = {attribute, 1, module, ModuleName},
     ExportForm = {attribute, 1, export, [{Name, 1} || {Name, _} <- FieldMethods]},

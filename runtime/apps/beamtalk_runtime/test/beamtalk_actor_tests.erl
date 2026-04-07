@@ -1,17 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_actor module
-%%%
-%%% Tests all actor behaviors:
-%%% - Basic message dispatch (sync and async)
-%%% - doesNotUnderstand fallback
-%%% - Multiple actors communicating
-%%% - Code hot reload (code_change)
-%%% - Actor spawn/initialization
-%%% - Error cases
-
 -module(beamtalk_actor_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_actor module
+
+Tests all actor behaviors:
+- Basic message dispatch (sync and async)
+- doesNotUnderstand fallback
+- Multiple actors communicating
+- Code hot reload (code_change)
+- Actor spawn/initialization
+- Error cases
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -1528,7 +1530,7 @@ register_spawned_returns_error_on_generic_error_test() ->
 %%% Test helpers for BT-391
 %%% ===========================================================================
 
-%% @private Create a callback module that crashes
+-doc "Create a callback module that crashes".
 ensure_crash_callback_module() ->
     Forms = [
         {attribute, 1, module, beamtalk_actor_tests_crash_callback},
@@ -1545,7 +1547,7 @@ ensure_crash_callback_module() ->
     {module, _} = code:load_binary(beamtalk_actor_tests_crash_callback, "test", Bin),
     ok.
 
-%% @private Create a callback module that returns an error tuple
+-doc "Create a callback module that returns an error tuple".
 ensure_error_callback_module() ->
     Forms = [
         {attribute, 1, module, beamtalk_actor_tests_error_callback},
@@ -1911,7 +1913,9 @@ spawn_callback_crash_log_includes_stacktrace_test() ->
         logger:remove_handler(HandlerId)
     end.
 
-%% @private Collect log events until we find one matching the expected message with stacktrace
+-doc """
+Collect log events until we find one matching the expected message with stacktrace
+""".
 collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
     collect_log_with_stacktrace(ExpectedMsg, Timeout, erlang:monotonic_time(millisecond)).
 

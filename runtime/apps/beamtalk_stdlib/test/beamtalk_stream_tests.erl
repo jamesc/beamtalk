@@ -1,8 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Unit tests for beamtalk_stream finalizer support (BT-537).
 -module(beamtalk_stream_tests).
+
+-moduledoc "Unit tests for beamtalk_stream finalizer support (BT-537).".
 
 -include_lib("eunit/include/eunit.hrl").
 

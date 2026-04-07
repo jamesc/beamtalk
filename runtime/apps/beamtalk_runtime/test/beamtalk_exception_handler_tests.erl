@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_exception_handler module.
-%%%
-%%% Tests exception wrapping, ensure_wrapped/1, and exception map patterns (ADR 0015).
-
 -module(beamtalk_exception_handler_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_exception_handler module.
+
+Tests exception wrapping, ensure_wrapped/1, and exception map patterns (ADR 0015).
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -735,7 +737,7 @@ class_signal_fallback_test() ->
             ?assertEqual(<<"Exception">>, Inner#beamtalk_error.message)
     end.
 
-%% @private Setup class system for hierarchy tests
+-doc "Setup class system for hierarchy tests".
 setup_class_system() ->
     case whereis(pg) of
         undefined -> pg:start_link();
@@ -749,6 +751,6 @@ setup_class_system() ->
     beamtalk_stdlib:init(),
     ok.
 
-%% @private Teardown class system
+-doc "Teardown class system".
 teardown_class_system(_) ->
     ok.

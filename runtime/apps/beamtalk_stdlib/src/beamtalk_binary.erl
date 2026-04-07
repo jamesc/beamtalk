@@ -1,42 +1,44 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Binary class implementation — serialization, byte operations, and
-%%% instance methods for binary data.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Binary provides class-side methods for serializing/deserializing Erlang
-%%% terms and working with byte-level binary data, plus instance methods for
-%%% iteration, slicing, and conversion (ADR 0069 Phase 1).
-%%%
-%%% ## Class Methods
-%%%
-%%% | Selector        | Description                                      |
-%%% |-----------------|--------------------------------------------------|
-%%% | `serialize:`    | Term → binary (via `term_to_binary/1`)            |
-%%% | `deserialize:`  | Binary → term (via `binary_to_term/2`, safe mode) |
-%%% | `size:`         | Binary → byte size                                |
-%%% | `fromIolist:`   | Iolist → binary                                  |
-%%%
-%%% ## Instance Methods
-%%%
-%%% | Function              | Description                                    |
-%%% |-----------------------|------------------------------------------------|
-%%% | `do/2`                | Iterate over bytes, calling block per byte     |
-%%% | `at/2`                | 1-based byte access, returns Integer           |
-%%% | `byte_at/2`           | 0-based byte access, returns Integer           |
-%%% | `byte_size/1`         | Byte count                                     |
-%%% | `part/3`              | Zero-copy slice via binary:part/3              |
-%%% | `concat/2`            | Concatenate two binaries                       |
-%%% | `to_bytes/1`          | Binary → list of byte integers                 |
-%%% | `from_bytes/1`        | Byte list → binary                             |
-%%% | `as_string/1`         | Validate UTF-8, return {ok,Bin}|{error,...}     |
-%%% | `as_string_unchecked/1` | Return binary as-is (no validation)           |
-%%% | `print_string/1`      | Printable representation                       |
-%%% | `deserialize_with_used/1` | binary_to_term with byte count             |
-
 -module(beamtalk_binary).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Binary class implementation — serialization, byte operations, and
+instance methods for binary data.
+
+Binary provides class-side methods for serializing/deserializing Erlang
+terms and working with byte-level binary data, plus instance methods for
+iteration, slicing, and conversion (ADR 0069 Phase 1).
+
+## Class Methods
+
+| Selector        | Description                                      |
+|-----------------|--------------------------------------------------|
+| `serialize:`    | Term → binary (via `term_to_binary/1`)            |
+| `deserialize:`  | Binary → term (via `binary_to_term/2`, safe mode) |
+| `size:`         | Binary → byte size                                |
+| `fromIolist:`   | Iolist → binary                                  |
+
+## Instance Methods
+
+| Function              | Description                                    |
+|-----------------------|------------------------------------------------|
+| `do/2`                | Iterate over bytes, calling block per byte     |
+| `at/2`                | 1-based byte access, returns Integer           |
+| `byte_at/2`           | 0-based byte access, returns Integer           |
+| `byte_size/1`         | Byte count                                     |
+| `part/3`              | Zero-copy slice via binary:part/3              |
+| `concat/2`            | Concatenate two binaries                       |
+| `to_bytes/1`          | Binary → list of byte integers                 |
+| `from_bytes/1`        | Byte list → binary                             |
+| `as_string/1`         | Validate UTF-8, return {ok,Bin}|{error,...}     |
+| `as_string_unchecked/1` | Return binary as-is (no validation)           |
+| `print_string/1`      | Printable representation                       |
+| `deserialize_with_used/1` | binary_to_term with byte count             |
+""".
 
 %% Class methods
 -export([
@@ -59,15 +61,17 @@
 %%% Public API
 %%% ============================================================================
 
-%% @doc Serialize any term to a binary via `erlang:term_to_binary/1`.
+-doc "Serialize any term to a binary via `erlang:term_to_binary/1`.".
 -spec 'serialize:'(term()) -> binary().
 'serialize:'(Term) ->
     erlang:term_to_binary(Term).
 
-%% @doc Deserialize a binary back to the original term.
-%%
-%% Uses safe mode (`[safe]`) to prevent atom table exhaustion from untrusted
-%% input. Atoms not already in the atom table will cause an error.
+-doc """
+Deserialize a binary back to the original term.
+
+Uses safe mode (`[safe]`) to prevent atom table exhaustion from untrusted
+input. Atoms not already in the atom table will cause an error.
+""".
 -spec 'deserialize:'(binary()) -> term().
 'deserialize:'(Bin) when is_binary(Bin) ->
     try
@@ -87,7 +91,7 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a Binary">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Return the byte size of a binary.
+-doc "Return the byte size of a binary.".
 -spec 'size:'(binary()) -> non_neg_integer().
 'size:'(Bin) when is_binary(Bin) ->
     erlang:byte_size(Bin);
@@ -97,7 +101,7 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a Binary">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Convert an iolist to a flat binary.
+-doc "Convert an iolist to a flat binary.".
 -spec 'fromIolist:'(iolist()) -> binary().
 'fromIolist:'(Iolist) ->
     try
@@ -117,7 +121,7 @@
 %%% Instance Methods (ADR 0069 Phase 1)
 %%% ============================================================================
 
-%% @doc Iterate over bytes in binary, calling Fun with each byte (Integer 0-255).
+-doc "Iterate over bytes in binary, calling Fun with each byte (Integer 0-255).".
 -spec do(binary(), fun((non_neg_integer()) -> any())) -> ok.
 do(Bin, Fun) when is_binary(Bin), is_function(Fun, 1) ->
     do_loop(Bin, 0, erlang:byte_size(Bin), Fun);
@@ -132,7 +136,7 @@ do_loop(Bin, Pos, Size, Fun) ->
     Fun(Byte),
     do_loop(Bin, Pos + 1, Size, Fun).
 
-%% @doc 1-based byte access. Returns Integer 0-255.
+-doc "1-based byte access. Returns Integer 0-255.".
 -spec at(binary(), pos_integer()) -> non_neg_integer().
 at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
     Size = erlang:byte_size(Bin),
@@ -157,7 +161,7 @@ at(Bin, _Index) when not is_binary(Bin) ->
 at(_Bin, _Index) ->
     raise_type_error(at, <<"Index must be an Integer">>).
 
-%% @doc 0-based byte access (Erlang-compatible). Returns Integer 0-255.
+-doc "0-based byte access (Erlang-compatible). Returns Integer 0-255.".
 -spec byte_at(binary(), non_neg_integer()) -> non_neg_integer().
 byte_at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
     Size = erlang:byte_size(Bin),
@@ -182,14 +186,14 @@ byte_at(Bin, _Index) when not is_binary(Bin) ->
 byte_at(_Bin, _Index) ->
     raise_type_error(byte_at, <<"Index must be an Integer">>).
 
-%% @doc Return the byte count of a binary (instance version).
+-doc "Return the byte count of a binary (instance version).".
 -spec byte_size(binary()) -> non_neg_integer().
 byte_size(Bin) when is_binary(Bin) ->
     erlang:byte_size(Bin);
 byte_size(_) ->
     raise_type_error(byte_size, <<"Receiver must be a Binary">>).
 
-%% @doc Zero-copy slice via `binary:part/3`. Pos and Len are 0-based.
+-doc "Zero-copy slice via `binary:part/3`. Pos and Len are 0-based.".
 -spec part(binary(), non_neg_integer(), non_neg_integer()) -> binary().
 part(Bin, Pos, Len) when is_binary(Bin), is_integer(Pos), is_integer(Len) ->
     try
@@ -214,7 +218,7 @@ part(Bin, _Pos, _Len) when not is_binary(Bin) ->
 part(_Bin, _Pos, _Len) ->
     raise_type_error(part, <<"Position and length must be Integers">>).
 
-%% @doc Concatenate two binaries.
+-doc "Concatenate two binaries.".
 -spec concat(binary(), binary()) -> binary().
 concat(A, B) when is_binary(A), is_binary(B) ->
     <<A/binary, B/binary>>;
@@ -223,14 +227,14 @@ concat(A, _B) when not is_binary(A) ->
 concat(_A, _B) ->
     raise_type_error(concat, <<"Argument must be a Binary">>).
 
-%% @doc Convert binary to list of byte integers.
+-doc "Convert binary to list of byte integers.".
 -spec to_bytes(binary()) -> [non_neg_integer()].
 to_bytes(Bin) when is_binary(Bin) ->
     binary:bin_to_list(Bin);
 to_bytes(_) ->
     raise_type_error(to_bytes, <<"Receiver must be a Binary">>).
 
-%% @doc Create binary from list of byte integers.
+-doc "Create binary from list of byte integers.".
 -spec from_bytes([non_neg_integer()]) -> binary().
 from_bytes(Bytes) when is_list(Bytes) ->
     try
@@ -245,7 +249,7 @@ from_bytes(Bytes) when is_list(Bytes) ->
 from_bytes(_) ->
     raise_type_error(from_bytes, <<"Argument must be a list of integers 0-255">>).
 
-%% @doc Validate UTF-8 and return {ok, Binary} or {error, {invalid_utf8, Offset}}.
+-doc "Validate UTF-8 and return {ok, Binary} or {error, {invalid_utf8, Offset}}.".
 -spec as_string(binary()) -> {ok, binary()} | {error, {invalid_utf8, non_neg_integer()}}.
 as_string(Bin) when is_binary(Bin) ->
     case unicode:characters_to_binary(Bin, utf8) of
@@ -260,14 +264,14 @@ as_string(Bin) when is_binary(Bin) ->
 as_string(_) ->
     raise_type_error(as_string, <<"Receiver must be a Binary">>).
 
-%% @doc Return binary as-is, without UTF-8 validation.
+-doc "Return binary as-is, without UTF-8 validation.".
 -spec as_string_unchecked(binary()) -> binary().
 as_string_unchecked(Bin) when is_binary(Bin) ->
     Bin;
 as_string_unchecked(_) ->
     raise_type_error(as_string_unchecked, <<"Receiver must be a Binary">>).
 
-%% @doc Printable representation: hex for non-UTF-8, quoted for valid UTF-8.
+-doc "Printable representation: hex for non-UTF-8, quoted for valid UTF-8.".
 -spec print_string(binary()) -> binary().
 print_string(Bin) when is_binary(Bin) ->
     case as_string(Bin) of
@@ -285,8 +289,10 @@ print_string(Bin) when is_binary(Bin) ->
 print_string(_) ->
     raise_type_error(print_string, <<"Receiver must be a Binary">>).
 
-%% @doc Deserialize binary using binary_to_term/2 with [safe, used].
-%% Returns {Value, BytesConsumed}.
+-doc """
+Deserialize binary using binary_to_term/2 with [safe, used].
+Returns {Value, BytesConsumed}.
+""".
 -spec deserialize_with_used(binary()) -> {term(), non_neg_integer()}.
 deserialize_with_used(Bin) when is_binary(Bin) ->
     try
@@ -307,7 +313,7 @@ deserialize_with_used(_) ->
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private Raise a type_error with the given selector and hint.
+-doc "Raise a type_error with the given selector and hint.".
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
     Error0 = beamtalk_error:new(type_error, 'Binary'),
@@ -315,7 +321,7 @@ raise_type_error(Selector, Hint) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @private Find offset of first invalid UTF-8 byte.
+-doc "Find offset of first invalid UTF-8 byte.".
 find_invalid_utf8_offset(<<>>, Offset) ->
     Offset;
 find_invalid_utf8_offset(Bin, Offset) ->
@@ -326,7 +332,7 @@ find_invalid_utf8_offset(Bin, Offset) ->
             Offset
     end.
 
-%% @private Convert binary to hex string representation.
+-doc "Convert binary to hex string representation.".
 bytes_to_hex(<<>>) ->
     <<>>;
 bytes_to_hex(Bin) ->
@@ -337,34 +343,34 @@ bytes_to_hex(Bin) ->
 %%% FFI aliases — no-colon names for Erlang FFI dispatch
 %%% ============================================================================
 
-%% @doc FFI alias for serialize:/1.
+-doc "FFI alias for serialize:/1.".
 -spec serialize(term()) -> binary().
 serialize(X) -> 'serialize:'(X).
 
-%% @doc FFI alias for deserialize:/1.
+-doc "FFI alias for deserialize:/1.".
 -spec deserialize(binary()) -> term().
 deserialize(X) -> 'deserialize:'(X).
 
-%% @doc FFI alias for size:/1.
+-doc "FFI alias for size:/1.".
 -spec size(binary()) -> non_neg_integer().
 size(X) -> 'size:'(X).
 
-%% @doc FFI alias for fromIolist:/1.
+-doc "FFI alias for fromIolist:/1.".
 -spec fromIolist(iolist()) -> binary().
 fromIolist(X) -> 'fromIolist:'(X).
 
-%% @doc Class method wrapper for from_bytes/1.
+-doc "Class method wrapper for from_bytes/1.".
 -spec 'fromBytes:'([non_neg_integer()]) -> binary().
 'fromBytes:'(Bytes) -> from_bytes(Bytes).
 
-%% @doc FFI alias for fromBytes:/1.
+-doc "FFI alias for fromBytes:/1.".
 -spec fromBytes([non_neg_integer()]) -> binary().
 fromBytes(Bytes) -> from_bytes(Bytes).
 
-%% @doc Class method wrapper for deserialize_with_used/1.
+-doc "Class method wrapper for deserialize_with_used/1.".
 -spec 'deserializeWithUsed:'(binary()) -> {term(), non_neg_integer()}.
 'deserializeWithUsed:'(Bin) -> deserialize_with_used(Bin).
 
-%% @doc FFI alias for deserializeWithUsed:/1.
+-doc "FFI alias for deserializeWithUsed:/1.".
 -spec deserializeWithUsed(binary()) -> {term(), non_neg_integer()}.
 deserializeWithUsed(Bin) -> deserialize_with_used(Bin).

@@ -1,25 +1,28 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Class registry and hierarchy management for Beamtalk.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Provides stateless lookup and hierarchy functions for the class system.
-%%% These functions don't require gen_server state and are used across many
-%%% runtime modules (dispatch, primitive, stdlib, beamtalk_interface, REPL).
-%%%
-%%% Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
-%%%
-%%% ## Responsibilities
-%%%
-%%% - Class process lookup via Erlang registry
-%%% - Class enumeration via pg (process groups)
-%%% - Class hierarchy ETS table management
-%%% - Inheritance queries (inherits_from/2)
-%%% - Class object identity checks (is_class_object/1, is_class_name/1)
-%%% - Flattened method table invalidation broadcasts
 -module(beamtalk_class_registry).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Class registry and hierarchy management for Beamtalk.
+
+Provides stateless lookup and hierarchy functions for the class system.
+These functions don't require gen_server state and are used across many
+runtime modules (dispatch, primitive, stdlib, beamtalk_interface, REPL).
+
+Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
+
+## Responsibilities
+
+- Class process lookup via Erlang registry
+- Class enumeration via pg (process groups)
+- Class hierarchy ETS table management
+- Inheritance queries (inherits_from/2)
+- Class object identity checks (is_class_object/1, is_class_name/1)
+- Flattened method table invalidation broadcasts
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -69,22 +72,24 @@
 %% Class Lookup
 %%====================================================================
 
-%% @doc Look up a class by name.
+-doc "Look up a class by name.".
 -spec whereis_class(class_name()) -> pid() | undefined.
 whereis_class(ClassName) ->
     RegName = registry_name(ClassName),
     erlang:whereis(RegName).
 
-%% @doc Get all class processes.
+-doc "Get all class processes.".
 -spec all_classes() -> [pid()].
 all_classes() ->
     pg:get_members(beamtalk_classes).
 
-%% @doc Fetch all live class entries from the registry.
-%%
-%% Returns a list of {Name, ModuleName, Pid} tuples for all registered class
-%% processes that are still alive. Dead processes (noproc, timeout) are silently
-%% filtered out. Returns [] if the pg process group is not running.
+-doc """
+Fetch all live class entries from the registry.
+
+Returns a list of {Name, ModuleName, Pid} tuples for all registered class
+processes that are still alive. Dead processes (noproc, timeout) are silently
+filtered out. Returns [] if the pg process group is not running.
+""".
 -type class_entry() :: {atom(), module(), pid()}.
 -spec live_class_entries() -> [class_entry()].
 live_class_entries() ->
@@ -111,12 +116,14 @@ live_class_entries() ->
             []
     end.
 
-%% @doc Return all loaded user classes (those with a source file recorded).
-%%
-%% Excludes stdlib and ClassBuilder-created classes (they have no source file).
-%% Returns a list of {beamtalk_object, ClassTag, ModuleName, Pid} tuples for
-%% all user-defined classes that are still alive. Dead processes are silently
-%% filtered out. Returns [] if the pg process group is not running.
+-doc """
+Return all loaded user classes (those with a source file recorded).
+
+Excludes stdlib and ClassBuilder-created classes (they have no source file).
+Returns a list of {beamtalk_object, ClassTag, ModuleName, Pid} tuples for
+all user-defined classes that are still alive. Dead processes are silently
+filtered out. Returns [] if the pg process group is not running.
+""".
 -type user_class_entry() :: {beamtalk_object, atom(), module(), pid()}.
 -spec user_classes() -> [user_class_entry()].
 user_classes() ->
@@ -146,7 +153,7 @@ user_classes() ->
             []
     end.
 
-%% @doc Compute the Erlang registry name for a class.
+-doc "Compute the Erlang registry name for a class.".
 -spec registry_name(class_name()) -> atom().
 registry_name(ClassName) ->
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
@@ -155,8 +162,10 @@ registry_name(ClassName) ->
 %% Process Group & ETS Bootstrap
 %%====================================================================
 
-%% @doc Ensure pg (process groups) is started.
-%% pg is used for tracking all class processes.
+-doc """
+Ensure pg (process groups) is started.
+pg is used for tracking all class processes.
+""".
 -spec ensure_pg_started() -> ok.
 ensure_pg_started() ->
     case whereis(pg) of
@@ -169,27 +178,33 @@ ensure_pg_started() ->
             ok
     end.
 
-%% @doc Ensure the class hierarchy ETS table exists.
-%% Delegates to beamtalk_class_hierarchy_table (BT-1062).
+-doc """
+Ensure the class hierarchy ETS table exists.
+Delegates to beamtalk_class_hierarchy_table (BT-1062).
+""".
 -spec ensure_hierarchy_table() -> ok.
 ensure_hierarchy_table() ->
     beamtalk_class_hierarchy_table:new().
 
-%% @doc Ensure the class module ETS table exists (BT-1285).
-%%
-%% Delegates to `beamtalk_class_module_table:new/0`.
-%% Called from `beamtalk_object_class:init/1` alongside `ensure_hierarchy_table/0`.
+-doc """
+Ensure the class module ETS table exists (BT-1285).
+
+Delegates to `beamtalk_class_module_table:new/0`.
+Called from `beamtalk_object_class:init/1` alongside `ensure_hierarchy_table/0`.
+""".
 -spec ensure_module_table() -> ok.
 ensure_module_table() ->
     beamtalk_class_module_table:new().
 
-%% @doc Ensure the class collision warnings ETS table exists.
-%% BT-737/BT-742: Stores collision warnings keyed by {Package, ClassName}.
-%% Uses bag type so multiple warnings per class are all captured.
-%% Uses try/catch to handle concurrent creation race (TOCTOU safe).
-%% BT-742: Key changed from flat ClassName to {Package | undefined, ClassName}
-%% so that draining warnings for one package doesn't affect another's.
-%% BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
+-doc """
+Ensure the class collision warnings ETS table exists.
+BT-737/BT-742: Stores collision warnings keyed by {Package, ClassName}.
+Uses bag type so multiple warnings per class are all captured.
+Uses try/catch to handle concurrent creation race (TOCTOU safe).
+BT-742: Key changed from flat ClassName to {Package | undefined, ClassName}
+so that draining warnings for one package doesn't affect another's.
+BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
+""".
 -spec ensure_class_warnings_table() -> ok.
 ensure_class_warnings_table() ->
     case ets:info(beamtalk_class_warnings) of
@@ -214,10 +229,12 @@ ensure_class_warnings_table() ->
             ok
     end.
 
-%% @doc Record a class collision warning keyed by {Package, ClassName}.
-%% BT-737: Called by beamtalk_object_class when update_class detects module mismatch.
-%% BT-742: Package is extracted from NewModule (the replacing module) so that
-%% warnings can be drained per-package during selective reloads.
+-doc """
+Record a class collision warning keyed by {Package, ClassName}.
+BT-737: Called by beamtalk_object_class when update_class detects module mismatch.
+BT-742: Package is extracted from NewModule (the replacing module) so that
+warnings can be drained per-package during selective reloads.
+""".
 -spec record_class_collision_warning(atom(), atom(), atom()) -> ok.
 record_class_collision_warning(ClassName, OldModule, NewModule) ->
     ensure_class_warnings_table(),
@@ -225,11 +242,13 @@ record_class_collision_warning(ClassName, OldModule, NewModule) ->
     ets:insert(beamtalk_class_warnings, {{Package, ClassName}, OldModule, NewModule}),
     ok.
 
-%% @doc Drain collision warnings for the given class names after a file load.
-%% BT-737: Called by the REPL load handler after loading a file, to collect
-%% warnings and surface them to the client. Removes entries from the table.
-%% BT-742: Drains ALL packages for each class name. Use
-%% drain_class_warnings_by_qualified_names/1 for per-package precision.
+-doc """
+Drain collision warnings for the given class names after a file load.
+BT-737: Called by the REPL load handler after loading a file, to collect
+warnings and surface them to the client. Removes entries from the table.
+BT-742: Drains ALL packages for each class name. Use
+drain_class_warnings_by_qualified_names/1 for per-package precision.
+""".
 -spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
 drain_class_warnings_by_names(ClassNames) ->
     case ets:info(beamtalk_class_warnings) of
@@ -256,10 +275,12 @@ drain_class_warnings_by_names(ClassNames) ->
             )
     end.
 
-%% @doc Drain collision warnings for the given {Package, ClassName} pairs.
-%% BT-742: Package-aware drain that only removes warnings for the specified
-%% package, leaving other packages' warnings intact. Use this from reload
-%% handlers where the package context is known.
+-doc """
+Drain collision warnings for the given {Package, ClassName} pairs.
+BT-742: Package-aware drain that only removes warnings for the specified
+package, leaving other packages' warnings intact. Use this from reload
+handlers where the package context is known.
+""".
 -spec drain_class_warnings_by_qualified_names([{atom() | undefined, atom()}]) ->
     [{atom(), atom(), atom()}].
 drain_class_warnings_by_qualified_names(QualifiedNames) ->
@@ -280,9 +301,11 @@ drain_class_warnings_by_qualified_names(QualifiedNames) ->
             )
     end.
 
-%% @doc Extract the package segment from a bt@{pkg}@{class} module name.
-%% Returns the package name atom or undefined for unqualified modules.
-%% BT-742: Used to derive the package portion of the ETS key from module atoms.
+-doc """
+Extract the package segment from a bt@{pkg}@{class} module name.
+Returns the package name atom or undefined for unqualified modules.
+BT-742: Used to derive the package portion of the ETS key from module atoms.
+""".
 -spec extract_package_from_module(atom()) -> atom() | undefined.
 extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
     ModStr = atom_to_list(ModuleName),
@@ -293,20 +316,24 @@ extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
             undefined
     end.
 
-%% @doc Record a structured error to be surfaced after a failed module load.
-%% BT-738: Called by beamtalk_object_class when update_class detects stdlib shadowing.
-%% The error is keyed by class name (atom) and drained by the REPL load handler
-%% after code:load_binary returns {error, _} due to on_load failure.
+-doc """
+Record a structured error to be surfaced after a failed module load.
+BT-738: Called by beamtalk_object_class when update_class detects stdlib shadowing.
+The error is keyed by class name (atom) and drained by the REPL load handler
+after code:load_binary returns {error, _} due to on_load failure.
+""".
 -spec record_pending_load_error(atom(), #beamtalk_error{}) -> ok.
 record_pending_load_error(ClassName, Error) ->
     ensure_pending_errors_table(),
     ets:insert(beamtalk_pending_load_errors, {ClassName, Error}),
     ok.
 
-%% @doc Drain pending load errors for the given class names.
-%% BT-738: Called by the REPL load handler after a failed code:load_binary,
-%% to retrieve any structured stdlib_shadowing errors for the attempted classes.
-%% Removes entries from the table (atomically via ets:take/2).
+-doc """
+Drain pending load errors for the given class names.
+BT-738: Called by the REPL load handler after a failed code:load_binary,
+to retrieve any structured stdlib_shadowing errors for the attempted classes.
+Removes entries from the table (atomically via ets:take/2).
+""".
 -spec drain_pending_load_errors_by_names([atom()]) -> [{atom(), #beamtalk_error{}}].
 drain_pending_load_errors_by_names(ClassNames) ->
     case ets:info(beamtalk_pending_load_errors) of
@@ -321,10 +348,12 @@ drain_pending_load_errors_by_names(ClassNames) ->
             )
     end.
 
-%% @doc Validate a class update for stdlib shadowing and cross-module redefinition.
-%% BT-738: Rejects updates where a user module tries to shadow a stdlib class.
-%% BT-737: Emits a warning when a class is redefined from a different module.
-%% Returns ok if the update is permitted, {error, Error} if it must be rejected.
+-doc """
+Validate a class update for stdlib shadowing and cross-module redefinition.
+BT-738: Rejects updates where a user module tries to shadow a stdlib class.
+BT-737: Emits a warning when a class is redefined from a different module.
+Returns ok if the update is permitted, {error, Error} if it must be rejected.
+""".
 -spec validate_class_update(atom(), atom(), map()) -> ok | {error, #beamtalk_error{}}.
 validate_class_update(ClassName, OldModule, ClassInfo) ->
     NewModule = maps:get(module, ClassInfo, OldModule),
@@ -372,8 +401,10 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
             ok
     end.
 
-%% @doc Returns true if the given module atom belongs to the Beamtalk stdlib.
-%% BT-738: Stdlib modules have the prefix 'bt@stdlib@'.
+-doc """
+Returns true if the given module atom belongs to the Beamtalk stdlib.
+BT-738: Stdlib modules have the prefix 'bt@stdlib@'.
+""".
 -spec is_stdlib_module(atom()) -> boolean().
 is_stdlib_module(Module) when is_atom(Module) ->
     case atom_to_binary(Module, utf8) of
@@ -383,18 +414,22 @@ is_stdlib_module(Module) when is_atom(Module) ->
 is_stdlib_module(_) ->
     false.
 
-%% @private Returns true if the given module atom is a bootstrap stub.
-%% Bootstrap stubs are hand-written modules that register placeholder classes
-%% (Class, Metaclass, ClassBuilder) before the compiled stdlib loads.
-%% They are intentionally replaced during stdlib initialization.
+-doc """
+Returns true if the given module atom is a bootstrap stub.
+Bootstrap stubs are hand-written modules that register placeholder classes
+(Class, Metaclass, ClassBuilder) before the compiled stdlib loads.
+They are intentionally replaced during stdlib initialization.
+""".
 -spec is_bootstrap_stub_module(atom()) -> boolean().
 is_bootstrap_stub_module(beamtalk_class_bt) -> true;
 is_bootstrap_stub_module(beamtalk_metaclass_bt) -> true;
 is_bootstrap_stub_module(beamtalk_class_builder_bt) -> true;
 is_bootstrap_stub_module(_) -> false.
 
-%% @private Ensure the pending load errors ETS table exists.
-%% BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
+-doc """
+Ensure the pending load errors ETS table exists.
+BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
+""".
 -spec ensure_pending_errors_table() -> ok.
 ensure_pending_errors_table() ->
     case ets:info(beamtalk_pending_load_errors) of
@@ -423,16 +458,18 @@ ensure_pending_errors_table() ->
 %% ETS Ownership Helpers (BT-1888)
 %%====================================================================
 
-%% @private Return an ETS heir option for table survival across process crashes.
-%%
-%% BT-1888: ETS tables created by a transient process (e.g. a class gen_server)
-%% are destroyed when that process dies.  Using `{heir, Pid, Data}` hands the
-%% table to a long-lived process instead of deleting it.
-%%
-%% We pick the runtime supervisor (`beamtalk_runtime_sup`) if it is alive.
-%% If the supervisor is not yet running (early bootstrap, tests), we omit
-%% the heir option — the table will be owned by the caller and recreated
-%% if needed via the existing ensure_* idempotent guards.
+-doc """
+Return an ETS heir option for table survival across process crashes.
+
+BT-1888: ETS tables created by a transient process (e.g. a class gen_server)
+are destroyed when that process dies.  Using `{heir, Pid, Data}` hands the
+table to a long-lived process instead of deleting it.
+
+We pick the runtime supervisor (`beamtalk_runtime_sup`) if it is alive.
+If the supervisor is not yet running (early bootstrap, tests), we omit
+the heir option — the table will be owned by the caller and recreated
+if needed via the existing ensure_* idempotent guards.
+""".
 -spec heir_option() -> [tuple()].
 heir_option() ->
     case whereis(beamtalk_runtime_sup) of
@@ -440,13 +477,15 @@ heir_option() ->
         Pid -> [{heir, Pid, undefined}]
     end.
 
-%% @private Retroactively set the heir on an existing table if one is not set.
-%%
-%% BT-1888: Tables created early in boot (from `beamtalk_runtime_app:start/2`)
-%% run before the supervisor is alive, so `heir_option/0` returns `[]`.
-%% Subsequent `ensure_*` calls (e.g., from `beamtalk_object_class:init/1`)
-%% invoke this to set the heir once the supervisor is available.
-%% Only the table owner can call `ets:setopts/2`, so we guard on ownership.
+-doc """
+Retroactively set the heir on an existing table if one is not set.
+
+BT-1888: Tables created early in boot (from `beamtalk_runtime_app:start/2`)
+run before the supervisor is alive, so `heir_option/0` returns `[]`.
+Subsequent `ensure_*` calls (e.g., from `beamtalk_object_class:init/1`)
+invoke this to set the heir once the supervisor is available.
+Only the table owner can call `ets:setopts/2`, so we guard on ownership.
+""".
 -spec maybe_set_heir(atom()) -> ok.
 maybe_set_heir(Table) ->
     case whereis(beamtalk_runtime_sup) of
@@ -479,14 +518,16 @@ maybe_set_heir(Table) ->
 %% Hierarchy Queries
 %%====================================================================
 
-%% @doc Check if a class inherits from a given ancestor (walks superclass chain).
-%%
-%% BT-510: Uses ETS hierarchy table for O(1) lookups per level instead of
-%% gen_server calls. No process messaging needed — pure ETS reads.
-%%
-%% Returns true if ClassName is equal to or a subclass of Ancestor.
-%% Returns false if the class is not in the hierarchy table (safe during bootstrap).
-%% Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
+-doc """
+Check if a class inherits from a given ancestor (walks superclass chain).
+
+BT-510: Uses ETS hierarchy table for O(1) lookups per level instead of
+gen_server calls. No process messaging needed — pure ETS reads.
+
+Returns true if ClassName is equal to or a subclass of Ancestor.
+Returns false if the class is not in the hierarchy table (safe during bootstrap).
+Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
+""".
 -spec inherits_from(class_name() | none, class_name()) -> boolean().
 inherits_from(none, _Ancestor) ->
     false;
@@ -499,23 +540,27 @@ inherits_from(ClassName, Ancestor) ->
         {ok, SuperclassName} -> inherits_from(SuperclassName, Ancestor)
     end.
 
-%% @doc Return sorted list of direct subclass names for a given class.
-%%
-%% BT-573: Queries the ETS hierarchy table for all classes whose superclass
-%% matches the given class name. Returns sorted atom list for deterministic output.
+-doc """
+Return sorted list of direct subclass names for a given class.
+
+BT-573: Queries the ETS hierarchy table for all classes whose superclass
+matches the given class name. Returns sorted atom list for deterministic output.
+""".
 -spec direct_subclasses(class_name()) -> [class_name()].
 direct_subclasses(ClassName) ->
     lists:sort(beamtalk_class_hierarchy_table:match_subclasses(ClassName)).
 
-%% @doc Return sorted list of all subclass names recursively.
-%%
-%% BT-573: Walks the hierarchy tree depth-first, collecting all transitive
-%% subclasses. Returns sorted atom list for deterministic output.
+-doc """
+Return sorted list of all subclass names recursively.
+
+BT-573: Walks the hierarchy tree depth-first, collecting all transitive
+subclasses. Returns sorted atom list for deterministic output.
+""".
 -spec all_subclasses(class_name()) -> [class_name()].
 all_subclasses(ClassName) ->
     lists:sort(all_subclasses_acc([ClassName], [])).
 
-%% @doc Accumulator helper for all_subclasses/1; walks hierarchy depth-first.
+-doc "Accumulator helper for all_subclasses/1; walks hierarchy depth-first.".
 -spec all_subclasses_acc([class_name()], [class_name()]) -> [class_name()].
 all_subclasses_acc([], Acc) ->
     Acc;
@@ -527,26 +572,30 @@ all_subclasses_acc([Current | Rest], Acc) ->
 %% Class Object Identity
 %%====================================================================
 
-%% @doc Convert a class name atom to a class object tag (BT-246).
-%%
-%% Appends " class" to the atom, e.g. 'Point' -> 'Point class'.
-%% Used by codegen to create class object records with the right tag
-%% for is_class_object/1 detection.
+-doc """
+Convert a class name atom to a class object tag (BT-246).
+
+Appends " class" to the atom, e.g. 'Point' -> 'Point class'.
+Used by codegen to create class object records with the right tag
+for is_class_object/1 detection.
+""".
 -spec class_object_tag(atom()) -> atom().
 class_object_tag(ClassName) when is_atom(ClassName) ->
     list_to_atom(atom_to_list(ClassName) ++ " class").
 
-%% @doc Check if a value is a class object (BT-246).
-%%
-%% Class objects are beamtalk_object records whose class name ends with " class".
-%% This distinguishes class objects from actor instances at runtime.
+-doc """
+Check if a value is a class object (BT-246).
+
+Class objects are beamtalk_object records whose class name ends with " class".
+This distinguishes class objects from actor instances at runtime.
+""".
 -spec is_class_object(term()) -> boolean().
 is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
     is_class_name(Class);
 is_class_object(_) ->
     false.
 
-%% @doc Check if an atom class name represents a class object (ends with " class").
+-doc "Check if an atom class name represents a class object (ends with \" class\").".
 -spec is_class_name(atom()) -> boolean().
 is_class_name(ClassName) when is_atom(ClassName) ->
     ClassBin = atom_to_binary(ClassName, utf8),
@@ -555,10 +604,12 @@ is_class_name(ClassName) when is_atom(ClassName) ->
 is_class_name(_) ->
     false.
 
-%% @doc Strip " class" suffix from a class object name to get the display name.
-%%
-%% Returns the base class name (e.g., `'Integer class'` → `<<"Integer">>`).
-%% Returns the full name as binary if not a class name.
+-doc """
+Strip " class" suffix from a class object name to get the display name.
+
+Returns the base class name (e.g., `'Integer class'` → `<<"Integer">>`).
+Returns the full name as binary if not a class name.
+""".
 -spec class_display_name(atom()) -> binary().
 class_display_name(ClassName) when is_atom(ClassName) ->
     ClassBin = atom_to_binary(ClassName, utf8),
@@ -572,12 +623,14 @@ class_display_name(ClassName) when is_atom(ClassName) ->
 %% Class Pid Reverse Index (BT-1768)
 %%====================================================================
 
-%% @doc Ensure the pid→classname reverse index table exists (idempotent).
-%%
-%% BT-1768: This table maps `{Pid, ClassName}` so that when a class process
-%% crashes and the Erlang registry removes its name, we can still recover the
-%% class name from the stale pid for auto-restart.
-%% BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
+-doc """
+Ensure the pid→classname reverse index table exists (idempotent).
+
+BT-1768: This table maps `{Pid, ClassName}` so that when a class process
+crashes and the Erlang registry removes its name, we can still recover the
+class name from the stale pid for auto-restart.
+BT-1888: Uses {heir, ...} to prevent table loss when owner dies.
+""".
 -spec ensure_pid_table() -> ok.
 ensure_pid_table() ->
     case ets:info(beamtalk_class_pids) of
@@ -602,19 +655,23 @@ ensure_pid_table() ->
             ok
     end.
 
-%% @doc Record a class pid→classname mapping.
-%%
-%% Called from `beamtalk_object_class:init/1` after the class process starts.
+-doc """
+Record a class pid→classname mapping.
+
+Called from `beamtalk_object_class:init/1` after the class process starts.
+""".
 -spec record_class_pid(pid(), class_name()) -> ok.
 record_class_pid(Pid, ClassName) ->
     ensure_pid_table(),
     ets:insert(beamtalk_class_pids, {Pid, ClassName}),
     ok.
 
-%% @doc Look up the class name for a (possibly dead) pid.
-%%
-%% Returns `{ok, ClassName}` or `not_found`. The entry persists after the
-%% process dies, which is the whole point — we need this for crash recovery.
+-doc """
+Look up the class name for a (possibly dead) pid.
+
+Returns `{ok, ClassName}` or `not_found`. The entry persists after the
+process dies, which is the whole point — we need this for crash recovery.
+""".
 -spec class_name_for_pid(pid()) -> {ok, class_name()} | not_found.
 class_name_for_pid(Pid) ->
     case ets:info(beamtalk_class_pids) of
@@ -631,18 +688,20 @@ class_name_for_pid(Pid) ->
 %% Class Process Recovery (BT-1768)
 %%====================================================================
 
-%% @doc Attempt to restart a crashed class process from compiled module state.
-%%
-%% BT-1768: When a class gen_server crashes, the Erlang registry automatically
-%% unregisters its name. This function reconstructs a minimal ClassInfo from:
-%%   1. The ETS module table (ClassName → Module mapping, survives process death)
-%%   2. The ETS hierarchy table (ClassName → Superclass mapping)
-%%   3. The compiled module's `__beamtalk_meta/0` (static metadata baked into BEAM)
-%%
-%% Hot-patched methods and class variable state are lost — only compiled state
-%% is recovered. Logs a warning so the user knows recovery happened.
-%%
-%% Returns `{ok, NewPid}` on success, `{error, Reason}` on failure.
+-doc """
+Attempt to restart a crashed class process from compiled module state.
+
+BT-1768: When a class gen_server crashes, the Erlang registry automatically
+unregisters its name. This function reconstructs a minimal ClassInfo from:
+  1. The ETS module table (ClassName → Module mapping, survives process death)
+  2. The ETS hierarchy table (ClassName → Superclass mapping)
+  3. The compiled module's `__beamtalk_meta/0` (static metadata baked into BEAM)
+
+Hot-patched methods and class variable state are lost — only compiled state
+is recovered. Logs a warning so the user knows recovery happened.
+
+Returns `{ok, NewPid}` on success, `{error, Reason}` on failure.
+""".
 -spec restart_class(class_name()) -> {ok, pid()} | {error, term()}.
 restart_class(ClassName) ->
     case beamtalk_class_module_table:lookup(ClassName) of
@@ -716,13 +775,15 @@ restart_class(ClassName) ->
 %% Return-Type Lookup (BT-1002 / ADR 0045)
 %%====================================================================
 
-%% @doc Look up the return type for an instance method, walking the superclass chain.
-%%
-%% Returns `{ok, TypeAtom}` if the method has a Simple return-type annotation anywhere
-%% in the hierarchy, or `{error, not_found}` if none is found.
-%%
-%% Absence means "dynamic" — the REPL should not rely on a specific type.
-%% Chain walking follows the same superclass order as method dispatch.
+-doc """
+Look up the return type for an instance method, walking the superclass chain.
+
+Returns `{ok, TypeAtom}` if the method has a Simple return-type annotation anywhere
+in the hierarchy, or `{error, not_found}` if none is found.
+
+Absence means "dynamic" — the REPL should not rely on a specific type.
+Chain walking follows the same superclass order as method dispatch.
+""".
 -spec get_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
 get_method_return_type(none, _Selector) ->
     {error, not_found};
@@ -759,9 +820,11 @@ get_method_return_type(ClassName, Selector) ->
             end
     end.
 
-%% @doc Look up the return type for a class-side method, walking the superclass chain.
-%%
-%% Same semantics as `get_method_return_type/2` but consults `class_method_return_types`.
+-doc """
+Look up the return type for a class-side method, walking the superclass chain.
+
+Same semantics as `get_method_return_type/2` but consults `class_method_return_types`.
+""".
 -spec get_class_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
 get_class_method_return_type(none, _Selector) ->
     {error, not_found};

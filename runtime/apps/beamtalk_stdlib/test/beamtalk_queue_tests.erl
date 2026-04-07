@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_queue module (BT-1250).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover:
-%%% - new/0 — empty queue creation
-%%% - enqueue/2 — element addition (success, type error)
-%%% - dequeue/1 — element removal (success, empty queue error, type error)
-%%% - peek/1 — front inspection (success, empty queue error, type error)
-%%% - isEmpty/1 — empty check (empty and non-empty, type error)
-%%% - size/1 — element count (0, 1, many, type error)
-%%% - FIFO ordering — enqueue multiple elements, dequeue in order
-
 -module(beamtalk_queue_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_queue module (BT-1250).
+
+Tests cover:
+- new/0 — empty queue creation
+- enqueue/2 — element addition (success, type error)
+- dequeue/1 — element removal (success, empty queue error, type error)
+- peek/1 — front inspection (success, empty queue error, type error)
+- isEmpty/1 — empty check (empty and non-empty, type error)
+- size/1 — element count (0, 1, many, type error)
+- FIFO ordering — enqueue multiple elements, dequeue in order
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

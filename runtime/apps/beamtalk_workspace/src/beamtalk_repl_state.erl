@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc State management for Beamtalk REPL
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% This module defines the REPL state record and provides utilities
-%%% for manipulating state during REPL sessions.
-
 -module(beamtalk_repl_state).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+State management for Beamtalk REPL
+
+This module defines the REPL state record and provides utilities
+for manipulating state during REPL sessions.
+""".
 
 -export([
     new/2, new/3,
@@ -56,12 +58,12 @@
 
 -opaque state() :: #state{}.
 
-%% @doc Create a new REPL state.
+-doc "Create a new REPL state.".
 -spec new(gen_tcp:socket() | undefined, inet:port_number()) -> state().
 new(ListenSocket, Port) ->
     new(ListenSocket, Port, #{}).
 
-%% @doc Create a new REPL state with options.
+-doc "Create a new REPL state with options.".
 -spec new(gen_tcp:socket() | undefined, inet:port_number(), map()) -> state().
 new(ListenSocket, Port, _Options) ->
     #state{
@@ -76,106 +78,112 @@ new(ListenSocket, Port, _Options) ->
         pending_module_removals = []
     }.
 
-%% @doc Get current variable bindings.
+-doc "Get current variable bindings.".
 -spec get_bindings(state()) -> map().
 get_bindings(#state{bindings = Bindings}) ->
     Bindings.
 
-%% @doc Set variable bindings.
+-doc "Set variable bindings.".
 -spec set_bindings(map(), state()) -> state().
 set_bindings(Bindings, State) ->
     State#state{bindings = Bindings}.
 
-%% @doc Clear all variable bindings and reset workspace injection state.
+-doc "Clear all variable bindings and reset workspace injection state.".
 -spec clear_bindings(state()) -> state().
 clear_bindings(State) ->
     State#state{bindings = #{}, injected_ws_keys = []}.
 
-%% @doc Get the set of binding keys last injected from workspace.
+-doc "Get the set of binding keys last injected from workspace.".
 -spec get_injected_ws_keys(state()) -> [atom()].
 get_injected_ws_keys(#state{injected_ws_keys = Keys}) ->
     Keys.
 
-%% @doc Set the set of binding keys injected from workspace.
+-doc "Set the set of binding keys injected from workspace.".
 -spec set_injected_ws_keys([atom()], state()) -> state().
 set_injected_ws_keys(Keys, State) ->
     State#state{injected_ws_keys = Keys}.
 
-%% @doc Get current eval counter.
+-doc "Get current eval counter.".
 -spec get_eval_counter(state()) -> non_neg_integer().
 get_eval_counter(#state{eval_counter = Counter}) ->
     Counter.
 
-%% @doc Increment eval counter and return new state.
+-doc "Increment eval counter and return new state.".
 -spec increment_eval_counter(state()) -> state().
 increment_eval_counter(State = #state{eval_counter = Counter}) ->
     State#state{eval_counter = Counter + 1}.
 
-%% @doc Get loaded modules list.
+-doc "Get loaded modules list.".
 -spec get_loaded_modules(state()) -> [atom()].
 get_loaded_modules(#state{loaded_modules = Modules}) ->
     Modules.
 
-%% @doc Add a loaded module to the state.
+-doc "Add a loaded module to the state.".
 -spec add_loaded_module(atom(), state()) -> state().
 add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
     State#state{loaded_modules = [Module | Modules]}.
 
-%% @doc Set the loaded modules list.
+-doc "Set the loaded modules list.".
 -spec set_loaded_modules([atom()], state()) -> state().
 set_loaded_modules(Modules, State) ->
     State#state{loaded_modules = Modules}.
 
-%% @doc Get listen socket.
+-doc "Get listen socket.".
 -spec get_listen_socket(state()) -> gen_tcp:socket() | undefined.
 get_listen_socket(#state{listen_socket = Socket}) ->
     Socket.
 
-%% @doc Get port number.
+-doc "Get port number.".
 -spec get_port(state()) -> inet:port_number().
 get_port(#state{port = Port}) ->
     Port.
 
-%% @doc Get actor registry PID.
+-doc "Get actor registry PID.".
 -spec get_actor_registry(state()) -> pid() | undefined.
 get_actor_registry(#state{actor_registry = Registry}) ->
     Registry.
 
-%% @doc Set actor registry PID.
+-doc "Set actor registry PID.".
 -spec set_actor_registry(pid() | undefined, state()) -> state().
 set_actor_registry(Registry, State) ->
     State#state{actor_registry = Registry}.
 
-%% @doc Get module tracker.
+-doc "Get module tracker.".
 -spec get_module_tracker(state()) -> beamtalk_repl_modules:module_tracker().
 get_module_tracker(#state{module_tracker = Tracker}) ->
     Tracker.
 
-%% @doc Set module tracker.
+-doc "Set module tracker.".
 -spec set_module_tracker(beamtalk_repl_modules:module_tracker(), state()) -> state().
 set_module_tracker(Tracker, State) ->
     State#state{module_tracker = Tracker}.
 
-%% @doc Get pending module removals (deferred during active eval).
-%%
-%% BT-1242: Returns the list of module atoms queued for removal while an eval
-%% worker was running.  Applied to the worker result state in eval_result handler.
+-doc """
+Get pending module removals (deferred during active eval).
+
+BT-1242: Returns the list of module atoms queued for removal while an eval
+worker was running.  Applied to the worker result state in eval_result handler.
+""".
 -spec get_pending_module_removals(state()) -> [atom()].
 get_pending_module_removals(#state{pending_module_removals = Removals}) ->
     Removals.
 
-%% @doc Add a module to the pending-removals list.
-%%
-%% BT-1242: Called by handle_info({class_removed, ...}) when an eval worker is
-%% active.  Deduplicates via ordsets so repeated removals are idempotent.
+-doc """
+Add a module to the pending-removals list.
+
+BT-1242: Called by handle_info({class_removed, ...}) when an eval worker is
+active.  Deduplicates via ordsets so repeated removals are idempotent.
+""".
 -spec add_pending_module_removal(atom(), state()) -> state().
 add_pending_module_removal(Module, #state{pending_module_removals = Removals} = State) ->
     State#state{pending_module_removals = ordsets:add_element(Module, Removals)}.
 
-%% @doc Clear the pending-removals list.
-%%
-%% BT-1242: Called after applying pending removals on interrupt or worker crash,
-%% so the shell returns to idle with a clean slate.
+-doc """
+Clear the pending-removals list.
+
+BT-1242: Called after applying pending removals on interrupt or worker crash,
+so the shell returns to idle with a clean slate.
+""".
 -spec clear_pending_module_removals(state()) -> state().
 clear_pending_module_removals(State) ->
     State#state{pending_module_removals = []}.

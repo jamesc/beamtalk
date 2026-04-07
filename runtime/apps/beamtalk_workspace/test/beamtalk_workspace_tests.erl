@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_workspace module
-%%%
-%%% Tests the workspace API (status/0).
-
 -module(beamtalk_workspace_tests).
+
+-moduledoc """
+Unit tests for beamtalk_workspace module
+
+Tests the workspace API (status/0).
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

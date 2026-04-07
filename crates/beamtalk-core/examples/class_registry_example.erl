@@ -1,11 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Example showing how to use the beamtalk_classes registry.
-%%
-%% This demonstrates registering classes, querying the hierarchy,
-%% and adding methods dynamically (for live development).
 -module(class_registry_example).
+
+-moduledoc """
+Example showing how to use the beamtalk_classes registry.
+
+This demonstrates registering classes, querying the hierarchy,
+and adding methods dynamically (for live development).
+""".
 -export([run/0]).
 
 run() ->

@@ -1,12 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for actor send wrapper telemetry instrumentation (ADR 0069 Phase 2a).
-%%%
-%%% Tests cover: telemetry events emitted by sync_send/3, async_send/4, cast_send/3,
-%%% aggregate counter updates, trace event capture when enabled, error handling
-%%% preservation (timeout, actor_dead), and lifecycle method exclusion.
 -module(beamtalk_actor_tracing_tests).
+
+-moduledoc """
+EUnit tests for actor send wrapper telemetry instrumentation (ADR 0069 Phase 2a).
+
+Tests cover: telemetry events emitted by sync_send/3, async_send/4, cast_send/3,
+aggregate counter updates, trace event capture when enabled, error handling
+preservation (timeout, actor_dead), and lifecycle method exclusion.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -46,7 +49,7 @@ cleanup(_State) ->
     erase('$beamtalk_parent_span_id'),
     ok.
 
-%% @doc Attach a telemetry handler that sends events to the calling process.
+-doc "Attach a telemetry handler that sends events to the calling process.".
 attach_handler(EventName) ->
     Self = self(),
     HandlerId = {actor_tracing_test, EventName, make_ref()},
@@ -60,7 +63,7 @@ attach_handler(EventName) ->
     ),
     HandlerId.
 
-%% @doc Start a test counter actor and register it in the instance registry.
+-doc "Start a test counter actor and register it in the instance registry.".
 start_registered_counter(InitialValue) ->
     {ok, Pid} = test_counter:start_link(InitialValue),
     ok = beamtalk_object_instances:register('Counter', Pid),

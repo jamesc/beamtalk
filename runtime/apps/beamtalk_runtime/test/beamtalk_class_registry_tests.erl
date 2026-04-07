@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_class_registry (BT-708).
-%%%
-%%% Tests class lookup, hierarchy queries, process group management,
-%%% and class object identity functions.
-
 -module(beamtalk_class_registry_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_class_registry (BT-708).
+
+Tests class lookup, hierarchy queries, process group management,
+and class object identity functions.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

@@ -1,25 +1,27 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Regex class implementation — regular expressions via Erlang re module.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Provides class-side constructors for compiling patterns and instance
-%%% methods for inspection. String-side regex operations (matchesRegex:,
-%%% firstMatch:, etc.) are also in this module as helper functions called
-%%% by String's codegen.
-%%%
-%%% Regex objects are represented as tagged maps:
-%%% ```
-%%% #{
-%%%   '$beamtalk_class' => 'Regex',
-%%%   source => Pattern :: binary(),
-%%%   compiled => CompiledRe :: mp()
-%%% }
-%%% ```
-
 -module(beamtalk_regex).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Regex class implementation — regular expressions via Erlang re module.
+
+Provides class-side constructors for compiling patterns and instance
+methods for inspection. String-side regex operations (matchesRegex:,
+firstMatch:, etc.) are also in this module as helper functions called
+by String's codegen.
+
+Regex objects are represented as tagged maps:
+```
+#{
+  '$beamtalk_class' => 'Regex',
+  source => Pattern :: binary(),
+  compiled => CompiledRe :: mp()
+}
+```
+""".
 
 -export(['from:'/1, 'from:options:'/2]).
 -export([from/1, from/2]).
@@ -38,9 +40,11 @@
 %%% Class Methods — Constructors
 %%% ============================================================================
 
-%% @doc Compile a regex pattern string into a Regex object.
-%%
-%% Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
+-doc """
+Compile a regex pattern string into a Regex object.
+
+Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
+""".
 -spec 'from:'(binary()) -> beamtalk_result:t().
 'from:'(Pattern) when is_binary(Pattern) ->
     case re:compile(Pattern) of
@@ -65,10 +69,12 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Pattern must be a String">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Compile a regex pattern string with PCRE options.
-%%
-%% Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
-%% Unknown options still raise (programming error).
+-doc """
+Compile a regex pattern string with PCRE options.
+
+Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
+Unknown options still raise (programming error).
+""".
 -spec 'from:options:'(binary(), list()) -> beamtalk_result:t().
 'from:options:'(Pattern, Options) when is_binary(Pattern), is_list(Options) ->
     ErlOpts = translate_options(Options),
@@ -98,11 +104,13 @@
 %%% FFI aliases — no-colon names for Erlang FFI dispatch
 %%% ============================================================================
 
-%% @doc FFI alias for from:/1 — called via (Erlang beamtalk_regex) from: pattern.
+-doc "FFI alias for from:/1 — called via (Erlang beamtalk_regex) from: pattern.".
 -spec from(binary()) -> beamtalk_result:t().
 from(Pattern) -> 'from:'(Pattern).
 
-%% @doc FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
+-doc """
+FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
+""".
 -spec from(binary(), list()) -> beamtalk_result:t().
 from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 
@@ -110,11 +118,11 @@ from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 %%% Instance Methods — Inspection
 %%% ============================================================================
 
-%% @doc Return the original pattern source string.
+-doc "Return the original pattern source string.".
 -spec source(map()) -> binary().
 source(#{source := Src}) -> Src.
 
-%% @doc Human-readable representation: Regex([0-9]+)
+-doc "Human-readable representation: Regex([0-9]+)".
 -spec 'printString'(map()) -> binary().
 'printString'(#{source := Src}) ->
     iolist_to_binary([<<"Regex(">>, Src, <<")">>]).
@@ -123,7 +131,7 @@ source(#{source := Src}) -> Src.
 %%% String Helper Functions — called by String codegen
 %%% ============================================================================
 
-%% @doc Test if string matches pattern (String or Regex).
+-doc "Test if string matches pattern (String or Regex).".
 -spec matches_regex(binary(), binary() | map()) -> boolean().
 matches_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     re:run(Str, MP, [{capture, none}]) =:= match;
@@ -141,7 +149,7 @@ matches_regex(_, _) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @doc Test if string matches pattern with options (String only pattern).
+-doc "Test if string matches pattern with options (String only pattern).".
 -spec matches_regex_options(binary(), binary(), list()) -> boolean().
 matches_regex_options(Str, Pattern, Options) when
     is_binary(Str), is_binary(Pattern), is_list(Options)
@@ -160,7 +168,7 @@ matches_regex_options(_, _, _) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @doc Find first match in string, return String or nil.
+-doc "Find first match in string, return String or nil.".
 -spec first_match(binary(), binary() | map()) -> binary() | 'nil'.
 first_match(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     case re:run(Str, MP, [{capture, first, binary}]) of
@@ -184,7 +192,7 @@ first_match(_, _) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @doc Find all matches in string, return List of Strings.
+-doc "Find all matches in string, return List of Strings.".
 -spec all_matches(binary(), binary() | map()) -> list().
 all_matches(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     case re:run(Str, MP, [global, {capture, first, binary}]) of
@@ -208,7 +216,7 @@ all_matches(_, _) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @doc Replace first match with replacement string.
+-doc "Replace first match with replacement string.".
 -spec replace_regex(binary(), binary() | map(), binary()) -> binary().
 replace_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}, Replacement) when
     is_binary(Str), is_binary(Replacement)
@@ -228,7 +236,7 @@ replace_regex(_, _, _) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Arguments must be Strings or Regex">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Replace all matches with replacement string.
+-doc "Replace all matches with replacement string.".
 -spec replace_all_regex(binary(), binary() | map(), binary()) -> binary().
 replace_all_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}, Replacement) when
     is_binary(Str), is_binary(Replacement)
@@ -248,7 +256,7 @@ replace_all_regex(_, _, _) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Arguments must be Strings or Regex">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Split string by regex pattern.
+-doc "Split string by regex pattern.".
 -spec split_regex(binary(), binary() | map()) -> list().
 split_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     re:split(Str, MP, [{return, binary}, trim]);
@@ -270,8 +278,7 @@ split_regex(_, _) ->
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private
-%% @doc Raise a structured regex_error for invalid patterns in String methods.
+-doc "Raise a structured regex_error for invalid patterns in String methods.".
 -spec raise_bad_pattern(atom(), binary()) -> no_return().
 raise_bad_pattern(Selector, Pattern) ->
     %% Try re:compile to get a detailed error message
@@ -289,8 +296,7 @@ raise_bad_pattern(Selector, Pattern) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @private
-%% @doc Translate Beamtalk option atoms to Erlang re compile options.
+-doc "Translate Beamtalk option atoms to Erlang re compile options.".
 -spec translate_options(list()) -> list().
 translate_options(Opts) ->
     lists:map(fun translate_option/1, Opts).

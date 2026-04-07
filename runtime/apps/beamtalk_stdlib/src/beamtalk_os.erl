@@ -1,21 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc OS class implementation — shell command execution.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% OS provides class-side methods for executing shell commands
-%%% and capturing their output as a String.
-%%%
-%%% ## Methods
-%%%
-%%% | Selector          | Description                                      |
-%%% |-------------------|--------------------------------------------------|
-%%% | `run:`            | Execute shell command, return trimmed stdout     |
-%%% | `run:timeout:`    | Same, with an explicit wall-clock timeout (ms)   |
-
 -module(beamtalk_os).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+OS class implementation — shell command execution.
+
+OS provides class-side methods for executing shell commands
+and capturing their output as a String.
+
+## Methods
+
+| Selector          | Description                                      |
+|-------------------|--------------------------------------------------|
+| `run:`            | Execute shell command, return trimmed stdout     |
+| `run:timeout:`    | Same, with an explicit wall-clock timeout (ms)   |
+""".
 
 -export(['run:'/1, run/1, 'run:timeout:'/2, run/2]).
 
@@ -30,24 +32,28 @@
 %%% Public API
 %%% ============================================================================
 
-%% @doc Execute a shell command and return its trimmed stdout as a binary.
-%%
-%% Runs the command through the platform shell (`/bin/sh -c` on Unix,
-%% `cmd.exe /c` on Windows) via an Erlang port.
-%% Blocks until the command exits or the default 30-second timeout fires.
-%% Raises `#beamtalk_error{kind = timeout}` on timeout,
-%% `output_too_large` if stdout exceeds 10 MB.
+-doc """
+Execute a shell command and return its trimmed stdout as a binary.
+
+Runs the command through the platform shell (`/bin/sh -c` on Unix,
+`cmd.exe /c` on Windows) via an Erlang port.
+Blocks until the command exits or the default 30-second timeout fires.
+Raises `#beamtalk_error{kind = timeout}` on timeout,
+`output_too_large` if stdout exceeds 10 MB.
+""".
 -spec 'run:'(binary()) -> binary().
 'run:'(Cmd) when is_binary(Cmd) ->
     run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:');
 'run:'(_) ->
     raise_type_error('run:', <<"Argument must be a String">>).
 
-%% @doc Execute a shell command with an explicit timeout in milliseconds.
-%%
-%% Behaves like `run:` but the caller controls the wall-clock deadline.
-%% Raises `#beamtalk_error{kind = timeout}` if the command has not exited
-%% within `TimeoutMs` milliseconds.
+-doc """
+Execute a shell command with an explicit timeout in milliseconds.
+
+Behaves like `run:` but the caller controls the wall-clock deadline.
+Raises `#beamtalk_error{kind = timeout}` if the command has not exited
+within `TimeoutMs` milliseconds.
+""".
 -spec 'run:timeout:'(binary(), pos_integer()) -> binary().
 'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0 ->
     run_cmd(Cmd, TimeoutMs, 'run:timeout:');
@@ -56,11 +62,11 @@
 'run:timeout:'(_, _) ->
     raise_type_error('run:timeout:', <<"Timeout must be a positive Integer">>).
 
-%% @doc FFI shim for (Erlang beamtalk_os) run: cmd dispatch.
+-doc "FFI shim for (Erlang beamtalk_os) run: cmd dispatch.".
 -spec run(binary()) -> binary().
 run(Cmd) -> 'run:'(Cmd).
 
-%% @doc FFI shim for (Erlang beamtalk_os) run: cmd timeout: ms dispatch.
+-doc "FFI shim for (Erlang beamtalk_os) run: cmd timeout: ms dispatch.".
 -spec run(binary(), pos_integer()) -> binary().
 run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 
@@ -68,18 +74,20 @@ run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 %%% Internal helpers
 %%% ============================================================================
 
-%% @private Open a shell port and collect all stdout until exit or timeout.
-%%
-%% On Unix, `{spawn, Cmd}` routes through `/bin/sh -c` automatically.
-%% On Windows we must explicitly route through `cmd.exe /c` so that shell
-%% builtins (e.g. `ver`) and chaining operators (`&`) work correctly.
+-doc """
+Open a shell port and collect all stdout until exit or timeout.
+
+On Unix, `{spawn, Cmd}` routes through `/bin/sh -c` automatically.
+On Windows we must explicitly route through `cmd.exe /c` so that shell
+builtins (e.g. `ver`) and chaining operators (`&`) work correctly.
+""".
 -spec run_cmd(binary(), pos_integer(), atom()) -> binary().
 run_cmd(Cmd, TimeoutMs, Selector) ->
     Port = open_shell_port(Cmd),
     Timer = erlang:start_timer(TimeoutMs, self(), os_run_timeout),
     collect(Port, <<>>, Timer, Selector).
 
-%% @private Open a port through the platform shell.
+-doc "Open a port through the platform shell.".
 -spec open_shell_port(binary()) -> port().
 open_shell_port(Cmd) ->
     CmdStr = binary_to_list(Cmd),
@@ -94,7 +102,7 @@ open_shell_port(Cmd) ->
             open_port({spawn, CmdStr}, [exit_status, binary])
     end.
 
-%% @private Accumulate port output, then trim trailing whitespace on exit.
+-doc "Accumulate port output, then trim trailing whitespace on exit.".
 -spec collect(port(), binary(), reference(), atom()) -> binary().
 collect(Port, Acc, Timer, Selector) ->
     receive
@@ -120,8 +128,10 @@ collect(Port, Acc, Timer, Selector) ->
             raise_timeout(Selector)
     end.
 
-%% @private Drain any residual port messages left in the mailbox after
-%% port_close/1 so they do not accumulate in long-lived callers.
+-doc """
+Drain any residual port messages left in the mailbox after
+port_close/1 so they do not accumulate in long-lived callers.
+""".
 -spec flush_port(port()) -> ok.
 flush_port(Port) ->
     receive
@@ -129,8 +139,10 @@ flush_port(Port) ->
     after 0 -> ok
     end.
 
-%% @private Drain a stale timer message that may have been enqueued before
-%% erlang:cancel_timer/1 ran. Safe to call even when cancel_timer succeeded.
+-doc """
+Drain a stale timer message that may have been enqueued before
+erlang:cancel_timer/1 ran. Safe to call even when cancel_timer succeeded.
+""".
 -spec flush_timer(reference()) -> ok.
 flush_timer(Timer) ->
     receive
@@ -138,7 +150,6 @@ flush_timer(Timer) ->
     after 0 -> ok
     end.
 
-%% @private
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
     Error0 = beamtalk_error:new(type_error, 'OS'),
@@ -146,7 +157,6 @@ raise_type_error(Selector, Hint) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @private
 -spec raise_timeout(atom()) -> no_return().
 raise_timeout(Selector) ->
     Error0 = beamtalk_error:new(timeout, 'OS'),
@@ -154,7 +164,6 @@ raise_timeout(Selector) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Command exceeded time limit">>),
     beamtalk_error:raise(Error2).
 
-%% @private
 -spec raise_output_too_large(atom()) -> no_return().
 raise_output_too_large(Selector) ->
     Error0 = beamtalk_error:new(output_too_large, 'OS'),

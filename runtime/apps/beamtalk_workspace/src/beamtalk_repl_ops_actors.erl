@@ -1,20 +1,21 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for actors, inspect, kill, and interrupt operations.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Extracted from beamtalk_repl_server (BT-705).
-
 -module(beamtalk_repl_ops_actors).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Op handlers for actors, inspect, kill, and interrupt operations.
+
+Extracted from beamtalk_repl_server (BT-705).
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([handle/4, validate_actor_pid/1, is_known_actor/1]).
 
-%% @private
 -spec encode_invalid_pid_error(atom(), string(), beamtalk_repl_protocol:protocol_msg()) -> binary().
 encode_invalid_pid_error(Reason, PidStr, Msg) ->
     PidBin = list_to_binary(PidStr),
@@ -31,7 +32,7 @@ encode_invalid_pid_error(Reason, PidStr, Msg) ->
         Err2, Msg, fun beamtalk_repl_json:format_error_message/1
     ).
 
-%% @doc Handle actors/inspect/kill/interrupt ops.
+-doc "Handle actors/inspect/kill/interrupt ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"actors">>, _Params, Msg, _SessionPid) ->
     case whereis(beamtalk_actor_registry) of
@@ -132,7 +133,6 @@ handle(<<"interrupt">>, _Params, Msg, SessionPid) ->
 
 %%% Internal helpers
 
-%% @private
 -spec validate_actor_pid(string()) -> {ok, pid()} | {error, invalid_pid | unknown_actor}.
 validate_actor_pid(PidStr) ->
     try
@@ -145,7 +145,6 @@ validate_actor_pid(PidStr) ->
         _:_ -> {error, invalid_pid}
     end.
 
-%% @private
 -spec is_known_actor(pid()) -> boolean().
 is_known_actor(Pid) when is_pid(Pid) ->
     case whereis(beamtalk_actor_registry) of

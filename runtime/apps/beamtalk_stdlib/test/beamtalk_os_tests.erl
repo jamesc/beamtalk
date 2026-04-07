@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_os module (BT-1247).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover:
-%%% - run: success path (trimmed stdout)
-%%% - run: type error (non-binary argument)
-%%% - run:timeout: success path with explicit timeout
-%%% - run:timeout: type error (non-binary command)
-%%% - run:timeout: type error (non-integer timeout)
-%%% - run:timeout: timeout expiry raises #timeout error
-%%% - output exceeding MAX_OUTPUT_BYTES raises output_too_large error
-
 -module(beamtalk_os_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_os module (BT-1247).
+
+Tests cover:
+- run: success path (trimmed stdout)
+- run: type error (non-binary argument)
+- run:timeout: success path with explicit timeout
+- run:timeout: type error (non-binary command)
+- run:timeout: type error (non-integer timeout)
+- run:timeout: timeout expiry raises #timeout error
+- output exceeding MAX_OUTPUT_BYTES raises output_too_large error
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").

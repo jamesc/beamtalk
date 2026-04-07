@@ -1,17 +1,20 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Performance test suite for actor call latency (BT-202)
-%%%
-%%% Benchmarks key actor system operations to track regressions and
-%%% document expected performance characteristics.
-%%%
-%%% Run with: just perf
-%%%
-%%% Tests output parseable results in the format:
-%%%   PERF: <benchmark_name> <median_us>us (mean: <mean_us>us, ...)
 
 -module(beamtalk_perf_tests).
+
+-moduledoc """
+Performance test suite for actor call latency (BT-202)
+
+Benchmarks key actor system operations to track regressions and
+document expected performance characteristics.
+
+Run with: just perf
+
+Tests output parseable results in the format:
+  PERF: <benchmark_name> <median_us>us (mean: <mean_us>us, ...)
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -54,7 +57,7 @@ wait_for_actor_class(N) ->
 %% Benchmark Helpers
 %%====================================================================
 
-%% @doc Run a benchmark function N times, return list of microsecond timings.
+-doc "Run a benchmark function N times, return list of microsecond timings.".
 -spec run_benchmark(fun(() -> term()), pos_integer(), non_neg_integer()) -> [non_neg_integer()].
 run_benchmark(Fun, Iterations, Warmup) ->
     %% Warmup phase (discard results)
@@ -65,7 +68,7 @@ run_benchmark(Fun, Iterations, Warmup) ->
         Time
     end, lists:seq(1, Iterations)).
 
-%% @doc Calculate statistics from a list of timings.
+-doc "Calculate statistics from a list of timings.".
 -spec stats([non_neg_integer()]) -> #{median := number(), mean := number(),
                                        min := number(), max := number(),
                                        p95 := number(), p99 := number()}.
@@ -82,7 +85,7 @@ stats(Timings) ->
         p99 => lists:nth(round(Len * 0.99), Sorted)
     }.
 
-%% @doc Format and print benchmark results in parseable format.
+-doc "Format and print benchmark results in parseable format.".
 -spec report(string(), #{median := number(), mean := number(),
                           min := number(), max := number(),
                           p95 := number(), p99 := number()},
@@ -446,7 +449,7 @@ bench_overhead_comparison_hires() ->
         "PERF: hires/beamtalk_vs_raw ~.3fx~n",
         [BtNsMedian / max(RawNsMedian, 1)]).
 
-%% @doc Like report/3 but values are nanoseconds.
+-doc "Like report/3 but values are nanoseconds.".
 report_ns(Name, #{median := Median, mean := Mean, min := Min,
                   max := Max, p95 := P95, p99 := P99}, N) ->
     io:format(standard_error,
@@ -959,8 +962,10 @@ bench_method_threading() ->
 
     ok.
 
-%% @doc Run a method benchmark with hi-res batching.
-%% Returns stats map with median/mean/etc in nanoseconds per call.
+-doc """
+Run a method benchmark with hi-res batching.
+Returns stats map with median/mean/etc in nanoseconds per call.
+""".
 -spec method_bench(fun(() -> term())) -> #{median := number(), mean := number(),
                                             min := number(), max := number(),
                                             p95 := number(), p99 := number()}.
@@ -977,4 +982,3 @@ method_bench(Fun) ->
         T * 1000 div ?METHOD_BATCH
     end, lists:seq(1, ?METHOD_ITERATIONS)),
     stats(BatchTimings).
-

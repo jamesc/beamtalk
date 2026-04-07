@@ -1,12 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Test backing gen_server for native: facade e2e tests (BT-1210).
-%%
-%% A minimal counter gen_server used by NativeCounter.bt to validate
-%% that dispatch functions correctly route through beamtalk_actor:sync_send/3.
 -module(beamtalk_test_native_counter).
 -behaviour(gen_server).
+
+-moduledoc """
+Test backing gen_server for native: facade e2e tests (BT-1210).
+
+A minimal counter gen_server used by NativeCounter.bt to validate
+that dispatch functions correctly route through beamtalk_actor:sync_send/3.
+""".
 
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2]).

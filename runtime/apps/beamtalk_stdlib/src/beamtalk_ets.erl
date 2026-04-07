@@ -1,51 +1,53 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Ets class implementation — shared in-memory tables via OTP ets.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Ets is an Erlang-backed class wrapping OTP ets tables. Tables are
-%%% named and public by default, enabling cross-actor reads and writes
-%%% without message-passing overhead. The owning process holds the table;
-%%% when the owner terminates, the table is deleted automatically.
-%%% Only the owner process may call `deleteTable/1`.
-%%%
-%%% Ets objects are represented as tagged maps:
-%%% ```
-%%% #{
-%%%   '$beamtalk_class' => 'Ets',
-%%%   table => TableName :: atom()
-%%% }
-%%% ```
-%%%
-%%% ## Class Methods
-%%%
-%%% | Selector      | Description                                       |
-%%% |---------------|---------------------------------------------------|
-%%% | `new:type:`   | Create a named public ETS table                   |
-%%% | `named:`      | Look up an existing named table by atom name      |
-%%%
-%%% ## Instance Methods
-%%%
-%%% | Selector           | Description                                  |
-%%% |--------------------|----------------------------------------------|
-%%% | `lookup:key:`      | Look up a key; nil if absent                 |
-%%% | `insert:key:value:`| Insert or update a key-value pair            |
-%%% | `lookupIfAbsent:key:block:` | Lookup with default block           |
-%%% | `includesKey:key:` | Test key membership                          |
-%%% | `removeKey:key:`   | Delete an entry; returns nil                 |
-%%% | `keys:`            | Return all keys as a List                    |
-%%% | `tableSize:`       | Number of entries                            |
-%%% | `deleteTable:`     | Destroy the table                            |
-%%%
-%%% ## References
-%%%
-%%% - BT-1189: ETS — shared in-memory table class for actor state sharing
-%%% - ADR 0042: Actor-Only Mutable State
-%%% - ADR 0055: Erlang-Backed Class Protocol
-
 -module(beamtalk_ets).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Ets class implementation — shared in-memory tables via OTP ets.
+
+Ets is an Erlang-backed class wrapping OTP ets tables. Tables are
+named and public by default, enabling cross-actor reads and writes
+without message-passing overhead. The owning process holds the table;
+when the owner terminates, the table is deleted automatically.
+Only the owner process may call `deleteTable/1`.
+
+Ets objects are represented as tagged maps:
+```
+#{
+  '$beamtalk_class' => 'Ets',
+  table => TableName :: atom()
+}
+```
+
+## Class Methods
+
+| Selector      | Description                                       |
+|---------------|---------------------------------------------------|
+| `new:type:`   | Create a named public ETS table                   |
+| `named:`      | Look up an existing named table by atom name      |
+
+## Instance Methods
+
+| Selector           | Description                                  |
+|--------------------|----------------------------------------------|
+| `lookup:key:`      | Look up a key; nil if absent                 |
+| `insert:key:value:`| Insert or update a key-value pair            |
+| `lookupIfAbsent:key:block:` | Lookup with default block           |
+| `includesKey:key:` | Test key membership                          |
+| `removeKey:key:`   | Delete an entry; returns nil                 |
+| `keys:`            | Return all keys as a List                    |
+| `tableSize:`       | Number of entries                            |
+| `deleteTable:`     | Destroy the table                            |
+
+## References
+
+- BT-1189: ETS — shared in-memory table class for actor state sharing
+- ADR 0042: Actor-Only Mutable State
+- ADR 0055: Erlang-Backed Class Protocol
+""".
 
 %% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
 -export(['new:type:'/2, 'named:'/1, 'exists:'/1, 'newOrExisting:type:'/2]).
@@ -66,14 +68,16 @@
 %%% Class Methods
 %%% ============================================================================
 
-%% @doc Create a new named public ETS table.
-%%
-%% `TableType` must be one of: `set`, `orderedSet`, `bag`, `duplicateBag`.
-%% The table is created with `named_table` and `public` access so it can be
-%% read and written by any process.
-%%
-%% Raises `already_exists` if a table with the same name already exists.
-%% Raises `type_error` if arguments are not atoms.
+-doc """
+Create a new named public ETS table.
+
+`TableType` must be one of: `set`, `orderedSet`, `bag`, `duplicateBag`.
+The table is created with `named_table` and `public` access so it can be
+read and written by any process.
+
+Raises `already_exists` if a table with the same name already exists.
+Raises `type_error` if arguments are not atoms.
+""".
 -spec 'new:type:'(atom(), atom()) -> t().
 'new:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
     EtsType = map_table_type(TableType),
@@ -104,11 +108,13 @@
     ),
     beamtalk_error:raise(Error2).
 
-%% @doc Look up an existing named ETS table.
-%%
-%% Returns an Ets instance if a table with the given name exists.
-%% Raises `not_found` if no table with that name has been created.
-%% Raises `type_error` if the argument is not an atom.
+-doc """
+Look up an existing named ETS table.
+
+Returns an Ets instance if a table with the given name exists.
+Raises `not_found` if no table with that name has been created.
+Raises `type_error` if the argument is not an atom.
+""".
 -spec 'named:'(atom()) -> t().
 'named:'(Name) when is_atom(Name) ->
     case ets:whereis(Name) of
@@ -129,10 +135,12 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Check whether a named ETS table exists.
-%%
-%% Returns `true` if a table with the given name exists, `false` otherwise.
-%% Raises `type_error` if the argument is not an atom.
+-doc """
+Check whether a named ETS table exists.
+
+Returns `true` if a table with the given name exists, `false` otherwise.
+Raises `type_error` if the argument is not an atom.
+""".
 -spec 'exists:'(atom()) -> boolean().
 'exists:'(Name) when is_atom(Name) ->
     ets:whereis(Name) =/= undefined;
@@ -142,11 +150,13 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Create a named table or return the existing one.
-%%
-%% If a table with the given name already exists, returns an Ets instance
-%% wrapping it. Otherwise creates a new table with the specified type.
-%% Raises `type_error` if arguments are not atoms.
+-doc """
+Create a named table or return the existing one.
+
+If a table with the given name already exists, returns an Ets instance
+wrapping it. Otherwise creates a new table with the specified type.
+Raises `type_error` if arguments are not atoms.
+""".
 -spec 'newOrExisting:type:'(atom(), atom()) -> t().
 'newOrExisting:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
     EtsType = map_table_type_for('newOrExisting:type:', TableType),
@@ -192,10 +202,12 @@
 %%%   `lookup: self key: key` → selector `lookup:key:` → `lookup(Self, Key)`
 %%% ============================================================================
 
-%% @doc Look up a key. Returns the value, or nil if the key is absent.
-%%
-%% For bag/duplicate_bag tables with multiple values for a key, returns
-%% the first stored value. The wrapper exposes only one value per key.
+-doc """
+Look up a key. Returns the value, or nil if the key is absent.
+
+For bag/duplicate_bag tables with multiple values for a key, returns
+the first stored value. The wrapper exposes only one value per key.
+""".
 -spec lookup(t(), term()) -> term().
 lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
@@ -212,13 +224,15 @@ lookup(_Self, _Key) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Insert or update a key-value pair. Returns nil.
-%%
-%% For bag/duplicate_bag tables, deletes all existing entries for Key before
-%% inserting, giving best-effort upsert semantics. Note: the delete and insert
-%% are two separate ETS operations. Concurrent writes from multiple actors to
-%% the same key on a bag table are not serialized — interleaved calls may
-%% result in multiple entries for the same key.
+-doc """
+Insert or update a key-value pair. Returns nil.
+
+For bag/duplicate_bag tables, deletes all existing entries for Key before
+inserting, giving best-effort upsert semantics. Note: the delete and insert
+are two separate ETS operations. Concurrent writes from multiple actors to
+the same key on a bag table are not serialized — interleaved calls may
+result in multiple entries for the same key.
+""".
 -spec insert(t(), term(), term()) -> nil.
 insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
     try
@@ -239,7 +253,7 @@ insert(_Self, _Key, _Value) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Look up a key; if absent, evaluate the block and return its result.
+-doc "Look up a key; if absent, evaluate the block and return its result.".
 -spec lookupIfAbsent(t(), term(), function()) -> term().
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
@@ -263,7 +277,7 @@ lookupIfAbsent(_Self, _Key, _Block) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Test whether a key exists in the table.
+-doc "Test whether a key exists in the table.".
 -spec includesKey(t(), term()) -> boolean().
 includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
@@ -277,7 +291,7 @@ includesKey(_Self, _Key) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Remove the entry for key. Returns nil.
+-doc "Remove the entry for key. Returns nil.".
 -spec removeKey(t(), term()) -> nil.
 removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
@@ -292,10 +306,12 @@ removeKey(_Self, _Key) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Return all unique keys in the table as a List.
-%%
-%% For bag/duplicate_bag tables, duplicate keys are collapsed so each key
-%% appears only once. Order is unspecified for set/bag tables; sorted for orderedSet.
+-doc """
+Return all unique keys in the table as a List.
+
+For bag/duplicate_bag tables, duplicate keys are collapsed so each key
+appears only once. Order is unspecified for set/bag tables; sorted for orderedSet.
+""".
 -spec keys(t()) -> list().
 keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     try
@@ -309,9 +325,11 @@ keys(_Self) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Return the number of entries in the table.
-%%
-%% Named `tableSize` to avoid shadowing the deprecated `erlang:size/1` BIF.
+-doc """
+Return the number of entries in the table.
+
+Named `tableSize` to avoid shadowing the deprecated `erlang:size/1` BIF.
+""".
 -spec tableSize(t()) -> non_neg_integer().
 tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     case ets:info(TableName, size) of
@@ -324,9 +342,11 @@ tableSize(_Self) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Destroy the ETS table. Returns nil.
-%%
-%% Named `deleteTable` to avoid shadowing `ets:delete/1` in call sites.
+-doc """
+Destroy the ETS table. Returns nil.
+
+Named `deleteTable` to avoid shadowing `ets:delete/1` in call sites.
+""".
 -spec deleteTable(t()) -> nil.
 deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     try
@@ -358,19 +378,21 @@ deleteTable(_Self) ->
 %%%   `(Erlang beamtalk_ets) named: name`       → `named(name)` → `'named:'`
 %%% ============================================================================
 
-%% @doc FFI shim for new:type: — called via (Erlang beamtalk_ets) new: name type: type.
+-doc "FFI shim for new:type: — called via (Erlang beamtalk_ets) new: name type: type.".
 -spec new(atom(), atom()) -> t().
 new(Name, TableType) -> 'new:type:'(Name, TableType).
 
-%% @doc FFI shim for named: — called via (Erlang beamtalk_ets) named: name.
+-doc "FFI shim for named: — called via (Erlang beamtalk_ets) named: name.".
 -spec named(atom()) -> t().
 named(Name) -> 'named:'(Name).
 
-%% @doc FFI shim for exists: — called via (Erlang beamtalk_ets) exists: name.
+-doc "FFI shim for exists: — called via (Erlang beamtalk_ets) exists: name.".
 -spec exists(atom()) -> boolean().
 exists(Name) -> 'exists:'(Name).
 
-%% @doc FFI shim for newOrExisting:type: — called via (Erlang beamtalk_ets) newOrExisting: name type: t.
+-doc """
+FFI shim for newOrExisting:type: — called via (Erlang beamtalk_ets) newOrExisting: name type: t.
+""".
 -spec newOrExisting(atom(), atom()) -> t().
 newOrExisting(Name, TableType) -> 'newOrExisting:type:'(Name, TableType).
 
@@ -378,11 +400,12 @@ newOrExisting(Name, TableType) -> 'newOrExisting:type:'(Name, TableType).
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private
-%% @doc Build a structured error for a stale or deleted ETS table.
-%%
-%% Used when an ETS operation raises `error:badarg` because the table no
-%% longer exists (owner terminated or `deleteTable/1` was called).
+-doc """
+Build a structured error for a stale or deleted ETS table.
+
+Used when an ETS operation raises `error:badarg` because the table no
+longer exists (owner terminated or `deleteTable/1` was called).
+""".
 -spec stale_table_error(atom(), atom()) -> no_return().
 stale_table_error(Selector, TableName) ->
     Error0 = beamtalk_error:new(stale_table, 'Ets'),
@@ -396,23 +419,24 @@ stale_table_error(Selector, TableName) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @private
-%% @doc Build an Ets tagged map for the given table name.
+-doc "Build an Ets tagged map for the given table name.".
 -spec make_ets(atom()) -> t().
 make_ets(Name) ->
     #{'$beamtalk_class' => 'Ets', table => Name}.
 
-%% @private
-%% @doc Map Beamtalk table type symbols to OTP ets type atoms.
-%%
-%% Beamtalk uses camelCase symbols matching the Smalltalk convention.
-%% OTP uses snake_case atoms.
+-doc """
+Map Beamtalk table type symbols to OTP ets type atoms.
+
+Beamtalk uses camelCase symbols matching the Smalltalk convention.
+OTP uses snake_case atoms.
+""".
 -spec map_table_type(atom()) -> set | ordered_set | bag | duplicate_bag.
 map_table_type(TableType) ->
     map_table_type_for('new:type:', TableType).
 
-%% @private
-%% @doc Map Beamtalk table type symbols to OTP ets type atoms, with caller selector for errors.
+-doc """
+Map Beamtalk table type symbols to OTP ets type atoms, with caller selector for errors.
+""".
 -spec map_table_type_for(atom(), atom()) -> set | ordered_set | bag | duplicate_bag.
 map_table_type_for(_Selector, set) ->
     set;

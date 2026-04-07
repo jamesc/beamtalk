@@ -2,14 +2,17 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%% @doc Integration tests for List compiled dispatch and primitive send.
-%%
-%% Tests compiled dispatch via 'bt@stdlib@list':dispatch/3 (List.bt BIF mappings)
-%% and beamtalk_primitive:send/3 integration for the List class.
-%%
-%% For direct beamtalk_list module tests (at, detect, reject, etc.),
-%% see beamtalk_stdlib/test/beamtalk_list_tests.erl.
 -module(beamtalk_list_tests).
+
+-moduledoc """
+Integration tests for List compiled dispatch and primitive send.
+
+Tests compiled dispatch via 'bt@stdlib@list':dispatch/3 (List.bt BIF mappings)
+and beamtalk_primitive:send/3 integration for the List class.
+
+For direct beamtalk_list module tests (at, detect, reject, etc.),
+see beamtalk_stdlib/test/beamtalk_list_tests.erl.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

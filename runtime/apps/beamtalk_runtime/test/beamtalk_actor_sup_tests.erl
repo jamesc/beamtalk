@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_actor_sup module
-%%%
-%%% Tests actor supervisor behavior and dynamic actor management.
-
 -module(beamtalk_actor_sup_tests).
+
+-moduledoc """
+Unit tests for beamtalk_actor_sup module
+
+Tests actor supervisor behavior and dynamic actor management.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

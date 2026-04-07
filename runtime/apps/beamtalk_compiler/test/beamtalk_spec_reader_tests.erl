@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_spec_reader (ADR 0075, Phase 1).
-%%
-%% Tests spec extraction from `.beam` files, Erlang→Beamtalk type mapping,
-%% multi-clause spec handling, and batch processing.
-
 -module(beamtalk_spec_reader_tests).
+
+-moduledoc """
+Tests for beamtalk_spec_reader (ADR 0075, Phase 1).
+
+Tests spec extraction from `.beam` files, Erlang→Beamtalk type mapping,
+multi-clause spec handling, and batch processing.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 
