@@ -334,14 +334,30 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 /// extracted (e.g., runtime not yet compiled).
 fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
     use crate::beam_compiler;
+    use beamtalk_cli::repl_startup;
 
-    // Runtime ebin directories where Erlang FFI modules live
-    let ebin_dirs = [
-        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_runtime/ebin"),
-        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_stdlib/ebin"),
-        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_workspace/ebin"),
-        Utf8PathBuf::from("runtime/_build/default/lib/beamtalk_compiler/ebin"),
+    // Use the same runtime discovery as the build worker so paths stay in sync
+    // with the runtime layout (dev vs installed).
+    let (runtime_dir, layout): (std::path::PathBuf, _) =
+        repl_startup::find_runtime_dir_with_layout().ok()?;
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+    // Collect ebin directories that contain Erlang FFI modules with -spec attributes.
+    // Convert from std PathBuf to camino Utf8PathBuf (required by beam_compiler API).
+    let mut ebin_dirs: Vec<Utf8PathBuf> = Vec::new();
+    let candidates: Vec<std::path::PathBuf> = vec![
+        paths.runtime_ebin,
+        paths.stdlib_erlang_ebin,
+        paths.workspace_ebin,
+        paths.compiler_ebin,
     ];
+    for dir in candidates {
+        if dir.exists() {
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(dir) {
+                ebin_dirs.push(utf8);
+            }
+        }
+    }
 
     let beam_files = beam_compiler::discover_dependency_beam_files(&ebin_dirs);
     if beam_files.is_empty() {
@@ -349,8 +365,10 @@ fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
         return None;
     }
 
-    // Use a cache directory under the runtime _build to avoid re-extracting specs
-    let cache_dir = Utf8PathBuf::from("runtime/_build/type_cache");
+    // Cache directory under the runtime _build to avoid re-extracting specs
+    let cache_dir: Utf8PathBuf =
+        Utf8PathBuf::from_path_buf(runtime_dir.join("_build/type_cache"))
+            .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
 
     match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
         Ok(registry) => {
