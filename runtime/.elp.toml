@@ -1,0 +1,5 @@
+[rebar]
+profile = "test"
+
+[eqwalizer]
+ignore_modules = ["*_tests"]

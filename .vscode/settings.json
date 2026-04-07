@@ -9,5 +9,8 @@
   //     Erlang runtime from runtime/_build/default/lib/ automatically)
   //   - 'beamtalk --print-sysroot' sysroot discovery for beamtalk-lsp
   //     (though the bundled bin/beamtalk-lsp is checked first)
-  "beamtalk.binary.path": "${workspaceFolder}/target/debug/beamtalk"
+  "beamtalk.binary.path": "${workspaceFolder}/target/debug/beamtalk",
+
+  // ELP (Erlang Language Platform) — Erlang code lives under runtime/
+  "elp.projectDir": "runtime"
 }
