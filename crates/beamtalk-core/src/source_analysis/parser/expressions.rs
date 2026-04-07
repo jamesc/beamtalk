@@ -1042,10 +1042,7 @@ impl Parser {
                     Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                     Some(last) => {
                         let span = last.span();
-                        self.diagnostics.push(Diagnostic::error(
-                            "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
-                            span,
-                        ));
+                        self.cast_in_expression_error(span);
                     }
                     None => {}
                 }

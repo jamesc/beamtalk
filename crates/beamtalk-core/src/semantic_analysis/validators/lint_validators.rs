@@ -13,7 +13,7 @@
 
 use crate::ast::{Expression, Identifier, Module};
 use crate::ast_walker::walk_module;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 // ── BT-950: Redundant assignment ─────────────────────────────────────────────
 
@@ -155,30 +155,28 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
 /// Methods declared with `=>` but no body expressions are a compile error.
 /// Use `self notImplemented` for work-in-progress stubs, or
 /// `self subclassResponsibility` for abstract interface contracts.
+/// Creates a diagnostic for a method with an empty body.
+fn empty_body_error(selector: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(format!("Method `{selector}` has an empty body"), span)
+        .with_category(DiagnosticCategory::EmptyBody)
+        .with_hint(
+            "Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods",
+        )
+}
+
 pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     for class in &module.classes {
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             if method.body.is_empty() {
                 let selector = method.selector.name();
-                diagnostics.push(
-                    Diagnostic::error(format!("Method `{selector}` has an empty body"), method.span)
-                        .with_category(DiagnosticCategory::EmptyBody)
-                        .with_hint("Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods"),
-                );
+                diagnostics.push(empty_body_error(&selector, method.span));
             }
         }
     }
     for standalone in &module.method_definitions {
         if standalone.method.body.is_empty() {
             let selector = standalone.method.selector.name();
-            diagnostics.push(
-                Diagnostic::error(
-                    format!("Method `{selector}` has an empty body"),
-                    standalone.method.span,
-                )
-                .with_category(DiagnosticCategory::EmptyBody)
-                .with_hint("Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods"),
-            );
+            diagnostics.push(empty_body_error(&selector, standalone.method.span));
         }
     }
 }
