@@ -16,7 +16,7 @@
 use crate::ast::{ClassDefinition, MethodKind, Module};
 use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -463,7 +463,8 @@ impl ClassHierarchy {
                     .with_hint(format!(
                         "A {label} with this selector is already defined at offset {}",
                         first_span.start()
-                    )),
+                    ))
+                    .with_category(DiagnosticCategory::Type),
                 );
             } else {
                 seen.insert(key, method.span);
