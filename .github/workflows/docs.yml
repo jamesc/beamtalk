@@ -47,7 +47,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
