@@ -553,22 +553,24 @@ fn read_startup_log_detail(workspace_id: &str) -> String {
     workspace_dir(workspace_id)
         .ok()
         .map(|d| d.join("startup.log"))
-        .and_then(|p| std::fs::read_to_string(&p).ok())
-        .filter(|s| !s.is_empty())
+        .and_then(|p| std::fs::read(&p).ok())
+        .filter(|bytes| !bytes.is_empty())
         .map_or_else(
             || "\nCheck Erlang/OTP is installed.".to_string(),
             |log| {
                 if log.len() <= STARTUP_LOG_MAX_BYTES {
-                    format!("\nStartup log:\n{log}")
+                    format!("\nStartup log:\n{}", String::from_utf8_lossy(&log))
                 } else {
                     // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
-                    // recent (and usually most relevant) output.
+                    // recent (and usually most relevant) output.  Operating on raw
+                    // bytes avoids panicking on multibyte UTF-8 boundaries;
+                    // from_utf8_lossy replaces any split characters with U+FFFD.
                     let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
                     // Find the first newline to avoid cutting mid-line.
-                    let start = tail.find('\n').map_or(0, |i| i + 1);
+                    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
                     format!(
                         "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
-                        &tail[start..]
+                        String::from_utf8_lossy(&tail[start..])
                     )
                 }
             },
