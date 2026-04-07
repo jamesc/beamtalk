@@ -11,7 +11,7 @@
 
 use crate::ast::{Expression, MethodDefinition, Module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// BT-1218: Validate that `class supervisionPolicy` override returns a valid symbol.
 ///
@@ -154,7 +154,8 @@ fn check_children_literal_for_policy(
                 .with_hint(
                     "Add `class supervisionPolicy -> Symbol => #permanent` (or `#transient`) \
                      to declare the restart behaviour explicitly",
-                ),
+                )
+                .with_category(DiagnosticCategory::Type),
             );
         }
     }

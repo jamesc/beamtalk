@@ -478,7 +478,8 @@ impl TypeChecker {
                                 )
                                 .with_hint(format!(
                                     "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
-                                )),
+                                ))
+                                .with_category(DiagnosticCategory::Type),
                             );
                         }
                     }
@@ -1099,7 +1100,7 @@ impl TypeChecker {
                             arity = sig.arity,
                         ),
                         span,
-                    ));
+                    ).with_category(DiagnosticCategory::Type));
                 }
             }
         }
@@ -1149,7 +1150,8 @@ impl TypeChecker {
                                 "FFI calls are positional — keyword names don't affect dispatch. \
                                  Preferred form: {}",
                                 sig.display_signature(),
-                            )),
+                            ))
+                            .with_category(DiagnosticCategory::Type),
                         );
                     }
                 }

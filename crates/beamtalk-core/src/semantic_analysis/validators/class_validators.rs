@@ -348,7 +348,8 @@ fn validate_map_field_names(
                         format!("Unknown field `{sym}` for class `{class_name}`"),
                         *sym_span,
                     )
-                    .with_hint(format!("Declared fields: {}", fields.join(", "))),
+                    .with_hint(format!("Declared fields: {}", fields.join(", ")))
+                    .with_category(DiagnosticCategory::Type),
                 );
             }
         }
@@ -401,7 +402,8 @@ fn visit_classvar_access(
                                 ),
                                 *span,
                             )
-                            .with_hint(hint),
+                            .with_hint(hint)
+                            .with_category(DiagnosticCategory::Type),
                         );
                     }
                 }
@@ -438,7 +440,8 @@ fn visit_classvar_access(
                                     ),
                                     msg.span,
                                 )
-                                .with_hint(hint),
+                                .with_hint(hint)
+                                .with_category(DiagnosticCategory::Type),
                             );
                         }
                     }
@@ -618,7 +621,8 @@ fn report_self_slot_assignment(
             .with_hint(format!(
                 "Consider using `self {with_selector} newValue` \
                  to go through the `{with_selector}` method."
-            )),
+            ))
+            .with_category(DiagnosticCategory::Type),
         );
     }
 }

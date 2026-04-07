@@ -11,7 +11,7 @@
 
 use crate::ast::{MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 // ── BT-1207: Native actor validation (ADR 0056) ──────────────────────────────
 
@@ -107,7 +107,8 @@ fn emit_delegate_return_type_warning(
             ),
             span,
         )
-        .with_hint("Add a return type: `selector -> ReturnType => self delegate`".to_string()),
+        .with_hint("Add a return type: `selector -> ReturnType => self delegate`".to_string())
+        .with_category(DiagnosticCategory::Type),
     );
 }
 

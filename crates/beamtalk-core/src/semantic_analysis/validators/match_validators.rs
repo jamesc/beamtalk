@@ -9,7 +9,7 @@
 
 use crate::ast::{Expression, Module, Pattern};
 use crate::ast_walker::walk_module;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 // ── BT-1299: Match exhaustiveness for sealed types ────────────────────────────
 
@@ -162,7 +162,8 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
                         .with_hint(format!(
                             "Capture the match result instead: `{} := value match: [...]`",
                             id.name,
-                        )),
+                        ))
+                        .with_category(DiagnosticCategory::DeadAssignment),
                     );
                 }
                 Expression::FieldAccess {
@@ -185,7 +186,8 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
                             "Move the field assignment outside the match, \
                              or use an `ifTrue:ifFalse:` chain instead."
                                 .to_string(),
-                        ),
+                        )
+                        .with_category(DiagnosticCategory::DeadAssignment),
                     );
                 }
                 _ => {}
