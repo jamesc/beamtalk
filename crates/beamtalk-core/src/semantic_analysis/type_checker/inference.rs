@@ -662,6 +662,7 @@ impl TypeChecker {
                                 ),
                                 expr.span(),
                             )
+                            .with_hint("Add a type annotation or use `@expect type` to suppress if intentional")
                             .with_category(DiagnosticCategory::Type),
                         );
                     }
@@ -1112,7 +1113,8 @@ impl TypeChecker {
                         arity = sig.arity,
                     ),
                     span,
-                ).with_category(DiagnosticCategory::Type));
+                ).with_hint("Use `@expect type` to suppress if the call is intentional")
+                .with_category(DiagnosticCategory::Type));
             }
         }
     }
@@ -1380,6 +1382,7 @@ impl TypeChecker {
             } else {
                 Diagnostic::hint(message, span)
             }
+            .with_hint("Use `respondsTo:` to check before sending, or `@expect type` to suppress")
             .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
             self.diagnostics.push(diag);
         }

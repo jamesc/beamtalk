@@ -371,6 +371,7 @@ impl TypeChecker {
                         ),
                         param.name.span,
                     )
+                    .with_hint(format!("Add a type annotation: `{} :: Type`", param.name.name))
                     .with_category(DiagnosticCategory::TypeAnnotation),
                 );
             }
@@ -385,6 +386,7 @@ impl TypeChecker {
                     ),
                     method.span,
                 )
+                .with_hint(format!("Add a return type: `{selector} -> ReturnType =>`"))
                 .with_category(DiagnosticCategory::TypeAnnotation),
             );
         }
@@ -406,6 +408,7 @@ impl TypeChecker {
                         ),
                         field.name.span,
                     )
+                    .with_hint(format!("Add a type annotation: `{} :: Type = defaultValue`", field.name.name))
                     .with_category(DiagnosticCategory::TypeAnnotation),
                 );
             }
@@ -698,6 +701,7 @@ impl TypeChecker {
                         ),
                         param.name.span,
                     )
+                    .with_hint("Use the concrete class name instead of `Self` for parameter types")
                     .with_category(DiagnosticCategory::Type),
                 );
             }

@@ -246,6 +246,9 @@ impl ProtocolRegistry {
                         ),
                         protocol_def.name.span,
                     )
+                    .with_hint(format!(
+                        "Rename the protocol to avoid conflicting with class `{name}`"
+                    ))
                     .with_category(DiagnosticCategory::Type),
                 );
                 continue;
@@ -257,6 +260,9 @@ impl ProtocolRegistry {
                     Diagnostic::error(
                         format!("Duplicate protocol definition: `{name}`"),
                         protocol_def.name.span,
+                    )
+                    .with_hint(
+                        "Remove the duplicate definition — each protocol can only be defined once",
                     )
                     .with_category(DiagnosticCategory::Type),
                 );
@@ -273,6 +279,9 @@ impl ProtocolRegistry {
                             format!("Protocol `{name}` extends unknown protocol `{parent_name}`"),
                             protocol_def.span,
                         )
+                        .with_hint(format!(
+                            "Define protocol `{parent_name}` first, or check the name for typos"
+                        ))
                         .with_category(DiagnosticCategory::Type),
                     );
                 }

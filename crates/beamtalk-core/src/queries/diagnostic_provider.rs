@@ -214,7 +214,10 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
                 cat.as_str()
             )
         };
-        diagnostics.push(Diagnostic::warning(message, span));
+        diagnostics.push(
+            Diagnostic::warning(message, span)
+                .with_hint("Remove the `@expect` directive if the diagnostic was fixed"),
+        );
     }
 }
 
@@ -1234,5 +1237,140 @@ typed Object subclass: MyTyped
             output.contains("@expect type_annotation \"migrating\""),
             "Unparsed output should contain reason string, got: {output}"
         );
+    }
+
+    // ── BT-1923: Drift prevention — every Warning/Hint must have a category ──
+
+    /// Compiles a source snippet and returns only the Warning/Hint diagnostics.
+    fn warnings_and_hints(source: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let all = compute_diagnostics(&module, parse_diags);
+        all.into_iter()
+            .filter(|d| {
+                matches!(
+                    d.severity,
+                    crate::source_analysis::Severity::Warning
+                        | crate::source_analysis::Severity::Hint
+                        | crate::source_analysis::Severity::Lint
+                )
+            })
+            .collect()
+    }
+
+    /// BT-1923: Every Warning/Hint/Lint diagnostic MUST have a category.
+    ///
+    /// This test compiles source snippets that trigger diagnostics from every
+    /// compiler phase (parser, name resolver, semantic analysis, type checker,
+    /// lint validators, etc.). If a new warning or hint is added anywhere in
+    /// the compiler without setting `.with_category(...)`, this test will fail.
+    ///
+    /// To fix a failure: find the `Diagnostic::warning(...)` or
+    /// `Diagnostic::hint(...)` call that produces the uncategorised diagnostic
+    /// and chain `.with_category(DiagnosticCategory::Foo)` onto it.
+    #[test]
+    fn all_warnings_and_hints_have_categories() {
+        // Each snippet is designed to trigger one or more Warning/Hint diagnostics
+        // from a specific compiler phase. We collect them all and assert that every
+        // single one has `category.is_some()`.
+        let snippets: Vec<(&str, &str)> = vec![
+            // ── Name resolver: unused variable ──
+            (
+                "unused variable",
+                "Object subclass: Foo\n  bar => x := 42. 0",
+            ),
+            // ── Name resolver: variable shadowing ──
+            (
+                "variable shadowing",
+                "Object subclass: Foo\n  bar =>\n    x := 1.\n    [| :x | x + 1] value: 2",
+            ),
+            // ── Name resolver: unreachable code ──
+            (
+                "unreachable code after early return",
+                "Object subclass: Foo\n  bar => ^1. 2",
+            ),
+            // ── Type checker: DNU hint ──
+            (
+                "DNU hint on unknown method",
+                "typed Object subclass: Foo\n  state: x :: Integer = 0\n  bar => self.x noSuchMethod",
+            ),
+            // ── Type checker: type mismatch hint ──
+            (
+                "type mismatch in typed class",
+                "typed Object subclass: Foo\n  state: x :: Integer = 0\n  bar => self.x := \"hello\"",
+            ),
+            // ── Lint validator: always-true condition ──
+            ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
+            // ── Actor new error ──
+            (
+                "actor new",
+                "Actor subclass: A\n  state: v = 0\n  go => self.v\n\nA new",
+            ),
+            // ── Type checker: missing type annotation in typed class ──
+            (
+                "missing type annotation in typed class",
+                "typed Object subclass: Foo\n  state: x = 0\n  bar => self.x",
+            ),
+            // ── Type checker: Dynamic inference warning in typed class ──
+            (
+                "dynamic inference in typed class",
+                "typed Object subclass: Foo\n  state: x :: Integer = 0\n  bar :: Integer => self.x abs",
+            ),
+        ];
+
+        let mut failures: Vec<String> = Vec::new();
+
+        for (label, source) in &snippets {
+            let diags = warnings_and_hints(source);
+            for diag in &diags {
+                if diag.category.is_none() {
+                    failures.push(format!(
+                        "[{label}] {severity:?} diagnostic has no category: \"{msg}\"",
+                        severity = diag.severity,
+                        msg = diag.message
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "Found Warning/Hint/Lint diagnostics without categories \
+             (drift prevention BT-1923):\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    /// BT-1923: Sanity check — the drift prevention snippets actually produce diagnostics.
+    ///
+    /// If this test fails, it means the snippets no longer trigger any warnings/hints,
+    /// which would make the category assertion vacuously true (and useless).
+    #[test]
+    fn drift_prevention_snippets_produce_diagnostics() {
+        // A subset of snippets that should always produce at least one warning/hint.
+        let must_produce = vec![
+            (
+                "unused variable",
+                "Object subclass: Foo\n  bar => x := 42. 0",
+            ),
+            ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
+            (
+                "actor new",
+                "Actor subclass: A\n  state: v = 0\n  go => self.v\n\nA new",
+            ),
+            (
+                "missing type annotation in typed class",
+                "typed Object subclass: Foo\n  state: x = 0\n  bar => self.x",
+            ),
+        ];
+
+        for (label, source) in must_produce {
+            let diags = warnings_and_hints(source);
+            assert!(
+                !diags.is_empty(),
+                "Snippet [{label}] should produce at least one Warning/Hint/Lint diagnostic \
+                 but produced none — update the drift prevention test snippets"
+            );
+        }
     }
 }
