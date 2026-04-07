@@ -525,6 +525,11 @@ pub enum DiagnosticCategory {
     ArityMismatch,
     /// Workspace binding shadows class (BT-1759) — REPL binding hides a class name.
     ShadowedClass,
+    /// Missing type annotation in typed class (BT-1918).
+    ///
+    /// Separate from `Type` so that `@expect type_annotation` suppresses
+    /// only missing-annotation warnings without hiding real type mismatches.
+    TypeAnnotation,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).

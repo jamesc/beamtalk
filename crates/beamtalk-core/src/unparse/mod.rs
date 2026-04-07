@@ -578,8 +578,18 @@ fn unparse_method_definition_with_prefix(
     }
 
     // BT-1856: Emit @expect directive before the method declaration
-    if let Some((cat, _)) = method.expect {
-        docs.push(docvec!["@expect ", unparse_expect_category(cat)]);
+    if let Some((cat, ref reason, _)) = method.expect {
+        let base = docvec!["@expect ", unparse_expect_category(cat)];
+        if let Some(reason) = reason {
+            docs.push(docvec![
+                base,
+                " \"",
+                Document::String(reason.to_string()),
+                "\""
+            ]);
+        } else {
+            docs.push(base);
+        }
         docs.push(line());
     }
 
@@ -735,8 +745,18 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     }
 
     // BT-1856: Emit @expect directive before the declaration
-    if let Some((cat, _)) = state.expect {
-        docs.push(docvec!["@expect ", unparse_expect_category(cat)]);
+    if let Some((cat, ref reason, _)) = state.expect {
+        if let Some(reason) = reason {
+            docs.push(docvec![
+                "@expect ",
+                unparse_expect_category(cat),
+                " \"",
+                Document::String(reason.to_string()),
+                "\""
+            ]);
+        } else {
+            docs.push(docvec!["@expect ", unparse_expect_category(cat)]);
+        }
         docs.push(line());
     }
 
@@ -872,8 +892,15 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             }
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),
-        Expression::ExpectDirective { category, .. } => {
-            docvec!["@expect ", unparse_expect_category(*category)]
+        Expression::ExpectDirective {
+            category, reason, ..
+        } => {
+            let base = docvec!["@expect ", unparse_expect_category(*category)];
+            if let Some(reason) = reason {
+                docvec![base, " \"", Document::String(reason.to_string()), "\""]
+            } else {
+                base
+            }
         }
         Expression::Error { message, .. } => {
             // Emit a comment indicating the error rather than nothing.

@@ -1396,7 +1396,7 @@ fn test_expect_type_suppresses_typed_method_warnings() {
         vec![bare(int_lit(42))],
         span(),
     );
-    method.expect = Some((ExpectCategory::Type, span()));
+    method.expect = Some((ExpectCategory::Type, None, span()));
 
     let class_def = ClassDefinition::with_modifiers(
         ident("MyTyped"),
@@ -1428,7 +1428,7 @@ fn test_expect_all_suppresses_typed_method_warnings() {
         vec![bare(int_lit(42))],
         span(),
     );
-    method.expect = Some((ExpectCategory::All, span()));
+    method.expect = Some((ExpectCategory::All, None, span()));
 
     let class_def = ClassDefinition::with_modifiers(
         ident("MyTyped"),
@@ -1459,7 +1459,7 @@ fn test_expect_type_suppresses_uninitialized_state_warning() {
         TypeAnnotation::simple("Integer", span()),
         span(),
     );
-    typed_no_default.expect = Some((ExpectCategory::Type, span()));
+    typed_no_default.expect = Some((ExpectCategory::Type, None, span()));
 
     // Need at least one typed field WITH a default to trigger the sibling-default heuristic
     let typed_with_default = StateDeclaration::with_type_and_default(
@@ -2818,7 +2818,7 @@ fn test_inherited_typed_class_warns_on_missing_state_annotation() {
 fn test_expect_type_suppresses_typed_state_warning() {
     // BT-1913: @expect type on a state field should suppress the warning
     let mut state_decl = StateDeclaration::new(ident("count"), span());
-    state_decl.expect = Some((ExpectCategory::Type, span()));
+    state_decl.expect = Some((ExpectCategory::Type, None, span()));
 
     let class_def = ClassDefinition::with_modifiers(
         ident("StrictCounter"),

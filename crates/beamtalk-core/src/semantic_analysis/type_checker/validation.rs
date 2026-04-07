@@ -371,7 +371,7 @@ impl TypeChecker {
                         ),
                         param.name.span,
                     )
-                    .with_category(DiagnosticCategory::Type),
+                    .with_category(DiagnosticCategory::TypeAnnotation),
                 );
             }
         }
@@ -385,7 +385,7 @@ impl TypeChecker {
                     ),
                     method.span,
                 )
-                .with_category(DiagnosticCategory::Type),
+                .with_category(DiagnosticCategory::TypeAnnotation),
             );
         }
     }
@@ -406,7 +406,7 @@ impl TypeChecker {
                         ),
                         field.name.span,
                     )
-                    .with_category(DiagnosticCategory::Type),
+                    .with_category(DiagnosticCategory::TypeAnnotation),
                 );
             }
         }

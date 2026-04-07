@@ -1968,10 +1968,11 @@ impl Parser {
         }
     }
 
-    /// Parses an `@expect category` directive.
+    /// Parses an `@expect category` or `@expect category "reason"` directive.
     ///
     /// The `@expect` token has already been identified by `parse_primary`.
-    /// This method consumes it and parses the category name that follows.
+    /// This method consumes it, parses the category name, and optionally
+    /// parses a reason string that follows (BT-1918).
     fn parse_expect_directive(&mut self) -> Expression {
         let start_token = self.advance(); // consume AtExpect
         let start = start_token.span();
@@ -1979,9 +1980,22 @@ impl Parser {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let name = name.clone();
             let end_token = self.advance();
-            let span = start.merge(end_token.span());
+            let mut span = start.merge(end_token.span());
             if let Some(category) = ExpectCategory::from_name(&name) {
-                Expression::ExpectDirective { category, span }
+                // BT-1918: Parse optional reason string after category.
+                let reason = if let TokenKind::String(reason_str) = self.current_kind() {
+                    let reason_str = reason_str.clone();
+                    let reason_token = self.advance();
+                    span = start.merge(reason_token.span());
+                    Some(reason_str)
+                } else {
+                    None
+                };
+                Expression::ExpectDirective {
+                    category,
+                    reason,
+                    span,
+                }
             } else {
                 let valid = ExpectCategory::valid_names().join(", ");
                 let message: EcoString =
