@@ -100,7 +100,7 @@ fn extract_pattern_bindings_impl(
                                 first_span.start()
                             ),
                             id.span,
-                        ));
+                        ).with_hint(format!("Rename one of the `{}` bindings — each variable can only appear once in a pattern", id.name)));
                     }
                 }
                 Entry::Vacant(entry) => {
