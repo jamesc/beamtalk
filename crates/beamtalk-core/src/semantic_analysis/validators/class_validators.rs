@@ -49,6 +49,7 @@ fn abstract_class_error(class_name: &str, span: Span) -> Diagnostic {
         format!("Cannot instantiate abstract class `{class_name}`. Subclass it first."),
         span,
     )
+    .with_category(DiagnosticCategory::Type)
 }
 
 /// Visitor for abstract class instantiation checks (BT-105).
@@ -239,7 +240,8 @@ fn visit_object_new(
                     )
                     .with_hint(
                         "Object subclasses are not instantiable. Use `Value subclass:` for data types",
-                    ),
+                    )
+                    .with_category(DiagnosticCategory::Type),
                 );
             }
         }
@@ -262,7 +264,8 @@ fn visit_object_new(
                         )
                         .with_hint(
                             "Object subclasses are not instantiable. Use `Value subclass:` for data types",
-                        ),
+                        )
+                        .with_category(DiagnosticCategory::Type),
                     );
                 }
             }
@@ -596,7 +599,8 @@ fn report_self_slot_assignment(
             .with_hint(format!(
                 "Value types are immutable. \
                  Use `self {with_selector}` to return a new instance with the updated slot."
-            )),
+            ))
+            .with_category(DiagnosticCategory::Type),
         );
     } else if method_selector != with_selector
         && hierarchy.find_method(class_name, &with_selector).is_some()
@@ -681,12 +685,15 @@ fn visit_cast_on_value_type(
         }
         if let Some(class_name) = receiver_class_name(receiver) {
             if hierarchy.has_class(class_name) && hierarchy.is_value_subclass(class_name) {
-                diagnostics.push(Diagnostic::error(
-                    format!(
-                        "Cannot use ! (cast) on value type `{class_name}`. Value types are not actors."
-                    ),
-                    *span,
-                ));
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Cannot use ! (cast) on value type `{class_name}`. Value types are not actors."
+                        ),
+                        *span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
             }
         }
     }
@@ -811,7 +818,8 @@ fn check_method_nil_return(
         .with_hint(format!(
             "Value types (ADR 0042) are immutable transformations. \
              Move `{class_name}` to inherit from `Object` if it needs void methods."
-        )),
+        ))
+        .with_category(DiagnosticCategory::Type),
     );
 }
 
@@ -879,35 +887,44 @@ fn check_keyword_for_kind(
 
         // state: on Value → should be field:
         (ClassKind::Value, DeclaredKeyword::State) => {
-            diagnostics.push(Diagnostic::error(
-                format!(
-                    "Use 'field:' for Value subclass `{class_name}` data declarations, \
-                     not 'state:' — `{field_name}` is immutable"
-                ),
-                span,
-            ));
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Use 'field:' for Value subclass `{class_name}` data declarations, \
+                         not 'state:' — `{field_name}` is immutable"
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
         }
 
         // field: on Actor → should be state:
         (ClassKind::Actor, DeclaredKeyword::Field) => {
-            diagnostics.push(Diagnostic::error(
-                format!(
-                    "Use 'state:' for Actor subclass `{class_name}` data declarations, \
-                     not 'field:' — `{field_name}` is mutable process state"
-                ),
-                span,
-            ));
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Use 'state:' for Actor subclass `{class_name}` data declarations, \
+                         not 'field:' — `{field_name}` is mutable process state"
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
         }
 
         // Any data keyword on Object → Object cannot have instance data
         (ClassKind::Object, _) => {
-            diagnostics.push(Diagnostic::error(
-                format!(
-                    "Object subclass `{class_name}` cannot have instance data declarations; \
-                     use 'Value subclass:' for immutable data or 'Actor subclass:' for mutable state"
-                ),
-                span,
-            ));
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Object subclass `{class_name}` cannot have instance data declarations; \
+                         use 'Value subclass:' for immutable data or 'Actor subclass:' for mutable state"
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
         }
     }
 }
@@ -984,7 +1001,8 @@ fn emit_unsafe_field_mutation_diagnostic(
              Use the check-then-unwrap pattern: \
              `result isError ifTrue: [^Result error: ...]. \
              self.field := result unwrap`",
-        ),
+        )
+        .with_category(DiagnosticCategory::Type),
     );
 }
 

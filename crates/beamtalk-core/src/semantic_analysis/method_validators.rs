@@ -203,7 +203,8 @@ impl MethodValidator for ReflectionMethodValidator {
                 );
                 vec![
                     Diagnostic::error(message, id.span)
-                        .with_hint(format!("Use #{} instead of {}", id.name, id.name)),
+                        .with_hint(format!("Use #{} instead of {}", id.name, id.name))
+                        .with_category(DiagnosticCategory::Type),
                 ]
             }
 
@@ -217,7 +218,8 @@ impl MethodValidator for ReflectionMethodValidator {
                 );
                 vec![
                     Diagnostic::error(message, *span)
-                        .with_hint(format!("Use #{} instead of {}", name.name, name.name)),
+                        .with_hint(format!("Use #{} instead of {}", name.name, name.name))
+                        .with_category(DiagnosticCategory::Type),
                 ]
             }
 
@@ -231,7 +233,8 @@ impl MethodValidator for ReflectionMethodValidator {
                 );
                 vec![
                     Diagnostic::error(message, other.span())
-                        .with_hint("Use a symbol literal like #methodName"),
+                        .with_hint("Use a symbol literal like #methodName")
+                        .with_category(DiagnosticCategory::Type),
                 ]
             }
         }
@@ -306,7 +309,8 @@ pub(crate) fn validate_primitive_instantiation(
             format!("Cannot instantiate primitive class `{class_name}`"),
             span,
         )
-        .with_hint(hint),
+        .with_hint(hint)
+        .with_category(DiagnosticCategory::Type),
     )
 }
 
@@ -402,7 +406,9 @@ impl MethodValidator for BlockArityValidator {
         );
         let hint = block_arity_hint(&selector_name, expected);
 
-        vec![Diagnostic::error(message, block.span).with_hint(hint)]
+        vec![Diagnostic::error(message, block.span)
+            .with_hint(hint)
+            .with_category(DiagnosticCategory::Type)]
     }
 }
 
@@ -538,7 +544,8 @@ impl MethodValidator for StringArgumentValidator {
                         format!("{selector_name} expects a string argument, got {type_name}"),
                         *lit_span,
                     )
-                    .with_hint(string_arg_hint(&selector_name)),
+                    .with_hint(string_arg_hint(&selector_name))
+                    .with_category(DiagnosticCategory::Type),
                 ]
             }
 
@@ -605,7 +612,8 @@ impl MethodValidator for TypeAwareIntegerArgValidator {
                         format!("{selector_name} expects an integer argument, got {type_name}"),
                         *lit_span,
                     )
-                    .with_hint("Use a 1-based integer index: list at: 1"),
+                    .with_hint("Use a 1-based integer index: list at: 1")
+                    .with_category(DiagnosticCategory::Type),
                 ]
             }
             _ => vec![],
@@ -657,7 +665,8 @@ impl MethodValidator for TypeAwareStringArgValidator {
                         format!("{selector_name} expects a string argument, got {type_name}"),
                         *lit_span,
                     )
-                    .with_hint(string_arg_hint(&selector_name)),
+                    .with_hint(string_arg_hint(&selector_name))
+                    .with_category(DiagnosticCategory::Type),
                 ]
             }
             _ => vec![],
