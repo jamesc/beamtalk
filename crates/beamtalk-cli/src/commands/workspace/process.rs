@@ -95,6 +95,17 @@ const WS_HEALTH_MAX_DELAY_MS: u64 = 2000;
 /// loop uses its own fixed liveness-check interval.
 const LIVENESS_CHECK_INTERVAL: usize = 25;
 
+/// Escape a filesystem path for embedding in an Erlang double-quoted string literal.
+///
+/// Handles backslashes (Windows) and double quotes (all platforms) so the path
+/// can be safely interpolated into a `-eval` command without breaking syntax or
+/// enabling eval injection.
+fn escape_path_for_erlang(path: &str) -> String {
+    // Backslashes must be escaped first to avoid double-escaping quotes.
+    let s = path.replace('\\', "\\\\");
+    s.replace('"', "\\\"")
+}
+
 /// Prepare workspace paths and the eval command string for a detached node.
 ///
 /// Resolves the project path, cleans up stale runtime files, writes the
@@ -116,12 +127,8 @@ fn prepare_workspace_paths(
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
     let project_path_str = project_path
         .to_str()
-        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?
-        .to_owned();
-
-    // On Windows, escape backslashes in the project path for Erlang string syntax (BT-661)
-    #[cfg(windows)]
-    let project_path_str = project_path_str.replace('\\', "\\\\");
+        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
+    let project_path_str = escape_path_for_erlang(project_path_str);
 
     // If a `starting` tombstone is present, a previous startup was interrupted
     // mid-flight (crash, OOM, SIGKILL, etc.).  Clean up all runtime files —
@@ -145,10 +152,19 @@ fn prepare_workspace_paths(
     let pid_file_path = workspace_dir(workspace_id)?.join("pid");
     let pid_file_path_str = pid_file_path
         .to_str()
-        .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?
-        .to_owned();
-    #[cfg(windows)]
-    let pid_file_path_str = pid_file_path_str.replace('\\', "\\\\");
+        .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?;
+    let pid_file_path_str = escape_path_for_erlang(pid_file_path_str);
+
+    // Compute the startup log path so the eval command's try/catch can write
+    // crash diagnostics from within the VM (bypassing -detached's fd redirect).
+    let startup_log_path = workspace_dir(workspace_id)?.join("startup.log");
+    let startup_log_path_str = startup_log_path.to_str().ok_or_else(|| {
+        miette!(
+            "Startup log path contains invalid UTF-8: {:?}",
+            startup_log_path
+        )
+    })?;
+    let startup_log_path_str = escape_path_for_erlang(startup_log_path_str);
 
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(config.bind_addr);
@@ -171,6 +187,7 @@ fn prepare_workspace_paths(
 
     let eval_cmd = build_workspace_eval_cmd(
         &pid_file_path_str,
+        &startup_log_path_str,
         workspace_id,
         &project_path_str,
         config.port,
@@ -186,10 +203,15 @@ fn prepare_workspace_paths(
     Ok((eval_cmd, project_path))
 }
 
-/// Configure startup logging for a detached BEAM node.
+/// Configure startup logging for a detached BEAM node (best-effort fallback).
 ///
-/// Redirects the command's stderr to a workspace log file for crash diagnostics.
-/// If the log file cannot be opened, falls back to `/dev/null` (the default).
+/// Redirects the command's stderr to a workspace log file. However, Erlang's
+/// `-detached` flag internally redirects all fds to `/dev/null` after forking,
+/// so this only captures output from the initial `erl` process before the
+/// double-fork — not from the final BEAM node.  The primary crash-capture
+/// mechanism is the `try/catch` in the eval command (see `build_workspace_eval_cmd`),
+/// which writes directly to `startup.log` via `file:write_file/2`.
+///
 /// Also configures the OTP kernel logger to write to stderr (BT-1431).
 ///
 /// Returns the log file path and whether logging was successfully enabled.
@@ -309,9 +331,10 @@ pub fn start_detached_node(
                 break 'retry pid;
             }
         }
+        let detail = read_startup_log_detail(workspace_id);
         return Err(miette!(
             "BEAM node did not write PID file within timeout.\n\
-             The workspace may have failed to start. Check Erlang/OTP is installed."
+             The workspace may have failed to start.{detail}"
         ));
     };
 
@@ -335,14 +358,10 @@ pub fn start_detached_node(
             // (after writing the PID file but before cowboy bound its port).
             // Check every 10 attempts (5 s at PORT_DISCOVERY_DELAY_MS = 500 ms).
             if attempt > 0 && attempt % 10 == 0 && !is_process_alive(pid) {
-                let hint = if startup_log_enabled {
-                    format!(" Check {} for startup logs.", startup_log_path.display())
-                } else {
-                    String::new()
-                };
+                let detail = read_startup_log_detail(workspace_id);
                 return Err(miette!(
                     "BEAM node (PID {pid}) exited before writing its port file. \
-                     The node likely crashed during OTP application startup.{hint}"
+                     The node likely crashed during OTP application startup.{detail}"
                 ));
             }
             std::thread::sleep(Duration::from_millis(PORT_DISCOVERY_DELAY_MS));
@@ -519,13 +538,60 @@ fn ws_health_delay_ms(attempt: usize) -> u64 {
     delay.min(WS_HEALTH_MAX_DELAY_MS)
 }
 
+/// Maximum bytes of `startup.log` to inline in an error message.
+///
+/// 4 KiB is enough for a typical Erlang crash reason + stacktrace while
+/// keeping terminal output manageable.
+const STARTUP_LOG_MAX_BYTES: usize = 4096;
+
+/// Read crash diagnostics from `startup.log` written by the eval try/catch.
+///
+/// Returns a formatted detail string suitable for appending to an error message.
+/// If the log contains content, it's shown inline (truncated to `STARTUP_LOG_MAX_BYTES`);
+/// otherwise a generic hint is returned.
+fn read_startup_log_detail(workspace_id: &str) -> String {
+    workspace_dir(workspace_id)
+        .ok()
+        .map(|d| d.join("startup.log"))
+        .and_then(|p| std::fs::read(&p).ok())
+        .filter(|bytes| !bytes.is_empty())
+        .map_or_else(
+            || "\nCheck Erlang/OTP is installed.".to_string(),
+            |log| {
+                if log.len() <= STARTUP_LOG_MAX_BYTES {
+                    format!("\nStartup log:\n{}", String::from_utf8_lossy(&log))
+                } else {
+                    // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
+                    // recent (and usually most relevant) output.  Operating on raw
+                    // bytes avoids panicking on multibyte UTF-8 boundaries;
+                    // from_utf8_lossy replaces any split characters with U+FFFD.
+                    let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
+                    // Find the first newline to avoid cutting mid-line.
+                    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+                    format!(
+                        "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
+                        String::from_utf8_lossy(&tail[start..])
+                    )
+                }
+            },
+        )
+}
+
 /// Build the Erlang `-eval` string for workspace node startup.
+///
+/// The entire startup sequence is wrapped in a `try/catch` that writes any
+/// crash reason to `startup.log` via `file:write_file/2`.  This is necessary
+/// because Erlang's `-detached` flag internally redirects all file descriptors
+/// (including stderr) to `/dev/null` after forking, so the Rust-side stderr
+/// redirect to `startup.log` never captures anything.  Writing to the file
+/// from within the VM bypasses the fd redirect entirely.
 ///
 /// Separated from `start_detached_node` to reduce nesting depth and keep the
 /// format string at a manageable indentation level.
 #[allow(clippy::too_many_arguments)]
 fn build_workspace_eval_cmd(
     pid_file_path_str: &str,
+    startup_log_path_str: &str,
     workspace_id: &str,
     project_path_str: &str,
     port: u16,
@@ -538,7 +604,8 @@ fn build_workspace_eval_cmd(
     otp_app_start: &str,
 ) -> String {
     format!(
-        "ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
+        "try \
+         ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
          application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
@@ -558,7 +625,12 @@ fn build_workspace_eval_cmd(
          {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \
-         receive stop -> ok end."
+         receive stop -> ok end \
+         catch C___:R___:S___ -> \
+         Msg___ = iolist_to_binary(io_lib:format(\"~p:~p~n~p~n\", [C___, R___, S___])), \
+         file:write_file(\"{startup_log_path_str}\", Msg___, [append]), \
+         halt(1) \
+         end."
     )
 }
 
