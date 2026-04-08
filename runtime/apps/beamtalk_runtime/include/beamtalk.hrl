@@ -79,11 +79,12 @@
     span :: {binary(), integer(), integer(), integer(), integer()} | undefined
 }).
 
-%% @doc Opaque type alias for Beamtalk class/object references passed through FFI.
+%% @doc Type alias for Beamtalk class/object references passed through FFI.
 %%
-%% Beamtalk objects are represented as tuples at the BEAM level. This type alias
-%% replaces bare `term()` in FFI specs to signal that a parameter is expected to
-%% be a Beamtalk object (class tuple or actor reference), not an arbitrary term.
+%% Beamtalk objects are represented as tuples at the BEAM level. This broad type
+%% alias replaces bare `term()` in FFI specs to signal that a parameter is
+%% expected to be a Beamtalk object (class tuple or actor reference), not an
+%% arbitrary term.
 -type beamtalk_object() :: tuple().
 -export_type([beamtalk_object/0]).
 

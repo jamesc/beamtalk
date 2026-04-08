@@ -192,6 +192,20 @@ run_method(ClassRef, TestName) when
 ->
     ClassName = extract_class_name(ClassRef),
     run_method_by_name(ClassName, TestName);
+run_method(ClassRef, TestName) when
+    is_tuple(ClassRef), tuple_size(ClassRef) >= 2
+->
+    %% ClassRef is valid but TestName is not an atom
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "run:method: expects a method name (atom), got: ~p",
+            [TestName]
+        )
+    ),
+    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
+    Error1 = beamtalk_error:with_selector(Error0, 'run:method:'),
+    Error2 = beamtalk_error:with_message(Error1, Msg),
+    beamtalk_error:raise(Error2);
 run_method(Invalid, _TestName) ->
     Msg = iolist_to_binary(
         io_lib:format(
@@ -595,10 +609,34 @@ Strip the trailing " class" (6 chars) to get the bare class name.
 -spec extract_class_name(beamtalk_object()) -> atom().
 extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     Tag = element(2, ClassRef),
-    TagStr = atom_to_list(Tag),
-    Len = length(TagStr),
-    NameStr = lists:sublist(TagStr, Len - 6),
-    list_to_existing_atom(NameStr).
+    case is_atom(Tag) of
+        true ->
+            TagStr = atom_to_list(Tag),
+            Len = length(TagStr),
+            case Len > 6 andalso lists:suffix(" class", TagStr) of
+                true ->
+                    NameStr = lists:sublist(TagStr, Len - 6),
+                    list_to_existing_atom(NameStr);
+                false ->
+                    raise_invalid_class_ref(ClassRef)
+            end;
+        false ->
+            raise_invalid_class_ref(ClassRef)
+    end.
+
+-doc "Raise a structured error for an invalid class reference tuple.".
+-spec raise_invalid_class_ref(term()) -> no_return().
+raise_invalid_class_ref(ClassRef) ->
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "expected a class reference (element 2 must be a 'ClassName class' atom), got: ~p",
+            [ClassRef]
+        )
+    ),
+    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
+    Error1 = beamtalk_error:with_selector(Error0, 'run:'),
+    Error2 = beamtalk_error:with_message(Error1, Msg),
+    beamtalk_error:raise(Error2).
 
 -doc "Create a TestResult tagged map.".
 -spec make_test_result(

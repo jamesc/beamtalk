@@ -1062,7 +1062,7 @@ resolve_remote_type_posix_test() ->
     ?assert(length(ReadFileSpecs) > 0),
     [Spec | _] = ReadFileSpecs,
     %% posix() in error branch should resolve to Symbol (since posix() = atom())
-    ?assertEqual(<<"Result(String, Symbol)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(String | Binary, Symbol)">>, maps:get(return_type, Spec)).
 
 %% Remote type resolution: disk_log error types resolve.
 resolve_remote_type_disk_log_test() ->
