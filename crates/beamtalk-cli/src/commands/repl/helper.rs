@@ -107,56 +107,14 @@ impl ReplHelper {
         *self.main_session_id.borrow_mut() = session_id.map(String::from);
     }
 
-    /// Query the backend for Erlang module or function name completions.
+    /// Send a completion request to the backend client, handling reconnection.
     ///
-    /// Used when completing `:h Erlang <TAB>` or `:h Erlang mod <TAB>`.
-    fn backend_erlang_complete(&self, prefix: &str, module: Option<&str>) -> Vec<String> {
-        let mut client_ref = self.completion_client.borrow_mut();
-
-        if client_ref.is_none() {
-            *client_ref = ProtocolClient::connect(
-                &self.host,
-                self.port,
-                &self.cookie,
-                Some(COMPLETION_TIMEOUT),
-            )
-            .ok()
-            .map(|mut c| {
-                c.set_print_transcript(false);
-                c
-            });
-        }
-
-        let Some(client) = client_ref.as_mut() else {
-            return Vec::new();
-        };
-
-        let mut request = serde_json::json!({
-            "op": "erlang-complete",
-            "id": protocol::next_msg_id(),
-            "prefix": prefix
-        });
-        if let Some(m) = module {
-            request["module"] = serde_json::Value::String(m.to_string());
-        }
-
-        if let Ok(response) = client.send_request::<ReplResponse>(&request) {
-            response.completions.unwrap_or_default()
-        } else {
-            *client_ref = None;
-            Vec::new()
-        }
-    }
-
-    /// Query the backend for completions given the full line up to the cursor.
-    ///
-    /// Sends the line context and cursor position so the backend can perform
-    /// receiver-aware method completion (BT-783).
-    fn backend_complete(&self, line_to_pos: &str, cursor: usize) -> Vec<String> {
-        if line_to_pos.is_empty() {
-            return Vec::new();
-        }
-
+    /// Returns the completions from the response, or an empty vec on failure.
+    /// Drops the client on connection failure so it reconnects on next attempt.
+    fn send_completion_request(
+        &self,
+        request: &serde_json::Value,
+    ) -> Vec<String> {
         let mut client_ref = self.completion_client.borrow_mut();
 
         // Try to reconnect if we don't have a client
@@ -178,6 +136,39 @@ impl ReplHelper {
             return Vec::new();
         };
 
+        if let Ok(response) = client.send_request::<ReplResponse>(request) {
+            response.completions.unwrap_or_default()
+        } else {
+            // Connection failed — drop client so we reconnect next time
+            *client_ref = None;
+            Vec::new()
+        }
+    }
+
+    /// Query the backend for Erlang module or function name completions.
+    ///
+    /// Used when completing `:h Erlang <TAB>` or `:h Erlang mod <TAB>`.
+    fn backend_erlang_complete(&self, prefix: &str, module: Option<&str>) -> Vec<String> {
+        let mut request = serde_json::json!({
+            "op": "erlang-complete",
+            "id": protocol::next_msg_id(),
+            "prefix": prefix
+        });
+        if let Some(m) = module {
+            request["module"] = serde_json::Value::String(m.to_string());
+        }
+        self.send_completion_request(&request)
+    }
+
+    /// Query the backend for completions given the full line up to the cursor.
+    ///
+    /// Sends the line context and cursor position so the backend can perform
+    /// receiver-aware method completion (BT-783).
+    fn backend_complete(&self, line_to_pos: &str, cursor: usize) -> Vec<String> {
+        if line_to_pos.is_empty() {
+            return Vec::new();
+        }
+
         let session_id = self.main_session_id.borrow();
         let mut request = serde_json::json!({
             "op": "complete",
@@ -188,14 +179,7 @@ impl ReplHelper {
         if let Some(ref sid) = *session_id {
             request["session"] = serde_json::Value::String(sid.clone());
         }
-
-        if let Ok(response) = client.send_request::<ReplResponse>(&request) {
-            response.completions.unwrap_or_default()
-        } else {
-            // Connection failed — drop client so we reconnect next time
-            *client_ref = None;
-            Vec::new()
-        }
+        self.send_completion_request(&request)
     }
 }
 
@@ -286,6 +270,8 @@ impl Completer for ReplHelper {
                         // Replace from the start of the function name prefix
                         return Ok((arg_start + "Erlang ".len() + module.len() + 1, candidates));
                     }
+                    // Extra tokens after module+function (e.g. `:h Erlang mod fn extra`)
+                    // — fall through to regular completion
                     _ => {}
                 }
             }

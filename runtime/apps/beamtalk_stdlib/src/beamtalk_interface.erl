@@ -258,13 +258,17 @@ handle_erlang_help(ModuleBin, SelectorArg) when is_binary(ModuleBin) ->
                 Err,
                 iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
             ),
-            beamtalk_error:raise(Err1)
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Check the module name and ensure it is available on the code path.">>
+            ),
+            beamtalk_error:raise(Err2)
     end;
 handle_erlang_help(_ModuleArg, _SelectorArg) ->
     Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
     Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:selector:'),
     Err2 = beamtalk_error:with_message(
-        Err1, <<"erlangHelp: expects a binary module name">>
+        Err1, <<"erlangHelp:selector: expects a binary module name and atom/binary function name">>
     ),
     beamtalk_error:raise(Err2).
 
