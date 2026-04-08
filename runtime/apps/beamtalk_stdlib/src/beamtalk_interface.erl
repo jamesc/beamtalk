@@ -27,6 +27,8 @@ dictionary or ETS state is required.
 | `globals'         | Class registry snapshot as a map                  |
 | `help:'           | Formatted class documentation                     |
 | `help:selector:'  | Formatted method documentation                    |
+| `erlangHelp:'     | Formatted Erlang module documentation              |
+| `erlangHelp:selector:' | Formatted Erlang function documentation       |
 | `version'         | Beamtalk runtime version string                   |
 """.
 
@@ -34,7 +36,8 @@ dictionary or ETS state is required.
 
 -export([dispatch/3]).
 %% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
--export([allClasses/0, classNamed/1, findClass/1, globals/0, help/1, help/2, version/0]).
+-export([allClasses/0, classNamed/1, findClass/1, globals/0, help/1, help/2,
+         erlangHelp/1, erlangHelp/2, version/0]).
 
 %%% ============================================================================
 %%% dispatch/3 — called from compiled bt@stdlib@beamtalk_interface for @primitives
@@ -62,6 +65,10 @@ dispatch('help:selector:', [ClassArg, SelectorArg], _Self) ->
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
     end;
+dispatch('erlangHelp:', [ModuleArg], _Self) ->
+    handle_erlang_help(ModuleArg);
+dispatch('erlangHelp:selector:', [ModuleArg, SelectorArg], _Self) ->
+    handle_erlang_help(ModuleArg, SelectorArg);
 dispatch(version, [], _Self) ->
     case application:get_key(beamtalk_runtime, vsn) of
         {ok, Vsn} -> list_to_binary(Vsn);
@@ -137,6 +144,22 @@ help(ClassArg, SelectorArg) ->
     end.
 
 -doc """
+Format Erlang module documentation (erlangHelp: moduleName).
+Called via `(Erlang beamtalk_interface) erlangHelp: "lists"`.
+""".
+-spec erlangHelp(binary()) -> binary().
+erlangHelp(ModuleArg) ->
+    handle_erlang_help(ModuleArg).
+
+-doc """
+Format Erlang function documentation (erlangHelp: moduleName selector: #fn).
+Called via `(Erlang beamtalk_interface) erlangHelp: "lists" selector: #reverse`.
+""".
+-spec erlangHelp(binary(), atom() | binary()) -> binary().
+erlangHelp(ModuleArg, SelectorArg) ->
+    handle_erlang_help(ModuleArg, SelectorArg).
+
+-doc """
 Return the Beamtalk runtime version string.
 Called via `(Erlang beamtalk_interface) version`.
 """.
@@ -150,6 +173,89 @@ version() ->
 %%% ============================================================================
 %%% Internal method implementations
 %%% ============================================================================
+
+-doc "Format Erlang module help via beamtalk_erlang_help (dynamic call).".
+-spec handle_erlang_help(binary()) -> binary().
+handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
+    try binary_to_existing_atom(ModuleBin, utf8) of
+        Module ->
+            case beamtalk_erlang_help:format_module_help(Module) of
+                {ok, Text} -> Text;
+                {error, not_found} ->
+                    Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+                    Err1 = beamtalk_error:with_message(
+                        Err,
+                        iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
+                    ),
+                    Err2 = beamtalk_error:with_hint(
+                        Err1,
+                        <<"Check the module name and ensure it is available on the code path.">>
+                    ),
+                    beamtalk_error:raise(Err2)
+            end
+    catch
+        error:badarg ->
+            Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+            Err1 = beamtalk_error:with_message(
+                Err,
+                iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Check the module name and ensure it is available on the code path.">>
+            ),
+            beamtalk_error:raise(Err2)
+    end;
+handle_erlang_help(ModuleArg) ->
+    Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:'),
+    Err2 = beamtalk_error:with_message(
+        Err1, <<"erlangHelp: expects a binary module name">>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc "Format Erlang function help via beamtalk_erlang_help (dynamic call).".
+-spec handle_erlang_help(binary(), atom() | binary()) -> binary().
+handle_erlang_help(ModuleBin, SelectorArg) when is_binary(ModuleBin) ->
+    FunctionBin = case SelectorArg of
+        A when is_atom(A) -> atom_to_binary(A);
+        B when is_binary(B) -> B
+    end,
+    try binary_to_existing_atom(ModuleBin, utf8) of
+        Module ->
+            case beamtalk_erlang_help:format_function_help(Module, FunctionBin) of
+                {ok, Text} -> Text;
+                {error, not_found} ->
+                    Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+                    Err1 = beamtalk_error:with_message(
+                        Err,
+                        iolist_to_binary([ModuleBin, <<":">>, FunctionBin, <<" not found">>])
+                    ),
+                    Err2 = beamtalk_error:with_hint(
+                        Err1,
+                        iolist_to_binary([
+                            <<"Use Beamtalk erlangHelp: \"">>, ModuleBin,
+                            <<"\" to see available functions.">>
+                        ])
+                    ),
+                    beamtalk_error:raise(Err2)
+            end
+    catch
+        error:badarg ->
+            Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+            Err1 = beamtalk_error:with_message(
+                Err,
+                iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
+            ),
+            beamtalk_error:raise(Err1)
+    end;
+handle_erlang_help(_ModuleArg, _SelectorArg) ->
+    Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:selector:'),
+    Err2 = beamtalk_error:with_message(
+        Err1, <<"erlangHelp: expects a binary module name">>
+    ),
+    beamtalk_error:raise(Err2).
 
 -doc "Look up a class by name.".
 -spec handle_class_named(binary() | atom() | term()) ->
