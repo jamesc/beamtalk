@@ -107,6 +107,47 @@ impl ReplHelper {
         *self.main_session_id.borrow_mut() = session_id.map(String::from);
     }
 
+    /// Query the backend for Erlang module or function name completions.
+    ///
+    /// Used when completing `:h Erlang <TAB>` or `:h Erlang mod <TAB>`.
+    fn backend_erlang_complete(&self, prefix: &str, module: Option<&str>) -> Vec<String> {
+        let mut client_ref = self.completion_client.borrow_mut();
+
+        if client_ref.is_none() {
+            *client_ref = ProtocolClient::connect(
+                &self.host,
+                self.port,
+                &self.cookie,
+                Some(COMPLETION_TIMEOUT),
+            )
+            .ok()
+            .map(|mut c| {
+                c.set_print_transcript(false);
+                c
+            });
+        }
+
+        let Some(client) = client_ref.as_mut() else {
+            return Vec::new();
+        };
+
+        let mut request = serde_json::json!({
+            "op": "erlang-complete",
+            "id": protocol::next_msg_id(),
+            "prefix": prefix
+        });
+        if let Some(m) = module {
+            request["module"] = serde_json::Value::String(m.to_string());
+        }
+
+        if let Ok(response) = client.send_request::<ReplResponse>(&request) {
+            response.completions.unwrap_or_default()
+        } else {
+            *client_ref = None;
+            Vec::new()
+        }
+    }
+
     /// Query the backend for completions given the full line up to the cursor.
     ///
     /// Sends the line context and cursor position so the backend can perform
@@ -214,6 +255,45 @@ impl Completer for ReplHelper {
 
         if let Some(arg_start) = class_expr_arg_start {
             let arg = &line_to_pos[arg_start..];
+
+            // Erlang module/function completion: `:h Erlang <prefix>` or `:h Erlang mod <prefix>`
+            if let Some(erlang_rest) = arg.strip_prefix("Erlang ") {
+                let parts: Vec<&str> = erlang_rest.splitn(2, ' ').collect();
+                match parts.as_slice() {
+                    // `:h Erlang li<TAB>` — complete module names
+                    [prefix] => {
+                        let completions = self.backend_erlang_complete(prefix, None);
+                        let candidates: Vec<Pair> = completions
+                            .into_iter()
+                            .map(|c| Pair {
+                                display: c.clone(),
+                                replacement: c,
+                            })
+                            .collect();
+                        // Replace from the start of the module name prefix
+                        return Ok((arg_start + "Erlang ".len(), candidates));
+                    }
+                    // `:h Erlang lists re<TAB>` — complete function names in module
+                    [module, fn_prefix] => {
+                        let completions =
+                            self.backend_erlang_complete(fn_prefix, Some(module));
+                        let candidates: Vec<Pair> = completions
+                            .into_iter()
+                            .map(|c| Pair {
+                                display: c.clone(),
+                                replacement: c,
+                            })
+                            .collect();
+                        // Replace from the start of the function name prefix
+                        return Ok((
+                            arg_start + "Erlang ".len() + module.len() + 1,
+                            candidates,
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+
             let completions = self.backend_complete(arg, arg.len());
             // Find the word boundary within the argument portion.
             let arg_word_start = arg

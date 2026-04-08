@@ -103,6 +103,49 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
                 json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
             )
     end;
+handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
+    %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
+    Prefix = maps:get(<<"prefix">>, Params, <<>>),
+    ModuleBin = maps:get(<<"module">>, Params, undefined),
+    Completions =
+        case ModuleBin of
+            undefined ->
+                %% Complete module names
+                All = beamtalk_erlang_help:available_modules(),
+                [M || M <- All, binary:match(M, Prefix) =:= {0, byte_size(Prefix)}];
+            _ ->
+                %% Complete function names within a module
+                try binary_to_existing_atom(ModuleBin, utf8) of
+                    Module ->
+                        try Module:module_info(exports) of
+                            Exports ->
+                                Filtered = [atom_to_binary(F) ||
+                                    {F, _A} <- Exports,
+                                    F =/= module_info],
+                                Unique = lists:usort(Filtered),
+                                [F || F <- Unique,
+                                    binary:match(F, Prefix) =:= {0, byte_size(Prefix)}]
+                        catch
+                            _:_ -> []
+                        end
+                catch
+                    error:badarg -> []
+                end
+        end,
+    case beamtalk_repl_protocol:is_legacy(Msg) of
+        true ->
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"completions">>,
+                    <<"completions">> => Completions
+                })
+            );
+        false ->
+            Base = base_protocol_response(Msg),
+            iolist_to_binary(
+                json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
+            )
+    end;
 handle(<<"docs">>, Params, Msg, _SessionPid) ->
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     ClassSide = maps:get(<<"class_side">>, Params, false),
@@ -1802,6 +1845,14 @@ base_ops() ->
             <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]
         },
         <<"describe">> => #{<<"params">> => []},
+        <<"erlang-help">> => #{
+            <<"params">> => [<<"module">>],
+            <<"optional">> => [<<"function">>]
+        },
+        <<"erlang-complete">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"prefix">>, <<"module">>]
+        },
         <<"shutdown">> => #{<<"params">> => [<<"cookie">>]}
     }.
 
