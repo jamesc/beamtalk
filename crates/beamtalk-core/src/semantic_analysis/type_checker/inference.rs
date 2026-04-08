@@ -304,16 +304,40 @@ impl TypeChecker {
     /// Examples:
     /// - `"Integer"` → `Known("Integer")`
     /// - `"String | nil"` → `Union(["String", "UndefinedObject"])`
+    /// - `"List(String)"` → `Known("List", type_args: [Known("String")])`
     pub(super) fn resolve_type_name_string(type_name: &EcoString) -> InferredType {
+        // Split on `|` respecting parenthesis nesting, so
+        // `Result(String | Integer, Error)` is not split at the inner `|`.
         if type_name.contains('|') {
-            let members: Vec<InferredType> = type_name
-                .split('|')
-                .map(|s| {
-                    let trimmed = s.trim();
-                    InferredType::known(Self::resolve_type_keyword(&EcoString::from(trimmed)))
-                })
-                .collect();
-            InferredType::union_of(&members)
+            let members = Self::split_union_respecting_parens(type_name);
+            if members.len() > 1 {
+                let resolved: Vec<InferredType> = members
+                    .into_iter()
+                    .map(|s| Self::resolve_type_name_string(&EcoString::from(s)))
+                    .collect();
+                return InferredType::union_of(&resolved);
+            }
+            // Single element — the `|` was inside parens, fall through
+        }
+        if let Some(open) = type_name.find('(') {
+            // Parametric type: e.g., "List(String)", "Dictionary(String, Integer)"
+            if type_name.ends_with(')') {
+                let base = Self::resolve_type_keyword(&EcoString::from(&type_name[..open]));
+                let inner = &type_name[open + 1..type_name.len() - 1];
+                let type_args: Vec<InferredType> = Self::split_type_params(inner)
+                    .into_iter()
+                    .map(|p| Self::resolve_type_name_string(&EcoString::from(p)))
+                    .collect();
+                InferredType::Known {
+                    class_name: base,
+                    type_args,
+                    provenance: super::TypeProvenance::Declared(
+                        crate::source_analysis::Span::default(),
+                    ),
+                }
+            } else {
+                InferredType::known(Self::resolve_type_keyword(type_name))
+            }
         } else {
             InferredType::known(Self::resolve_type_keyword(type_name))
         }
@@ -501,9 +525,14 @@ impl TypeChecker {
                 let is_class_ref = matches!(receiver.as_ref(), Expression::ClassReference { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
-                    for arg in &msg.arguments {
-                        self.infer_expr(arg, hierarchy, env, in_abstract_method);
-                    }
+                    self.infer_args_with_block_context(
+                        &msg.arguments,
+                        &receiver_ty,
+                        &selector_name,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
                     if is_class_ref {
                         if let Expression::ClassReference { name, .. } = receiver.as_ref() {
                             self.check_class_side_send(
@@ -730,10 +759,14 @@ impl TypeChecker {
                 in_abstract_method,
             )
         } else {
-            arguments
-                .iter()
-                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
-                .collect()
+            self.infer_args_with_block_context(
+                arguments,
+                &receiver_ty,
+                &selector_name,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
         };
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
@@ -1785,6 +1818,187 @@ impl TypeChecker {
         }
     }
 
+    /// Infer argument types, propagating block parameter types from the callee
+    /// method's signature when the receiver type is known.
+    ///
+    /// For example, `List(String)>>sort:` declares `Block(E, E, Boolean)`.
+    /// With E=String (from receiver type args), block params get typed as String
+    /// instead of `Dynamic(UnannotatedParam)`.
+    fn infer_args_with_block_context(
+        &mut self,
+        arguments: &[Expression],
+        receiver_ty: &InferredType,
+        selector_name: &str,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        // Fast path: receiver must be Known to look up method signatures
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = receiver_ty
+        else {
+            return arguments
+                .iter()
+                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+                .collect();
+        };
+
+        // Look up the method to get param types
+        let Some(method) = hierarchy.find_method(class_name, selector_name) else {
+            return arguments
+                .iter()
+                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+                .collect();
+        };
+
+        // Check if any param type is a Block(...) type
+        let has_block_param = method.param_types.iter().any(|pt| {
+            pt.as_ref()
+                .is_some_and(|t| t.starts_with("Block(") && t.ends_with(')'))
+        });
+        if !has_block_param {
+            return arguments
+                .iter()
+                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+                .collect();
+        }
+
+        // Phase 1: Infer non-block arguments to resolve method-local type params
+        let mut arg_types: Vec<InferredType> = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            if matches!(arg, Expression::Block(_)) {
+                // Placeholder — will be re-inferred in Phase 2
+                arg_types.push(InferredType::known("Block"));
+            } else {
+                arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
+            }
+        }
+
+        // Build substitution maps
+        let class_subst = Self::build_inherited_substitution_map(
+            hierarchy,
+            class_name,
+            type_args,
+            &method.defined_in,
+        );
+        let method_subst = Self::infer_method_local_params(
+            &method,
+            &arg_types,
+            &class_subst,
+            hierarchy,
+            &method.defined_in,
+        );
+
+        // Phase 2: Re-infer block arguments with typed params
+        for (i, arg) in arguments.iter().enumerate() {
+            if let Expression::Block(block) = arg {
+                let param_type_str = method
+                    .param_types
+                    .get(i)
+                    .and_then(|pt| pt.as_ref())
+                    .filter(|t| t.starts_with("Block(") && t.ends_with(')'));
+
+                if let Some(block_type_str) = param_type_str {
+                    // Parse Block(X, Y, Z) → params = [X, Y], return = Z
+                    let inner = &block_type_str[6..block_type_str.len() - 1];
+                    let type_params = Self::split_type_params(inner);
+
+                    if type_params.len() >= 2 {
+                        // All but last are block parameter types, last is return type
+                        let block_param_types: Vec<InferredType> = type_params
+                            [..type_params.len() - 1]
+                            .iter()
+                            .map(|p| {
+                                Self::resolve_type_param(p, &class_subst, &method_subst, hierarchy)
+                            })
+                            .collect();
+
+                        arg_types[i] = self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &block_param_types,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                    } else {
+                        // Block with only return type (e.g., Block(R)) — no params to type
+                        arg_types[i] = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                    }
+                } else {
+                    // No Block(...) param type for this position
+                    arg_types[i] = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                }
+            }
+        }
+
+        arg_types
+    }
+
+    /// Infer a block expression with typed parameters resolved from the callee
+    /// method's signature.
+    fn infer_block_with_typed_params(
+        &mut self,
+        block: &crate::ast::Block,
+        block_span: Span,
+        param_types: &[InferredType],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        let mut block_env = env.child();
+        for (param, ty) in block.parameters.iter().zip(param_types.iter()) {
+            block_env.set(param.name.as_str(), ty.clone());
+        }
+        // Extra params beyond resolved types stay Dynamic
+        for param in block.parameters.iter().skip(param_types.len()) {
+            block_env.set(
+                param.name.as_str(),
+                InferredType::Dynamic(DynamicReason::UnannotatedParam),
+            );
+        }
+        let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+        // Build Block type with resolved param types + inferred return type
+        let mut block_type_args: Vec<InferredType> = param_types.to_vec();
+        block_type_args.push(body_ty);
+        let ty = InferredType::Known {
+            class_name: "Block".into(),
+            type_args: block_type_args,
+            provenance: super::TypeProvenance::Inferred(block_span),
+        };
+        self.type_map.insert(block_span, ty.clone());
+        ty
+    }
+
+    /// Resolve a type parameter string through class-level and method-local
+    /// substitution maps. Returns the resolved type, or `Dynamic` if
+    /// the parameter cannot be resolved.
+    fn resolve_type_param(
+        param: &str,
+        class_subst: &HashMap<EcoString, InferredType>,
+        method_subst: &HashMap<EcoString, InferredType>,
+        hierarchy: &ClassHierarchy,
+    ) -> InferredType {
+        let eco: EcoString = EcoString::from(param);
+        // Check method-local substitution first (e.g., A from inject:into:)
+        if let Some(ty) = method_subst.get(&eco) {
+            return ty.clone();
+        }
+        // Then class-level substitution (e.g., E from List(String))
+        if let Some(ty) = class_subst.get(&eco) {
+            return ty.clone();
+        }
+        // If it's a known class name (e.g., Boolean, Integer), return it directly
+        if hierarchy.has_class(&eco) {
+            return InferredType::known(eco);
+        }
+        // Unresolved type param — stay Dynamic
+        InferredType::Dynamic(DynamicReason::UnannotatedParam)
+    }
+
     /// Extract a variable name from an expression, supporting identifiers
     /// and parenthesized identifiers.
     fn extract_variable_name(expr: &Expression) -> Option<EcoString> {
@@ -2144,6 +2358,32 @@ impl TypeChecker {
                 '(' => depth += 1,
                 ')' => depth -= 1,
                 ',' if depth == 0 => {
+                    result.push(s[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        let last = s[start..].trim();
+        if !last.is_empty() {
+            result.push(last);
+        }
+        result
+    }
+
+    /// Split a type string on `|` while respecting parenthesis nesting.
+    ///
+    /// This ensures `Result(String | Integer, Error)` is NOT split at the inner `|`,
+    /// but `String | nil` IS split into `["String", "nil"]`.
+    pub(super) fn split_union_respecting_parens(s: &str) -> Vec<&str> {
+        let mut result = Vec::new();
+        let mut depth = 0i32;
+        let mut start = 0;
+        for (i, c) in s.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                '|' if depth == 0 => {
                     result.push(s[start..i].trim());
                     start = i + 1;
                 }
