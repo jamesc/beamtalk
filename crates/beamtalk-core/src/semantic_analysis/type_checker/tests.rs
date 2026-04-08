@@ -11421,3 +11421,20 @@ fn split_union_respecting_parens_mixed() {
     let result = TypeChecker::split_union_respecting_parens("List(String) | nil");
     assert_eq!(result, vec!["List(String)", "nil"]);
 }
+
+#[test]
+fn block_params_typed_in_cascade_sends() {
+    // Cascade sends should also propagate block param types.
+    let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> List(Integer) =>\n    self.nums\n      sort: [:a :b | a < b];\n      yourself";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "cascade sort: block params should be typed from List(Integer), got: {dynamic_warnings:?}"
+    );
+}

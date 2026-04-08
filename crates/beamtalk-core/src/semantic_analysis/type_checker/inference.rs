@@ -525,9 +525,14 @@ impl TypeChecker {
                 let is_class_ref = matches!(receiver.as_ref(), Expression::ClassReference { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
-                    for arg in &msg.arguments {
-                        self.infer_expr(arg, hierarchy, env, in_abstract_method);
-                    }
+                    self.infer_args_with_block_context(
+                        &msg.arguments,
+                        &receiver_ty,
+                        &selector_name,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
                     if is_class_ref {
                         if let Expression::ClassReference { name, .. } = receiver.as_ref() {
                             self.check_class_side_send(
