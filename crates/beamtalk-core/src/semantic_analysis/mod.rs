@@ -547,6 +547,7 @@ fn analyse_full_with_natives(
         validators::check_unresolved_classes(
             module,
             &result.class_hierarchy,
+            &result.protocol_registry,
             known_vars,
             &mut result.diagnostics,
         );
