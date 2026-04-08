@@ -153,6 +153,23 @@ fn validate_class_name(name: &str) -> Result<(), rmcp::ErrorData> {
     Ok(())
 }
 
+/// Validate that a string is a valid Erlang module name.
+///
+/// Erlang module names are lowercase atoms: start with a lowercase letter or underscore,
+/// followed by alphanumerics and underscores.
+fn validate_erlang_module_name(name: &str) -> Result<(), rmcp::ErrorData> {
+    if name.is_empty()
+        || !name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(rmcp::ErrorData::invalid_params(
+            format!("Invalid Erlang module name: '{name}'. Must be a lowercase identifier."),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 /// Validate that a string is a valid Beamtalk selector.
 ///
 /// Accepts keyword/unary selectors (`increment`, `at:put:`) and binary operator
@@ -275,13 +292,22 @@ pub struct ReloadClassParams {
 }
 
 /// Parameters for the `docs` MCP tool.
+///
+/// Provide exactly one of `class` (Beamtalk class) or `erlang_module` (Erlang module).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DocsParams {
-    /// Class name to get documentation for.
-    #[schemars(description = "Name of the beamtalk class to get documentation for")]
-    pub class: String,
-    /// Optional selector to get docs for a specific method.
-    #[schemars(description = "Optional method selector to get documentation for")]
+    /// Beamtalk class name to get documentation for.
+    #[schemars(
+        description = "Name of the beamtalk class to get documentation for. Mutually exclusive with erlang_module."
+    )]
+    pub class: Option<String>,
+    /// Erlang module name to get documentation for.
+    #[schemars(
+        description = "Name of an Erlang module to get FFI documentation for (e.g. \"lists\", \"maps\"). Mutually exclusive with class."
+    )]
+    pub erlang_module: Option<String>,
+    /// Optional selector to get docs for a specific method or function.
+    #[schemars(description = "Optional method/function selector to get documentation for")]
     pub selector: Option<String>,
 }
 
@@ -952,26 +978,57 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
-    /// Get documentation for a beamtalk class or method.
+    /// Get documentation for a Beamtalk class or Erlang module.
     #[tool(
-        description = "Get documentation for a beamtalk class or method. Provide a class name and optionally a method selector."
+        description = "Get documentation for a Beamtalk class or Erlang module. Provide either 'class' (Beamtalk) or 'erlang_module' (Erlang FFI), and optionally a method/function selector."
     )]
     async fn docs(
         &self,
         Parameters(params): Parameters<DocsParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("docs");
-        tracing::debug!(tool = "docs", class = %params.class, selector = ?params.selector, "tool invoked");
-        validate_class_name(&params.class)?;
-        // Use native Beamtalk API: Beamtalk help: ClassName [selector: #sel]
-        let expr = match params.selector.as_deref() {
-            Some(sel) => {
-                let sel = sel.strip_prefix('#').unwrap_or(sel);
-                validate_selector(sel)?;
-                format!("Beamtalk help: {} selector: #{}", params.class, sel)
+        tracing::debug!(tool = "docs", class = ?params.class, erlang_module = ?params.erlang_module, selector = ?params.selector, "tool invoked");
+
+        let expr = match (&params.class, &params.erlang_module) {
+            (Some(class), None) => {
+                validate_class_name(class)?;
+                match params.selector.as_deref() {
+                    Some(sel) => {
+                        let sel = sel.strip_prefix('#').unwrap_or(sel);
+                        validate_selector(sel)?;
+                        format!("Beamtalk help: {} selector: #{}", class, sel)
+                    }
+                    None => format!("Beamtalk help: {}", class),
+                }
             }
-            None => format!("Beamtalk help: {}", params.class),
+            (None, Some(module)) => {
+                validate_erlang_module_name(module)?;
+                match params.selector.as_deref() {
+                    Some(sel) => {
+                        let sel = sel.strip_prefix('#').unwrap_or(sel);
+                        validate_selector(sel)?;
+                        format!(
+                            "Beamtalk erlangHelp: \"{}\" selector: #{}",
+                            module, sel
+                        )
+                    }
+                    None => format!("Beamtalk erlangHelp: \"{}\"", module),
+                }
+            }
+            (Some(_), Some(_)) => {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "Provide either 'class' or 'erlang_module', not both.",
+                    None,
+                ));
+            }
+            (None, None) => {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "Provide either 'class' (Beamtalk class) or 'erlang_module' (Erlang module).",
+                    None,
+                ));
+            }
         };
+
         let response = self
             .client
             .evaluate_with_options(&expr, false)
