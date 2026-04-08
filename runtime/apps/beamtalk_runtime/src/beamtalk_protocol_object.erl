@@ -63,12 +63,29 @@ Extract the protocol name from a class self object.
 
 Class self objects use the tag format `'ProtocolName class'`
 (from `beamtalk_class_registry:class_object_tag/1`). This function
-strips the ` class` suffix to recover the protocol name atom.
+validates and strips the ` class` suffix to recover the protocol name atom
+without creating new atoms.
 """.
 -spec protocol_name_from_class_self(#beamtalk_object{}) -> atom().
 protocol_name_from_class_self(#beamtalk_object{class = ClassTag}) ->
-    TagStr = atom_to_list(ClassTag),
-    %% Strip " class" suffix (6 characters)
-    ProtocolStr = lists:sublist(TagStr, length(TagStr) - 6),
-    % elp:fixme W0023 intentional atom creation — protocol names are already registered
-    list_to_atom(ProtocolStr).
+    TagBin = atom_to_binary(ClassTag, utf8),
+    Suffix = <<" class">>,
+    SuffixSize = byte_size(Suffix),
+    TagSize = byte_size(TagBin),
+    case TagSize >= SuffixSize of
+        true ->
+            ProtocolSize = TagSize - SuffixSize,
+            case TagBin of
+                <<ProtocolBin:ProtocolSize/binary, Suffix/binary>> ->
+                    try binary_to_existing_atom(ProtocolBin, utf8) of
+                        ProtocolName -> ProtocolName
+                    catch
+                        error:badarg ->
+                            erlang:error({unknown_protocol_class_tag, ClassTag})
+                    end;
+                _ ->
+                    erlang:error({invalid_protocol_class_tag, ClassTag})
+            end;
+        false ->
+            erlang:error({invalid_protocol_class_tag, ClassTag})
+    end.

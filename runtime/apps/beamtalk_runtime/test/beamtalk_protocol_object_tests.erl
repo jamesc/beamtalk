@@ -33,8 +33,9 @@ setup() ->
         undefined -> ok;
         _ -> ets:delete_all_objects(beamtalk_protocol_registry)
     end,
-    %% Ensure Protocol class exists (needed as superclass)
-    ProtocolPid =
+    %% Ensure Protocol class exists (needed as superclass).
+    %% Track whether we created it so cleanup doesn't stop a pre-existing process.
+    {ProtocolPid, Created} =
         case beamtalk_class_registry:whereis_class('Protocol') of
             undefined ->
                 {ok, Pid} = beamtalk_object_class:start('Protocol', #{
@@ -43,13 +44,13 @@ setup() ->
                     is_abstract => true,
                     meta => #{is_sealed => true, is_abstract => true}
                 }),
-                Pid;
+                {Pid, true};
             Pid ->
-                Pid
+                {Pid, false}
         end,
-    ProtocolPid.
+    {ProtocolPid, Created}.
 
-cleanup(ProtocolPid) ->
+cleanup({ProtocolPid, Created}) ->
     %% Clean up test protocol class processes
     lists:foreach(
         fun(TestName) ->
@@ -71,8 +72,8 @@ cleanup(ProtocolPid) ->
         undefined -> ok;
         _ -> ets:delete_all_objects(beamtalk_protocol_registry)
     end,
-    %% Only stop Protocol if we created it (check it's still alive)
-    case is_process_alive(ProtocolPid) of
+    %% Only stop Protocol if we created it in setup
+    case Created of
         true ->
             try
                 gen_server:stop(ProtocolPid)
@@ -88,7 +89,7 @@ cleanup(ProtocolPid) ->
 %%% ============================================================================
 
 protocol_class_creation_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_ProtocolPid) ->
+    {setup, fun setup/0, fun cleanup/1, fun({_ProtocolPid, _Created}) ->
         [
             {"register_protocol creates a class process", fun register_creates_class/0},
             {"protocol class is sealed and abstract", fun protocol_class_is_sealed_abstract/0},

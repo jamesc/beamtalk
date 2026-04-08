@@ -70,7 +70,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 -export([
     is_sealed/1,
     is_abstract/1,
-    is_internal/1
+    is_internal/1,
+    is_protocol/1
 ]).
 
 %%% ===================================================================
@@ -280,6 +281,11 @@ is_abstract(ClassPid) ->
 -spec is_internal(pid()) -> boolean().
 is_internal(ClassPid) ->
     beamtalk_object_class:is_internal(ClassPid).
+
+-doc "Check if a class name is a registered protocol (ADR 0068).".
+-spec is_protocol(atom()) -> boolean().
+is_protocol(ClassName) ->
+    beamtalk_protocol_registry:is_protocol(ClassName).
 
 %%% ====================================================================
 %%% Object Instances Delegators

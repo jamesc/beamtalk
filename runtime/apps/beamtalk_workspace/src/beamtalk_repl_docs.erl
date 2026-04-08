@@ -116,7 +116,7 @@ format_class_docs(ClassName) ->
                 SeeAlso = build_see_also(ClassName, Superclass, ModuleDoc),
 
                 %% Format the output
-                IsProtocol = beamtalk_protocol_registry:is_protocol(ClassName),
+                IsProtocol = beamtalk_runtime_api:is_protocol(ClassName),
                 Modifiers = #{
                     is_sealed => IsSealed,
                     is_abstract => IsAbstract,
