@@ -94,10 +94,11 @@ available_modules() ->
     All = code:all_available(),
     Names = lists:filtermap(
         fun({ModName, _Path, _Loaded}) ->
-            Bin = if
-                is_atom(ModName) -> atom_to_binary(ModName);
-                is_list(ModName) -> list_to_binary(ModName)
-            end,
+            Bin =
+                if
+                    is_atom(ModName) -> atom_to_binary(ModName);
+                    is_list(ModName) -> list_to_binary(ModName)
+                end,
             %% Skip Beamtalk compiled modules (bt@package@Class)
             case Bin of
                 <<"bt@", _/binary>> -> false;

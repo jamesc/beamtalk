@@ -275,8 +275,7 @@ impl Completer for ReplHelper {
                     }
                     // `:h Erlang lists re<TAB>` — complete function names in module
                     [module, fn_prefix] => {
-                        let completions =
-                            self.backend_erlang_complete(fn_prefix, Some(module));
+                        let completions = self.backend_erlang_complete(fn_prefix, Some(module));
                         let candidates: Vec<Pair> = completions
                             .into_iter()
                             .map(|c| Pair {
@@ -285,10 +284,7 @@ impl Completer for ReplHelper {
                             })
                             .collect();
                         // Replace from the start of the function name prefix
-                        return Ok((
-                            arg_start + "Erlang ".len() + module.len() + 1,
-                            candidates,
-                        ));
+                        return Ok((arg_start + "Erlang ".len() + module.len() + 1, candidates));
                     }
                     _ => {}
                 }

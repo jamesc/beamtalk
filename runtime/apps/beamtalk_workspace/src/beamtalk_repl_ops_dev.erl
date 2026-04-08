@@ -119,12 +119,17 @@ handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
                     Module ->
                         try Module:module_info(exports) of
                             Exports ->
-                                Filtered = [atom_to_binary(F) ||
-                                    {F, _A} <- Exports,
-                                    F =/= module_info],
+                                Filtered = [
+                                    atom_to_binary(F)
+                                 || {F, _A} <- Exports,
+                                    F =/= module_info
+                                ],
                                 Unique = lists:usort(Filtered),
-                                [F || F <- Unique,
-                                    binary:match(F, Prefix) =:= {0, byte_size(Prefix)}]
+                                [
+                                    F
+                                 || F <- Unique,
+                                    binary:match(F, Prefix) =:= {0, byte_size(Prefix)}
+                                ]
                         catch
                             _:_ -> []
                         end
@@ -245,25 +250,28 @@ handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
                         {ok, Text} ->
                             beamtalk_repl_protocol:encode_docs(Text, Msg);
                         {error, not_found} ->
-                            What = case FunctionBin of
-                                undefined ->
-                                    iolist_to_binary([
-                                        <<"Erlang module '">>, ModuleBin, <<"'">>
-                                    ]);
-                                _ ->
-                                    iolist_to_binary([
-                                        ModuleBin, <<":">>, FunctionBin
-                                    ])
-                            end,
-                            Hint = case FunctionBin of
-                                undefined ->
-                                    <<"Check the module name and ensure it is available on the code path.">>;
-                                _ ->
-                                    iolist_to_binary([
-                                        <<"Use :help Erlang ">>, ModuleBin,
-                                        <<" to see available functions and types.">>
-                                    ])
-                            end,
+                            What =
+                                case FunctionBin of
+                                    undefined ->
+                                        iolist_to_binary([
+                                            <<"Erlang module '">>, ModuleBin, <<"'">>
+                                        ]);
+                                    _ ->
+                                        iolist_to_binary([
+                                            ModuleBin, <<":">>, FunctionBin
+                                        ])
+                                end,
+                            Hint =
+                                case FunctionBin of
+                                    undefined ->
+                                        <<"Check the module name and ensure it is available on the code path.">>;
+                                    _ ->
+                                        iolist_to_binary([
+                                            <<"Use :help Erlang ">>,
+                                            ModuleBin,
+                                            <<" to see available functions and types.">>
+                                        ])
+                                end,
                             format_erlang_not_found_error(What, Hint, Msg)
                     end
             catch
@@ -2052,4 +2060,3 @@ format_erlang_not_found_error(What, Hint, Msg) ->
     beamtalk_repl_protocol:encode_error(
         Err2, Msg, fun beamtalk_repl_json:format_error_message/1
     ).
-

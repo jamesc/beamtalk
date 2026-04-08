@@ -996,9 +996,9 @@ impl BeamtalkMcp {
                     Some(sel) => {
                         let sel = sel.strip_prefix('#').unwrap_or(sel);
                         validate_selector(sel)?;
-                        format!("Beamtalk help: {} selector: #{}", class, sel)
+                        format!("Beamtalk help: {class} selector: #{sel}")
                     }
-                    None => format!("Beamtalk help: {}", class),
+                    None => format!("Beamtalk help: {class}"),
                 }
             }
             (None, Some(module)) => {
@@ -1007,12 +1007,9 @@ impl BeamtalkMcp {
                     Some(sel) => {
                         let sel = sel.strip_prefix('#').unwrap_or(sel);
                         validate_selector(sel)?;
-                        format!(
-                            "Beamtalk erlangHelp: \"{}\" selector: #{}",
-                            module, sel
-                        )
+                        format!("Beamtalk erlangHelp: \"{module}\" selector: #{sel}")
                     }
-                    None => format!("Beamtalk erlangHelp: \"{}\"", module),
+                    None => format!("Beamtalk erlangHelp: \"{module}\""),
                 }
             }
             (Some(_), Some(_)) => {

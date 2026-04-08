@@ -36,8 +36,15 @@ dictionary or ETS state is required.
 
 -export([dispatch/3]).
 %% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
--export([allClasses/0, classNamed/1, findClass/1, globals/0, help/1, help/2,
-         erlangHelp/1, erlangHelp/2, version/0]).
+-export([
+    allClasses/0,
+    classNamed/1,
+    findClass/1,
+    globals/0,
+    help/1, help/2,
+    erlangHelp/1, erlangHelp/2,
+    version/0
+]).
 
 %%% ============================================================================
 %%% dispatch/3 — called from compiled bt@stdlib@beamtalk_interface for @primitives
@@ -180,7 +187,8 @@ handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
     try binary_to_existing_atom(ModuleBin, utf8) of
         Module ->
             case beamtalk_erlang_help:format_module_help(Module) of
-                {ok, Text} -> Text;
+                {ok, Text} ->
+                    Text;
                 {error, not_found} ->
                     Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
                     Err1 = beamtalk_error:with_message(
@@ -217,14 +225,16 @@ handle_erlang_help(_ModuleArg) ->
 -doc "Format Erlang function help via beamtalk_erlang_help (dynamic call).".
 -spec handle_erlang_help(binary(), atom() | binary()) -> binary().
 handle_erlang_help(ModuleBin, SelectorArg) when is_binary(ModuleBin) ->
-    FunctionBin = case SelectorArg of
-        A when is_atom(A) -> atom_to_binary(A);
-        B when is_binary(B) -> B
-    end,
+    FunctionBin =
+        case SelectorArg of
+            A when is_atom(A) -> atom_to_binary(A);
+            B when is_binary(B) -> B
+        end,
     try binary_to_existing_atom(ModuleBin, utf8) of
         Module ->
             case beamtalk_erlang_help:format_function_help(Module, FunctionBin) of
-                {ok, Text} -> Text;
+                {ok, Text} ->
+                    Text;
                 {error, not_found} ->
                     Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
                     Err1 = beamtalk_error:with_message(
@@ -234,7 +244,8 @@ handle_erlang_help(ModuleBin, SelectorArg) when is_binary(ModuleBin) ->
                     Err2 = beamtalk_error:with_hint(
                         Err1,
                         iolist_to_binary([
-                            <<"Use Beamtalk erlangHelp: \"">>, ModuleBin,
+                            <<"Use Beamtalk erlangHelp: \"">>,
+                            ModuleBin,
                             <<"\" to see available functions.">>
                         ])
                     ),

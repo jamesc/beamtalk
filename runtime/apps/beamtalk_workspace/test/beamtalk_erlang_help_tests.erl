@@ -20,7 +20,9 @@ format_module_help_returns_ok_for_preloaded_test() ->
     ?assertNotEqual(nomatch, binary:match(Text, <<"Erlang module: erlang">>)).
 
 format_module_help_returns_error_for_nonexistent_test() ->
-    ?assertEqual({error, not_found}, beamtalk_erlang_help:format_module_help(nonexistent_module_xyz)).
+    ?assertEqual(
+        {error, not_found}, beamtalk_erlang_help:format_module_help(nonexistent_module_xyz)
+    ).
 
 %%====================================================================
 %% format_function_help/2
