@@ -298,6 +298,8 @@ ERROR: Cannot remove stdlib class
 | `:help Counter increment` | `Beamtalk help: Counter selector: #increment` | Show method documentation |
 | `:help Counter class` | *(class-side docs)* | Show class-side methods (spawn, new, reload, ...) |
 | `:help Counter class create:` | *(class-side method docs)* | Show class-side method documentation |
+| `:help Erlang lists` | `Beamtalk erlangHelp: "lists"` | Show Erlang module docs and function signatures |
+| `:help Erlang lists reverse` | `Beamtalk erlangHelp: "lists" selector: #reverse` | Show Erlang function docs and type signature |
 | `:bindings` / `:b` | *(session-local)* | Show current variable bindings |
 | `:show-codegen <expr>` / `:sc <expr>` | *(REPL-only)* | Show generated Core Erlang for an expression |
 
@@ -326,6 +328,25 @@ Package-qualified class names are also supported:
 == Integer < Number ==
   ...
 ```
+
+Erlang FFI modules are also supported — shows type signatures and EEP-48 docs:
+
+```beamtalk
+> :help Erlang lists
+Erlang module: lists
+
+Functions:
+  append: list1 :: List list2: list2 :: List -> List
+  reverse: list :: List -> List
+  ...
+
+> :help Erlang lists reverse
+lists:reverse
+  Erlang: -spec reverse(List) -> List when List :: [T], T :: term().
+  reverse: list :: List -> List
+```
+
+Tab completion works for module names (`:h Erlang li<TAB>`) and function names (`:h Erlang lists re<TAB>`).
 
 **`:bindings`** shows all variables in the current session:
 
