@@ -171,7 +171,7 @@ normalize_decoded(null) ->
 normalize_decoded(Map) when is_map(Map) ->
     maps:map(fun(_K, V) -> normalize_decoded(V) end, Map);
 normalize_decoded(List) when is_list(List) ->
-    lists:map(fun normalize_decoded/1, List);
+    [normalize_decoded(E) || E <- List];
 normalize_decoded(Other) ->
     Other.
 
@@ -189,7 +189,7 @@ prepare_for_encode(Map) when is_map(Map) ->
     Cleaned = maps:remove('$beamtalk_class', Map),
     maps:map(fun(_K, V) -> prepare_for_encode(V) end, Cleaned);
 prepare_for_encode(List) when is_list(List) ->
-    lists:map(fun prepare_for_encode/1, List);
+    [prepare_for_encode(E) || E <- List];
 prepare_for_encode(true) ->
     true;
 prepare_for_encode(false) ->

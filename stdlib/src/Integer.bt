@@ -348,6 +348,7 @@ sealed typed Number subclass: Integer
   /// 0 factorial     // => 1
   /// ```
   factorial -> Integer =>
+    @expect type
     self match: [
       _ when: [self < 0] -> (self error: "Factorial is undefined for negative integers");
       _ when: [self =:= 0] -> 1;

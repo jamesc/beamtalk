@@ -165,6 +165,7 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
                 #{domain => [beamtalk, runtime]}
             ),
             %% Unload the native module from the VM before removing the mtime.
+            % elp:fixme W0023 intentional atom creation
             ModName = list_to_atom(filename:basename(P, ".erl")),
             case code:is_loaded(ModName) of
                 false ->
@@ -213,7 +214,7 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         not sets:is_element(P, BtErrorPaths)
     ],
     record_file_mtimes_from_snapshot(SuccessfulBtMtimes),
-    Errors = lists:reverse(NativeErrors) ++ BtErrors,
+    Errors = lists:reverse(NativeErrors, BtErrors),
     ClassNames =
         [
             case maps:get(name, C, "") of
@@ -460,7 +461,7 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     WorkspaceExtra =
         case beamtalk_workspace_meta:loaded_modules() of
             {ok, WsMods} ->
-                TrackedSet = maps:from_list([{N, true} || {N, _} <- TrackedModules]),
+                TrackedSet = maps:from_keys([N || {N, _} <- TrackedModules], true),
                 lists:filtermap(
                     fun({ModName, SourcePath}) ->
                         case maps:is_key(ModName, TrackedSet) of
@@ -736,7 +737,7 @@ topo_sort_loop([], Pending, Acc) ->
         [length(Pending)],
         #{domain => [beamtalk, runtime]}
     ),
-    lists:reverse(Acc) ++ [maps:get(path, I) || I <- Pending];
+    lists:reverse(Acc, [maps:get(path, I) || I <- Pending]);
 topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
     {NowReady, StillPending} = lists:partition(
         fun(#{super := Super}) -> Super =:= Class end,
@@ -836,10 +837,12 @@ diagnostic_to_error_map(PathBin, D) when is_map(D) ->
         <<"message">> => Msg
     },
     ErrMap1 =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(line, D) of
             {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
             _ -> ErrMap0
         end,
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, D) of
         {ok, Hint} when is_binary(Hint) -> ErrMap1#{<<"hint">> => Hint};
         _ -> ErrMap1
@@ -1246,6 +1249,7 @@ Returns true if:
 """.
 -spec is_native_erl_stale(string(), binary()) -> boolean().
 is_native_erl_stale(ErlFile, ModBin) ->
+    % elp:fixme W0023 intentional atom creation
     ModAtom = binary_to_atom(ModBin, utf8),
     case code:is_loaded(ModAtom) of
         false ->
@@ -1407,6 +1411,7 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
             case SourcePath =:= Path of
                 true ->
                     %% Try to find class name for this module and remove it.
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(ModuleName, ModToClass) of
                         {ok, ClassNameBin} ->
                             case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of

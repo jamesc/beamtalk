@@ -1,0 +1,6 @@
+# ELP lint configuration for Beamtalk runtime
+# See: https://whatsapp.github.io/erlang-language-platform/docs/erlang-error-index/
+
+# Binary sigil syntax (<<"foo">> -> ~"foo") -- OTP 27+ cosmetic preference.
+# Suppressed: 1840 instances; will migrate when erlfmt supports auto-rewrite.
+disabled_lints = ['W0051']

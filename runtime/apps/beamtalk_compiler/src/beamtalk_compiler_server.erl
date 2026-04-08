@@ -177,7 +177,11 @@ not running (e.g. non-REPL compilation or test runs without the server).
 """.
 -spec register_class(atom(), map()) -> ok.
 register_class(ClassName, MetaMap) ->
-    catch gen_server:cast(?MODULE, {register_class, ClassName, MetaMap}),
+    try
+        gen_server:cast(?MODULE, {register_class, ClassName, MetaMap})
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 -doc """
@@ -283,7 +287,11 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{port = Port}) when is_port(Port) ->
-    catch beamtalk_compiler_port:close(Port),
+    (try
+        beamtalk_compiler_port:close(Port)
+    catch
+        _:_ -> ok
+    end),
     ok;
 terminate(_Reason, _State) ->
     ok.
@@ -328,7 +336,7 @@ recover_from_beam_modules() ->
                                     is_atom(ClassName) andalso
                                     not sets:is_element(ClassName, BuiltinSet)
                             of
-                                true -> maps:put(ClassName, Meta, Acc);
+                                true -> Acc#{ClassName => Meta};
                                 false -> Acc
                             end;
                         _ ->
@@ -396,7 +404,11 @@ send_port_request(Port, Request, Timeout) ->
                     {exit_status, ExitStatus}
             after Timeout ->
                 %% Close the port so any late response cannot poison the next request.
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 timeout
             end
     catch

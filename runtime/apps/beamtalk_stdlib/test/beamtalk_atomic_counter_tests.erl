@@ -32,12 +32,20 @@ Tests cover:
 -doc "Create a fresh counter with a unique name, run Fun(Counter), then clean up.".
 with_counter(Name, Fun) ->
     %% Delete any leftover table from a previous failed run
-    catch ets:delete(Name),
+    (try
+        ets:delete(Name)
+    catch
+        _:_ -> ok
+    end),
     Counter = beamtalk_atomic_counter:'new:'(Name),
     try
         Fun(Counter)
     after
-        catch ets:delete(Name)
+        (try
+            ets:delete(Name)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -45,22 +53,38 @@ with_counter(Name, Fun) ->
 %%% ============================================================================
 
 new_returns_counter_map_test() ->
-    catch ets:delete(bt_ac_test_new),
+    (try
+        ets:delete(bt_ac_test_new)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_new),
     ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_new}, C),
     ets:delete(bt_ac_test_new).
 
 new_starts_at_zero_test() ->
-    catch ets:delete(bt_ac_test_zero),
+    (try
+        ets:delete(bt_ac_test_zero)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_zero),
     try
         ?assertEqual(0, beamtalk_atomic_counter:value(C))
     after
-        catch ets:delete(bt_ac_test_zero)
+        (try
+            ets:delete(bt_ac_test_zero)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 new_already_exists_test() ->
-    catch ets:delete(bt_ac_test_dup),
+    (try
+        ets:delete(bt_ac_test_dup)
+    catch
+        _:_ -> ok
+    end),
     ets:new(bt_ac_test_dup, [set, named_table, public]),
     try
         ?assertError(
@@ -88,13 +112,21 @@ new_type_error_not_atom_test() ->
 %%% ============================================================================
 
 named_success_test() ->
-    catch ets:delete(bt_ac_test_named),
+    (try
+        ets:delete(bt_ac_test_named)
+    catch
+        _:_ -> ok
+    end),
     _C = beamtalk_atomic_counter:'new:'(bt_ac_test_named),
     try
         C2 = beamtalk_atomic_counter:'named:'(bt_ac_test_named),
         ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_named}, C2)
     after
-        catch ets:delete(bt_ac_test_named)
+        (try
+            ets:delete(bt_ac_test_named)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 named_not_found_test() ->
@@ -291,7 +323,11 @@ reset_type_error_test() ->
 %%% ============================================================================
 
 delete_destroys_table_test() ->
-    catch ets:delete(bt_ac_test_delete),
+    (try
+        ets:delete(bt_ac_test_delete)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_delete),
     ?assertEqual(nil, beamtalk_atomic_counter:delete(C)),
     ?assertEqual(undefined, ets:whereis(bt_ac_test_delete)).
@@ -306,7 +342,11 @@ delete_type_error_test() ->
     ).
 
 delete_stale_counter_test() ->
-    catch ets:delete(bt_ac_test_delete_stale),
+    (try
+        ets:delete(bt_ac_test_delete_stale)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_delete_stale),
     beamtalk_atomic_counter:delete(C),
     %% Second delete: table is gone — must raise stale_counter, not permission_error.
@@ -323,19 +363,31 @@ delete_stale_counter_test() ->
 %%% ============================================================================
 
 ffi_new_shim_test() ->
-    catch ets:delete(bt_ac_test_ffi_new),
+    (try
+        ets:delete(bt_ac_test_ffi_new)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:new(bt_ac_test_ffi_new),
     ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_ffi_new}, C),
     ets:delete(bt_ac_test_ffi_new).
 
 ffi_named_shim_success_test() ->
-    catch ets:delete(bt_ac_test_ffi_named),
+    (try
+        ets:delete(bt_ac_test_ffi_named)
+    catch
+        _:_ -> ok
+    end),
     _C = beamtalk_atomic_counter:'new:'(bt_ac_test_ffi_named),
     try
         C2 = beamtalk_atomic_counter:named(bt_ac_test_ffi_named),
         ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_ffi_named}, C2)
     after
-        catch ets:delete(bt_ac_test_ffi_named)
+        (try
+            ets:delete(bt_ac_test_ffi_named)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 ffi_named_shim_not_found_test() ->
@@ -349,7 +401,11 @@ ffi_named_shim_not_found_test() ->
 %%% ============================================================================
 
 stale_counter_increment_test() ->
-    catch ets:delete(bt_ac_test_stale_incr),
+    (try
+        ets:delete(bt_ac_test_stale_incr)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_incr),
     beamtalk_atomic_counter:delete(C),
     ?assertError(
@@ -361,7 +417,11 @@ stale_counter_increment_test() ->
     ).
 
 stale_counter_value_test() ->
-    catch ets:delete(bt_ac_test_stale_value),
+    (try
+        ets:delete(bt_ac_test_stale_value)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_value),
     ets:delete(bt_ac_test_stale_value),
     ?assertError(
@@ -382,7 +442,11 @@ concurrent_increment_test() ->
     NumProcs = 20,
     Increments = 100,
     Expected = NumProcs * Increments,
-    catch ets:delete(bt_ac_test_concurrent),
+    (try
+        ets:delete(bt_ac_test_concurrent)
+    catch
+        _:_ -> ok
+    end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_concurrent),
     try
         Parent = self(),
@@ -409,5 +473,9 @@ concurrent_increment_test() ->
         ),
         ?assertEqual(Expected, beamtalk_atomic_counter:value(C))
     after
-        catch ets:delete(bt_ac_test_concurrent)
+        (try
+            ets:delete(bt_ac_test_concurrent)
+        catch
+            _:_ -> ok
+        end)
     end.

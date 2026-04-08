@@ -183,7 +183,7 @@ on(_) ->
     raise_type_error('reject:', <<"Expected a Block with 1 argument">>).
 
 -doc "Skip first N elements.".
--spec 'drop'(t(), non_neg_integer()) -> t().
+-spec 'drop'(t(), Count :: non_neg_integer()) -> t().
 'drop'(#{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, N) when
     is_integer(N), N >= 0
 ->
@@ -198,7 +198,7 @@ on(_) ->
 %%% ============================================================================
 
 -doc "Return first N elements as a List.".
--spec take(t(), non_neg_integer()) -> list().
+-spec take(t(), Count :: non_neg_integer()) -> list().
 take(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, N) when is_integer(N), N >= 0 ->
     try
         take_loop(Gen, N, [])
@@ -209,7 +209,7 @@ take(_, _) ->
     raise_type_error('take:', <<"Expected a non-negative Integer">>).
 
 -doc "Iterate with side effects, return nil.".
--spec do(t(), fun((term()) -> term())) -> 'nil'.
+-spec do(t(), Block :: fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Block) when is_function(Block, 1) ->
     try
         do_loop(Gen, Block)
@@ -221,7 +221,7 @@ do(_, _) ->
     raise_type_error('do:', <<"Expected a Block with 1 argument">>).
 
 -doc "Fold/reduce: inject initial value, accumulate with block.".
--spec inject_into(t(), term(), fun((term(), term()) -> term())) -> term().
+-spec inject_into(t(), Init :: term(), Into :: fun((term(), term()) -> term())) -> term().
 inject_into(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Initial, Block) when
     is_function(Block, 2)
 ->
@@ -298,11 +298,11 @@ print_string(#{'$beamtalk_class' := 'Stream', description := Desc}) ->
 %% These shims bridge camelCase FFI names to the snake_case implementations.
 
 %% `from:by:` → selector strips to `from`, arity 2
--spec from(term(), fun((term()) -> term())) -> t().
+-spec from(term(), By :: fun((term()) -> term())) -> t().
 from(Start, StepFun) -> from_by(Start, StepFun).
 
 %% `inject:init:into:` → selector strips to `inject`, arity 3
--spec inject(t(), term(), fun((term(), term()) -> term())) -> term().
+-spec inject(t(), Init :: term(), Into :: fun((term(), term()) -> term())) -> term().
 inject(Self, Init, Block) -> inject_into(Self, Init, Block).
 
 %% `asList:` → selector strips to `asList`, arity 1
@@ -450,7 +450,11 @@ Uses catch to handle double-close and missing finalizer gracefully.
 """.
 -spec call_finalizer(t()) -> ok.
 call_finalizer(#{finalizer := Finalizer}) when is_function(Finalizer, 0) ->
-    catch Finalizer(),
+    try
+        Finalizer()
+    catch
+        _:_ -> ok
+    end,
     ok;
 call_finalizer(_) ->
     ok.

@@ -11,7 +11,6 @@ Op handlers for actors, inspect, kill, and interrupt operations.
 Extracted from beamtalk_repl_server (BT-705).
 """.
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([handle/4, validate_actor_pid/1, is_known_actor/1]).

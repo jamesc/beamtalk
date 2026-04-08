@@ -74,7 +74,7 @@ Add an element to the back of the queue. Returns a new Queue.
 
 O(1) amortised.
 """.
--spec enqueue(t(), term()) -> t().
+-spec enqueue(t(), Elem :: term()) -> t().
 enqueue(#{'$beamtalk_class' := 'Queue', queue := Q}, Elem) ->
     make_queue(queue:in(Elem, Q));
 enqueue(_Self, _Elem) ->

@@ -63,6 +63,7 @@ ensure_structured_error({compile_error, [#{message := Msg} = Diag | _]}) ->
     %% BT-1235: structured diagnostic list — extract message and hint from first diagnostic
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     Err1 = beamtalk_error:with_message(Err0, Msg),
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, Diag) of
         {ok, Hint} when is_binary(Hint) -> beamtalk_error:with_hint(Err1, Hint);
         _ -> Err1

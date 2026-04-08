@@ -259,7 +259,7 @@ extract_exports(Forms) ->
     lists:foldl(
         fun
             ({attribute, _, export, FnList}, Acc) ->
-                lists:foldl(fun(FA, S) -> sets:add_element(FA, S) end, Acc, FnList);
+                lists:foldl(fun sets:add_element/2, Acc, FnList);
             (_, Acc) ->
                 Acc
         end,
@@ -285,6 +285,7 @@ process_spec(Name, Arity, Clauses, LineMap) ->
         params => Params,
         return_type => ReturnType
     },
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find({Name, Arity}, LineMap) of
         {ok, Line} -> Base#{line => Line};
         error -> Base
@@ -407,6 +408,7 @@ extract_param_names_with_constraints(ArgTypes, ConstraintMap) ->
                 };
             ({var, _, VarName}) ->
                 ResolvedType =
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(VarName, ConstraintMap) of
                         {ok, T} -> map_type(T);
                         error -> <<"Dynamic">>
@@ -452,6 +454,7 @@ build_constraint_map(Constraints) ->
 %% before ok/error Result recognition runs.
 -spec resolve_type_with_constraints(tuple(), map()) -> binary().
 resolve_type_with_constraints({var, _, VarName}, ConstraintMap) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(VarName, ConstraintMap) of
         {ok, Type} -> map_type(Type);
         error -> <<"Dynamic">>
@@ -470,6 +473,7 @@ resolve_type_with_constraints(Type, _ConstraintMap) ->
 %% that map_union/2 can pattern-match on ok/error tuples.
 -spec resolve_branch_with_constraints(tuple(), map()) -> tuple().
 resolve_branch_with_constraints({var, Line, VarName}, ConstraintMap) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(VarName, ConstraintMap) of
         {ok, Type} -> Type;
         error -> {var, Line, VarName}
@@ -660,7 +664,7 @@ map_type({type, _, float, []}) ->
 map_type({type, _, number, []}) ->
     <<"Number">>;
 map_type({type, _, binary, _}) ->
-    <<"String">>;
+    <<"String | Binary">>;
 map_type({type, _, boolean, []}) ->
     <<"Boolean">>;
 map_type({type, _, atom, []}) ->

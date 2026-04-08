@@ -249,7 +249,7 @@ are not started here — they are bootstrapped by beamtalk_workspace_bootstrap.
 """.
 singleton_child_specs() ->
     Singletons = beamtalk_workspace_config:singletons(),
-    lists:map(fun singleton_to_child_spec/1, Singletons) ++
+    [singleton_to_child_spec(S) || S <- Singletons] ++
         [
             #{
                 id => beamtalk_actor_registry,
@@ -308,6 +308,7 @@ do_setup_file_logger(WorkspaceId) ->
                 ok ->
                     %% Read log level from app env (set by --log-level CLI flag),
                     %% defaulting to info.
+                    % elp:fixme W0011 intentional cross-app read
                     Level = application:get_env(beamtalk_runtime, log_level, info),
                     HandlerConfig = #{
                         config => #{

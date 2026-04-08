@@ -1458,6 +1458,7 @@ spawning a process registered as a class and calling class_send on self().
 """.
 class_method_self_call_class_name_in_error_test() ->
     TestClassName = 'SelfCallNameTestClass',
+    % elp:fixme W0023 intentional atom creation
     RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(TestClassName)),
     Parent = self(),
     spawn(fun() ->

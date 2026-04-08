@@ -176,12 +176,10 @@ execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
                 FlatMethods,
                 TestMethods,
                 fun(SuiteFixture) ->
-                    lists:map(
-                        fun(Method) ->
-                            run_test_method(ClassName, Module, Method, FlatMethods, SuiteFixture)
-                        end,
-                        TestMethods
-                    )
+                    [
+                        run_test_method(ClassName, Module, Method, FlatMethods, SuiteFixture)
+                     || Method <- TestMethods
+                    ]
                 end
             ),
             EndTime = erlang:monotonic_time(millisecond),
@@ -237,12 +235,10 @@ run_all(ClassName) ->
                 none,
                 TestMethods,
                 fun(SuiteFixture) ->
-                    lists:map(
-                        fun(Method) ->
-                            run_test_method(ClassName, Module, Method, none, SuiteFixture)
-                        end,
-                        TestMethods
-                    )
+                    [
+                        run_test_method(ClassName, Module, Method, none, SuiteFixture)
+                     || Method <- TestMethods
+                    ]
                 end
             ),
             EndTime = erlang:monotonic_time(millisecond),
@@ -317,12 +313,10 @@ run_all_structured(ClassName) ->
                 none,
                 TestMethods,
                 fun(SuiteFixture) ->
-                    lists:map(
-                        fun(Method) ->
-                            run_test_method(ClassName, Module, Method, none, SuiteFixture)
-                        end,
-                        TestMethods
-                    )
+                    [
+                        run_test_method(ClassName, Module, Method, none, SuiteFixture)
+                     || Method <- TestMethods
+                    ]
                 end
             ),
             EndTime = erlang:monotonic_time(millisecond),
@@ -387,6 +381,7 @@ readable messages instead of raw ~p formatting.
 decode_beam_error({future_rejected, Inner}) ->
     iolist_to_binary([<<"future rejected: ">>, decode_beam_error(Inner)]);
 decode_beam_error({error, Map}) when is_map(Map) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(error, Map) of
         {ok, Inner} -> decode_beam_error(Inner);
         _ -> beamtalk_primitive:print_string(Map)
@@ -714,11 +709,13 @@ Falls back to bt@stdlib@snake_case_name for stdlib classes.
 -spec resolve_module(atom()) -> atom().
 resolve_module(ClassName) ->
     SnakeName = class_name_to_snake(atom_to_list(ClassName)),
+    % elp:fixme W0023 intentional atom creation
     UserModule = list_to_atom("bt@" ++ SnakeName),
     case code:is_loaded(UserModule) of
         {file, _} ->
             UserModule;
         false ->
+            % elp:fixme W0023 intentional atom creation
             StdlibModule = list_to_atom("bt@stdlib@" ++ SnakeName),
             case code:is_loaded(StdlibModule) of
                 {file, _} ->

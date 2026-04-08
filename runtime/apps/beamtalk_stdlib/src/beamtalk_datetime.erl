@@ -63,7 +63,7 @@ now() ->
     erlang:monotonic_time(nanosecond).
 
 -doc "Construct a DateTime from year, month, day (time defaults to 00:00:00).".
--spec 'year:month:day:'(integer(), integer(), integer()) -> t().
+-spec 'year:month:day:'(integer(), Month :: integer(), Day :: integer()) -> t().
 'year:month:day:'(Y, Mo, D) when is_integer(Y), is_integer(Mo), is_integer(D) ->
     validate_date(Y, Mo, D, 'year:month:day:'),
     make_datetime(Y, Mo, D, 0, 0, 0);
@@ -73,11 +73,11 @@ now() ->
 -doc "Construct a DateTime from year, month, day, hour, minute, second.".
 -spec 'year:month:day:hour:minute:second:'(
     integer(),
-    integer(),
-    integer(),
-    integer(),
-    integer(),
-    integer()
+    Month :: integer(),
+    Day :: integer(),
+    Hour :: integer(),
+    Minute :: integer(),
+    Second :: integer()
 ) -> t().
 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S) when
     is_integer(Y),
@@ -185,7 +185,7 @@ second(#{second := V}) -> V.
 %%% ============================================================================
 
 -doc "Add seconds, return new DateTime.".
--spec 'addSeconds:'(t(), integer()) -> t().
+-spec 'addSeconds:'(t(), Secs :: integer()) -> t().
 'addSeconds:'(Self, Secs) when is_integer(Secs) ->
     Ts = 'asTimestamp'(Self) + Secs,
     'fromTimestamp:'(Ts);
@@ -193,7 +193,7 @@ second(#{second := V}) -> V.
     raise_type_error('addSeconds:', <<"Argument must be an Integer">>).
 
 -doc "Add days, return new DateTime.".
--spec 'addDays:'(t(), integer()) -> t().
+-spec 'addDays:'(t(), Days :: integer()) -> t().
 'addDays:'(Self, Days) when is_integer(Days) ->
     'addSeconds:'(Self, Days * 86400);
 'addDays:'(_, _) ->
@@ -255,9 +255,18 @@ second(#{second := V}) -> V.
 %% and operator-named implementations.
 
 %% `year:month:day:` → strips to `year`, arity 3
+-spec year(integer(), Month :: integer(), Day :: integer()) -> t().
 year(Y, Mo, D) -> 'year:month:day:'(Y, Mo, D).
 
 %% `year:month:day:hour:minute:second:` → strips to `year`, arity 6
+-spec year(
+    integer(),
+    Month :: integer(),
+    Day :: integer(),
+    Hour :: integer(),
+    Minute :: integer(),
+    Second :: integer()
+) -> t().
 year(Y, Mo, D, H, Mi, S) -> 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S).
 
 %% `fromTimestamp:` → strips to `fromTimestamp`, arity 1
@@ -267,9 +276,11 @@ fromTimestamp(Ts) -> 'fromTimestamp:'(Ts).
 fromString(Str) -> 'fromString:'(Str).
 
 %% `addSeconds:secs:` → strips to `addSeconds`, arity 2
+-spec addSeconds(t(), Secs :: integer()) -> t().
 addSeconds(Self, Secs) -> 'addSeconds:'(Self, Secs).
 
 %% `addDays:days:` → strips to `addDays`, arity 2
+-spec addDays(t(), Days :: integer()) -> t().
 addDays(Self, Days) -> 'addDays:'(Self, Days).
 
 %% `diffSeconds:with:` → strips to `diffSeconds`, arity 2

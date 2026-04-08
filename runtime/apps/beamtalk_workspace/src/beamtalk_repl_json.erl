@@ -103,7 +103,7 @@ format_response_with_warnings(Value, Warnings) ->
         Response = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
         case Warnings of
             [] -> iolist_to_binary(json:encode(Response));
-            _ -> iolist_to_binary(json:encode(maps:put(<<"warnings">>, Warnings, Response)))
+            _ -> iolist_to_binary(json:encode(Response#{<<"warnings">> => Warnings}))
         end
     catch
         Class:Reason:_Stack ->
@@ -124,7 +124,7 @@ format_error_with_warnings(Reason, Warnings) ->
         Response = #{<<"type">> => <<"error">>, <<"message">> => Message},
         case Warnings of
             [] -> iolist_to_binary(json:encode(Response));
-            _ -> iolist_to_binary(json:encode(maps:put(<<"warnings">>, Warnings, Response)))
+            _ -> iolist_to_binary(json:encode(Response#{<<"warnings">> => Warnings}))
         end
     catch
         Class:FormatError:Stack ->
@@ -155,7 +155,7 @@ format_bindings(Bindings) ->
                     is_binary(Name) -> Name;
                     true -> list_to_binary(io_lib:format("~p", [Name]))
                 end,
-            maps:put(NameBin, term_to_json(Value), Acc)
+            Acc#{NameBin => term_to_json(Value)}
         end,
         #{},
         Bindings
@@ -179,34 +179,30 @@ format_loaded(Classes) ->
 -doc "Format an actors list response as JSON.".
 -spec format_actors([beamtalk_repl_actors:actor_metadata()]) -> binary().
 format_actors(Actors) ->
-    JsonActors = lists:map(
-        fun(#{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt}) ->
-            #{
-                <<"pid">> => list_to_binary(pid_to_list(Pid)),
-                <<"class">> => atom_to_binary(Class, utf8),
-                <<"module">> => atom_to_binary(Module, utf8),
-                <<"spawned_at">> => SpawnedAt
-            }
-        end,
-        Actors
-    ),
+    JsonActors = [
+        #{
+            <<"pid">> => list_to_binary(pid_to_list(Pid)),
+            <<"class">> => atom_to_binary(Class, utf8),
+            <<"module">> => atom_to_binary(Module, utf8),
+            <<"spawned_at">> => SpawnedAt
+        }
+     || #{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt} <- Actors
+    ],
     iolist_to_binary(json:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors})).
 
 -doc "Format a modules list response as JSON.".
 -spec format_modules([{atom(), map()}]) -> binary().
 format_modules(ModulesWithInfo) ->
-    JsonModules = lists:map(
-        fun({_ModuleName, Info}) ->
-            #{
-                <<"name">> => maps:get(name, Info),
-                <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
-                <<"actor_count">> => maps:get(actor_count, Info),
-                <<"load_time">> => maps:get(load_time, Info),
-                <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
-            }
-        end,
-        ModulesWithInfo
-    ),
+    JsonModules = [
+        #{
+            <<"name">> => maps:get(name, Info),
+            <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
+            <<"actor_count">> => maps:get(actor_count, Info),
+            <<"load_time">> => maps:get(load_time, Info),
+            <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
+        }
+     || {_ModuleName, Info} <- ModulesWithInfo
+    ],
     iolist_to_binary(json:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules})).
 
 -doc """
@@ -341,11 +337,11 @@ term_to_json(Value) when is_tuple(Value) ->
                     _ -> <<"#Supervisor<">>
                 end,
             iolist_to_binary([Prefix, ClassBin, <<",">>, Inner, <<">">>]);
-        {beamtalk_object, 'Metaclass', _Module, Pid} ->
+        #beamtalk_object{class = 'Metaclass', pid = Pid} ->
             %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
             ClassName = beamtalk_runtime_api:class_name(Pid),
             iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
-        {beamtalk_object, Class, _Module, Pid} ->
+        #beamtalk_object{class = Class, pid = Pid} ->
             case beamtalk_runtime_api:is_class_name(Class) of
                 true ->
                     beamtalk_runtime_api:class_display_name(Class);

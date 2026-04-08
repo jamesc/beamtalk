@@ -147,7 +147,7 @@ increment(_Self) ->
     receiver_type_error('increment').
 
 -doc "Atomically add N. Returns the new value.".
--spec incrementBy(t(), integer()) -> integer().
+-spec incrementBy(t(), By :: integer()) -> integer().
 incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
     try
         ets:update_counter(TableName, value, N)
@@ -174,7 +174,7 @@ decrement(_Self) ->
     receiver_type_error('decrement').
 
 -doc "Atomically subtract N. Returns the new value.".
--spec decrementBy(t(), integer()) -> integer().
+-spec decrementBy(t(), By :: integer()) -> integer().
 decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
     try
         ets:update_counter(TableName, value, -N)

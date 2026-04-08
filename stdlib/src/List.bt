@@ -279,6 +279,7 @@ sealed typed Collection subclass: List(E)
   /// #(10, 20, 30) indexOf: 99        // => nil
   /// ```
   indexOf: item :: Object -> Integer | Nil =>
+    @expect type
     self
       inject: 0
       into: [:i :each |
@@ -295,6 +296,7 @@ sealed typed Collection subclass: List(E)
   /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
   /// ```
   eachWithIndex: block :: Block(E, Integer, Object) -> Nil =>
+    @expect type
     self
       inject: 0
       into: [:i :each |

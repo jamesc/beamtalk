@@ -344,7 +344,7 @@ encode_bindings(Bindings, Msg, TermToJson) ->
     JsonBindings = maps:fold(
         fun(Name, Value, Acc) ->
             NameBin = to_binary(Name),
-            maps:put(NameBin, TermToJson(Value), Acc)
+            Acc#{NameBin => TermToJson(Value)}
         end,
         #{},
         Bindings
@@ -387,17 +387,15 @@ encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
 -doc "Encode an actors list response.".
 -spec encode_actors([map()], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_actors(Actors, Msg, _TermToJson) ->
-    JsonActors = lists:map(
-        fun(#{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt}) ->
-            #{
-                <<"pid">> => list_to_binary(pid_to_list(Pid)),
-                <<"class">> => atom_to_binary(Class, utf8),
-                <<"module">> => atom_to_binary(Module, utf8),
-                <<"spawned_at">> => SpawnedAt
-            }
-        end,
-        Actors
-    ),
+    JsonActors = [
+        #{
+            <<"pid">> => list_to_binary(pid_to_list(Pid)),
+            <<"class">> => atom_to_binary(Class, utf8),
+            <<"module">> => atom_to_binary(Module, utf8),
+            <<"spawned_at">> => SpawnedAt
+        }
+     || #{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt} <- Actors
+    ],
     case Msg#protocol_msg.legacy of
         true ->
             iolist_to_binary(
@@ -413,18 +411,16 @@ encode_actors(Actors, Msg, _TermToJson) ->
 -doc "Encode a modules list response.".
 -spec encode_modules([{atom(), map()}], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_modules(ModulesWithInfo, Msg, _TermToJson) ->
-    JsonModules = lists:map(
-        fun({_ModuleName, Info}) ->
-            #{
-                <<"name">> => maps:get(name, Info),
-                <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
-                <<"actor_count">> => maps:get(actor_count, Info),
-                <<"load_time">> => maps:get(load_time, Info),
-                <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
-            }
-        end,
-        ModulesWithInfo
-    ),
+    JsonModules = [
+        #{
+            <<"name">> => maps:get(name, Info),
+            <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
+            <<"actor_count">> => maps:get(actor_count, Info),
+            <<"load_time">> => maps:get(load_time, Info),
+            <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
+        }
+     || {_ModuleName, Info} <- ModulesWithInfo
+    ],
     case Msg#protocol_msg.legacy of
         true ->
             iolist_to_binary(
@@ -443,6 +439,7 @@ encode_sessions(Sessions, Msg, _TermToJson) ->
     JsonSessions = lists:map(
         fun(#{id := Id} = S) ->
             Base = #{<<"id">> => Id},
+            % elp:fixme W0032 maps:find with complex branch logic
             case maps:find(created_at, S) of
                 {ok, T} -> Base#{<<"created_at">> => T};
                 error -> Base
@@ -482,7 +479,7 @@ encode_inspect(InspectStr, Msg) ->
 encode_inspect(ActorState, Msg, TermToJson) ->
     JsonState = maps:fold(
         fun(K, V, Acc) ->
-            maps:put(to_binary(K), TermToJson(V), Acc)
+            Acc#{to_binary(K) => TermToJson(V)}
         end,
         #{},
         ActorState
@@ -595,6 +592,7 @@ encode_test_entry(#{name := Name, status := skip} = Entry) ->
         <<"status">> => <<"skip">>
     },
     Base =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(reason, Entry) of
             {ok, Reason} when is_binary(Reason) ->
                 Base0#{<<"reason">> => Reason};

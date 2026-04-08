@@ -468,7 +468,7 @@ apply_pending_removals(ShellState, WorkerState) ->
         Pending ->
             Tracker = beamtalk_repl_state:get_module_tracker(WorkerState),
             NewTracker = lists:foldl(
-                fun(M, T) -> beamtalk_repl_modules:remove_module(M, T) end,
+                fun beamtalk_repl_modules:remove_module/2,
                 Tracker,
                 Pending
             ),
@@ -490,7 +490,7 @@ drain_pending_removals(State) ->
         Pending ->
             Tracker = beamtalk_repl_state:get_module_tracker(State),
             NewTracker = lists:foldl(
-                fun(M, T) -> beamtalk_repl_modules:remove_module(M, T) end,
+                fun beamtalk_repl_modules:remove_module/2,
                 Tracker,
                 Pending
             ),

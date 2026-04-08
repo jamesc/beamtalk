@@ -542,7 +542,7 @@ Non-binary args are passed through unchanged.
 """.
 -spec coerce_binaries_to_charlists(list()) -> list().
 coerce_binaries_to_charlists(Args) ->
-    lists:map(fun coerce_arg/1, Args).
+    [coerce_arg(A) || A <- Args].
 
 -spec coerce_arg(term()) -> term().
 coerce_arg(Arg) when is_binary(Arg) ->

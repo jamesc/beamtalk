@@ -18,8 +18,6 @@ See also: beamtalk_file for File class-side methods (`exists:`, `readAll:`, etc.
 
 -export([dispatch/3, has_method/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -doc """
 Dispatch a message to a FileHandle instance.
 

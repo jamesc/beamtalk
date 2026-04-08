@@ -60,6 +60,7 @@ do_eval(Expression, State) ->
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State, Subscriber) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
@@ -68,7 +69,7 @@ do_eval(Expression, State, Subscriber) ->
     WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
-    Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
+    Bindings = Bindings0#{?WORKSPACE_BINDINGS_KEY => WorkspaceOnlyBindings},
 
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
@@ -115,6 +116,7 @@ or `{error, Reason, Output, Warnings, State}' on failure.
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
@@ -122,7 +124,7 @@ do_eval_trace(Expression, State) ->
     WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
-    Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
+    Bindings = Bindings0#{?WORKSPACE_BINDINGS_KEY => WorkspaceOnlyBindings},
 
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
@@ -133,7 +135,7 @@ do_eval_trace(Expression, State) ->
                     BindingsWithRegistry =
                         case RegistryPid of
                             undefined -> Bindings;
-                            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+                            _ -> Bindings#{?INTERNAL_REGISTRY_KEY => RegistryPid}
                         end,
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
@@ -162,7 +164,7 @@ do_eval_trace(Expression, State) ->
                                     FutExObj = beamtalk_exception_handler:ensure_wrapped(
                                         FutureReason
                                     ),
-                                    FutBindings = maps:put('_error', FutExObj, CleanBindings),
+                                    FutBindings = CleanBindings#{'_error' => FutExObj},
                                     ErrState = beamtalk_repl_state:set_bindings(
                                         FutBindings, NewState
                                     ),
@@ -184,7 +186,7 @@ do_eval_trace(Expression, State) ->
                                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
                                     Class, Reason, Stacktrace
                                 ),
-                                CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                                CaughtBindings = Bindings#{'_error' => CaughtExObj},
                                 CaughtState = beamtalk_repl_state:set_bindings(
                                     CaughtBindings, NewState
                                 ),
@@ -401,7 +403,7 @@ eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Wa
         catch
             Class:Reason:Stacktrace ->
                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
-                CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                CaughtBindings = Bindings#{'_error' => CaughtExObj},
                 CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
                 {error, {eval_error, Class, CaughtExObj}, CaughtState}
         after
@@ -417,7 +419,7 @@ execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
     BindingsWithRegistry =
         case RegistryPid of
             undefined -> Bindings;
-            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+            _ -> Bindings#{?INTERNAL_REGISTRY_KEY => RegistryPid}
         end,
     {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
     CleanBindings = strip_internal_bindings(UpdatedBindings),
@@ -429,13 +431,13 @@ execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 process_eval_result({future_rejected, ErrorReason}, _Expression, CleanBindings, State) ->
     FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
-    FutBindings = maps:put('_error', FutExObj, CleanBindings),
+    FutBindings = CleanBindings#{'_error' => FutExObj},
     FinalState = beamtalk_repl_state:set_bindings(FutBindings, State),
     {error, FutExObj, FinalState};
 process_eval_result(Result, Expression, CleanBindings, State) ->
     case extract_assignment(Expression) of
         {ok, VarName} ->
-            NewBindings = maps:put(VarName, Result, CleanBindings),
+            NewBindings = CleanBindings#{VarName => Result},
             {ok, Result, beamtalk_repl_state:set_bindings(NewBindings, State)};
         none ->
             {ok, Result, beamtalk_repl_state:set_bindings(CleanBindings, State)}
@@ -469,7 +471,7 @@ rebuild_bindings_from_steps(Steps, Bindings) ->
         fun({Src, AwaitedVal}, Acc) ->
             SrcStr = binary_to_list(Src),
             case extract_assignment(SrcStr) of
-                {ok, VarName} -> maps:put(VarName, AwaitedVal, Acc);
+                {ok, VarName} -> Acc#{VarName => AwaitedVal};
                 none -> Acc
             end
         end,
@@ -491,6 +493,7 @@ extract_assignment(Expression) ->
                     [{capture, [1], list}]
                 )
             of
+                % elp:fixme W0023 intentional atom creation
                 {match, [VarName]} -> {ok, list_to_atom(VarName)};
                 nomatch -> none
             end
@@ -530,6 +533,7 @@ strip_internal_bindings(Bindings) ->
                 WithoutMeta = maps:remove(?WORKSPACE_BINDINGS_KEY, Bindings),
                 maps:fold(
                     fun(Key, OriginalValue, Acc) ->
+                        % elp:fixme W0032 maps:find with complex branch logic
                         case maps:find(Key, Acc) of
                             {ok, OriginalValue} -> maps:remove(Key, Acc);
                             _ -> Acc

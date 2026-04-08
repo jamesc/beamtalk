@@ -75,7 +75,7 @@ handle_spawn(Args, ClassName, Module, false) ->
                     beamtalk_error:raise(Error2)
             end,
         case SpawnResult of
-            {beamtalk_object, _, _, _} = Obj ->
+            #beamtalk_object{} = Obj ->
                 {ok, Obj};
             {ok, Pid} ->
                 Obj = #beamtalk_object{

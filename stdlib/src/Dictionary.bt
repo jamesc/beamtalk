@@ -119,6 +119,7 @@ sealed typed Collection subclass: Dictionary(K, V)
   /// ```
   collect: block :: Block(V, R) -> Dictionary(K, R) =>
     dict := self
+    @expect type
     self keys inject: #{} into: [:acc :k |
       acc at: k put: (block value: (dict at: k))
     ]

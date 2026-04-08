@@ -11,7 +11,6 @@ Op handlers for sessions, clone, close, health, and shutdown operations.
 Extracted from beamtalk_repl_server (BT-705).
 """.
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([handle/4]).

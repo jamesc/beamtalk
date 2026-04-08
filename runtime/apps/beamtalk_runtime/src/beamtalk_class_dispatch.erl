@@ -457,6 +457,7 @@ erlang:apply will raise undef, which invoke_class_method already handles.
 """.
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
+    % elp:fixme W0023 intentional atom creation
     list_to_atom("class_" ++ atom_to_list(Selector)).
 
 -doc """

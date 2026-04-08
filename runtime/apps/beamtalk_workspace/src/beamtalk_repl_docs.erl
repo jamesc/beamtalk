@@ -103,8 +103,8 @@ format_class_docs(ClassName) ->
 
                 %% Get method signatures and docs from runtime for own methods
                 OwnSelectors = lists:sort([S || {S, _, _} <- Own]),
-                SealedMap = maps:from_list([{S, Sealed} || {S, Sealed, _} <- Own]),
-                InternalMap = maps:from_list([{S, Int} || {S, _, Int} <- Own]),
+                SealedMap = #{S => Sealed || {S, Sealed, _} <- Own},
+                InternalMap = #{S => Int || {S, _, Int} <- Own},
                 OwnDocs = get_method_signatures_with_modifiers(
                     ClassPid, OwnSelectors, SealedMap, InternalMap
                 ),
@@ -254,7 +254,7 @@ format_class_docs_class_side(ClassName) ->
                         ClassClassPid ->
                             Proto = collect_flattened_methods('Class', ClassClassPid),
                             group_by_class(
-                                lists:sort([{Sel, DC} || {Sel, {DC, _}} <- maps:to_list(Proto)])
+                                lists:sort([{Sel, DC} || Sel := {DC, _} <- Proto])
                             )
                     end,
 
@@ -524,7 +524,7 @@ group_by_class(Methods) ->
     Grouped = lists:foldl(
         fun({Selector, DefClass}, Acc) ->
             Existing = maps:get(DefClass, Acc, []),
-            maps:put(DefClass, [Selector | Existing], Acc)
+            Acc#{DefClass => [Selector | Existing]}
         end,
         #{},
         Methods
@@ -582,12 +582,7 @@ format_class_output(
             [] ->
                 <<>>;
             _ ->
-                MethodLines = lists:map(
-                    fun(MethodEntry) ->
-                        format_method_line(MethodEntry)
-                    end,
-                    OwnDocs
-                ),
+                MethodLines = [format_method_line(M) || M <- OwnDocs],
                 iolist_to_binary([
                     <<"\nInstance methods:\n">>,
                     lists:join(<<"\n">>, MethodLines)

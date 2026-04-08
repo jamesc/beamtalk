@@ -17,8 +17,6 @@ Called by `beamtalk_class_builder` via the `class_load_callback` application
 environment variable — same pattern as `actor_spawn_callback`.
 """.
 
--include_lib("kernel/include/logger.hrl").
-
 %% Public API
 -export([
     start_link/1,

@@ -42,7 +42,7 @@ Raises beamtalk_error for invalid class references.
     ClassRef :: pid() | atom() | tuple().
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     resolve_with_hierarchy(ClassPid, Selector);
-resolve({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when
+resolve(#beamtalk_object{class = ClassTag, pid = ClassPid} = Obj, Selector) when
     is_atom(ClassTag), is_pid(ClassPid)
 ->
     case beamtalk_class_registry:is_class_name(ClassTag) of

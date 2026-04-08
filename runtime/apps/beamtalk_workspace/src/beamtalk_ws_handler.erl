@@ -653,6 +653,7 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
         <<"class">> => atom_to_binary(Class, utf8),
         <<"pid">> => list_to_binary(pid_to_list(Pid))
     },
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(spawned_at, Meta) of
         {ok, T} -> Base#{<<"spawned_at">> => T};
         error -> Base
@@ -682,6 +683,7 @@ extract_compile_error_location({compile_error, [DiagMap | _]}) when is_map(DiagM
     case maps:find(line, DiagMap) of
         {ok, Line} when is_integer(Line) ->
             Base = #{<<"line">> => Line},
+            % elp:fixme W0032 maps:find with complex branch logic
             case maps:find(hint, DiagMap) of
                 {ok, Hint} -> Base#{<<"hint">> => Hint};
                 error -> Base
@@ -751,7 +753,7 @@ encode_log_event(EventData) ->
     maps:fold(
         fun
             (_K, undefined, Acc) -> Acc;
-            (K, V, Acc) -> maps:put(atom_to_binary(K, utf8), V, Acc)
+            (K, V, Acc) -> Acc#{atom_to_binary(K, utf8) => V}
         end,
         #{},
         EventData

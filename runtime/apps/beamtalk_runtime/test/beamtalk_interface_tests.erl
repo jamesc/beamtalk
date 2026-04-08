@@ -116,7 +116,11 @@ cleanup_test_classes() ->
     ),
     lists:foreach(
         fun(Name) ->
-            catch unregister(Name)
+            try
+                unregister(Name)
+            catch
+                _:_ -> ok
+            end
         end,
         [
             beamtalk_class_Object,

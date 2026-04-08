@@ -156,6 +156,7 @@ user_classes() ->
 -doc "Compute the Erlang registry name for a class.".
 -spec registry_name(class_name()) -> atom().
 registry_name(ClassName) ->
+    % elp:fixme W0023 intentional atom creation
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
 
 %%====================================================================
@@ -311,6 +312,7 @@ extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
     ModStr = atom_to_list(ModuleName),
     case string:split(ModStr, "@", all) of
         ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
+            % elp:fixme W0023 intentional atom creation
             list_to_atom(Pkg);
         _ ->
             undefined
@@ -581,6 +583,7 @@ for is_class_object/1 detection.
 """.
 -spec class_object_tag(atom()) -> atom().
 class_object_tag(ClassName) when is_atom(ClassName) ->
+    % elp:fixme W0023 intentional atom creation
     list_to_atom(atom_to_list(ClassName) ++ " class").
 
 -doc """
@@ -590,7 +593,7 @@ Class objects are beamtalk_object records whose class name ends with " class".
 This distinguishes class objects from actor instances at runtime.
 """.
 -spec is_class_object(term()) -> boolean().
-is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
+is_class_object(#beamtalk_object{class = Class}) when is_atom(Class) ->
     is_class_name(Class);
 is_class_object(_) ->
     false.

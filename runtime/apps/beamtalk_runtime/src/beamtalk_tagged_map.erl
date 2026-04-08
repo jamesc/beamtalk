@@ -67,6 +67,7 @@ Non-map values always return `undefined`.
 """.
 -spec class_of(term()) -> atom() | undefined.
 class_of(Map) when is_map(Map) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find('$beamtalk_class', Map) of
         {ok, Class} when is_atom(Class) ->
             Class;
@@ -79,6 +80,7 @@ class_of(_) ->
 -doc "Returns the class name for a tagged map, or `Default` for non-tagged maps.".
 -spec class_of(term(), atom()) -> atom().
 class_of(Map, Default) when is_map(Map) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find('$beamtalk_class', Map) of
         {ok, Class} when is_atom(Class) ->
             Class;
@@ -91,6 +93,7 @@ class_of(_, Default) ->
 -doc "Returns `true` if the value is a tagged map (has a valid class key).".
 -spec is_tagged(term()) -> boolean().
 is_tagged(Map) when is_map(Map) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find('$beamtalk_class', Map) of
         {ok, Class} when is_atom(Class) -> true;
         _ -> maps:is_key('__class_mod__', Map)
@@ -105,6 +108,7 @@ is_tagged(_) ->
 -doc "Try `Mod:class_name()` via `__class_mod__`, with guard for stale BEAM files.".
 -spec class_name_from_mod(map(), atom()) -> atom().
 class_name_from_mod(Map, Default) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find('__class_mod__', Map) of
         {ok, Mod} when is_atom(Mod) ->
             case erlang:function_exported(Mod, class_name, 0) of
