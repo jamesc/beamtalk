@@ -130,6 +130,88 @@ impl ClassHierarchy {
         (Ok(hierarchy), diagnostics)
     }
 
+    /// Register protocol definitions as synthetic class entries (BT-1933).
+    ///
+    /// Each protocol definition (e.g., `protocol Printable`) gets a synthetic
+    /// `ClassInfo` entry as a sealed abstract subclass of `Protocol`, with
+    /// class-side methods `requiredMethods` and `conformingClasses`.
+    ///
+    /// This enables LSP features (completions, `has_class` checks) to work
+    /// with protocol names the same way they work with class names.
+    ///
+    /// Called from the language service layer *after* `build()`, not during it,
+    /// to avoid interfering with `ProtocolRegistry::register_module`'s
+    /// namespace collision checks.
+    pub fn register_protocol_classes(&mut self, module: &Module) {
+        for protocol_def in &module.protocols {
+            let name = &protocol_def.name.name;
+
+            // Don't overwrite real classes (namespace collision is diagnosed elsewhere)
+            if self.classes.contains_key(name.as_str()) {
+                continue;
+            }
+
+            let class_methods = vec![
+                MethodInfo {
+                    selector: "requiredMethods".into(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: name.clone(),
+                    is_sealed: true,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: Some("List".into()),
+                    param_types: vec![],
+                    doc: Some(
+                        format!("Return the required method selectors for the `{name}` protocol.")
+                            .into(),
+                    ),
+                },
+                MethodInfo {
+                    selector: "conformingClasses".into(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: name.clone(),
+                    is_sealed: true,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: Some("List".into()),
+                    param_types: vec![],
+                    doc: Some(
+                        format!("Return the classes conforming to the `{name}` protocol.").into(),
+                    ),
+                },
+            ];
+
+            self.classes.insert(
+                name.clone(),
+                ClassInfo {
+                    name: name.clone(),
+                    superclass: Some("Protocol".into()),
+                    is_sealed: true,
+                    is_abstract: true,
+                    is_typed: true,
+                    is_internal: false,
+                    package: None,
+                    is_value: false,
+                    is_native: false,
+                    state: vec![],
+                    state_types: HashMap::new(),
+                    methods: vec![],
+                    class_methods,
+                    class_variables: vec![],
+                    type_params: vec![],
+                    type_param_bounds: vec![],
+                    superclass_type_args: vec![],
+                },
+            );
+        }
+
+        if !module.protocols.is_empty() {
+            self.rebuild_all_indexes();
+        }
+    }
+
     /// Create a hierarchy with only built-in classes.
     ///
     /// The built-in class map is computed once and cached in a `OnceLock`.
