@@ -455,20 +455,26 @@ format_specs_list(Module, Specs) ->
         fun(Spec) ->
             Name = maps:get(name, Spec),
             Arity = maps:get(arity, Spec),
-            FnAtom =
+            case
                 if
                     is_atom(Name) ->
-                        Name;
+                        {ok, Name};
                     is_binary(Name) ->
                         try
-                            binary_to_existing_atom(Name, utf8)
+                            {ok, binary_to_existing_atom(Name, utf8)}
                         catch
-                            error:badarg -> Name
+                            error:badarg -> skip
                         end;
                     true ->
-                        Name
-                end,
-            not beamtalk_native_docs:is_hidden(Module, FnAtom, Arity)
+                        skip
+                end
+            of
+                {ok, FnAtom} ->
+                    not beamtalk_native_docs:is_hidden(Module, FnAtom, Arity);
+                skip ->
+                    %% Can't resolve to atom — include rather than hiding
+                    true
+            end
         end,
         Deduped
     ),

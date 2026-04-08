@@ -111,10 +111,7 @@ impl ReplHelper {
     ///
     /// Returns the completions from the response, or an empty vec on failure.
     /// Drops the client on connection failure so it reconnects on next attempt.
-    fn send_completion_request(
-        &self,
-        request: &serde_json::Value,
-    ) -> Vec<String> {
+    fn send_completion_request(&self, request: &serde_json::Value) -> Vec<String> {
         let mut client_ref = self.completion_client.borrow_mut();
 
         // Try to reconnect if we don't have a client
