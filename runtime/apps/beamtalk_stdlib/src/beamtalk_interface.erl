@@ -224,7 +224,8 @@ handle_erlang_help(_ModuleArg) ->
 
 -doc "Format Erlang function help via beamtalk_erlang_help (dynamic call).".
 -spec handle_erlang_help(binary(), atom() | binary()) -> binary().
-handle_erlang_help(ModuleBin, SelectorArg) when is_binary(ModuleBin) ->
+handle_erlang_help(ModuleBin, SelectorArg)
+        when is_binary(ModuleBin), (is_atom(SelectorArg) orelse is_binary(SelectorArg)) ->
     FunctionBin =
         case SelectorArg of
             A when is_atom(A) -> atom_to_binary(A, utf8);

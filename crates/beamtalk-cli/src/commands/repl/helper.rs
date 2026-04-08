@@ -239,8 +239,9 @@ impl Completer for ReplHelper {
 
             // Erlang module/function completion: `:h Erlang <prefix>` or `:h Erlang mod <prefix>`
             if let Some(erlang_rest) = arg.strip_prefix("Erlang ") {
-                let parts: Vec<&str> = erlang_rest.splitn(2, ' ').collect();
-                match parts.as_slice() {
+                // Split on whitespace to handle double spaces and trailing spaces cleanly
+                let tokens: Vec<&str> = erlang_rest.split_whitespace().collect();
+                match tokens.as_slice() {
                     // `:h Erlang li<TAB>` — complete module names
                     [prefix] => {
                         let completions = self.backend_erlang_complete(prefix, None);
@@ -270,6 +271,7 @@ impl Completer for ReplHelper {
                     // Extra tokens after module+function (e.g. `:h Erlang mod fn extra`)
                     // — fall through to regular completion
                     _ => {}
+                    // Also handles empty erlang_rest (just "Erlang " at cursor) via empty tokens slice
                 }
             }
 

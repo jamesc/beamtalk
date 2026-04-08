@@ -106,7 +106,7 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
 handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
-    ModuleBin = maps:get(<<"module">>, Params, undefined),
+    ModuleBin = nonempty_or_undefined(maps:get(<<"module">>, Params, undefined)),
     Completions =
         case ModuleBin of
             undefined ->
@@ -114,24 +114,34 @@ handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
                 All = beamtalk_erlang_help:available_modules(),
                 [M || M <- All, binary:match(M, Prefix) =:= {0, byte_size(Prefix)}];
             _ ->
-                %% Complete function names within a module
+                %% Complete function names within a module.
+                %% Use beamtalk_erlang_help to avoid triggering module autoload during completion.
                 try binary_to_existing_atom(ModuleBin, utf8) of
                     Module ->
-                        try Module:module_info(exports) of
-                            Exports ->
-                                Filtered = [
-                                    atom_to_binary(F, utf8)
-                                 || {F, _A} <- Exports,
-                                    F =/= module_info
-                                ],
-                                Unique = lists:usort(Filtered),
-                                [
-                                    F
-                                 || F <- Unique,
-                                    binary:match(F, Prefix) =:= {0, byte_size(Prefix)}
-                                ]
-                        catch
-                            _:_ -> []
+                        %% get_object_code avoids autoload and on_load side effects.
+                        case code:get_object_code(Module) of
+                            {Module, _Binary, _Filename} ->
+                                %% Module is already loaded; safe to get exports.
+                                try Module:module_info(exports) of
+                                    Exports ->
+                                        Filtered = [
+                                            atom_to_binary(F, utf8)
+                                         || {F, _A} <- Exports,
+                                            F =/= module_info
+                                        ],
+                                        Unique = lists:usort(Filtered),
+                                        [
+                                            F
+                                         || F <- Unique,
+                                            binary:match(F, Prefix) =:= {0, byte_size(Prefix)}
+                                        ]
+                                catch
+                                    _:_ -> []
+                                end;
+                            error ->
+                                %% Module not loaded; fall back to empty completions
+                                %% to avoid triggering autoload during a read-only operation.
+                                []
                         end
                 catch
                     error:badarg -> []
@@ -225,7 +235,7 @@ handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
     %% BT-1852: `:help Erlang <module>` and `:help Erlang <module> <function>`
     %% Delegates to beamtalk_erlang_help for formatting.
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
-    FunctionBin = maps:get(<<"function">>, Params, undefined),
+    FunctionBin = nonempty_or_undefined(maps:get(<<"function">>, Params, undefined)),
     case ModuleBin of
         <<>> ->
             Err = beamtalk_error:new(invalid_argument, 'REPL'),
