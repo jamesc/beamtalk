@@ -1147,9 +1147,9 @@ impl TypeChecker {
             // Check against the declared keyword at this position
             if let Some(param) = sig.params.get(i) {
                 if let Some(ref declared_keyword) = param.keyword {
-                    // Skip unnamed/positional params — "arg" is the default
-                    // placeholder from beamtalk_spec_reader when no variable
-                    // name appears in the Erlang -spec.
+                    // Skip generic/non-canonical param names — "arg" is used
+                    // by beamtalk_spec_reader for placeholder parameters, and
+                    // normalization also lowercases an explicit `Arg` to "arg".
                     if declared_keyword == "arg" {
                         continue;
                     }

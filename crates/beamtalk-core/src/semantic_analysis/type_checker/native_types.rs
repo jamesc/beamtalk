@@ -177,19 +177,20 @@ fn parse_erlang_spec_term(term: &str) -> Vec<FunctionSignature> {
     // `'terminateChild:child:'/2` all normalize to `terminateChild/2`.
     // Prefer the bare-name spec (no colons in raw name) over keyword aliases,
     // since the bare spec's parameter names are canonical.
-    let mut seen: HashMap<(String, u8), usize> = HashMap::new();
+    let mut seen: HashMap<(String, u8), (usize, bool)> = HashMap::new();
     let mut result: Vec<FunctionSignature> = Vec::with_capacity(parsed.len());
 
     for (is_bare, sig) in parsed {
         let key = (sig.name.clone(), sig.arity);
-        if let Some(&idx) = seen.get(&key) {
+        if let Some(&(idx, was_bare)) = seen.get(&key) {
             // Already have one — replace only if the new one is bare and the old was not
-            if is_bare {
+            if is_bare && !was_bare {
                 result[idx] = sig;
+                seen.insert(key, (idx, true));
             }
             // Otherwise keep the existing entry
         } else {
-            seen.insert(key, result.len());
+            seen.insert(key, (result.len(), is_bare));
             result.push(sig);
         }
     }
