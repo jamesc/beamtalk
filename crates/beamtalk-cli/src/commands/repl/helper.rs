@@ -269,9 +269,9 @@ impl Completer for ReplHelper {
                         return Ok((arg_start + "Erlang ".len() + module.len() + 1, candidates));
                     }
                     // Extra tokens after module+function (e.g. `:h Erlang mod fn extra`)
-                    // — fall through to regular completion
+                    // — fall through to regular completion. Also handles empty erlang_rest
+                    // (just "Erlang " at cursor) via empty tokens slice.
                     _ => {}
-                    // Also handles empty erlang_rest (just "Erlang " at cursor) via empty tokens slice
                 }
             }
 

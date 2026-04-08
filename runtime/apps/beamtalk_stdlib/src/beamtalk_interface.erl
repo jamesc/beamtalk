@@ -229,18 +229,7 @@ handle_erlang_help(ModuleBin, SelectorArg)
     FunctionBin =
         case SelectorArg of
             A when is_atom(A) -> atom_to_binary(A, utf8);
-            B when is_binary(B) -> B;
-            Other ->
-                Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
-                Err01 = beamtalk_error:with_selector(Err0, 'erlangHelp:selector:'),
-                Err02 = beamtalk_error:with_message(
-                    Err01,
-                    iolist_to_binary([
-                        <<"Expected atom or binary selector, got: ">>,
-                        iolist_to_binary(io_lib:format("~p", [Other]))
-                    ])
-                ),
-                beamtalk_error:raise(Err02)
+            B when is_binary(B) -> B
         end,
     try binary_to_existing_atom(ModuleBin, utf8) of
         Module ->
