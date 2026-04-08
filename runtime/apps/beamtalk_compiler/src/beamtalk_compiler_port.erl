@@ -152,7 +152,11 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             after 30000 ->
                 ?LOG_ERROR("Compiler port timeout", #{domain => [beamtalk, runtime], port => Port}),
                 %% Close the port so any late response cannot poison the next request.
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
@@ -227,7 +231,11 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
                 ?LOG_ERROR("Compiler port timeout (trace)", #{
                     domain => [beamtalk, runtime], port => Port
                 }),
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
@@ -285,7 +293,11 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
                     port => Port
                 }),
                 %% Close the port so any late response cannot poison the next request.
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 {error, type_unknown}
             end
     catch
@@ -330,6 +342,7 @@ handle_response(
     },
     %% BT-903: Forward trailing_core_erlang when present (inline class + trailing expressions)
     ClassInfo =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(trailing_core_erlang, Response) of
             {ok, TrailingCoreErlang} ->
                 BaseInfo#{trailing_core_erlang => TrailingCoreErlang};

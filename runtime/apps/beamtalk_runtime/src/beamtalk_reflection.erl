@@ -56,7 +56,7 @@ convention.
 """.
 -spec write_field(atom(), term(), map()) -> {term(), map()}.
 write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
-    NewState = maps:put(Name, Value, State),
+    NewState = State#{Name => Value},
     {Value, NewState}.
 
 -doc """

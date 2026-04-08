@@ -161,7 +161,7 @@ each(Str, Block) when is_binary(Str), is_function(Block, 1) ->
 -doc "Map over graphemes, applying block to each. Returns new string.".
 -spec collect(binary(), function()) -> binary().
 collect(Str, Block) when is_binary(Str), is_function(Block, 1) ->
-    Mapped = lists:map(Block, as_list(Str)),
+    Mapped = [Block(C) || C <- as_list(Str)],
     iolist_to_binary(Mapped).
 
 -doc "Filter graphemes by block predicate. Returns new string.".
@@ -305,17 +305,35 @@ path fails — this correctly handles both UTF-8 byte iolists such as
 from_iolist(X) when is_binary(X) ->
     X;
 from_iolist(X) when is_list(X) ->
-    case catch iolist_to_binary(X) of
-        Bytes when is_binary(Bytes) ->
+    case
+        try
+            {ok, iolist_to_binary(X)}
+        catch
+            _:_ -> error
+        end
+    of
+        {ok, Bytes} when is_binary(Bytes) ->
             %% Assemble bytes first; then validate/normalise as UTF-8.
-            case catch unicode:characters_to_binary(Bytes) of
-                UtfBin when is_binary(UtfBin) ->
+            case
+                try
+                    {ok, unicode:characters_to_binary(Bytes)}
+                catch
+                    _:_ -> error
+                end
+            of
+                {ok, UtfBin} when is_binary(UtfBin) ->
                     UtfBin;
                 _ ->
                     %% Byte assembly succeeded but the bytes are not valid UTF-8.
                     %% Fall back: interpret the original list as a charlist of code points.
-                    case catch unicode:characters_to_binary(X) of
-                        UtfBin2 when is_binary(UtfBin2) ->
+                    case
+                        try
+                            {ok, unicode:characters_to_binary(X)}
+                        catch
+                            _:_ -> error
+                        end
+                    of
+                        {ok, UtfBin2} when is_binary(UtfBin2) ->
                             UtfBin2;
                         _ ->
                             Error0 = beamtalk_error:new(type_error, 'String'),
@@ -328,8 +346,14 @@ from_iolist(X) when is_list(X) ->
             end;
         _ ->
             %% iolist_to_binary/1 failed — try treating the list as a charlist directly.
-            case catch unicode:characters_to_binary(X) of
-                UtfBin when is_binary(UtfBin) ->
+            case
+                try
+                    {ok, unicode:characters_to_binary(X)}
+                catch
+                    _:_ -> error
+                end
+            of
+                {ok, UtfBin} when is_binary(UtfBin) ->
                     UtfBin;
                 _ ->
                     Error0 = beamtalk_error:new(type_error, 'String'),

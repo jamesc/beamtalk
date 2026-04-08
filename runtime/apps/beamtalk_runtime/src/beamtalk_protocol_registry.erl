@@ -44,7 +44,6 @@ See also: docs/ADR/0068-parametric-types-and-protocols.md — Stage 2
 See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
 """.
 
--include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([
@@ -206,6 +205,7 @@ required_methods(ProtocolName) ->
             InstanceSels = [Sel || #{selector := Sel} <- AllMethods],
             AllClassMethods = all_required_class_methods(Info),
             ClassSels = [
+                % elp:fixme W0023 intentional atom creation
                 list_to_atom("class " ++ atom_to_list(Sel))
              || #{selector := Sel} <- AllClassMethods
             ],
@@ -248,10 +248,7 @@ protocol_info(ProtocolName) ->
         undefined ->
             undefined;
         _ ->
-            case ets:lookup(?PROTOCOL_TABLE, ProtocolName) of
-                [{_, Info}] -> Info;
-                [] -> undefined
-            end
+            ets:lookup_element(?PROTOCOL_TABLE, ProtocolName, 2, undefined)
     end.
 
 -doc "Check if a name is a registered protocol.".

@@ -38,16 +38,11 @@ Subscribers receive `{log_event, Map}` messages where Map contains:
 ```
 """.
 
--include_lib("kernel/include/logger.hrl").
-
 %% Public API
 -export([subscribe/0, subscribe/1, unsubscribe/0]).
 
 %% OTP logger handler callbacks
 -export([log/2, adding_handler/1, removing_handler/1]).
-
-%% Handler ID used with logger:add_handler/3
--define(HANDLER_ID, beamtalk_ws_log).
 
 %% ETS table for subscriber tracking
 -define(SUB_TABLE, beamtalk_ws_log_subscribers).
@@ -302,4 +297,4 @@ format_pid(_) ->
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
-    maps:put(Key, Value, Map).
+    Map#{Key => Value}.

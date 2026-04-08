@@ -48,6 +48,7 @@ typed Actor subclass: TimeoutProxy
 
   /// Forward all unknown messages to the target with the configured timeout.
   doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
+    @expect type
     self.target
       perform: selector
       withArguments: arguments

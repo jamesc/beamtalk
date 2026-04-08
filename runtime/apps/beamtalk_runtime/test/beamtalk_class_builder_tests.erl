@@ -42,7 +42,11 @@ teardown(ClassNames) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
             end
         end,
         ClassNames

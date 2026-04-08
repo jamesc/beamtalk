@@ -45,7 +45,13 @@ setup_minimal() ->
 
 teardown_pids(Pids) ->
     lists:foreach(
-        fun(Pid) -> catch gen_server:stop(Pid, normal, 5000) end,
+        fun(Pid) ->
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end
+        end,
         Pids
     ).
 
@@ -429,7 +435,11 @@ test_module_not_loaded() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(Hint, atom_to_binary(ClassName, utf8)) =/= nomatch)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% When the module IS loaded but the class method function is absent,
@@ -448,7 +458,11 @@ test_method_not_found() ->
             binary:match(Hint, atom_to_binary(?TEST_SELECTOR, utf8)) =/= nomatch
         )
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -487,7 +501,11 @@ test_class_send_new() ->
         %% Clean up the spawned actor process to prevent cross-test leakage.
         case Result of
             #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
-                catch gen_server:stop(ActorPid, normal, 5000);
+                (try
+                    gen_server:stop(ActorPid, normal, 5000)
+                catch
+                    _:_ -> ok
+                end);
             _ ->
                 ok
         end
@@ -517,7 +535,11 @@ test_class_send_user_method() ->
         Result = beamtalk_class_dispatch:class_send(Pid, testSuccess, []),
         ?assertEqual(test_success_result, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -545,6 +567,7 @@ class_name_from_pid_test_() ->
 %% strips the prefix and returns <ClassName> as the class atom.
 test_class_name_from_registered_pid() ->
     ClassName = 'BT1085NameTestPid',
+    % elp:fixme W0023 intentional atom creation
     RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)),
     register(RegName, self()),
     try
@@ -639,8 +662,16 @@ test_chain_finds_parent_method() ->
         Result = gen_server:call(ChildPid, {class_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        (try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end),
+        (try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% Selector not found in any ancestor → {error, not_found}.
@@ -657,7 +688,11 @@ test_chain_not_found_anywhere() ->
         Result = gen_server:call(Pid, {class_method_call, completelyAbsentSelector, []}),
         ?assertEqual({error, not_found}, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% The ?MAX_HIERARCHY_DEPTH guard terminates runaway chain walks gracefully.
@@ -671,10 +706,12 @@ test_chain_depth_limit() ->
     %% Build a 22-process chain; the 22nd class's superclass is a phantom name
     %% (not started) so the depth guard fires before any lookup attempt on it.
     N = 21,
+    % elp:fixme W0023 intentional atom creation
     Names = [
         list_to_atom("BT1085Depth" ++ integer_to_list(I))
      || I <- lists:seq(0, N)
     ],
+    % elp:fixme W0023 intentional atom creation
     PhantomName = list_to_atom("BT1085Depth" ++ integer_to_list(N + 1)),
     Pids = lists:map(
         fun(I) ->
@@ -741,7 +778,11 @@ test_metaclass_method_found() ->
         Result = gen_server:call(Pid, {metaclass_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================

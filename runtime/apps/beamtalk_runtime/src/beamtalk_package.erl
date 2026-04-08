@@ -25,8 +25,6 @@ Packages map 1:1 to OTP applications whose env contains a `classes` key
 See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
 """.
 
--include("beamtalk.hrl").
-
 -export([
     all/0,
     named/1,
@@ -74,7 +72,7 @@ The name can be a binary (`<<"stdlib">>`) or an atom (`stdlib`).
 Returns a map with keys: name, version, classes, dependencies, source.
 Raises `#beamtalk_error{}` with kind `package_not_found` if no such package.
 """.
--spec named(binary() | atom()) -> map().
+-spec named(binary() | atom()) -> term().
 named(Name) when is_atom(Name) ->
     named(atom_to_binary(Name, utf8));
 named(Name) when is_binary(Name) ->

@@ -676,6 +676,7 @@ serialized_counter_grow_test_() ->
                 TestPid = self(),
                 lists:foreach(
                     fun(I) ->
+                        % elp:fixme W0023 intentional atom creation
                         Sel = list_to_atom("method_" ++ integer_to_list(I)),
                         beamtalk_trace_store:record_dispatch(TestPid, Sel, 100, ok, sync, 'Counter')
                     end,
@@ -958,6 +959,7 @@ export_traces_with_filters_test_() ->
                     TestPid = self(),
                     lists:foreach(
                         fun(I) ->
+                            % elp:fixme W0023 intentional atom creation
                             Sel = list_to_atom("m_" ++ integer_to_list(I)),
                             beamtalk_trace_store:record_trace_event(
                                 TestPid, 'Counter', Sel, sync, 1000, ok, #{}, stop

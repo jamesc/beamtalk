@@ -398,7 +398,7 @@ handle_call({get_class_source, ClassName}, _From, State) ->
     {reply, Result, State};
 handle_call({set_class_source, ClassName, Source}, _From, State) ->
     Sources = State#state.class_sources,
-    State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
+    State2 = State#state{class_sources = Sources#{ClassName => Source}},
     store_state_in_ets(State2),
     {reply, ok, schedule_persist(State2)};
 handle_call(get_file_mtimes, _From, State) ->
@@ -439,7 +439,7 @@ handle_cast({register_module, Module, NewSource}, State) ->
             undefined -> maps:get(Module, Modules, undefined);
             _ -> NewSource
         end,
-    State2 = State#state{loaded_modules = maps:put(Module, EffectiveSource, Modules)},
+    State2 = State#state{loaded_modules = Modules#{Module => EffectiveSource}},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({unregister_module, Module}, State) ->
@@ -450,7 +450,7 @@ handle_cast({unregister_module, Module}, State) ->
     {noreply, schedule_persist(State2)};
 handle_cast({set_file_mtime, FilePath, Mtime}, State) ->
     Mtimes = State#state.file_mtimes,
-    State2 = State#state{file_mtimes = maps:put(FilePath, Mtime, Mtimes)},
+    State2 = State#state{file_mtimes = Mtimes#{FilePath => Mtime}},
     store_state_in_ets(State2),
     {noreply, State2};
 handle_cast(clear_file_mtimes, State) ->
@@ -591,7 +591,7 @@ load_metadata_from_disk(State) ->
                                 maps:fold(
                                     fun
                                         (K, V, Acc) when is_binary(K), is_binary(V) ->
-                                            maps:put(K, binary_to_list(V), Acc);
+                                            Acc#{K => binary_to_list(V)};
                                         (_, _, Acc) ->
                                             Acc
                                     end,
@@ -673,7 +673,7 @@ persist_metadata_to_disk(State) ->
                             end
                     end
             }
-         || {M, S} <- maps:to_list(State#state.loaded_modules)
+         || M := S <- State#state.loaded_modules
         ],
         <<"class_sources">> => maps:fold(
             fun(ClassName, Source, Acc) ->
@@ -684,7 +684,7 @@ persist_metadata_to_disk(State) ->
                     end,
                 case SourceBin of
                     null -> Acc;
-                    _ -> maps:put(ClassName, SourceBin, Acc)
+                    _ -> Acc#{ClassName => SourceBin}
                 end
             end,
             #{},
@@ -713,6 +713,7 @@ Used by both explicit unregister and DOWN message handling.
 -spec remove_actor(pid(), #state{}) -> #state{}.
 remove_actor(Pid, State) ->
     MonRefs = State#state.monitor_refs,
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Pid, MonRefs) of
         {ok, Ref} -> demonitor(Ref, [flush]);
         error -> ok

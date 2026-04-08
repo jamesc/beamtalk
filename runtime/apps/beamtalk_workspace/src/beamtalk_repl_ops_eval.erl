@@ -11,8 +11,6 @@ Op handlers for eval, clear, and bindings operations.
 Extracted from beamtalk_repl_server (BT-705).
 """.
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -export([handle/4]).
 
 -doc "Handle eval/clear/bindings ops.".

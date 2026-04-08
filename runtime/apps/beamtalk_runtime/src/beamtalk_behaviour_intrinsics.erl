@@ -1038,7 +1038,11 @@ stop_class_actors(ClassName) ->
             ],
             lists:foreach(
                 fun(Pid) ->
-                    catch gen_server:call(RegistryPid, {kill, Pid})
+                    try
+                        gen_server:call(RegistryPid, {kill, Pid})
+                    catch
+                        _:_ -> ok
+                    end
                 end,
                 ClassActors
             )

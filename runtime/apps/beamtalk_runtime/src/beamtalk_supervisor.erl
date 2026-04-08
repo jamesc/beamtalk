@@ -42,6 +42,8 @@ functions that call OTP APIs from the caller's process context.
     whichChildren/1,
     whichChild/2,
     terminateChild/2,
+    'terminateChild:class:'/2,
+    'terminateChild:child:'/2,
     startChild/1,
     startChild/2,
     countChildren/1,
@@ -76,7 +78,7 @@ Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 Returns `{beamtalk_supervisor, ClassName, Module, Pid}`.
 Idempotent: if the supervisor is already running, returns the existing instance.
 """.
--spec startLink(tuple()) -> tuple().
+-spec startLink(term()) -> term().
 startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -176,7 +178,7 @@ Return the running supervisor instance, or nil if not started.
 Called from `class current` on Supervisor and DynamicSupervisor subclasses.
 Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 """.
--spec current(tuple()) -> tuple() | nil.
+-spec current(term()) -> term() | nil.
 current(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -196,7 +198,7 @@ Returns a list of child id atoms (class name atoms by default, or custom
 ids when `withId:` was used in `SupervisionSpec`).
 Dead or restarting children are excluded.
 """.
--spec whichChildren(tuple()) -> [atom()].
+-spec whichChildren(term()) -> term().
 whichChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -218,7 +220,7 @@ Matches by child module (position 4 in which_children tuples) rather than child 
 so that custom ids set via `withId:` in SupervisionSpec still resolve correctly.
 Returns {beamtalk_supervisor, ...} for supervisor subclasses, {beamtalk_object, ...} otherwise.
 """.
--spec whichChild(tuple(), tuple()) -> tuple() | nil.
+-spec whichChild(term(), Class :: term()) -> term() | nil.
 whichChild(Self, ClassArg) ->
     SupPid = element(4, Self),
     ClassName = element(2, Self),
@@ -253,7 +255,14 @@ terminates child by its process pid (simple_one_for_one semantics). Returns nil.
 
 Raises a runtime_error if the child is not found or cannot be terminated.
 """.
--spec terminateChild(tuple(), tuple()) -> nil.
+%% Canonical specs for the two BT selectors that map to this function:
+%%   Supervisor:        terminate: aClass  → terminateChild: self class: aClass
+%%   DynamicSupervisor: terminateChild: child → terminateChild: self child: child
+-spec 'terminateChild:class:'(term(), Class :: term()) -> nil.
+'terminateChild:class:'(Self, Class) -> terminateChild(Self, Class).
+-spec 'terminateChild:child:'(term(), Child :: term()) -> nil.
+'terminateChild:child:'(Self, Child) -> terminateChild(Self, Child).
+-spec terminateChild(term(), term()) -> nil.
 terminateChild(Self, Arg) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
@@ -320,7 +329,7 @@ then starts the child via OTP simple_one_for_one.
 Returns {beamtalk_supervisor, ChildClass, ChildModule, ChildPid} for supervisor
 subclasses, or {beamtalk_object, ChildClass, ChildModule, ChildPid} for workers.
 """.
--spec startChild(tuple()) -> tuple().
+-spec startChild(term()) -> term().
 startChild(Self) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
@@ -366,7 +375,7 @@ which appends it to the child start function's argument list.
 Returns {beamtalk_supervisor, ChildClass, ChildModule, ChildPid} for supervisor
 subclasses, or {beamtalk_object, ChildClass, ChildModule, ChildPid} for workers.
 """.
--spec startChild(tuple(), term()) -> tuple().
+-spec startChild(term(), term()) -> term().
 startChild(Self, Args) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
@@ -410,7 +419,7 @@ Called from `count` on Supervisor and DynamicSupervisor instances.
 Uses `supervisor:count_children/1` which returns a proplist with
 `active` (running), `workers`, `supervisors`, `specs` counts.
 """.
--spec countChildren(tuple()) -> non_neg_integer().
+-spec countChildren(term()) -> non_neg_integer().
 countChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -426,7 +435,7 @@ Called from `stop` on Supervisor and DynamicSupervisor instances.
 Uses gen_server:stop/1 since supervisors are OTP gen_servers.
 Returns nil.
 """.
--spec stop(tuple()) -> nil.
+-spec stop(term()) -> nil.
 stop(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -472,7 +481,7 @@ the root supervisor has started. SupervisorTuple must be a
 `{beamtalk_supervisor, ClassName, Module, Pid}` value as returned by
 `startLink/1`. Creates the ETS table if it does not already exist.
 """.
--spec register_root(tuple()) -> ok.
+-spec register_root(term()) -> ok.
 register_root(SupervisorTuple) ->
     ensure_root_table(),
     ets:insert(?ROOT_SUPERVISOR_TABLE, {root, SupervisorTuple}),
@@ -486,13 +495,10 @@ Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple registered
 by `register_root/1`, or the Beamtalk `nil` atom if no root supervisor has
 been registered (e.g. no `[application]` section in `beamtalk.toml`).
 """.
--spec get_root() -> tuple() | nil.
+-spec get_root() -> term() | nil.
 get_root() ->
     ensure_root_table(),
-    case ets:lookup(?ROOT_SUPERVISOR_TABLE, root) of
-        [{root, Sup}] -> Sup;
-        [] -> nil
-    end.
+    ets:lookup_element(?ROOT_SUPERVISOR_TABLE, root, 2, nil).
 
 -doc """
 Clear the registered root supervisor entry.
@@ -522,7 +528,7 @@ dispatch requires.
 Uses `call_class_method_direct` to bypass the class gen_server for the
 initial `class_initialize:` method lookup (same pattern as `static_init/2`).
 """.
--spec run_initialize(tuple()) -> ok.
+-spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, ClassName, Module, _Pid} = SupTuple) ->
     ClassSelf = make_init_class_self(ClassName, Module),
     ClassVars = #{},
@@ -536,7 +542,7 @@ Build a ClassSelf tuple for use in direct class method calls during supervisor i
 The pid field is set to the class gen_server pid (may be blocked, but ClassSelf is
 used only as a value object — pure class methods do not send messages to self).
 """.
--spec make_init_class_self(atom(), module()) -> tuple().
+-spec make_init_class_self(atom(), module()) -> term().
 make_init_class_self(ClassName, Module) ->
     ClassPid = beamtalk_class_registry:whereis_class(ClassName),
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
@@ -702,7 +708,7 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
                 R -> R
             end,
         case Result of
-            {beamtalk_object, _Class, _Mod, Pid} when is_pid(Pid) ->
+            #beamtalk_object{pid = Pid} when is_pid(Pid) ->
                 {ok, Pid};
             {beamtalk_supervisor, _Class, _Mod, Pid} when is_pid(Pid) ->
                 {ok, Pid};
@@ -779,6 +785,7 @@ spec_to_otp(BtSpec) ->
                         %% in source form (e.g., 'create:value:'); we prepend 'class_'
                         %% to get the compiled function name for call_class_method_direct.
                         [Selector, ArgsList] = array:get(2, StartErlArray),
+                        % elp:fixme W0023 intentional atom creation
                         CompiledSelector = list_to_atom(
                             "class_" ++ atom_to_list(Selector)
                         ),

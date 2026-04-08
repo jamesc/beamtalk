@@ -166,15 +166,22 @@ Calls the module's init(#{}) to get default state, then:
 -spec migrate_fields(map(), [atom()], atom()) -> map().
 migrate_fields(OldState, NewInstanceVars, Module) ->
     %% Get new default state by calling init with empty args
-    case catch Module:init(#{}) of
+    case
+        try
+            Module:init(#{})
+        catch
+            _:_ -> init_error
+        end
+    of
         {ok, NewDefaults} when is_map(NewDefaults) ->
             %% Internal keys to always preserve from new defaults
             InternalKeys = beamtalk_tagged_map:internal_fields(),
             %% Start with internal keys from new defaults (updated method table etc.)
             BaseState = lists:foldl(
                 fun(Key, Acc) ->
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(Key, NewDefaults) of
-                        {ok, Val} -> maps:put(Key, Val, Acc);
+                        {ok, Val} -> Acc#{Key => Val};
                         error -> Acc
                     end
                 end,
@@ -185,8 +192,9 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             NewVarSet = sets:from_list(NewInstanceVars, [{version, 2}]),
             WithDefaults = lists:foldl(
                 fun(Var, Acc) ->
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(Var, NewDefaults) of
-                        {ok, Default} -> maps:put(Var, Default, Acc);
+                        {ok, Default} -> Acc#{Var => Default};
                         error -> Acc
                     end
                 end,
@@ -198,7 +206,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             {Kept, Dropped} = maps:fold(
                 fun(Key, Value, {KeepAcc, DropAcc}) ->
                     case sets:is_element(Key, NewVarSet) of
-                        true -> {maps:put(Key, Value, KeepAcc), DropAcc};
+                        true -> {KeepAcc#{Key => Value}, DropAcc};
                         false -> {KeepAcc, [Key | DropAcc]}
                     end
                 end,
@@ -230,7 +238,11 @@ try_change_code(Pid, Module, Extra) ->
         try
             sys:change_code(Pid, Module, undefined, Extra)
         after
-            catch sys:resume(Pid)
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     catch
         exit:{noproc, _} ->

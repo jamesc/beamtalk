@@ -68,6 +68,7 @@ remove_module(ModuleName, Tracker) ->
 -doc "Get information about a specific module.".
 -spec get_module_info(atom(), module_tracker()) -> {ok, module_info()} | {error, not_found}.
 get_module_info(ModuleName, Tracker) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(ModuleName, Tracker) of
         {ok, Info} -> {ok, Info};
         error -> {error, not_found}

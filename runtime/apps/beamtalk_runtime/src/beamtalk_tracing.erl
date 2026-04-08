@@ -185,7 +185,7 @@ tracesFor(Actor) ->
 Trace events for a specific actor + selector.
 FFI: (Erlang beamtalk_tracing) tracesFor: actor selector: sel
 """.
--spec tracesFor(term(), atom()) -> [map()].
+-spec tracesFor(term(), Selector :: atom()) -> [map()].
 tracesFor(Actor, Selector) ->
     Pid = extract_pid(Actor),
     call_trace_store_default(

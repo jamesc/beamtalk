@@ -23,6 +23,7 @@ typed Collection subclass: Bag
   /// Bag withAll: #(1, 2, 1, 3)   // => a Bag
   /// ```
   class withAll: list :: List -> Bag =>
+    @expect type
     list inject: Bag new into: [:bag :elem | bag add: elem]
 
   /// Total number of element occurrences (sum of all counts).
@@ -32,7 +33,9 @@ typed Collection subclass: Bag
   /// (Bag withAll: #(1, 1, 2)) size   // => 3
   /// Bag new size                     // => 0
   /// ```
-  size -> Integer => self.counts inject: 0 into: [:sum :count | sum + count]
+  size -> Integer =>
+    @expect type
+    self.counts inject: 0 into: [:sum :count | sum + count]
 
   /// Number of occurrences of `element` in the bag.
   ///
@@ -104,6 +107,7 @@ typed Collection subclass: Bag
   /// (Bag withAll: #(1, 1, 2)) do: [:x | Transcript show: x]
   /// ```
   do: block :: Block -> Nil =>
+    @expect type
     self.counts doWithKey: [:elem :count |
       count timesRepeat: [block value: elem]
     ]

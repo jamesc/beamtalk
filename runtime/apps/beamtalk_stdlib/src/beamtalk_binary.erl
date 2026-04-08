@@ -72,7 +72,7 @@ Deserialize a binary back to the original term.
 Uses safe mode (`[safe]`) to prevent atom table exhaustion from untrusted
 input. Atoms not already in the atom table will cause an error.
 """.
--spec 'deserialize:'(binary()) -> term().
+-spec 'deserialize:'(term()) -> term().
 'deserialize:'(Bin) when is_binary(Bin) ->
     try
         erlang:binary_to_term(Bin, [safe])
@@ -293,7 +293,7 @@ print_string(_) ->
 Deserialize binary using binary_to_term/2 with [safe, used].
 Returns {Value, BytesConsumed}.
 """.
--spec deserialize_with_used(binary()) -> {term(), non_neg_integer()}.
+-spec deserialize_with_used(term()) -> {term(), non_neg_integer()}.
 deserialize_with_used(Bin) when is_binary(Bin) ->
     try
         erlang:binary_to_term(Bin, [safe, used])
@@ -348,7 +348,7 @@ bytes_to_hex(Bin) ->
 serialize(X) -> 'serialize:'(X).
 
 -doc "FFI alias for deserialize:/1.".
--spec deserialize(binary()) -> term().
+-spec deserialize(term()) -> term().
 deserialize(X) -> 'deserialize:'(X).
 
 -doc "FFI alias for size:/1.".
@@ -368,9 +368,9 @@ fromIolist(X) -> 'fromIolist:'(X).
 fromBytes(Bytes) -> from_bytes(Bytes).
 
 -doc "Class method wrapper for deserialize_with_used/1.".
--spec 'deserializeWithUsed:'(binary()) -> {term(), non_neg_integer()}.
+-spec 'deserializeWithUsed:'(term()) -> {term(), non_neg_integer()}.
 'deserializeWithUsed:'(Bin) -> deserialize_with_used(Bin).
 
 -doc "FFI alias for deserializeWithUsed:/1.".
--spec deserializeWithUsed(binary()) -> {term(), non_neg_integer()}.
+-spec deserializeWithUsed(term()) -> {term(), non_neg_integer()}.
 deserializeWithUsed(Bin) -> deserialize_with_used(Bin).

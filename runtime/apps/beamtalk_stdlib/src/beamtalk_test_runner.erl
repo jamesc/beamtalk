@@ -19,7 +19,6 @@ TestResult is a tagged map:
    duration => float(), tests => [#{name, status, error?}]}
 ```
 """.
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([
@@ -116,7 +115,7 @@ run_all_impl(MaxJobs) ->
             make_test_result(0, 0, 0, 0, 0.0, []);
         _ when MaxJobs =:= 1 ->
             %% Sequential: original behavior
-            ClassResults = lists:map(fun run_class_by_name/1, Classes),
+            ClassResults = [run_class_by_name(C) || C <- Classes],
             aggregate_results(ClassResults);
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
@@ -125,7 +124,7 @@ run_all_impl(MaxJobs) ->
             %% Run concurrent classes with bounded parallelism
             ConcurrentResults = run_classes_concurrent(Concurrent, MaxJobs),
             %% Run serial classes one at a time
-            SerialResults = lists:map(fun run_class_by_name/1, Serial),
+            SerialResults = [run_class_by_name(C) || C <- Serial],
             EndTime = erlang:monotonic_time(millisecond),
             WallDuration = (EndTime - StartTime) / 1000.0,
             Aggregated = aggregate_results(ConcurrentResults ++ SerialResults),
@@ -156,7 +155,7 @@ run_file(FilePath) when is_binary(FilePath) ->
         [] ->
             make_test_result(0, 0, 0, 0, 0.0, []);
         _ ->
-            ClassResults = lists:map(fun run_class_by_name/1, MatchingClasses),
+            ClassResults = [run_class_by_name(C) || C <- MatchingClasses],
             aggregate_results(ClassResults)
     end.
 
@@ -165,7 +164,7 @@ Run all tests in a single class.
 
 ClassRef is a class tuple — element 2 is 'ClassName class' atom.
 """.
--spec run_class(tuple()) -> test_result().
+-spec run_class(term()) -> test_result().
 run_class(ClassRef) ->
     ClassName = extract_class_name(ClassRef),
     run_class_by_name(ClassName).
@@ -175,7 +174,7 @@ Run a single test method in a class.
 
 ClassRef is a class tuple, TestName is a symbol atom.
 """.
--spec run_method(tuple(), atom()) -> map().
+-spec run_method(term(), Method :: atom()) -> map().
 run_method(ClassRef, TestName) when is_atom(TestName) ->
     ClassName = extract_class_name(ClassRef),
     run_method_by_name(ClassName, TestName).
@@ -300,7 +299,7 @@ format_failure_details(Tests) ->
         [] ->
             <<>>;
         _ ->
-            Lines = lists:map(fun format_single_failure/1, Failures),
+            Lines = [format_single_failure(F) || F <- Failures],
             iolist_to_binary(Lines)
     end.
 
@@ -412,14 +411,12 @@ run_class_by_name(ClassName) ->
                 FlatMethods,
                 TestMethods,
                 fun(SuiteFixture) ->
-                    lists:map(
-                        fun(Method) ->
-                            beamtalk_test_case:run_test_method(
-                                ClassName, Module, Method, FlatMethods, SuiteFixture
-                            )
-                        end,
-                        TestMethods
-                    )
+                    [
+                        beamtalk_test_case:run_test_method(
+                            ClassName, Module, Method, FlatMethods, SuiteFixture
+                        )
+                     || Method <- TestMethods
+                    ]
                 end
             ),
             EndTime = erlang:monotonic_time(millisecond),
@@ -478,7 +475,7 @@ discover_methods_via_registry(ClassName) ->
         ClassPid ->
             Methods = gen_server:call(ClassPid, methods),
             Module = beamtalk_object_class:module_name(ClassPid),
-            FlatMethods = maps:from_list([{M, true} || M <- Methods]),
+            FlatMethods = maps:from_keys(Methods, true),
             TestMethods = [
                 M
              || M <- Methods,
@@ -570,13 +567,13 @@ Extract class name from a class reference tuple.
 Class references have element 2 = 'ClassName class' atom.
 Strip the trailing " class" (6 chars) to get the bare class name.
 """.
--spec extract_class_name(tuple()) -> atom().
+-spec extract_class_name(term()) -> atom().
 extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     Tag = element(2, ClassRef),
     TagStr = atom_to_list(Tag),
     Len = length(TagStr),
     NameStr = lists:sublist(TagStr, Len - 6),
-    list_to_atom(NameStr).
+    list_to_existing_atom(NameStr).
 
 -doc "Create a TestResult tagged map.".
 -spec make_test_result(
@@ -614,7 +611,7 @@ aggregate_results(ClassResults) ->
                 },
                 {TAcc, PAcc, FAcc, SAcc, DAcc, TestsAcc}
             ) ->
-                {TAcc + T, PAcc + P, FAcc + F, SAcc + S, DAcc + D, lists:reverse(Tests) ++ TestsAcc}
+                {TAcc + T, PAcc + P, FAcc + F, SAcc + S, DAcc + D, lists:reverse(Tests, TestsAcc)}
             end,
             {0, 0, 0, 0, 0.0, []},
             ClassResults
@@ -789,11 +786,11 @@ runAll() -> run_all().
 runAll(MaxJobs) -> run_all(MaxJobs).
 
 %% run: → run/1  (TestRunner run: testClass)
--spec run(tuple()) -> test_result().
+-spec run(term()) -> test_result().
 run(TestClass) -> run_class(TestClass).
 
 %% run:method: → run/2  (TestRunner run: testClass method: testName)
--spec run(tuple(), atom()) -> test_result().
+-spec run(term(), Method :: atom()) -> test_result().
 run(TestClass, TestName) -> run_method(TestClass, TestName).
 
 %% TestResult instance shims — passed: → passed/1, etc.

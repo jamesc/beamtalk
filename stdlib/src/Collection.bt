@@ -87,6 +87,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
   includes: element :: Object -> Boolean =>
+    @expect type
     self do: [:each | each =:= element ifTrue: [^true]]
     false
 
@@ -118,6 +119,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
   collect: block :: Block -> Self =>
+    @expect type
     result := (self inject: #() into: [:acc :each |
       acc addFirst: (block value: each)
     ]) reversed
@@ -136,6 +138,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
   select: block :: Block -> Self =>
+    @expect type
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
     ]) reversed
@@ -150,6 +153,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
   reject: block :: Block -> Self =>
+    @expect type
     self select: [:each | (block value: each) not]
 
   /// Find the first element for which `block` returns true.
@@ -162,6 +166,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
   detect: block :: Block -> Object | Nil =>
+    @expect type
     self do: [:each | (block value: each) ifTrue: [^each]]
     nil
 
@@ -174,6 +179,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
   detect: block :: Block ifNone: noneBlock :: Block -> Object =>
+    @expect type
     self do: [:each | (block value: each) ifTrue: [^each]]
     noneBlock value
 
@@ -186,6 +192,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) anySatisfy: [:x | x > 2]  // => true
   /// ```
   anySatisfy: block :: Block -> Boolean =>
+    @expect type
     self do: [:each | (block value: each) ifTrue: [^true]]
     false
 
@@ -198,6 +205,7 @@ abstract typed Value subclass: Collection
   /// #(2, 4, 6) allSatisfy: [:x | x isEven]  // => true
   /// ```
   allSatisfy: block :: Block -> Boolean =>
+    @expect type
     self do: [:each | (block value: each) ifFalse: [^false]]
     true
 

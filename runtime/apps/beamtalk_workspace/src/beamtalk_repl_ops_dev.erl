@@ -546,9 +546,9 @@ compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
     %% Prefer the live in-memory source over the on-disk file; the metadata is
     %% updated by handle_load and method-patching so it reflects the current state.
     CompilePath =
-        if
-            SourcePath =:= "unknown" -> undefined;
-            true -> SourcePath
+        case SourcePath of
+            "unknown" -> undefined;
+            _ -> SourcePath
         end,
     SourceResult =
         case beamtalk_workspace_meta:get_class_source(ClassBin) of
@@ -2107,22 +2107,20 @@ format_eep48_signatures_or_exports(Module) ->
                 Doc =/= {error, hidden}
             ],
             Sorted = lists:sort(Visible),
-            Lines = lists:map(
-                fun({{F, A}, Doc}) ->
-                    case Doc of
-                        #{sig := Sig} when Sig =/= <<>> ->
-                            iolist_to_binary([<<"  ">>, Sig]);
-                        _ ->
-                            iolist_to_binary([
-                                <<"  ">>,
-                                atom_to_binary(F, utf8),
-                                <<"/">>,
-                                integer_to_binary(A)
-                            ])
-                    end
-                end,
-                Sorted
-            ),
+            Lines = [
+                case Doc of
+                    #{sig := Sig} when Sig =/= <<>> ->
+                        iolist_to_binary([<<"  ">>, Sig]);
+                    _ ->
+                        iolist_to_binary([
+                            <<"  ">>,
+                            atom_to_binary(F, utf8),
+                            <<"/">>,
+                            integer_to_binary(A)
+                        ])
+                end
+             || {{F, A}, Doc} <- Sorted
+            ],
             iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>])
     catch
         _:_ -> <<"(no export information available)\n">>
@@ -2372,15 +2370,13 @@ format_erlang_function_with_docs(Module, Function, BeamPath, Msg) ->
                     [] ->
                         <<>>;
                     _ ->
-                        ErlLines = lists:map(
-                            fun({_N, _A, Form}) ->
-                                iolist_to_binary([
-                                    <<"  Erlang: ">>,
-                                    beamtalk_spec_reader:format_erlang_spec(Form)
-                                ])
-                            end,
-                            RawSpecs
-                        ),
+                        ErlLines = [
+                            iolist_to_binary([
+                                <<"  Erlang: ">>,
+                                beamtalk_spec_reader:format_erlang_spec(Form)
+                            ])
+                         || {_N, _A, Form} <- RawSpecs
+                        ],
                         iolist_to_binary(lists:join(<<"\n">>, ErlLines))
                 end,
             %% Build Beamtalk signature section
@@ -2513,15 +2509,13 @@ find_types_in_beam(Path, Pred) ->
 ) -> binary().
 render_type_result_or_not_found(Module, NameBin, {ok, Types}, Msg) ->
     ModName = atom_to_binary(Module, utf8),
-    TypeLines = lists:map(
-        fun({_N, _A, Form}) ->
-            iolist_to_binary([
-                <<"  ">>,
-                beamtalk_spec_reader:format_erlang_type(Form)
-            ])
-        end,
-        Types
-    ),
+    TypeLines = [
+        iolist_to_binary([
+            <<"  ">>,
+            beamtalk_spec_reader:format_erlang_type(Form)
+        ])
+     || {_N, _A, Form} <- Types
+    ],
     Header = iolist_to_binary([ModName, <<":">>, NameBin, <<"\n">>]),
     Body = iolist_to_binary(lists:join(<<"\n">>, TypeLines)),
     FullText = iolist_to_binary([Header, Body, <<"\n">>]),

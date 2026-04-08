@@ -13,8 +13,6 @@ including expression compilation, file compilation, and codegen display.
 Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 """.
 
--include_lib("kernel/include/logger.hrl").
-
 -export([
     compile_expression/3,
     compile_expression_trace/3,
@@ -178,6 +176,7 @@ format_formatted_diagnostics(FormattedList) ->
 format_diagnostic_text(D) when is_map(D) ->
     Msg = maps:get(message, D, <<"Unknown error">>),
     LinePrefix =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(line, D) of
             {ok, Line} when is_integer(Line) ->
                 [<<"Line ">>, integer_to_binary(Line), <<": ">>];
@@ -185,6 +184,7 @@ format_diagnostic_text(D) when is_map(D) ->
                 []
         end,
     HintSuffix =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(hint, D) of
             {ok, Hint} -> [<<"\nHint: ">>, Hint];
             error -> []
@@ -285,6 +285,7 @@ compile_for_method_reload(SourceBin, Options) ->
                     #{core_erlang := CoreErlang, module_name := ModNameBin, classes := Classes} =
                         CR} ->
                     Warnings = maps:get(warnings, CR, []),
+                    % elp:fixme W0023 intentional atom creation
                     ModName = binary_to_atom(ModNameBin, utf8),
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
@@ -350,6 +351,7 @@ compile_protocol_definition_result(ProtocolInfo) ->
         protocols := Protocols,
         warnings := Warnings
     } = ProtocolInfo,
+    % elp:fixme W0023 intentional atom creation
     ModuleName = binary_to_atom(ModuleNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
@@ -377,6 +379,7 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
         classes := Classes,
         warnings := Warnings
     } = ClassInfo,
+    % elp:fixme W0023 intentional atom creation
     ClassModName = binary_to_atom(ClassModNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
@@ -390,6 +393,7 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
 -spec compile_trailing_expressions(map(), atom()) ->
     {ok, binary(), atom()} | {error, binary()} | none.
 compile_trailing_expressions(ClassInfo, ModuleName) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(trailing_core_erlang, ClassInfo) of
         {ok, TrailingCoreErlang} ->
             case beamtalk_compiler:compile_core_erlang(TrailingCoreErlang) of
@@ -456,6 +460,7 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
                     module_name := ModNameBin,
                     classes := Classes
                 }} ->
+                    % elp:fixme W0023 intentional atom creation
                     ModuleName = binary_to_atom(ModNameBin, utf8),
                     compile_file_core(CoreErlang, ModuleName, Classes);
                 {error, Diagnostics} ->

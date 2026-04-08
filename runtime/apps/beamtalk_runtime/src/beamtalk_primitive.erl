@@ -27,6 +27,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 -include("beamtalk.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang, not .erl source.
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({nowarn_function, [send/3, responds_to/2]}).
 
 %%% ============================================================================
@@ -164,7 +165,7 @@ print_string_map(X) ->
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
         'Array' ->
             Elements = array:to_list(maps:get(data, X)),
-            Parts = lists:map(fun(E) -> print_string(E) end, Elements),
+            Parts = [print_string(E) || E <- Elements],
             iolist_to_binary(["#[", lists:join(<<", ">>, Parts), "]"]);
         'Stream' ->
             maps:get(description, X);
@@ -587,6 +588,7 @@ static_class_module_name(Class) ->
         list_to_existing_atom(ModName)
     catch
         error:badarg ->
+            % elp:fixme W0023 intentional atom creation
             list_to_atom(ModName)
     end.
 

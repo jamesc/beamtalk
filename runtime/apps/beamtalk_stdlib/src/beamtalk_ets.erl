@@ -78,7 +78,7 @@ read and written by any process.
 Raises `already_exists` if a table with the same name already exists.
 Raises `type_error` if arguments are not atoms.
 """.
--spec 'new:type:'(atom(), atom()) -> t().
+-spec 'new:type:'(atom(), Type :: atom()) -> t().
 'new:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
     EtsType = map_table_type(TableType),
     try
@@ -157,7 +157,7 @@ If a table with the given name already exists, returns an Ets instance
 wrapping it. Otherwise creates a new table with the specified type.
 Raises `type_error` if arguments are not atoms.
 """.
--spec 'newOrExisting:type:'(atom(), atom()) -> t().
+-spec 'newOrExisting:type:'(atom(), Type :: atom()) -> t().
 'newOrExisting:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
     EtsType = map_table_type_for('newOrExisting:type:', TableType),
     try
@@ -208,7 +208,7 @@ Look up a key. Returns the value, or nil if the key is absent.
 For bag/duplicate_bag tables with multiple values for a key, returns
 the first stored value. The wrapper exposes only one value per key.
 """.
--spec lookup(t(), term()) -> term().
+-spec lookup(t(), Key :: term()) -> term().
 lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
         case ets:lookup(TableName, Key) of
@@ -233,7 +233,7 @@ are two separate ETS operations. Concurrent writes from multiple actors to
 the same key on a bag table are not serialized — interleaved calls may
 result in multiple entries for the same key.
 """.
--spec insert(t(), term(), term()) -> nil.
+-spec insert(t(), Key :: term(), Value :: term()) -> nil.
 insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
     try
         case ets:info(TableName, type) of
@@ -254,7 +254,7 @@ insert(_Self, _Key, _Value) ->
     beamtalk_error:raise(Error2).
 
 -doc "Look up a key; if absent, evaluate the block and return its result.".
--spec lookupIfAbsent(t(), term(), function()) -> term().
+-spec lookupIfAbsent(t(), Key :: term(), Block :: function()) -> term().
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
 ->
@@ -278,7 +278,7 @@ lookupIfAbsent(_Self, _Key, _Block) ->
     beamtalk_error:raise(Error2).
 
 -doc "Test whether a key exists in the table.".
--spec includesKey(t(), term()) -> boolean().
+-spec includesKey(t(), Key :: term()) -> boolean().
 includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
         ets:member(TableName, Key)
@@ -292,7 +292,7 @@ includesKey(_Self, _Key) ->
     beamtalk_error:raise(Error2).
 
 -doc "Remove the entry for key. Returns nil.".
--spec removeKey(t(), term()) -> nil.
+-spec removeKey(t(), Key :: term()) -> nil.
 removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
         ets:delete(TableName, Key),
@@ -379,7 +379,7 @@ deleteTable(_Self) ->
 %%% ============================================================================
 
 -doc "FFI shim for new:type: — called via (Erlang beamtalk_ets) new: name type: type.".
--spec new(atom(), atom()) -> t().
+-spec new(atom(), Type :: atom()) -> t().
 new(Name, TableType) -> 'new:type:'(Name, TableType).
 
 -doc "FFI shim for named: — called via (Erlang beamtalk_ets) named: name.".
@@ -393,7 +393,7 @@ exists(Name) -> 'exists:'(Name).
 -doc """
 FFI shim for newOrExisting:type: — called via (Erlang beamtalk_ets) newOrExisting: name type: t.
 """.
--spec newOrExisting(atom(), atom()) -> t().
+-spec newOrExisting(atom(), Type :: atom()) -> t().
 newOrExisting(Name, TableType) -> 'newOrExisting:type:'(Name, TableType).
 
 %%% ============================================================================

@@ -13,8 +13,6 @@ registering classes, triggering hot reload, and managing file paths.
 Extracted from beamtalk_repl_eval (BT-863).
 """.
 
--include_lib("kernel/include/logger.hrl").
-
 -export([
     handle_load/2,
     handle_load/3,

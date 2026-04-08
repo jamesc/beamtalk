@@ -36,6 +36,9 @@ Regex objects are represented as tagged maps:
     split_regex/2
 ]).
 
+-type t() :: #{'$beamtalk_class' := 'Regex', atom() => term()}.
+-export_type([t/0]).
+
 %%% ============================================================================
 %%% Class Methods — Constructors
 %%% ============================================================================
@@ -75,7 +78,7 @@ Compile a regex pattern string with PCRE options.
 Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 Unknown options still raise (programming error).
 """.
--spec 'from:options:'(binary(), list()) -> beamtalk_result:t().
+-spec 'from:options:'(binary(), Options :: list()) -> beamtalk_result:t().
 'from:options:'(Pattern, Options) when is_binary(Pattern), is_list(Options) ->
     ErlOpts = translate_options(Options),
     case re:compile(Pattern, ErlOpts) of
@@ -111,7 +114,7 @@ from(Pattern) -> 'from:'(Pattern).
 -doc """
 FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
 """.
--spec from(binary(), list()) -> beamtalk_result:t().
+-spec from(binary(), Options :: list()) -> beamtalk_result:t().
 from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 
 %%% ============================================================================
@@ -119,11 +122,11 @@ from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 %%% ============================================================================
 
 -doc "Return the original pattern source string.".
--spec source(map()) -> binary().
+-spec source(t()) -> binary().
 source(#{source := Src}) -> Src.
 
 -doc "Human-readable representation: Regex([0-9]+)".
--spec 'printString'(map()) -> binary().
+-spec 'printString'(t()) -> binary().
 'printString'(#{source := Src}) ->
     iolist_to_binary([<<"Regex(">>, Src, <<")">>]).
 
@@ -299,7 +302,7 @@ raise_bad_pattern(Selector, Pattern) ->
 -doc "Translate Beamtalk option atoms to Erlang re compile options.".
 -spec translate_options(list()) -> list().
 translate_options(Opts) ->
-    lists:map(fun translate_option/1, Opts).
+    [translate_option(O) || O <- Opts].
 
 -spec translate_option(atom()) -> atom().
 translate_option(caseless) ->

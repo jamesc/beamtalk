@@ -41,6 +41,7 @@ Extracted from beamtalk_repl_eval.erl (BT-706).
 Start capturing IO output for the current process.
 Convenience wrapper for start(undefined).
 """.
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_unused, start/0}).
 -spec start() -> {pid(), pid()}.
 start() ->

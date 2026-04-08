@@ -385,7 +385,7 @@ build_compiled_class_info(
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
-    maps:put(Key, Value, Map).
+    Map#{Key => Value}.
 
 -doc """
 Convert a methodSpecs map to the instance_methods format expected by the class gen_server.
@@ -400,9 +400,9 @@ build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
         fun
             (Selector, Fun, Acc) when is_function(Fun) ->
                 {arity, Arity} = erlang:fun_info(Fun, arity),
-                maps:put(Selector, #{block => Fun, arity => Arity}, Acc);
+                Acc#{Selector => #{block => Fun, arity => Arity}};
             (Selector, MethodInfo, Acc) when is_map(MethodInfo) ->
-                maps:put(Selector, MethodInfo, Acc);
+                Acc#{Selector => MethodInfo};
             (_Selector, _Other, Acc) ->
                 Acc
         end,

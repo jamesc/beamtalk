@@ -562,6 +562,7 @@ handle_call(
     } = State
 ) ->
     Result =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(Selector, Methods) of
             {ok, MethodInfo} ->
                 #{
@@ -582,6 +583,7 @@ handle_call(
     _From,
     #class_state{method_return_types = MRT} = State
 ) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Selector, MRT) of
         {ok, Type} -> {reply, {ok, Type}, State};
         error -> {reply, not_found, State}
@@ -591,6 +593,7 @@ handle_call(
     _From,
     #class_state{class_method_return_types = CMRT} = State
 ) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Selector, CMRT) of
         {ok, Type} -> {reply, {ok, Type}, State};
         error -> {reply, not_found, State}
@@ -747,7 +750,7 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     {reply, maps:get(Name, ClassVars, nil), State};
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    {reply, Value, State#class_state{class_state = maps:put(Name, Value, ClassVars)}}.
+    {reply, Value, State#class_state{class_state = ClassVars#{Name => Value}}}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(

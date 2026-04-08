@@ -120,6 +120,7 @@ Object, and Actor. The bootstrap no longer registers these classes.
 load_compiled_stdlib_modules() ->
     %% Ensure the beamtalk_stdlib app is loaded (not started — just metadata)
     _ = application:load(beamtalk_stdlib),
+    % elp:fixme W0011 intentional cross-app read
     case application:get_env(beamtalk_stdlib, classes) of
         {ok, ClassList} when is_list(ClassList) ->
             %% ADR 0070 Phase 4: ClassList is now a list of maps:
@@ -156,6 +157,7 @@ be loaded explicitly.
 -spec load_protocol_modules() -> ok.
 load_protocol_modules() ->
     _ = application:load(beamtalk_stdlib),
+    % elp:fixme W0011 intentional cross-app read
     case application:get_env(beamtalk_stdlib, protocol_modules) of
         {ok, Modules} when is_list(Modules) ->
             lists:foreach(
@@ -213,6 +215,7 @@ discover_and_load_fallback(Dir) ->
     case file:list_dir(Dir) of
         {ok, Files} ->
             Modules = [
+                % elp:fixme W0023 intentional atom creation
                 list_to_atom(filename:rootname(F))
              || F <- Files, filename:extension(F) =:= ".beam"
             ],

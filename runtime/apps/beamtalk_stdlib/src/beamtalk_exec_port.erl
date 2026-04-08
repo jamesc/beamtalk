@@ -104,6 +104,7 @@ spawn_child(Port, ChildId, Executable, Args, Options) ->
     %% Only include dir when explicitly provided — empty string causes
     %% Command::current_dir("") to fail with ENOENT on the Rust side.
     Cmd =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(dir, Options) of
             {ok, Dir} when byte_size(Dir) > 0 -> Base#{dir => Dir};
             _ -> Base
