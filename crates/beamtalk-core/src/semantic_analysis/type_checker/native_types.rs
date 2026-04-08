@@ -31,6 +31,7 @@
 use super::native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
 use super::types::{DynamicReason, InferredType, TypeProvenance};
 use ecow::EcoString;
+use std::collections::HashMap;
 
 /// Prefix for spec module lines in the build worker protocol.
 const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
@@ -166,9 +167,34 @@ fn parse_erlang_spec_term(term: &str) -> Vec<FunctionSignature> {
     // Split into individual map entries at top-level `#{` boundaries
     let maps = split_top_level_maps(inner);
 
-    maps.iter()
+    let parsed: Vec<(bool, FunctionSignature)> = maps
+        .iter()
         .filter_map(|map_str| parse_spec_map(map_str))
-        .collect()
+        .collect();
+
+    // Deduplicate keyword aliases that normalize to the same (name, arity).
+    // E.g., `terminateChild/2`, `'terminateChild:class:'/2`, and
+    // `'terminateChild:child:'/2` all normalize to `terminateChild/2`.
+    // Prefer the bare-name spec (no colons in raw name) over keyword aliases,
+    // since the bare spec's parameter names are canonical.
+    let mut seen: HashMap<(String, u8), usize> = HashMap::new();
+    let mut result: Vec<FunctionSignature> = Vec::with_capacity(parsed.len());
+
+    for (is_bare, sig) in parsed {
+        let key = (sig.name.clone(), sig.arity);
+        if let Some(&idx) = seen.get(&key) {
+            // Already have one — replace only if the new one is bare and the old was not
+            if is_bare {
+                result[idx] = sig;
+            }
+            // Otherwise keep the existing entry
+        } else {
+            seen.insert(key, result.len());
+            result.push(sig);
+        }
+    }
+
+    result
 }
 
 /// Splits a string containing multiple Erlang maps at the top level.
@@ -245,13 +271,16 @@ fn split_top_level_maps(input: &str) -> Vec<&str> {
 ///   params => [#{name => <<"list">>,type => <<"List">>}],
 ///   return_type => <<"List">>}
 /// ```
-fn parse_spec_map(map_str: &str) -> Option<FunctionSignature> {
+/// Returns `(is_bare_name, signature)` where `is_bare_name` is true when
+/// the raw Erlang function name has no colons (i.e., it's not a keyword alias).
+fn parse_spec_map(map_str: &str) -> Option<(bool, FunctionSignature)> {
     let inner = map_str
         .trim()
         .strip_prefix("#{")
         .and_then(|s| s.strip_suffix('}'))?;
 
     let raw_name = extract_binary_value(inner, "name")?;
+    let is_bare = !raw_name.contains(':');
     // Normalize the function name to match selector_to_function/1 in
     // beamtalk_erlang_proxy: strip everything from the first colon onward.
     // E.g., "readAll:" → "readAll", "new:type:" → "new".
@@ -264,14 +293,17 @@ fn parse_spec_map(map_str: &str) -> Option<FunctionSignature> {
     let params = extract_params_list(inner)?;
     let line = extract_integer_value(inner, "line").and_then(|v| u32::try_from(v).ok());
 
-    Some(FunctionSignature {
-        name,
-        arity: u8::try_from(arity).ok()?,
-        params,
-        return_type: map_type_name(&return_type_str),
-        provenance: TypeProvenance::Extracted,
-        line,
-    })
+    Some((
+        is_bare,
+        FunctionSignature {
+            name,
+            arity: u8::try_from(arity).ok()?,
+            params,
+            return_type: map_type_name(&return_type_str),
+            provenance: TypeProvenance::Extracted,
+            line,
+        },
+    ))
 }
 
 /// Normalizes a function name from the spec reader to its canonical bare form.
@@ -703,5 +735,45 @@ mod tests {
         // Should find by bare name, not "readAll:"
         assert!(reg.lookup("beamtalk_file", "readAll", 1).is_some());
         assert!(reg.lookup("beamtalk_file", "readAll:", 1).is_none());
+    }
+
+    #[test]
+    fn dedup_keyword_aliases_prefers_bare_spec() {
+        // When 'terminateChild/2', 'terminateChild:class:/2', and
+        // 'terminateChild:child:/2' all normalize to terminateChild/2,
+        // the bare function's spec should win.
+        let line = concat!(
+            "beamtalk-specs-module:beamtalk_supervisor:[",
+            "#{arity => 2,name => <<\"terminateChild:class:\">>,",
+            "params => [#{name => <<\"arg\">>,type => <<\"Dynamic\">>},",
+            "#{name => <<\"class\">>,type => <<\"Object\">>}],",
+            "return_type => <<\"Nil\">>},",
+            "#{arity => 2,name => <<\"terminateChild\">>,",
+            "params => [#{name => <<\"arg\">>,type => <<\"Dynamic\">>},",
+            "#{name => <<\"arg\">>,type => <<\"Dynamic\">>}],",
+            "return_type => <<\"Nil\">>},",
+            "#{arity => 2,name => <<\"terminateChild:child:\">>,",
+            "params => [#{name => <<\"arg\">>,type => <<\"Dynamic\">>},",
+            "#{name => <<\"child\">>,type => <<\"Dynamic\">>}],",
+            "return_type => <<\"Nil\">>}]",
+        );
+        let mut reg = NativeTypeRegistry::new();
+        parse_specs_line(line, &mut reg);
+
+        // Should have exactly one entry for terminateChild/2
+        let fns = reg.module_functions("beamtalk_supervisor").unwrap();
+        let tc_fns: Vec<_> = fns
+            .iter()
+            .filter(|f| f.name == "terminateChild" && f.arity == 2)
+            .collect();
+        assert_eq!(tc_fns.len(), 1, "Should deduplicate to one entry");
+
+        // The bare spec has unnamed "arg" params, not "class" from the alias
+        let sig = tc_fns[0];
+        assert_eq!(
+            sig.params[1].keyword.as_deref(),
+            Some("arg"),
+            "Bare spec's unnamed param should win over keyword alias's 'class'"
+        );
     }
 }

@@ -950,6 +950,16 @@ resolve_user_type_local_test() ->
         erase(beamtalk_type_depth)
     end.
 
+%% beamtalk_object() maps to Object (the BT root class), not Tuple.
+%% This is a special case — beamtalk_object() is defined as tuple() in
+%% beamtalk.hrl, but it represents "any Beamtalk object" in the type system.
+resolve_user_type_beamtalk_object_test() ->
+    %% Should resolve to Object regardless of type registry contents
+    ?assertEqual(
+        <<"Object">>,
+        beamtalk_spec_reader:map_type({user_type, 0, beamtalk_object, []})
+    ).
+
 %% Chained user_type resolution: type aliases referencing other type aliases.
 resolve_user_type_chained_test() ->
     %% -type base() :: atom().

@@ -1096,6 +1096,12 @@ impl TypeChecker {
                 if expected == actual {
                     continue;
                 }
+                // Object is the root of the BT class hierarchy — any class is
+                // a subtype. This arises when Erlang specs use beamtalk_object()
+                // (which maps to Object) and the call site passes a concrete class.
+                if expected == "Object" {
+                    continue;
+                }
                 let param_pos = i + 1;
                 let fallback_label = format!("parameter {param_pos}");
                 let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
@@ -1141,6 +1147,12 @@ impl TypeChecker {
             // Check against the declared keyword at this position
             if let Some(param) = sig.params.get(i) {
                 if let Some(ref declared_keyword) = param.keyword {
+                    // Skip unnamed/positional params — "arg" is the default
+                    // placeholder from beamtalk_spec_reader when no variable
+                    // name appears in the Erlang -spec.
+                    if declared_keyword == "arg" {
+                        continue;
+                    }
                     if call_keyword != declared_keyword.as_str() {
                         let param_pos = i + 1;
                         self.diagnostics.push(
