@@ -162,7 +162,7 @@ erlangHelp(ModuleArg) ->
 Format Erlang function documentation (erlangHelp: moduleName selector: #fn).
 Called via `(Erlang beamtalk_interface) erlangHelp: "lists" selector: #reverse`.
 """.
--spec erlangHelp(binary(), atom() | binary()) -> binary().
+-spec erlangHelp(ModuleName :: binary(), Selector :: atom() | binary()) -> binary().
 erlangHelp(ModuleArg, SelectorArg) ->
     handle_erlang_help(ModuleArg, SelectorArg).
 

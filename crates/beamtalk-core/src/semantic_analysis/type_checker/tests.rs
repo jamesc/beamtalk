@@ -9970,6 +9970,96 @@ fn test_ffi_member_returns_boolean() {
     );
 }
 
+// ---- Object subtype acceptance and unnamed param keyword skip ----
+
+#[test]
+fn test_ffi_object_param_accepts_any_class() {
+    // An FFI function expecting Object (from beamtalk_object() spec) should
+    // accept any concrete class type without warning.
+    let mut reg = NativeTypeRegistry::new();
+    reg.register_module(
+        "beamtalk_supervisor",
+        vec![FunctionSignature {
+            name: "startLink".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: Some(ecow::EcoString::from("arg")),
+                type_: InferredType::known("Object"),
+            }],
+            return_type: InferredType::Dynamic(DynamicReason::DynamicSpec),
+            provenance: TypeProvenance::Extracted,
+            line: None,
+        }],
+    );
+    // Pass a class reference (Supervisor) as the argument — should be accepted
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("beamtalk_supervisor"),
+        keyword_selector(&["startLink:"]),
+        vec![class_ref("Supervisor")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Object param should accept any class type. Got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn test_ffi_unnamed_arg_param_skips_keyword_mismatch() {
+    // An FFI function with unnamed params (keyword = "arg") should not warn
+    // when the call site uses a different keyword name.
+    let mut reg = NativeTypeRegistry::new();
+    reg.register_module(
+        "beamtalk_supervisor",
+        vec![FunctionSignature {
+            name: "terminateChild".to_string(),
+            arity: 2,
+            params: vec![
+                ParamType {
+                    keyword: Some(ecow::EcoString::from("arg")),
+                    type_: InferredType::Dynamic(DynamicReason::DynamicSpec),
+                },
+                ParamType {
+                    keyword: Some(ecow::EcoString::from("arg")),
+                    type_: InferredType::Dynamic(DynamicReason::DynamicSpec),
+                },
+            ],
+            return_type: InferredType::known("Nil"),
+            provenance: TypeProvenance::Extracted,
+            line: None,
+        }],
+    );
+    // Call with child: keyword — should not warn about mismatch with "arg"
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("beamtalk_supervisor"),
+        keyword_selector(&["terminateChild:", "child:"]),
+        vec![var("self"), var("child")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+
+    let keyword_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not match"))
+        .collect();
+    assert!(
+        keyword_warnings.is_empty(),
+        "Unnamed 'arg' param should not trigger keyword mismatch. Got: {keyword_warnings:?}"
+    );
+}
+
 // ---- BT-1880: Class protocol selectors vs FFI module lookups ----
 
 #[test]

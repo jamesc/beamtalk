@@ -548,6 +548,11 @@ clear_type_context() ->
 %% Try to resolve a user_type via the local type registry.
 %% Returns the mapped Beamtalk type or <<"Dynamic">> if not resolvable.
 -spec resolve_user_type(atom(), [tuple()]) -> binary().
+resolve_user_type(beamtalk_object, []) ->
+    %% beamtalk_object() is the runtime representation of any Beamtalk object.
+    %% It's defined as tuple() in beamtalk.hrl, but in the BT type system it
+    %% corresponds to Object (the root class), not the generic Tuple type.
+    <<"Object">>;
 resolve_user_type(Name, Args) ->
     Arity = length(Args),
     OpaqueSet = get(beamtalk_opaque_set),
