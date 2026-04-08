@@ -11203,3 +11203,212 @@ fn dynamic_reason_descriptions() {
     );
     assert_eq!(DynamicReason::Unknown.description(), None);
 }
+
+// ---- block param type propagation from method signatures ----
+
+#[test]
+fn block_params_typed_from_sort_on_parameterized_list() {
+    // List(String)>>sort: declares Block(E, E, Boolean) — block params should get String.
+    let source = "typed Object subclass: T\n  field: items :: List(String)\n  m -> List(String) => self.items sort: [:a :b | a < b]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "sort: block params should be typed from List(String), got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_typed_from_any_satisfy_on_parameterized_list() {
+    // List(Integer)>>anySatisfy: declares Block(E, Boolean) — block param should get Integer.
+    let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Boolean => self.nums anySatisfy: [:n | n > 0]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "anySatisfy: block param should be typed from List(Integer), got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_typed_from_inject_into() {
+    // List(Integer)>>inject:into: declares [A, Block(A, E, A)] — acc gets type from first arg.
+    let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Integer => self.nums inject: 0 into: [:acc :n | acc + n]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "inject:into: block params should be typed, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_typed_from_collect_on_parameterized_array() {
+    // Array(Integer)>>collect: declares Block(E, R) — block param should get Integer.
+    let source = "typed Object subclass: T\n  field: nums :: Array(Integer)\n  m -> Array => self.nums collect: [:n | n + 1]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "collect: block param should be typed from Array(Integer), got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_remain_dynamic_for_unparameterized_list() {
+    // List>>sort: with unparameterized List — E can't be resolved, params stay Dynamic.
+    let source = "typed Object subclass: T\n  field: items :: List\n  m -> List => self.items sort: [:a :b | a < b]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        !dynamic_warnings.is_empty(),
+        "unparameterized List should still produce Dynamic warnings for block params"
+    );
+}
+
+#[test]
+fn resolve_type_name_string_parametric() {
+    // List(String) should parse to Known("List") with type_args [Known("String")]
+    let result = TypeChecker::resolve_type_name_string(&"List(String)".into());
+    match &result {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "List");
+            assert_eq!(type_args.len(), 1);
+            assert_eq!(type_args[0], InferredType::known("String"));
+        }
+        other => panic!("Expected Known with type_args, got {other:?}"),
+    }
+}
+
+#[test]
+fn resolve_type_name_string_nested_parametric() {
+    // Result(List(Integer), String) should parse correctly
+    let result = TypeChecker::resolve_type_name_string(&"Result(List(Integer), String)".into());
+    match &result {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "Result");
+            assert_eq!(type_args.len(), 2);
+            // First arg: List(Integer)
+            match &type_args[0] {
+                InferredType::Known {
+                    class_name,
+                    type_args: inner,
+                    ..
+                } => {
+                    assert_eq!(class_name.as_str(), "List");
+                    assert_eq!(inner.len(), 1);
+                    assert_eq!(inner[0], InferredType::known("Integer"));
+                }
+                other => panic!("Expected Known(List(Integer)), got {other:?}"),
+            }
+            assert_eq!(type_args[1], InferredType::known("String"));
+        }
+        other => panic!("Expected Known with type_args, got {other:?}"),
+    }
+}
+
+#[test]
+fn block_params_fewer_than_signature_no_crash() {
+    // List(String)>>sort: expects Block(E, E, Boolean) — 2 block params.
+    // User passes a 1-param block. Extra resolved types are silently dropped.
+    let source = "typed Object subclass: T\n  field: items :: List(String)\n  m -> List(String) => self.items sort: [:a | a]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    // Should not crash, and the one param should be typed (no Dynamic warning for it)
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "single block param should still be typed from List(String), got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_more_than_signature_extra_stays_dynamic() {
+    // List(Integer)>>anySatisfy: expects Block(E, Boolean) — 1 block param.
+    // User passes a 2-param block. Extra param stays Dynamic.
+    let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Boolean => self.nums anySatisfy: [:n :extra | n > 0]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    // The first param (n) should be typed, but extra stays Dynamic
+    // We just verify it doesn't crash; extra param is not used, so no warning
+}
+
+#[test]
+fn block_params_typed_via_method_parameter_annotation() {
+    // Method parameter `items :: List(Dictionary)` — sort: block params should get Dictionary.
+    let source = "typed Object subclass: T\n  m: items :: List(Dictionary) -> List(Dictionary) => items sort: [:a :b | (a at: \"x\" ifAbsent: [0]) < (b at: \"x\" ifAbsent: [0])]";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "block params should be typed from method param List(Dictionary), got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn split_union_respecting_parens_simple() {
+    let result = TypeChecker::split_union_respecting_parens("String | nil");
+    assert_eq!(result, vec!["String", "nil"]);
+}
+
+#[test]
+fn split_union_respecting_parens_inside_parametric() {
+    // Pipe inside parens should NOT cause a split
+    let result = TypeChecker::split_union_respecting_parens("Result(String | Integer, Error)");
+    assert_eq!(result, vec!["Result(String | Integer, Error)"]);
+}
+
+#[test]
+fn split_union_respecting_parens_mixed() {
+    // Top-level union with parametric member
+    let result = TypeChecker::split_union_respecting_parens("List(String) | nil");
+    assert_eq!(result, vec!["List(String)", "nil"]);
+}
