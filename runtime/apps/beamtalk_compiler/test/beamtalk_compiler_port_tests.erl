@@ -1,13 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_compiler_port (ADR 0022, Phase 0 wire check).
-
 -module(beamtalk_compiler_port_tests).
 
--include_lib("eunit/include/eunit.hrl").
--include_lib("kernel/include/logger.hrl").
+-moduledoc "Tests for beamtalk_compiler_port (ADR 0022, Phase 0 wire check).".
 
+-include_lib("eunit/include/eunit.hrl").
 %% Helper to find the compiler binary
 compiler_binary() ->
     %% Look in target/debug from project root
@@ -32,7 +30,11 @@ with_port(Fun) ->
     try
         Fun(Port)
     after
-        catch beamtalk_compiler_port:close(Port)
+        (try
+            beamtalk_compiler_port:close(Port)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% Tests
@@ -96,7 +98,11 @@ garbage_etf_handled_gracefully_test() ->
     after 5000 ->
         ?assert(false)
     end,
-    catch beamtalk_compiler_port:close(Port).
+    (try
+        beamtalk_compiler_port:close(Port)
+    catch
+        _:_ -> ok
+    end).
 
 compile_on_closed_port_returns_error_test() ->
     Port = beamtalk_compiler_port:open(compiler_binary()),

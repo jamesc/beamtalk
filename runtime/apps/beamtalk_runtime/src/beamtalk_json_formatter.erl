@@ -1,27 +1,29 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc JSON log formatter for the OTP logger framework.
-%%%
-%%% **DDD Context:** Runtime Context
-%%%
-%%% Implements the `logger_formatter` behaviour to produce structured JSON
-%%% log lines. Used when the operator switches log format to `json` via
-%%% `beamtalk_logging_config:logFormat/1`.
-%%%
-%%% Output format (one JSON object per line):
-%%% ```json
-%%% {"time":"2026-03-17T14:23:01.234Z","level":"info","msg":"Actor initialized",
-%%%  "domain":"runtime","class":"Counter","selector":"increment"}
-%%% ```
-%%%
-%%% Uses the OTP `json` module (OTP 27+) for JSON encoding.
-
 -module(beamtalk_json_formatter).
+
+%%% **DDD Context:** Runtime Context
+
+-moduledoc """
+JSON log formatter for the OTP logger framework.
+
+Implements the `logger_formatter` behaviour to produce structured JSON
+log lines. Used when the operator switches log format to `json` via
+`beamtalk_logging_config:logFormat/1`.
+
+Output format (one JSON object per line):
+```json
+{"time":"2026-03-17T14:23:01.234Z","level":"info","msg":"Actor initialized",
+ "domain":"runtime","class":"Counter","selector":"increment"}
+```
+
+Uses the OTP `json` module (OTP 27+) for JSON encoding.
+""".
 
 -export([format/2, check_config/1]).
 
-%% @doc Format a log event as a single-line JSON object followed by a newline.
+-doc "Format a log event as a single-line JSON object followed by a newline.".
 -spec format(logger:log_event(), logger:formatter_config()) -> unicode:chardata().
 format(#{level := Level, msg := Msg, meta := Meta}, _Config) ->
     try
@@ -42,8 +44,10 @@ format(#{level := Level, msg := Msg, meta := Meta}, _Config) ->
             )
     end.
 
-%% @doc Build the JSON log line. Separated from format/2 so the try-catch
-%% wrapper stays small.
+-doc """
+Build the JSON log line. Separated from format/2 so the try-catch
+wrapper stays small.
+""".
 -spec format_json(atom(), term(), map()) -> unicode:chardata().
 format_json(Level, Msg, Meta) ->
     TimeBin = format_time(Meta),
@@ -65,7 +69,7 @@ format_json(Level, Msg, Meta) ->
     Json = iolist_to_binary(json:encode(maps:from_list(lists:reverse(Fields7)))),
     [Json, $\n].
 
-%% @doc Validate formatter configuration. Accepts any config.
+-doc "Validate formatter configuration. Accepts any config.".
 -spec check_config(logger:formatter_config()) -> ok | {error, term()}.
 check_config(_Config) ->
     ok.
@@ -74,7 +78,7 @@ check_config(_Config) ->
 %% Internal helpers
 %%====================================================================
 
-%% @doc Format the timestamp from metadata as an ISO 8601 UTC string.
+-doc "Format the timestamp from metadata as an ISO 8601 UTC string.".
 -spec format_time(map()) -> binary().
 format_time(#{time := Timestamp}) ->
     %% Timestamp is in microseconds since epoch
@@ -91,7 +95,7 @@ format_time(#{time := Timestamp}) ->
 format_time(_) ->
     <<"unknown">>.
 
-%% @doc Best-effort message extraction for the crash fallback path.
+-doc "Best-effort message extraction for the crash fallback path.".
 -spec format_msg_fallback(term()) -> unicode:chardata().
 format_msg_fallback({string, Msg}) ->
     Msg;
@@ -106,10 +110,12 @@ format_msg_fallback({Format, Args}) when is_list(Format), is_list(Args) ->
 format_msg_fallback(Other) ->
     io_lib:format("~tp", [Other]).
 
-%% @doc Format the log message and extract structured fields from OTP reports.
-%%
-%% Returns {MessageBinary, ExtraFields} where ExtraFields is a list of
-%% {Key, Value} pairs extracted from structured OTP reports.
+-doc """
+Format the log message and extract structured fields from OTP reports.
+
+Returns {MessageBinary, ExtraFields} where ExtraFields is a list of
+{Key, Value} pairs extracted from structured OTP reports.
+""".
 -spec format_msg_structured(term(), map()) -> {binary(), [{binary(), term()}]}.
 format_msg_structured({string, Msg}, _Meta) ->
     {safe_to_binary(Msg), []};
@@ -126,9 +132,11 @@ format_msg_structured({report, Report}, Meta) ->
 format_msg_structured({Format, Args}, _Meta) ->
     {safe_to_binary(io_lib:format(Format, Args)), []}.
 
-%% @doc Extract structured fields from OTP report maps.
-%%
-%% Recognises gen_server terminate, supervisor, and proc_lib crash reports.
+-doc """
+Extract structured fields from OTP report maps.
+
+Recognises gen_server terminate, supervisor, and proc_lib crash reports.
+""".
 -spec extract_report_fields(map(), map()) ->
     {binary(), [{binary(), term()}]} | undefined.
 extract_report_fields(#{label := {gen_server, terminate}, name := Name, reason := Reason}, _Meta) ->
@@ -243,8 +251,10 @@ extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta)
 extract_report_fields(_Report, _Meta) ->
     undefined.
 
-%% @doc Build a human-readable message, appending any beamtalk error found in
-%% the OTP crash reason. Falls back to the raw reason if no beamtalk error.
+-doc """
+Build a human-readable message, appending any beamtalk error found in
+the OTP crash reason. Falls back to the raw reason if no beamtalk error.
+""".
 -spec format_reason_with_bt_error(iolist(), term()) -> binary().
 format_reason_with_bt_error(Prefix, Reason) ->
     try
@@ -259,8 +269,10 @@ format_reason_with_bt_error(Prefix, Reason) ->
         _:_ -> safe_to_binary(io_lib:format("~ts: ~tp", [Prefix, Reason]))
     end.
 
-%% @doc Format a crash reason concisely for the "reason" JSON field.
-%% Extracts beamtalk error message if present, otherwise uses ~tp.
+-doc """
+Format a crash reason concisely for the "reason" JSON field.
+Extracts beamtalk error message if present, otherwise uses ~tp.
+""".
 -spec format_reason_concise(term()) -> binary().
 format_reason_concise(Reason) ->
     try
@@ -274,7 +286,7 @@ format_reason_concise(Reason) ->
         _:_ -> safe_to_binary(io_lib:format("~tp", [Reason]))
     end.
 
-%% @doc Format a report using the report callback or fallback.
+-doc "Format a report using the report callback or fallback.".
 -spec format_report_fallback(term(), map()) -> binary().
 format_report_fallback(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
@@ -287,10 +299,12 @@ format_report_fallback(Report, Meta) ->
             safe_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end.
 
-%% @doc Format the domain metadata as a dot-separated binary.
-%%
-%% Uses explicit domain from metadata if present. Otherwise, infers domain
-%% from OTP report labels (gen_server, supervisor, proc_lib → "otp").
+-doc """
+Format the domain metadata as a dot-separated binary.
+
+Uses explicit domain from metadata if present. Otherwise, infers domain
+from OTP report labels (gen_server, supervisor, proc_lib → "otp").
+""".
 -spec format_domain(term(), map()) -> binary() | undefined.
 format_domain(_Msg, #{domain := Domain}) when is_list(Domain) ->
     iolist_to_binary(
@@ -301,7 +315,7 @@ format_domain({report, Report}, _Meta) when is_map(Report) ->
 format_domain(_Msg, _Meta) ->
     undefined.
 
-%% @doc Infer domain from OTP report labels.
+-doc "Infer domain from OTP report labels.".
 -spec infer_domain_from_report(map()) -> binary() | undefined.
 infer_domain_from_report(#{label := {gen_server, _}}) -> <<"otp">>;
 infer_domain_from_report(#{label := {supervisor, _}}) -> <<"otp">>;
@@ -309,27 +323,31 @@ infer_domain_from_report(#{label := {proc_lib, _}}) -> <<"otp">>;
 infer_domain_from_report(#{label := {application_controller, _}}) -> <<"otp">>;
 infer_domain_from_report(_) -> undefined.
 
-%% @doc Format the MFA metadata as a binary.
-%%
-%% Uses explicit mfa from log event metadata. Does not infer mfa from OTP
-%% report fields — registered names belong in the "name" field, not "mfa".
+-doc """
+Format the MFA metadata as a binary.
+
+Uses explicit mfa from log event metadata. Does not infer mfa from OTP
+report fields — registered names belong in the "name" field, not "mfa".
+""".
 -spec format_mfa(term(), map()) -> binary() | undefined.
 format_mfa(_Msg, #{mfa := {M, F, A}}) ->
     iolist_to_binary(io_lib:format("~s:~s/~B", [M, F, A]));
 format_mfa(_Msg, _Meta) ->
     undefined.
 
-%% @doc Format the PID metadata as a binary.
+-doc "Format the PID metadata as a binary.".
 -spec format_pid(map()) -> binary() | undefined.
 format_pid(#{pid := Pid}) when is_pid(Pid) ->
     list_to_binary(pid_to_list(Pid));
 format_pid(_) ->
     undefined.
 
-%% @doc Append user-supplied metadata fields that aren't handled by the core formatter.
-%%
-%% OTP standard keys (time, pid, gl, file, line, mfa, domain, report_cb, etc.)
-%% are excluded. Everything else is formatted as `~tp` and included.
+-doc """
+Append user-supplied metadata fields that aren't handled by the core formatter.
+
+OTP standard keys (time, pid, gl, file, line, mfa, domain, report_cb, etc.)
+are excluded. Everything else is formatted as `~tp` and included.
+""".
 -spec append_extra_meta(map(), [{binary(), term()}]) -> [{binary(), term()}].
 append_extra_meta(Meta, Fields) ->
     Dominated = [
@@ -356,11 +374,13 @@ append_extra_meta(Meta, Fields) ->
         Extra
     ).
 
-%% @doc Format an extra metadata value for JSON output.
-%%
-%% Stacktraces get special formatting: Erlang stacktrace lists are converted
-%% to human-readable frames via `beamtalk_stack_frame`. Non-list stacktraces
-%% (e.g., tuples from Core Erlang catch) are scanned for beamtalk errors.
+-doc """
+Format an extra metadata value for JSON output.
+
+Stacktraces get special formatting: Erlang stacktrace lists are converted
+to human-readable frames via `beamtalk_stack_frame`. Non-list stacktraces
+(e.g., tuples from Core Erlang catch) are scanned for beamtalk errors.
+""".
 -spec format_extra_value(atom() | binary(), term()) -> binary().
 format_extra_value(stacktrace, Stack) when is_list(Stack) ->
     %% Standard Erlang stacktrace — convert to human-readable frames
@@ -399,7 +419,7 @@ format_extra_value(_Key, Value) when is_pid(Value) ->
 format_extra_value(_Key, Value) ->
     safe_to_binary(io_lib:format("~tp", [Value])).
 
-%% @doc Format a single StackFrame tagged map as a concise string.
+-doc "Format a single StackFrame tagged map as a concise string.".
 -spec format_stack_frame(map()) -> iolist().
 format_stack_frame(#{class_name := ClassName, function := Function, arity := Arity} = Frame) ->
     ClassPart =
@@ -421,14 +441,16 @@ format_stack_frame(#{class_name := ClassName, function := Function, arity := Ari
         end,
     io_lib:format("  ~ts>>~ts/~B~ts", [ClassPart, FunPart, Arity, Location]).
 
-%% @doc Convert a metadata key to a binary.  Keys are usually atoms, but
-%% user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.
+-doc """
+Convert a metadata key to a binary.  Keys are usually atoms, but
+user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.
+""".
 -spec key_to_binary(atom() | binary()) -> binary().
 key_to_binary(Key) when is_atom(Key) -> atom_to_binary(Key, utf8);
 key_to_binary(Key) when is_binary(Key) -> Key;
 key_to_binary(Key) -> iolist_to_binary(io_lib:format("~tp", [Key])).
 
-%% @doc Convert unicode chardata to binary, falling back to latin1 on error.
+-doc "Convert unicode chardata to binary, falling back to latin1 on error.".
 -spec safe_to_binary(unicode:chardata()) -> binary().
 safe_to_binary(Chardata) ->
     case unicode:characters_to_binary(Chardata) of
@@ -437,7 +459,7 @@ safe_to_binary(Chardata) ->
         {incomplete, Encoded, _} -> Encoded
     end.
 
-%% @doc Conditionally prepend a key-value pair if the value is not undefined.
+-doc "Conditionally prepend a key-value pair if the value is not undefined.".
 -spec maybe_add(binary(), term(), [{binary(), term()}]) -> [{binary(), term()}].
 maybe_add(_Key, undefined, Acc) ->
     Acc;

@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_dispatch module.
-%%%
-%%% Tests the method dispatch domain service including:
-%%% - Hierarchy walking (lookup/5)
-%%% - Super send dispatch (super/5)
-%%% - Extension method checking
-%%% - Error handling (structured #beamtalk_error{})
-%%%
-%%% ## Test Strategy
-%%%
-%%% Uses the real compiled Counter fixture (tests/e2e/fixtures/counter.bt)
-%%% and beamtalk_object_class registry for realistic testing.
-
 -module(beamtalk_dispatch_tests).
+
+-moduledoc """
+Unit tests for beamtalk_dispatch module.
+
+Tests the method dispatch domain service including:
+- Hierarchy walking (lookup/5)
+- Super send dispatch (super/5)
+- Extension method checking
+- Error handling (structured #beamtalk_error{})
+
+## Test Strategy
+
+Uses the real compiled Counter fixture (tests/e2e/fixtures/counter.bt)
+and beamtalk_object_class registry for realistic testing.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -239,7 +241,11 @@ test_extension_priority() ->
     Result = beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter'),
 
     %% Clean up the extension to avoid leaking between tests
-    catch ets:delete(beamtalk_extensions, {'Counter', testExtension}),
+    (try
+        ets:delete(beamtalk_extensions, {'Counter', testExtension})
+    catch
+        _:_ -> ok
+    end),
 
     %% Should invoke the extension
     ?assertMatch({reply, extension_called, _}, Result).
@@ -366,7 +372,11 @@ test_extension_error_propagation() ->
             beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter')
         )
     after
-        catch ets:delete(beamtalk_extensions, {'Counter', crashExt})
+        (try
+            ets:delete(beamtalk_extensions, {'Counter', crashExt})
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% Test responds_to finds extension methods
@@ -380,7 +390,11 @@ test_responds_to_extension_method() ->
     try
         ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter'))
     after
-        catch ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
+        (try
+            ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -513,7 +527,11 @@ test_super_finds_extension_on_superclass() ->
         ?assertMatch({reply, super_extension_called, _}, Result)
     after
         %% Clean up extension (ignore any error if it's already gone)
-        catch ets:delete(beamtalk_extensions, {'Actor', superExtTest})
+        (try
+            ets:delete(beamtalk_extensions, {'Actor', superExtTest})
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -544,7 +562,11 @@ test_extension_state_threading() ->
         %% State should be threaded: value 42 + 100 = 142
         ?assertMatch({reply, 142, #{'value' := 142}}, Result)
     after
-        catch ets:delete(beamtalk_extensions, {'Counter', addHundred})
+        (try
+            ets:delete(beamtalk_extensions, {'Counter', addHundred})
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% Test: arity-2 (value-type) extension works via runtime dispatch path
@@ -569,7 +591,11 @@ test_value_type_extension_via_runtime_dispatch() ->
         %% Arity-2 path: original State is preserved
         ?assertMatch({reply, {value_ext_called, 42}, _}, Result)
     after
-        catch ets:delete(beamtalk_extensions, {'Integer', testValExt})
+        (try
+            ets:delete(beamtalk_extensions, {'Integer', testValExt})
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -734,6 +760,7 @@ test_depth_limit_exceeded() ->
     %% Build a chain of 22 classes (deeper than MAX_HIERARCHY_DEPTH = 20).
     %% Each class has no methods and points to the next as superclass.
     NumClasses = 22,
+    % elp:fixme W0023 intentional atom creation
     ClassNames = [
         list_to_atom("DepthTestClass" ++ integer_to_list(I))
      || I <- lists:seq(1, NumClasses)

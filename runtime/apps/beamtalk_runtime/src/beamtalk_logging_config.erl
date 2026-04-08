@@ -1,26 +1,28 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Logging configuration API for the Beamtalk runtime.
-%%%
-%%% **DDD Context:** Runtime Context
-%%%
-%%% Provides functions to query and control OTP logger settings from
-%%% Beamtalk code. BeamtalkInterface delegates to this module for
-%%% log-level management, per-subsystem debug toggling, and logger
-%%% introspection.
-%%%
-%%% Debug targets are tracked in an ETS table so that
-%%% `activeDebugTargets/0` can report what is currently enabled.
-%%%
-%%% `enableDebug/1` is polymorphic on argument type:
-%%% - **Symbol** (atom) — enables debug for a named subsystem
-%%% - **Class reference** (`#beamtalk_object{}` with class tag) —
-%%%   installs a primary logger filter for `beamtalk_class` metadata
-%%% - **Actor instance** (`#beamtalk_object{}` with PID) —
-%%%   sets per-process debug level (transient, lost on restart)
-
 -module(beamtalk_logging_config).
+
+%%% **DDD Context:** Runtime Context
+
+-moduledoc """
+Logging configuration API for the Beamtalk runtime.
+
+Provides functions to query and control OTP logger settings from
+Beamtalk code. BeamtalkInterface delegates to this module for
+log-level management, per-subsystem debug toggling, and logger
+introspection.
+
+Debug targets are tracked in an ETS table so that
+`activeDebugTargets/0` can report what is currently enabled.
+
+`enableDebug/1` is polymorphic on argument type:
+- **Symbol** (atom) — enables debug for a named subsystem
+- **Class reference** (`#beamtalk_object{}` with class tag) —
+  installs a primary logger filter for `beamtalk_class` metadata
+- **Actor instance** (`#beamtalk_object{}` with PID) —
+  sets per-process debug level (transient, lost on restart)
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -85,14 +87,16 @@ subsystem_modules(_) ->
 %% Public API
 %%====================================================================
 
-%% @doc Return the current OTP primary log level as an atom.
+-doc "Return the current OTP primary log level as an atom.".
 -spec logLevel() -> atom().
 logLevel() ->
     #{level := Level} = logger:get_primary_config(),
     Level.
 
-%% @doc Set the OTP primary log level. Returns `nil` on success or a
-%% `#beamtalk_error{}` for an invalid level.
+-doc """
+Set the OTP primary log level. Returns `nil` on success or a
+`#beamtalk_error{}` for an invalid level.
+""".
 -spec logLevel(atom()) -> nil | #beamtalk_error{}.
 logLevel(Level) when is_atom(Level) ->
     case lists:member(Level, ?VALID_LEVELS) of
@@ -127,12 +131,14 @@ logLevel(Level) ->
         )
     ).
 
-%% @doc Return the current log format as an atom (`text` or `json`).
-%%
-%% Inspects the formatter configured on the `beamtalk_file_log` handler.
-%% Returns `text` if the handler uses `logger_formatter` (the OTP default),
-%% `json` if it uses `beamtalk_json_formatter`, or `text` if no file
-%% handler is installed.
+-doc """
+Return the current log format as an atom (`text` or `json`).
+
+Inspects the formatter configured on the `beamtalk_file_log` handler.
+Returns `text` if the handler uses `logger_formatter` (the OTP default),
+`json` if it uses `beamtalk_json_formatter`, or `text` if no file
+handler is installed.
+""".
 -spec logFormat() -> text | json.
 logFormat() ->
     case logger:get_handler_config(beamtalk_file_log) of
@@ -142,11 +148,13 @@ logFormat() ->
             text
     end.
 
-%% @doc Switch the log format on the `beamtalk_file_log` handler.
-%%
-%% `text` configures `logger_formatter` with the default template.
-%% `json` configures `beamtalk_json_formatter` for structured JSON output.
-%% Returns `nil` on success or a `#beamtalk_error{}` for an invalid format.
+-doc """
+Switch the log format on the `beamtalk_file_log` handler.
+
+`text` configures `logger_formatter` with the default template.
+`json` configures `beamtalk_json_formatter` for structured JSON output.
+Returns `nil` on success or a `#beamtalk_error{}` for an invalid format.
+""".
 -spec logFormat(atom()) -> nil | #beamtalk_error{}.
 logFormat(text) ->
     Formatter =
@@ -179,20 +187,22 @@ logFormat(Format) ->
         )
     ).
 
-%% @doc Return the list of available debug target symbols.
+-doc "Return the list of available debug target symbols.".
 -spec debugTargets() -> [atom()].
 debugTargets() ->
     [actor, supervisor, dispatch, compiler, workspace, stdlib, hotreload, mcp, runtime, user].
 
-%% @doc Enable debug logging for a subsystem, class, or actor instance.
-%%
-%% Accepts three argument types:
-%% - Atom (symbol): enables debug for a named subsystem
-%% - Class reference (#beamtalk_object with class tag): installs a primary
-%%   logger filter matching #{beamtalk_class => ClassName} metadata and sets
-%%   module level on the compiled class module
-%% - Actor instance (#beamtalk_object with PID): sets per-process debug level
-%%   (transient — lost on actor restart)
+-doc """
+Enable debug logging for a subsystem, class, or actor instance.
+
+Accepts three argument types:
+- Atom (symbol): enables debug for a named subsystem
+- Class reference (#beamtalk_object with class tag): installs a primary
+  logger filter matching #{beamtalk_class => ClassName} metadata and sets
+  module level on the compiled class module
+- Actor instance (#beamtalk_object with PID): sets per-process debug level
+  (transient — lost on actor restart)
+""".
 -spec enableDebug(term()) -> nil | #beamtalk_error{}.
 enableDebug(Target) when is_atom(Target) ->
     case subsystem_modules(Target) of
@@ -225,6 +235,7 @@ enableDebug(Target) when is_atom(Target) ->
             end;
         {domain, Domain} ->
             ensure_table(),
+            % elp:fixme W0023 intentional atom creation
             FilterId = list_to_atom("beamtalk_debug_domain_" ++ atom_to_list(Target)),
             FilterFun = fun(LogEvent, _Extra) ->
                 case LogEvent of
@@ -276,13 +287,13 @@ enableDebug(Target) ->
             )
     end.
 
-%% @doc Disable debug logging for a subsystem, class, or actor instance.
+-doc "Disable debug logging for a subsystem, class, or actor instance.".
 -spec disableDebug(term()) -> nil | #beamtalk_error{}.
 disableDebug(Target) when is_atom(Target) ->
     case subsystem_modules(Target) of
         {module_level, Modules} ->
             ensure_table(),
-            lists:foreach(fun(M) -> logger:unset_module_level(M) end, Modules),
+            lists:foreach(fun logger:unset_module_level/1, Modules),
             case Target of
                 supervisor -> disable_supervisor_progress();
                 _ -> ok
@@ -298,7 +309,7 @@ disableDebug(Target) when is_atom(Target) ->
             ensure_table(),
             case ets:lookup(?DEBUG_TABLE, Target) of
                 [{Target, subsystem, FilterIds}] ->
-                    lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds),
+                    lists:foreach(fun logger:remove_handler/1, FilterIds),
                     ets:delete(?DEBUG_TABLE, Target),
                     nil;
                 [] ->
@@ -333,12 +344,14 @@ disableDebug(Target) ->
             )
     end.
 
-%% @doc Return the list of currently enabled debug targets.
-%%
-%% Returns a mixed list:
-%% - Atoms for subsystem targets (e.g. `actor`, `compiler`)
-%% - `{class, ClassName}` tuples for class debug targets
-%% - `{actor, Pid, ClassName}` tuples for per-actor debug targets
+-doc """
+Return the list of currently enabled debug targets.
+
+Returns a mixed list:
+- Atoms for subsystem targets (e.g. `actor`, `compiler`)
+- `{class, ClassName}` tuples for class debug targets
+- `{actor, Pid, ClassName}` tuples for per-actor debug targets
+""".
 -spec activeDebugTargets() -> list().
 activeDebugTargets() ->
     ensure_table(),
@@ -354,7 +367,7 @@ activeDebugTargets() ->
         ets:tab2list(?DEBUG_TABLE)
     ).
 
-%% @doc Disable all debug targets and clear module-level overrides.
+-doc "Disable all debug targets and clear module-level overrides.".
 -spec disableAllDebug() -> nil.
 disableAllDebug() ->
     ensure_table(),
@@ -364,7 +377,7 @@ disableAllDebug() ->
             ({Target, subsystem, FilterIds}) ->
                 case subsystem_modules(Target) of
                     {module_level, Modules} ->
-                        lists:foreach(fun(M) -> logger:unset_module_level(M) end, Modules),
+                        lists:foreach(fun logger:unset_module_level/1, Modules),
                         case Target of
                             supervisor -> disable_supervisor_progress();
                             _ -> ok
@@ -372,25 +385,25 @@ disableAllDebug() ->
                     {mcp_signal, _} ->
                         remove_mcp_signal_file();
                     {domain, _Domain} ->
-                        lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds);
+                        lists:foreach(fun logger:remove_handler/1, FilterIds);
                     unknown ->
                         ok
                 end;
             ({ClassName, user_class, FilterIds}) ->
-                lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+                lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
                 case beamtalk_class_module_table:lookup(ClassName) of
                     {ok, Module} -> logger:unset_module_level(Module);
                     not_found -> ok
                 end;
             ({_Pid, actor_instance, {_ClassName, FilterIds}}) ->
-                lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds)
+                lists:foreach(fun logger:remove_primary_filter/1, FilterIds)
         end,
         Targets
     ),
     ets:delete_all_objects(?DEBUG_TABLE),
     nil.
 
-%% @doc Return a formatted string describing the current logger state.
+-doc "Return a formatted string describing the current logger state.".
 -spec loggerInfo() -> binary().
 loggerInfo() ->
     Level = logLevel(),
@@ -401,12 +414,7 @@ loggerInfo() ->
                 <<"  (none)">>;
             _ ->
                 iolist_to_binary(
-                    lists:map(
-                        fun(T) ->
-                            format_debug_target(T)
-                        end,
-                        Active
-                    )
+                    [format_debug_target(T) || T <- Active]
                 )
         end,
     LogFile = find_log_file(),
@@ -422,7 +430,7 @@ loggerInfo() ->
 %% Internal helpers — format switching
 %%====================================================================
 
-%% @doc Apply a formatter config to the beamtalk_file_log handler.
+-doc "Apply a formatter config to the beamtalk_file_log handler.".
 -spec apply_format({module(), map()}) -> nil | #beamtalk_error{}.
 apply_format(Formatter) ->
     case logger:get_handler_config(beamtalk_file_log) of
@@ -438,13 +446,14 @@ apply_format(Formatter) ->
 %% Internal helpers — target type detection
 %%====================================================================
 
-%% @doc Detect whether a non-atom target is a class reference or actor instance.
+-doc "Detect whether a non-atom target is a class reference or actor instance.".
 -spec detect_target_type(term()) -> {class, atom()} | {actor, pid(), atom()} | unknown.
 detect_target_type(#beamtalk_object{class = ClassTag, pid = Pid}) ->
     case beamtalk_class_registry:is_class_name(ClassTag) of
         true ->
             %% Class reference — strip " class" suffix to get the actual class name
             ClassStr = atom_to_list(ClassTag),
+            % elp:fixme W0023 intentional atom creation - class name derived from known class tag
             ClassName = list_to_atom(lists:sublist(ClassStr, length(ClassStr) - 6)),
             {class, ClassName};
         false ->
@@ -458,14 +467,17 @@ detect_target_type(_) ->
 %% Internal helpers — class debug
 %%====================================================================
 
-%% @doc Enable debug logging for a user class.
-%%
-%% Installs a primary logger filter that allows debug events where
-%% `#{beamtalk_class => ClassName}` metadata matches. Also sets module
-%% level on the compiled class module for direct `?LOG_*` calls.
+-doc """
+Enable debug logging for a user class.
+
+Installs a primary logger filter that allows debug events where
+`#{beamtalk_class => ClassName}` metadata matches. Also sets module
+level on the compiled class module for direct `?LOG_*` calls.
+""".
 -spec enable_class_debug(atom()) -> nil | #beamtalk_error{}.
 enable_class_debug(ClassName) ->
     ensure_table(),
+    % elp:fixme W0023 intentional atom creation
     FilterId = list_to_atom("beamtalk_debug_class_" ++ atom_to_list(ClassName)),
     FilterFun = fun(LogEvent, _Extra) ->
         case LogEvent of
@@ -486,13 +498,13 @@ enable_class_debug(ClassName) ->
     ets:insert(?DEBUG_TABLE, {ClassName, user_class, [FilterId]}),
     nil.
 
-%% @doc Disable debug logging for a user class.
+-doc "Disable debug logging for a user class.".
 -spec disable_class_debug(atom()) -> nil.
 disable_class_debug(ClassName) ->
     ensure_table(),
     case ets:lookup(?DEBUG_TABLE, ClassName) of
         [{ClassName, user_class, FilterIds}] ->
-            lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+            lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
             case beamtalk_class_module_table:lookup(ClassName) of
                 {ok, Module} -> logger:unset_module_level(Module);
                 not_found -> ok
@@ -507,13 +519,16 @@ disable_class_debug(ClassName) ->
 %% Internal helpers — actor debug
 %%====================================================================
 
-%% @doc Enable debug logging for a specific actor process.
-%%
-%% Installs a primary logger filter that allows debug events from
-%% the actor's PID. This is transient — lost when the actor restarts.
+-doc """
+Enable debug logging for a specific actor process.
+
+Installs a primary logger filter that allows debug events from
+the actor's PID. This is transient — lost when the actor restarts.
+""".
 -spec enable_actor_debug(pid(), atom()) -> nil.
 enable_actor_debug(Pid, ClassName) ->
     ensure_table(),
+    % elp:fixme W0023 intentional atom creation
     FilterId = list_to_atom(
         "beamtalk_debug_actor_" ++ pid_to_list(Pid)
     ),
@@ -529,13 +544,13 @@ enable_actor_debug(Pid, ClassName) ->
     ets:insert(?DEBUG_TABLE, {Pid, actor_instance, {ClassName, [FilterId]}}),
     nil.
 
-%% @doc Disable debug logging for a specific actor process.
+-doc "Disable debug logging for a specific actor process.".
 -spec disable_actor_debug(pid()) -> nil.
 disable_actor_debug(Pid) ->
     ensure_table(),
     case ets:lookup(?DEBUG_TABLE, Pid) of
         [{Pid, actor_instance, {_ClassName, FilterIds}}] ->
-            lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+            lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
             ets:delete(?DEBUG_TABLE, Pid),
             nil;
         [] ->
@@ -546,7 +561,7 @@ disable_actor_debug(Pid) ->
 %% Internal helpers — formatting
 %%====================================================================
 
-%% @doc Format a debug target entry for loggerInfo output.
+-doc "Format a debug target entry for loggerInfo output.".
 -spec format_debug_target(term()) -> iodata().
 format_debug_target({class, ClassName}) ->
     [<<"  ">>, atom_to_binary(ClassName, utf8), <<" (class) -> metadata filter\n">>];
@@ -584,7 +599,7 @@ format_debug_target(T) when is_atom(T) ->
 %% Internal helpers — ETS and logger
 %%====================================================================
 
-%% @doc Ensure the debug-targets ETS table exists. Creates it on first access.
+-doc "Ensure the debug-targets ETS table exists. Creates it on first access.".
 -spec ensure_table() -> ok.
 ensure_table() ->
     case ets:whereis(?DEBUG_TABLE) of
@@ -601,8 +616,10 @@ ensure_table() ->
             ok
     end.
 
-%% @doc Enable OTP progress reports for the supervisor subsystem by removing
-%% the default progress-report filter.
+-doc """
+Enable OTP progress reports for the supervisor subsystem by removing
+the default progress-report filter.
+""".
 -spec enable_supervisor_progress() -> [atom()].
 enable_supervisor_progress() ->
     case logger:get_handler_config(default) of
@@ -618,7 +635,7 @@ enable_supervisor_progress() ->
             []
     end.
 
-%% @doc Re-install the OTP progress report filter on the default handler.
+-doc "Re-install the OTP progress report filter on the default handler.".
 -spec disable_supervisor_progress() -> ok.
 disable_supervisor_progress() ->
     logger:add_handler_filter(
@@ -628,7 +645,7 @@ disable_supervisor_progress() ->
     ),
     ok.
 
-%% @doc Try to find the current log file path from the file log handler.
+-doc "Try to find the current log file path from the file log handler.".
 -spec find_log_file() -> binary().
 find_log_file() ->
     case logger:get_handler_config(beamtalk_file_log) of
@@ -647,11 +664,13 @@ find_log_file() ->
 %% Internal helpers — MCP debug signal file
 %%====================================================================
 
-%% @doc Return the path to the MCP debug signal file for the current workspace.
-%%
-%% The signal file lives at `~/.beamtalk/workspaces/{id}/mcp_debug_enabled`.
-%% The MCP server (Rust process) watches for this file and adjusts its
-%% tracing filter level accordingly.
+-doc """
+Return the path to the MCP debug signal file for the current workspace.
+
+The signal file lives at `~/.beamtalk/workspaces/{id}/mcp_debug_enabled`.
+The MCP server (Rust process) watches for this file and adjusts its
+tracing filter level accordingly.
+""".
 -spec mcp_signal_path() -> {ok, string()} | {error, term()}.
 mcp_signal_path() ->
     case beamtalk_workspace_meta:get_metadata() of
@@ -680,7 +699,7 @@ mcp_signal_path() ->
             {error, workspace_not_started}
     end.
 
-%% @doc Write the MCP debug signal file to enable debug logging in the MCP server.
+-doc "Write the MCP debug signal file to enable debug logging in the MCP server.".
 -spec write_mcp_signal_file() -> ok | {error, term()}.
 write_mcp_signal_file() ->
     case mcp_signal_path() of
@@ -717,7 +736,7 @@ write_mcp_signal_file() ->
             {error, Reason}
     end.
 
-%% @doc Remove the MCP debug signal file to disable debug logging in the MCP server.
+-doc "Remove the MCP debug signal file to disable debug logging in the MCP server.".
 -spec remove_mcp_signal_file() -> ok.
 remove_mcp_signal_file() ->
     case mcp_signal_path() of

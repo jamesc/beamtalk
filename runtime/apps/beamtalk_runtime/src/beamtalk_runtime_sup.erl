@@ -1,18 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Top-level supervisor for the Beamtalk runtime.
-%%%
-%%% **DDD Context:** Object System Context
 -module(beamtalk_runtime_sup).
 -behaviour(supervisor).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc "Top-level supervisor for the Beamtalk runtime.".
 
 -export([start_link/0]).
 -export([init/1]).
 
 -include_lib("kernel/include/logger.hrl").
 
-%% @doc Start the runtime supervisor.
+-doc "Start the runtime supervisor.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     Result = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
@@ -24,7 +25,6 @@ start_link() ->
     end,
     Result.
 
-%% @private
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,

@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_repl_shell module (BT-343).
-%%%
-%%% Tests session lifecycle, eval, bindings, and gen_server callbacks.
-
 -module(beamtalk_repl_shell_tests).
+
+-moduledoc """
+Unit tests for beamtalk_repl_shell module (BT-343).
+
+Tests session lifecycle, eval, bindings, and gen_server callbacks.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

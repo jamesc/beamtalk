@@ -2,16 +2,18 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_list (BT-708).
-%%%
-%%% Tests list operations: at, detect, detect_if_none, do, reject,
-%%% zip, group_by, partition, intersperse, take, drop, sort_with,
-%%% from_to — including error cases.
-%%%
-%%% Note: index_of/2 and each_with_index/2 were removed in BT-816
-%%% (self-hosted in pure Beamtalk in List.bt).
-
 -module(beamtalk_list_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_list (BT-708).
+
+Tests list operations: at, detect, detect_if_none, do, reject,
+zip, group_by, partition, intersperse, take, drop, sort_with,
+from_to — including error cases.
+
+Note: index_of/2 and each_with_index/2 were removed in BT-816
+(self-hosted in pure Beamtalk in List.bt).
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

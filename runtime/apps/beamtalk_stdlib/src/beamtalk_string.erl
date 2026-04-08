@@ -1,17 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc String helper operations for compiled stdlib.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% This module provides implementations for String primitive methods
-%%% that require more than simple Erlang BIF calls. Called by compiled
-%%% stdlib String module via `@primitive` codegen.
-%%%
-%%% All operations are grapheme-aware and handle UTF-8 correctly.
-
 -module(beamtalk_string).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+String helper operations for compiled stdlib.
+
+This module provides implementations for String primitive methods
+that require more than simple Erlang BIF calls. Called by compiled
+stdlib String module via `@primitive` codegen.
+
+All operations are grapheme-aware and handle UTF-8 correctly.
+""".
 -export([
     at/2,
     capitalize/1,
@@ -40,7 +42,7 @@
     from_iolist/1
 ]).
 
-%% @doc 1-based grapheme access. Returns the grapheme at the given index.
+-doc "1-based grapheme access. Returns the grapheme at the given index.".
 -spec at(binary(), integer()) -> binary().
 at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
     case get_nth_grapheme(Str, Idx) of
@@ -58,7 +60,7 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Index must be >= 1 (1-based indexing)">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Capitalize the first grapheme, keep rest unchanged.
+-doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(binary()) -> binary().
 capitalize(<<>>) ->
     <<>>;
@@ -74,19 +76,19 @@ capitalize(Str) when is_binary(Str) ->
             <<>>
     end.
 
-%% @doc Grapheme-aware string reverse.
+-doc "Grapheme-aware string reverse.".
 -spec reverse(binary()) -> binary().
 reverse(Str) when is_binary(Str) ->
     unicode:characters_to_binary(string:reverse(Str)).
 
-%% @doc Check if string contains substring.
+-doc "Check if string contains substring.".
 -spec includes(binary(), binary()) -> boolean().
 includes(_Str, <<>>) ->
     true;
 includes(Str, Sub) when is_binary(Str), is_binary(Sub) ->
     binary:match(Str, Sub) =/= nomatch.
 
-%% @doc Check if string starts with prefix.
+-doc "Check if string starts with prefix.".
 -spec starts_with(binary(), binary()) -> boolean().
 starts_with(_Str, <<>>) ->
     true;
@@ -97,7 +99,7 @@ starts_with(Str, Prefix) when is_binary(Str), is_binary(Prefix) ->
         _ -> false
     end.
 
-%% @doc Check if string ends with suffix.
+-doc "Check if string ends with suffix.".
 -spec ends_with(binary(), binary()) -> boolean().
 ends_with(_Str, <<>>) ->
     true;
@@ -115,7 +117,7 @@ ends_with(Str, Suffix) when is_binary(Str), is_binary(Suffix) ->
             false
     end.
 
-%% @doc Find first occurrence of substring, return 1-based grapheme index or nil.
+-doc "Find first occurrence of substring, return 1-based grapheme index or nil.".
 -spec index_of(binary(), binary()) -> integer() | 'nil'.
 index_of(_Str, <<>>) ->
     nil;
@@ -124,68 +126,70 @@ index_of(Str, Sub) when is_binary(Str), is_binary(Sub) ->
     SubGs = string:to_graphemes(Sub),
     index_of_graphemes(StrGs, SubGs, 1).
 
-%% @doc Split string by pattern (global split).
+-doc "Split string by pattern (global split).".
 -spec split_on(binary(), binary()) -> [binary()].
 split_on(Str, <<>>) when is_binary(Str) -> [Str];
 split_on(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
     binary:split(Str, Pattern, [global]).
 
-%% @doc Repeat string N times.
+-doc "Repeat string N times.".
 -spec repeat(binary(), integer()) -> binary().
 repeat(Str, N) when is_binary(Str), is_integer(N), N >= 0 ->
     binary:copy(Str, N).
 
-%% @doc Convert string to list of grapheme binaries.
+-doc "Convert string to list of grapheme binaries.".
 -spec as_list(binary()) -> [binary()].
 as_list(Str) when is_binary(Str) ->
     [unicode:characters_to_binary([G]) || G <- string:to_graphemes(Str)].
 
-%% @doc Join a list of grapheme binaries into a single string.
-%%
-%% Used by `String class withAll:` to reconstruct a String from a
-%% list of grapheme elements (e.g., the result of `select:`).
+-doc """
+Join a list of grapheme binaries into a single string.
+
+Used by `String class withAll:` to reconstruct a String from a
+list of grapheme elements (e.g., the result of `select:`).
+""".
 -spec join([binary()]) -> binary().
 join(List) when is_list(List) ->
     iolist_to_binary(List).
 
-%% @doc Iterate over graphemes, applying block to each. Returns nil.
+-doc "Iterate over graphemes, applying block to each. Returns nil.".
 -spec each(binary(), function()) -> 'nil'.
 each(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     lists:foreach(Block, as_list(Str)),
     nil.
 
-%% @doc Map over graphemes, applying block to each. Returns new string.
+-doc "Map over graphemes, applying block to each. Returns new string.".
 -spec collect(binary(), function()) -> binary().
 collect(Str, Block) when is_binary(Str), is_function(Block, 1) ->
-    Mapped = lists:map(Block, as_list(Str)),
+    Mapped = [Block(C) || C <- as_list(Str)],
     iolist_to_binary(Mapped).
 
-%% @doc Filter graphemes by block predicate. Returns new string.
+-doc "Filter graphemes by block predicate. Returns new string.".
 -spec select(binary(), function()) -> binary().
 select(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     Graphemes = as_list(Str),
     Selected = lists:filter(Block, Graphemes),
     iolist_to_binary(Selected).
 
-%% @doc Reject graphemes for which block returns true. Returns new string.
+-doc "Reject graphemes for which block returns true. Returns new string.".
 -spec reject(binary(), function()) -> binary().
 reject(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     Graphemes = as_list(Str),
     Kept = lists:filter(fun(G) -> not Block(G) end, Graphemes),
     iolist_to_binary(Kept).
 
-%% @doc Split string by newlines.
+-doc "Split string by newlines.".
 -spec lines(binary()) -> [binary()].
 lines(Str) when is_binary(Str) ->
     binary:split(Str, [<<"\n">>, <<"\r\n">>], [global]).
 
-%% @doc Split string by whitespace, filtering empty segments.
+-doc "Split string by whitespace, filtering empty segments.".
 -spec words(binary()) -> [binary()].
 words(Str) when is_binary(Str) ->
     Parts = binary:split(string:trim(Str), [<<" ">>, <<"\t">>, <<"\n">>, <<"\r">>], [global]),
     [P || P <- Parts, P =/= <<>>].
 
-%% @doc First N graphemes.
+-doc "First N graphemes.".
 -spec take(binary(), integer()) -> binary().
 take(_Str, N) when is_integer(N), N =< 0 -> <<>>;
 take(Str, N) when is_binary(Str), is_integer(N) ->
@@ -193,7 +197,7 @@ take(Str, N) when is_binary(Str), is_integer(N) ->
     Taken = lists:sublist(Graphemes, N),
     iolist_to_binary(Taken).
 
-%% @doc Skip first N graphemes.
+-doc "Skip first N graphemes.".
 -spec drop(binary(), integer()) -> binary().
 drop(Str, N) when is_integer(N), N =< 0, is_binary(Str) -> Str;
 drop(Str, N) when is_binary(Str), is_integer(N) ->
@@ -201,12 +205,12 @@ drop(Str, N) when is_binary(Str), is_integer(N) ->
     Dropped = lists:nthtail(min(N, length(Graphemes)), Graphemes),
     iolist_to_binary(Dropped).
 
-%% @doc Test if string is empty or only whitespace.
+-doc "Test if string is empty or only whitespace.".
 -spec is_blank(binary()) -> boolean().
 is_blank(Str) when is_binary(Str) ->
     string:trim(Str) =:= <<>>.
 
-%% @doc Test if all characters are digits.
+-doc "Test if all characters are digits.".
 -spec is_digit(binary()) -> boolean().
 is_digit(<<>>) ->
     false;
@@ -221,7 +225,7 @@ is_digit(Str) when is_binary(Str) ->
         as_list(Str)
     ).
 
-%% @doc Test if all characters are alphabetic.
+-doc "Test if all characters are alphabetic.".
 -spec is_alpha(binary()) -> boolean().
 is_alpha(<<>>) ->
     false;
@@ -237,7 +241,7 @@ is_alpha(Str) when is_binary(Str) ->
         as_list(Str)
     ).
 
-%% @doc Create a single-character UTF-8 binary from a Unicode code point.
+-doc "Create a single-character UTF-8 binary from a Unicode code point.".
 -spec from_code_point(integer()) -> binary().
 from_code_point(CodePoint) when is_integer(CodePoint), CodePoint >= 0 ->
     case unicode:characters_to_binary([CodePoint]) of
@@ -259,7 +263,7 @@ from_code_point(_) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Code point must be an Integer">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Create a UTF-8 binary from a list of Unicode code points.
+-doc "Create a UTF-8 binary from a list of Unicode code points.".
 -spec from_code_points([integer()]) -> binary().
 from_code_points(List) when is_list(List) ->
     case lists:all(fun(X) -> is_integer(X) andalso X >= 0 end, List) of
@@ -288,28 +292,48 @@ from_code_points(_) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected a List of Integer code points">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Coerce an Erlang iolist or charlist to a UTF-8 binary String.
-%%
-%% Strategy: try iolist_to_binary/1 first to preserve byte-oriented iodata,
-%% then validate/normalise the result as UTF-8. Only fall back to treating the
-%% original list as a Unicode charlist of code points when the byte-oriented
-%% path fails — this correctly handles both UTF-8 byte iolists such as
-%% [195, 169] and Unicode codepoint charlists such as [233], both yielding "é".
+-doc """
+Coerce an Erlang iolist or charlist to a UTF-8 binary String.
+
+Strategy: try iolist_to_binary/1 first to preserve byte-oriented iodata,
+then validate/normalise the result as UTF-8. Only fall back to treating the
+original list as a Unicode charlist of code points when the byte-oriented
+path fails — this correctly handles both UTF-8 byte iolists such as
+[195, 169] and Unicode codepoint charlists such as [233], both yielding "é".
+""".
 -spec from_iolist(iolist() | binary()) -> binary().
 from_iolist(X) when is_binary(X) ->
     X;
 from_iolist(X) when is_list(X) ->
-    case catch iolist_to_binary(X) of
-        Bytes when is_binary(Bytes) ->
+    case
+        try
+            {ok, iolist_to_binary(X)}
+        catch
+            _:_ -> error
+        end
+    of
+        {ok, Bytes} when is_binary(Bytes) ->
             %% Assemble bytes first; then validate/normalise as UTF-8.
-            case catch unicode:characters_to_binary(Bytes) of
-                UtfBin when is_binary(UtfBin) ->
+            case
+                try
+                    {ok, unicode:characters_to_binary(Bytes)}
+                catch
+                    _:_ -> error
+                end
+            of
+                {ok, UtfBin} when is_binary(UtfBin) ->
                     UtfBin;
                 _ ->
                     %% Byte assembly succeeded but the bytes are not valid UTF-8.
                     %% Fall back: interpret the original list as a charlist of code points.
-                    case catch unicode:characters_to_binary(X) of
-                        UtfBin2 when is_binary(UtfBin2) ->
+                    case
+                        try
+                            {ok, unicode:characters_to_binary(X)}
+                        catch
+                            _:_ -> error
+                        end
+                    of
+                        {ok, UtfBin2} when is_binary(UtfBin2) ->
                             UtfBin2;
                         _ ->
                             Error0 = beamtalk_error:new(type_error, 'String'),
@@ -322,8 +346,14 @@ from_iolist(X) when is_list(X) ->
             end;
         _ ->
             %% iolist_to_binary/1 failed — try treating the list as a charlist directly.
-            case catch unicode:characters_to_binary(X) of
-                UtfBin when is_binary(UtfBin) ->
+            case
+                try
+                    {ok, unicode:characters_to_binary(X)}
+                catch
+                    _:_ -> error
+                end
+            of
+                {ok, UtfBin} when is_binary(UtfBin) ->
                     UtfBin;
                 _ ->
                     Error0 = beamtalk_error:new(type_error, 'String'),
@@ -344,8 +374,7 @@ from_iolist(_) ->
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private
-%% @doc Grapheme-aware substring search.
+-doc "Grapheme-aware substring search.".
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
     integer() | 'nil'.
 index_of_graphemes([], _SubGs, _Idx) ->
@@ -356,8 +385,7 @@ index_of_graphemes(StrGs, SubGs, Idx) ->
         false -> index_of_graphemes(tl(StrGs), SubGs, Idx + 1)
     end.
 
-%% @private
-%% @doc Return the Nth grapheme (1-based) from a UTF-8 binary.
+-doc "Return the Nth grapheme (1-based) from a UTF-8 binary.".
 -spec get_nth_grapheme(binary(), pos_integer()) -> {ok, binary()} | error.
 get_nth_grapheme(Str, N) ->
     get_nth_grapheme(Str, N, 1).

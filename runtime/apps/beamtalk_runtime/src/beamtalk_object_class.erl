@@ -1,23 +1,26 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Per-class gen_server for Beamtalk class objects.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%% Each class in Beamtalk is a first-class object backed by a gen_server
-%% process. Follows Smalltalk philosophy where classes are messageable objects.
-%%
-%% Class method dispatch is handled by beamtalk_class_dispatch.
-%% Instance creation (new/spawn) by beamtalk_class_instantiation.
-%% Method lookup walks the class chain directly via has_method/2 + superclass/1.
-%%
-%% ## Registration
-%%
-%% Classes register via Erlang's built-in registry (beamtalk_class_Counter)
-%% and join the `beamtalk_classes` pg group for enumeration.
 -module(beamtalk_object_class).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Per-class gen_server for Beamtalk class objects.
+
+Each class in Beamtalk is a first-class object backed by a gen_server
+process. Follows Smalltalk philosophy where classes are messageable objects.
+
+Class method dispatch is handled by beamtalk_class_dispatch.
+Instance creation (new/spawn) by beamtalk_class_instantiation.
+Method lookup walks the class chain directly via has_method/2 + superclass/1.
+
+## Registration
+
+Classes register via Erlang's built-in registry (beamtalk_class_Counter)
+and join the `beamtalk_classes` pg group for enumeration.
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -110,25 +113,25 @@
 %% API
 %%====================================================================
 
-%% @doc Start a class process (unlinked) for on_load registration.
+-doc "Start a class process (unlinked) for on_load registration.".
 -spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start(ClassName, ClassInfo) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
     gen_server:start({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
 
-%% @doc Start a class process with full options.
+-doc "Start a class process with full options.".
 -spec start_link(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start_link(ClassName, ClassInfo) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
     gen_server:start_link({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
 
-%% @doc Start a class process with minimal info (for testing).
+-doc "Start a class process with minimal info (for testing).".
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
 start_link(ClassInfo) ->
     ClassName = maps:get(name, ClassInfo),
     start_link(ClassName, ClassInfo).
 
-%% @doc Update an existing class process with new metadata after redefinition.
+-doc "Update an existing class process with new metadata after redefinition.".
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
 update_class(ClassName, ClassInfo) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -138,7 +141,7 @@ update_class(ClassName, ClassInfo) ->
             gen_server:call(Pid, {update_class, ClassInfo})
     end.
 
-%% @doc Set a class variable on a class by name.
+-doc "Set a class variable on a class by name.".
 -spec set_class_var(class_name(), atom(), term()) -> term().
 set_class_var(ClassName, Name, Value) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -149,78 +152,86 @@ set_class_var(ClassName, Name, Value) ->
             gen_server:call(Pid, {set_class_var, Name, Value})
     end.
 
-%% @doc Create a new instance of this class.
+-doc "Create a new instance of this class.".
 -spec new(pid()) -> {ok, #beamtalk_object{}} | {error, term()}.
 new(ClassPid) ->
     new(ClassPid, []).
 
-%% @doc Create a new instance with initialization arguments.
+-doc "Create a new instance with initialization arguments.".
 -spec new(pid(), list()) -> {ok, #beamtalk_object{}} | {error, term()}.
 new(ClassPid, Args) ->
     gen_server:call(ClassPid, {new, Args}).
 
-%% @doc Get all method selectors.
+-doc "Get all method selectors.".
 -spec methods(pid()) -> [selector()].
 methods(ClassPid) ->
     gen_server:call(ClassPid, methods).
 
-%% @doc Get local class-side method selectors (not inherited).
+-doc "Get local class-side method selectors (not inherited).".
 -spec local_class_methods(pid()) -> [selector()].
 local_class_methods(ClassPid) ->
     maps:keys(local_class_methods_map(ClassPid)).
 
-%% @doc Get the full local class-side methods map (selector => info).
+-doc "Get the full local class-side methods map (selector => info).".
 -spec local_class_methods_map(pid()) -> #{selector() => map()}.
 local_class_methods_map(ClassPid) ->
     gen_server:call(ClassPid, get_local_class_methods).
 
-%% @doc Get local instance-side method selectors (not inherited).
+-doc "Get local instance-side method selectors (not inherited).".
 -spec local_instance_methods(pid()) -> [selector()].
 local_instance_methods(ClassPid) ->
     {ok, InstanceMethods} = gen_server:call(ClassPid, get_instance_methods),
     maps:keys(InstanceMethods).
 
-%% @doc Get the superclass name.
+-doc "Get the superclass name.".
 -spec superclass(pid()) -> class_name() | none.
 superclass(ClassPid) ->
     gen_server:call(ClassPid, superclass).
 
-%% @doc Get the class name.
-%%
-%% BT-893: If called from within the class gen_server itself (self-call), read
-%% from the process dictionary instead of gen_server:call to avoid calling_self.
+-doc """
+Get the class name.
+
+BT-893: If called from within the class gen_server itself (self-call), read
+from the process dictionary instead of gen_server:call to avoid calling_self.
+""".
 -spec class_name(pid()) -> class_name().
 class_name(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_name);
 class_name(ClassPid) ->
     gen_server:call(ClassPid, class_name).
 
-%% @doc Get the module name.
-%%
-%% BT-893: If called from within the class gen_server itself (self-call), read
-%% from the process dictionary instead of gen_server:call to avoid calling_self.
+-doc """
+Get the module name.
+
+BT-893: If called from within the class gen_server itself (self-call), read
+from the process dictionary instead of gen_server:call to avoid calling_self.
+""".
 -spec module_name(pid()) -> atom().
 module_name(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_module);
 module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
 
-%% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
-%%
-%% Delegates to beamtalk_class_dispatch (BT-704).
+-doc """
+Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
+
+Delegates to beamtalk_class_dispatch (BT-704).
+""".
 -spec class_send(pid() | undefined, atom(), list()) -> term().
 class_send(ClassPid, Selector, Args) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
 
-%% @doc Execute a class method in the caller's process (BT-1664).
-%%
-%% Resolves the target module from the class object, then calls
-%% Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
-%% object's gen_server. The caller takes responsibility for knowing the
-%% method does not mutate class state (nil is passed for ClassSelf).
-%%
-%% Raises beamtalk_error if the receiver is not a class object, or if the
-%% class does not define the requested method.
+-doc """
+Execute a class method in the caller's process (BT-1664).
+
+Resolves the target module from the class object, then calls
+Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
+object's gen_server. The caller takes responsibility for knowing the
+method does not mutate class state (nil is passed for ClassSelf).
+
+Raises beamtalk_error if the receiver is not a class object, or if the
+class does not define the requested method.
+""".
 -spec local_call(term(), atom(), list()) -> term().
 local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
     is_atom(Selector), is_list(Args)
@@ -273,22 +284,26 @@ local_call(Receiver, _Selector, _Args) ->
     ),
     beamtalk_error:raise(Error).
 
-%% @doc Get a compiled method object.
-%% Delegates to beamtalk_method_resolver.
+-doc """
+Get a compiled method object.
+Delegates to beamtalk_method_resolver.
+""".
 -spec method(pid() | class_name() | tuple(), selector()) -> compiled_method() | 'nil'.
 method(ClassRef, Selector) ->
     beamtalk_method_resolver:resolve(ClassRef, Selector).
 
-%% @doc Check if a class is internal (ADR 0071).
+-doc "Check if a class is internal (ADR 0071).".
 -spec is_internal(pid()) -> boolean().
 is_internal(ClassPid) ->
     gen_server:call(ClassPid, is_internal).
 
-%% @doc Check if a class has a method (does not walk hierarchy).
-%% First checks the gen_server state (instance_methods map for compiled methods),
-%% then falls back to the module's has_method/1. The fallback is needed for
-%% abstract/value-type classes (e.g., Behaviour) where @primitive methods appear
-%% in the compiled module but may not be tracked in the gen_server instance_methods.
+-doc """
+Check if a class has a method (does not walk hierarchy).
+First checks the gen_server state (instance_methods map for compiled methods),
+then falls back to the module's has_method/1. The fallback is needed for
+abstract/value-type classes (e.g., Behaviour) where @primitive methods appear
+in the compiled module but may not be tracked in the gen_server instance_methods.
+""".
 -spec has_method(pid(), selector()) -> boolean().
 has_method(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
@@ -318,33 +333,35 @@ has_method(ClassPid, Selector) ->
             true
     end.
 
-%% @doc Replace a method with a new function (hot patching).
+-doc "Replace a method with a new function (hot patching).".
 -spec put_method(pid(), selector(), fun()) -> ok.
 put_method(ClassPid, Selector, Fun) ->
     put_method(ClassPid, Selector, Fun, <<"">>).
 
-%% @doc Replace a method with source.
+-doc "Replace a method with source.".
 -spec put_method(pid(), selector(), fun(), binary()) -> ok.
 put_method(ClassPid, Selector, Fun, Source) ->
     gen_server:call(ClassPid, {put_method, Selector, Fun, Source}).
 
-%% @doc Get instance variable names.
+-doc "Get instance variable names.".
 -spec instance_variables(pid()) -> [atom()].
 instance_variables(ClassPid) ->
     gen_server:call(ClassPid, instance_variables).
 
-%% @doc Check if a class is sealed (cannot be subclassed).
+-doc "Check if a class is sealed (cannot be subclassed).".
 -spec is_sealed(pid()) -> boolean().
 is_sealed(ClassPid) ->
     gen_server:call(ClassPid, is_sealed).
 
-%% @doc Check if a class is abstract (cannot be instantiated).
+-doc "Check if a class is abstract (cannot be instantiated).".
 -spec is_abstract(pid()) -> boolean().
 is_abstract(ClassPid) ->
     gen_server:call(ClassPid, is_abstract).
 
-%% @doc Check if a class can be instantiated via new/new:.
-%% BT-474: Returns false for actors (use spawn) and sealed primitives.
+-doc """
+Check if a class can be instantiated via new/new:.
+BT-474: Returns false for actors (use spawn) and sealed primitives.
+""".
 -spec is_constructible(pid()) -> boolean().
 is_constructible(ClassPid) ->
     gen_server:call(ClassPid, is_constructible).
@@ -545,6 +562,7 @@ handle_call(
     } = State
 ) ->
     Result =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(Selector, Methods) of
             {ok, MethodInfo} ->
                 #{
@@ -565,6 +583,7 @@ handle_call(
     _From,
     #class_state{method_return_types = MRT} = State
 ) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Selector, MRT) of
         {ok, Type} -> {reply, {ok, Type}, State};
         error -> {reply, not_found, State}
@@ -574,6 +593,7 @@ handle_call(
     _From,
     #class_state{class_method_return_types = CMRT} = State
 ) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Selector, CMRT) of
         {ok, Type} -> {reply, {ok, Type}, State};
         error -> {reply, not_found, State}
@@ -730,7 +750,7 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     {reply, maps:get(Name, ClassVars, nil), State};
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    {reply, Value, State#class_state{class_state = maps:put(Name, Value, ClassVars)}}.
+    {reply, Value, State#class_state{class_state = ClassVars#{Name => Value}}}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(
@@ -772,12 +792,14 @@ code_change(OldVsn, State, Extra) ->
 %% Internal functions
 %%====================================================================
 
-%% @private Walk superclass chain to find an inherited class method.
-%% Returns a CompiledMethod-like map or nil if not found.
-%% Each hop is a gen_server:call to the superclass process, which handles its
-%% own {class_method, _} lookup.  The self() guard prevents deadlock if a
-%% class lists itself as its own superclass; the 5 s timeout caps any deeper
-%% cycle that might slip through.
+-doc """
+Walk superclass chain to find an inherited class method.
+Returns a CompiledMethod-like map or nil if not found.
+Each hop is a gen_server:call to the superclass process, which handles its
+own {class_method, _} lookup.  The self() guard prevents deadlock if a
+class lists itself as its own superclass; the 5 s timeout caps any deeper
+cycle that might slip through.
+""".
 -spec find_inherited_class_method(atom(), atom() | none) -> map() | nil.
 find_inherited_class_method(_Selector, none) ->
     nil;
@@ -797,17 +819,19 @@ find_inherited_class_method(Selector, SuperName) ->
             end
     end.
 
-%% @private Check whether `class_new:/3` is exported anywhere in the superclass chain.
-%%
-%% Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
-%% a module exporting `class_new:'/3` is found, `false` if none is found in the chain.
-%% This correctly supports inherited `class new:` constructors: a subclass that does
-%% not override `class new:` will still route through the parent's implementation.
-%%
-%% We use `function_exported/3` rather than checking the `classMethods` metadata map
-%% because the metadata includes auto-generated `new:` entries for all classes,
-%% making it impossible to distinguish user-defined from auto-generated with a map
-%% key check alone.
+-doc """
+Check whether `class_new:/3` is exported anywhere in the superclass chain.
+
+Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
+a module exporting `class_new:'/3` is found, `false` if none is found in the chain.
+This correctly supports inherited `class new:` constructors: a subclass that does
+not override `class new:` will still route through the parent's implementation.
+
+We use `function_exported/3` rather than checking the `classMethods` metadata map
+because the metadata includes auto-generated `new:` entries for all classes,
+making it impossible to distinguish user-defined from auto-generated with a map
+key check alone.
+""".
 -spec has_class_new_in_chain(class_name(), atom()) -> boolean().
 has_class_new_in_chain(ClassName, Module) ->
     has_class_new_in_chain(ClassName, Module, 0).
@@ -851,10 +875,12 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
             end
     end.
 
-%% @private Read __beamtalk_meta/0 from a compiled module.
-%%
-%% Returns the meta map or #{} if the function is not exported or fails.
-%% ADR 0050 Phase 5: Used by init/1 and apply_class_info/2 to read static metadata.
+-doc """
+Read __beamtalk_meta/0 from a compiled module.
+
+Returns the meta map or #{} if the function is not exported or fails.
+ADR 0050 Phase 5: Used by init/1 and apply_class_info/2 to read static metadata.
+""".
 -spec read_meta(atom()) -> map().
 read_meta(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
@@ -869,17 +895,19 @@ read_meta(Module) ->
             #{}
     end.
 
-%% @private Convert a method_info map from __beamtalk_meta/0 to the internal format.
-%%
-%% Returns {MethodMap, ReturnTypes} where:
-%%   MethodMap: selector => #{arity => N, is_sealed => bool, ...}
-%%   ReturnTypes: selector => atom (only for non-none return types)
-%%
-%% Falls back to FallbackMethods when MetaMethodInfo is undefined (dynamic classes
-%% without __beamtalk_meta/0 pass method closures via ClassInfo instead).
-%%
-%% The full method info map is preserved (including is_sealed, param_types, etc.)
-%% because runtime tooling (e.g. :help) reads these keys from __method_info__.
+-doc """
+Convert a method_info map from __beamtalk_meta/0 to the internal format.
+
+Returns {MethodMap, ReturnTypes} where:
+  MethodMap: selector => #{arity => N, is_sealed => bool, ...}
+  ReturnTypes: selector => atom (only for non-none return types)
+
+Falls back to FallbackMethods when MetaMethodInfo is undefined (dynamic classes
+without __beamtalk_meta/0 pass method closures via ClassInfo instead).
+
+The full method info map is preserved (including is_sealed, param_types, etc.)
+because runtime tooling (e.g. :help) reads these keys from __method_info__.
+""".
 -spec meta_to_methods(map() | undefined, map()) -> {map(), map()}.
 meta_to_methods(undefined, FallbackMethods) ->
     %% No meta available: return fallback methods with empty return types.
@@ -895,13 +923,15 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
     ),
     {MetaMethodInfo, ReturnTypes}.
 
-%% @private Notify the compiler server of a hot-patch.
-%%
-%% ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
-%% compile-time metadata only).  This function synthesizes a minimal metadata map
-%% from the current live `class_state` and casts it to the compiler server.
-%% The compiler server replaces the class entry wholesale.
-%% Fire-and-forget — silently dropped if the server is not running.
+-doc """
+Notify the compiler server of a hot-patch.
+
+ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
+compile-time metadata only).  This function synthesizes a minimal metadata map
+from the current live `class_state` and casts it to the compiler server.
+The compiler server replaces the class entry wholesale.
+Fire-and-forget — silently dropped if the server is not running.
+""".
 -spec notify_hot_patch(#class_state{}) -> ok.
 notify_hot_patch(#class_state{
     name = ClassName,
@@ -964,9 +994,11 @@ notify_hot_patch(#class_state{
         false -> ok
     end.
 
-%% @private Apply ClassInfo map to existing State, returning updated State.
-%% ADR 0032 Phase 1: No flattened tables to rebuild.
-%% ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
+-doc """
+Apply ClassInfo map to existing State, returning updated State.
+ADR 0032 Phase 1: No flattened tables to rebuild.
+ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
+""".
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
     %% BT-893: Keep process dictionary in sync with state for self-instantiation.

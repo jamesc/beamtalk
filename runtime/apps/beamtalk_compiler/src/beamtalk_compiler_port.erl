@@ -1,17 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc OTP Port interface to the Rust compiler binary (ADR 0022, Phase 0).
-%%
-%%% **DDD Context:** Compilation (Anti-Corruption Layer)
-%%
-%% Spawns `beamtalk-compiler-port` as an OTP port with `{packet, 4}' framing
-%% and ETF-encoded requests/responses.
-%%
-%% Phase 0 is a wire check — no supervisor, no backend dispatch. Manual
-%% verification that BEAM can invoke the Rust compiler via a port.
-
 -module(beamtalk_compiler_port).
+
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
+
+-moduledoc """
+OTP Port interface to the Rust compiler binary (ADR 0022, Phase 0).
+
+Spawns `beamtalk-compiler-port` as an OTP port with `{packet, 4}' framing
+and ETF-encoded requests/responses.
+
+Phase 0 is a wire check — no supervisor, no backend dispatch. Manual
+verification that BEAM can invoke the Rust compiler via a port.
+""".
 
 -export([
     open/0, open/1,
@@ -31,13 +33,15 @@
 
 -include_lib("kernel/include/logger.hrl").
 
-%% @doc Open a port to the compiler binary.
-%% Finds the binary relative to the project root or via PATH.
+-doc """
+Open a port to the compiler binary.
+Finds the binary relative to the project root or via PATH.
+""".
 -spec open() -> port().
 open() ->
     open(find_compiler_binary()).
 
-%% @doc Open a port to the compiler binary at the given path.
+-doc "Open a port to the compiler binary at the given path.".
 -spec open(file:filename_all()) -> port().
 open(BinaryPath) ->
     ?LOG_INFO("Opening compiler port", #{domain => [beamtalk, runtime], binary => BinaryPath}),
@@ -48,15 +52,17 @@ open(BinaryPath) ->
         use_stdio
     ]).
 
-%% @doc Compile a REPL expression through the port.
-%%
-%% Sends an ETF-encoded request and receives an ETF-encoded response.
-%% Returns `{ok, CoreErlang, Warnings}' on success,
-%% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
-%% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% `{ok, protocol_definition, ProtocolInfo}' for protocol definitions (BT-1612),
-%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
-%% `message', `line' (1-based), and optionally `hint'.
+-doc """
+Compile a REPL expression through the port.
+
+Sends an ETF-encoded request and receives an ETF-encoded response.
+Returns `{ok, CoreErlang, Warnings}' on success,
+`{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
+`{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+`{ok, protocol_definition, ProtocolInfo}' for protocol definitions (BT-1612),
+or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+`message', `line' (1-based), and optionally `hint'.
+""".
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -66,15 +72,17 @@ open(BinaryPath) ->
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     compile_expression(Port, Source, ModuleName, KnownVars, #{}).
 
-%% @doc Compile a REPL expression with optional compilation options.
-%%
-%% Options:
-%%   class_superclass_index => #{binary() => binary()} — cross-file superclass info
-%%   class_module_index => #{binary() => binary()} — cross-directory module name mapping
-%%
-%% When provided, these indexes are forwarded to the compiler port so that
-%% inline class definitions correctly resolve inherited types and module names
-%% from already-loaded files.
+-doc """
+Compile a REPL expression with optional compilation options.
+
+Options:
+  class_superclass_index => #{binary() => binary()} — cross-file superclass info
+  class_module_index => #{binary() => binary()} — cross-directory module name mapping
+
+When provided, these indexes are forwarded to the compiler port so that
+inline class definitions correctly resolve inherited types and module names
+from already-loaded files.
+""".
 -spec compile_expression(port(), binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -144,7 +152,11 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             after 30000 ->
                 ?LOG_ERROR("Compiler port timeout", #{domain => [beamtalk, runtime], port => Port}),
                 %% Close the port so any late response cannot poison the next request.
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
@@ -155,18 +167,20 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 
-%% @doc Compile a REPL expression in trace mode (BT-1238).
-%%
-%% Same request format as `compile_expression/4' but sends the
-%% `compile_expression_trace' command.  The returned Core Erlang module's
-%% `eval/1' returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of
-%% `{Result, FinalState}'.
+-doc """
+Compile a REPL expression in trace mode (BT-1238).
+
+Same request format as `compile_expression/4' but sends the
+`compile_expression_trace' command.  The returned Core Erlang module's
+`eval/1' returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of
+`{Result, FinalState}'.
+""".
 -spec compile_expression_trace(port(), binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars) ->
     compile_expression_trace(Port, Source, ModuleName, KnownVars, #{}).
 
-%% @doc Compile in trace mode with optional compilation options.
+-doc "Compile in trace mode with optional compilation options.".
 -spec compile_expression_trace(port(), binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
@@ -217,7 +231,11 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
                 ?LOG_ERROR("Compiler port timeout (trace)", #{
                     domain => [beamtalk, runtime], port => Port
                 }),
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
@@ -228,14 +246,16 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
             {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 
-%% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
-%%
-%% Sends an ETF-encoded `resolve_completion_type' request and returns
-%% `{ok, ClassName}' when the type is statically known, or
-%% `{error, type_unknown}' when the type cannot be determined.
-%%
-%% `ClassHierarchy' is the accumulated class cache map from
-%% `beamtalk_compiler_server' (ADR 0050 Phase 4).
+-doc """
+Resolve the type of an expression for REPL completion fallback (BT-1068).
+
+Sends an ETF-encoded `resolve_completion_type' request and returns
+`{ok, ClassName}' when the type is statically known, or
+`{error, type_unknown}' when the type cannot be determined.
+
+`ClassHierarchy' is the accumulated class cache map from
+`beamtalk_compiler_server' (ADR 0050 Phase 4).
+""".
 -spec resolve_completion_type(port(), binary(), #{atom() => map()}) ->
     {ok, atom()} | {error, type_unknown}.
 resolve_completion_type(Port, Expression, ClassHierarchy) ->
@@ -273,7 +293,11 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
                     port => Port
                 }),
                 %% Close the port so any late response cannot poison the next request.
-                catch port_close(Port),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
                 {error, type_unknown}
             end
     catch
@@ -281,16 +305,18 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
             {error, type_unknown}
     end.
 
-%% @doc Close the compiler port.
+-doc "Close the compiler port.".
 -spec close(port()) -> true.
 close(Port) ->
     port_close(Port).
 
 %%% Internal functions
 
-%% @private Handle ETF response from the compiler port.
-%% BT-571: Extended to handle class_definition and method_definition responses.
-%% BT-1235: Diagnostics in error responses are maps with `message', `line', and optional `hint'.
+-doc """
+Handle ETF response from the compiler port.
+BT-571: Extended to handle class_definition and method_definition responses.
+BT-1235: Diagnostics in error responses are maps with `message', `line', and optional `hint'.
+""".
 -spec handle_response(map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -316,6 +342,7 @@ handle_response(
     },
     %% BT-903: Forward trailing_core_erlang when present (inline class + trailing expressions)
     ClassInfo =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(trailing_core_erlang, Response) of
             {ok, TrailingCoreErlang} ->
                 BaseInfo#{trailing_core_erlang => TrailingCoreErlang};
@@ -364,9 +391,11 @@ handle_response(Other) ->
     ?LOG_ERROR("Unexpected compiler response", #{domain => [beamtalk, runtime], response => Other}),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
-%% @private Handle ETF response from a resolve_completion_type request.
-%% Returns `{ok, ClassName}' when the class name is a known existing atom,
-%% or `{error, type_unknown}' for not-found or malformed responses.
+-doc """
+Handle ETF response from a resolve_completion_type request.
+Returns `{ok, ClassName}' when the class name is a known existing atom,
+or `{error, type_unknown}' for not-found or malformed responses.
+""".
 -spec handle_resolve_response(map()) -> {ok, atom()} | {error, type_unknown}.
 handle_resolve_response(#{status := ok, class_name := ClassName}) when is_binary(ClassName) ->
     try binary_to_existing_atom(ClassName, utf8) of
@@ -377,9 +406,11 @@ handle_resolve_response(#{status := ok, class_name := ClassName}) when is_binary
 handle_resolve_response(_) ->
     {error, type_unknown}.
 
-%% @private Normalize a list of diagnostics to a uniform list of maps.
-%% BT-1235: The port now returns maps with `message', `line', `hint'.
-%% Plain binaries (legacy/protocol errors) are wrapped as `#{message => Bin}'.
+-doc """
+Normalize a list of diagnostics to a uniform list of maps.
+BT-1235: The port now returns maps with `message', `line', `hint'.
+Plain binaries (legacy/protocol errors) are wrapped as `#{message => Bin}'.
+""".
 -spec normalize_diagnostics([term()]) -> [map()].
 normalize_diagnostics(Diagnostics) when is_list(Diagnostics) ->
     [normalize_diagnostic(D) || D <- Diagnostics].
@@ -414,7 +445,7 @@ maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
     end;
 maybe_pretty_core(Other) when not is_binary(Other) -> erlang:error(badarg).
 
-%% @private Reduce Core Erlang indentation from 4 spaces per level to 2 spaces per level.
+-doc "Reduce Core Erlang indentation from 4 spaces per level to 2 spaces per level.".
 -spec halve_indent(binary()) -> binary().
 halve_indent(Bin) ->
     Lines = binary:split(Bin, <<"\n">>, [global]),
@@ -431,9 +462,11 @@ halve_leading_spaces(Line) ->
 count_leading_spaces(<<" ", Rest/binary>>, N) -> count_leading_spaces(Rest, N + 1);
 count_leading_spaces(Rest, N) -> {N, Rest}.
 
-%% @private Find the compiler binary.
-%% Looks for the binary in the cargo target directory first (development),
-%% then falls back to PATH.
+-doc """
+Find the compiler binary.
+Looks for the binary in the cargo target directory first (development),
+then falls back to PATH.
+""".
 find_compiler_binary() ->
     %% 1. Check explicit env var (set by CLI for installed mode)
     case os:getenv("BEAMTALK_COMPILER_PORT_BIN") of
@@ -480,7 +513,7 @@ find_compiler_binary_dev() ->
             end
     end.
 
-%% @private Find the project root by looking for Cargo.toml.
+-doc "Find the project root by looking for Cargo.toml.".
 find_project_root() ->
     Cwd = filename:absname(""),
     find_project_root(Cwd).

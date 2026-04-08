@@ -1,46 +1,52 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Runtime helper operations for Dictionary (Erlang maps).
-%%
-%%% **DDD Context:** Object System Context
-%%
-%% BT-418: Complex Dictionary operations that cannot be inlined as
-%% direct BIF calls in generated Core Erlang. Called from compiled
-%% stdlib module bt@stdlib@dictionary.
-%%
-%% Replaces the former beamtalk_map.erl hand-written dispatch module.
 -module(beamtalk_map).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Runtime helper operations for Dictionary (Erlang maps).
+
+BT-418: Complex Dictionary operations that cannot be inlined as
+direct BIF calls in generated Core Erlang. Called from compiled
+stdlib module bt@stdlib@dictionary.
+
+Replaces the former beamtalk_map.erl hand-written dispatch module.
+""".
 
 -export([at_if_absent/3, do/2, do_with_key/2, includes/2, print_string/1]).
 
-%% @doc Get value at key, or evaluate block if absent.
+-doc "Get value at key, or evaluate block if absent.".
 -spec at_if_absent(map(), term(), fun(() -> term())) -> term().
 at_if_absent(Map, Key, Block) when is_function(Block, 0) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Key, Map) of
         {ok, Value} -> Value;
         error -> Block()
     end.
 
-%% @doc Iterate over all values in the dictionary.
+-doc "Iterate over all values in the dictionary.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(Map, Block) when is_function(Block, 1) ->
     maps:foreach(fun(_K, V) -> Block(V) end, Map),
     nil.
 
-%% @doc Iterate over all key-value pairs, calling block with key and value.
+-doc "Iterate over all key-value pairs, calling block with key and value.".
 -spec do_with_key(map(), fun((term(), term()) -> term())) -> 'nil'.
 do_with_key(Map, Block) when is_function(Block, 2) ->
-    maps:foreach(fun(K, V) -> Block(K, V) end, Map),
+    maps:foreach(Block, Map),
     nil.
 
-%% @doc Test if the dictionary contains the given value.
+-doc "Test if the dictionary contains the given value.".
 -spec includes(map(), term()) -> boolean().
 includes(Map, Value) ->
     lists:member(Value, maps:values(Map)).
 
-%% @doc Format a dictionary as Beamtalk syntax: #{key => value, ...}
-%% BT-535: Used by Dictionary>>printString and REPL display.
+-doc """
+Format a dictionary as Beamtalk syntax: #{key => value, ...}
+BT-535: Used by Dictionary>>printString and REPL display.
+""".
 -spec print_string(map()) -> binary().
 print_string(Map) ->
     %% Strip the $beamtalk_class tag if present (plain dictionaries don't have it)

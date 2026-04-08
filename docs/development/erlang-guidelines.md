@@ -39,7 +39,7 @@ When generating Core Erlang or Erlang source:
 - Include `-compile([no_auto_import]).` to avoid import conflicts
 
 **Documentation (EEP-59):**
-- Use EEP-59 structured doc attributes (OTP 27+), not EDoc comments
+- Use EEP-59 structured doc attributes (OTP 27+)
 - `-moduledoc "Module purpose here".` after `-behaviour` for the module summary
 - `-doc "Function purpose here".` before each exported function
 - Do **not** use `-doc false` for internal helpers — keep docs visible for developers and tooling

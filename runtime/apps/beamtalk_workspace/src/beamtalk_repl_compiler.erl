@@ -1,17 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Beamtalk compilation pipeline for the REPL
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Handles Beamtalk source → Core Erlang → BEAM bytecode compilation,
-%%% including expression compilation, file compilation, and codegen display.
-%%% Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
-
 -module(beamtalk_repl_compiler).
 
--include_lib("kernel/include/logger.hrl").
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Beamtalk compilation pipeline for the REPL
+
+Handles Beamtalk source → Core Erlang → BEAM bytecode compilation,
+including expression compilation, file compilation, and codegen display.
+Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
+""".
 
 -export([
     compile_expression/3,
@@ -46,7 +46,7 @@
 
 %%% Public API
 
-%% @doc Compile a Beamtalk expression to bytecode.
+-doc "Compile a Beamtalk expression to bytecode.".
 -spec compile_expression(string(), atom(), map()) ->
     {ok, binary(), term(), [binary()]}
     | {ok, class_definition, map(), [binary()]}
@@ -56,10 +56,12 @@
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
 
-%% @doc Compile a Beamtalk expression in trace mode (BT-1238).
-%%
-%% Like `compile_expression/3' but the generated module's `eval/1' returns
-%% `{[{<<"src0">>, Val0}, ...], FinalState}' — one step per top-level statement.
+-doc """
+Compile a Beamtalk expression in trace mode (BT-1238).
+
+Like `compile_expression/3' but the generated module's `eval/1' returns
+`{[{<<"src0">>, Val0}, ...], FinalState}' — one step per top-level statement.
+""".
 -spec compile_expression_trace(string(), atom(), map()) ->
     {ok, binary(), term(), [binary()]} | {error, term()}.
 compile_expression_trace(Expression, ModuleName, Bindings) ->
@@ -88,23 +90,27 @@ compile_expression_trace(Expression, ModuleName, Bindings) ->
         direct
     ).
 
-%% @doc Compile a Beamtalk file to bytecode.
+-doc "Compile a Beamtalk file to bytecode.".
 -spec compile_file(string(), string(), boolean(), binary() | undefined) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
 
-%% @doc Compile a Beamtalk file to bytecode with pre-built class indexes (BT-1543).
-%%
-%% Like `compile_file/4' but accepts pre-built class indexes to avoid
-%% redundant class registry scans during batch loads.
+-doc """
+Compile a Beamtalk file to bytecode with pre-built class indexes (BT-1543).
+
+Like `compile_file/4' but accepts pre-built class indexes to avoid
+redundant class registry scans during batch loads.
+""".
 -spec compile_file(string(), string(), boolean(), binary() | undefined, map()) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes).
 
-%% @doc Compile a Beamtalk expression and return Core Erlang source (for show-codegen).
-%% Does NOT compile to bytecode.
+-doc """
+Compile a Beamtalk expression and return Core Erlang source (for show-codegen).
+Does NOT compile to bytecode.
+""".
 -spec compile_for_codegen(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]} | {error, term()}.
 compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
@@ -131,8 +137,10 @@ compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
         wrapped
     ).
 
-%% @doc Compile a Beamtalk source file and return Core Erlang source (for show-codegen).
-%% Does NOT compile to bytecode. Used when inspecting codegen for a loaded class.
+-doc """
+Compile a Beamtalk source file and return Core Erlang source (for show-codegen).
+Does NOT compile to bytecode. Used when inspecting codegen for a loaded class.
+""".
 -spec compile_file_for_codegen(binary(), string() | undefined) ->
     {ok, binary(), [binary()]} | {error, term()}.
 compile_file_for_codegen(SourceBin, Path) ->
@@ -152,8 +160,10 @@ compile_file_for_codegen(SourceBin, Path) ->
         wrapped
     ).
 
-%% @doc Format a list of diagnostics as a human-readable binary string.
-%% Handles both structured diagnostic maps (BT-1235) and plain binaries (legacy).
+-doc """
+Format a list of diagnostics as a human-readable binary string.
+Handles both structured diagnostic maps (BT-1235) and plain binaries (legacy).
+""".
 -spec format_formatted_diagnostics(list()) -> binary().
 format_formatted_diagnostics([]) ->
     <<"Compilation failed">>;
@@ -161,11 +171,12 @@ format_formatted_diagnostics(FormattedList) ->
     Messages = [format_diagnostic_text(D) || D <- FormattedList],
     iolist_to_binary(lists:join(<<"\n\n">>, Messages)).
 
-%% @private Format a single diagnostic for human-readable display.
+-doc "Format a single diagnostic for human-readable display.".
 -spec format_diagnostic_text(term()) -> binary().
 format_diagnostic_text(D) when is_map(D) ->
     Msg = maps:get(message, D, <<"Unknown error">>),
     LinePrefix =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(line, D) of
             {ok, Line} when is_integer(Line) ->
                 [<<"Line ">>, integer_to_binary(Line), <<": ">>];
@@ -173,6 +184,7 @@ format_diagnostic_text(D) when is_map(D) ->
                 []
         end,
     HintSuffix =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(hint, D) of
             {ok, Hint} -> [<<"\nHint: ">>, Hint];
             error -> []
@@ -183,7 +195,7 @@ format_diagnostic_text(D) when is_binary(D) ->
 format_diagnostic_text(D) ->
     iolist_to_binary(io_lib:format("~p", [D])).
 
-%% @doc Check if a binding key is internal (not a user variable).
+-doc "Check if a binding key is internal (not a user variable).".
 -spec is_internal_key(atom()) -> boolean().
 is_internal_key(Key) when is_atom(Key) ->
     case atom_to_list(Key) of
@@ -191,10 +203,12 @@ is_internal_key(Key) when is_atom(Key) ->
         _ -> false
     end.
 
-%% @doc Build a class→superclass index from the Beamtalk class hierarchy ETS table.
-%%
-%% BT-905: Used when compiling new source via the REPL to inform the compiler
-%% which already-loaded classes are value objects vs actors.
+-doc """
+Build a class→superclass index from the Beamtalk class hierarchy ETS table.
+
+BT-905: Used when compiling new source via the REPL to inform the compiler
+which already-loaded classes are value objects vs actors.
+""".
 -spec build_class_superclass_index() -> #{binary() => binary()}.
 build_class_superclass_index() ->
     FoldFun = fun
@@ -207,12 +221,14 @@ build_class_superclass_index() ->
     end,
     beamtalk_runtime_api:hierarchy_foldl(FoldFun, #{}).
 
-%% @doc Build a class→module index from all registered class gen-servers.
-%%
-%% When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt),
-%% the Rust compiler's user_package_prefix loses the subdirectory segment. By passing
-%% a full class→module map, compiled_module_name/2 uses the correct module name
-%% (e.g. bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
+-doc """
+Build a class→module index from all registered class gen-servers.
+
+When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt),
+the Rust compiler's user_package_prefix loses the subdirectory segment. By passing
+a full class→module map, compiled_module_name/2 uses the correct module name
+(e.g. bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
+""".
 -spec build_class_module_index() -> #{binary() => binary()}.
 build_class_module_index() ->
     ClassPids =
@@ -240,21 +256,25 @@ build_class_module_index() ->
         ClassPids
     ).
 
-%% @doc Build both class indexes as a single options map (BT-1543).
-%%
-%% Returns a map suitable for merging into compile options, containing
-%% `class_superclass_index' and/or `class_module_index' keys when non-empty.
-%% Intended to be built once before a batch of compilations.
+-doc """
+Build both class indexes as a single options map (BT-1543).
+
+Returns a map suitable for merging into compile options, containing
+`class_superclass_index' and/or `class_module_index' keys when non-empty.
+Intended to be built once before a batch of compilations.
+""".
 -spec build_class_indexes() -> map().
 build_class_indexes() ->
     add_class_indexes(#{}).
 
-%% @doc Compile Beamtalk source and Core Erlang for method reload (BT-911).
-%%
-%% Wraps both beamtalk_compiler:compile/2 and compile_core_erlang/1 inside
-%% wrap_compiler_errors so that a compiler crash (exit, throw, error) returns
-%% {error, {compile_error, Msg}} instead of propagating a fatal exit that would
-%% kill the REPL process.
+-doc """
+Compile Beamtalk source and Core Erlang for method reload (BT-911).
+
+Wraps both beamtalk_compiler:compile/2 and compile_core_erlang/1 inside
+wrap_compiler_errors so that a compiler crash (exit, throw, error) returns
+{error, {compile_error, Msg}} instead of propagating a fatal exit that would
+kill the REPL process.
+""".
 -spec compile_for_method_reload(binary(), map()) ->
     {ok, binary(), atom(), list(), [binary()]} | {error, term()}.
 compile_for_method_reload(SourceBin, Options) ->
@@ -265,6 +285,7 @@ compile_for_method_reload(SourceBin, Options) ->
                     #{core_erlang := CoreErlang, module_name := ModNameBin, classes := Classes} =
                         CR} ->
                     Warnings = maps:get(warnings, CR, []),
+                    % elp:fixme W0023 intentional atom creation
                     ModName = binary_to_atom(ModNameBin, utf8),
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
@@ -330,6 +351,7 @@ compile_protocol_definition_result(ProtocolInfo) ->
         protocols := Protocols,
         warnings := Warnings
     } = ProtocolInfo,
+    % elp:fixme W0023 intentional atom creation
     ModuleName = binary_to_atom(ModuleNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
@@ -357,6 +379,7 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
         classes := Classes,
         warnings := Warnings
     } = ClassInfo,
+    % elp:fixme W0023 intentional atom creation
     ClassModName = binary_to_atom(ClassModNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
@@ -370,6 +393,7 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
 -spec compile_trailing_expressions(map(), atom()) ->
     {ok, binary(), atom()} | {error, binary()} | none.
 compile_trailing_expressions(ClassInfo, ModuleName) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(trailing_core_erlang, ClassInfo) of
         {ok, TrailingCoreErlang} ->
             case beamtalk_compiler:compile_core_erlang(TrailingCoreErlang) of
@@ -436,6 +460,7 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
                     module_name := ModNameBin,
                     classes := Classes
                 }} ->
+                    % elp:fixme W0023 intentional atom creation
                     ModuleName = binary_to_atom(ModNameBin, utf8),
                     compile_file_core(CoreErlang, ModuleName, Classes);
                 {error, Diagnostics} ->
@@ -504,10 +529,12 @@ apply_source_path(Options, Path) when is_list(Path) ->
 apply_source_path(Options, _) ->
     Options.
 
-%% @doc Wrap compiler calls with shared error handling for exit/error/throw.
-%% ErrorStyle controls error wrapping:
-%%   direct  - returns {error, Message} directly (for expression compilation)
-%%   wrapped - wraps as {error, {compile_error, Message}} (for file compilation)
+-doc """
+Wrap compiler calls with shared error handling for exit/error/throw.
+ErrorStyle controls error wrapping:
+  direct  - returns {error, Message} directly (for expression compilation)
+  wrapped - wraps as {error, {compile_error, Message}} (for file compilation)
+""".
 -spec wrap_compiler_errors(fun(() -> term()), direct | wrapped) -> term().
 wrap_compiler_errors(Fun, ErrorStyle) ->
     try

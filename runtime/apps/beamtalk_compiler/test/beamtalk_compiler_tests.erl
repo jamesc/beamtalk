@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_compiler (ADR 0022, Phase 1).
-%%
-%% Tests the public API, backend dispatch, in-memory Core Erlang compilation,
-%% and the compile (file) command.
-
 -module(beamtalk_compiler_tests).
+
+-moduledoc """
+Tests for beamtalk_compiler (ADR 0022, Phase 1).
+
+Tests the public API, backend dispatch, in-memory Core Erlang compilation,
+and the compile (file) command.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

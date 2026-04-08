@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_spec_reader (ADR 0075, Phase 1).
-%%
-%% Tests spec extraction from `.beam` files, Erlang→Beamtalk type mapping,
-%% multi-clause spec handling, and batch processing.
-
 -module(beamtalk_spec_reader_tests).
+
+-moduledoc """
+Tests for beamtalk_spec_reader (ADR 0075, Phase 1).
+
+Tests spec extraction from `.beam` files, Erlang→Beamtalk type mapping,
+multi-clause spec handling, and batch processing.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -90,7 +92,7 @@ map_type_number_test() ->
     ?assertEqual(<<"Number">>, beamtalk_spec_reader:map_type({type, 0, number, []})).
 
 map_type_binary_test() ->
-    ?assertEqual(<<"String">>, beamtalk_spec_reader:map_type({type, 0, binary, []})).
+    ?assertEqual(<<"String | Binary">>, beamtalk_spec_reader:map_type({type, 0, binary, []})).
 
 map_type_boolean_test() ->
     ?assertEqual(<<"Boolean">>, beamtalk_spec_reader:map_type({type, 0, boolean, []})).
@@ -226,10 +228,10 @@ map_type_union_dedup_test() ->
 %%% Union types — ok/error Result recognition (ADR 0076 Phase 2)
 %%% ---------------------------------------------------------------
 
-%% {ok, binary()} | {error, posix()} → Result(String, Symbol)
+%% {ok, binary()} | {error, posix()} → Result(String | Binary, Symbol)
 map_type_result_ok_error_test() ->
     ?assertEqual(
-        <<"Result(String, Symbol)">>,
+        <<"Result(String | Binary, Symbol)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -266,7 +268,7 @@ map_type_result_bare_ok_test() ->
 map_type_result_ok_only_test() ->
     %% {ok, T} | other — ok branch present, no error branch
     ?assertEqual(
-        <<"Result(String, Dynamic) | Integer">>,
+        <<"Result(String | Binary, Dynamic) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -278,7 +280,7 @@ map_type_result_ok_only_test() ->
 %% {ok, T} as the sole branch in a union with no error branch
 map_type_result_ok_only_pure_test() ->
     ?assertEqual(
-        <<"Result(String, Dynamic)">>,
+        <<"Result(String | Binary, Dynamic)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]}
@@ -313,7 +315,7 @@ map_type_result_error_only_pure_test() ->
 %% {ok, T} | {error, E} | Other → Result(T, E) | Other
 map_type_result_three_branch_test() ->
     ?assertEqual(
-        <<"Result(String, Symbol) | Integer">>,
+        <<"Result(String | Binary, Symbol) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -331,7 +333,7 @@ map_type_result_term_unchanged_test() ->
 %% Bare error atom in union
 map_type_result_bare_error_test() ->
     ?assertEqual(
-        <<"Result(String, Nil)">>,
+        <<"Result(String | Binary, Nil)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -370,8 +372,8 @@ verify_file_read_file_result_test() ->
     ?assert(length(ReadFileSpecs) > 0),
     [Spec | _] = ReadFileSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should start with "Result(" — the ok type is String from binary()
-    ?assertMatch(<<"Result(String,", _/binary>>, RetType).
+    %% Should start with "Result(" — the ok type is String | Binary from binary()
+    ?assertMatch(<<"Result(String | Binary,", _/binary>>, RetType).
 
 %% timer:send_after/2 → Result return type
 verify_timer_send_after_result_test() ->
@@ -448,8 +450,8 @@ bounded_fun_result_with_constraints_test() ->
     [Spec] = Result,
     ?assertEqual(<<"read_file">>, maps:get(name, Spec)),
     %% The union's type variables (Binary, Reason) must be resolved via constraints
-    %% before Result recognition, yielding Result(String, Symbol)
-    ?assertEqual(<<"Result(String, Symbol)">>, maps:get(return_type, Spec)).
+    %% before Result recognition, yielding Result(String | Binary, Symbol)
+    ?assertEqual(<<"Result(String | Binary, Symbol)">>, maps:get(return_type, Spec)).
 
 %%% ---------------------------------------------------------------
 %%% extract_param_names/1 — parameter name extraction
@@ -987,7 +989,7 @@ resolve_user_type_union_test() ->
     put(beamtalk_type_depth, 0),
     try
         ?assertEqual(
-            <<"Result(String, Symbol)">>,
+            <<"Result(String | Binary, Symbol)">>,
             beamtalk_spec_reader:map_type({user_type, 0, my_result, []})
         )
     after
@@ -1060,7 +1062,7 @@ resolve_remote_type_posix_test() ->
     ?assert(length(ReadFileSpecs) > 0),
     [Spec | _] = ReadFileSpecs,
     %% posix() in error branch should resolve to Symbol (since posix() = atom())
-    ?assertEqual(<<"Result(String, Symbol)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(String | Binary, Symbol)">>, maps:get(return_type, Spec)).
 
 %% Remote type resolution: disk_log error types resolve.
 resolve_remote_type_disk_log_test() ->

@@ -1,38 +1,40 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Wire check tests for ADR 0032 Phase 0 (BT-732).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Proves the core assumption of the Early Class Protocol:
-%%% a class-side message not found in user-defined class methods
-%%% dispatches through the 'Class' instance method chain.
-%%%
-%%% ## What This Tests
-%%%
-%%% 1. **Dispatch fallthrough**: `Counter testClassProtocol` reaches
-%%%    the currently registered Class implementation module's
-%%%    `dispatch/4` (in this suite, `beamtalk_class_chain_test_helper:dispatch/4`)
-%%%    via `try_class_chain_fallthrough/3`.
-%%%
-%%% 2. **Metaclass tag preservation**: The `self` argument received by
-%%%    the Class method has the 'Counter class' tag, not 'Counter'.
-%%%    This proves the virtual metaclass tag survives the dispatch chain.
-%%%
-%%% 3. **DNU still works**: Messages not in Class chain still raise
-%%%    does_not_understand.
-%%%
-%%% 4. **Fallback when Class absent**: When 'Class' is not registered,
-%%%    does_not_understand is raised (no crash, graceful fallback).
-%%%
-%%% ## Phase 0 Outcome
-%%%
-%%% The testClassProtocol probe was provided by beamtalk_class_chain_test_helper
-%%% (test-only module) to keep production code clean. The dispatch mechanism
-%%% (try_class_chain_fallthrough) remains in beamtalk_class_dispatch.
-
 -module(beamtalk_class_chain_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Wire check tests for ADR 0032 Phase 0 (BT-732).
+
+Proves the core assumption of the Early Class Protocol:
+a class-side message not found in user-defined class methods
+dispatches through the 'Class' instance method chain.
+
+## What This Tests
+
+1. **Dispatch fallthrough**: `Counter testClassProtocol` reaches
+   the currently registered Class implementation module's
+   `dispatch/4` (in this suite, `beamtalk_class_chain_test_helper:dispatch/4`)
+   via `try_class_chain_fallthrough/3`.
+
+2. **Metaclass tag preservation**: The `self` argument received by
+   the Class method has the 'Counter class' tag, not 'Counter'.
+   This proves the virtual metaclass tag survives the dispatch chain.
+
+3. **DNU still works**: Messages not in Class chain still raise
+   does_not_understand.
+
+4. **Fallback when Class absent**: When 'Class' is not registered,
+   does_not_understand is raised (no crash, graceful fallback).
+
+## Phase 0 Outcome
+
+The testClassProtocol probe was provided by beamtalk_class_chain_test_helper
+(test-only module) to keep production code clean. The dispatch mechanism
+(try_class_chain_fallthrough) remains in beamtalk_class_dispatch.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

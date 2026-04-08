@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_compiled_method_ops module (BT-346).
-%%%
-%%% Tests dispatch, introspection, and error handling for CompiledMethod objects.
-
 -module(beamtalk_compiled_method_tests).
+
+-moduledoc """
+Unit tests for beamtalk_compiled_method_ops module (BT-346).
+
+Tests dispatch, introspection, and error handling for CompiledMethod objects.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

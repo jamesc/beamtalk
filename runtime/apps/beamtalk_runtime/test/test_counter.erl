@@ -1,10 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test counter actor for beamtalk_actor tests
-
 -module(test_counter).
 -behaviour(gen_server).
+
+-moduledoc "Test counter actor for beamtalk_actor tests".
 
 %% API
 -export([start_link/1, start/1]).
@@ -32,7 +32,9 @@
 start_link(InitialValue) ->
     beamtalk_actor:start_link(?MODULE, InitialValue).
 
-%% @doc Start without a link (for kill tests — avoids propagating exit signals to the test process).
+-doc """
+Start without a link (for kill tests — avoids propagating exit signals to the test process).
+""".
 start(InitialValue) ->
     gen_server:start(?MODULE, InitialValue, []).
 

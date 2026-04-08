@@ -1,16 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Primitive type dispatch and reflection.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Provides uniform dispatch and class identity for primitive types (integers,
-%%% strings, etc.) and tagged maps. Enables reflection like `42 class` → `'Integer'`.
-%%%
-%%% @see docs/internal/design-self-as-object.md Section 3.3
-
 -module(beamtalk_primitive).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Primitive type dispatch and reflection.
+
+Provides uniform dispatch and class identity for primitive types (integers,
+strings, etc.) and tagged maps. Enables reflection like `42 class` → `'Integer'`.
+
+See also: docs/internal/design-self-as-object.md Section 3.3
+""".
 -export([
     class_of/1,
     class_of_object/1,
@@ -25,13 +27,14 @@
 -include("beamtalk.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang, not .erl source.
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({nowarn_function, [send/3, responds_to/2]}).
 
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
 
-%% @doc Determine the Beamtalk class of any value.
+-doc "Determine the Beamtalk class of any value.".
 -spec class_of(term()) -> atom().
 class_of(X) when is_integer(X) -> 'Integer';
 class_of(X) when is_float(X) -> 'Float';
@@ -63,12 +66,14 @@ class_of(X) when is_reference(X) -> 'Reference';
 class_of(_) ->
     'Object'.
 
-%% @doc Return the class of any value as a first-class class object (BT-412).
-%%
-%% ADR 0036: For class objects (tagged with " class" suffix) returns a real
-%% metaclass object instead of the sentinel atom 'Metaclass'. For metaclass
-%% objects (tagged with 'Metaclass'), returns the same struct (idempotent) to
-%% enable the self-grounding invariant: `Metaclass class class == Metaclass class`.
+-doc """
+Return the class of any value as a first-class class object (BT-412).
+
+ADR 0036: For class objects (tagged with " class" suffix) returns a real
+metaclass object instead of the sentinel atom 'Metaclass'. For metaclass
+objects (tagged with 'Metaclass'), returns the same struct (idempotent) to
+enable the self-grounding invariant: `Metaclass class class == Metaclass class`.
+""".
 -spec class_of_object(term()) -> #beamtalk_object{} | atom().
 class_of_object({beamtalk_future, _} = Future) ->
     %% BT-840: Auto-await tagged futures before class object inspection.
@@ -90,11 +95,11 @@ class_of_object(X) ->
     ClassName = class_of(X),
     class_of_object_inner(ClassName).
 
-%% @private Helper to construct class object from class name.
+-doc "Helper to construct class object from class name.".
 class_of_object_inner(ClassName) ->
     class_of_object_by_name(ClassName).
 
-%% @doc Return a class object given a class name atom (BT-412).
+-doc "Return a class object given a class name atom (BT-412).".
 -spec class_of_object_by_name(atom()) -> tuple() | atom().
 class_of_object_by_name(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -106,9 +111,11 @@ class_of_object_by_name(ClassName) ->
             {beamtalk_object, ClassTag, ModuleName, Pid}
     end.
 
-%% @doc Return the printString representation of any value.
-%%
-%% Strings are quoted (developer representation), symbols use the `#` prefix.
+-doc """
+Return the printString representation of any value.
+
+Strings are quoted (developer representation), symbols use the `#` prefix.
+""".
 -spec print_string(term()) -> binary().
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
@@ -149,7 +156,7 @@ print_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
-%% @private Format tagged maps for display.
+-doc "Format tagged maps for display.".
 -spec print_string_map(map()) -> binary().
 print_string_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
@@ -158,7 +165,7 @@ print_string_map(X) ->
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
         'Array' ->
             Elements = array:to_list(maps:get(data, X)),
-            Parts = lists:map(fun(E) -> print_string(E) end, Elements),
+            Parts = [print_string(E) || E <- Elements],
             iolist_to_binary(["#[", lists:join(<<", ">>, Parts), "]"]);
         'Stream' ->
             maps:get(description, X);
@@ -190,11 +197,13 @@ print_string_map(X) ->
             end
     end.
 
-%% @doc Return the displayString representation of any value.
-%%
-%% Strings are returned as-is (no surrounding quotes), symbols without
-%% the `#` prefix. This is the user-facing representation suitable for
-%% `Transcript show:` and string interpolation.
+-doc """
+Return the displayString representation of any value.
+
+Strings are returned as-is (no surrounding quotes), symbols without
+the `#` prefix. This is the user-facing representation suitable for
+`Transcript show:` and string interpolation.
+""".
 -spec display_string(term()) -> binary().
 display_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 display_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
@@ -227,7 +236,7 @@ display_string(X) when is_map(X) ->
 display_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
-%% @doc Send a message to any value (actor or primitive).
+-doc "Send a message to any value (actor or primitive).".
 -spec send(term(), atom(), list()) -> term().
 send({beamtalk_future, _} = Future, Selector, Args) ->
     %% BT-840: Auto-await tagged futures before dispatching.
@@ -255,8 +264,10 @@ send(X, Selector, Args) ->
     %% All other primitives: route through module_for_value/1
     dispatch_via_module(X, Selector, Args).
 
-%% @private Tagged map dispatch — routes through module_for_value/1 for all
-%% tagged-map types, falling back to send_tagged_map_fallback/4 if unregistered.
+-doc """
+Tagged map dispatch — routes through module_for_value/1 for all
+tagged-map types, falling back to send_tagged_map_fallback/4 if unregistered.
+""".
 -spec send_map(map(), atom(), list()) -> term().
 send_map(X, Selector, Args) ->
     case module_for_value(X) of
@@ -267,10 +278,12 @@ send_map(X, Selector, Args) ->
             Mod:dispatch(Selector, Args, X)
     end.
 
-%% @private Dispatch messages to a pid value.
-%%
-%% Routes Future-specific selectors (BT-813) directly to beamtalk_future.
-%% All other selectors fall through to the Pid stdlib module.
+-doc """
+Dispatch messages to a pid value.
+
+Routes Future-specific selectors (BT-813) directly to beamtalk_future.
+All other selectors fall through to the Pid stdlib module.
+""".
 -spec send_pid(pid(), atom(), list()) -> term().
 send_pid(X, await, _Args) ->
     beamtalk_future:await(X);
@@ -285,10 +298,12 @@ send_pid(X, 'whenRejected:', [Block]) ->
 send_pid(X, Selector, Args) ->
     dispatch_via_module(X, Selector, Args).
 
-%% @private True if the selector belongs to the Future protocol.
-%%
-%% Used by both send_pid/3 and responds_to/2 to recognise Future-specific
-%% messages on bare pids.
+-doc """
+True if the selector belongs to the Future protocol.
+
+Used by both send_pid/3 and responds_to/2 to recognise Future-specific
+messages on bare pids.
+""".
 -spec is_future_selector(atom()) -> boolean().
 is_future_selector(await) -> true;
 is_future_selector(awaitForever) -> true;
@@ -297,7 +312,7 @@ is_future_selector('whenResolved:') -> true;
 is_future_selector('whenRejected:') -> true;
 is_future_selector(_) -> false.
 
-%% @private Fallback for tagged maps without a compiled stdlib module.
+-doc "Fallback for tagged maps without a compiled stdlib module.".
 -spec send_tagged_map_fallback(map(), atom(), atom(), list()) -> term().
 send_tagged_map_fallback(X, Class, Selector, Args) ->
     case beamtalk_exception_handler:is_exception_class(Class) of
@@ -307,12 +322,14 @@ send_tagged_map_fallback(X, Class, Selector, Args) ->
             value_type_send(X, Class, Selector, Args)
     end.
 
-%% @doc Check if a value responds to a given selector.
-%%
-%% ADR 0032 Phase 3: For actor instances (#beamtalk_object{}), delegate to
-%% beamtalk_dispatch:responds_to/2 which walks the full class hierarchy.
-%% The previous approach (Mod:has_method/1) only checked locally-defined methods,
-%% causing inherited methods (e.g. 'class' from ProtoObject) to return false.
+-doc """
+Check if a value responds to a given selector.
+
+ADR 0032 Phase 3: For actor instances (#beamtalk_object{}), delegate to
+beamtalk_dispatch:responds_to/2 which walks the full class hierarchy.
+The previous approach (Mod:has_method/1) only checked locally-defined methods,
+causing inherited methods (e.g. 'class' from ProtoObject) to return false.
+""".
 -spec responds_to(term(), atom()) -> boolean().
 responds_to({beamtalk_future, _} = Future, Selector) ->
     %% BT-840: Auto-await tagged futures before protocol checking.
@@ -352,8 +369,10 @@ responds_to(X, Selector) ->
     %% All other primitives: route through module_for_value/1
     responds_via_module(X, Selector).
 
-%% @private Tagged map responds_to — routes through module_for_value/1 for all
-%% tagged-map types, falling back to exception/value-type checks if unregistered.
+-doc """
+Tagged map responds_to — routes through module_for_value/1 for all
+tagged-map types, falling back to exception/value-type checks if unregistered.
+""".
 -spec responds_to_map(map(), atom()) -> boolean().
 responds_to_map(X, Selector) ->
     case module_for_value(X) of
@@ -367,7 +386,7 @@ responds_to_map(X, Selector) ->
             Mod:has_method(Selector)
     end.
 
-%% @private Dispatch a value using its mapped stdlib module.
+-doc "Dispatch a value using its mapped stdlib module.".
 -spec dispatch_via_module(term(), atom(), list()) -> term().
 dispatch_via_module(X, Selector, Args) ->
     case module_for_value(X) of
@@ -384,7 +403,7 @@ dispatch_via_module(X, Selector, Args) ->
             Mod:dispatch(Selector, Args, X)
     end.
 
-%% @private Check method support using the mapped stdlib module.
+-doc "Check method support using the mapped stdlib module.".
 -spec responds_via_module(term(), atom()) -> boolean().
 responds_via_module(X, Selector) ->
     case module_for_value(X) of
@@ -392,7 +411,7 @@ responds_via_module(X, Selector) ->
         Mod -> Mod:has_method(Selector)
     end.
 
-%% @private Map a runtime value to its stdlib dispatch module.
+-doc "Map a runtime value to its stdlib dispatch module.".
 -spec module_for_value(term()) -> atom() | undefined.
 module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
 module_for_value(X) when is_binary(X) -> 'bt@stdlib@string';
@@ -447,8 +466,10 @@ module_for_value(X) when is_map(X) ->
 module_for_value(_) ->
     undefined.
 
-%% @private Try dispatching via beamtalk_object_ops (base Object protocol).
-%% Returns {ok, Result} if handled, false if not.
+-doc """
+Try dispatching via beamtalk_object_ops (base Object protocol).
+Returns {ok, Result} if handled, false if not.
+""".
 -spec try_object_ops(atom(), list(), term()) -> {ok, term()} | false.
 try_object_ops(Selector, Args, Self) ->
     case beamtalk_object_ops:has_method(Selector) of
@@ -461,7 +482,7 @@ try_object_ops(Selector, Args, Self) ->
             false
     end.
 
-%% @private Send a message to a value type instance (BT-354).
+-doc "Send a message to a value type instance (BT-354).".
 -spec value_type_send(map(), atom(), atom(), list()) -> term().
 value_type_send(Self, Class, Selector, Args) ->
     case is_ivar_method(Selector) of
@@ -497,20 +518,22 @@ value_type_send(Self, Class, Selector, Args) ->
             end
     end.
 
-%% @private Check if a selector is a mutation method on a value type (BT-359, BT-924).
-%%
-%% `fieldAt:put:` is blocked — value types are immutable, and the `with*:` methods
-%% return new instances rather than mutating in place.
-%%
-%% `fieldAt:` is intentionally NOT blocked here: user-defined value objects store
-%% their slots in the underlying map and support read-only reflection (BT-924).
+-doc """
+Check if a selector is a mutation method on a value type (BT-359, BT-924).
+
+`fieldAt:put:` is blocked — value types are immutable, and the `with*:` methods
+return new instances rather than mutating in place.
+
+`fieldAt:` is intentionally NOT blocked here: user-defined value objects store
+their slots in the underlying map and support read-only reflection (BT-924).
+""".
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
 is_ivar_method('fieldAt:put:') ->
     {true, <<"Cannot modify slot on value type — use withSlot: to create a new instance">>};
 is_ivar_method(_) ->
     false.
 
-%% @private Check if a value type responds to a selector (BT-354).
+-doc "Check if a value type responds to a selector (BT-354).".
 -spec value_type_responds_to(atom(), atom()) -> boolean().
 value_type_responds_to(Class, Selector) ->
     Module = class_name_to_module(Class),
@@ -528,12 +551,14 @@ value_type_responds_to(Class, Selector) ->
                 beamtalk_object_ops:has_method(Selector)
     end.
 
-%% @private Convert a CamelCase class name atom to a module name atom (ADR 0016).
-%%
-%% First tries the static naming convention (bt@{snake_case}).
-%% If that module is not loaded, falls back to the class registry to
-%% resolve package-qualified module names (e.g. bt@{package}@{snake_case}).
-%% BT-760: This fallback enables `beamtalk test` to dispatch on package classes.
+-doc """
+Convert a CamelCase class name atom to a module name atom (ADR 0016).
+
+First tries the static naming convention (bt@{snake_case}).
+If that module is not loaded, falls back to the class registry to
+resolve package-qualified module names (e.g. bt@{package}@{snake_case}).
+BT-760: This fallback enables `beamtalk test` to dispatch on package classes.
+""".
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
     StaticModule = static_class_module_name(Class),
@@ -554,7 +579,7 @@ class_name_to_module(Class) when is_atom(Class) ->
             end
     end.
 
-%% @private Static module name from class name (bt@{snake_case}).
+-doc "Static module name from class name (bt@{snake_case}).".
 -spec static_class_module_name(atom()) -> atom().
 static_class_module_name(Class) ->
     SnakeCase = camel_to_snake(atom_to_list(Class)),
@@ -563,10 +588,11 @@ static_class_module_name(Class) ->
         list_to_existing_atom(ModName)
     catch
         error:badarg ->
+            % elp:fixme W0023 intentional atom creation
             list_to_atom(ModName)
     end.
 
-%% @private CamelCase string to snake_case string conversion.
+-doc "CamelCase string to snake_case string conversion.".
 -spec camel_to_snake(string()) -> string().
 camel_to_snake(Str) ->
     camel_to_snake(Str, false, []).
@@ -582,11 +608,13 @@ camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
 camel_to_snake([H | T], _PrevWasLower, Acc) ->
     camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
 
-%% @private Extract the class name atom from a class tag or class object tag.
-%%
-%% Handles both plain instance tags (e.g. 'Counter') and class object tags
-%% (e.g. 'Counter class') — in both cases returns the class name atom 'Counter'.
-%% Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2.
+-doc """
+Extract the class name atom from a class tag or class object tag.
+
+Handles both plain instance tags (e.g. 'Counter') and class object tags
+(e.g. 'Counter class') — in both cases returns the class name atom 'Counter'.
+Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2.
+""".
 -spec class_name_from_tag(atom()) -> atom() | undefined.
 class_name_from_tag(Tag) ->
     Bin = beamtalk_class_registry:class_display_name(Tag),

@@ -1,27 +1,30 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Trace store gen_server for actor observability (ADR 0069 Phase 1).
-%%%
-%%% **DDD Context:** Runtime Context
-%%%
-%%% Owns ETS tables and atomics refs for lock-free aggregate tracking and
-%%% opt-in trace event capture. The gen_server handles queries and lifecycle
-%%% but is NOT in the write path — all writes happen in the calling process
-%%% via atomics:add/3, CAS loops, and ets:insert/2.
-%%%
-%%% Storage layout:
-%%% - beamtalk_agg_index (ETS set): {Pid, Selector} → {Key, CounterRef, SlotBase}
-%%% - beamtalk_trace_events (ETS ordered_set): composite key → trace event
-%%% - atomics ref in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
-%%% - persistent_term toggle: beamtalk_tracing_enabled (true | false)
-%%%
-%%% ETS tables use {heir, SupervisorPid, HeirData} for crash resilience.
-%%% Atomics refs stored in persistent_term survive gen_server crashes.
-%%%
-%%% @see docs/ADR/0069-actor-observability-and-tracing.md
 -module(beamtalk_trace_store).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Runtime Context
+
+-moduledoc """
+Trace store gen_server for actor observability (ADR 0069 Phase 1).
+
+Owns ETS tables and atomics refs for lock-free aggregate tracking and
+opt-in trace event capture. The gen_server handles queries and lifecycle
+but is NOT in the write path — all writes happen in the calling process
+via atomics:add/3, CAS loops, and ets:insert/2.
+
+Storage layout:
+- beamtalk_agg_index (ETS set): {Pid, Selector} → {Key, CounterRef, SlotBase}
+- beamtalk_trace_events (ETS ordered_set): composite key → trace event
+- atomics ref in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
+- persistent_term toggle: beamtalk_tracing_enabled (true | false)
+
+ETS tables use {heir, SupervisorPid, HeirData} for crash resilience.
+Atomics refs stored in persistent_term survive gen_server crashes.
+
+See also: docs/ADR/0069-actor-observability-and-tracing.md
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -83,7 +86,6 @@
 -define(SLOT_TOTAL_DURATION, 5).
 -define(SLOT_MIN_DURATION, 6).
 -define(SLOT_MAX_DURATION, 7).
--define(SLOT_RESERVED, 8).
 -define(SLOTS_PER_KEY, 8).
 
 %% Sentinel value for min duration — large enough that any real duration will be smaller.
@@ -119,22 +121,22 @@
 %% API
 %%====================================================================
 
-%% @doc Start the trace store gen_server.
+-doc "Start the trace store gen_server.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% @doc Enable trace event capture. Aggregates are always on.
+-doc "Enable trace event capture. Aggregates are always on.".
 -spec enable() -> ok.
 enable() ->
     gen_server:call(?MODULE, enable).
 
-%% @doc Disable trace event capture.
+-doc "Disable trace event capture.".
 -spec disable() -> ok.
 disable() ->
     gen_server:call(?MODULE, disable).
 
-%% @doc Check whether trace event capture is active.
+-doc "Check whether trace event capture is active.".
 -spec is_enabled() -> boolean().
 is_enabled() ->
     try persistent_term:get(?PT_ENABLED) of
@@ -143,22 +145,26 @@ is_enabled() ->
         error:badarg -> false
     end.
 
-%% @doc Generate the next monotonic span ID for causal trace linking (BT-1633).
-%% Uses a global atomics counter — one atomics:add_get/3 call (~10ns).
-%% Only called from within maybe_span when tracing is enabled.
+-doc """
+Generate the next monotonic span ID for causal trace linking (BT-1633).
+Uses a global atomics counter — one atomics:add_get/3 call (~10ns).
+Only called from within maybe_span when tracing is enabled.
+""".
 -spec next_span_id() -> pos_integer().
 next_span_id() ->
     Ref = persistent_term:get(?PT_SPAN_ID_COUNTER),
     atomics:add_get(Ref, 1, 1).
 
-%% @doc Clear all trace events and aggregate stats.
+-doc "Clear all trace events and aggregate stats.".
 -spec clear() -> ok.
 clear() ->
     gen_server:call(?MODULE, clear).
 
-%% @doc Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
-%% This runs in the calling process for lock-free performance.
-%% Class comes from telemetry metadata — the authoritative source (BT-1640).
+-doc """
+Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
+This runs in the calling process for lock-free performance.
+Class comes from telemetry metadata — the authoritative source (BT-1640).
+""".
 -spec record_dispatch(pid(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
 record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
     %% BT-1640: Store Pid→Class mapping from telemetry metadata so actor_stats
@@ -182,8 +188,10 @@ record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
     cas_max(AtomicsRef, SlotBase + ?SLOT_MAX_DURATION, Duration),
     ok.
 
-%% @doc Record a trace event (called from telemetry handler, NOT via gen_server).
-%% Only inserts if tracing is enabled. Runs in the calling process.
+-doc """
+Record a trace event (called from telemetry handler, NOT via gen_server).
+Only inserts if tracing is enabled. Runs in the calling process.
+""".
 -spec record_trace_event(pid(), atom(), atom(), atom(), non_neg_integer(), atom(), map(), atom()) ->
     ok.
 record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Phase) ->
@@ -200,84 +208,90 @@ record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Pha
             ok
     end.
 
-%% @doc Get all trace events, newest first.
+-doc "Get all trace events, newest first.".
 -spec get_traces() -> [map()].
 get_traces() ->
     get_traces(#{}).
 
-%% @doc Get trace events filtered by opts map or actor pid, newest first.
-%% Opts map supports: actor, selector, class, outcome, min_duration_ns.
+-doc """
+Get trace events filtered by opts map or actor pid, newest first.
+Opts map supports: actor, selector, class, outcome, min_duration_ns.
+""".
 -spec get_traces(map() | pid() | undefined) -> [map()].
 get_traces(Opts) when is_map(Opts) ->
     gen_server:call(?MODULE, {get_traces, Opts});
 get_traces(Pid) when is_pid(Pid); Pid =:= undefined ->
     get_traces(#{actor => Pid}).
 
-%% @doc Get trace events for a specific actor + selector, newest first.
+-doc "Get trace events for a specific actor + selector, newest first.".
 -spec get_traces(pid() | undefined, atom() | undefined) -> [map()].
 get_traces(Pid, Selector) ->
     get_traces(#{actor => Pid, selector => Selector}).
 
-%% @doc Export trace events to a JSON file.
-%% Opts is a map with optional keys:
-%%   path     - binary file path (default: timestamped file in cwd)
-%%   actor    - pid() to filter by actor
-%%   selector - atom() to filter by selector
-%%   limit    - integer() max events to export
-%% Returns {ok, #{path => Path, count => Count}} on success.
+-doc """
+Export trace events to a JSON file.
+Opts is a map with optional keys:
+  path     - binary file path (default: timestamped file in cwd)
+  actor    - pid() to filter by actor
+  selector - atom() to filter by selector
+  limit    - integer() max events to export
+Returns {ok, #{path => Path, count => Count}} on success.
+""".
 -spec export_traces(map()) -> {ok, map()} | {error, term()}.
 export_traces(Opts) when is_map(Opts) ->
     gen_server:call(?MODULE, {export_traces, Opts});
 export_traces(_) ->
     {error, badarg}.
 
-%% @doc Get aggregate stats for all actors.
+-doc "Get aggregate stats for all actors.".
 -spec get_stats() -> map().
 get_stats() ->
     gen_server:call(?MODULE, get_stats).
 
-%% @doc Get aggregate stats for a specific actor pid.
+-doc "Get aggregate stats for a specific actor pid.".
 -spec get_stats(pid()) -> map().
 get_stats(Pid) ->
     gen_server:call(?MODULE, {get_stats, Pid}).
 
-%% @doc Top N methods by average duration (descending).
+-doc "Top N methods by average duration (descending).".
 -spec slow_methods(pos_integer()) -> [map()].
 slow_methods(Limit) ->
     gen_server:call(?MODULE, {slow_methods, Limit}).
 
-%% @doc Top N methods sorted by the given duration metric (descending).
-%% SortBy can be: avg_duration_ns | max_duration_ns | min_duration_ns.
+-doc """
+Top N methods sorted by the given duration metric (descending).
+SortBy can be: avg_duration_ns | max_duration_ns | min_duration_ns.
+""".
 -spec slow_methods(pos_integer(), atom()) -> [map()].
 slow_methods(Limit, SortBy) ->
     gen_server:call(?MODULE, {slow_methods, Limit, SortBy}).
 
-%% @doc Top N methods by call count (descending).
+-doc "Top N methods by call count (descending).".
 -spec hot_methods(pos_integer()) -> [map()].
 hot_methods(Limit) ->
     gen_server:call(?MODULE, {hot_methods, Limit}).
 
-%% @doc Top N methods by error + timeout rate (descending).
+-doc "Top N methods by error + timeout rate (descending).".
 -spec error_methods(pos_integer()) -> [map()].
 error_methods(Limit) ->
     gen_server:call(?MODULE, {error_methods, Limit}).
 
-%% @doc Top N actors by message queue length (live snapshot).
+-doc "Top N actors by message queue length (live snapshot).".
 -spec bottlenecks(pos_integer()) -> [map()].
 bottlenecks(Limit) ->
     gen_server:call(?MODULE, {bottlenecks, Limit}).
 
-%% @doc Live process health for a specific actor.
+-doc "Live process health for a specific actor.".
 -spec actor_health(pid()) -> map().
 actor_health(Pid) ->
     gen_server:call(?MODULE, {actor_health, Pid}).
 
-%% @doc VM overview: scheduler count, memory, process count, run queues.
+-doc "VM overview: scheduler count, memory, process count, run queues.".
 -spec system_health() -> map().
 system_health() ->
     gen_server:call(?MODULE, system_health).
 
-%% @doc Get current ring buffer capacity.
+-doc "Get current ring buffer capacity.".
 -spec max_events() -> pos_integer().
 max_events() ->
     try persistent_term:get(?PT_MAX_EVENTS) of
@@ -286,14 +300,16 @@ max_events() ->
         error:badarg -> ?DEFAULT_MAX_EVENTS
     end.
 
-%% @doc Set ring buffer capacity.
+-doc "Set ring buffer capacity.".
 -spec max_events(pos_integer()) -> ok.
 max_events(Size) when is_integer(Size), Size > 0 ->
     gen_server:call(?MODULE, {max_events, Size}).
 
-%% @doc Check whether telemetry handlers are attached to actor dispatch events.
-%% Returns true if the trace store's telemetry handlers are active, false if
-%% telemetry is unavailable or handlers failed to attach.
+-doc """
+Check whether telemetry handlers are attached to actor dispatch events.
+Returns true if the trace store's telemetry handlers are active, false if
+telemetry is unavailable or handlers failed to attach.
+""".
 -spec telemetry_attached() -> boolean().
 telemetry_attached() ->
     try
@@ -310,7 +326,7 @@ telemetry_attached() ->
 %% Telemetry handler callbacks
 %%====================================================================
 
-%% @doc Handler for [beamtalk, actor, dispatch, stop] events.
+-doc "Handler for [beamtalk, actor, dispatch, stop] events.".
 -spec handle_dispatch_stop([atom()], map(), map(), map()) -> ok.
 handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     #{pid := Pid, selector := Selector, mode := Mode} = Metadata,
@@ -335,7 +351,7 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
 handle_dispatch_stop(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
 
-%% @doc Handler for [beamtalk, actor, dispatch, exception] events.
+-doc "Handler for [beamtalk, actor, dispatch, exception] events.".
 -spec handle_dispatch_exception([atom()], map(), map(), map()) -> ok.
 handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config) ->
     #{pid := Pid, selector := Selector, mode := Mode} = Metadata,
@@ -361,9 +377,11 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
 handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
 
-%% @doc Handler for [beamtalk, actor, lifecycle, *] events (BT-1629).
-%% Lifecycle events (start, stop, kill) are instantaneous — no duration.
-%% Recorded in the shared trace ring buffer with mode => lifecycle.
+-doc """
+Handler for [beamtalk, actor, lifecycle, *] events (BT-1629).
+Lifecycle events (start, stop, kill) are instantaneous — no duration.
+Recorded in the shared trace ring buffer with mode => lifecycle.
+""".
 -spec handle_lifecycle_event([atom()], map(), map(), map()) -> ok.
 handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     #{pid := Pid, class := Class} = Metadata,
@@ -378,16 +396,18 @@ handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
     ok.
 
-%% @private Derive outcome from lifecycle event action and metadata.
-%% For stop events, normal/shutdown exits are ok; anything else is an error.
-%% Start and kill events are always ok.
+-doc """
+Derive outcome from lifecycle event action and metadata.
+For stop events, normal/shutdown exits are ok; anything else is an error.
+Start and kill events are always ok.
+""".
 lifecycle_outcome(stop, #{reason := normal}) -> ok;
 lifecycle_outcome(stop, #{reason := shutdown}) -> ok;
 lifecycle_outcome(stop, #{reason := {shutdown, _}}) -> ok;
 lifecycle_outcome(stop, #{reason := _}) -> error;
 lifecycle_outcome(_, _) -> ok.
 
-%% @doc Handler for telemetry_poller VM measurement events.
+-doc "Handler for telemetry_poller VM measurement events.".
 -spec handle_vm_measurements([atom()], map(), map(), map()) -> ok.
 handle_vm_measurements(_EventName, Measurements, _Metadata, _Config) ->
     gen_server:cast(?MODULE, {vm_measurements, Measurements}),
@@ -397,7 +417,6 @@ handle_vm_measurements(_EventName, Measurements, _Metadata, _Config) ->
 %% gen_server callbacks
 %%====================================================================
 
-%% @private
 init([]) ->
     logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
 
@@ -432,7 +451,6 @@ init([]) ->
     ?LOG_INFO("Trace store started", #{}),
     {ok, #state{sweep_timer = TimerRef}}.
 
-%% @private
 handle_call(enable, _From, State) ->
     persistent_term:put(?PT_ENABLED, true),
     ?LOG_INFO("Trace capture enabled", #{}),
@@ -498,13 +516,11 @@ handle_call({max_events, Size}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
 handle_cast({vm_measurements, Measurements}, State) ->
     {noreply, State#state{vm_stats = Measurements}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
 handle_info(sweep_eviction, State) ->
     do_sweep_eviction(),
     TimerRef = start_sweep_timer(),
@@ -515,7 +531,6 @@ handle_info({'ETS-TRANSFER', TableName, _FromPid, _HeirData}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(_Reason, State) ->
     case State#state.sweep_timer of
         undefined -> ok;
@@ -524,7 +539,6 @@ terminate(_Reason, State) ->
     detach_telemetry_handlers(),
     ok.
 
-%% @private
 code_change(OldVsn, State, Extra) ->
     %% Ensure new ETS tables (e.g. beamtalk_agg_class) exist after live upgrade.
     ensure_ets_tables(find_supervisor()),
@@ -534,14 +548,14 @@ code_change(OldVsn, State, Extra) ->
 %% Internal: ETS table management
 %%====================================================================
 
-%% @private Find the supervisor pid for heir option.
+-doc "Find the supervisor pid for heir option.".
 find_supervisor() ->
     case whereis(beamtalk_runtime_sup) of
         undefined -> self();
         Pid -> Pid
     end.
 
-%% @private Create or verify ETS tables exist.
+-doc "Create or verify ETS tables exist.".
 ensure_ets_tables(SupPid) ->
     ensure_table(?AGG_INDEX, [
         named_table,
@@ -569,21 +583,23 @@ ensure_ets_tables(SupPid) ->
     ]),
     ok.
 
-%% @private Create a table if it doesn't exist.
-%% If the table already exists (inherited by supervisor via heir after crash),
-%% it's a public table so reads/writes work regardless of ownership. The data
-%% is preserved, which is the primary goal of the heir mechanism.
+-doc """
+Create a table if it doesn't exist.
+If the table already exists (inherited by supervisor via heir after crash),
+it's a public table so reads/writes work regardless of ownership. The data
+is preserved, which is the primary goal of the heir mechanism.
+""".
 ensure_table(Name, Opts) ->
     case ets:whereis(Name) of
         undefined ->
-            Name = ets:new(Name, Opts);
+            _Name = ets:new(Name, Opts);
         _Tid ->
             %% Table already exists (inherited via heir after crash).
             %% Public table — reads/writes work regardless of owner.
             ok
     end.
 
-%% @private Ensure atomics ref and slot allocator exist in persistent_term.
+-doc "Ensure atomics ref and slot allocator exist in persistent_term.".
 ensure_counters() ->
     try persistent_term:get(?PT_COUNTERS) of
         _Ref -> ok
@@ -607,7 +623,7 @@ ensure_counters() ->
             persistent_term:put(?PT_SPAN_ID_COUNTER, SpanIdRef)
     end.
 
-%% @private Initialise persistent_term defaults.
+-doc "Initialise persistent_term defaults.".
 init_persistent_terms() ->
     try persistent_term:get(?PT_ENABLED) of
         _ -> ok
@@ -626,8 +642,10 @@ init_persistent_terms() ->
 %% Internal: Counter slot allocation
 %%====================================================================
 
-%% @private Get or allocate atomics slots for a {Pid, Selector} pair.
-%% Called from the write path (calling process), not the gen_server.
+-doc """
+Get or allocate atomics slots for a {Pid, Selector} pair.
+Called from the write path (calling process), not the gen_server.
+""".
 -spec ensure_counter_slot(pid(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
 ensure_counter_slot(Pid, Selector) ->
     Key = {Pid, Selector},
@@ -638,10 +656,12 @@ ensure_counter_slot(Pid, Selector) ->
             allocate_counter_slot(Key)
     end.
 
-%% @private Allocate new atomics slots for a key.
-%% Uses atomics-style CAS on persistent_term slot counter.
-%% In the rare concurrent allocation race, both callers get valid (different) slots
-%% and the last ets:insert wins — acceptable for first-observation allocation.
+-doc """
+Allocate new atomics slots for a key.
+Uses atomics-style CAS on persistent_term slot counter.
+In the rare concurrent allocation race, both callers get valid (different) slots
+and the last ets:insert wins — acceptable for first-observation allocation.
+""".
 allocate_counter_slot(Key) ->
     AtomicsRef = persistent_term:get(?PT_COUNTERS),
     SlotBase = allocate_next_slot(),
@@ -678,16 +698,18 @@ allocate_counter_slot(Key) ->
             {AtomicsRef, SlotBase}
     end.
 
-%% @private Atomically allocate the next slot base.
-%% Uses atomics:add_get/3 for true lock-free atomic allocation — no race condition
-%% even under concurrent first-observation of different {Pid, Selector} keys.
+-doc """
+Atomically allocate the next slot base.
+Uses atomics:add_get/3 for true lock-free atomic allocation — no race condition
+even under concurrent first-observation of different {Pid, Selector} keys.
+""".
 allocate_next_slot() ->
     Allocator = persistent_term:get(?PT_SLOT_ALLOCATOR),
     %% add_get returns the NEW value after adding, so subtract to get the old (allocated) base
     NewVal = atomics:add_get(Allocator, 1, ?SLOTS_PER_KEY),
     NewVal - ?SLOTS_PER_KEY.
 
-%% @private Grow the atomics array by doubling its size.
+-doc "Grow the atomics array by doubling its size.".
 grow_counters(OldRef, OldSize) ->
     NewSize = OldSize * 2,
     NewRef = atomics:new(NewSize, [{signed, true}]),
@@ -698,7 +720,7 @@ grow_counters(OldRef, OldSize) ->
     update_counter_refs(NewRef),
     NewRef.
 
-%% @private Copy atomics values from old ref to new ref.
+-doc "Copy atomics values from old ref to new ref.".
 copy_counters(_OldRef, _NewRef, Idx, MaxIdx) when Idx > MaxIdx ->
     ok;
 copy_counters(OldRef, NewRef, Idx, MaxIdx) ->
@@ -709,7 +731,7 @@ copy_counters(OldRef, NewRef, Idx, MaxIdx) ->
     end,
     copy_counters(OldRef, NewRef, Idx + 1, MaxIdx).
 
-%% @private Update all agg_index entries to point to a new counter ref.
+-doc "Update all agg_index entries to point to a new counter ref.".
 update_counter_refs(NewRef) ->
     ets:foldl(
         fun({Key, _OldRef, SlotBase}, Acc) ->
@@ -724,8 +746,10 @@ update_counter_refs(NewRef) ->
 %% Internal: Telemetry handlers
 %%====================================================================
 
-%% @private Attach telemetry event handlers.
-%% Detach first to handle restarts after crash (terminate/2 not called on kill).
+-doc """
+Attach telemetry event handlers.
+Detach first to handle restarts after crash (terminate/2 not called on kill).
+""".
 attach_telemetry_handlers() ->
     detach_telemetry_handlers(),
     ok = telemetry:attach(
@@ -767,7 +791,7 @@ attach_telemetry_handlers() ->
     ),
     ok.
 
-%% @private Detach telemetry handlers on shutdown (safe if telemetry not loaded).
+-doc "Detach telemetry handlers on shutdown (safe if telemetry not loaded).".
 detach_telemetry_handlers() ->
     try
         telemetry:detach(beamtalk_trace_store_dispatch_stop),
@@ -782,7 +806,7 @@ detach_telemetry_handlers() ->
     end,
     ok.
 
-%% @private Configure telemetry_poller for periodic VM measurements.
+-doc "Configure telemetry_poller for periodic VM measurements.".
 configure_poller() ->
     %% telemetry_poller is started by the telemetry_poller application.
     %% It emits [vm, memory], [vm, total_run_queue_lengths], etc. by default.
@@ -794,11 +818,11 @@ configure_poller() ->
 %% Internal: Sweep / eviction
 %%====================================================================
 
-%% @private Start the periodic sweep timer.
+-doc "Start the periodic sweep timer.".
 start_sweep_timer() ->
     erlang:send_after(?EVICTION_INTERVAL_MS, self(), sweep_eviction).
 
-%% @private Evict oldest events if over the soft bound.
+-doc "Evict oldest events if over the soft bound.".
 do_sweep_eviction() ->
     MaxEvents = max_events(),
     Size = ets:info(?TRACE_EVENTS, size),
@@ -811,7 +835,7 @@ do_sweep_eviction() ->
             ok
     end.
 
-%% @private Delete the N oldest entries from an ordered_set.
+-doc "Delete the N oldest entries from an ordered_set.".
 delete_oldest_n(_Table, 0) ->
     ok;
 delete_oldest_n(Table, N) ->
@@ -827,8 +851,10 @@ delete_oldest_n(Table, N) ->
 %% Internal: Query implementations
 %%====================================================================
 
-%% @private Get trace events, filtered by opts map.
-%% Supported opts: actor, selector, class, outcome, min_duration_ns, trace_id (BT-1633).
+-doc """
+Get trace events, filtered by opts map.
+Supported opts: actor, selector, class, outcome, min_duration_ns, trace_id (BT-1633).
+""".
 do_get_traces(Opts) when is_map(Opts) ->
     Pid = maps:get(actor, Opts, undefined),
     Selector = maps:get(selector, Opts, undefined),
@@ -860,7 +886,7 @@ do_get_traces(Opts) when is_map(Opts) ->
     Sorted = lists:reverse(Filtered),
     [trace_event_to_map(Ev) || Ev <- Sorted].
 
-%% @private Export traces to a JSON file with optional filters.
+-doc "Export traces to a JSON file with optional filters.".
 do_export_traces(Opts) ->
     Limit = maps:get(limit, Opts, undefined),
     %% Pass filter opts through to do_get_traces (actor, selector, class, outcome, min_duration_ns)
@@ -919,7 +945,7 @@ do_export_traces(Opts) ->
             {error, Reason}
     end.
 
-%% @private Generate a default export path with timestamp.
+-doc "Generate a default export path with timestamp.".
 default_export_path() ->
     {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
     Unique = erlang:unique_integer([positive, monotonic]),
@@ -929,8 +955,10 @@ default_export_path() ->
     ),
     iolist_to_binary(Filename).
 
-%% @private Convert a trace event tuple to a map.
-%% Supports both 9-tuple (with wall-clock) and legacy 8-tuple (without) formats.
+-doc """
+Convert a trace event tuple to a map.
+Supports both 9-tuple (with wall-clock) and legacy 8-tuple (without) formats.
+""".
 trace_event_to_map({
     {_MonotonicNs, _Unique},
     Pid,
@@ -975,10 +1003,12 @@ trace_event_to_map({
         _ -> maps:merge(sanitize_metadata(Metadata), Base)
     end.
 
-%% @private Sanitize metadata map values for JSON serialization (BT-1641).
-%% JSX requires all values to be JSON-compatible (binaries, numbers, booleans,
-%% null, lists, maps). Atom values like `normal` from lifecycle events, pid
-%% values, and tuples must be converted to binary strings.
+-doc """
+Sanitize metadata map values for JSON serialization (BT-1641).
+JSX requires all values to be JSON-compatible (binaries, numbers, booleans,
+null, lists, maps). Atom values like `normal` from lifecycle events, pid
+values, and tuples must be converted to binary strings.
+""".
 -spec sanitize_metadata(map()) -> map().
 sanitize_metadata(Meta) ->
     maps:fold(
@@ -995,7 +1025,7 @@ sanitize_metadata(Meta) ->
         Meta
     ).
 
-%% @private Convert a single value to a JSON-safe representation.
+-doc "Convert a single value to a JSON-safe representation.".
 -spec sanitize_value(term()) -> term().
 sanitize_value(V) when is_binary(V) -> V;
 sanitize_value(V) when is_integer(V) -> V;
@@ -1010,7 +1040,7 @@ sanitize_value(V) when is_list(V) -> [sanitize_value(E) || E <- V];
 sanitize_value(V) when is_map(V) -> sanitize_metadata(V);
 sanitize_value(V) -> iolist_to_binary(io_lib:format("~p", [V])).
 
-%% @private Get aggregate stats, optionally filtered by Pid.
+-doc "Get aggregate stats, optionally filtered by Pid.".
 do_get_stats(FilterPid) ->
     ets:foldl(
         fun({{Pid, Selector}, CounterRef, SlotBase}, Acc) ->
@@ -1019,14 +1049,15 @@ do_get_stats(FilterPid) ->
                     Stats = read_counter_stats(CounterRef, SlotBase),
                     PidKey = list_to_binary(pid_to_list(Pid)),
                     PidStats =
+                        % elp:fixme W0032 maps:find with complex branch logic
                         case maps:find(PidKey, Acc) of
                             {ok, Existing} -> Existing;
                             error -> #{class => lookup_class_for_pid(Pid), methods => #{}}
                         end,
-                    Methods = maps:get(methods, PidStats),
+                    Methods = map_get(methods, PidStats),
                     SelKey = atom_to_binary(Selector, utf8),
-                    NewMethods = maps:put(SelKey, Stats, Methods),
-                    maps:put(PidKey, PidStats#{methods => NewMethods}, Acc);
+                    NewMethods = Methods#{SelKey => Stats},
+                    Acc#{PidKey => PidStats#{methods => NewMethods}};
                 false ->
                     Acc
             end
@@ -1035,7 +1066,7 @@ do_get_stats(FilterPid) ->
         ?AGG_INDEX
     ).
 
-%% @private Read stats from atomics slots.
+-doc "Read stats from atomics slots.".
 read_counter_stats(AtomicsRef, SlotBase) ->
     Calls = atomics:get(AtomicsRef, SlotBase + ?SLOT_CALLS),
     Ok = atomics:get(AtomicsRef, SlotBase + ?SLOT_OK),
@@ -1066,7 +1097,7 @@ read_counter_stats(AtomicsRef, SlotBase) ->
         max_duration_ns => MaxDuration
     }.
 
-%% @private Collect all method stats as a flat list for sorting.
+-doc "Collect all method stats as a flat list for sorting.".
 collect_method_stats() ->
     ets:foldl(
         fun({{Pid, Selector}, CounterRef, SlotBase}, Acc) ->
@@ -1084,11 +1115,11 @@ collect_method_stats() ->
         ?AGG_INDEX
     ).
 
-%% @private Top N methods by average duration (descending).
+-doc "Top N methods by average duration (descending).".
 do_slow_methods(Limit) ->
     do_slow_methods(Limit, avg_duration_ns).
 
-%% @private Top N methods sorted by the given duration metric (descending).
+-doc "Top N methods sorted by the given duration metric (descending).".
 do_slow_methods(Limit, SortBy) when
     SortBy =:= avg_duration_ns;
     SortBy =:= max_duration_ns;
@@ -1104,7 +1135,7 @@ do_slow_methods(Limit, _SortBy) ->
     %% Fall back to avg for unknown sort keys
     do_slow_methods(Limit, avg_duration_ns).
 
-%% @private Top N methods by call count (descending).
+-doc "Top N methods by call count (descending).".
 do_hot_methods(Limit) ->
     AllStats = collect_method_stats(),
     Sorted = lists:sort(
@@ -1113,7 +1144,7 @@ do_hot_methods(Limit) ->
     ),
     lists:sublist(Sorted, Limit).
 
-%% @private Top N methods by error + timeout rate (descending).
+-doc "Top N methods by error + timeout rate (descending).".
 do_error_methods(Limit) ->
     AllStats = collect_method_stats(),
     WithRate = lists:map(
@@ -1135,7 +1166,7 @@ do_error_methods(Limit) ->
     ),
     lists:sublist(Sorted, Limit).
 
-%% @private Top N actors by message queue length (live snapshot).
+-doc "Top N actors by message queue length (live snapshot).".
 do_bottlenecks(Limit) ->
     %% Get all unique pids from the agg index
     Pids = lists:usort(
@@ -1175,7 +1206,7 @@ do_bottlenecks(Limit) ->
     ),
     lists:sublist(Sorted, Limit).
 
-%% @private Live health for a specific actor.
+-doc "Live health for a specific actor.".
 do_actor_health(Pid) ->
     case erlang:is_process_alive(Pid) of
         true ->
@@ -1210,7 +1241,7 @@ do_actor_health(Pid) ->
             }
     end.
 
-%% @private VM overview.
+-doc "VM overview.".
 do_system_health(State) ->
     MemInfo = erlang:memory(),
     #{
@@ -1227,8 +1258,10 @@ do_system_health(State) ->
         vm_stats => State#state.vm_stats
     }.
 
-%% @private Convert atom map keys to binary for user-facing output.
-%% Nested maps are converted recursively.
+-doc """
+Convert atom map keys to binary for user-facing output.
+Nested maps are converted recursively.
+""".
 -spec to_binary_keys(map()) -> map().
 to_binary_keys(Map) when is_map(Map) ->
     maps:fold(
@@ -1244,15 +1277,17 @@ to_binary_keys(Map) when is_map(Map) ->
                     _ when is_map(V) -> to_binary_keys(V);
                     _ -> V
                 end,
-            maps:put(BinKey, BinVal, Acc)
+            Acc#{BinKey => BinVal}
         end,
         #{},
         Map
     ).
 
-%% @private Resolve actor class name from the aggregate class table (BT-1640).
-%% The agg class table is populated from telemetry metadata — the authoritative
-%% source — during record_dispatch/6. Falls back to instance registry lookup.
+-doc """
+Resolve actor class name from the aggregate class table (BT-1640).
+The agg class table is populated from telemetry metadata — the authoritative
+source — during record_dispatch/6. Falls back to instance registry lookup.
+""".
 -spec lookup_class_for_pid(pid()) -> binary().
 lookup_class_for_pid(Pid) ->
     try ets:lookup(?AGG_CLASS, Pid) of
@@ -1262,8 +1297,10 @@ lookup_class_for_pid(Pid) ->
         error:badarg -> lookup_class_from_registry(Pid)
     end.
 
-%% @private Fallback: resolve actor class name from beamtalk_instance_registry.
-%% Returns binary class name or <<"unknown">>.
+-doc """
+Fallback: resolve actor class name from beamtalk_instance_registry.
+Returns binary class name or <<"unknown">>.
+""".
 -spec lookup_class_from_registry(pid()) -> binary().
 lookup_class_from_registry(Pid) ->
     try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
@@ -1277,7 +1314,7 @@ lookup_class_from_registry(Pid) ->
 %% Internal: Clear
 %%====================================================================
 
-%% @private Clear all data.
+-doc "Clear all data.".
 do_clear() ->
     %% Clear trace events
     ets:delete_all_objects(?TRACE_EVENTS),
@@ -1296,8 +1333,10 @@ do_clear() ->
 %% Internal: Lock-free CAS loops for min/max
 %%====================================================================
 
-%% @private CAS loop to update the minimum value in an atomics slot.
-%% If NewVal < current value, atomically swap it in. Retries on contention.
+-doc """
+CAS loop to update the minimum value in an atomics slot.
+If NewVal < current value, atomically swap it in. Retries on contention.
+""".
 -spec cas_min(atomics:atomics_ref(), pos_integer(), integer()) -> ok.
 cas_min(Ref, Idx, NewVal) ->
     Current = atomics:get(Ref, Idx),
@@ -1314,8 +1353,10 @@ cas_min(Ref, Idx, NewVal) ->
             ok
     end.
 
-%% @private CAS loop to update the maximum value in an atomics slot.
-%% If NewVal > current value, atomically swap it in. Retries on contention.
+-doc """
+CAS loop to update the maximum value in an atomics slot.
+If NewVal > current value, atomically swap it in. Retries on contention.
+""".
 -spec cas_max(atomics:atomics_ref(), pos_integer(), integer()) -> ok.
 cas_max(Ref, Idx, NewVal) ->
     Current = atomics:get(Ref, Idx),

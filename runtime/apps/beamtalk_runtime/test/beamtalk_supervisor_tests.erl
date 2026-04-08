@@ -3,18 +3,21 @@
 
 %%% **DDD Context:** Actor System Context
 %%%
-%%% @doc Unit tests for beamtalk_supervisor runtime helper.
-%%%
-%%% Tests cover:
-%%% - is_supervisor/1 ancestry check
-%%% - whichChildren/1 child id extraction
-%%% - countChildren/1 active count
-%%% - stop/1 returns nil
-%%% - build_child_specs/1 with empty list
-%%% - supervisor tuple structure
-%%% - start_child_via_class_method/4: valid return, invalid return, class_var_result
-%%%   unwrap, process dictionary cleanup, child linking, supervisor restart (BT-1875)
 -module(beamtalk_supervisor_tests).
+
+-moduledoc """
+Unit tests for beamtalk_supervisor runtime helper.
+
+Tests cover:
+- is_supervisor/1 ancestry check
+- whichChildren/1 child id extraction
+- countChildren/1 active count
+- stop/1 returns nil
+- build_child_specs/1 with empty list
+- supervisor tuple structure
+- start_child_via_class_method/4: valid return, invalid return, class_var_result
+  unwrap, process dictionary cleanup, child linking, supervisor restart (BT-1875)
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -43,9 +46,11 @@
 %% OTP supervisor callback
 %%====================================================================
 
-%% @private Used as the supervisor callback module.
-%% {simple_one_for_one, ChildSpec}: dynamic supervisor with one child template.
-%% {SupFlags, ChildSpecs}: static (one_for_one) supervisor.
+-doc """
+Used as the supervisor callback module.
+{simple_one_for_one, ChildSpec}: dynamic supervisor with one child template.
+{SupFlags, ChildSpecs}: static (one_for_one) supervisor.
+""".
 init({simple_one_for_one, ChildSpec}) ->
     SupFlags = #{strategy => simple_one_for_one, intensity => 0, period => 1},
     {ok, {SupFlags, [ChildSpec]}};
@@ -93,7 +98,7 @@ start_anon_supervisor_with_worker(ChildId) ->
     end,
     Pid.
 
-%% @private OTP-compatible worker start function (returns {ok, Pid}).
+-doc "OTP-compatible worker start function (returns {ok, Pid}).".
 start_worker(ParentPid) ->
     WorkerPid = erlang:spawn_link(fun() ->
         ParentPid ! {worker_ready, self()},
@@ -282,12 +287,20 @@ stale_handle_stop_test() ->
 root_registry_returns_nil_when_empty_test() ->
     %% get_root/0 returns nil when no root has been registered.
     %% Delete the table first so we start from a clean state.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     ?assertEqual(nil, beamtalk_supervisor:get_root()).
 
 root_registry_roundtrip_test() ->
     %% register_root/1 followed by get_root/0 returns the same tuple.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     FakePid = self(),
     SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', FakePid},
     ok = beamtalk_supervisor:register_root(SupTuple),
@@ -295,7 +308,11 @@ root_registry_roundtrip_test() ->
 
 root_registry_overwrite_test() ->
     %% A second register_root/1 call replaces the previous entry.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     Pid1 = self(),
     Pid2 = spawn(fun() -> ok end),
     beamtalk_supervisor:register_root({beamtalk_supervisor, 'Old', old_mod, Pid1}),
@@ -306,19 +323,21 @@ root_registry_overwrite_test() ->
 %% Tests: BT-1285 — hierarchy walk uses ETS, not gen_server:call
 %%====================================================================
 
-%% @doc Verify that static_init/2 can walk a two-level Supervisor subclass
-%% hierarchy when the ancestor's class methods are in a module looked up
-%% via ETS — without any gen_server being registered for those classes.
-%%
-%% In the old code, call_inherited_class_method_direct called
-%% beamtalk_object_class:module_name/1 (gen_server:call).  If the ancestor
-%% class gen_server is blocked inside startLink/1, that call deadlocks.
-%% The new code reads from beamtalk_class_module_table (ETS) instead.
-%%
-%% We simulate the deadlock scenario by populating ETS for a fake two-level
-%% hierarchy where NO gen_server processes are registered for either class.
-%% The old code would crash (gen_server:call to undefined); the new code
-%% resolves the module from ETS and succeeds.
+-doc """
+Verify that static_init/2 can walk a two-level Supervisor subclass
+hierarchy when the ancestor's class methods are in a module looked up
+via ETS — without any gen_server being registered for those classes.
+
+In the old code, call_inherited_class_method_direct called
+beamtalk_object_class:module_name/1 (gen_server:call).  If the ancestor
+class gen_server is blocked inside startLink/1, that call deadlocks.
+The new code reads from beamtalk_class_module_table (ETS) instead.
+
+We simulate the deadlock scenario by populating ETS for a fake two-level
+hierarchy where NO gen_server processes are registered for either class.
+The old code would crash (gen_server:call to undefined); the new code
+resolves the module from ETS and succeeds.
+""".
 static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     %% Ensure ETS tables exist.
     beamtalk_class_hierarchy_table:new(),
@@ -368,7 +387,7 @@ class_restartWindow(_ClassSelf, _ClassVars) -> 5.
 %% BT-1875: start_child_via_class_method tests
 %%====================================================================
 
-%% @doc Start a fake child gen_server — OTP-compatible {ok, Pid} return.
+-doc "Start a fake child gen_server — OTP-compatible {ok, Pid} return.".
 start_link_fake_child() ->
     gen_server:start_link(?MODULE, fake_child, []).
 
@@ -387,8 +406,10 @@ class_returnWrapped(_ClassSelf, _ClassVars) ->
     {ok, Pid} = start_link_fake_child(),
     {class_var_result, {beamtalk_object, 'FakeChild', ?MODULE, Pid}, #{some_var => 42}}.
 
-%% @private Set up ETS tables and register a fake class for start_child_via_class_method.
-%% Returns the fake class pid (a dummy process) that should be cleaned up after the test.
+-doc """
+Set up ETS tables and register a fake class for start_child_via_class_method.
+Returns the fake class pid (a dummy process) that should be cleaned up after the test.
+""".
 setup_fake_class(ClassName) ->
     beamtalk_class_hierarchy_table:new(),
     beamtalk_class_module_table:new(),
@@ -404,10 +425,14 @@ setup_fake_class(ClassName) ->
     beamtalk_class_module_table:insert(ClassName, ?MODULE),
     FakeClassPid.
 
-%% @private Clean up after a fake class test.
+-doc "Clean up after a fake class test.".
 cleanup_fake_class(ClassName, FakeClassPid) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
-    catch unregister(RegName),
+    (try
+        unregister(RegName)
+    catch
+        _:_ -> ok
+    end),
     FakeClassPid ! stop,
     beamtalk_class_module_table:delete(ClassName),
     ok.

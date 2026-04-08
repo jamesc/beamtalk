@@ -651,7 +651,9 @@ impl TypeChecker {
         if let InferredType::Dynamic(reason) = &ty {
             if !matches!(
                 reason,
-                DynamicReason::DynamicReceiver | DynamicReason::Unknown
+                DynamicReason::DynamicReceiver
+                    | DynamicReason::DynamicSpec
+                    | DynamicReason::Unknown
             ) {
                 if let Some(ref class_name) = self.typed_class_context {
                     if let Some(description) = reason.description() {
@@ -1012,27 +1014,17 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
-        // Extract the Erlang function name and arity from the selector.
-        // Beamtalk selectors include colons (`readAll:`, `writeAll:contents:`).
-        // Erlang specs may use either the colon'd form (`'readAll:'/1` in beamtalk_*
-        // modules) or the stripped form (`reverse/1` in OTP modules). Try both.
+        // Extract the canonical Erlang function name and arity from the selector.
+        // The canonical name is the first keyword without colons, matching the
+        // selector_to_function/1 logic in beamtalk_erlang_proxy. The spec reader
+        // normalizes stored names the same way, so a single lookup suffices.
         let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
 
-        // Look up the spec using multiple name forms. Erlang FFI modules use
-        // different naming conventions:
-        //   1. Full selector with colons: `readAll:` or `writeAll:contents:`
-        //   2. First keyword with colon: `addDays:` (for `addDays:by:` selector)
-        //   3. Bare name without colons: `reverse` (OTP modules)
         // Clone the signature to release the borrow on self before emitting diagnostics.
-        let first_kw_colon = format!("{function_name}:");
         let sig = self
             .native_type_registry
             .as_ref()
-            .and_then(|reg| {
-                reg.lookup(module_name, selector_name.as_str(), arity)
-                    .or_else(|| reg.lookup(module_name, &first_kw_colon, arity))
-                    .or_else(|| reg.lookup(module_name, &function_name, arity))
-            })
+            .and_then(|reg| reg.lookup(module_name, &function_name, arity))
             .cloned();
 
         let Some(sig) = sig else {

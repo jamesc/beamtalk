@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_class_registry (BT-708).
-%%%
-%%% Tests class lookup, hierarchy queries, process group management,
-%%% and class object identity functions.
-
 -module(beamtalk_class_registry_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_class_registry (BT-708).
+
+Tests class lookup, hierarchy queries, process group management,
+and class object identity functions.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -288,7 +290,11 @@ live_class_entries_test_() ->
             Pid
         end,
         fun(Pid) ->
-            catch gen_server:stop(Pid)
+            (try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end)
         end,
         [
             {"returns a list", fun() ->
@@ -346,7 +352,11 @@ get_method_return_type_test_() ->
         fun({Saved, Pids}) ->
             lists:foreach(
                 fun(Pid) ->
-                    catch gen_server:stop(Pid)
+                    (try
+                        gen_server:stop(Pid)
+                    catch
+                        _:_ -> ok
+                    end)
                 end,
                 Pids
             ),
@@ -417,7 +427,11 @@ user_classes_test_() ->
             Pid
         end,
         fun(Pid) ->
-            catch gen_server:stop(Pid)
+            (try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end)
         end,
         [
             {"returns a list", fun() ->
@@ -583,8 +597,14 @@ restart_class_recovery_test_() ->
         fun({HierSaved, _Pid}) ->
             %% Clean up the restarted class if it exists
             case beamtalk_class_registry:whereis_class('RestartTest1888') of
-                undefined -> ok;
-                P -> catch gen_server:stop(P)
+                undefined ->
+                    ok;
+                P ->
+                    (try
+                        gen_server:stop(P)
+                    catch
+                        _:_ -> ok
+                    end)
             end,
             ets:delete_all_objects(beamtalk_class_hierarchy),
             ets:insert(beamtalk_class_hierarchy, HierSaved)

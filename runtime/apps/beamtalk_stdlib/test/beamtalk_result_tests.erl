@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_result module (BT-1254).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover:
-%%% - from_tagged_tuple/1 — ok tuple, error tuple (atom, #beamtalk_error{}, wrapped map)
-%%% - class_tryDo:/3 — success path, exception path
-
 -module(beamtalk_result_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_result module (BT-1254).
+
+Tests cover:
+- from_tagged_tuple/1 — ok tuple, error tuple (atom, #beamtalk_error{}, wrapped map)
+- class_tryDo:/3 — success path, exception path
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

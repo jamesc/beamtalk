@@ -1,39 +1,41 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc ClassBuilder runtime backing for ADR 0038 (ClassBuilder Protocol).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% This module implements the `register/1` function that is the Erlang backing
-%%% for the `@intrinsic classBuilderRegister` intrinsic. It accepts a builder
-%%% state map accumulated by the ClassBuilder gen_server, validates it, and
-%%% delegates to `beamtalk_object_class:start/2` for first registration or
-%%% `beamtalk_object_class:update_class/2` for hot reload.
-%%%
-%%% All class registration requires a `moduleName` key (or defaults to className)
-%%% and uses compiled BEAM module dispatch.
-%%%
-%%% ## Hot Reload
-%%%
-%%% When a class is already registered (module on_load runs twice or during
-%%% interactive redefinition), `start/2` returns `{error, {already_started, _}}`.
-%%% `register/1` detects this and falls back to `update_class/2`, keeping the
-%%% existing gen_server process but refreshing its metadata.
-%%%
-%%% ## Builder Lifecycle
-%%%
-%%% After successful registration, `register/1` stops the builder gen_server
-%%% (if `builderPid` is in the state map) via `gen_server:stop/3` with a 5-second
-%%% timeout. The builder is single-use: create, configure, register, done.
-%%%
-%%% ## References
-%%%
-%%% * ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md`
-%%% * Pattern: `beamtalk_class_bt.erl`, `beamtalk_metaclass_bt.erl`
-%%% * Existing registration: `beamtalk_object_class:start/2`, `update_class/2`
-
 -module(beamtalk_class_builder).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+ClassBuilder runtime backing for ADR 0038 (ClassBuilder Protocol).
+
+This module implements the `register/1` function that is the Erlang backing
+for the `@intrinsic classBuilderRegister` intrinsic. It accepts a builder
+state map accumulated by the ClassBuilder gen_server, validates it, and
+delegates to `beamtalk_object_class:start/2` for first registration or
+`beamtalk_object_class:update_class/2` for hot reload.
+
+All class registration requires a `moduleName` key (or defaults to className)
+and uses compiled BEAM module dispatch.
+
+## Hot Reload
+
+When a class is already registered (module on_load runs twice or during
+interactive redefinition), `start/2` returns `{error, {already_started, _}}`.
+`register/1` detects this and falls back to `update_class/2`, keeping the
+existing gen_server process but refreshing its metadata.
+
+## Builder Lifecycle
+
+After successful registration, `register/1` stops the builder gen_server
+(if `builderPid` is in the state map) via `gen_server:stop/3` with a 5-second
+timeout. The builder is single-use: create, configure, register, done.
+
+## References
+
+* ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md`
+* Pattern: `beamtalk_class_bt.erl`, `beamtalk_metaclass_bt.erl`
+* Existing registration: `beamtalk_object_class:start/2`, `update_class/2`
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -45,29 +47,31 @@
 %%% API
 %%% ============================================================================
 
-%% @doc Register a class from a builder state map.
-%%
-%% Accepts a map with the following keys:
-%%   - `className`    — atom (required): name of the class to register
-%%   - `superclassRef` — atom | pid (required, not nil): superclass reference
-%%   - `fieldSpecs`   — map (optional): field_name => default_value
-%%   - `methodSpecs`  — map (optional): selector => fun()
-%%   - `modifiers`    — list (optional): [:abstract, :sealed, ...]
-%%   - `builderPid`   — pid (optional): builder process to stop after registration
-%%
-%% Additional keys for compiled classes (BT-837 / ADR 0038 Phase 3):
-%%   - `moduleName`   — atom: compiled Erlang module name (default: className)
-%%   - `classMethods` — map: class method specs (default: #{})
-%%   - `methodSource`  — map: selector => binary source text (default: #{})
-%%   - `classState`   — map: class variable defaults (default: #{})
-%%   - `classDoc`     — binary | none: class doc comment (default: none)
-%%   - `methodDocs`   — map: selector => binary doc text (default: #{})
-%%
-%% On success: registers the class with the runtime and returns `{ok, ClassPid}`.
-%% Hot reload: if the class already exists, updates it and returns `{ok, ClassPid}`.
-%% On failure: returns `{error, #beamtalk_error{}}` without stopping any process.
-%%
-%% ADR 0038 Phase 1: Backing for `@intrinsic classBuilderRegister`.
+-doc """
+Register a class from a builder state map.
+
+Accepts a map with the following keys:
+  - `className`    — atom (required): name of the class to register
+  - `superclassRef` — atom | pid (required, not nil): superclass reference
+  - `fieldSpecs`   — map (optional): field_name => default_value
+  - `methodSpecs`  — map (optional): selector => fun()
+  - `modifiers`    — list (optional): [:abstract, :sealed, ...]
+  - `builderPid`   — pid (optional): builder process to stop after registration
+
+Additional keys for compiled classes (BT-837 / ADR 0038 Phase 3):
+  - `moduleName`   — atom: compiled Erlang module name (default: className)
+  - `classMethods` — map: class method specs (default: #{})
+  - `methodSource`  — map: selector => binary source text (default: #{})
+  - `classState`   — map: class variable defaults (default: #{})
+  - `classDoc`     — binary | none: class doc comment (default: none)
+  - `methodDocs`   — map: selector => binary doc text (default: #{})
+
+On success: registers the class with the runtime and returns `{ok, ClassPid}`.
+Hot reload: if the class already exists, updates it and returns `{ok, ClassPid}`.
+On failure: returns `{error, #beamtalk_error{}}` without stopping any process.
+
+ADR 0038 Phase 1: Backing for `@intrinsic classBuilderRegister`.
+""".
 -spec register(map()) -> {ok, pid()} | {error, #beamtalk_error{}}.
 register(BuilderState) when is_map(BuilderState) ->
     ClassName = maps:get(className, BuilderState, nil),
@@ -109,8 +113,7 @@ register(BuilderState) when is_map(BuilderState) ->
 %%% Internal functions
 %%% ============================================================================
 
-%% @private
-%% @doc Attempt to start or update the class gen_server.
+-doc "Attempt to start or update the class gen_server.".
 -spec do_register(atom(), map()) -> {ok, pid()} | {error, #beamtalk_error{}}.
 do_register(ClassName, ClassInfo) ->
     case beamtalk_object_class:start(ClassName, ClassInfo) of
@@ -151,23 +154,24 @@ do_register(ClassName, ClassInfo) ->
             {error, Error}
     end.
 
-%% @private
-%% @doc Validate the builder state before registration.
-%%
-%% Returns ok if valid, {error, #beamtalk_error{}} otherwise.
-%%
-%% Checks:
-%%   1. className is an atom (Symbol in Beamtalk terms)
-%%   2. superclassRef is set (not nil)
-%%   3. superclassRef is a valid type (atom | pid | #beamtalk_object{})
-%%   4. superclass is not sealed (unless StdlibMode = true)
-%%
-%% Note: sealed-superclass enforcement is bypassed when StdlibMode = true.
-%% The Beamtalk compiler (semantic_analysis) enforces it at compile time,
-%% and stdlib classes compiled with stdlib_mode are explicitly permitted to
-%% subclass sealed classes (e.g. Character extends Integer). Enforcing it
-%% again at runtime causes stdlib on_load hooks to fail when topo-sorted
-%% stdlib loading registers Integer (sealed) before Character (BT-791).
+-doc """
+Validate the builder state before registration.
+
+Returns ok if valid, {error, #beamtalk_error{}} otherwise.
+
+Checks:
+  1. className is an atom (Symbol in Beamtalk terms)
+  2. superclassRef is set (not nil)
+  3. superclassRef is a valid type (atom | pid | #beamtalk_object{})
+  4. superclass is not sealed (unless StdlibMode = true)
+
+Note: sealed-superclass enforcement is bypassed when StdlibMode = true.
+The Beamtalk compiler (semantic_analysis) enforces it at compile time,
+and stdlib classes compiled with stdlib_mode are explicitly permitted to
+subclass sealed classes (e.g. Character extends Integer). Enforcing it
+again at runtime causes stdlib on_load hooks to fail when topo-sorted
+stdlib loading registers Integer (sealed) before Character (BT-791).
+""".
 -spec validate(term(), term(), boolean()) -> ok | {error, #beamtalk_error{}}.
 validate(nil, _, _) ->
     Error0 = beamtalk_error:new(missing_parameter, 'ClassBuilder'),
@@ -205,12 +209,13 @@ validate(_ClassName, _SuperclassRef, true) ->
     %% BT-791: stdlib mode — skip sealed check so stdlib on_load hooks succeed.
     ok.
 
-%% @private
-%% @doc Check that the superclass is not sealed (user code enforcement).
-%%
-%% Looks up the superclass class process and checks `is_sealed`. Only called
-%% when StdlibMode = false (user-invoked classBuilder). Stdlib on_load hooks
-%% pass StdlibMode = true and skip this check entirely (BT-791).
+-doc """
+Check that the superclass is not sealed (user code enforcement).
+
+Looks up the superclass class process and checks `is_sealed`. Only called
+when StdlibMode = false (user-invoked classBuilder). Stdlib on_load hooks
+pass StdlibMode = true and skip this check entirely (BT-791).
+""".
 -spec validate_superclass_not_sealed(atom() | pid() | #beamtalk_object{}) ->
     ok | {error, #beamtalk_error{}}.
 validate_superclass_not_sealed(SuperclassRef) ->
@@ -245,13 +250,14 @@ validate_superclass_not_sealed(SuperclassRef) ->
             end
     end.
 
-%% @private
-%% @doc Resolve a superclass reference to a class name atom.
-%%
-%% Accepts:
-%%   - atom: returned as-is
-%%   - pid: class gen_server pid → resolved via class_name/1
-%%   - #beamtalk_object{}: extracts class name from the object record
+-doc """
+Resolve a superclass reference to a class name atom.
+
+Accepts:
+  - atom: returned as-is
+  - pid: class gen_server pid → resolved via class_name/1
+  - #beamtalk_object{}: extracts class name from the object record
+""".
 -spec resolve_superclass_name(atom() | pid() | #beamtalk_object{}) -> atom().
 resolve_superclass_name(Name) when is_atom(Name) ->
     Name;
@@ -260,15 +266,16 @@ resolve_superclass_name(Pid) when is_pid(Pid) ->
 resolve_superclass_name(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
     beamtalk_object_class:class_name(Pid).
 
-%% @private
-%% @doc Build a ClassInfo map for beamtalk_object_class:start/2.
-%%
-%% BT-837: Accepts the full builder state as the last argument to extract
-%% additional metadata for compiled classes (moduleName, classMethods,
-%% methodSource, classState, classDoc, methodDocs).
-%%
-%% BT-873: Dynamic path (BT-838) removed. All classes go through the
-%% compiled path regardless of whether moduleName is present.
+-doc """
+Build a ClassInfo map for beamtalk_object_class:start/2.
+
+BT-837: Accepts the full builder state as the last argument to extract
+additional metadata for compiled classes (moduleName, classMethods,
+methodSource, classState, classDoc, methodDocs).
+
+BT-873: Dynamic path (BT-838) removed. All classes go through the
+compiled path regardless of whether moduleName is present.
+""".
 -spec build_class_info(atom(), atom(), map(), map(), list(), map()) -> map().
 build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers, BuilderState) ->
     IsSealed = lists:member(sealed, Modifiers),
@@ -285,8 +292,7 @@ build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers, 
         BuilderState
     ).
 
-%% @private
-%% @doc Build ClassInfo for a compiled class.
+-doc "Build ClassInfo for a compiled class.".
 -spec build_compiled_class_info(
     atom(),
     atom(),
@@ -374,29 +380,29 @@ build_compiled_class_info(
         )
     ).
 
-%% @private
-%% @doc Conditionally add a key to a map (skips undefined values).
+-doc "Conditionally add a key to a map (skips undefined values).".
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
-    maps:put(Key, Value, Map).
+    Map#{Key => Value}.
 
-%% @private
-%% @doc Convert a methodSpecs map to the instance_methods format expected by the class gen_server.
-%%
-%% Each entry in methodSpecs is either:
-%%   - `selector => fun()`: closure (converted to #{block, arity} format)
-%%   - `selector => #{arity => N}`: compiled method reference (already in the right format)
+-doc """
+Convert a methodSpecs map to the instance_methods format expected by the class gen_server.
+
+Each entry in methodSpecs is either:
+  - `selector => fun()`: closure (converted to #{block, arity} format)
+  - `selector => #{arity => N}`: compiled method reference (already in the right format)
+""".
 -spec build_method_map(map()) -> map().
 build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
     maps:fold(
         fun
             (Selector, Fun, Acc) when is_function(Fun) ->
                 {arity, Arity} = erlang:fun_info(Fun, arity),
-                maps:put(Selector, #{block => Fun, arity => Arity}, Acc);
+                Acc#{Selector => #{block => Fun, arity => Arity}};
             (Selector, MethodInfo, Acc) when is_map(MethodInfo) ->
-                maps:put(Selector, MethodInfo, Acc);
+                Acc#{Selector => MethodInfo};
             (_Selector, _Other, Acc) ->
                 Acc
         end,
@@ -404,14 +410,15 @@ build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
         MethodSpecs
     ).
 
-%% @private
-%% @doc Stop the builder gen_server process after successful registration.
-%%
-%% Only called if builderPid is present in the builder state map.
-%% Uses gen_server:stop/3 with a 5-second timeout. Catches exit signals for
-%% the case where the builder exits between the call and the stop (TOCTOU).
-%%
-%% Not called in error cases — the caller may wish to retry or inspect the builder.
+-doc """
+Stop the builder gen_server process after successful registration.
+
+Only called if builderPid is present in the builder state map.
+Uses gen_server:stop/3 with a 5-second timeout. Catches exit signals for
+the case where the builder exits between the call and the stop (TOCTOU).
+
+Not called in error cases — the caller may wish to retry or inspect the builder.
+""".
 -spec maybe_stop_builder(pid() | undefined) -> ok.
 maybe_stop_builder(undefined) ->
     ok;
@@ -433,10 +440,11 @@ maybe_stop_builder(Pid) when is_pid(Pid) ->
             end
     end.
 
-%% @private
-%% @doc Notify class_load_callback module that a class was loaded (BT-1020).
-%% Checks application env `class_load_callback` — same pattern as `actor_spawn_callback`.
-%% Safe to call if the callback module is not running.
+-doc """
+Notify class_load_callback module that a class was loaded (BT-1020).
+Checks application env `class_load_callback` — same pattern as `actor_spawn_callback`.
+Safe to call if the callback module is not running.
+""".
 -spec notify_class_loaded(atom()) -> ok.
 notify_class_loaded(ClassName) ->
     case application:get_env(beamtalk_runtime, class_load_callback) of

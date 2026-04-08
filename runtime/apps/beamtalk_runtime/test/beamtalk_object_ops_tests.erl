@@ -1,10 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_object.erl (ADR 0006 Phase 1b).
-%%%
-%%% Tests the Object base class reflection, display, and utility methods.
 -module(beamtalk_object_ops_tests).
+
+-moduledoc """
+Unit tests for beamtalk_object.erl (ADR 0006 Phase 1b).
+
+Tests the Object base class reflection, display, and utility methods.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

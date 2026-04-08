@@ -1,11 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_extensions module.
-%%%
-%%% Tests extension registration, lookup, conflict tracking, and tooling APIs.
-
 -module(beamtalk_extensions_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_extensions module.
+
+Tests extension registration, lookup, conflict tracking, and tooling APIs.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
@@ -49,8 +53,16 @@ cleanup(_) ->
 
 init_creates_tables_test() ->
     %% Clean up any existing tables
-    catch ets:delete(beamtalk_extensions),
-    catch ets:delete(beamtalk_extension_conflicts),
+    (try
+        ets:delete(beamtalk_extensions)
+    catch
+        _:_ -> ok
+    end),
+    (try
+        ets:delete(beamtalk_extension_conflicts)
+    catch
+        _:_ -> ok
+    end),
 
     beamtalk_extensions:init(),
 

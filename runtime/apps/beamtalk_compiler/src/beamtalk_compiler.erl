@@ -1,23 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Public API for the Beamtalk compiler (ADR 0022).
-%%
-%%% **DDD Context:** Compilation (Anti-Corruption Layer)
-%%
-%% This module is the single entry point for all compilation via OTP Port.
-%%
-%% All functions delegate to `beamtalk_compiler_server' (port backend).
-%%
-%% ## API
-%%
-%% - `compile_expression/3' — Compile a REPL expression
-%% - `compile/2' — Compile a file/class definition (`:load')
-%% - `diagnostics/1' — Get parse/semantic diagnostics only
-%% - `version/0' — Get compiler version
-%% - `compile_core_erlang/1' — Core Erlang → BEAM bytecode (in-memory)
-
 -module(beamtalk_compiler).
+
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
+
+-moduledoc """
+Public API for the Beamtalk compiler (ADR 0022).
+
+This module is the single entry point for all compilation via OTP Port.
+
+All functions delegate to `beamtalk_compiler_server' (port backend).
+
+## API
+
+- `compile_expression/3' — Compile a REPL expression
+- `compile/2' — Compile a file/class definition (`:load')
+- `diagnostics/1' — Get parse/semantic diagnostics only
+- `version/0' — Get compiler version
+- `compile_core_erlang/1' — Core Erlang → BEAM bytecode (in-memory)
+""".
 
 -export([
     compile_expression/3, compile_expression/4,
@@ -29,17 +31,19 @@
     resolve_completion_type/1
 ]).
 
-%% @doc Compile a REPL expression.
-%%
-%% `Source' is the expression source code as a binary.
-%% `ModuleName' is the unique module name for this evaluation.
-%% `KnownVars' is a list of variable name binaries from the REPL session.
-%%
-%% Returns `{ok, CoreErlang, Warnings}' for expressions,
-%% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
-%% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
-%% `message', `line' (1-based), and optionally `hint'.
+-doc """
+Compile a REPL expression.
+
+`Source' is the expression source code as a binary.
+`ModuleName' is the unique module name for this evaluation.
+`KnownVars' is a list of variable name binaries from the REPL session.
+
+Returns `{ok, CoreErlang, Warnings}' for expressions,
+`{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
+`{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+`message', `line' (1-based), and optionally `hint'.
+""".
 -spec compile_expression(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -49,10 +53,12 @@
 compile_expression(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars).
 
-%% @doc Compile a REPL expression with optional compilation options.
-%%
-%% Options:
-%%   class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+-doc """
+Compile a REPL expression with optional compilation options.
+
+Options:
+  class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+""".
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -62,10 +68,12 @@ compile_expression(Source, ModuleName, KnownVars) ->
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).
 
-%% @doc Compile a REPL expression in trace mode (BT-1238).
-%%
-%% Returns `{ok, CoreErlang, Warnings}' where the generated module's `eval/1'
-%% returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
+-doc """
+Compile a REPL expression in trace mode (BT-1238).
+
+Returns `{ok, CoreErlang, Warnings}' where the generated module's `eval/1'
+returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
+""".
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
@@ -76,47 +84,55 @@ compile_expression_trace(Source, ModuleName, KnownVars) ->
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, Options).
 
-%% @doc Compile a file/class definition.
-%%
-%% `Source' is the file source code as a binary.
-%% `Options' is a map with optional keys:
-%%   - `stdlib_mode' (boolean, default false) — enable `@primitive' pragmas
-%%   - `workspace_mode' (boolean, default true) — REPL workspace context
-%%
-%% Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or
-%% `{error, Diagnostics}'.
+-doc """
+Compile a file/class definition.
+
+`Source' is the file source code as a binary.
+`Options' is a map with optional keys:
+  - `stdlib_mode' (boolean, default false) — enable `@primitive' pragmas
+  - `workspace_mode' (boolean, default true) — REPL workspace context
+
+Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or
+`{error, Diagnostics}'.
+""".
 -spec compile(binary(), map()) ->
     {ok, map()} | {error, [map()]}.
 compile(Source, Options) ->
     beamtalk_compiler_server:compile(Source, Options).
 
-%% @doc Get diagnostics for source code (no code generation).
-%%
-%% Returns `{ok, [#{message, severity, start, end}]}' or `{error, Diagnostics}'.
+-doc """
+Get diagnostics for source code (no code generation).
+
+Returns `{ok, [#{message, severity, start, end}]}' or `{error, Diagnostics}'.
+""".
 -spec diagnostics(binary()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source) ->
     beamtalk_compiler_server:diagnostics(Source).
 
-%% @doc Get compiler version.
+-doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
 version() ->
     beamtalk_compiler_server:version().
 
-%% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
-%%
-%% `Expression' is the receiver expression-up-to-cursor with the incomplete
-%% prefix stripped. Returns `{ok, ClassName}' or `{error, type_unknown}'.
+-doc """
+Resolve the type of an expression for REPL completion fallback (BT-1068).
+
+`Expression' is the receiver expression-up-to-cursor with the incomplete
+prefix stripped. Returns `{ok, ClassName}' or `{error, type_unknown}'.
+""".
 -spec resolve_completion_type(binary()) -> {ok, atom()} | {error, type_unknown}.
 resolve_completion_type(Expression) ->
     beamtalk_compiler_server:resolve_completion_type(Expression).
 
-%% @doc Compile Core Erlang source to BEAM bytecode in memory.
-%%
-%% Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'.
-%% No temp files on disk (BT-48).
-%%
-%% Returns `{ok, ModuleName, Binary}' or `{error, Reason}'.
+-doc """
+Compile Core Erlang source to BEAM bytecode in memory.
+
+Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'.
+No temp files on disk (BT-48).
+
+Returns `{ok, ModuleName, Binary}' or `{error, Reason}'.
+""".
 -spec compile_core_erlang(binary()) -> {ok, atom(), binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin) ->
     beamtalk_compiler_server:compile_core_erlang(CoreErlangBin).

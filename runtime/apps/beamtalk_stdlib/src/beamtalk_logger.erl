@@ -1,30 +1,30 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Logger class implementation — setLevel: via Erlang logger.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Log methods (info:, warn:, error:, debug: and their metadata: variants)
-%%% are now compiler intrinsics (BT-1478) that generate inline `logger:log/3`
-%%% calls with domain metadata at the call site. Only `setLevel:` remains as
-%%% an Erlang FFI function since it requires real Erlang runtime calls.
-
 -module(beamtalk_logger).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Logger class implementation — setLevel: via Erlang logger.
+
+Log methods (info:, warn:, error:, debug: and their metadata: variants)
+are now compiler intrinsics (BT-1478) that generate inline `logger:log/3`
+calls with domain metadata at the call site. Only `setLevel:` remains as
+an Erlang FFI function since it requires real Erlang runtime calls.
+""".
 
 -export(['setLevel:'/1]).
 %% FFI shim
 -export([setLevel/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
 
-%% @doc Set the primary log level.
-%% @deprecated Use {@link beamtalk_system:logLevel/1} (`Beamtalk logLevel:`) instead.
+-doc "Set the primary log level. Deprecated: use `Beamtalk logLevel:` instead.".
 -spec 'setLevel:'(atom()) -> 'nil'.
 'setLevel:'(Level) when is_atom(Level) ->
     maybe_emit_deprecation_warning(),
@@ -54,7 +54,7 @@ setLevel(Level) -> 'setLevel:'(Level).
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private Emit a deprecation warning for setLevel: on first call only.
+-doc "Emit a deprecation warning for setLevel: on first call only.".
 -spec maybe_emit_deprecation_warning() -> ok.
 maybe_emit_deprecation_warning() ->
     Key = beamtalk_logger_setlevel_deprecated,
@@ -66,7 +66,7 @@ maybe_emit_deprecation_warning() ->
             ?LOG_WARNING("Logger setLevel: is deprecated. Use Beamtalk logLevel: instead.")
     end.
 
-%% @private Raise a type error for the Logger class.
+-doc "Raise a type error for the Logger class.".
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
     Error0 = beamtalk_error:new(type_error, 'Logger'),

@@ -1,69 +1,72 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Beamtalk Future/Promise Runtime
-%%%
-%%% **DDD Context:** Concurrency Context
-%%%
-%%% Implements futures (promises) as lightweight BEAM processes.
-%%% Beamtalk is async-first: message sends return futures by default.
-%%%
-%%% Each future is a BEAM process (~2KB) that can be in one of three states:
-%%% - pending: waiting for a value
-%%% - resolved: has a successful value
-%%% - rejected: has an error
-%%%
-%%% Completed futures (resolved or rejected) will automatically terminate after
-%%% 5 minutes of inactivity to prevent memory leaks.
-%%%
-%%% ## Protocol
-%%%
-%%% Messages sent to a future process:
-%%% - `{resolve, Value}` - Transition to resolved state with Value
-%%% - `{reject, Reason}` - Transition to rejected state with Reason
-%%% - `{await, Pid}` - Register Pid to be notified when future completes
-%%% - `{await, Pid, Timeout}` - Register Pid with timeout (milliseconds)
-%%% - `{add_callback, resolved, Fun}` - Register callback for resolved state
-%%% - `{add_callback, rejected, Fun}` - Register callback for rejected state
-%%%
-%%% Messages received from a future process:
-%%% - `{future_resolved, FuturePid, Value}` - Future was resolved
-%%% - `{future_rejected, FuturePid, Reason}` - Future was rejected
-%%% - `{future_timeout, FuturePid}` - Await timed out
-%%%
-%%% ## Example
-%%%
-%%% ```erlang
-%%% %% Create a new future
-%%% Future = beamtalk_future:new(),
-%%%
-%%% %% Spawn a task that will resolve the future
-%%% spawn(fun() ->
-%%%     Result = expensive_computation(),
-%%%     beamtalk_future:resolve(Future, Result)
-%%% end),
-%%%
-%%% %% Await the result (blocks until resolved)
-%%% Value = beamtalk_future:await(Future),
-%%%
-%%% %% Or use a timeout
-%%% case beamtalk_future:await(Future, 5000) of
-%%%     {ok, Value} -> Value;
-%%%     {error, timeout} -> default_value
-%%% end.
-%%% ```
-%%%
-%%% ## Callbacks
-%%%
-%%% ```erlang
-%%% Future = beamtalk_future:new(),
-%%% beamtalk_future:when_resolved(Future, fun(Value) ->
-%%%     io:format("Got value: ~p~n", [Value])
-%%% end),
-%%% beamtalk_future:resolve(Future, 42).
-%%% ```
-
 -module(beamtalk_future).
+
+%%% **DDD Context:** Concurrency Context
+
+-moduledoc """
+Beamtalk Future/Promise Runtime
+
+Implements futures (promises) as lightweight BEAM processes.
+Beamtalk is async-first: message sends return futures by default.
+
+Each future is a BEAM process (~2KB) that can be in one of three states:
+- pending: waiting for a value
+- resolved: has a successful value
+- rejected: has an error
+
+Completed futures (resolved or rejected) will automatically terminate after
+5 minutes of inactivity to prevent memory leaks.
+
+## Protocol
+
+Messages sent to a future process:
+- `{resolve, Value}` - Transition to resolved state with Value
+- `{reject, Reason}` - Transition to rejected state with Reason
+- `{await, Pid}` - Register Pid to be notified when future completes
+- `{await, Pid, Timeout}` - Register Pid with timeout (milliseconds)
+- `{add_callback, resolved, Fun}` - Register callback for resolved state
+- `{add_callback, rejected, Fun}` - Register callback for rejected state
+
+Messages received from a future process:
+- `{future_resolved, FuturePid, Value}` - Future was resolved
+- `{future_rejected, FuturePid, Reason}` - Future was rejected
+- `{future_timeout, FuturePid}` - Await timed out
+
+## Example
+
+```erlang
+%% Create a new future
+Future = beamtalk_future:new(),
+
+%% Spawn a task that will resolve the future
+spawn(fun() ->
+    Result = expensive_computation(),
+    beamtalk_future:resolve(Future, Result)
+end),
+
+%% Await the result (blocks until resolved)
+Value = beamtalk_future:await(Future),
+
+%% Or use a timeout (throws on timeout)
+try beamtalk_future:await(Future, 5000) of
+    Value -> Value
+catch
+    throw:#beamtalk_error{type = timeout_error} -> default_value
+end.
+```
+
+## Callbacks
+
+```erlang
+Future = beamtalk_future:new(),
+beamtalk_future:when_resolved(Future, fun(Value) ->
+    io:format("Got value: ~p~n", [Value])
+end),
+beamtalk_future:resolve(Future, 42).
+```
+""".
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 -export([
@@ -81,34 +84,42 @@
 
 -export_type([future/0]).
 
-%% @doc Opaque tagged tuple wrapping a future process.
-%% This is an internal runtime detail — Beamtalk code never sees futures
-%% directly. They are always resolved before reaching the language layer.
+-doc """
+Opaque tagged tuple wrapping a future process.
+This is an internal runtime detail — Beamtalk code never sees futures
+directly. They are always resolved before reaching the language layer.
+""".
 -type future() :: {beamtalk_future, pid()}.
 
-%% @doc Create a new future in the pending state.
-%% Returns a tagged tuple `{beamtalk_future, Pid}' that can be detected
-%% by the dispatch layer for auto-awaiting in chained message sends.
+-doc """
+Create a new future in the pending state.
+Returns a tagged tuple `{beamtalk_future, Pid}' that can be detected
+by the dispatch layer for auto-awaiting in chained message sends.
+""".
 -spec new() -> future().
 new() ->
     {beamtalk_future, spawn(fun() -> pending([]) end)}.
 
-%% @doc Check if a value is a future.
+-doc "Check if a value is a future.".
 -spec is_future(term()) -> boolean().
 is_future({beamtalk_future, Pid}) when is_pid(Pid) -> true;
 is_future(_) -> false.
 
-%% @doc Extract the raw pid from a tagged future.
-%% Used by the codegen layer to obtain the underlying process pid before
-%% passing it to beamtalk_actor:async_send/4, and by tests for direct
-%% process inspection.
+-doc """
+Extract the raw pid from a tagged future.
+Used by the codegen layer to obtain the underlying process pid before
+passing it to beamtalk_actor:async_send/4, and by tests for direct
+process inspection.
+""".
 -spec pid(future()) -> pid().
 pid({beamtalk_future, Pid}) -> Pid.
 
-%% @doc Resolve a future with a value.
-%% If the future is already resolved or rejected, this is a no-op.
-%% Notifies all waiting processes and executes all resolved callbacks.
-%% Accepts both tagged futures and raw pids (for internal actor use).
+-doc """
+Resolve a future with a value.
+If the future is already resolved or rejected, this is a no-op.
+Notifies all waiting processes and executes all resolved callbacks.
+Accepts both tagged futures and raw pids (for internal actor use).
+""".
 -spec resolve(future() | pid(), term()) -> ok.
 resolve({beamtalk_future, Pid}, Value) ->
     Pid ! {resolve, Value},
@@ -117,10 +128,12 @@ resolve(Pid, Value) when is_pid(Pid) ->
     Pid ! {resolve, Value},
     ok.
 
-%% @doc Reject a future with an error reason.
-%% If the future is already resolved or rejected, this is a no-op.
-%% Notifies all waiting processes and executes all rejected callbacks.
-%% Accepts both tagged futures and raw pids (for internal actor use).
+-doc """
+Reject a future with an error reason.
+If the future is already resolved or rejected, this is a no-op.
+Notifies all waiting processes and executes all rejected callbacks.
+Accepts both tagged futures and raw pids (for internal actor use).
+""".
 -spec reject(future() | pid(), term()) -> ok.
 reject({beamtalk_future, Pid}, Reason) ->
     Pid ! {reject, Reason},
@@ -129,22 +142,26 @@ reject(Pid, Reason) when is_pid(Pid) ->
     Pid ! {reject, Reason},
     ok.
 
-%% @doc Block the calling process until the future is resolved or rejected.
-%% Uses a default timeout of 30 seconds to prevent indefinite blocking.
-%% Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
-%% Throws #beamtalk_error{kind = timeout} if the future doesn't complete in time.
+-doc """
+Block the calling process until the future is resolved or rejected.
+Uses a default timeout of 30 seconds to prevent indefinite blocking.
+Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
+Throws #beamtalk_error{kind = timeout} if the future doesn't complete in time.
+""".
 -spec await(future() | pid()) -> term().
 await(Future) ->
     await(Future, 30000).
 
-%% @doc Block the calling process until the future is resolved, rejected, or times out.
-%% Returns the value if resolved, throws {future_rejected, Reason} if rejected,
-%% or throws #beamtalk_error{kind = timeout} if the timeout expires.
-%% Accepts both tagged futures and raw pids (for internal actor use).
-%%
-%% BT-918 / ADR 0043: With sync-by-default, actor sends return values directly
-%% (not futures). To preserve backward compat during the migration period, any
-%% non-future, non-pid value is returned as-is rather than crashing.
+-doc """
+Block the calling process until the future is resolved, rejected, or times out.
+Returns the value if resolved, throws {future_rejected, Reason} if rejected,
+or throws #beamtalk_error{kind = timeout} if the timeout expires.
+Accepts both tagged futures and raw pids (for internal actor use).
+
+BT-918 / ADR 0043: With sync-by-default, actor sends return values directly
+(not futures). To preserve backward compat during the migration period, any
+non-future, non-pid value is returned as-is rather than crashing.
+""".
 -spec await(future() | pid() | term(), timeout()) -> term().
 await({beamtalk_future, Pid}, Timeout) ->
     await_pid(Pid, Timeout);
@@ -154,17 +171,21 @@ await(Value, _Timeout) ->
     %% Non-future value — already resolved, return as-is.
     Value.
 
-%% @doc Block the calling process until the future is resolved or rejected.
-%% Waits indefinitely with no timeout. Use this for operations that may take
-%% an arbitrarily long time to complete.
-%% Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
+-doc """
+Block the calling process until the future is resolved or rejected.
+Waits indefinitely with no timeout. Use this for operations that may take
+an arbitrarily long time to complete.
+Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
+""".
 -spec await_forever(future() | pid()) -> term().
 await_forever(Future) ->
     await(Future, infinity).
 
-%% @doc Register a callback to be executed when the future is resolved.
-%% If the future is already resolved, the callback is executed immediately.
-%% If the future is rejected, the callback is never executed.
+-doc """
+Register a callback to be executed when the future is resolved.
+If the future is already resolved, the callback is executed immediately.
+If the future is rejected, the callback is never executed.
+""".
 -spec when_resolved(future() | pid(), fun((term()) -> term())) -> ok.
 when_resolved({beamtalk_future, Pid}, Callback) ->
     Pid ! {add_callback, resolved, Callback},
@@ -173,9 +194,11 @@ when_resolved(Pid, Callback) when is_pid(Pid) ->
     Pid ! {add_callback, resolved, Callback},
     ok.
 
-%% @doc Register a callback to be executed when the future is rejected.
-%% If the future is already rejected, the callback is executed immediately.
-%% If the future is resolved, the callback is never executed.
+-doc """
+Register a callback to be executed when the future is rejected.
+If the future is already rejected, the callback is executed immediately.
+If the future is resolved, the callback is never executed.
+""".
 -spec when_rejected(future() | pid(), fun((term()) -> term())) -> ok.
 when_rejected({beamtalk_future, Pid}, Callback) ->
     Pid ! {add_callback, rejected, Callback},
@@ -184,16 +207,17 @@ when_rejected(Pid, Callback) when is_pid(Pid) ->
     Pid ! {add_callback, rejected, Callback},
     ok.
 
-%% @doc If the value is a future, await it; otherwise return as-is.
-%% Used by codegen to auto-await binary op operands.
+-doc """
+If the value is a future, await it; otherwise return as-is.
+Used by codegen to auto-await binary op operands.
+""".
 -spec maybe_await(term()) -> term().
 maybe_await({beamtalk_future, _} = Future) -> await(Future);
 maybe_await(Value) -> Value.
 
 %%% Internal helpers
 
-%% @private
-%% Core await implementation operating on a raw pid.
+-doc "Core await implementation operating on a raw pid.".
 -spec await_pid(pid(), timeout()) -> term().
 await_pid(Pid, infinity) ->
     Pid ! {await, self(), infinity},
@@ -224,8 +248,7 @@ await_pid(Pid, Timeout) ->
 
 %%% Internal state machine
 
-%% @private
-%% Pending state: waiting for resolve or reject
+-doc "Pending state: waiting for resolve or reject".
 pending(Waiters) ->
     receive
         {resolve, Value} ->
@@ -265,9 +288,10 @@ pending(Waiters) ->
             pending([{callback, rejected, Callback} | Waiters])
     end.
 
-%% @private
-%% Resolved state: has a value
-%% Terminates after 5 minutes of inactivity to prevent memory leaks.
+-doc """
+Resolved state: has a value
+Terminates after 5 minutes of inactivity to prevent memory leaks.
+""".
 resolved(Value) ->
     receive
         {resolve, _} ->
@@ -299,9 +323,10 @@ resolved(Value) ->
         ok
     end.
 
-%% @private
-%% Rejected state: has an error reason
-%% Terminates after 5 minutes of inactivity to prevent memory leaks.
+-doc """
+Rejected state: has an error reason
+Terminates after 5 minutes of inactivity to prevent memory leaks.
+""".
 rejected(Reason) ->
     receive
         {resolve, _} ->
@@ -333,8 +358,7 @@ rejected(Reason) ->
         ok
     end.
 
-%% @private
-%% Notify all waiters when future completes
+-doc "Notify all waiters when future completes".
 notify_waiters(Waiters, State, ValueOrReason) ->
     lists:foreach(
         fun
@@ -358,8 +382,7 @@ notify_waiters(Waiters, State, ValueOrReason) ->
         Waiters
     ).
 
-%% @private
-%% Execute a callback in a separate process to avoid blocking
+-doc "Execute a callback in a separate process to avoid blocking".
 execute_callback(Callback, Value) ->
     spawn(fun() ->
         try
@@ -375,8 +398,7 @@ execute_callback(Callback, Value) ->
         end
     end).
 
-%% @private
-%% Create a timeout error record with consistent message and hint
+-doc "Create a timeout error record with consistent message and hint".
 make_timeout_error() ->
     #beamtalk_error{
         kind = timeout,

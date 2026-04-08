@@ -1,0 +1,7 @@
+[rebar]
+profile = "test"
+
+[eqwalizer]
+ignore_modules = ["*_tests"]
+[otp]
+exclude_apps = [ "cowboy", "gun", "ranch", "telemetry_poller", "cowlib", "jsx", "telemetry", "yamerl" ]

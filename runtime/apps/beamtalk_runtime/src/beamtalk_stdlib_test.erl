@@ -1,28 +1,30 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Stdlib expression test runner for compiled `// =>` assertion tests.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Provides the runtime support for stdlib expression tests (ADR 0014 Phase 1).
-%%% The Rust test compiler generates thin EUnit wrappers that call into this
-%%% module rather than inlining all formatting, matching, and assertion logic.
-%%%
-%%% Assertion spec types:
-%%%   {value, EvalModule, Expected, VarName, Location}
-%%%   {value_wildcard, EvalModule, Expected, VarName, Location}
-%%%   {value_any, EvalModule, VarName, Location}
-%%%   {error, EvalModule, ExpectedKind, VarName, Location}
-%%%
-%%% Where:
-%%%   EvalModule  :: atom()   - compiled expression module with eval/1
-%%%   Expected    :: binary() - expected formatted result string
-%%%   ExpectedKind:: atom()   - expected error kind for error assertions
-%%%   VarName     :: atom() | none - variable name for binding assignment
-%%%   Location    :: binary() - source location "file:line `expr`"
-
 -module(beamtalk_stdlib_test).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Stdlib expression test runner for compiled `// =>` assertion tests.
+
+Provides the runtime support for stdlib expression tests (ADR 0014 Phase 1).
+The Rust test compiler generates thin EUnit wrappers that call into this
+module rather than inlining all formatting, matching, and assertion logic.
+
+Assertion spec types:
+  {value, EvalModule, Expected, VarName, Location}
+  {value_wildcard, EvalModule, Expected, VarName, Location}
+  {value_any, EvalModule, VarName, Location}
+  {error, EvalModule, ExpectedKind, VarName, Location}
+
+Where:
+  EvalModule  :: atom()   - compiled expression module with eval/1
+  Expected    :: binary() - expected formatted result string
+  ExpectedKind:: atom()   - expected error kind for error assertions
+  VarName     :: atom() | none - variable name for binding assignment
+  Location    :: binary() - source location "file:line `expr`"
+""".
 
 -export([
     run_and_assert/2,
@@ -34,17 +36,19 @@
 %% run_and_assert/2 — main entry point for EUnit wrappers
 %% ──────────────────────────────────────────────────────────────────────────
 
-%% @doc Run a list of assertion specs sequentially, threading bindings.
-%%
-%% Each assertion is wrapped in try/catch so failures don't cascade.
-%% Variable bindings carry forward on success; on crash, the previous
-%% bindings are preserved for subsequent assertions.
-%%
-%% Prints structured output for the Rust result parser:
-%%   RESULTS:module:passed:failed
-%%   FAIL location
-%%     expected: value
-%%     got:      value
+-doc """
+Run a list of assertion specs sequentially, threading bindings.
+
+Each assertion is wrapped in try/catch so failures don't cascade.
+Variable bindings carry forward on success; on crash, the previous
+bindings are preserved for subsequent assertions.
+
+Prints structured output for the Rust result parser:
+  RESULTS:module:passed:failed
+  FAIL location
+    expected: value
+    got:      value
+""".
 -spec run_and_assert(atom(), list()) -> ok | no_return().
 run_and_assert(TestModule, Assertions) ->
     {_FinalBindings, Results} = lists:foldl(
@@ -85,7 +89,7 @@ run_and_assert(TestModule, Assertions) ->
 %% Individual assertion runners
 %% ──────────────────────────────────────────────────────────────────────────
 
-%% @doc Run a single assertion spec, returning {NewBindings, Result}.
+-doc "Run a single assertion spec, returning {NewBindings, Result}.".
 -spec run_one(tuple(), map()) -> {map(), tuple()}.
 
 %% Value assertion: compare format_result(Value) =:= Expected
@@ -159,7 +163,7 @@ run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
             {Bindings, {crash, Location, Class, Reason, Stack}}
     end.
 
-%% @doc Check if caught error kind matches expected.
+-doc "Check if caught error kind matches expected.".
 -spec check_error_kind(atom(), atom(), binary(), map()) -> {map(), tuple()}.
 check_error_kind(Kind, ExpectedKind, Location, Bindings) ->
     case Kind =:= ExpectedKind of
@@ -172,21 +176,23 @@ check_error_kind(Kind, ExpectedKind, Location, Bindings) ->
                 {fail, Location, <<"ERROR: ", ExpectedBin/binary>>, <<"ERROR: ", KindBin/binary>>}}
     end.
 
-%% @doc Optionally bind a variable name to the result value.
+-doc "Optionally bind a variable name to the result value.".
 -spec maybe_bind(atom() | none, term(), map()) -> map().
 maybe_bind(none, _Value, Bindings) ->
     Bindings;
 maybe_bind(VarName, Value, Bindings) ->
-    maps:put(VarName, Value, Bindings).
+    Bindings#{VarName => Value}.
 
 %% ──────────────────────────────────────────────────────────────────────────
 %% format_result/1 — Beamtalk value → display string
 %% ──────────────────────────────────────────────────────────────────────────
 
-%% @doc Format a Beamtalk runtime value to its display binary string.
-%%
-%% Mirrors the REPL's term_to_json formatting so that expected values
-%% written as strings (like E2E tests) match correctly.
+-doc """
+Format a Beamtalk runtime value to its display binary string.
+
+Mirrors the REPL's term_to_json formatting so that expected values
+written as strings (like E2E tests) match correctly.
+""".
 -spec format_result(term()) -> binary().
 format_result(V) when is_integer(V) ->
     integer_to_binary(V);
@@ -260,9 +266,11 @@ format_result(V) ->
 %% matches_pattern/2 — glob-style wildcard matching (BT-502)
 %% ──────────────────────────────────────────────────────────────────────────
 
-%% @doc Glob-style pattern matching where `_` matches any substring,
-%% but only when `_` is NOT flanked by alphanumeric characters on both sides.
-%% This preserves literal underscores in identifiers like `does_not_understand`.
+-doc """
+Glob-style pattern matching where `_` matches any substring,
+but only when `_` is NOT flanked by alphanumeric characters on both sides.
+This preserves literal underscores in identifiers like `does_not_understand`.
+""".
 -spec matches_pattern(binary(), binary()) -> boolean().
 matches_pattern(Pattern, Actual) ->
     Segments = wildcard_segments(Pattern),

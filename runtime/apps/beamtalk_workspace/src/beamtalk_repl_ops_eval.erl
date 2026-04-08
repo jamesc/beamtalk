@@ -1,19 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for eval, clear, and bindings operations.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Extracted from beamtalk_repl_server (BT-705).
-
 -module(beamtalk_repl_ops_eval).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Op handlers for eval, clear, and bindings operations.
+
+Extracted from beamtalk_repl_server (BT-705).
+""".
 
 -export([handle/4]).
 
-%% @doc Handle eval/clear/bindings ops.
+-doc "Handle eval/clear/bindings ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"eval">>, Params, Msg, SessionPid) ->
     Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),

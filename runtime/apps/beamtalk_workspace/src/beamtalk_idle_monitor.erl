@@ -1,37 +1,39 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Idle monitor for automatic workspace cleanup
-%%%
-%%% **DDD Context:** Workspace Context
-%%%
-%%% Monitors workspace activity and initiates graceful shutdown if the
-%%% workspace has been idle for too long. This prevents abandoned BEAM
-%%% nodes from accumulating indefinitely.
-%%%
-%%% Activity is tracked via beamtalk_workspace_meta:update_activity/0,
-%%% which should be called by:
-%%% - REPL sessions (on connection)
-%%% - Actors (on spawn or message handling)
-%%% - Code reloading
-%%%
-%%% ## Cleanup Criteria (from ADR 0004)
-%%%
-%%% A workspace is considered active if:
-%%% - Any REPL session is connected
-%%% - Actor message sent/received in last N seconds
-%%% - Code hot-reloaded recently
-%%%
-%%% If idle for more than max_idle_seconds, the node self-terminates
-%%% via init:stop/0.
-%%%
-%%% ## Production Nodes
-%%%
-%%% Nodes started with --persistent flag disable auto-cleanup by setting
-%%% enabled: false in the config.
-
 -module(beamtalk_idle_monitor).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Idle monitor for automatic workspace cleanup
+
+Monitors workspace activity and initiates graceful shutdown if the
+workspace has been idle for too long. This prevents abandoned BEAM
+nodes from accumulating indefinitely.
+
+Activity is tracked via beamtalk_workspace_meta:update_activity/0,
+which should be called by:
+- REPL sessions (on connection)
+- Actors (on spawn or message handling)
+- Code reloading
+
+## Cleanup Criteria (from ADR 0004)
+
+A workspace is considered active if:
+- Any REPL session is connected
+- Actor message sent/received in last N seconds
+- Code hot-reloaded recently
+
+If idle for more than max_idle_seconds, the node self-terminates
+via init:stop/0.
+
+## Production Nodes
+
+Nodes started with --persistent flag disable auto-cleanup by setting
+enabled: false in the config.
+""".
 -include_lib("kernel/include/logger.hrl").
 
 %% Public API
@@ -58,21 +60,24 @@
 
 %%% Public API
 
-%% @doc Start the idle monitor.
-%% Config: #{enabled => boolean(), max_idle_seconds => integer()}
+-doc """
+Start the idle monitor.
+Config: #{enabled => boolean(), max_idle_seconds => integer()}
+""".
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
 start_link(Config) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []).
 
-%% @doc Mark activity (convenience wrapper for workspace_meta).
-%% This is a convenience function that components can call to indicate activity.
+-doc """
+Mark activity (convenience wrapper for workspace_meta).
+This is a convenience function that components can call to indicate activity.
+""".
 -spec mark_activity() -> ok.
 mark_activity() ->
     beamtalk_workspace_meta:update_activity().
 
 %%% gen_server callbacks
 
-%% @private
 init(Config) ->
     Enabled = maps:get(enabled, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
@@ -95,15 +100,12 @@ init(Config) ->
 
     {ok, NewState}.
 
-%% @private
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
 handle_info(check_idle, State = #state{enabled = false}) ->
     %% Auto-cleanup disabled, don't schedule next check
     {noreply, State};
@@ -125,7 +127,6 @@ handle_info(check_idle, State = #state{enabled = true, max_idle_seconds = MaxIdl
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(_Reason, #state{timer_ref = TRef}) ->
     %% Cancel timer if set
     case TRef of
@@ -134,13 +135,12 @@ terminate(_Reason, #state{timer_ref = TRef}) ->
     end,
     ok.
 
-%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal Functions
 
-%% @doc Determine if the workspace should terminate due to inactivity.
+-doc "Determine if the workspace should terminate due to inactivity.".
 -spec should_terminate(integer()) -> boolean().
 should_terminate(MaxIdleSeconds) ->
     %% Check if there are any active sessions
@@ -159,7 +159,7 @@ should_terminate(MaxIdleSeconds) ->
             false
     end.
 
-%% @doc Check if there are any active REPL sessions connected.
+-doc "Check if there are any active REPL sessions connected.".
 -spec has_active_sessions() -> boolean().
 has_active_sessions() ->
     %% Check if beamtalk_session_sup exists and has children

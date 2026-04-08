@@ -1,10 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor with invalid method (not a function)
-
 -module(test_invalid_method_actor).
 -behaviour(gen_server).
+
+-moduledoc "Test actor with invalid method (not a function)".
 
 %% API
 -export([start_link/0]).

@@ -1,18 +1,20 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc IO capture for Beamtalk REPL evaluation.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Captures stdout during eval by temporarily replacing the group_leader
-%%% with a custom IO server process.
-%%% BT-696: Optionally forwards IO chunks to a subscriber for streaming.
-%%% BT-698: Handles stdin requests by forwarding to subscriber.
-%%%
-%%% Extracted from beamtalk_repl_eval.erl (BT-706).
-
 -module(beamtalk_io_capture).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+IO capture for Beamtalk REPL evaluation.
+
+Captures stdout during eval by temporarily replacing the group_leader
+with a custom IO server process.
+BT-696: Optionally forwards IO chunks to a subscriber for streaming.
+BT-698: Handles stdin requests by forwarding to subscriber.
+
+Extracted from beamtalk_repl_eval.erl (BT-706).
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -35,15 +37,20 @@
 %% BT-698: Timeout for stdin input during eval (30 seconds)
 -define(STDIN_TIMEOUT, 30000).
 
-%% @doc Start capturing IO output for the current process.
-%% Convenience wrapper for start(undefined).
+-doc """
+Start capturing IO output for the current process.
+Convenience wrapper for start(undefined).
+""".
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_unused, start/0}).
 -spec start() -> {pid(), pid()}.
 start() ->
     start(undefined).
 
-%% @doc Start capturing IO output with optional streaming subscriber (BT-696).
-%% When Subscriber is a pid, each IO chunk is forwarded as {eval_out, Chunk}.
+-doc """
+Start capturing IO output with optional streaming subscriber (BT-696).
+When Subscriber is a pid, each IO chunk is forwarded as {eval_out, Chunk}.
+""".
 -spec start(pid() | undefined) -> {pid(), pid()}.
 start(Subscriber) ->
     OldGL = group_leader(),
@@ -51,13 +58,15 @@ start(Subscriber) ->
     group_leader(CapturePid, self()),
     {CapturePid, OldGL}.
 
-%% @doc Stop capturing IO and return all captured output as a binary.
-%% Restores the original group_leader. Returns <<>> on timeout or if
-%% the capture process has already exited.
-%%
-%% BT-358: After restoring the eval process's group_leader, also resets
-%% the group_leader of any processes that inherited the capture process
-%% as their group_leader during eval (e.g., spawned actors).
+-doc """
+Stop capturing IO and return all captured output as a binary.
+Restores the original group_leader. Returns <<>> on timeout or if
+the capture process has already exited.
+
+BT-358: After restoring the eval process's group_leader, also resets
+the group_leader of any processes that inherited the capture process
+as their group_leader during eval (e.g., spawned actors).
+""".
 -spec stop({pid(), pid()}) -> binary().
 stop({CapturePid, OldGL}) ->
     group_leader(OldGL, self()),
@@ -79,15 +88,17 @@ stop({CapturePid, OldGL}) ->
             <<>>
     end.
 
-%% @doc IO server loop that captures put_chars output.
-%% Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
-%% (the latter is used by io:format).
-%% BT-696: When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
-%% BT-698: When Subscriber is a pid, handles get_line/get_chars/get_until by
-%% sending {need_input, CapturePid, Prompt} to Subscriber and waiting for
-%% {stdin_input, Data} response.
-%% After capture stops, proxies IO to the original group_leader so that
-%% processes spawned during eval still have a working IO path.
+-doc """
+IO server loop that captures put_chars output.
+Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
+(the latter is used by io:format).
+BT-696: When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
+BT-698: When Subscriber is a pid, handles get_line/get_chars/get_until by
+sending {need_input, CapturePid, Prompt} to Subscriber and waiting for
+{stdin_input, Data} response.
+After capture stops, proxies IO to the original group_leader so that
+processes spawned during eval still have a working IO path.
+""".
 -spec io_capture_loop(binary(), pid() | undefined) -> ok.
 io_capture_loop(Buffer, Subscriber) ->
     receive
@@ -120,9 +131,11 @@ io_capture_loop(Buffer, Subscriber) ->
             io_passthrough_loop(OldGL)
     end.
 
-%% @doc After capture, forward all IO to the original group_leader.
-%% Keeps this process alive so spawned children don't get a dead group_leader.
-%% Exits after 60 seconds of inactivity to avoid leaking processes.
+-doc """
+After capture, forward all IO to the original group_leader.
+Keeps this process alive so spawned children don't get a dead group_leader.
+Exits after 60 seconds of inactivity to avoid leaking processes.
+""".
 -spec io_passthrough_loop(pid()) -> ok.
 io_passthrough_loop(OldGL) ->
     receive
@@ -133,9 +146,11 @@ io_passthrough_loop(OldGL) ->
         ok
     end.
 
-%% @doc Reset group_leader for processes that inherited the capture process.
-%% Scans all processes to find those whose group_leader is the capture
-%% process and resets them to the original group_leader (BT-358).
+-doc """
+Reset group_leader for processes that inherited the capture process.
+Scans all processes to find those whose group_leader is the capture
+process and resets them to the original group_leader (BT-358).
+""".
 -spec reset_captured_group_leaders(pid(), pid()) -> ok.
 reset_captured_group_leaders(CapturePid, OldGL) ->
     lists:foreach(
@@ -165,9 +180,11 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
         erlang:processes()
     ).
 
-%% @doc Check if an IO request is a stdin (input) request.
-%% Returns {true, Prompt} for get_line/get_chars/get_until, false otherwise.
-%% BT-698: Supports the Erlang IO protocol input requests.
+-doc """
+Check if an IO request is a stdin (input) request.
+Returns {true, Prompt} for get_line/get_chars/get_until, false otherwise.
+BT-698: Supports the Erlang IO protocol input requests.
+""".
 -spec is_stdin_request(term()) -> {true, binary()} | false.
 is_stdin_request({get_line, _Encoding, Prompt}) ->
     {true, prompt_to_binary(Prompt)};
@@ -184,7 +201,7 @@ is_stdin_request({get_until, Prompt, _Mod, _Func, _Args}) ->
 is_stdin_request(_) ->
     false.
 
-%% @doc Convert an IO prompt to a binary string.
+-doc "Convert an IO prompt to a binary string.".
 -spec prompt_to_binary(term()) -> binary().
 prompt_to_binary(Prompt) when is_binary(Prompt) -> Prompt;
 prompt_to_binary(Prompt) when is_list(Prompt) ->
@@ -199,11 +216,13 @@ prompt_to_binary(Prompt) when is_atom(Prompt) ->
 prompt_to_binary(_) ->
     <<"? ">>.
 
-%% @doc Handle a stdin IO request by notifying the subscriber and waiting for input.
-%% When no subscriber is present (sync eval), returns {error, enotsup}.
-%% BT-698: Sends {need_input, CapturePid, Ref, Prompt} to subscriber, waits for
-%% {stdin_input, Ref, Data} response with timeout. The Ref prevents late replies
-%% from a timed-out prompt being consumed by a subsequent prompt.
+-doc """
+Handle a stdin IO request by notifying the subscriber and waiting for input.
+When no subscriber is present (sync eval), returns {error, enotsup}.
+BT-698: Sends {need_input, CapturePid, Ref, Prompt} to subscriber, waits for
+{stdin_input, Ref, Data} response with timeout. The Ref prevents late replies
+from a timed-out prompt being consumed by a subsequent prompt.
+""".
 -spec handle_stdin_request(pid() | undefined, binary()) -> term().
 handle_stdin_request(undefined, _Prompt) ->
     {error, enotsup};
@@ -222,8 +241,10 @@ handle_stdin_request(Subscriber, Prompt) when is_pid(Subscriber) ->
         {error, timeout}
     end.
 
-%% @doc Handle a single IO protocol request.
-%% Always replies ok for output requests to avoid changing program behavior.
+-doc """
+Handle a single IO protocol request.
+Always replies ok for output requests to avoid changing program behavior.
+""".
 -spec handle_io_request(term(), binary()) -> {term(), binary()}.
 handle_io_request({put_chars, Encoding, Chars}, Buffer) ->
     try unicode:characters_to_binary(Chars, Encoding, utf8) of

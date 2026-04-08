@@ -1,25 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Reads `-spec` attributes and parameter names from `.beam` abstract code.
-%%
-%% **DDD Context:** Compilation (Anti-Corruption Layer)
-%%
-%% ADR 0075: Erlang FFI Type Definitions (Phase 1).
-%% ADR 0076: ok/error → Result type mapping (Phase 2).
-%%
-%% Extracts spec forms and spec variable names from the `abstract_code` chunk
-%% of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
-%%
-%% Supports batch processing of multiple modules via `read_specs_batch/1' and
-%% integration with the `beamtalk_build_worker' protocol.
-%%
-%% Multi-clause specs produce a union of return types. Parameter names and
-%% types come from the first clause (Erlang convention).
-%%
-%% @end
-
 -module(beamtalk_spec_reader).
+
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
+
+-moduledoc """
+Reads `-spec` attributes and parameter names from `.beam` abstract code.
+
+ADR 0075: Erlang FFI Type Definitions (Phase 1).
+ADR 0076: ok/error → Result type mapping (Phase 2).
+
+Extracts spec forms and spec variable names from the `abstract_code` chunk
+of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
+
+Supports batch processing of multiple modules via `read_specs_batch/1' and
+integration with the `beamtalk_build_worker' protocol.
+
+Multi-clause specs produce a union of return types. Parameter names and
+types come from the first clause (Erlang convention).
+""".
 
 -export([
     read_specs/1,
@@ -39,18 +39,20 @@
 ]).
 -endif.
 
-%% @doc Read specs from a `.beam` file.
-%%
-%% Returns `{ok, Specs}' where `Specs' is a list of spec entries, or
-%% `{error, Reason}' if the file cannot be read or has no abstract code.
-%%
-%% Each spec entry is a map:
-%% ```
-%% #{name => atom(),
-%%   arity => non_neg_integer(),
-%%   params => [#{name => binary(), type => binary()}],
-%%   return_type => binary()}
-%% ```
+-doc """
+Read specs from a `.beam` file.
+
+Returns `{ok, Specs}' where `Specs' is a list of spec entries, or
+`{error, Reason}' if the file cannot be read or has no abstract code.
+
+Each spec entry is a map:
+```
+#{name => atom(),
+  arity => non_neg_integer(),
+  params => [#{name => binary(), type => binary()}],
+  return_type => binary()}
+```
+""".
 -spec read_specs(file:filename_all()) ->
     {ok, [map()]} | {error, no_debug_info | {beam_lib, term()}}.
 read_specs(BeamFile) ->
@@ -71,14 +73,16 @@ read_specs(BeamFile) ->
             {error, {beam_lib, Reason}}
     end.
 
-%% @doc Batch-read specs from multiple `.beam` files.
-%%
-%% Returns a list of `{Module, Specs}' tuples, one per input file.
-%% Each result is:
-%%   `{Module, {ok, Specs}}' on success
-%%   `{Module, {error, Reason}}' on failure
-%%
-%% The module name is extracted from the `.beam` file's module attribute.
+-doc """
+Batch-read specs from multiple `.beam` files.
+
+Returns a list of `{Module, Specs}' tuples, one per input file.
+Each result is:
+  `{Module, {ok, Specs}}' on success
+  `{Module, {error, Reason}}' on failure
+
+The module name is extracted from the `.beam` file's module attribute.
+""".
 -spec read_specs_batch([file:filename_all()]) ->
     [{binary(), {ok, [map()]} | {error, term()}}].
 read_specs_batch(BeamFiles) ->
@@ -95,12 +99,14 @@ read_specs_batch(BeamFiles) ->
         BeamFiles
     ).
 
-%% @doc Read raw spec abstract forms from a `.beam` file.
-%%
-%% Returns `{ok, RawSpecs}' where `RawSpecs' is a list of
-%% `{Name, Arity, SpecForm}' tuples containing the original abstract form
-%% suitable for pretty-printing with `erl_pp:attribute/1'.
-%% Only specs for exported functions are returned.
+-doc """
+Read raw spec abstract forms from a `.beam` file.
+
+Returns `{ok, RawSpecs}' where `RawSpecs' is a list of
+`{Name, Arity, SpecForm}' tuples containing the original abstract form
+suitable for pretty-printing with `erl_pp:attribute/1'.
+Only specs for exported functions are returned.
+""".
 -spec read_raw_specs(file:filename_all()) ->
     {ok, [{atom(), non_neg_integer(), tuple()}]} | {error, no_debug_info | {beam_lib, term()}}.
 read_raw_specs(BeamFile) ->
@@ -131,11 +137,13 @@ read_raw_specs(BeamFile) ->
             {error, {beam_lib, Reason}}
     end.
 
-%% @doc Read type definitions from a `.beam` file.
-%%
-%% Returns `{ok, Types}' where `Types' is a list of
-%% `{Name, Arity, TypeForm}' tuples containing the original abstract form
-%% suitable for pretty-printing with `erl_pp:attribute/1'.
+-doc """
+Read type definitions from a `.beam` file.
+
+Returns `{ok, Types}' where `Types' is a list of
+`{Name, Arity, TypeForm}' tuples containing the original abstract form
+suitable for pretty-printing with `erl_pp:attribute/1'.
+""".
 -spec read_types(file:filename_all()) ->
     {ok, [{atom(), non_neg_integer(), tuple()}]} | {error, no_debug_info | {beam_lib, term()}}.
 read_types(BeamFile) ->
@@ -157,20 +165,24 @@ read_types(BeamFile) ->
             {error, {beam_lib, Reason}}
     end.
 
-%% @doc Pretty-print a raw spec abstract form as an Erlang `-spec' string.
-%%
-%% Takes the raw spec form from `read_raw_specs/1' and returns a formatted
-%% binary like `<<"-spec next_file(Log) -> ok | {error, Reason}.">>'.
+-doc """
+Pretty-print a raw spec abstract form as an Erlang `-spec' string.
+
+Takes the raw spec form from `read_raw_specs/1' and returns a formatted
+binary like `<<"-spec next_file(Log) -> ok | {error, Reason}.">>'.
+""".
 -spec format_erlang_spec(tuple()) -> binary().
 format_erlang_spec(SpecForm) ->
     Formatted = erl_pp:attribute(SpecForm),
     Bin = iolist_to_binary(Formatted),
     string:trim(Bin).
 
-%% @doc Pretty-print a raw type abstract form as an Erlang `-type' string.
-%%
-%% Takes the raw type form from `read_types/1' and returns a formatted
-%% binary like `<<"-type my_type() :: a | b.">>'.
+-doc """
+Pretty-print a raw type abstract form as an Erlang `-type' string.
+
+Takes the raw type form from `read_types/1' and returns a formatted
+binary like `<<"-type my_type() :: a | b.">>'.
+""".
 -spec format_erlang_type(tuple()) -> binary().
 format_erlang_type(TypeForm) ->
     Formatted = erl_pp:attribute(TypeForm),
@@ -183,10 +195,12 @@ beam_file_to_module_name(BeamFile) ->
     BaseName = filename:basename(BeamFile, ".beam"),
     iolist_to_binary(BaseName).
 
-%% @doc Extract spec entries from abstract forms.
-%%
-%% Collects `{attribute, _, spec, ...}' forms and the export list from the
-%% given forms. Only specs for exported functions are returned.
+-doc """
+Extract spec entries from abstract forms.
+
+Collects `{attribute, _, spec, ...}' forms and the export list from the
+given forms. Only specs for exported functions are returned.
+""".
 -spec extract_specs_from_forms([erl_parse:abstract_form()]) -> [map()].
 extract_specs_from_forms(Forms) ->
     Exports = extract_exports(Forms),
@@ -245,7 +259,7 @@ extract_exports(Forms) ->
     lists:foldl(
         fun
             ({attribute, _, export, FnList}, Acc) ->
-                lists:foldl(fun(FA, S) -> sets:add_element(FA, S) end, Acc, FnList);
+                lists:foldl(fun sets:add_element/2, Acc, FnList);
             (_, Acc) ->
                 Acc
         end,
@@ -271,6 +285,7 @@ process_spec(Name, Arity, Clauses, LineMap) ->
         params => Params,
         return_type => ReturnType
     },
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find({Name, Arity}, LineMap) of
         {ok, Line} -> Base#{line => Line};
         error -> Base
@@ -393,6 +408,7 @@ extract_param_names_with_constraints(ArgTypes, ConstraintMap) ->
                 };
             ({var, _, VarName}) ->
                 ResolvedType =
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(VarName, ConstraintMap) of
                         {ok, T} -> map_type(T);
                         error -> <<"Dynamic">>
@@ -438,6 +454,7 @@ build_constraint_map(Constraints) ->
 %% before ok/error Result recognition runs.
 -spec resolve_type_with_constraints(tuple(), map()) -> binary().
 resolve_type_with_constraints({var, _, VarName}, ConstraintMap) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(VarName, ConstraintMap) of
         {ok, Type} -> map_type(Type);
         error -> <<"Dynamic">>
@@ -456,6 +473,7 @@ resolve_type_with_constraints(Type, _ConstraintMap) ->
 %% that map_union/2 can pattern-match on ok/error tuples.
 -spec resolve_branch_with_constraints(tuple(), map()) -> tuple().
 resolve_branch_with_constraints({var, Line, VarName}, ConstraintMap) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(VarName, ConstraintMap) of
         {ok, Type} -> Type;
         error -> {var, Line, VarName}
@@ -623,12 +641,14 @@ resolve_remote_type_from_beam(BeamFile, _Mod, TypeName, Arity, Depth) ->
             <<"Dynamic">>
     end.
 
-%% @doc Map an Erlang abstract type to a Beamtalk type name.
-%%
-%% Implements the reverse mapping from ADR 0075 Table 1.
-%% When a type registry is available (set via process dictionary during
-%% read_specs/1), user_type and remote_type references are resolved
-%% instead of falling back to Dynamic.
+-doc """
+Map an Erlang abstract type to a Beamtalk type name.
+
+Implements the reverse mapping from ADR 0075 Table 1.
+When a type registry is available (set via process dictionary during
+read_specs/1), user_type and remote_type references are resolved
+instead of falling back to Dynamic.
+""".
 -spec map_type(tuple()) -> binary().
 %% Basic types
 map_type({type, _, integer, []}) ->
@@ -644,7 +664,7 @@ map_type({type, _, float, []}) ->
 map_type({type, _, number, []}) ->
     <<"Number">>;
 map_type({type, _, binary, _}) ->
-    <<"String">>;
+    <<"String | Binary">>;
 map_type({type, _, boolean, []}) ->
     <<"Boolean">>;
 map_type({type, _, atom, []}) ->
@@ -730,10 +750,12 @@ map_type({integer, _, _}) ->
 map_type(_) ->
     <<"Dynamic">>.
 
-%% @doc Extract the Beamtalk class name from a typed map's field list.
-%%
-%% Looks for a `'$beamtalk_class' := ClassName` exact field. Returns
-%% `{ok, ClassName}` if found, `error` otherwise.
+-doc """
+Extract the Beamtalk class name from a typed map's field list.
+
+Looks for a `'$beamtalk_class' := ClassName` exact field. Returns
+`{ok, ClassName}` if found, `error` otherwise.
+""".
 -spec extract_beamtalk_class([tuple()]) -> {ok, atom()} | error.
 extract_beamtalk_class([]) ->
     error;
@@ -745,16 +767,18 @@ extract_beamtalk_class([
 extract_beamtalk_class([_ | Rest]) ->
     extract_beamtalk_class(Rest).
 
-%% @doc Classify union branches and emit Result(T, E) for ok/error patterns.
-%%
-%% Recognizes these patterns in union types (ADR 0076 Phase 2):
-%%   - {ok, T} | {error, E}  → Result(T, E)
-%%   - ok | {error, E}       → Result(Nil, E)    (bare ok atom)
-%%   - {ok, T} alone         → Result(T, Dynamic) (no error branch)
-%%   - {error, E} alone      → Result(Dynamic, E) (no ok branch)
-%%   - 3+ branch union with ok/error → Result(T, E) | Other
-%%
-%% Non-ok/error unions fall through to standard type mapping.
+-doc """
+Classify union branches and emit Result(T, E) for ok/error patterns.
+
+Recognizes these patterns in union types (ADR 0076 Phase 2):
+  - {ok, T} | {error, E}  → Result(T, E)
+  - ok | {error, E}       → Result(Nil, E)    (bare ok atom)
+  - {ok, T} alone         → Result(T, Dynamic) (no error branch)
+  - {error, E} alone      → Result(Dynamic, E) (no ok branch)
+  - 3+ branch union with ok/error → Result(T, E) | Other
+
+Non-ok/error unions fall through to standard type mapping.
+""".
 -spec map_union([tuple()], term()) -> binary().
 map_union(Branches, _Line) ->
     {OkTypes, ErrTypes, OtherBranches} = classify_union_branches(Branches),

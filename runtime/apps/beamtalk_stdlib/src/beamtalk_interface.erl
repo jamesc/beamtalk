@@ -1,47 +1,60 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Method implementations for the BeamtalkInterface sealed Object.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Implements methods for the BeamtalkInterface class. BeamtalkInterface is
-%%% a `sealed Object subclass:` (value type, no gen_server process). Methods
-%%% are called via Erlang FFI from the compiled Beamtalk module using the
-%%% ErlangModule proxy pattern: `(Erlang beamtalk_interface) fn: arg`.
-%%%
-%%% The `dispatch/3` function is used by EUnit tests and runtime bootstrap.
-%%%
-%%% All methods are stateless reads from the class registry; no process
-%%% dictionary or ETS state is required.
-%%%
-%%% ## Methods
-%%%
-%%% | Selector          | Description                                       |
-%%% |-------------------|---------------------------------------------------|
-%%% | `allClasses'      | List of all registered class names                |
-%%% | `classNamed:'     | Class object reference by name, or nil            |
-%%% | `globals'         | Class registry snapshot as a map                  |
-%%% | `help:'           | Formatted class documentation                     |
-%%% | `help:selector:'  | Formatted method documentation                    |
-%%% | `version'         | Beamtalk runtime version string                   |
-
 -module(beamtalk_interface).
 
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Method implementations for the BeamtalkInterface sealed Object.
+
+Implements methods for the BeamtalkInterface class. BeamtalkInterface is
+a `sealed Object subclass:` (value type, no gen_server process). Methods
+are called via Erlang FFI from the compiled Beamtalk module using the
+ErlangModule proxy pattern: `(Erlang beamtalk_interface) fn: arg`.
+
+The `dispatch/3` function is used by EUnit tests and runtime bootstrap.
+
+All methods are stateless reads from the class registry; no process
+dictionary or ETS state is required.
+
+## Methods
+
+| Selector          | Description                                       |
+|-------------------|---------------------------------------------------|
+| `allClasses'      | List of all registered class names                |
+| `classNamed:'     | Class object reference by name, or nil            |
+| `globals'         | Class registry snapshot as a map                  |
+| `help:'           | Formatted class documentation                     |
+| `help:selector:'  | Formatted method documentation                    |
+| `erlangHelp:'     | Formatted Erlang module documentation              |
+| `erlangHelp:selector:' | Formatted Erlang function documentation       |
+| `version'         | Beamtalk runtime version string                   |
+""".
+
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 -export([dispatch/3]).
 %% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
--export([allClasses/0, classNamed/1, findClass/1, globals/0, help/1, help/2, version/0]).
+-export([
+    allClasses/0,
+    classNamed/1,
+    findClass/1,
+    globals/0,
+    help/1, help/2,
+    erlangHelp/1, erlangHelp/2,
+    version/0
+]).
 
 %%% ============================================================================
 %%% dispatch/3 — called from compiled bt@stdlib@beamtalk_interface for @primitives
 %%% ============================================================================
 
-%% @doc Dispatch a primitive method call for BeamtalkInterface.
-%%
-%% Called by the compiled `bt@stdlib@beamtalk_interface:dispatch/3`.
+-doc """
+Dispatch a primitive method call for BeamtalkInterface.
+
+Called by the compiled `bt@stdlib@beamtalk_interface:dispatch/3`.
+""".
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Self) ->
     [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()];
@@ -59,6 +72,10 @@ dispatch('help:selector:', [ClassArg, SelectorArg], _Self) ->
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
     end;
+dispatch('erlangHelp:', [ModuleArg], _Self) ->
+    handle_erlang_help(ModuleArg);
+dispatch('erlangHelp:selector:', [ModuleArg, SelectorArg], _Self) ->
+    handle_erlang_help(ModuleArg, SelectorArg);
 dispatch(version, [], _Self) ->
     case application:get_key(beamtalk_runtime, vsn) of
         {ok, Vsn} -> list_to_binary(Vsn);
@@ -73,14 +90,18 @@ dispatch(Selector, _Args, _Self) ->
 %%% Direct exports for Erlang FFI (called via ErlangModule proxy from sealed Object)
 %%% ============================================================================
 
-%% @doc Return list of all registered class names.
-%% Called via `(Erlang beamtalk_interface) allClasses`.
+-doc """
+Return list of all registered class names.
+Called via `(Erlang beamtalk_interface) allClasses`.
+""".
 -spec allClasses() -> [atom()].
 allClasses() ->
     [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()].
 
-%% @doc Look up a class by name (atom or binary).
-%% Called via `(Erlang beamtalk_interface) classNamed: className`.
+-doc """
+Look up a class by name (atom or binary).
+Called via `(Erlang beamtalk_interface) classNamed: className`.
+""".
 -spec classNamed(binary() | atom() | term()) -> tuple() | 'nil'.
 classNamed(ClassName) ->
     case handle_class_named(ClassName) of
@@ -88,8 +109,10 @@ classNamed(ClassName) ->
         Result -> Result
     end.
 
-%% @doc Look up a class by name (atom or binary). Called via findClass: FFI.
-%% Alias for classNamed/1 — used because classNamed: selector triggers compile-time validation.
+-doc """
+Look up a class by name (atom or binary). Called via findClass: FFI.
+Alias for classNamed/1 — used because classNamed: selector triggers compile-time validation.
+""".
 -spec findClass(binary() | atom() | term()) -> tuple() | 'nil'.
 findClass(ClassName) ->
     case handle_class_named(ClassName) of
@@ -97,14 +120,18 @@ findClass(ClassName) ->
         Result -> Result
     end.
 
-%% @doc Return class registry snapshot as a map from class name to class object.
-%% Called via `(Erlang beamtalk_interface) globals`.
+-doc """
+Return class registry snapshot as a map from class name to class object.
+Called via `(Erlang beamtalk_interface) globals`.
+""".
 -spec globals() -> map().
 globals() ->
     handle_globals().
 
-%% @doc Format class documentation (help: aClass).
-%% Called via `(Erlang beamtalk_interface) help: aClass`.
+-doc """
+Format class documentation (help: aClass).
+Called via `(Erlang beamtalk_interface) help: aClass`.
+""".
 -spec help(term()) -> binary().
 help(ClassArg) ->
     case handle_help(ClassArg) of
@@ -112,17 +139,37 @@ help(ClassArg) ->
         Result -> Result
     end.
 
-%% @doc Format method documentation (help: aClass selector: aSelector).
-%% Called via `(Erlang beamtalk_interface) help: aClass selector: aSelector`.
--spec help(term(), atom()) -> binary().
+-doc """
+Format method documentation (help: aClass selector: aSelector).
+Called via `(Erlang beamtalk_interface) help: aClass selector: aSelector`.
+""".
+-spec help(term(), Selector :: atom()) -> binary().
 help(ClassArg, SelectorArg) ->
     case handle_help_selector(ClassArg, SelectorArg) of
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
     end.
 
-%% @doc Return the Beamtalk runtime version string.
-%% Called via `(Erlang beamtalk_interface) version`.
+-doc """
+Format Erlang module documentation (erlangHelp: moduleName).
+Called via `(Erlang beamtalk_interface) erlangHelp: "lists"`.
+""".
+-spec erlangHelp(binary()) -> binary().
+erlangHelp(ModuleArg) ->
+    handle_erlang_help(ModuleArg).
+
+-doc """
+Format Erlang function documentation (erlangHelp: moduleName selector: #fn).
+Called via `(Erlang beamtalk_interface) erlangHelp: "lists" selector: #reverse`.
+""".
+-spec erlangHelp(binary(), atom() | binary()) -> binary().
+erlangHelp(ModuleArg, SelectorArg) ->
+    handle_erlang_help(ModuleArg, SelectorArg).
+
+-doc """
+Return the Beamtalk runtime version string.
+Called via `(Erlang beamtalk_interface) version`.
+""".
 -spec version() -> binary().
 version() ->
     case application:get_key(beamtalk_runtime, vsn) of
@@ -134,7 +181,100 @@ version() ->
 %%% Internal method implementations
 %%% ============================================================================
 
-%% @private Look up a class by name.
+-doc "Format Erlang module help via beamtalk_erlang_help (dynamic call).".
+-spec handle_erlang_help(binary()) -> binary().
+handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
+    try binary_to_existing_atom(ModuleBin, utf8) of
+        Module ->
+            case beamtalk_erlang_help:format_module_help(Module) of
+                {ok, Text} ->
+                    Text;
+                {error, not_found} ->
+                    Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+                    Err1 = beamtalk_error:with_message(
+                        Err,
+                        iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
+                    ),
+                    Err2 = beamtalk_error:with_hint(
+                        Err1,
+                        <<"Check the module name and ensure it is available on the code path.">>
+                    ),
+                    beamtalk_error:raise(Err2)
+            end
+    catch
+        error:badarg ->
+            Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+            Err1 = beamtalk_error:with_message(
+                Err,
+                iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Check the module name and ensure it is available on the code path.">>
+            ),
+            beamtalk_error:raise(Err2)
+    end;
+handle_erlang_help(_ModuleArg) ->
+    Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:'),
+    Err2 = beamtalk_error:with_message(
+        Err1, <<"erlangHelp: expects a binary module name">>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc "Format Erlang function help via beamtalk_erlang_help (dynamic call).".
+-spec handle_erlang_help(binary(), atom() | binary()) -> binary().
+handle_erlang_help(ModuleBin, SelectorArg) when
+    is_binary(ModuleBin), (is_atom(SelectorArg) orelse is_binary(SelectorArg))
+->
+    FunctionBin =
+        case SelectorArg of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    try binary_to_existing_atom(ModuleBin, utf8) of
+        Module ->
+            case beamtalk_erlang_help:format_function_help(Module, FunctionBin) of
+                {ok, Text} ->
+                    Text;
+                {error, not_found} ->
+                    Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+                    Err1 = beamtalk_error:with_message(
+                        Err,
+                        iolist_to_binary([ModuleBin, <<":">>, FunctionBin, <<" not found">>])
+                    ),
+                    Err2 = beamtalk_error:with_hint(
+                        Err1,
+                        iolist_to_binary([
+                            <<"Use Beamtalk erlangHelp: \"">>,
+                            ModuleBin,
+                            <<"\" to see available functions.">>
+                        ])
+                    ),
+                    beamtalk_error:raise(Err2)
+            end
+    catch
+        error:badarg ->
+            Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+            Err1 = beamtalk_error:with_message(
+                Err,
+                iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Check the module name and ensure it is available on the code path.">>
+            ),
+            beamtalk_error:raise(Err2)
+    end;
+handle_erlang_help(_ModuleArg, _SelectorArg) ->
+    Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:selector:'),
+    Err2 = beamtalk_error:with_message(
+        Err1, <<"erlangHelp:selector: expects a binary module name and atom/binary function name">>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc "Look up a class by name.".
 -spec handle_class_named(binary() | atom() | term()) ->
     tuple() | 'nil' | {error, #beamtalk_error{}}.
 handle_class_named(ClassName) when is_binary(ClassName) ->
@@ -162,20 +302,20 @@ handle_class_named(_ClassName) ->
     ),
     {error, Error2}.
 
-%% @private Get workspace global bindings as a map from class name to class object.
+-doc "Get workspace global bindings as a map from class name to class object.".
 -spec handle_globals() -> map().
 handle_globals() ->
     lists:foldl(
         fun({Name, ModuleName, Pid}, Acc) ->
             ClassTag = beamtalk_class_registry:class_object_tag(Name),
             ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
-            maps:put(Name, ClassObj, Acc)
+            Acc#{Name => ClassObj}
         end,
         #{},
         beamtalk_class_registry:live_class_entries()
     ).
 
-%% @private Format class documentation for help:.
+-doc "Format class documentation for help:.".
 -spec handle_help(term()) -> binary() | {error, #beamtalk_error{}}.
 handle_help(ClassArg) ->
     case resolve_class_name(ClassArg) of
@@ -195,7 +335,7 @@ handle_help(ClassArg) ->
             end
     end.
 
-%% @private Format method documentation for help:selector:.
+-doc "Format method documentation for help:selector:.".
 -spec handle_help_selector(term(), atom()) -> binary() | {error, #beamtalk_error{}}.
 handle_help_selector(ClassArg, SelectorArg) ->
     case resolve_class_name(ClassArg) of
@@ -231,9 +371,9 @@ handle_help_selector(ClassArg, SelectorArg) ->
             end
     end.
 
-%% @private Resolve a class argument to an atom class name.
+-doc "Resolve a class argument to an atom class name.".
 -spec resolve_class_name(term()) -> {ok, atom()} | {error, #beamtalk_error{}}.
-resolve_class_name({beamtalk_object, _ClassTag, _Mod, ClassPid}) when is_pid(ClassPid) ->
+resolve_class_name(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
     try
         Name = beamtalk_object_class:class_name(ClassPid),
         {ok, Name}
@@ -258,7 +398,7 @@ resolve_class_name(_Other) ->
     Error0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
     {error, beamtalk_error:with_message(Error0, <<"Expected a class or symbol argument">>)}.
 
-%% @private Ensure a selector argument is an existing atom.
+-doc "Ensure a selector argument is an existing atom.".
 -spec ensure_atom(atom() | binary()) -> atom() | {error, #beamtalk_error{}}.
 ensure_atom(A) when is_atom(A) -> A;
 ensure_atom(B) when is_binary(B) ->
@@ -275,7 +415,7 @@ ensure_atom(B) when is_binary(B) ->
                 )}
     end.
 
-%% @private Format class-level help output.
+-doc "Format class-level help output.".
 -spec format_class_help(atom(), pid()) -> binary().
 format_class_help(ClassName, ClassPid) ->
     Superclass = gen_server:call(ClassPid, superclass, 5000),
@@ -400,7 +540,7 @@ format_class_help(ClassName, ClassPid) ->
         )
     ).
 
-%% @private Format method-level help output.
+-doc "Format method-level help output.".
 -spec format_method_help(atom(), atom(), atom(), map()) -> binary().
 format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
     SelectorBin = atom_to_binary(SelectorAtom, utf8),
@@ -448,7 +588,7 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
 
     iolist_to_binary([Header, SealedLine, InheritedPart, SignatureLine, DocPart]).
 
-%% @private Get method signature from a class pid.
+-doc "Get method signature from a class pid.".
 -spec get_method_sig(pid(), atom()) -> {binary(), binary() | none}.
 get_method_sig(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}, 5000) of
@@ -463,7 +603,7 @@ get_method_sig(ClassPid, Selector) ->
             {atom_to_binary(Selector, utf8), Doc}
     end.
 
-%% @private Walk the class hierarchy to collect flattened method map.
+-doc "Walk the class hierarchy to collect flattened method map.".
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
     collect_flattened_methods(ClassName, ClassPid, 0).
@@ -487,7 +627,7 @@ collect_chain_methods(SuperName, Depth) ->
         SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
     end.
 
-%% @private Find which class in the hierarchy defines a selector.
+-doc "Find which class in the hierarchy defines a selector.".
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
     find_defining_class(ClassPid, Selector, 0).
@@ -512,13 +652,13 @@ find_defining_class(ClassPid, Selector, Depth) ->
             ClassName
     end.
 
-%% @private Group inherited methods by defining class.
+-doc "Group inherited methods by defining class.".
 -spec group_by_class([{atom(), atom()}]) -> [{atom(), [atom()]}].
 group_by_class(Methods) ->
     Grouped = lists:foldl(
         fun({Selector, DefClass}, Acc) ->
             Existing = maps:get(DefClass, Acc, []),
-            maps:put(DefClass, [Selector | Existing], Acc)
+            Acc#{DefClass => [Selector | Existing]}
         end,
         #{},
         Methods
@@ -533,7 +673,7 @@ group_by_class(Methods) ->
         )
     ).
 
-%% @private Build a structured error for a class not found.
+-doc "Build a structured error for a class not found.".
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->
     NameBin =
@@ -551,7 +691,7 @@ make_class_not_found_error(ClassName) ->
         <<"Use Beamtalk allClasses for available classes.">>
     ).
 
-%% @private Build a structured error for a method not found.
+-doc "Build a structured error for a method not found.".
 -spec make_method_not_found_error(atom(), atom()) -> #beamtalk_error{}.
 make_method_not_found_error(ClassName, Selector) ->
     NameBin = atom_to_binary(ClassName, utf8),

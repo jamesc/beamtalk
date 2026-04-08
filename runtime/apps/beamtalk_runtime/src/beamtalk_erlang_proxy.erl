@@ -1,55 +1,59 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc ErlangModule proxy dispatch for BEAM interop (BT-676, BT-679).
-%%%
-%%% Forwards Beamtalk messages to Erlang function calls via `erlang:apply/3`.
-%%% ErlangModule proxies are tagged maps of the form:
-%%% ```
-%%% #{
-%%%   '$beamtalk_class' => 'ErlangModule',
-%%%   module => lists    % the Erlang module to proxy
-%%% }
-%%% ```
-%%%
-%%% **Dispatch rules:**
-%%% - Keyword selectors (ending in `:`) → strip colon, use as function name
-%%%   `reverse:` + [Arg] → `lists:reverse(Arg)`
-%%% - Multi-keyword selectors → first keyword = function name, all args positional
-%%%   `sublist:length:` + [Start, Len] → `lists:sublist(Start, Len)`
-%%% - Unary selectors (no colon) → zero-arg function call
-%%%   `node` → `erlang:node()`
-%%%
-%%% **Export introspection (BT-679):**
-%%% Before dispatch, validates function existence and arity via
-%%% `Module:module_info(exports)`. Provides actionable error messages for:
-%%% - Wrong arity: "lists:reverse/1 exists but was called with 2 arguments"
-%%% - Missing function: "This Erlang function does not exist."
-%%% - Unloaded module: "Erlang module 'bogus' is not loaded."
-%%%
-%%% **Escape hatch:** `call:args:` bypasses selector→function mapping
-%%% for reserved selectors (class, ==, /=, self, etc.).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% See: ADR 0028 §1 (Module Proxy Pattern)
-
 -module(beamtalk_erlang_proxy).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+ErlangModule proxy dispatch for BEAM interop (BT-676, BT-679).
+
+Forwards Beamtalk messages to Erlang function calls via `erlang:apply/3`.
+ErlangModule proxies are tagged maps of the form:
+```
+#{
+  '$beamtalk_class' => 'ErlangModule',
+  module => lists    % the Erlang module to proxy
+}
+```
+
+**Dispatch rules:**
+- Keyword selectors (ending in `:`) → strip colon, use as function name
+  `reverse:` + [Arg] → `lists:reverse(Arg)`
+- Multi-keyword selectors → first keyword = function name, all args positional
+  `sublist:length:` + [Start, Len] → `lists:sublist(Start, Len)`
+- Unary selectors (no colon) → zero-arg function call
+  `node` → `erlang:node()`
+
+**Export introspection (BT-679):**
+Before dispatch, validates function existence and arity via
+`Module:module_info(exports)`. Provides actionable error messages for:
+- Wrong arity: "lists:reverse/1 exists but was called with 2 arguments"
+- Missing function: "This Erlang function does not exist."
+- Unloaded module: "Erlang module 'bogus' is not loaded."
+
+**Escape hatch:** `call:args:` bypasses selector→function mapping
+for reserved selectors (class, ==, /=, self, etc.).
+
+See: ADR 0028 §1 (Module Proxy Pattern)
+""".
 
 -export([coerce_result/1, direct_call/3, dispatch/3, has_method/1, new/1]).
 
 -include("beamtalk.hrl").
 
-%% @doc Create a new ErlangModule proxy for the given module atom.
+-doc "Create a new ErlangModule proxy for the given module atom.".
 -spec new(atom()) -> map().
 new(Module) when is_atom(Module) ->
     #{'$beamtalk_class' => 'ErlangModule', module => Module}.
 
-%% @doc Dispatch a Beamtalk message to the proxied Erlang module.
-%%
-%% Handles Object protocol messages (class, printString, methods) locally,
-%% validates export existence/arity before dispatch, and provides
-%% actionable error messages (BT-679).
+-doc """
+Dispatch a Beamtalk message to the proxied Erlang module.
+
+Handles Object protocol messages (class, printString, methods) locally,
+validates export existence/arity before dispatch, and provides
+actionable error messages (BT-679).
+""".
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch('class', _Args, _Self) ->
     'ErlangModule';
@@ -135,24 +139,28 @@ dispatch(Selector, Args, Self) ->
             end
     end.
 
-%% @doc Check if an ErlangModule responds to the given selector.
-%%
-%% Always returns true — any selector may map to an Erlang function call.
-%% Actual validation (arity, existence) happens at dispatch time.
+-doc """
+Check if an ErlangModule responds to the given selector.
+
+Always returns true — any selector may map to an Erlang function call.
+Actual validation (arity, existence) happens at dispatch time.
+""".
 -spec has_method(atom()) -> boolean().
 has_method(_Selector) -> true.
 
-%% @doc Entry point for direct Erlang calls (BT-1127).
-%%
-%% The codegen emits `call 'beamtalk_erlang_proxy':'direct_call'(M, F, [args])`
-%% for all `Erlang M fn: arg` expressions, routing through the proxy instead
-%% of calling `call 'M':'F'(args)` directly. This enables:
-%% - Export validation and actionable error messages (BT-679)
-%% - Automatic binary→charlist coercion on badarg (BT-1127)
-%% - Charlist→binary result coercion for consistent string types
-%%
-%% Unlike `validate_and_apply/4`, this does NOT wrap exit/throw exceptions —
-%% those propagate naturally so `Erlang erlang exit: 1` behaves as expected.
+-doc """
+Entry point for direct Erlang calls (BT-1127).
+
+The codegen emits `call 'beamtalk_erlang_proxy':'direct_call'(M, F, [args])`
+for all `Erlang M fn: arg` expressions, routing through the proxy instead
+of calling `call 'M':'F'(args)` directly. This enables:
+- Export validation and actionable error messages (BT-679)
+- Automatic binary→charlist coercion on badarg (BT-1127)
+- Charlist→binary result coercion for consistent string types
+
+Unlike `validate_and_apply/4`, this does NOT wrap exit/throw exceptions —
+those propagate naturally so `Erlang erlang exit: 1` behaves as expected.
+""".
 -spec direct_call(atom(), atom(), list()) -> term().
 direct_call(Module, FunName, Args) ->
     Arity = length(Args),
@@ -170,11 +178,13 @@ direct_call(Module, FunName, Args) ->
             end
     end.
 
-%% @doc Call Module:FunName(Args), retrying with charlist-coerced args on badarg.
-%%
-%% Only catches badarg (for coercion retry). All other exceptions (exit, throw,
-%% and other errors) propagate naturally — this preserves the semantics of
-%% direct calls like `Erlang erlang exit: 1`.
+-doc """
+Call Module:FunName(Args), retrying with charlist-coerced args on badarg.
+
+Only catches badarg (for coercion retry). All other exceptions (exit, throw,
+and other errors) propagate naturally — this preserves the semantics of
+direct calls like `Erlang erlang exit: 1`.
+""".
 -spec apply_with_coercion(atom(), atom(), list(), atom()) -> term().
 apply_with_coercion(Module, FunName, Args, OrigSelector) ->
     try
@@ -210,7 +220,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
 %%% Internal helpers
 %%% ============================================================================
 
-%% @doc Format an actionable hint for an Erlang error.
+-doc "Format an actionable hint for an Erlang error.".
 -spec erlang_error_hint(atom(), atom(), term()) -> binary().
 erlang_error_hint(Module, FunName, Reason) ->
     ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
@@ -223,15 +233,17 @@ erlang_error_hint(Module, FunName, Reason) ->
         ReasonBin
     ]).
 
-%% @doc Convert a Beamtalk selector atom to an Erlang function name.
-%%
-%% Returns {ok, Atom} when the function name is a known atom,
-%% or {error, Binary} when it's not in the atom table (cannot exist as
-%% an exported function). This avoids creating new atoms for unknown selectors.
-%%
-%% Keyword selectors like `'reverse:'` → `{ok, reverse}`
-%% Multi-keyword like `'sublist:length:'` → `{ok, sublist}`  (first keyword only)
-%% Unary selectors like `'node'` → `{ok, node}`
+-doc """
+Convert a Beamtalk selector atom to an Erlang function name.
+
+Returns {ok, Atom} when the function name is a known atom,
+or {error, Binary} when it's not in the atom table (cannot exist as
+an exported function). This avoids creating new atoms for unknown selectors.
+
+Keyword selectors like `'reverse:'` → `{ok, reverse}`
+Multi-keyword like `'sublist:length:'` → `{ok, sublist}`  (first keyword only)
+Unary selectors like `'node'` → `{ok, node}`
+""".
 -spec selector_to_function(atom()) -> {ok, atom()} | {error, binary()}.
 selector_to_function(Selector) ->
     SelectorStr = atom_to_list(Selector),
@@ -250,9 +262,11 @@ selector_to_function(Selector) ->
             {ok, Selector}
     end.
 
-%% @doc Get the exports for a module, checking if it's loaded first.
-%%
-%% Returns {ok, [{Function, Arity}]} or {error, not_loaded}.
+-doc """
+Get the exports for a module, checking if it's loaded first.
+
+Returns {ok, [{Function, Arity}]} or {error, not_loaded}.
+""".
 -spec get_exports(atom()) -> {ok, [{atom(), non_neg_integer()}]} | {error, not_loaded}.
 get_exports(Module) ->
     try
@@ -261,10 +275,12 @@ get_exports(Module) ->
         error:undef -> {error, not_loaded}
     end.
 
-%% @doc Validate function existence and arity, then apply.
-%%
-%% Checks module_info(exports) before calling erlang:apply/3 to provide
-%% actionable error messages (BT-679). No caching — hot code reload must work.
+-doc """
+Validate function existence and arity, then apply.
+
+Checks module_info(exports) before calling erlang:apply/3 to provide
+actionable error messages (BT-679). No caching — hot code reload must work.
+""".
 -spec validate_and_apply(atom(), atom(), list(), atom()) -> term().
 validate_and_apply(Module, FunName, Args, OrigSelector) ->
     Arity = length(Args),
@@ -428,9 +444,11 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
             end
     end.
 
-%% @doc Raise an error for missing function or wrong arity (BT-679).
-%%
-%% Shared by `direct_call/3` and `validate_and_apply/4`.
+-doc """
+Raise an error for missing function or wrong arity (BT-679).
+
+Shared by `direct_call/3` and `validate_and_apply/4`.
+""".
 -spec raise_function_or_arity_error(atom(), atom(), non_neg_integer(), atom(), [
     {atom(), non_neg_integer()}
 ]) -> no_return().
@@ -479,9 +497,11 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
             )
     end.
 
-%% @doc Raise a structured undef error (TOCTOU: function unloaded between check and apply).
-%%
-%% Pass the actual arity so the error message is accurate (not "0 arguments").
+-doc """
+Raise a structured undef error (TOCTOU: function unloaded between check and apply).
+
+Pass the actual arity so the error message is accurate (not "0 arguments").
+""".
 -spec raise_undef_error(atom(), atom(), non_neg_integer(), atom()) -> no_return().
 raise_undef_error(Module, FunName, Arity, OrigSelector) ->
     case get_exports(Module) of
@@ -493,7 +513,7 @@ raise_undef_error(Module, FunName, Arity, OrigSelector) ->
             )
     end.
 
-%% @doc Raise a structured badarg error.
+-doc "Raise a structured badarg error.".
 -spec raise_badarg_error(atom(), atom(), atom(), list()) -> no_return().
 raise_badarg_error(Module, FunName, OrigSelector, Stack) ->
     Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
@@ -512,15 +532,17 @@ raise_badarg_error(Module, FunName, OrigSelector, Stack) ->
         )
     ).
 
-%% @doc Coerce all binary values in a list to charlists (BT-1127).
-%%
-%% Beamtalk strings are UTF-8 binaries. Many Erlang functions (os:cmd/1,
-%% file:read_file/1, io:format/1) expect charlists. This converts each
-%% binary in the arg list to a charlist using unicode:characters_to_list/2.
-%% Non-binary args are passed through unchanged.
+-doc """
+Coerce all binary values in a list to charlists (BT-1127).
+
+Beamtalk strings are UTF-8 binaries. Many Erlang functions (os:cmd/1,
+file:read_file/1, io:format/1) expect charlists. This converts each
+binary in the arg list to a charlist using unicode:characters_to_list/2.
+Non-binary args are passed through unchanged.
+""".
 -spec coerce_binaries_to_charlists(list()) -> list().
 coerce_binaries_to_charlists(Args) ->
-    lists:map(fun coerce_arg/1, Args).
+    [coerce_arg(A) || A <- Args].
 
 -spec coerce_arg(term()) -> term().
 coerce_arg(Arg) when is_binary(Arg) ->
@@ -535,15 +557,17 @@ coerce_arg(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
 coerce_arg(Arg) ->
     Arg.
 
-%% @doc Convert a charlist result to a binary (BT-1127, BT-1398).
-%%
-%% Erlang functions may return charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
-%% Convert those back to binaries for consistent Beamtalk string representation.
-%% Applied on both the direct success path and the badarg retry path.
-%%
-%% Uses `io_lib:printable_unicode_list/1` rather than `io_lib:char_list/1` to avoid
-%% false positives on lists of small integers (e.g., [1,2,3]) that are valid codepoints
-%% but not printable text (BT-1398).
+-doc """
+Convert a charlist result to a binary (BT-1127, BT-1398).
+
+Erlang functions may return charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
+Convert those back to binaries for consistent Beamtalk string representation.
+Applied on both the direct success path and the badarg retry path.
+
+Uses `io_lib:printable_unicode_list/1` rather than `io_lib:char_list/1` to avoid
+false positives on lists of small integers (e.g., [1,2,3]) that are valid codepoints
+but not printable text (BT-1398).
+""".
 -spec coerce_charlist_result(term()) -> term().
 coerce_charlist_result([]) ->
     [];
@@ -560,17 +584,19 @@ coerce_charlist_result(Result) when is_list(Result) ->
 coerce_charlist_result(Result) ->
     Result.
 
-%% @doc Apply both charlist and result coercion, skipping charlist coercion
-%% for Beamtalk's own modules (BT-1839).
-%%
-%% Beamtalk runtime modules (beamtalk_*) and compiled classes (bt@*) already
-%% return properly-typed values — their lists are genuine Beamtalk lists, not
-%% Erlang charlists.  Applying `coerce_charlist_result/1` to their results
-%% corrupts lists of small integers (e.g., [10, 11, 12] from Stream take:)
-%% by converting them to binaries.
-%%
-%% Charlist coercion is only needed for stock Erlang modules whose APIs return
-%% charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
+-doc """
+Apply both charlist and result coercion, skipping charlist coercion
+for Beamtalk's own modules (BT-1839).
+
+Beamtalk runtime modules (beamtalk_*) and compiled classes (bt@*) already
+return properly-typed values — their lists are genuine Beamtalk lists, not
+Erlang charlists.  Applying `coerce_charlist_result/1` to their results
+corrupts lists of small integers (e.g., [10, 11, 12] from Stream take:)
+by converting them to binaries.
+
+Charlist coercion is only needed for stock Erlang modules whose APIs return
+charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
+""".
 -spec coerce_ffi_result(atom(), term()) -> term().
 coerce_ffi_result(Module, Result) ->
     case is_beamtalk_module(Module) of
@@ -580,8 +606,10 @@ coerce_ffi_result(Module, Result) ->
             coerce_result(coerce_charlist_result(Result))
     end.
 
-%% @doc Like coerce_result/1 but skips charlist coercion on inner values.
-%% Used for Beamtalk modules whose lists are genuine typed values.
+-doc """
+Like coerce_result/1 but skips charlist coercion on inner values.
+Used for Beamtalk modules whose lists are genuine typed values.
+""".
 -spec coerce_result_no_charlist(term()) -> term().
 coerce_result_no_charlist({ok, Value}) ->
     beamtalk_result:from_tagged_tuple({ok, Value});
@@ -594,29 +622,33 @@ coerce_result_no_charlist(error) ->
 coerce_result_no_charlist(Other) ->
     Other.
 
-%% @doc Check whether a module is part of the Beamtalk runtime/stdlib.
-%%
-%% Beamtalk modules use two naming conventions:
-%% - `beamtalk_*` — hand-written runtime helpers (beamtalk_stream, beamtalk_file, etc.)
-%% - `bt@*` — compiler-generated class modules (bt@stdlib@list, bt@test@foo, etc.)
-%%
-%% These modules return properly-typed Beamtalk values and must NOT have their
-%% list results coerced from charlists to binaries.
+-doc """
+Check whether a module is part of the Beamtalk runtime/stdlib.
+
+Beamtalk modules use two naming conventions:
+- `beamtalk_*` — hand-written runtime helpers (beamtalk_stream, beamtalk_file, etc.)
+- `bt@*` — compiler-generated class modules (bt@stdlib@list, bt@test@foo, etc.)
+
+These modules return properly-typed Beamtalk values and must NOT have their
+list results coerced from charlists to binaries.
+""".
 -spec is_beamtalk_module(atom()) -> boolean().
 is_beamtalk_module(Module) ->
     ModStr = atom_to_list(Module),
     lists:prefix("beamtalk_", ModStr) orelse lists:prefix("bt@", ModStr).
 
-%% @doc Coerce Erlang ok/error tuples to Beamtalk Result objects (ADR 0076).
-%%
-%% Applied after `coerce_charlist_result/1` in the FFI pipeline. Converts:
-%% - `{ok, Value}` → `Result ok: Value` via `from_tagged_tuple/1`
-%% - `{error, Reason}` → `Result error: Reason` via `from_tagged_tuple/1`
-%% - bare `ok` atom → `Result ok: nil`
-%% - bare `error` atom → `Result error: nil`
-%% - 3+ element tuples (e.g. `{ok, V1, V2}`) pass through as Tuple
-%% - Non-ok/error tuples pass through as Tuple
-%% - Non-tuple/non-atom values pass through unchanged
+-doc """
+Coerce Erlang ok/error tuples to Beamtalk Result objects (ADR 0076).
+
+Applied after `coerce_charlist_result/1` in the FFI pipeline. Converts:
+- `{ok, Value}` → `Result ok: Value` via `from_tagged_tuple/1`
+- `{error, Reason}` → `Result error: Reason` via `from_tagged_tuple/1`
+- bare `ok` atom → `Result ok: nil`
+- bare `error` atom → `Result error: nil`
+- 3+ element tuples (e.g. `{ok, V1, V2}`) pass through as Tuple
+- Non-ok/error tuples pass through as Tuple
+- Non-tuple/non-atom values pass through unchanged
+""".
 -spec coerce_result(term()) -> term().
 coerce_result({ok, Value}) ->
     beamtalk_result:from_tagged_tuple({ok, coerce_charlist_result(Value)});
@@ -629,7 +661,7 @@ coerce_result(error) ->
 coerce_result(Other) ->
     Other.
 
-%% @doc Raise error for unloaded module.
+-doc "Raise error for unloaded module.".
 -spec raise_module_not_loaded(atom(), atom()) -> no_return().
 raise_module_not_loaded(Module, Selector) ->
     Hint = iolist_to_binary([

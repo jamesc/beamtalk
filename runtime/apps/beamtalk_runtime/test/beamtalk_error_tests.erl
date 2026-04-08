@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_error module.
-%%%
-%%% Tests error construction, field access, and formatted message generation.
-
 -module(beamtalk_error_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_error module.
+
+Tests error construction, field access, and formatted message generation.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

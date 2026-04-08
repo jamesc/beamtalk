@@ -1,10 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Unit tests for beamtalk_stack_frame module (BT-624).
-%%
-%% Tests wrap/1, dispatch/3, has_method/1, and internal helpers.
 -module(beamtalk_stack_frame_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Unit tests for beamtalk_stack_frame module (BT-624).
+
+Tests wrap/1, dispatch/3, has_method/1, and internal helpers.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

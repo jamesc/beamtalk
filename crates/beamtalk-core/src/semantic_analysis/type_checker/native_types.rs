@@ -46,7 +46,7 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 ///
 /// - Concrete type names (e.g., `"Integer"`, `"List"`) produce `Known` types
 ///   with `Extracted` provenance.
-/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::UntypedFfi)`.
+/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::DynamicSpec)`.
 /// - Union types (e.g., `"Integer | String"`) are split and produce `Union` types.
 ///
 /// ## Examples
@@ -61,7 +61,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
     let trimmed = type_name.trim();
 
     if trimmed == "Dynamic" {
-        return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
 
     // Handle union types: "Integer | String"
@@ -79,7 +79,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
 /// Maps a single (non-union) type name to an [`InferredType`].
 fn map_single_type_name(name: &str) -> InferredType {
     if name == "Dynamic" {
-        return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
 
     InferredType::Known {
@@ -251,7 +251,14 @@ fn parse_spec_map(map_str: &str) -> Option<FunctionSignature> {
         .strip_prefix("#{")
         .and_then(|s| s.strip_suffix('}'))?;
 
-    let name = extract_binary_value(inner, "name")?;
+    let raw_name = extract_binary_value(inner, "name")?;
+    // Normalize the function name to match selector_to_function/1 in
+    // beamtalk_erlang_proxy: strip everything from the first colon onward.
+    // E.g., "readAll:" → "readAll", "new:type:" → "new".
+    // Unary names without colons pass through unchanged.
+    // We normalize here (not in the spec reader) so that Erlang-side
+    // consumers like dedupe_keyword_aliases retain the original colon form.
+    let name = canonical_function_name(&raw_name);
     let arity = extract_integer_value(inner, "arity")?;
     let return_type_str = extract_binary_value(inner, "return_type")?;
     let params = extract_params_list(inner)?;
@@ -265,6 +272,18 @@ fn parse_spec_map(map_str: &str) -> Option<FunctionSignature> {
         provenance: TypeProvenance::Extracted,
         line,
     })
+}
+
+/// Normalizes a function name from the spec reader to its canonical bare form.
+///
+/// Mirrors `selector_to_function/1` in `beamtalk_erlang_proxy`:
+/// keyword selectors (`"readAll:"`, `"new:type:"`) → first keyword (`"readAll"`, `"new"`),
+/// unary selectors (`"reverse"`) → unchanged.
+fn canonical_function_name(name: &str) -> String {
+    match name.find(':') {
+        Some(pos) => name[..pos].to_string(),
+        None => name.to_string(),
+    }
 }
 
 /// Extracts a binary value (`<<"value">>`) for a given key from a map string.
@@ -366,8 +385,8 @@ mod tests {
     fn map_type_name_dynamic() {
         let ty = map_type_name("Dynamic");
         match ty {
-            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::UntypedFfi),
-            other => panic!("expected Dynamic(UntypedFfi), got {other:?}"),
+            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::DynamicSpec),
+            other => panic!("expected Dynamic(DynamicSpec), got {other:?}"),
         }
     }
 
@@ -460,8 +479,8 @@ mod tests {
         // If any member is Dynamic, union_of returns Dynamic
         let ty = map_type_name("Integer | Dynamic");
         match ty {
-            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::UntypedFfi),
-            other => panic!("expected Dynamic(UntypedFfi), got {other:?}"),
+            InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::DynamicSpec),
+            other => panic!("expected Dynamic(DynamicSpec), got {other:?}"),
         }
     }
 
@@ -618,7 +637,7 @@ mod tests {
         let sig = reg.lookup("erlang", "apply", 1).unwrap();
         assert_eq!(
             sig.return_type,
-            InferredType::Dynamic(DynamicReason::UntypedFfi)
+            InferredType::Dynamic(DynamicReason::DynamicSpec)
         );
     }
 
@@ -653,5 +672,36 @@ mod tests {
 
         let sig = reg.lookup("lists", "reverse", 1).unwrap();
         assert_eq!(sig.line, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // canonical_function_name tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn canonical_name_unary_unchanged() {
+        assert_eq!(canonical_function_name("reverse"), "reverse");
+    }
+
+    #[test]
+    fn canonical_name_single_keyword_strips_colon() {
+        assert_eq!(canonical_function_name("readAll:"), "readAll");
+    }
+
+    #[test]
+    fn canonical_name_multi_keyword_takes_first() {
+        assert_eq!(canonical_function_name("new:type:"), "new");
+    }
+
+    #[test]
+    fn canonical_name_parsed_spec_has_bare_name() {
+        // Verify that a spec with a colon-suffixed name gets normalized
+        // when parsed into a FunctionSignature.
+        let line = "beamtalk-specs-module:beamtalk_file:[#{arity => 1,name => <<\"readAll:\">>,params => [#{name => <<\"path\">>,type => <<\"String\">>}],return_type => <<\"Result\">>}]";
+        let mut reg = NativeTypeRegistry::new();
+        parse_specs_line(line, &mut reg);
+        // Should find by bare name, not "readAll:"
+        assert!(reg.lookup("beamtalk_file", "readAll", 1).is_some());
+        assert!(reg.lookup("beamtalk_file", "readAll:", 1).is_none());
     }
 }

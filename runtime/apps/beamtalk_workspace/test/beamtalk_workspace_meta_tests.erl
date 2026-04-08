@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_workspace_meta module
-%%%
-%%% Tests workspace metadata tracking and activity updates.
-
 -module(beamtalk_workspace_meta_tests).
+
+-moduledoc """
+Unit tests for beamtalk_workspace_meta module
+
+Tests workspace metadata tracking and activity updates.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
@@ -299,6 +301,7 @@ register_module_test() ->
     InitialCount = length(InitialModules),
 
     %% Register a fresh module name unlikely to already exist
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("test_module_" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
     timer:sleep(50),
@@ -370,6 +373,7 @@ unregister_module_test() ->
     end,
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom(
         "test_unrg_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
@@ -596,8 +600,11 @@ debounce_coalesces_rapid_changes_test() ->
     }),
 
     %% Register 3 modules in rapid succession (< 2s debounce window)
+    % elp:fixme W0023 intentional atom creation
     Mod1 = list_to_atom("debounce_mod1_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    % elp:fixme W0023 intentional atom creation
     Mod2 = list_to_atom("debounce_mod2_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    % elp:fixme W0023 intentional atom creation
     Mod3 = list_to_atom("debounce_mod3_" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = beamtalk_workspace_meta:register_module(Mod1),
     timer:sleep(100),
@@ -704,6 +711,7 @@ class_removed_cast_unregisters_module_test() ->
     end,
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom(
         "bt1242_meta_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),

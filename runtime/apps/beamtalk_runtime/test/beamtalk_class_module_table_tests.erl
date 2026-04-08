@@ -3,16 +3,19 @@
 
 %%% **DDD Context:** Object System Context
 %%%
-%%% @doc Unit tests for beamtalk_class_module_table.
-%%%
-%%% Tests cover:
-%%% - new/0 is idempotent
-%%% - insert/2 and lookup/1 round-trip
-%%% - delete/1 removes the entry
-%%% - lookup/1 returns not_found for unknown class
-%%% - insert/2 overwrites on hot-reload
-%%% - lookup/1 returns not_found when table is absent
 -module(beamtalk_class_module_table_tests).
+
+-moduledoc """
+Unit tests for beamtalk_class_module_table.
+
+Tests cover:
+- new/0 is idempotent
+- insert/2 and lookup/1 round-trip
+- delete/1 removes the entry
+- lookup/1 returns not_found for unknown class
+- insert/2 overwrites on hot-reload
+- lookup/1 returns not_found when table is absent
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
@@ -106,7 +109,11 @@ delete_nonexistent_is_safe_test() ->
 lookup_when_table_absent_returns_not_found_test() ->
     %% Save real contents so we can restore the table afterward.
     Saved = ets:tab2list(beamtalk_class_module),
-    catch ets:delete(beamtalk_class_module),
+    (try
+        ets:delete(beamtalk_class_module)
+    catch
+        _:_ -> ok
+    end),
     try
         %% Must not crash when the table does not exist.
         ?assertEqual(not_found, beamtalk_class_module_table:lookup('AnyClass'))

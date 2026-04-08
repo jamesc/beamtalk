@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_string module.
-%%%
-%%% Tests string operations: indexing, slicing, searching, casing, and trimming.
-
 -module(beamtalk_string_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_string module.
+
+Tests string operations: indexing, slicing, searching, casing, and trimming.
+""".
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
 

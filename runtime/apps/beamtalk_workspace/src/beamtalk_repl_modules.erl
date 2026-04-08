@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Module management for Beamtalk REPL
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Tracks loaded modules, their source files, load times, and actor usage.
-%%% Provides utilities for listing, unloading, and reloading modules.
-
 -module(beamtalk_repl_modules).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Module management for Beamtalk REPL
+
+Tracks loaded modules, their source files, load times, and actor usage.
+Provides utilities for listing, unloading, and reloading modules.
+""".
 
 -export([
     new/0,
@@ -39,13 +41,15 @@
 -opaque module_info() :: #module_info{}.
 -type module_tracker() :: #{atom() => module_info()}.
 
-%% @doc Create a new empty module tracker.
+-doc "Create a new empty module tracker.".
 -spec new() -> module_tracker().
 new() ->
     #{}.
 
-%% @doc Add a module to the tracker.
-%% Records the module name, source file path, and load timestamp.
+-doc """
+Add a module to the tracker.
+Records the module name, source file path, and load timestamp.
+""".
 -spec add_module(atom(), string() | undefined, module_tracker()) -> module_tracker().
 add_module(ModuleName, SourceFile, Tracker) ->
     Info = #module_info{
@@ -56,37 +60,42 @@ add_module(ModuleName, SourceFile, Tracker) ->
     },
     Tracker#{ModuleName => Info}.
 
-%% @doc Remove a module from the tracker.
+-doc "Remove a module from the tracker.".
 -spec remove_module(atom(), module_tracker()) -> module_tracker().
 remove_module(ModuleName, Tracker) ->
     maps:remove(ModuleName, Tracker).
 
-%% @doc Get information about a specific module.
+-doc "Get information about a specific module.".
 -spec get_module_info(atom(), module_tracker()) -> {ok, module_info()} | {error, not_found}.
 get_module_info(ModuleName, Tracker) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(ModuleName, Tracker) of
         {ok, Info} -> {ok, Info};
         error -> {error, not_found}
     end.
 
-%% @doc Get the source file path from a module_info record.
+-doc "Get the source file path from a module_info record.".
 -spec get_source_file(module_info()) -> string() | undefined.
 get_source_file(#module_info{source_file = SourceFile}) ->
     SourceFile.
 
-%% @doc List all tracked modules with their information.
-%% Optionally updates actor counts from the actor registry.
+-doc """
+List all tracked modules with their information.
+Optionally updates actor counts from the actor registry.
+""".
 -spec list_modules(module_tracker()) -> [{atom(), module_info()}].
 list_modules(Tracker) ->
     maps:to_list(Tracker).
 
-%% @doc Check if a module is being tracked.
+-doc "Check if a module is being tracked.".
 -spec module_exists(atom(), module_tracker()) -> boolean().
 module_exists(ModuleName, Tracker) ->
     maps:is_key(ModuleName, Tracker).
 
-%% @doc Get the current actor count for a module.
-%% Queries the actor registry to count actors using this module.
+-doc """
+Get the current actor count for a module.
+Queries the actor registry to count actors using this module.
+""".
 -spec get_actor_count(atom(), pid() | undefined, module_tracker()) -> non_neg_integer().
 get_actor_count(ModuleName, RegistryPid, Tracker) ->
     case {maps:find(ModuleName, Tracker), RegistryPid} of
@@ -106,8 +115,10 @@ get_actor_count(ModuleName, RegistryPid, Tracker) ->
             0
     end.
 
-%% @doc Format module information for display.
-%% Returns a map with displayable fields.
+-doc """
+Format module information for display.
+Returns a map with displayable fields.
+""".
 -spec format_module_info(module_info(), non_neg_integer()) -> map().
 format_module_info(
     #module_info{name = Name, source_file = Source, load_time = LoadTime}, ActorCount
@@ -130,8 +141,10 @@ format_module_info(
         time_ago => TimeAgo
     }.
 
-%% @private Resolve source path for a loaded module when workspace_meta has none.
-%% Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+-doc """
+Resolve source path for a loaded module when workspace_meta has none.
+Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+""".
 -spec resolve_source_path(atom()) -> string().
 resolve_source_path(ModName) ->
     try
@@ -144,7 +157,7 @@ resolve_source_path(ModName) ->
         _:_ -> "unknown"
     end.
 
-%% @doc Format elapsed time as a human-readable string (e.g., "5m ago").
+-doc "Format elapsed time as a human-readable string (e.g., \"5m ago\").".
 -spec format_time_ago(integer()) -> string().
 format_time_ago(Secs) when Secs < 60 ->
     io_lib:format("~ps ago", [Secs]);

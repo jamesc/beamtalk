@@ -1,12 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Bootstrap tests.
-%%
-%% BT-446: Bootstrap only starts pg now. Class registration is done by
-%% compiled stdlib modules. These tests verify the bootstrap + stdlib
-%% flow produces the correct class hierarchy.
 -module(beamtalk_bootstrap_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Bootstrap tests.
+
+BT-446: Bootstrap only starts pg now. Class registration is done by
+compiled stdlib modules. These tests verify the bootstrap + stdlib
+flow produces the correct class hierarchy.
+""".
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================

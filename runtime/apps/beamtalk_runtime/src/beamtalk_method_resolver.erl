@@ -1,21 +1,24 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Method Resolver domain service.
-%%
-%%% **DDD Context:** Object System Context
-%%
-%% Resolves compiled method metadata from class references. Accepts
-%% various class reference formats (pid, atom, class object tuple) and
-%% returns a CompiledMethod map or nil.
-%%
-%% This is a stateless domain service that delegates to the class
-%% gen_server for the actual method lookup. It owns the logic for
-%% normalizing class references and producing structured errors.
-%%
-%% @see beamtalk_object_class for class process management
-%% @see beamtalk_compiled_method_ops for CompiledMethod field access
 -module(beamtalk_method_resolver).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Method Resolver domain service.
+
+Resolves compiled method metadata from class references. Accepts
+various class reference formats (pid, atom, class object tuple) and
+returns a CompiledMethod map or nil.
+
+This is a stateless domain service that delegates to the class
+gen_server for the actual method lookup. It owns the logic for
+normalizing class references and producing structured errors.
+
+See also: beamtalk_object_class for class process management
+See also: beamtalk_compiled_method_ops for CompiledMethod field access
+""".
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -24,20 +27,22 @@
 
 -type selector() :: atom().
 
-%% @doc Resolve a compiled method from a class reference.
-%%
-%% Accepts:
-%% - Class process pid
-%% - Class name atom (e.g., 'Counter')
-%% - Class object tuple ({beamtalk_object, 'Counter class', Module, Pid})
-%%
-%% Returns a CompiledMethod map or nil if the method is not found.
-%% Raises beamtalk_error for invalid class references.
+-doc """
+Resolve a compiled method from a class reference.
+
+Accepts:
+- Class process pid
+- Class name atom (e.g., 'Counter')
+- Class object tuple ({beamtalk_object, 'Counter class', Module, Pid})
+
+Returns a CompiledMethod map or nil if the method is not found.
+Raises beamtalk_error for invalid class references.
+""".
 -spec resolve(ClassRef, selector()) -> compiled_method() | 'nil' when
     ClassRef :: pid() | atom() | tuple().
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     resolve_with_hierarchy(ClassPid, Selector);
-resolve({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when
+resolve(#beamtalk_object{class = ClassTag, pid = ClassPid} = Obj, Selector) when
     is_atom(ClassTag), is_pid(ClassPid)
 ->
     case beamtalk_class_registry:is_class_name(ClassTag) of
@@ -76,8 +81,7 @@ resolve(Other, _Selector) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @private
-%% @doc Resolve a method, walking the superclass chain if not found locally.
+-doc "Resolve a method, walking the superclass chain if not found locally.".
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
@@ -87,13 +91,14 @@ resolve_with_hierarchy(ClassPid, Selector) ->
             Method
     end.
 
-%% @private
-%% @doc Walk the superclass chain to find an inherited method.
-%%
-%% Gets the superclass name from the current class, looks up its pid,
-%% and checks for the method. Recurses until the method is found or
-%% the chain is exhausted (superclass = none). Guarded by
-%% MAX_HIERARCHY_DEPTH to prevent infinite recursion on corrupted hierarchies.
+-doc """
+Walk the superclass chain to find an inherited method.
+
+Gets the superclass name from the current class, looks up its pid,
+and checks for the method. Recurses until the method is found or
+the chain is exhausted (superclass = none). Guarded by
+MAX_HIERARCHY_DEPTH to prevent infinite recursion on corrupted hierarchies.
+""".
 -spec walk_superclass_chain(pid(), selector(), non_neg_integer()) -> compiled_method() | 'nil'.
 walk_superclass_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     ?LOG_WARNING(">> hierarchy walk exceeded ~p levels", [?MAX_HIERARCHY_DEPTH], #{

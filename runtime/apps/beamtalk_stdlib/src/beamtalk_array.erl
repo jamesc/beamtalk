@@ -1,20 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Runtime helper operations for Array (Erlang array in tagged map).
-%%
-%% BT-822: Array type backed by Erlang's `array` module, giving O(log n)
-%% random access. Arrays are immutable — operations returning modified
-%% arrays return new tagged maps.
-%%
-%% Representation:
-%%   #{'$beamtalk_class' => 'Array', 'data' => ErlangArray}
-%%
-%% where ErlangArray is an opaque Erlang array record created by the
-%% `array` module.
-%%
-%%% **DDD Context:** Object System Context
 -module(beamtalk_array).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Runtime helper operations for Array (Erlang array in tagged map).
+
+BT-822: Array type backed by Erlang's `array` module, giving O(log n)
+random access. Arrays are immutable — operations returning modified
+arrays return new tagged maps.
+
+Representation:
+  #{'$beamtalk_class' => 'Array', 'data' => ErlangArray}
+
+where ErlangArray is an opaque Erlang array record created by the
+`array` module.
+""".
 
 -export([
     from_list/1,
@@ -31,13 +34,11 @@
     slice_from/2
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 %%% ============================================================================
 %%% Construction
 %%% ============================================================================
 
-%% @doc Create an Array from a list of elements.
+-doc "Create an Array from a list of elements.".
 -spec from_list(list()) -> map().
 from_list(List) when is_list(List) ->
     #{'$beamtalk_class' => 'Array', 'data' => array:from_list(List)};
@@ -50,19 +51,21 @@ from_list(_NonList) ->
 %%% Accessors
 %%% ============================================================================
 
-%% @doc Return the number of elements in the Array.
+-doc "Return the number of elements in the Array.".
 -spec size(map()) -> non_neg_integer().
 size(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
     array:size(Arr).
 
-%% @doc Return true if the Array has no elements.
+-doc "Return true if the Array has no elements.".
 -spec is_empty(map()) -> boolean().
 is_empty(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
     array:size(Arr) =:= 0.
 
-%% @doc Return the element at the given 1-based index.
-%%
-%% Raises index_out_of_bounds if the index is out of range.
+-doc """
+Return the element at the given 1-based index.
+
+Raises index_out_of_bounds if the index is out of range.
+""".
 -spec at(map(), integer()) -> term().
 at(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Index) when is_integer(Index), Index >= 1 ->
     N = array:size(Arr),
@@ -84,7 +87,7 @@ at(#{'$beamtalk_class' := 'Array'}, _Index) ->
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
 
-%% @doc Return a new Array with the element at `Index` (1-based) replaced by `Value`.
+-doc "Return a new Array with the element at `Index` (1-based) replaced by `Value`.".
 -spec at_put(map(), integer(), term()) -> map().
 at_put(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Index, Value) when
     is_integer(Index), Index >= 1
@@ -112,7 +115,7 @@ at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
 %%% Iteration
 %%% ============================================================================
 
-%% @doc Apply a block to each element of the Array. Returns nil.
+-doc "Apply a block to each element of the Array. Returns nil.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Block) when is_function(Block, 1) ->
     array:foldl(fun(_I, Elem, _Acc) -> Block(Elem) end, nil, Arr),
@@ -122,7 +125,7 @@ do(#{'$beamtalk_class' := 'Array'}, _Block) ->
     Error1 = beamtalk_error:with_selector(Error0, 'do:'),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
 
-%% @doc Return true if the Array contains the given element.
+-doc "Return true if the Array contains the given element.".
 -spec includes(map(), term()) -> boolean().
 includes(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Element) ->
     array:foldl(
@@ -137,7 +140,7 @@ includes(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Element) ->
 %%% Functional
 %%% ============================================================================
 
-%% @doc Map a block over the Array, returning a new Array.
+-doc "Map a block over the Array, returning a new Array.".
 -spec collect(map(), fun((term()) -> term())) -> map().
 collect(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Block) when is_function(Block, 1) ->
     Mapped = array:map(fun(_I, Elem) -> Block(Elem) end, Arr),
@@ -147,7 +150,7 @@ collect(#{'$beamtalk_class' := 'Array'}, _Block) ->
     Error1 = beamtalk_error:with_selector(Error0, 'collect:'),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
 
-%% @doc Select elements for which block returns true, returning a new Array.
+-doc "Select elements for which block returns true, returning a new Array.".
 -spec select(map(), fun((term()) -> boolean())) -> map().
 select(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Block) when is_function(Block, 1) ->
     Selected = array:foldl(
@@ -166,10 +169,12 @@ select(#{'$beamtalk_class' := 'Array'}, _Block) ->
     Error1 = beamtalk_error:with_selector(Error0, 'select:'),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
 
-%% @doc Fold the Array with an accumulator.
-%%
-%% Calls Block(Acc, Elem) for each element — accumulator first, element second —
-%% matching the Beamtalk `block value: acc value: each` convention.
+-doc """
+Fold the Array with an accumulator.
+
+Calls Block(Acc, Elem) for each element — accumulator first, element second —
+matching the Beamtalk `block value: acc value: each` convention.
+""".
 -spec inject_into(map(), term(), fun((term(), term()) -> term())) -> term().
 inject_into(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Initial, Block) when
     is_function(Block, 2)
@@ -188,10 +193,12 @@ inject_into(#{'$beamtalk_class' := 'Array'}, _Initial, _Block) ->
 %%% Slicing
 %%% ============================================================================
 
-%% @doc Return a new Array containing elements from 1-based index `From` to the end.
-%%
-%% Used by codegen for rest patterns in array destructuring:
-%% `#[a, b, ...rest] := arr` generates `slice_from(Arr, 3)` for the rest binding.
+-doc """
+Return a new Array containing elements from 1-based index `From` to the end.
+
+Used by codegen for rest patterns in array destructuring:
+`#[a, b, ...rest] := arr` generates `slice_from(Arr, 3)` for the rest binding.
+""".
 -spec slice_from(map(), integer()) -> map().
 slice_from(#{'$beamtalk_class' := 'Array', 'data' := Arr}, From) when is_integer(From), From >= 1 ->
     case From > array:size(Arr) of
@@ -215,12 +222,14 @@ slice_from(#{'$beamtalk_class' := 'Array'}, _From) ->
 %%% String Representation
 %%% ============================================================================
 
-%% @doc Return a developer-readable string representation of the Array.
-%%
-%% Format: `#[elem1, elem2, ...]`
+-doc """
+Return a developer-readable string representation of the Array.
+
+Format: `#[elem1, elem2, ...]`
+""".
 -spec print_string(map()) -> binary().
 print_string(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
     Elements = array:to_list(Arr),
-    Parts = lists:map(fun(E) -> beamtalk_primitive:print_string(E) end, Elements),
+    Parts = [beamtalk_primitive:print_string(E) || E <- Elements],
     Joined = lists:join(<<", ">>, Parts),
     iolist_to_binary(["#[", Joined, "]"]).

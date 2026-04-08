@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor that simulates backward-compatible error tuples.
-%%%
-%%% Compiled actors generated before BT-1822 return {error, {ErlType, ErrorValue}}
-%%% from safe_dispatch (without stacktrace). This actor simulates that pattern
-%%% to verify the backward-compat paths in beamtalk_actor preserve the exception
-%%% class (ErlType) instead of discarding it.
-%%%
-%%% Two code paths are exercised:
-%%%   1. sync_send (remote): handle_call returns {reply, {error, {ErlType, Value}}, State}
-%%%   2. self_dispatch: safe_dispatch/3 returns {error, {ErlType, Value}, State}
-%%%      Triggered when an actor sends to itself (ActorPid == self()).
-
 -module(test_compat_error_actor).
 -behaviour(gen_server).
+
+-moduledoc """
+Test actor that simulates backward-compatible error tuples.
+
+Compiled actors generated before BT-1822 return {error, {ErlType, ErrorValue}}
+from safe_dispatch (without stacktrace). This actor simulates that pattern
+to verify the backward-compat paths in beamtalk_actor preserve the exception
+class (ErlType) instead of discarding it.
+
+Two code paths are exercised:
+  1. sync_send (remote): handle_call returns {reply, {error, {ErlType, Value}}, State}
+  2. self_dispatch: safe_dispatch/3 returns {error, {ErlType, Value}, State}
+     Triggered when an actor sends to itself (ActorPid == self()).
+""".
 -include("beamtalk.hrl").
 
 %% API
@@ -88,11 +90,13 @@ handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
 code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
 terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
 
-%% @doc Backward-compat safe_dispatch/3 that returns 2-tuple errors.
-%%
-%% This simulates the old compiled actor pattern (pre-BT-1822) where
-%% safe_dispatch catches exceptions and returns {error, {Type, Value}, State}
-%% without the stacktrace third element.
+-doc """
+Backward-compat safe_dispatch/3 that returns 2-tuple errors.
+
+This simulates the old compiled actor pattern (pre-BT-1822) where
+safe_dispatch catches exceptions and returns {error, {Type, Value}, State}
+without the stacktrace third element.
+""".
 safe_dispatch(triggerExitError, _Args, State) ->
     {error, {exit, simulated_exit}, State};
 safe_dispatch(triggerThrowError, _Args, State) ->

@@ -1,27 +1,29 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc DateTime class implementation — date/time via Erlang calendar/os modules.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Provides class-side constructors for creating UTC datetime values and
-%%% instance methods for access, arithmetic, comparison, and formatting.
-%%%
-%%% DateTime objects are represented as tagged maps:
-%%% ```
-%%% #{
-%%%   '$beamtalk_class' => 'DateTime',
-%%%   year   => integer(),
-%%%   month  => 1..12,
-%%%   day    => 1..31,
-%%%   hour   => 0..23,
-%%%   minute => 0..59,
-%%%   second => 0..59
-%%% }
-%%% ```
-
 -module(beamtalk_datetime).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+DateTime class implementation — date/time via Erlang calendar/os modules.
+
+Provides class-side constructors for creating UTC datetime values and
+instance methods for access, arithmetic, comparison, and formatting.
+
+DateTime objects are represented as tagged maps:
+```
+#{
+  '$beamtalk_class' => 'DateTime',
+  year   => integer(),
+  month  => 1..12,
+  day    => 1..31,
+  hour   => 0..23,
+  minute => 0..59,
+  second => 0..59
+}
+```
+""".
 
 %% Class methods
 -export([now/0, 'monotonicNow'/0]).
@@ -39,9 +41,6 @@
 -export([addSeconds/2, addDays/2, diffSeconds/2]).
 -export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -type t() :: #{'$beamtalk_class' := 'DateTime', atom() => term()}.
 -export_type([t/0]).
 
@@ -52,33 +51,33 @@
 %%% Class Methods — Constructors
 %%% ============================================================================
 
-%% @doc Current UTC time as a DateTime.
+-doc "Current UTC time as a DateTime.".
 -spec now() -> t().
 now() ->
     {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
     make_datetime(Y, Mo, D, H, Mi, S).
 
-%% @doc Monotonic clock value in nanoseconds (Integer, not a DateTime).
+-doc "Monotonic clock value in nanoseconds (Integer, not a DateTime).".
 -spec 'monotonicNow'() -> integer().
 'monotonicNow'() ->
     erlang:monotonic_time(nanosecond).
 
-%% @doc Construct a DateTime from year, month, day (time defaults to 00:00:00).
--spec 'year:month:day:'(integer(), integer(), integer()) -> t().
+-doc "Construct a DateTime from year, month, day (time defaults to 00:00:00).".
+-spec 'year:month:day:'(integer(), Month :: integer(), Day :: integer()) -> t().
 'year:month:day:'(Y, Mo, D) when is_integer(Y), is_integer(Mo), is_integer(D) ->
     validate_date(Y, Mo, D, 'year:month:day:'),
     make_datetime(Y, Mo, D, 0, 0, 0);
 'year:month:day:'(_, _, _) ->
     raise_type_error('year:month:day:', <<"Arguments must be Integers">>).
 
-%% @doc Construct a DateTime from year, month, day, hour, minute, second.
+-doc "Construct a DateTime from year, month, day, hour, minute, second.".
 -spec 'year:month:day:hour:minute:second:'(
     integer(),
-    integer(),
-    integer(),
-    integer(),
-    integer(),
-    integer()
+    Month :: integer(),
+    Day :: integer(),
+    Hour :: integer(),
+    Minute :: integer(),
+    Second :: integer()
 ) -> t().
 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S) when
     is_integer(Y),
@@ -94,7 +93,7 @@ now() ->
 'year:month:day:hour:minute:second:'(_, _, _, _, _, _) ->
     raise_type_error('year:month:day:hour:minute:second:', <<"Arguments must be Integers">>).
 
-%% @doc Construct a DateTime from a Unix epoch timestamp (seconds).
+-doc "Construct a DateTime from a Unix epoch timestamp (seconds).".
 -spec 'fromTimestamp:'(integer()) -> t().
 'fromTimestamp:'(Ts) when is_integer(Ts) ->
     GregSec = Ts + ?EPOCH_GREGORIAN,
@@ -103,7 +102,7 @@ now() ->
 'fromTimestamp:'(_) ->
     raise_type_error('fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>).
 
-%% @doc Parse an ISO 8601 string into a DateTime.
+-doc "Parse an ISO 8601 string into a DateTime.".
 -spec 'fromString:'(binary()) -> t().
 'fromString:'(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
@@ -146,7 +145,7 @@ second(#{second := V}) -> V.
 %%% Instance Methods — Conversion
 %%% ============================================================================
 
-%% @doc Convert to Unix epoch timestamp (seconds).
+-doc "Convert to Unix epoch timestamp (seconds).".
 -spec 'asTimestamp'(t()) -> integer().
 'asTimestamp'(#{
     year := Y,
@@ -159,7 +158,7 @@ second(#{second := V}) -> V.
     GregSec = calendar:datetime_to_gregorian_seconds({{Y, Mo, D}, {H, Mi, S}}),
     GregSec - ?EPOCH_GREGORIAN.
 
-%% @doc Format as ISO 8601 string.
+-doc "Format as ISO 8601 string.".
 -spec 'asString'(t()) -> binary().
 'asString'(#{
     year := Y,
@@ -176,7 +175,7 @@ second(#{second := V}) -> V.
         )
     ).
 
-%% @doc Human-readable representation.
+-doc "Human-readable representation.".
 -spec 'printString'(t()) -> binary().
 'printString'(Self) ->
     iolist_to_binary([<<"a DateTime(">>, 'asString'(Self), <<")">>]).
@@ -185,22 +184,22 @@ second(#{second := V}) -> V.
 %%% Instance Methods — Arithmetic
 %%% ============================================================================
 
-%% @doc Add seconds, return new DateTime.
--spec 'addSeconds:'(t(), integer()) -> t().
+-doc "Add seconds, return new DateTime.".
+-spec 'addSeconds:'(t(), Secs :: integer()) -> t().
 'addSeconds:'(Self, Secs) when is_integer(Secs) ->
     Ts = 'asTimestamp'(Self) + Secs,
     'fromTimestamp:'(Ts);
 'addSeconds:'(_, _) ->
     raise_type_error('addSeconds:', <<"Argument must be an Integer">>).
 
-%% @doc Add days, return new DateTime.
--spec 'addDays:'(t(), integer()) -> t().
+-doc "Add days, return new DateTime.".
+-spec 'addDays:'(t(), Days :: integer()) -> t().
 'addDays:'(Self, Days) when is_integer(Days) ->
     'addSeconds:'(Self, Days * 86400);
 'addDays:'(_, _) ->
     raise_type_error('addDays:', <<"Argument must be an Integer">>).
 
-%% @doc Difference in seconds between this and another DateTime.
+-doc "Difference in seconds between this and another DateTime.".
 -spec 'diffSeconds:'(t(), t()) -> integer().
 'diffSeconds:'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) - 'asTimestamp'(Other);
@@ -256,9 +255,18 @@ second(#{second := V}) -> V.
 %% and operator-named implementations.
 
 %% `year:month:day:` → strips to `year`, arity 3
+-spec year(integer(), Month :: integer(), Day :: integer()) -> t().
 year(Y, Mo, D) -> 'year:month:day:'(Y, Mo, D).
 
 %% `year:month:day:hour:minute:second:` → strips to `year`, arity 6
+-spec year(
+    integer(),
+    Month :: integer(),
+    Day :: integer(),
+    Hour :: integer(),
+    Minute :: integer(),
+    Second :: integer()
+) -> t().
 year(Y, Mo, D, H, Mi, S) -> 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S).
 
 %% `fromTimestamp:` → strips to `fromTimestamp`, arity 1
@@ -268,9 +276,11 @@ fromTimestamp(Ts) -> 'fromTimestamp:'(Ts).
 fromString(Str) -> 'fromString:'(Str).
 
 %% `addSeconds:secs:` → strips to `addSeconds`, arity 2
+-spec addSeconds(t(), Secs :: integer()) -> t().
 addSeconds(Self, Secs) -> 'addSeconds:'(Self, Secs).
 
 %% `addDays:days:` → strips to `addDays`, arity 2
+-spec addDays(t(), Days :: integer()) -> t().
 addDays(Self, Days) -> 'addDays:'(Self, Days).
 
 %% `diffSeconds:with:` → strips to `diffSeconds`, arity 2

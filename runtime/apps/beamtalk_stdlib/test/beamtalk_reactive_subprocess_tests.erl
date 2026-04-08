@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_reactive_subprocess gen_server (BT-1187).
-%%%
-%%% **DDD Context:** runtime
-%%%
-%%% Tests cover:
-%%% - stdout lines are pushed to the notify actor via cast
-%%% - stderr lines are pushed to the notify actor via cast
-%%% - exit notification is cast to notify actor after stdout/stderr are flushed
-%%% - partial line (no trailing newline) is flushed and pushed on exit
-%%% - writeLine: writes data to subprocess stdin and returns nil
-%%% - close: terminates the subprocess and marks the port closed
-%%% - exitCode: returns nil while running, integer after exit
-
 -module(beamtalk_reactive_subprocess_tests).
+
+%%% **DDD Context:** runtime
+
+-moduledoc """
+EUnit tests for beamtalk_reactive_subprocess gen_server (BT-1187).
+
+Tests cover:
+- stdout lines are pushed to the notify actor via cast
+- stderr lines are pushed to the notify actor via cast
+- exit notification is cast to notify actor after stdout/stderr are flushed
+- partial line (no trailing newline) is flushed and pushed on exit
+- writeLine: writes data to subprocess stdin and returns nil
+- close: terminates the subprocess and marks the port closed
+- exitCode: returns nil while running, integer after exit
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -23,58 +25,60 @@
 %%% Cross-platform command helpers
 %%% ============================================================================
 
-%% @private Return {Executable, Args} for echo that outputs Text and exits.
+-doc "Return {Executable, Args} for echo that outputs Text and exits.".
 echo_cmd(Text) ->
     case os:type() of
         {unix, _} -> {<<"/bin/echo">>, [Text]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"echo ", Text/binary>>]}
     end.
 
-%% @private Return {Executable, Args} for a shell command.
+-doc "Return {Executable, Args} for a shell command.".
 shell_cmd(Script) ->
     case os:type() of
         {unix, _} -> {<<"/bin/sh">>, [<<"-c">>, Script]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, Script]}
     end.
 
-%% @private Return {Executable, Args} for a long-running process with no stdout.
+-doc "Return {Executable, Args} for a long-running process with no stdout.".
 sleep_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/bin/sleep">>, [<<"60">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"ping -n 60 127.0.0.1 >nul">>]}
     end.
 
-%% @private Return {Executable, Args} for a process that exits immediately with 0.
+-doc "Return {Executable, Args} for a process that exits immediately with 0.".
 true_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/usr/bin/env">>, [<<"true">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 0">>]}
     end.
 
-%% @private Return platform-appropriate shell script for multi-line stdout.
+-doc "Return platform-appropriate shell script for multi-line stdout.".
 multiline_script() ->
     case os:type() of
         {unix, _} -> <<"printf 'alpha\\nbeta\\ngamma\\n'">>;
         {win32, _} -> <<"(echo alpha& echo beta& echo gamma)">>
     end.
 
-%% @private Return platform-appropriate shell script for multi-line stderr.
+-doc "Return platform-appropriate shell script for multi-line stderr.".
 multiline_stderr_script() ->
     case os:type() of
         {unix, _} -> <<"printf 'x\\ny\\nz\\n' >&2">>;
         {win32, _} -> <<"(echo x& echo y& echo z)>&2">>
     end.
 
-%% @private Return platform-appropriate shell script for partial line (no newline).
+-doc "Return platform-appropriate shell script for partial line (no newline).".
 partial_line_script() ->
     case os:type() of
         {unix, _} -> <<"printf hello">>;
         {win32, _} -> <<"<nul set /p =hello">>
     end.
 
-%% @private Return {Executable, Args} for a process that echoes stdin to stdout.
-%% On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
-%% mode that explicitly flushes stdout, bypassing pipe buffering).
+-doc """
+Return {Executable, Args} for a process that echoes stdin to stdout.
+On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
+mode that explicitly flushes stdout, bypassing pipe buffering).
+""".
 cat_cmd() ->
     case os:type() of
         {unix, _} ->
@@ -84,7 +88,7 @@ cat_cmd() ->
             {list_to_binary(ExecBin), [<<"--cat">>]}
     end.
 
-%% @private Return platform-appropriate shell script for combined stdout+stderr.
+-doc "Return platform-appropriate shell script for combined stdout+stderr.".
 stdout_stderr_script() ->
     case os:type() of
         {unix, _} -> <<"echo out; echo err >&2">>;
@@ -153,7 +157,7 @@ wait_for_exit(CollectorPid, Tries) ->
             wait_for_exit(CollectorPid, Tries - 1)
     end.
 
-%% @private Poll until a subprocessLine event with the expected text arrives.
+-doc "Poll until a subprocessLine event with the expected text arrives.".
 wait_for_line(CollectorPid, Expected) ->
     wait_for_line(CollectorPid, Expected, 50).
 

@@ -2,17 +2,19 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_class_builder:register/1 (ADR 0038 Phase 1, BT-835).
-%%%
-%%% Tests:
-%%%   - happy path: successful class registration
-%%%   - hot reload: registering an existing class updates it
-%%%   - missing superclass error: superclassRef = nil
-%%%   - sealed superclass rejected (stdlibMode bypasses this for stdlib loading, BT-791)
-%%%   - bad name error: className is not an atom (nil or non-atom)
-%%%   - bootstrap assertion: Class respondsTo: #classBuilder
-
 -module(beamtalk_class_builder_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_class_builder:register/1 (ADR 0038 Phase 1, BT-835).
+
+Tests:
+  - happy path: successful class registration
+  - hot reload: registering an existing class updates it
+  - missing superclass error: superclassRef = nil
+  - sealed superclass rejected (stdlibMode bypasses this for stdlib loading, BT-791)
+  - bad name error: className is not an atom (nil or non-atom)
+  - bootstrap assertion: Class respondsTo: #classBuilder
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -40,7 +42,11 @@ teardown(ClassNames) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
             end
         end,
         ClassNames

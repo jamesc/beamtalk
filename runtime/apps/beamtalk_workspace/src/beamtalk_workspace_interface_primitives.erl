@@ -1,48 +1,50 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Primitive implementations for the WorkspaceInterface sealed Object.
-%%%
-%%% **DDD Context:** Workspace Context
-%%%
-%%% Implements methods for the WorkspaceInterface class. WorkspaceInterface is
-%%% a `sealed Object subclass:` (value type, no gen_server process). Methods
-%%% are called via Erlang FFI from the compiled Beamtalk module.
-%%%
-%%% ## State management
-%%%
-%%% User-registered bindings (`bind:as:` / `unbind:`) are stored in a public
-%%% named ETS table `beamtalk_wi_user_bindings` keyed by `Name` (atom).
-%%% Since WorkspaceInterface is a singleton (one per workspace), no per-process
-%%% keying is needed. The ETS table is normally created during workspace startup
-%%% via `create_bindings_table/0` (called by `beamtalk_workspace_bootstrap`),
-%%% which ensures the long-lived bootstrap process owns it. A lazy fallback via
-%%% `ensure_bindings_table/0` is also available for cases where the table is
-%%% accessed before bootstrap completes. Both paths produce the same singleton
-%%% table. The table is accessible from external processes via
-%%% `get_user_bindings/0` and `get_session_bindings/0`.
-%%%
-%%% ## External API
-%%%
-%%% `get_user_bindings/0` and `get_session_bindings/0` are called by
-%%% `beamtalk_repl_eval` and `beamtalk_repl_shell` to inject workspace bindings
-%%% into REPL session state. Workspace readiness is detected via
-%%% `whereis(beamtalk_workspace_meta)`.
-%%%
-%%% ## Methods
-%%%
-%%% | Selector      | Description                                         |
-%%% |---------------|-----------------------------------------------------|
-%%% | `actors'      | List all live actor object references               |
-%%% | `actorAt:'    | Look up actor by pid string                         |
-%%% | `classes'     | List all loaded user classes                        |
-%%% | `load:'       | Compile and load a .bt file                         |
-%%% | `globals'     | Full workspace namespace snapshot (Dictionary)      |
-%%% | `sync'        | Incremental project sync (compile changed files)   |
-%%% | `bind:as:'    | Register a value in workspace namespace             |
-%%% | `unbind:'     | Remove a value from workspace namespace             |
-
 -module(beamtalk_workspace_interface_primitives).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Primitive implementations for the WorkspaceInterface sealed Object.
+
+Implements methods for the WorkspaceInterface class. WorkspaceInterface is
+a `sealed Object subclass:` (value type, no gen_server process). Methods
+are called via Erlang FFI from the compiled Beamtalk module.
+
+## State management
+
+User-registered bindings (`bind:as:` / `unbind:`) are stored in a public
+named ETS table `beamtalk_wi_user_bindings` keyed by `Name` (atom).
+Since WorkspaceInterface is a singleton (one per workspace), no per-process
+keying is needed. The ETS table is normally created during workspace startup
+via `create_bindings_table/0` (called by `beamtalk_workspace_bootstrap`),
+which ensures the long-lived bootstrap process owns it. A lazy fallback via
+`ensure_bindings_table/0` is also available for cases where the table is
+accessed before bootstrap completes. Both paths produce the same singleton
+table. The table is accessible from external processes via
+`get_user_bindings/0` and `get_session_bindings/0`.
+
+## External API
+
+`get_user_bindings/0` and `get_session_bindings/0` are called by
+`beamtalk_repl_eval` and `beamtalk_repl_shell` to inject workspace bindings
+into REPL session state. Workspace readiness is detected via
+`whereis(beamtalk_workspace_meta)`.
+
+## Methods
+
+| Selector      | Description                                         |
+|---------------|-----------------------------------------------------|
+| `actors'      | List all live actor object references               |
+| `actorAt:'    | Look up actor by pid string                         |
+| `classes'     | List all loaded user classes                        |
+| `load:'       | Compile and load a .bt file                         |
+| `globals'     | Full workspace namespace snapshot (Dictionary)      |
+| `sync'        | Incremental project sync (compile changed files)   |
+| `bind:as:'    | Register a value in workspace namespace             |
+| `unbind:'     | Remove a value from workspace namespace             |
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -69,10 +71,12 @@
 %%% dispatch/3 — kept for backward compatibility; delegates to direct functions
 %%% ============================================================================
 
-%% @doc Dispatch a primitive method call for WorkspaceInterface.
-%%
-%% Retained for backward compatibility. The compiled sealed Object module
-%% uses Erlang FFI calls to the direct exports instead of this dispatch/3.
+-doc """
+Dispatch a primitive method call for WorkspaceInterface.
+
+Retained for backward compatibility. The compiled sealed Object module
+uses Erlang FFI calls to the direct exports instead of this dispatch/3.
+""".
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(actors, [], _Self) ->
     actors();
@@ -111,27 +115,35 @@ dispatch(Selector, _Args, _Self) ->
 %%% Direct exports for Erlang FFI (called via ErlangModule proxy)
 %%% ============================================================================
 
-%% @doc Return a list of all live actors as beamtalk_object references.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) actors`.
+-doc """
+Return a list of all live actors as beamtalk_object references.
+Called via `(Erlang beamtalk_workspace_interface_primitives) actors`.
+""".
 -spec actors() -> [tuple()].
 actors() ->
     handle_actors().
 
-%% @doc Look up a specific actor by pid string.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) actorAt: pidString`.
+-doc """
+Look up a specific actor by pid string.
+Called via `(Erlang beamtalk_workspace_interface_primitives) actorAt: pidString`.
+""".
 -spec actorAt(binary() | list() | term()) -> tuple() | 'nil'.
 actorAt(PidStr) ->
     handle_actor_at(PidStr).
 
-%% @doc Return all loaded user classes.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) classes`.
+-doc """
+Return all loaded user classes.
+Called via `(Erlang beamtalk_workspace_interface_primitives) classes`.
+""".
 -spec classes() -> [tuple()].
 classes() ->
     handle_classes().
 
-%% @doc Compile and load a .bt file.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) load: path`.
-%% Returns the loaded class object (or a list of class objects for multi-class files).
+-doc """
+Compile and load a .bt file.
+Called via `(Erlang beamtalk_workspace_interface_primitives) load: path`.
+Returns the loaded class object (or a list of class objects for multi-class files).
+""".
 -spec load(term()) -> term().
 load(Path) ->
     case handle_load(Path) of
@@ -139,16 +151,20 @@ load(Path) ->
         Result -> Result
     end.
 
-%% @doc Return the full workspace namespace snapshot.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) globals`.
+-doc """
+Return the full workspace namespace snapshot.
+Called via `(Erlang beamtalk_workspace_interface_primitives) globals`.
+""".
 -spec globals() -> map().
 globals() ->
     UserBindings = all_user_bindings(),
     handle_globals(UserBindings).
 
-%% @doc Register a value in the workspace namespace under a given atom name.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) bind: value as: name`.
--spec bind(term(), atom() | term()) -> 'nil'.
+-doc """
+Register a value in the workspace namespace under a given atom name.
+Called via `(Erlang beamtalk_workspace_interface_primitives) bind: value as: name`.
+""".
+-spec bind(term(), As :: atom() | term()) -> 'nil'.
 bind(Value, Name) ->
     ensure_bindings_table(),
     case to_atom_name(Name) of
@@ -165,8 +181,10 @@ bind(Value, Name) ->
             end
     end.
 
-%% @doc Remove a registered name from the workspace namespace.
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) unbind: name`.
+-doc """
+Remove a registered name from the workspace namespace.
+Called via `(Erlang beamtalk_workspace_interface_primitives) unbind: name`.
+""".
 -spec unbind(atom() | term()) -> 'nil'.
 unbind(Name) ->
     ensure_bindings_table(),
@@ -193,15 +211,17 @@ unbind(Name) ->
             end
     end.
 
-%% @doc Return the OTP application root supervisor, or nil (BT-1191).
-%%
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) rootSupervisor`.
-%% Delegates to `beamtalk_supervisor:get_root/0` which reads from the ETS
-%% registry populated by the generated `beamtalk_{appname}_app:start/2`.
-%%
-%% Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple when an
-%% OTP application with `[application] supervisor` has started, or the atom
-%% `nil` if no root has been registered.
+-doc """
+Return the OTP application root supervisor, or nil (BT-1191).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) rootSupervisor`.
+Delegates to `beamtalk_supervisor:get_root/0` which reads from the ETS
+registry populated by the generated `beamtalk_{appname}_app:start/2`.
+
+Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple when an
+OTP application with `[application] supervisor` has started, or the atom
+`nil` if no root has been registered.
+""".
 -spec rootSupervisor() -> tuple() | nil.
 rootSupervisor() ->
     beamtalk_supervisor:get_root().
@@ -210,17 +230,19 @@ rootSupervisor() ->
 %%% Supervisor lifecycle management (BT-1341)
 %%% ============================================================================
 
-%% @doc Start and attach a user supervisor to the workspace supervision tree.
-%%
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) startSupervisor: MySup`.
-%% The class must be a Supervisor or DynamicSupervisor subclass. The supervisor
-%% is started as a dynamic child of `beamtalk_workspace_sup` with `temporary`
-%% restart (user supervisors are not auto-restarted — the user re-attaches
-%% explicitly during iterative development).
-%%
-%% If the supervisor is already running under the workspace tree, returns the
-%% existing instance (idempotent).
--spec startSupervisor(tuple()) -> tuple().
+-doc """
+Start and attach a user supervisor to the workspace supervision tree.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) startSupervisor: MySup`.
+The class must be a Supervisor or DynamicSupervisor subclass. The supervisor
+is started as a dynamic child of `beamtalk_workspace_sup` with `temporary`
+restart (user supervisors are not auto-restarted — the user re-attaches
+explicitly during iterative development).
+
+If the supervisor is already running under the workspace tree, returns the
+existing instance (idempotent).
+""".
+-spec startSupervisor(term()) -> term().
 startSupervisor(ClassArg) ->
     case beamtalk_class_registry:is_class_object(ClassArg) of
         false ->
@@ -242,7 +264,6 @@ startSupervisor(ClassArg) ->
     end,
     do_start_supervisor(ClassName, Module).
 
-%% @private
 do_start_supervisor(ClassName, Module) ->
     ChildId = {user_supervisor, ClassName},
     ChildSpec = #{
@@ -288,9 +309,11 @@ do_start_supervisor(ClassName, Module) ->
             raise_start_supervisor_error(Reason)
     end.
 
-%% @private Return the actual attached handle for a workspace child.
-%% Reads from which_children to get the real module and pid (which may differ
-%% from the caller's ClassArg after a class reload).
+-doc """
+Return the actual attached handle for a workspace child.
+Reads from which_children to get the real module and pid (which may differ
+from the caller's ClassArg after a class reload).
+""".
 -spec workspace_child_handle(term()) -> {ok, tuple()} | not_found.
 workspace_child_handle(ChildId = {user_supervisor, ClassName}) ->
     case lists:keyfind(ChildId, 1, supervisor:which_children(beamtalk_workspace_sup)) of
@@ -300,14 +323,14 @@ workspace_child_handle(ChildId = {user_supervisor, ClassName}) ->
             not_found
     end.
 
-%% @private
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_start_supervisor_type_error/1}).
 raise_start_supervisor_type_error(Message) ->
     Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
-%% @private
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_start_supervisor_error/1}).
 raise_start_supervisor_error(Message) when is_binary(Message) ->
     Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
@@ -323,12 +346,14 @@ raise_start_supervisor_error(Reason) ->
         )
     ).
 
-%% @doc Stop and remove a supervisor from the workspace.
-%%
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) stopSupervisor: MySup`.
-%% Works for both workspace-attached supervisors and the root application
-%% supervisor. Cleanly shuts down the supervisor and all its children.
--spec stopSupervisor(tuple()) -> nil.
+-doc """
+Stop and remove a supervisor from the workspace.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) stopSupervisor: MySup`.
+Works for both workspace-attached supervisors and the root application
+supervisor. Cleanly shuts down the supervisor and all its children.
+""".
+-spec stopSupervisor(term()) -> nil.
 stopSupervisor(ClassArg) ->
     case beamtalk_class_registry:is_class_object(ClassArg) of
         false ->
@@ -351,7 +376,6 @@ stopSupervisor(ClassArg) ->
     end,
     do_stop_supervisor(ClassName).
 
-%% @private
 do_stop_supervisor(ClassName) ->
     ChildId = {user_supervisor, ClassName},
     case supervisor:terminate_child(beamtalk_workspace_sup, ChildId) of
@@ -383,19 +407,21 @@ do_stop_supervisor(ClassName) ->
             end
     end.
 
-%% @private
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_stop_supervisor_type_error/1}).
 raise_stop_supervisor_type_error(Message) ->
     Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
-%% @doc List all supervisors in the workspace supervision tree.
-%%
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) supervisors`.
-%% Returns a list of `{beamtalk_supervisor, ClassName, Module, Pid}` tuples
-%% including the root application supervisor (if registered) and all
-%% supervisors attached via `startSupervisor:`.
+-doc """
+List all supervisors in the workspace supervision tree.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) supervisors`.
+Returns a list of `{beamtalk_supervisor, ClassName, Module, Pid}` tuples
+including the root application supervisor (if registered) and all
+supervisors attached via `startSupervisor:`.
+""".
 -spec supervisors() -> [tuple()].
 supervisors() ->
     Root =
@@ -415,12 +441,14 @@ supervisors() ->
     ),
     Root ++ UserSups.
 
-%% @doc Return the direct dependencies of the current workspace package.
-%%
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) dependencies`.
-%% Returns a map of `#{PackageName => PackageInfoMap}` for each direct dependency
-%% of the current workspace package. Returns an empty map if the workspace
-%% has no package name or no dependencies.
+-doc """
+Return the direct dependencies of the current workspace package.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) dependencies`.
+Returns a map of `#{PackageName => PackageInfoMap}` for each direct dependency
+of the current workspace package. Returns an empty map if the workspace
+has no package name or no dependencies.
+""".
 -spec dependencies() -> #{binary() => map()}.
 dependencies() ->
     case beamtalk_workspace_meta:get_package_name() of
@@ -447,20 +475,22 @@ dependencies() ->
 %%% Project sync (BT-1723)
 %%% ============================================================================
 
-%% @doc Perform an incremental project sync from the current working directory.
-%%
-%% Called via `(Erlang beamtalk_workspace_interface_primitives) sync`.
-%% Delegates to `beamtalk_repl_ops_load:sync_project/2` which handles
-%% incremental compilation (mtime tracking, native .erl files, dependency
-%% ordering) and returns a result map.
-%%
-%% Returns a Dictionary with keys:
-%%   - `#summary` — human-readable summary (e.g. "Reloaded 2 of 5 files (3 unchanged)")
-%%   - `#classes` — List of loaded class name Strings
-%%   - `#errors` — List of error Dictionaries (empty on success)
-%%   - `#changedCount` — number of files reloaded
-%%   - `#unchangedCount` — number of unchanged files
-%%   - `#deletedCount` — number of deleted files
+-doc """
+Perform an incremental project sync from the current working directory.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) sync`.
+Delegates to `beamtalk_repl_ops_load:sync_project/2` which handles
+incremental compilation (mtime tracking, native .erl files, dependency
+ordering) and returns a result map.
+
+Returns a Dictionary with keys:
+  - `#summary` — human-readable summary (e.g. "Reloaded 2 of 5 files (3 unchanged)")
+  - `#classes` — List of loaded class name Strings
+  - `#errors` — List of error Dictionaries (empty on success)
+  - `#changedCount` — number of files reloaded
+  - `#unchangedCount` — number of unchanged files
+  - `#deletedCount` — number of deleted files
+""".
 -spec sync() -> map().
 sync() ->
     case beamtalk_repl_ops_load:sync_project(".", #{}) of
@@ -481,9 +511,11 @@ sync() ->
 %%% Stable external API
 %%% ============================================================================
 
-%% @doc Return workspace-level user bindings (for REPL session injection).
-%% Called before each eval to merge workspace bindings into session bindings.
-%% Returns #{} when the workspace meta process is not running (workspace down).
+-doc """
+Return workspace-level user bindings (for REPL session injection).
+Called before each eval to merge workspace bindings into session bindings.
+Returns #{} when the workspace meta process is not running (workspace down).
+""".
 -spec get_user_bindings() -> #{atom() => term()}.
 get_user_bindings() ->
     case whereis(beamtalk_workspace_meta) of
@@ -493,9 +525,11 @@ get_user_bindings() ->
             all_user_bindings()
     end.
 
-%% @doc Return non-class workspace globals for session binding injection.
-%% Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
-%% bind:as: names. Class objects are excluded.
+-doc """
+Return non-class workspace globals for session binding injection.
+Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
+bind:as: names. Class objects are excluded.
+""".
 -spec get_session_bindings() -> #{atom() => term()}.
 get_session_bindings() ->
     case whereis(beamtalk_workspace_meta) of
@@ -510,9 +544,11 @@ get_session_bindings() ->
 %%% Internal helpers — ETS management
 %%% ============================================================================
 
-%% @doc Create the bindings ETS table owned by the calling process.
-%% Must be called from a long-lived process (beamtalk_workspace_bootstrap) so that
-%% the table is not deleted when short-lived eval worker processes exit.
+-doc """
+Create the bindings ETS table owned by the calling process.
+Must be called from a long-lived process (beamtalk_workspace_bootstrap) so that
+the table is not deleted when short-lived eval worker processes exit.
+""".
 -spec create_bindings_table() -> ok.
 create_bindings_table() ->
     case ets:info(?WI_BINDINGS_TABLE, id) of
@@ -523,8 +559,10 @@ create_bindings_table() ->
             ok
     end.
 
-%% @private Ensure the bindings ETS table exists.
-%% Creates it on first call; safe to call repeatedly.
+-doc """
+Ensure the bindings ETS table exists.
+Creates it on first call; safe to call repeatedly.
+""".
 -spec ensure_bindings_table() -> ok.
 ensure_bindings_table() ->
     case ets:info(?WI_BINDINGS_TABLE, id) of
@@ -541,7 +579,7 @@ ensure_bindings_table() ->
             ok
     end.
 
-%% @private Read all user bindings as a map.
+-doc "Read all user bindings as a map.".
 -spec all_user_bindings() -> #{atom() => term()}.
 all_user_bindings() ->
     case ets:info(?WI_BINDINGS_TABLE, id) of
@@ -555,7 +593,7 @@ all_user_bindings() ->
 %%% Internal method implementations
 %%% ============================================================================
 
-%% @private Get all live actors as beamtalk_object references.
+-doc "Get all live actors as beamtalk_object references.".
 -spec handle_actors() -> [tuple()].
 handle_actors() ->
     case whereis(beamtalk_actor_registry) of
@@ -566,7 +604,7 @@ handle_actors() ->
             lists:filtermap(fun wrap_actor/1, Actors)
     end.
 
-%% @private Look up a specific actor by pid string.
+-doc "Look up a specific actor by pid string.".
 -spec handle_actor_at(binary() | list()) -> tuple() | 'nil'.
 handle_actor_at(PidStr) when is_binary(PidStr) ->
     handle_actor_at(binary_to_list(PidStr));
@@ -593,13 +631,15 @@ handle_actor_at(PidStr) when is_list(PidStr) ->
 handle_actor_at(_) ->
     nil.
 
-%% @private Return all loaded user classes (those with a source file recorded).
+-doc "Return all loaded user classes (those with a source file recorded).".
 -spec handle_classes() -> [tuple()].
 handle_classes() ->
     beamtalk_runtime_api:user_classes().
 
-%% @private Load a .bt file, compiling and registering the class.
-%% On success, returns the loaded class object(s) so the REPL displays what was loaded.
+-doc """
+Load a .bt file, compiling and registering the class.
+On success, returns the loaded class object(s) so the REPL displays what was loaded.
+""".
 -spec handle_load(term()) -> term() | {error, #beamtalk_error{}}.
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
@@ -634,16 +674,16 @@ handle_load(Other) ->
             iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
         )}.
 
-%% @private Return the full workspace globals snapshot.
+-doc "Return the full workspace globals snapshot.".
 -spec handle_globals(map()) -> map().
 handle_globals(UserBindings) ->
     Base = handle_session_bindings(UserBindings),
     Classes = handle_classes(),
     lists:foldl(
         fun
-            ({beamtalk_object, ClassTag, _Mod, _Pid} = ClassObj, Acc) ->
+            (#beamtalk_object{class = ClassTag} = ClassObj, Acc) ->
                 ClassName = base_class_name(ClassTag),
-                maps:put(ClassName, ClassObj, Acc);
+                Acc#{ClassName => ClassObj};
             (_, Acc) ->
                 Acc
         end,
@@ -651,19 +691,19 @@ handle_globals(UserBindings) ->
         Classes
     ).
 
-%% @private Return non-class session bindings: singletons + user bind:as: entries.
+-doc "Return non-class session bindings: singletons + user bind:as: entries.".
 -spec handle_session_bindings(map()) -> map().
 handle_session_bindings(UserBindings) ->
     Base0 = UserBindings,
     Base1 =
         case resolve_singleton('TranscriptStream') of
             nil -> Base0;
-            TranscriptObj -> maps:put('Transcript', TranscriptObj, Base0)
+            TranscriptObj -> Base0#{'Transcript' => TranscriptObj}
         end,
     Base2 =
         case resolve_singleton('BeamtalkInterface') of
             nil -> Base1;
-            BeamtalkObj -> maps:put('Beamtalk', BeamtalkObj, Base1)
+            BeamtalkObj -> Base1#{'Beamtalk' => BeamtalkObj}
         end,
     %% Resolve Workspace from singleton state, same as Beamtalk/Transcript.
     %% Falls back to a plain tagged-map if the class var hasn't been wired yet.
@@ -672,9 +712,9 @@ handle_session_bindings(UserBindings) ->
             nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
             Obj -> Obj
         end,
-    maps:put('Workspace', WorkspaceObj, Base2).
+    Base2#{'Workspace' => WorkspaceObj}.
 
-%% @private Convert a name argument to an atom.
+-doc "Convert a name argument to an atom.".
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
 to_atom_name(Name) when is_atom(Name) -> Name;
 to_atom_name(Other) ->
@@ -686,7 +726,7 @@ to_atom_name(Other) ->
             iolist_to_binary([<<"Expected a Symbol name, got ">>, TypeName])
         )}.
 
-%% @private Check if a name conflicts with Beamtalk system globals.
+-doc "Check if a name conflicts with Beamtalk system globals.".
 -spec check_bind_conflicts(atom()) -> ok | {error, #beamtalk_error{}}.
 check_bind_conflicts(AtomName) ->
     case is_protected_name(AtomName) of
@@ -711,13 +751,13 @@ is_protected_name('Beamtalk') -> true;
 is_protected_name('Workspace') -> true;
 is_protected_name(_) -> false.
 
-%% @private Warn if name is an existing loaded class.
+-doc "Warn if name is an existing loaded class.".
 -spec maybe_warn_loaded_class(atom()) -> ok.
 maybe_warn_loaded_class(AtomName) ->
     Classes = handle_classes(),
     IsLoadedClass = lists:any(
         fun
-            ({beamtalk_object, ClassTag, _Mod, _Pid}) ->
+            (#beamtalk_object{class = ClassTag}) ->
                 base_class_name(ClassTag) =:= AtomName;
             (_) ->
                 false
@@ -736,7 +776,7 @@ maybe_warn_loaded_class(AtomName) ->
             ok
     end.
 
-%% @private Wrap actor metadata into a beamtalk_object tuple.
+-doc "Wrap actor metadata into a beamtalk_object tuple.".
 -spec wrap_actor(beamtalk_repl_actors:actor_metadata()) -> {true, tuple()} | false.
 wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
     case is_process_alive(Pid) of
@@ -746,7 +786,7 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
             false
     end.
 
-%% @private Resolve a singleton class instance.
+-doc "Resolve a singleton class instance.".
 -spec resolve_singleton(atom()) -> tuple() | 'nil'.
 resolve_singleton(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
@@ -760,7 +800,9 @@ resolve_singleton(ClassName) ->
             end
     end.
 
-%% @private Extract the base class name from a class tag (e.g. 'Counter class' -> 'Counter').
+-doc """
+Extract the base class name from a class tag (e.g. 'Counter class' -> 'Counter').
+""".
 -spec base_class_name(atom()) -> atom().
 base_class_name(Tag) ->
     Bin = beamtalk_runtime_api:class_display_name(Tag),
@@ -770,8 +812,10 @@ base_class_name(Tag) ->
         error:badarg -> Tag
     end.
 
-%% @private Resolve loaded ClassNames maps to a Beamtalk List of class objects.
-%% Always returns a List (possibly empty) so callers have a uniform type.
+-doc """
+Resolve loaded ClassNames maps to a Beamtalk List of class objects.
+Always returns a List (possibly empty) so callers have a uniform type.
+""".
 -spec loaded_class_objects([map()]) -> list().
 loaded_class_objects(ClassNames) ->
     Objects = lists:filtermap(
@@ -813,7 +857,7 @@ loaded_class_objects(ClassNames) ->
     ),
     Objects.
 
-%% @private Return a human-readable type name for an Erlang/Beamtalk value.
+-doc "Return a human-readable type name for an Erlang/Beamtalk value.".
 -spec value_type_name(term()) -> binary().
 value_type_name(V) when is_integer(V) -> <<"Integer">>;
 value_type_name(V) when is_float(V) -> <<"Float">>;
@@ -822,5 +866,5 @@ value_type_name(nil) -> <<"nil">>;
 value_type_name(V) when is_atom(V) -> <<"Symbol">>;
 value_type_name(V) when is_list(V) -> <<"List">>;
 value_type_name(V) when is_map(V) -> <<"Dictionary">>;
-value_type_name({beamtalk_object, _, _, _}) -> <<"Object">>;
+value_type_name(#beamtalk_object{}) -> <<"Object">>;
 value_type_name(_) -> <<"Unknown">>.

@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Tests for WebSocket log handler (BT-1433)
-
 -module(beamtalk_ws_log_handler_tests).
+
+-moduledoc "Tests for WebSocket log handler (BT-1433)".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").
 
@@ -11,7 +11,7 @@
 %%% Setup / Teardown
 %%% ===========================================================================
 
-%% @doc Install the handler before each test group and remove after.
+-doc "Install the handler before each test group and remove after.".
 setup() ->
     %% Save and lower primary log level — test sys.config sets it to error,
     %% which drops events before they reach any handler.
@@ -167,7 +167,7 @@ format_includes_class_metadata() ->
 %%% Helpers
 %%% ===========================================================================
 
-%% @doc Receive a log_event message or return timeout.
+-doc "Receive a log_event message or return timeout.".
 receive_log_event(Timeout) ->
     receive
         {log_event, Data} -> Data
@@ -175,7 +175,7 @@ receive_log_event(Timeout) ->
         timeout
     end.
 
-%% @doc Receive a tagged log event from a forwarding process.
+-doc "Receive a tagged log event from a forwarding process.".
 receive_tagged_event(Timeout) ->
     receive
         {forwarded_log, Tag, Data} -> {Tag, Data}
@@ -183,7 +183,7 @@ receive_tagged_event(Timeout) ->
         timeout
     end.
 
-%% @doc Collect N tagged events within Timeout ms.
+-doc "Collect N tagged events within Timeout ms.".
 collect_tagged_events(Timeout, N) ->
     collect_tagged_events(Timeout, N, []).
 
@@ -197,7 +197,7 @@ collect_tagged_events(Timeout, N, Acc) ->
         lists:reverse(Acc)
     end.
 
-%% @doc Forward log events to parent tagged with an identifier.
+-doc "Forward log events to parent tagged with an identifier.".
 forward_log_events(Parent, Tag) ->
     receive
         {log_event, Data} ->

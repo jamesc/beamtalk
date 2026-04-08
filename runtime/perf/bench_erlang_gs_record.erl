@@ -3,14 +3,17 @@
 
 %%% **DDD Context:** Runtime benchmark — gen_server counter with record state
 %%%
-%%% @doc Idiomatic Erlang gen_server counter using a record for state.
-%%%
-%%% Baseline for overhead comparison: this is how you would write a counter
-%%% in hand-written Erlang — record state, direct pattern matching in handle_call,
-%%% no dispatch indirection. This is as fast as a gen_server counter can get.
 
 -module(bench_erlang_gs_record).
 -behaviour(gen_server).
+
+-moduledoc """
+Idiomatic Erlang gen_server counter using a record for state.
+
+Baseline for overhead comparison: this is how you would write a counter
+in hand-written Erlang — record state, direct pattern matching in handle_call,
+no dispatch indirection. This is as fast as a gen_server counter can get.
+""".
 
 -export([start_link/0, increment/1, get_value/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).

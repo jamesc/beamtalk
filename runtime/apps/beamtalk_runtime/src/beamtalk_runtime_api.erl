@@ -1,21 +1,24 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Sole cross-context API boundary between Workspace and Runtime.
-%%%
-%%% **DDD Context:** Object System Context / Workspace Context boundary
-%%%
-%%% This module is the **single approved entry point** for workspace code
-%%% (`beamtalk_workspace/src/*.erl`) to call into the runtime. All direct
-%%% calls to internal runtime modules from workspace source files must be
-%%% routed through this facade.
-%%%
-%%% Adding a function here constitutes explicit approval of the cross-context
-%%% call. Any call to a runtime module not delegated from here requires team
-%%% review and a corresponding update to `docs/development/erlang-guidelines.md`.
-%%%
-%%% See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 -module(beamtalk_runtime_api).
+
+%%% **DDD Context:** Object System Context / Workspace Context boundary
+
+-moduledoc """
+Sole cross-context API boundary between Workspace and Runtime.
+
+This module is the **single approved entry point** for workspace code
+(`beamtalk_workspace/src/*.erl`) to call into the runtime. All direct
+calls to internal runtime modules from workspace source files must be
+routed through this facade.
+
+Adding a function here constitutes explicit approval of the cross-context
+call. Any call to a runtime module not delegated from here requires team
+review and a corresponding update to `docs/development/erlang-guidelines.md`.
+
+See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
+""".
 
 -include("beamtalk.hrl").
 
@@ -67,7 +70,8 @@
 -export([
     is_sealed/1,
     is_abstract/1,
-    is_internal/1
+    is_internal/1,
+    is_protocol/1
 ]).
 
 %%% ===================================================================
@@ -194,11 +198,13 @@ get_class_method_return_type(ClassName, Selector) ->
 %%% Class Removal (BT-1239)
 %%% ====================================================================
 
-%% @doc Remove a class from the system by name, with full cleanup.
-%%
-%% Returns the BEAM module atom of the removed class on success (so the caller
-%% can update its own tracking state), or {error, Reason} if the removal fails
-%% (class not found, stdlib class, has subclasses, etc.).
+-doc """
+Remove a class from the system by name, with full cleanup.
+
+Returns the BEAM module atom of the removed class on success (so the caller
+can update its own tracking state), or {error, Reason} if the removal fails
+(class not found, stdlib class, has subclasses, etc.).
+""".
 -spec remove_class_from_system(atom()) -> {ok, module()} | {error, #beamtalk_error{}}.
 remove_class_from_system(ClassName) ->
     try
@@ -271,10 +277,15 @@ is_sealed(ClassPid) ->
 is_abstract(ClassPid) ->
     beamtalk_object_class:is_abstract(ClassPid).
 
-%% @doc ADR 0071 Phase 5: Check if a class has internal visibility.
+-doc "ADR 0071 Phase 5: Check if a class has internal visibility.".
 -spec is_internal(pid()) -> boolean().
 is_internal(ClassPid) ->
     beamtalk_object_class:is_internal(ClassPid).
+
+-doc "Check if a class name is a registered protocol (ADR 0068).".
+-spec is_protocol(atom()) -> boolean().
+is_protocol(ClassName) ->
+    beamtalk_protocol_registry:is_protocol(ClassName).
 
 %%% ====================================================================
 %%% Object Instances Delegators

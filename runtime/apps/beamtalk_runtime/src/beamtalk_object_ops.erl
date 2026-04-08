@@ -1,54 +1,57 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Object base class implementation (ADR 0006 Phase 1b).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% This module provides the shared reflection, display, and utility methods
-%%% inherited by all Beamtalk objects. It is registered as Object's runtime
-%%% module during bootstrap, so these methods are found via hierarchy walking
-%%% rather than being duplicated in every class's generated code.
-%%%
-%%% ## Reflection Methods
-%%%
-%%% | Selector          | Args          | Description                           |
-%%% |-------------------|---------------|---------------------------------------|
-%%% | `class`           | []            | Returns the object's class name       |
-%%% | `respondsTo:`     | [Selector]    | Checks if object understands message  |
-%%% | `fieldNames`      | []            | Returns list of field names           |
-%%% | `fieldAt:`        | [Name]        | Returns field value                   |
-%%% | `fieldAt:put:`    | [Name, Value] | Sets field value                      |
-%%%
-%%% ## Display Methods
-%%%
-%%% | Selector      | Args | Description                              |
-%%% |---------------|------|------------------------------------------|
-%%% | `printString`   | []   | Developer representation (e.g. `a Counter`)  |
-%%% | `displayString` | []   | User-facing representation (same for actors) |
-%%% | `inspect`       | []   | Detailed inspection string                   |
-%%%
-%%% ## Utility Methods
-%%%
-%%% | Selector   | Args | Description                        |
-%%% |------------|------|------------------------------------|
-%%% | `yourself` | []   | Returns the receiver (Self)        |
-%%% | `hash`     | []   | Returns a hash value               |
-%%% | `isNil`    | []   | Returns false (non-nil objects)    |
-%%% | `notNil`   | []   | Returns true (non-nil objects)     |
-%%%
-%%% ## Integration
-%%%
-%%% This module is invoked by `beamtalk_dispatch` when walking the hierarchy.
-%%% The dispatch service calls `beamtalk_object_ops:dispatch(Selector, Args, Self, State)`
-%%% where State is the actor's actual state map (containing `$beamtalk_class`, fields, etc.).
-%%%
-%%% ## References
-%%%
-%%% - ADR 0006: Unified Method Dispatch with Hierarchy Walking
-%%% - BT-275: printString/yourself/hash protocol
-%%% - BT-282: Bootstrap Object with shared reflection methods
 -module(beamtalk_object_ops).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Object base class implementation (ADR 0006 Phase 1b).
+
+This module provides the shared reflection, display, and utility methods
+inherited by all Beamtalk objects. It is registered as Object's runtime
+module during bootstrap, so these methods are found via hierarchy walking
+rather than being duplicated in every class's generated code.
+
+## Reflection Methods
+
+| Selector          | Args          | Description                           |
+|-------------------|---------------|---------------------------------------|
+| `class`           | []            | Returns the object's class name       |
+| `respondsTo:`     | [Selector]    | Checks if object understands message  |
+| `fieldNames`      | []            | Returns list of field names           |
+| `fieldAt:`        | [Name]        | Returns field value                   |
+| `fieldAt:put:`    | [Name, Value] | Sets field value                      |
+
+## Display Methods
+
+| Selector      | Args | Description                              |
+|---------------|------|------------------------------------------|
+| `printString`   | []   | Developer representation (e.g. `a Counter`)  |
+| `displayString` | []   | User-facing representation (same for actors) |
+| `inspect`       | []   | Detailed inspection string                   |
+
+## Utility Methods
+
+| Selector   | Args | Description                        |
+|------------|------|------------------------------------|
+| `yourself` | []   | Returns the receiver (Self)        |
+| `hash`     | []   | Returns a hash value               |
+| `isNil`    | []   | Returns false (non-nil objects)    |
+| `notNil`   | []   | Returns true (non-nil objects)     |
+
+## Integration
+
+This module is invoked by `beamtalk_dispatch` when walking the hierarchy.
+The dispatch service calls `beamtalk_object_ops:dispatch(Selector, Args, Self, State)`
+where State is the actor's actual state map (containing `$beamtalk_class`, fields, etc.).
+
+## References
+
+- ADR 0006: Unified Method Dispatch with Hierarchy Walking
+- BT-275: printString/yourself/hash protocol
+- BT-282: Bootstrap Object with shared reflection methods
+""".
 
 -export([dispatch/4, has_method/1, class_name/3]).
 
@@ -58,14 +61,16 @@
 %%% Public API
 %%% ============================================================================
 
-%% @doc Dispatch a message to the Object base class.
-%%
-%% This is called by `beamtalk_dispatch` when a method is found in Object
-%% during hierarchy walking. State is the actor's actual state map.
-%%
-%% BT-753: When dispatched on class objects via chain fallthrough, State is
-%% `#{}' (empty map). In that case, class identity is derived from Self
-%% (`#beamtalk_object.class') instead of the State map.
+-doc """
+Dispatch a message to the Object base class.
+
+This is called by `beamtalk_dispatch` when a method is found in Object
+during hierarchy walking. State is the actor's actual state map.
+
+BT-753: When dispatched on class objects via chain fallthrough, State is
+`#{}' (empty map). In that case, class identity is derived from Self
+(`#beamtalk_object.class') instead of the State map.
+""".
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, term(), map()}.
 
@@ -194,7 +199,7 @@ dispatch(Selector, _Args, Self, State) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in Object">>),
     {error, Error2, State}.
 
-%% @doc Check if Object responds to a given selector.
+-doc "Check if Object responds to a given selector.".
 -spec has_method(atom()) -> boolean().
 has_method(class) -> true;
 has_method('respondsTo:') -> true;
@@ -214,38 +219,38 @@ has_method(notNil) -> true;
 has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
 
-%% @private
-%% @doc Return a display-friendly class name binary, stripping the " class" suffix.
+-doc "Return a display-friendly class name binary, stripping the \" class\" suffix.".
 -spec class_display_name(term(), map()) -> binary().
 class_display_name(Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
     beamtalk_class_registry:class_display_name(ClassName).
 
-%% @private
-%% @doc Extract class name from Self or State.
-%%
-%% BT-753: When dispatched on class objects via chain fallthrough, State is
-%% `#{}' (empty map). In that case, derive the class from Self.
+-doc """
+Extract class name from Self or State.
+
+BT-753: When dispatched on class objects via chain fallthrough, State is
+`#{}' (empty map). In that case, derive the class from Self.
+""".
 -spec class_name(term(), map()) -> atom() | undefined.
 class_name(#beamtalk_object{class = Class}, _State) ->
     Class;
 class_name(_Self, State) ->
     beamtalk_tagged_map:class_of(State).
 
-%% @private
-%% @doc Extract class name from Self or State, with a default fallback.
+-doc "Extract class name from Self or State, with a default fallback.".
 -spec class_name(term(), map(), atom()) -> atom().
 class_name(#beamtalk_object{class = Class}, _State, _Default) ->
     Class;
 class_name(_Self, State, Default) ->
     beamtalk_tagged_map:class_of(State, Default).
 
-%% @private
-%% @doc Return the class name to use for respondsTo: dispatch.
-%%
-%% BT-776: Class objects have a virtual metaclass tag (e.g., 'Counter class')
-%% that is not registered in the class registry. For class objects, start the
-%% responds_to chain walk from 'Class' instead.
+-doc """
+Return the class name to use for respondsTo: dispatch.
+
+BT-776: Class objects have a virtual metaclass tag (e.g., 'Counter class')
+that is not registered in the class registry. For class objects, start the
+responds_to chain walk from 'Class' instead.
+""".
 -spec class_name_for_responds_to(term(), map()) -> atom().
 class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
     case beamtalk_class_registry:is_class_object(Self) of
@@ -255,16 +260,16 @@ class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
 class_name_for_responds_to(_Self, State) ->
     beamtalk_tagged_map:class_of(State).
 
-%% @private
-%% @doc Extract the pid from Self if it is an actor reference, else undefined.
+-doc "Extract the pid from Self if it is an actor reference, else undefined.".
 -spec actor_pid(term()) -> pid() | undefined.
 actor_pid(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> Pid;
 actor_pid(_) -> undefined.
 
-%% @private
-%% @doc Inspect a field value, guarding against actor self-references that
-%% would deadlock (the gen_server is already mid-call for inspect).
-%% Any actor reference whose pid matches SelfPid uses printString instead.
+-doc """
+Inspect a field value, guarding against actor self-references that
+would deadlock (the gen_server is already mid-call for inspect).
+Any actor reference whose pid matches SelfPid uses printString instead.
+""".
 -spec inspect_field(term(), pid() | undefined) -> binary().
 inspect_field(#beamtalk_object{pid = Pid} = V, SelfPid) when Pid =:= SelfPid ->
     %% Self-reference: avoid re-entering the same gen_server.
@@ -272,7 +277,6 @@ inspect_field(#beamtalk_object{pid = Pid} = V, SelfPid) when Pid =:= SelfPid ->
 inspect_field(V, _SelfPid) ->
     beamtalk_primitive:send(V, inspect, []).
 
-%% @private
 normalize_dispatch_result({error, Error}, State) ->
     {error, Error, State};
 normalize_dispatch_result(Other, _State) ->

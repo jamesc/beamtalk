@@ -1,15 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Unit tests for beamtalk_character module (BT-622).
-%%
-%% Tests edge cases and error paths in the character runtime module
-%% that can't be easily reached from Beamtalk stdlib tests:
-%% - Negative codepoints
-%% - Surrogate range codepoints (0xD800-0xDFFF)
-%% - Out-of-range codepoints (> 0x10FFFF)
-%% - value/1 error path
 -module(beamtalk_character_tests).
+
+-moduledoc """
+Unit tests for beamtalk_character module (BT-622).
+
+Tests edge cases and error paths in the character runtime module
+that can't be easily reached from Beamtalk stdlib tests:
+- Negative codepoints
+- Surrogate range codepoints (0xD800-0xDFFF)
+- Out-of-range codepoints (> 0x10FFFF)
+- value/1 error path
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

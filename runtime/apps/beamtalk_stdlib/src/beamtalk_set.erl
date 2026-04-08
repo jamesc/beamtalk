@@ -1,19 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Runtime helper operations for Set (Erlang ordsets in tagged maps).
-%%
-%% BT-73: Complex Set operations that cannot be inlined as direct BIF
-%% calls in generated Core Erlang. Called from compiled stdlib module
-%% bt@stdlib@set.
-%%
-%% Sets are represented as tagged maps:
-%%   #{'$beamtalk_class' => 'Set', elements => OrdsetData}
-%%
-%% where OrdsetData is a sorted list maintained by the ordsets module.
-%%
-%%% **DDD Context:** Object System Context
 -module(beamtalk_set).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Runtime helper operations for Set (Erlang ordsets in tagged maps).
+
+BT-73: Complex Set operations that cannot be inlined as direct BIF
+calls in generated Core Erlang. Called from compiled stdlib module
+bt@stdlib@set.
+
+Sets are represented as tagged maps:
+  #{'$beamtalk_class' => 'Set', elements => OrdsetData}
+
+where OrdsetData is a sorted list maintained by the ordsets module.
+""".
 
 -export([
     new/0,
@@ -31,18 +34,16 @@
     do/2
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 %%% ============================================================================
 %%% Set Representation
 %%% ============================================================================
 
-%% @doc Create a new empty Set.
+-doc "Create a new empty Set.".
 -spec new() -> map().
 new() ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:new()}.
 
-%% @doc Create a Set from a list of elements.
+-doc "Create a Set from a list of elements.".
 -spec from_list(list()) -> map().
 from_list(List) when is_list(List) ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:from_list(List)};
@@ -55,17 +56,17 @@ from_list(_NonList) ->
 %%% Accessors
 %%% ============================================================================
 
-%% @doc Return the number of elements in the Set.
+-doc "Return the number of elements in the Set.".
 -spec size(map()) -> non_neg_integer().
 size(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
     length(Elements).
 
-%% @doc Return true if the Set has no elements.
+-doc "Return true if the Set has no elements.".
 -spec is_empty(map()) -> boolean().
 is_empty(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
     Elements =:= [].
 
-%% @doc Return true if the Set contains the given element.
+-doc "Return true if the Set contains the given element.".
 -spec includes(map(), term()) -> boolean().
 includes(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
     ordsets:is_element(Element, Elements).
@@ -74,12 +75,12 @@ includes(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
 %%% Modification (returns new Set)
 %%% ============================================================================
 
-%% @doc Add an element to the Set, returning a new Set.
+-doc "Add an element to the Set, returning a new Set.".
 -spec add(map(), term()) -> map().
 add(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:add_element(Element, Elements)}.
 
-%% @doc Remove an element from the Set, returning a new Set.
+-doc "Remove an element from the Set, returning a new Set.".
 -spec remove(map(), term()) -> map().
 remove(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:del_element(Element, Elements)}.
@@ -88,7 +89,7 @@ remove(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
 %%% Set Operations (returns new Set)
 %%% ============================================================================
 
-%% @doc Return the union of two Sets.
+-doc "Return the union of two Sets.".
 -spec union(map(), map()) -> map().
 union(
     #{'$beamtalk_class' := 'Set', elements := E1},
@@ -100,7 +101,7 @@ union(#{'$beamtalk_class' := 'Set'}, _Other) ->
 union(_, _) ->
     set_type_error('union:').
 
-%% @doc Return the intersection of two Sets.
+-doc "Return the intersection of two Sets.".
 -spec intersection(map(), map()) -> map().
 intersection(
     #{'$beamtalk_class' := 'Set', elements := E1},
@@ -112,7 +113,7 @@ intersection(#{'$beamtalk_class' := 'Set'}, _Other) ->
 intersection(_, _) ->
     set_type_error('intersection:').
 
-%% @doc Return the difference of two Sets (elements in self but not other).
+-doc "Return the difference of two Sets (elements in self but not other).".
 -spec difference(map(), map()) -> map().
 difference(
     #{'$beamtalk_class' := 'Set', elements := E1},
@@ -128,7 +129,7 @@ difference(_, _) ->
 %%% Predicates
 %%% ============================================================================
 
-%% @doc Return true if self is a subset of other.
+-doc "Return true if self is a subset of other.".
 -spec is_subset_of(map(), map()) -> boolean().
 is_subset_of(
     #{'$beamtalk_class' := 'Set', elements := E1},
@@ -144,7 +145,7 @@ is_subset_of(_, _) ->
 %%% Conversion
 %%% ============================================================================
 
-%% @doc Return the elements as a plain list (ordsets are already lists).
+-doc "Return the elements as a plain list (ordsets are already lists).".
 -spec as_list(map()) -> list().
 as_list(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
     Elements.
@@ -153,7 +154,7 @@ as_list(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
 %%% Iteration
 %%% ============================================================================
 
-%% @doc Apply a block to each element of the Set.
+-doc "Apply a block to each element of the Set.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Set', elements := Elements}, Block) when is_function(Block, 1) ->
     lists:foreach(Block, Elements),
@@ -167,7 +168,7 @@ do(#{'$beamtalk_class' := 'Set'}, _Block) ->
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private Raise a type_error for binary set operations receiving a non-Set argument.
+-doc "Raise a type_error for binary set operations receiving a non-Set argument.".
 -spec set_type_error(atom()) -> no_return().
 set_type_error(Selector) ->
     Error0 = beamtalk_error:new(type_error, 'Set'),

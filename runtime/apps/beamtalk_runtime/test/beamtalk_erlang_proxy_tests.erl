@@ -1,13 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Unit tests for beamtalk_erlang_proxy module (BT-676).
-%%
-%%% **DDD Context:** Object System Context
-%%
-%% Tests ErlangModule proxy dispatch, Erlang class-side proxy,
-%% error wrapping, and printString formatting.
 -module(beamtalk_erlang_proxy_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Unit tests for beamtalk_erlang_proxy module (BT-676).
+
+Tests ErlangModule proxy dispatch, Erlang class-side proxy,
+error wrapping, and printString formatting.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 

@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_array module (BT-1088).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests from_list, size, is_empty, at, at_put, do, includes,
-%%% collect, select, inject_into, print_string, and error paths.
-
 -module(beamtalk_array_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_array module (BT-1088).
+
+Tests from_list, size, is_empty, at, at_put, do, includes,
+collect, select, inject_into, print_string, and error paths.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

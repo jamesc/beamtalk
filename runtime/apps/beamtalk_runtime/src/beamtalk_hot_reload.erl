@@ -1,26 +1,28 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Hot reload domain service for state migration during code upgrades.
-%%
-%%% **DDD Context:** Hot Reload Context
-%%
-%% This domain service implements the StateMigrator pattern from the DDD model.
-%% It centralizes code_change/3 logic for OTP hot code upgrade, providing a
-%% consistent state migration strategy across all gen_server behaviors in the
-%% runtime.
-%%
-%% **Current Migrations:**
-%% - BT-399: Rewrites `__class__` → `$beamtalk_class` tag key for actors
-%%   with pre-BT-324 state maps.
-%% - BT-572: Field migration — adds new fields with defaults, drops removed
-%%   fields (with log warning) when Extra contains `{NewInstanceVars, Module}`.
-%%
-%% **References:**
-%% - docs/beamtalk-ddd-model.md (Hot Reload Context, StateMigrator)
-%% - http://erlang.org/doc/design_principles/appup_cookbook.html
-
 -module(beamtalk_hot_reload).
+
+%%% **DDD Context:** Hot Reload Context
+
+-moduledoc """
+Hot reload domain service for state migration during code upgrades.
+
+This domain service implements the StateMigrator pattern from the DDD model.
+It centralizes code_change/3 logic for OTP hot code upgrade, providing a
+consistent state migration strategy across all gen_server behaviors in the
+runtime.
+
+**Current Migrations:**
+- BT-399: Rewrites `__class__` → `$beamtalk_class` tag key for actors
+  with pre-BT-324 state maps.
+- BT-572: Field migration — adds new fields with defaults, drops removed
+  fields (with log warning) when Extra contains `{NewInstanceVars, Module}`.
+
+**References:**
+- docs/beamtalk-ddd-model.md (Hot Reload Context, StateMigrator)
+- http://erlang.org/doc/design_principles/appup_cookbook.html
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -31,18 +33,19 @@
 %% Public API
 %%====================================================================
 
-%% @doc Migrate state during hot code upgrade.
-%%
-%% This is the domain service implementation of OTP's code_change/3 callback.
-%% Called by all gen_server behaviors in the runtime when BEAM loads a new
-%% version of a module.
-%%
-%% **Current Migrations:**
-%% - Rewrites `__class__` → `$beamtalk_class` for pre-BT-324 actor state maps.
-%%   Idempotent: already-migrated state is returned unchanged.
-%% - BT-572: When Extra is `{NewInstanceVars, Module}`, migrates actor state
-%%   by calling the module's init to get new defaults, then merging.
-%%
+-doc """
+Migrate state during hot code upgrade.
+
+This is the domain service implementation of OTP's code_change/3 callback.
+Called by all gen_server behaviors in the runtime when BEAM loads a new
+version of a module.
+
+**Current Migrations:**
+- Rewrites `__class__` → `$beamtalk_class` for pre-BT-324 actor state maps.
+  Idempotent: already-migrated state is returned unchanged.
+- BT-572: When Extra is `{NewInstanceVars, Module}`, migrates actor state
+  by calling the module's init to get new defaults, then merging.
+""".
 %% @param OldVsn The old version (either {down, Vsn} or Vsn atom/term)
 %% @param State The current gen_server state
 %% @param Extra Application-specific upgrade data passed via sys:change_code/4
@@ -67,10 +70,11 @@ code_change(_OldVsn, State, _Extra) when is_map(State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% @doc Trigger code_change for a list of actor PIDs after module reload.
-%%
-%% Calls sys:change_code/4 for each actor PID with empty Extra.
-%%
+-doc """
+Trigger code_change for a list of actor PIDs after module reload.
+
+Calls sys:change_code/4 for each actor PID with empty Extra.
+""".
 %% @param Module The module that was reloaded
 %% @param Pids List of actor PIDs to upgrade
 %% @returns {ok, Upgraded, Failures} where Upgraded is count of successes
@@ -80,11 +84,13 @@ code_change(_OldVsn, State, _Extra) ->
 trigger_code_change(Module, Pids) ->
     trigger_code_change(Module, Pids, []).
 
-%% @doc Trigger code_change for a list of actor PIDs with Extra data.
-%%
-%% BT-572: Extra can be `{NewInstanceVars, Module}` to enable field migration.
-%% Calls sys:change_code/4 for each actor PID. Failures are collected
-%% but do not prevent other actors from being upgraded.
+-doc """
+Trigger code_change for a list of actor PIDs with Extra data.
+
+BT-572: Extra can be `{NewInstanceVars, Module}` to enable field migration.
+Calls sys:change_code/4 for each actor PID. Failures are collected
+but do not prevent other actors from being upgraded.
+""".
 -spec trigger_code_change(atom(), [pid()], term()) ->
     {ok, non_neg_integer(), [{pid(), term()}]}.
 trigger_code_change(Module, Pids, Extra) ->
@@ -126,13 +132,14 @@ trigger_code_change(Module, Pids, Extra) ->
 %% Internal functions
 %%====================================================================
 
-%% @doc Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
-%%
-%% Idempotent: migration may add the new key and/or remove the old key,
-%% but will not change an existing `$beamtalk_class` value.
-%% Only adds the new key when the legacy value is an atom (actor class names);
-%% when both keys exist, the legacy key is removed regardless to complete cleanup.
-%% @private
+-doc """
+Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
+
+Idempotent: migration may add the new key and/or remove the old key,
+but will not change an existing `$beamtalk_class` value.
+Only adds the new key when the legacy value is an atom (actor class names);
+when both keys exist, the legacy key is removed regardless to complete cleanup.
+""".
 -spec maybe_migrate_class_key(map()) -> map().
 maybe_migrate_class_key(State) ->
     ClassKey = beamtalk_tagged_map:class_key(),
@@ -147,26 +154,34 @@ maybe_migrate_class_key(State) ->
             State
     end.
 
-%% @doc Migrate actor state fields during hot reload (BT-572).
-%%
-%% Calls the module's init(#{}) to get default state, then:
-%% - Preserves all existing field values from old state
-%% - Adds new fields with their default values
-%% - Drops removed fields (with log warning)
-%% - Preserves internal keys present in new init defaults (e.g. __class_mod__)
-%% @private
+-doc """
+Migrate actor state fields during hot reload (BT-572).
+
+Calls the module's init(#{}) to get default state, then:
+- Preserves all existing field values from old state
+- Adds new fields with their default values
+- Drops removed fields (with log warning)
+- Preserves internal keys present in new init defaults (e.g. __class_mod__)
+""".
 -spec migrate_fields(map(), [atom()], atom()) -> map().
 migrate_fields(OldState, NewInstanceVars, Module) ->
     %% Get new default state by calling init with empty args
-    case catch Module:init(#{}) of
+    case
+        try
+            Module:init(#{})
+        catch
+            _:_ -> init_error
+        end
+    of
         {ok, NewDefaults} when is_map(NewDefaults) ->
             %% Internal keys to always preserve from new defaults
             InternalKeys = beamtalk_tagged_map:internal_fields(),
             %% Start with internal keys from new defaults (updated method table etc.)
             BaseState = lists:foldl(
                 fun(Key, Acc) ->
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(Key, NewDefaults) of
-                        {ok, Val} -> maps:put(Key, Val, Acc);
+                        {ok, Val} -> Acc#{Key => Val};
                         error -> Acc
                     end
                 end,
@@ -177,8 +192,9 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             NewVarSet = sets:from_list(NewInstanceVars, [{version, 2}]),
             WithDefaults = lists:foldl(
                 fun(Var, Acc) ->
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(Var, NewDefaults) of
-                        {ok, Default} -> maps:put(Var, Default, Acc);
+                        {ok, Default} -> Acc#{Var => Default};
                         error -> Acc
                     end
                 end,
@@ -190,7 +206,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             {Kept, Dropped} = maps:fold(
                 fun(Key, Value, {KeepAcc, DropAcc}) ->
                     case sets:is_element(Key, NewVarSet) of
-                        true -> {maps:put(Key, Value, KeepAcc), DropAcc};
+                        true -> {KeepAcc#{Key => Value}, DropAcc};
                         false -> {KeepAcc, [Key | DropAcc]}
                     end
                 end,
@@ -214,8 +230,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             OldState
     end.
 
-%% @private
-%% @doc Try to trigger code_change for a single actor via sys:change_code/4.
+-doc "Try to trigger code_change for a single actor via sys:change_code/4.".
 -spec try_change_code(pid(), atom(), term()) -> ok | {error, term()}.
 try_change_code(Pid, Module, Extra) ->
     try
@@ -223,7 +238,11 @@ try_change_code(Pid, Module, Extra) ->
         try
             sys:change_code(Pid, Module, undefined, Extra)
         after
-            catch sys:resume(Pid)
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     catch
         exit:{noproc, _} ->

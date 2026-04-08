@@ -1,20 +1,22 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_workspace_interface_primitives module.
-%%%
-%%% Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
-%%% - actors selector
-%%% - actorAt: selector
-%%% - classes selector
-%%% - load: selector
-%%% - globals selector
-%%% - bind:as: selector
-%%% - unbind: selector
-%%% - get_user_bindings/0 external API
-%%% - get_session_bindings/0 external API
-
 -module(beamtalk_workspace_interface_primitives_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_workspace_interface_primitives module.
+
+Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
+- actors selector
+- actorAt: selector
+- classes selector
+- load: selector
+- globals selector
+- bind:as: selector
+- unbind: selector
+- get_user_bindings/0 external API
+- get_session_bindings/0 external API
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -376,7 +378,11 @@ unknown_selector_raises_does_not_understand_test() ->
 get_user_bindings_returns_empty_when_no_workspace_registered_test() ->
     %% Ensure beamtalk_workspace_meta is not registered (defensive cleanup for
     %% test suite ordering independence)
-    catch unregister(beamtalk_workspace_meta),
+    (try
+        unregister(beamtalk_workspace_meta)
+    catch
+        _:_ -> ok
+    end),
     ?assertEqual(undefined, whereis(beamtalk_workspace_meta)),
     Result = beamtalk_workspace_interface_primitives:get_user_bindings(),
     ?assertEqual(#{}, Result).
@@ -384,7 +390,11 @@ get_user_bindings_returns_empty_when_no_workspace_registered_test() ->
 get_user_bindings_returns_bound_values_test() ->
     Self = fake_self(self()),
     %% Register beamtalk_workspace_meta as the workspace-up sentinel
-    catch unregister(beamtalk_workspace_meta),
+    (try
+        unregister(beamtalk_workspace_meta)
+    catch
+        _:_ -> ok
+    end),
     register(beamtalk_workspace_meta, self()),
     try
         beamtalk_workspace_interface_primitives:dispatch(
@@ -395,7 +405,11 @@ get_user_bindings_returns_bound_values_test() ->
         ?assertEqual(100, maps:get(wsVar, Result))
     after
         cleanup_ets_for(self()),
-        catch unregister(beamtalk_workspace_meta)
+        (try
+            unregister(beamtalk_workspace_meta)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%====================================================================
@@ -405,14 +419,22 @@ get_user_bindings_returns_bound_values_test() ->
 get_session_bindings_returns_empty_when_no_workspace_registered_test() ->
     %% Ensure beamtalk_workspace_meta is not registered (defensive cleanup for
     %% test suite ordering independence)
-    catch unregister(beamtalk_workspace_meta),
+    (try
+        unregister(beamtalk_workspace_meta)
+    catch
+        _:_ -> ok
+    end),
     ?assertEqual(undefined, whereis(beamtalk_workspace_meta)),
     Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
     ?assertEqual(#{}, Result).
 
 get_session_bindings_includes_workspace_singleton_test() ->
     %% Register beamtalk_workspace_meta as the workspace-up sentinel
-    catch unregister(beamtalk_workspace_meta),
+    (try
+        unregister(beamtalk_workspace_meta)
+    catch
+        _:_ -> ok
+    end),
     register(beamtalk_workspace_meta, self()),
     try
         Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
@@ -420,11 +442,19 @@ get_session_bindings_includes_workspace_singleton_test() ->
         %% Workspace singleton is always included
         ?assert(maps:is_key('Workspace', Result))
     after
-        catch unregister(beamtalk_workspace_meta)
+        (try
+            unregister(beamtalk_workspace_meta)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 get_session_bindings_includes_user_bindings_test() ->
-    catch unregister(beamtalk_workspace_meta),
+    (try
+        unregister(beamtalk_workspace_meta)
+    catch
+        _:_ -> ok
+    end),
     register(beamtalk_workspace_meta, self()),
     Self = fake_self(self()),
     try
@@ -436,7 +466,11 @@ get_session_bindings_includes_user_bindings_test() ->
         ?assertEqual(<<"hello">>, maps:get(sessionVar, Result))
     after
         cleanup_ets_for(self()),
-        catch unregister(beamtalk_workspace_meta)
+        (try
+            unregister(beamtalk_workspace_meta)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%====================================================================
@@ -473,14 +507,22 @@ stop_supervisor_type_error_for_non_class_object_test() ->
 
 root_supervisor_returns_nil_when_not_registered_test() ->
     %% rootSupervisor/0 returns nil when no root supervisor has been registered.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     Self = fake_self(self()),
     ?assertEqual(nil, beamtalk_workspace_interface_primitives:dispatch(rootSupervisor, [], Self)),
     ?assertEqual(nil, beamtalk_workspace_interface_primitives:rootSupervisor()).
 
 root_supervisor_returns_registered_value_test() ->
     %% rootSupervisor/0 returns the tuple registered via beamtalk_supervisor:register_root/1.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     FakePid = self(),
     SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', FakePid},
     beamtalk_supervisor:register_root(SupTuple),
@@ -489,7 +531,11 @@ root_supervisor_returns_registered_value_test() ->
         SupTuple, beamtalk_workspace_interface_primitives:dispatch(rootSupervisor, [], Self)
     ),
     ?assertEqual(SupTuple, beamtalk_workspace_interface_primitives:rootSupervisor()),
-    catch ets:delete(beamtalk_root_supervisor).
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end).
 
 %%====================================================================
 %% sync Tests (BT-1723)

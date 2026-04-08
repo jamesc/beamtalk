@@ -1,23 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_class_dispatch (BT-1085).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Coverage target: ≥ 60% of beamtalk_class_dispatch.erl.
-%%%
-%%% Test groups:
-%%%
-%%%   1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
-%%%   2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
-%%%   3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
-%%%   4. unwrap_class_call/1 — ok and error paths
-%%%   5. undef classification — module_not_loaded vs method_not_found (BT-999)
-%%%   6. class_send/3 — undefined class, unknown selector, new/spawn
-%%%   7. class_name_from_pid/1 — via registered/unregistered processes
-
 -module(beamtalk_class_dispatch_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_class_dispatch (BT-1085).
+
+Coverage target: ≥ 60% of beamtalk_class_dispatch.erl.
+
+Test groups:
+
+  1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
+  2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
+  3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
+  4. unwrap_class_call/1 — ok and error paths
+  5. undef classification — module_not_loaded vs method_not_found (BT-999)
+  6. class_send/3 — undefined class, unknown selector, new/spawn
+  7. class_name_from_pid/1 — via registered/unregistered processes
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -43,7 +45,13 @@ setup_minimal() ->
 
 teardown_pids(Pids) ->
     lists:foreach(
-        fun(Pid) -> catch gen_server:stop(Pid, normal, 5000) end,
+        fun(Pid) ->
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end
+        end,
         Pids
     ).
 
@@ -427,7 +435,11 @@ test_module_not_loaded() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(Hint, atom_to_binary(ClassName, utf8)) =/= nomatch)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% When the module IS loaded but the class method function is absent,
@@ -446,7 +458,11 @@ test_method_not_found() ->
             binary:match(Hint, atom_to_binary(?TEST_SELECTOR, utf8)) =/= nomatch
         )
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -485,7 +501,11 @@ test_class_send_new() ->
         %% Clean up the spawned actor process to prevent cross-test leakage.
         case Result of
             #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
-                catch gen_server:stop(ActorPid, normal, 5000);
+                (try
+                    gen_server:stop(ActorPid, normal, 5000)
+                catch
+                    _:_ -> ok
+                end);
             _ ->
                 ok
         end
@@ -515,7 +535,11 @@ test_class_send_user_method() ->
         Result = beamtalk_class_dispatch:class_send(Pid, testSuccess, []),
         ?assertEqual(test_success_result, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================
@@ -543,6 +567,7 @@ class_name_from_pid_test_() ->
 %% strips the prefix and returns <ClassName> as the class atom.
 test_class_name_from_registered_pid() ->
     ClassName = 'BT1085NameTestPid',
+    % elp:fixme W0023 intentional atom creation
     RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)),
     register(RegName, self()),
     try
@@ -637,8 +662,16 @@ test_chain_finds_parent_method() ->
         Result = gen_server:call(ChildPid, {class_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        (try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end),
+        (try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% Selector not found in any ancestor → {error, not_found}.
@@ -655,7 +688,11 @@ test_chain_not_found_anywhere() ->
         Result = gen_server:call(Pid, {class_method_call, completelyAbsentSelector, []}),
         ?assertEqual({error, not_found}, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %% The ?MAX_HIERARCHY_DEPTH guard terminates runaway chain walks gracefully.
@@ -669,10 +706,12 @@ test_chain_depth_limit() ->
     %% Build a 22-process chain; the 22nd class's superclass is a phantom name
     %% (not started) so the depth guard fires before any lookup attempt on it.
     N = 21,
+    % elp:fixme W0023 intentional atom creation
     Names = [
         list_to_atom("BT1085Depth" ++ integer_to_list(I))
      || I <- lists:seq(0, N)
     ],
+    % elp:fixme W0023 intentional atom creation
     PhantomName = list_to_atom("BT1085Depth" ++ integer_to_list(N + 1)),
     Pids = lists:map(
         fun(I) ->
@@ -739,7 +778,11 @@ test_metaclass_method_found() ->
         Result = gen_server:call(Pid, {metaclass_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 %%% ============================================================================

@@ -396,7 +396,7 @@ mod tests {
             "apply",
             1,
             vec![param("fun", "Block")],
-            InferredType::Dynamic(DynamicReason::UntypedFfi),
+            InferredType::Dynamic(DynamicReason::DynamicSpec),
         );
         assert_eq!(format_signature(&s), "apply: fun :: Block -> Dynamic");
     }

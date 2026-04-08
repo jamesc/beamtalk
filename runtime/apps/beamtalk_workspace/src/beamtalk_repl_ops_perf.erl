@@ -1,29 +1,30 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for tracing and performance operations (ADR 0069 Phase 4).
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Provides REPL protocol ops for the MCP tracing workflow:
-%%% - enable-tracing: start trace event capture
-%%% - disable-tracing: stop trace event capture
-%%% - get-traces: query trace events with filtering
-%%% - actor-stats: query aggregate actor statistics
-%%% - export-traces: export trace events to a JSON file
-%%%
-%%% Delegates to beamtalk_tracing which wraps beamtalk_trace_store.
-%%% @see beamtalk_tracing
-%%% @see docs/ADR/0069-actor-observability-and-tracing.md
-
 -module(beamtalk_repl_ops_perf).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
+%%% **DDD Context:** REPL Session Context
 
+-moduledoc """
+Op handlers for tracing and performance operations (ADR 0069 Phase 4).
+
+Provides REPL protocol ops for the MCP tracing workflow:
+- enable-tracing: start trace event capture
+- disable-tracing: stop trace event capture
+- get-traces: query trace events with filtering
+- actor-stats: query aggregate actor statistics
+- export-traces: export trace events to a JSON file
+
+Delegates to beamtalk_tracing which wraps beamtalk_trace_store.
+
+See also: beamtalk_tracing
+See also: docs/ADR/0069-actor-observability-and-tracing.md
+""".
+
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -export([handle/4, describe_ops/0]).
 
-%% @doc Handle enable-tracing, get-traces, actor-stats, and export-traces ops.
+-doc "Handle enable-tracing, get-traces, actor-stats, and export-traces ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"enable-tracing">>, _Params, Msg, _SessionPid) ->
     beamtalk_tracing:enable(),
@@ -77,8 +78,10 @@ handle(<<"export-traces">>, Params, Msg, _SessionPid) ->
 
 %%% Internal helpers
 
-%% @private Build export options map from REPL params.
-%% Reuses build_trace_filter_opts for filter params, adds path and limit.
+-doc """
+Build export options map from REPL params.
+Reuses build_trace_filter_opts for filter params, adds path and limit.
+""".
 -spec build_export_opts(map()) -> map().
 build_export_opts(Params) ->
     FilterOpts = build_trace_filter_opts(Params),
@@ -93,8 +96,10 @@ build_export_opts(Params) ->
         _ -> Opts1
     end.
 
-%% @private Build trace filter opts map from REPL protocol params.
-%% Supports: actor, selector, class, outcome, min_duration_ns.
+-doc """
+Build trace filter opts map from REPL protocol params.
+Supports: actor, selector, class, outcome, min_duration_ns.
+""".
 -spec build_trace_filter_opts(map()) -> map().
 build_trace_filter_opts(Params) ->
     Opts0 = #{},
@@ -134,7 +139,7 @@ build_trace_filter_opts(Params) ->
             })
     end.
 
-%% @private Get stats with optional actor filter.
+-doc "Get stats with optional actor filter.".
 -spec get_stats(binary() | undefined) -> map().
 get_stats(undefined) ->
     beamtalk_tracing:stats();
@@ -142,7 +147,7 @@ get_stats(ActorBin) ->
     Pid = parse_pid(ActorBin),
     beamtalk_tracing:statsFor(Pid).
 
-%% @private Apply optional limit to trace results.
+-doc "Apply optional limit to trace results.".
 -spec apply_limit([map()], integer() | undefined) -> [map()].
 apply_limit(Traces, undefined) ->
     Traces;
@@ -151,8 +156,10 @@ apply_limit(Traces, Limit) when is_integer(Limit), Limit > 0 ->
 apply_limit(Traces, _) ->
     Traces.
 
-%% @private Parse a PID string (e.g. <<"<0.123.0>">>) to an Erlang pid.
-%% Raises a structured beamtalk_error on invalid input.
+-doc """
+Parse a PID string (e.g. <<"<0.123.0>">>) to an Erlang pid.
+Raises a structured beamtalk_error on invalid input.
+""".
 -spec parse_pid(binary()) -> pid().
 parse_pid(PidBin) when is_binary(PidBin) ->
     try
@@ -170,9 +177,11 @@ parse_pid(PidBin) when is_binary(PidBin) ->
             })
     end.
 
-%% @private Parse a selector binary to an existing atom.
-%% Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
-%% Raises a structured beamtalk_error if the selector is unknown.
+-doc """
+Parse a selector binary to an existing atom.
+Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
+Raises a structured beamtalk_error if the selector is unknown.
+""".
 -spec parse_selector(binary()) -> atom().
 parse_selector(SelectorBin) ->
     try
@@ -190,9 +199,11 @@ parse_selector(SelectorBin) ->
             })
     end.
 
-%% @private Parse a class filter binary to an existing atom.
-%% Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
-%% Raises a structured beamtalk_error if the class name is unknown.
+-doc """
+Parse a class filter binary to an existing atom.
+Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
+Raises a structured beamtalk_error if the class name is unknown.
+""".
 -spec parse_class(binary()) -> atom().
 parse_class(ClassBin) ->
     try
@@ -210,9 +221,11 @@ parse_class(ClassBin) ->
             })
     end.
 
-%% @private Parse an outcome filter binary to one of the valid outcome atoms.
-%% Valid outcomes: ok, error, timeout.
-%% Raises a structured beamtalk_error for invalid values.
+-doc """
+Parse an outcome filter binary to one of the valid outcome atoms.
+Valid outcomes: ok, error, timeout.
+Raises a structured beamtalk_error for invalid values.
+""".
 -spec parse_outcome(binary()) -> ok | error | timeout.
 parse_outcome(<<"ok">>) ->
     ok;
@@ -235,7 +248,7 @@ parse_outcome(OutcomeBin) ->
 %% Op descriptors for dynamic describe
 %%====================================================================
 
-%% @doc Return op descriptors for the tracing/performance operations.
+-doc "Return op descriptors for the tracing/performance operations.".
 -spec describe_ops() -> map().
 describe_ops() ->
     #{

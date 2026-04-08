@@ -1,23 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_subprocess gen_server (ADR 0051, Phase 4a+4b).
-%%%
-%%% **DDD Context:** runtime
-%%%
-%%% Tests cover:
-%%% - writeLine: writes data to subprocess stdin and returns nil
-%%% - readLine: blocks until data arrives and returns the line
-%%% - readLine: returns nil at EOF (subprocess exited, buffer drained)
-%%% - readLine: timeout returns nil when no data arrives within the deadline
-%%% - exitCode: returns nil while the subprocess is running
-%%% - exitCode: returns the exit code integer after the subprocess exits
-%%% - close: terminates the subprocess and marks the port closed
-%%% - readStderrLine: blocks until stderr data arrives, returns nil at EOF
-%%% - readStderrLine: stdout and stderr buffers are independent
-%%% - lines: Stream yields correct sequence of stdout lines
-
 -module(beamtalk_subprocess_tests).
+
+%%% **DDD Context:** runtime
+
+-moduledoc """
+EUnit tests for beamtalk_subprocess gen_server (ADR 0051, Phase 4a+4b).
+
+Tests cover:
+- writeLine: writes data to subprocess stdin and returns nil
+- readLine: blocks until data arrives and returns the line
+- readLine: returns nil at EOF (subprocess exited, buffer drained)
+- readLine: timeout returns nil when no data arrives within the deadline
+- exitCode: returns nil while the subprocess is running
+- exitCode: returns the exit code integer after the subprocess exits
+- close: terminates the subprocess and marks the port closed
+- readStderrLine: blocks until stderr data arrives, returns nil at EOF
+- readStderrLine: stdout and stderr buffers are independent
+- lines: Stream yields correct sequence of stdout lines
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -25,72 +27,74 @@
 %%% Cross-platform command helpers
 %%% ============================================================================
 
-%% @private Return {Executable, Args} for echo that outputs Text and exits.
+-doc "Return {Executable, Args} for echo that outputs Text and exits.".
 echo_cmd(Text) ->
     case os:type() of
         {unix, _} -> {<<"/bin/echo">>, [Text]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"echo ", Text/binary>>]}
     end.
 
-%% @private Return {Executable, Args} for a shell command.
+-doc "Return {Executable, Args} for a shell command.".
 shell_cmd(Script) ->
     case os:type() of
         {unix, _} -> {<<"/bin/sh">>, [<<"-c">>, Script]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, Script]}
     end.
 
-%% @private Return {Executable, Args} for a long-running process with no stdout.
+-doc "Return {Executable, Args} for a long-running process with no stdout.".
 sleep_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/bin/sleep">>, [<<"60">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"ping -n 60 127.0.0.1 >nul">>]}
     end.
 
-%% @private Return {Executable, Args} for a process that exits immediately with 0.
+-doc "Return {Executable, Args} for a process that exits immediately with 0.".
 true_cmd() ->
     case os:type() of
         {unix, _} -> {<<"/usr/bin/env">>, [<<"true">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 0">>]}
     end.
 
-%% @private Return platform-appropriate shell script for stderr output.
+-doc "Return platform-appropriate shell script for stderr output.".
 stderr_echo_script() ->
     case os:type() of
         {unix, _} -> <<"echo err >&2">>;
         {win32, _} -> <<"echo err>&2">>
     end.
 
-%% @private Return platform-appropriate shell script for combined stdout+stderr.
+-doc "Return platform-appropriate shell script for combined stdout+stderr.".
 stdout_stderr_script() ->
     case os:type() of
         {unix, _} -> <<"echo out; echo err >&2">>;
         {win32, _} -> <<"echo out& echo err>&2">>
     end.
 
-%% @private Return platform-appropriate shell script for multi-line stdout.
+-doc "Return platform-appropriate shell script for multi-line stdout.".
 multiline_script() ->
     case os:type() of
         {unix, _} -> <<"printf 'alpha\\nbeta\\ngamma\\n'">>;
         {win32, _} -> <<"(echo alpha& echo beta& echo gamma)">>
     end.
 
-%% @private Return platform-appropriate shell script for partial line (no newline).
+-doc "Return platform-appropriate shell script for partial line (no newline).".
 partial_line_script() ->
     case os:type() of
         {unix, _} -> <<"printf hello">>;
         {win32, _} -> <<"<nul set /p =hello">>
     end.
 
-%% @private Return platform-appropriate shell script for multi-line stderr.
+-doc "Return platform-appropriate shell script for multi-line stderr.".
 multiline_stderr_script() ->
     case os:type() of
         {unix, _} -> <<"printf 'a\\nb\\nc\\n' >&2">>;
         {win32, _} -> <<"(echo a& echo b& echo c)>&2">>
     end.
 
-%% @private Return {Executable, Args} for a process that echoes stdin to stdout.
-%% On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
-%% mode that explicitly flushes stdout, bypassing pipe buffering).
+-doc """
+Return {Executable, Args} for a process that echoes stdin to stdout.
+On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
+mode that explicitly flushes stdout, bypassing pipe buffering).
+""".
 cat_cmd() ->
     case os:type() of
         {unix, _} ->

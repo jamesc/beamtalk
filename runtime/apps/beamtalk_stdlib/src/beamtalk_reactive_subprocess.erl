@@ -1,57 +1,59 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc OTP gen_server for push-mode subprocess delivery (BT-1187).
-%%%
-%%% **DDD Context:** Actor System Context
-%%%
-%%% Each `beamtalk_reactive_subprocess` process owns one port to the
-%%% `beamtalk_exec` Rust helper binary and manages exactly one child subprocess
-%%% (ChildId = 0).
-%%%
-%%% Unlike `beamtalk_subprocess` (pull model), this gen_server casts each
-%%% stdout/stderr line to a registered `notify` actor as data arrives.
-%%% The gen_server never blocks waiting for callers; it has no buffer queues and
-%%% no deferred-reply slots.
-%%%
-%%% == State Map ==
-%%%
-%%% ```erlang
-%%% #{
-%%%   port           => port(),
-%%%   child_id       => 0,
-%%%   notify         => #beamtalk_object{},   % SubprocessDelegate actor
-%%%   self_ref       => #beamtalk_object{},   % this gen_server as a Beamtalk object
-%%%   stdout_pending => binary(),             % partial line fragment
-%%%   stderr_pending => binary(),             % partial line fragment
-%%%   exit_code      => nil | non_neg_integer(),
-%%%   port_closed    => boolean()
-%%% }
-%%% ```
-%%%
-%%% == SubprocessDelegate Protocol ==
-%%%
-%%% The `notify` actor must implement:
-%%% * `subprocessLine:from:` — called for each stdout line
-%%% * `subprocessStderrLine:from:` — called for each stderr line
-%%% * `subprocessExit:from:` — called when the subprocess exits
-%%%
-%%% == Selectors ==
-%%%
-%%% * `{'writeLine:', [Data]}` — append newline and write to subprocess stdin
-%%% * `{exitCode, []}` — returns nil while running, integer after exit
-%%% * `{close, []}` — send kill command to helper, close port
-%%%
-%%% `readLine`, `lines`, `stderrLines`, `readStderrLine` are absent by design
-%%% (DNU enforced structurally — no methods = no runtime guard needed).
-%%%
-%%% == References ==
-%%%
-%%% * BT-1187 — ReactiveSubprocess feature
-%%% * ADR 0051 "Subprocess Execution" — push tier design
-
 -module(beamtalk_reactive_subprocess).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Actor System Context
+
+-moduledoc """
+OTP gen_server for push-mode subprocess delivery (BT-1187).
+
+Each `beamtalk_reactive_subprocess` process owns one port to the
+`beamtalk_exec` Rust helper binary and manages exactly one child subprocess
+(ChildId = 0).
+
+Unlike `beamtalk_subprocess` (pull model), this gen_server casts each
+stdout/stderr line to a registered `notify` actor as data arrives.
+The gen_server never blocks waiting for callers; it has no buffer queues and
+no deferred-reply slots.
+
+== State Map ==
+
+```erlang
+#{
+  port           => port(),
+  child_id       => 0,
+  notify         => #beamtalk_object{},   % SubprocessDelegate actor
+  self_ref       => #beamtalk_object{},   % this gen_server as a Beamtalk object
+  stdout_pending => binary(),             % partial line fragment
+  stderr_pending => binary(),             % partial line fragment
+  exit_code      => nil | non_neg_integer(),
+  port_closed    => boolean()
+}
+```
+
+== SubprocessDelegate Protocol ==
+
+The `notify` actor must implement:
+* `subprocessLine:from:` — called for each stdout line
+* `subprocessStderrLine:from:` — called for each stderr line
+* `subprocessExit:from:` — called when the subprocess exits
+
+== Selectors ==
+
+* `{'writeLine:', [Data]}` — append newline and write to subprocess stdin
+* `{exitCode, []}` — returns nil while running, integer after exit
+* `{close, []}` — send kill command to helper, close port
+
+`readLine`, `lines`, `stderrLines`, `readStderrLine` are absent by design
+(DNU enforced structurally — no methods = no runtime guard needed).
+
+== References ==
+
+* BT-1187 — ReactiveSubprocess feature
+* ADR 0051 "Subprocess Execution" — push tier design
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -87,11 +89,13 @@
 %%% Class-side @primitive dispatch
 %%% ============================================================================
 
-%% @doc Dispatch a class-side @primitive method call for ReactiveSubprocess.
-%%
-%% Called by the compiled `bt@stdlib@reactive_subprocess:dispatch/3` for
-%% class-side `@primitive` annotations: `open:args:notify:` and
-%% `open:args:env:dir:notify:`.
+-doc """
+Dispatch a class-side @primitive method call for ReactiveSubprocess.
+
+Called by the compiled `bt@stdlib@reactive_subprocess:dispatch/3` for
+class-side `@primitive` annotations: `open:args:notify:` and
+`open:args:env:dir:notify:`.
+""".
 -spec dispatch(atom(), list(), term()) -> term().
 
 dispatch('open:args:notify:', [Command, Args, Notify], _ClassSelf) when
@@ -134,10 +138,12 @@ dispatch(Selector, _Args, _Self) ->
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     beamtalk_error:raise(Err1).
 
-%% @private Start a supervised beamtalk_reactive_subprocess gen_server.
-%%
-%% Returns `Result ok: subprocessObject` on success, `Result error:` if the
-%% process cannot be started (e.g. binary not found, permission denied).
+-doc """
+Start a supervised beamtalk_reactive_subprocess gen_server.
+
+Returns `Result ok: subprocessObject` on success, `Result error:` if the
+process cannot be started (e.g. binary not found, permission denied).
+""".
 -spec start_subprocess(map(), atom()) -> beamtalk_result:t().
 start_subprocess(Config, Selector) ->
     case beamtalk_reactive_subprocess_sup:start_child(Config) of
@@ -162,16 +168,18 @@ start_subprocess(Config, Selector) ->
 %%% Public API
 %%% ============================================================================
 
-%% @doc Start a linked reactive subprocess gen_server.
-%%
-%% Config must contain `executable` (binary path or name on PATH) and
-%% `notify` (#beamtalk_object{}).
-%% Optional keys: `args` ([binary()]), `env` (#{binary() => binary()}), `dir` (binary()).
+-doc """
+Start a linked reactive subprocess gen_server.
+
+Config must contain `executable` (binary path or name on PATH) and
+`notify` (#beamtalk_object{}).
+Optional keys: `args` ([binary()]), `env` (#{binary() => binary()}), `dir` (binary()).
+""".
 -spec start_link(config()) -> {ok, pid()} | {error, term()}.
 start_link(Config) ->
     gen_server:start_link(?MODULE, Config, []).
 
-%% @doc Start an unlinked reactive subprocess gen_server (useful in tests).
+-doc "Start an unlinked reactive subprocess gen_server (useful in tests).".
 -spec start(config()) -> {ok, pid()} | {error, term()}.
 start(Config) ->
     gen_server:start(?MODULE, Config, []).
@@ -180,7 +188,7 @@ start(Config) ->
 %%% gen_server callbacks
 %%% ============================================================================
 
-%% @doc Open the exec port, spawn the child subprocess, and store self-reference.
+-doc "Open the exec port, spawn the child subprocess, and store self-reference.".
 -spec init(config()) -> {ok, map()} | {stop, term()}.
 init(Config) ->
     Executable = maps:get(executable, Config),
@@ -208,7 +216,7 @@ init(Config) ->
     },
     {ok, State}.
 
-%% @doc Dispatch sync calls.
+-doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
 %% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
@@ -239,12 +247,12 @@ handle_call(Msg, _From, State) ->
         end,
     {reply, {error, Err1}, State}.
 
-%% @doc Ignore casts.
+-doc "Ignore casts.".
 -spec handle_cast(term(), map()) -> {noreply, map()}.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @doc Handle port data and port exit.
+-doc "Handle port data and port exit.".
 -spec handle_info(term(), map()) -> {noreply, map()}.
 handle_info({Port, {data, _Packet}}, #{port := Port, port_closed := true} = State) ->
     %% Port was closed — discard any queued data arriving after close.
@@ -260,7 +268,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             %% Flush pending partial lines, then notify the delegate.
             S0 = push_pending(stdout, State),
             S1 = push_pending(stderr, S0),
-            catch beamtalk_subprocess_port:close(Port),
+            (try
+                beamtalk_subprocess_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             NewState = S1#{exit_code => Code, port_closed => true},
             cast_notify(NewState, 'subprocessExit:from:', [Code]),
             {noreply, NewState};
@@ -281,12 +293,12 @@ handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
 handle_info(_Msg, State) ->
     {noreply, State}.
 
-%% @doc No-op hot reload.
+-doc "No-op hot reload.".
 -spec code_change(term(), map(), term()) -> {ok, map()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% @doc Clean up the port and child when the gen_server stops.
+-doc "Clean up the port and child when the gen_server stops.".
 -spec terminate(term(), map()) -> ok.
 terminate(_Reason, State) ->
     case maps:get(port_closed, State, false) of
@@ -295,8 +307,16 @@ terminate(_Reason, State) ->
         false ->
             Port = maps:get(port, State),
             ChildId = maps:get(child_id, State),
-            catch beamtalk_subprocess_port:kill_child(Port, ChildId),
-            catch beamtalk_subprocess_port:close(Port),
+            (try
+                beamtalk_subprocess_port:kill_child(Port, ChildId)
+            catch
+                _:_ -> ok
+            end),
+            (try
+                beamtalk_subprocess_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             ok
     end.
 
@@ -304,7 +324,7 @@ terminate(_Reason, State) ->
 %%% Internal handlers
 %%% ============================================================================
 
-%% @private Write Data + newline to subprocess stdin.
+-doc "Write Data + newline to subprocess stdin.".
 -spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
@@ -333,7 +353,7 @@ handle_writeLine(Data, State) ->
             end
     end.
 
-%% @private Kill subprocess and close the exec port.
+-doc "Kill subprocess and close the exec port.".
 -spec handle_close(map()) -> {reply, nil, map()}.
 handle_close(State) ->
     case maps:get(port_closed, State, false) of
@@ -341,8 +361,16 @@ handle_close(State) ->
             {reply, nil, State};
         false ->
             #{port := Port, child_id := ChildId} = State,
-            catch beamtalk_subprocess_port:kill_child(Port, ChildId),
-            catch beamtalk_subprocess_port:close(Port),
+            (try
+                beamtalk_subprocess_port:kill_child(Port, ChildId)
+            catch
+                _:_ -> ok
+            end),
+            (try
+                beamtalk_subprocess_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             {reply, nil, State#{port_closed => true}}
     end.
 
@@ -350,10 +378,12 @@ handle_close(State) ->
 %%% Internal helpers
 %%% ============================================================================
 
-%% @private Push complete lines from Data to the notify actor.
-%%
-%% Combines the pending fragment with new data, splits on newlines, and casts
-%% each complete line to the notify actor. Stores the remainder as new pending.
+-doc """
+Push complete lines from Data to the notify actor.
+
+Combines the pending fragment with new data, splits on newlines, and casts
+each complete line to the notify actor. Stores the remainder as new pending.
+""".
 -spec push_lines(stdout | stderr, binary(), map()) -> {noreply, map()}.
 push_lines(stdout, Data, #{stdout_pending := Pending} = State) ->
     {Lines, Remainder} = beamtalk_subprocess_port:flush_and_collect(Pending, Data),
@@ -370,9 +400,11 @@ push_lines(stderr, Data, #{stderr_pending := Pending} = State) ->
     ),
     {noreply, State#{stderr_pending => Remainder}}.
 
-%% @private Flush any pending partial line and push it to the notify actor.
-%%
-%% Called on subprocess exit: the final output may not end with a newline.
+-doc """
+Flush any pending partial line and push it to the notify actor.
+
+Called on subprocess exit: the final output may not end with a newline.
+""".
 -spec push_pending(stdout | stderr, map()) -> map().
 push_pending(stdout, #{stdout_pending := <<>>} = State) ->
     State;
@@ -385,10 +417,12 @@ push_pending(stderr, #{stderr_pending := Partial} = State) ->
     cast_notify(State, 'subprocessStderrLine:from:', [Partial]),
     State#{stderr_pending => <<>>}.
 
-%% @private Cast a message to the notify actor.
-%%
-%% Appends self_ref as the `from:` argument so the delegate knows which
-%% ReactiveSubprocess sent the event.
+-doc """
+Cast a message to the notify actor.
+
+Appends self_ref as the `from:` argument so the delegate knows which
+ReactiveSubprocess sent the event.
+""".
 -spec cast_notify(map(), atom(), list()) -> ok.
 cast_notify(#{notify := Notify, self_ref := SelfRef}, Selector, Args) ->
     NotifyPid = Notify#beamtalk_object.pid,

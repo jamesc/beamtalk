@@ -2,13 +2,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** REPL Session Context
 
-%%% @doc Unit tests for beamtalk_repl_server module
-%%%
-%%% Tests TCP client handling, JSON protocol parsing, and server-side
-%%% request/response behaviour. Formatting tests live in
-%%% beamtalk_repl_json_tests.
-
 -module(beamtalk_repl_server_tests).
+
+-moduledoc """
+Unit tests for beamtalk_repl_server module
+
+Tests TCP client handling, JSON protocol parsing, and server-side
+request/response behaviour. Formatting tests live in
+beamtalk_repl_json_tests.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -1624,7 +1626,11 @@ session_table_undefined_returns_default_test() ->
 %% ETS table does not exist → catch returns default without crashing
 session_table_no_ets_table_returns_default_test() ->
     %% Ensure the named table does not exist for this test
-    catch ets:delete(beamtalk_sessions),
+    (try
+        ets:delete(beamtalk_sessions)
+    catch
+        _:_ -> ok
+    end),
     Default = self(),
     %% resolve_pid/2 catches all errors and falls back to Default
     Result = beamtalk_session_table:resolve_pid(<<"no-such-session">>, Default),
@@ -2098,7 +2104,11 @@ mock_class_loop(InstanceMethods, ClassMethods) ->
 
 cleanup_mock_class(Name, Pid) ->
     RegName = beamtalk_class_registry:registry_name(Name),
-    catch erlang:unregister(RegName),
+    (try
+        erlang:unregister(RegName)
+    catch
+        _:_ -> ok
+    end),
     Pid ! stop.
 
 %% Helper: spawn a mock class that supports return-type lookups for chain resolution (BT-1006).
@@ -2164,6 +2174,7 @@ resolve_module_atoms_explicit_test() ->
 
 resolve_module_atoms_from_classes_test() ->
     %% Module name must exist as an atom
+    % elp:fixme W0023 intentional atom creation
     _ = list_to_atom("erlang"),
     Classes = [#{name => "erlang"}],
     Result = beamtalk_repl_server:resolve_module_atoms(undefined, Classes),
@@ -2178,6 +2189,7 @@ resolve_module_atoms_unknown_class_test() ->
 
 resolve_module_atoms_binary_name_test() ->
     %% Test with binary class name (covers lines 917-920)
+    % elp:fixme W0023 intentional atom creation
     _ = list_to_atom("erlang"),
     Classes = [#{name => <<"erlang">>}],
     Result = beamtalk_repl_server:resolve_module_atoms(undefined, Classes),
@@ -2465,7 +2477,11 @@ handle_op_inspect_live_tagged_actor_test() ->
             ok;
         Old ->
             Ref = erlang:monitor(process, Old),
-            catch gen_server:stop(Old),
+            (try
+                gen_server:stop(Old)
+            catch
+                _:_ -> ok
+            end),
             receive
                 {'DOWN', Ref, process, Old, _} -> ok
             after 1000 ->
@@ -2492,8 +2508,16 @@ handle_op_inspect_live_tagged_actor_test() ->
         ?assertNot(maps:is_key(<<"$beamtalk_class">>, State)),
         ?assertNot(maps:is_key(<<"__methods__">>, State))
     after
-        catch gen_server:stop(ActorPid),
-        catch gen_server:stop(RegistryPid)
+        (try
+            gen_server:stop(ActorPid)
+        catch
+            _:_ -> ok
+        end),
+        (try
+            gen_server:stop(RegistryPid)
+        catch
+            _:_ -> ok
+        end)
     end.
 
 handle_op_kill_invalid_pid_test() ->

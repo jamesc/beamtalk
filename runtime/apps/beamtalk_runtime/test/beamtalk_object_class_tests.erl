@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_object_class module.
-%%%
-%%% Tests class-side method dispatch, metaclass lookup, and class object behaviour.
-
 -module(beamtalk_object_class_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_object_class module.
+
+Tests class-side method dispatch, metaclass lookup, and class object behaviour.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -1403,11 +1405,13 @@ multi_class_stdlib_shadowing_short_circuits_test_() ->
 %% BT-755: class method self-call (new/new: on own class)
 %%====================================================================
 
-%% @doc Verify class_send raises a clean instantiation_error when ClassPid =:= self().
-%%
-%% BT-755: A class method calling new: on its own class would deadlock the
-%% gen_server with a {calling_self,...} OTP error.  The guard added in
-%% beamtalk_class_dispatch detects this upfront and raises a structured error.
+-doc """
+Verify class_send raises a clean instantiation_error when ClassPid =:= self().
+
+BT-755: A class method calling new: on its own class would deadlock the
+gen_server with a {calling_self,...} OTP error.  The guard added in
+beamtalk_class_dispatch detects this upfront and raises a structured error.
+""".
 class_method_self_call_new_colon_test() ->
     %% Use self() as ClassPid — triggers the ClassPid =:= self() guard.
     ?assertError(
@@ -1445,13 +1449,16 @@ class_method_self_call_spawn_with_test() ->
         beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
     ).
 
-%% @doc Verify the error contains the class name extracted from the registered pid name.
-%%
-%% BT-755: class_name_from_pid/1 strips 'beamtalk_class_' from the registered
-%% name to populate the error's class field. Exercise the full error path by
-%% spawning a process registered as a class and calling class_send on self().
+-doc """
+Verify the error contains the class name extracted from the registered pid name.
+
+BT-755: class_name_from_pid/1 strips 'beamtalk_class_' from the registered
+name to populate the error's class field. Exercise the full error path by
+spawning a process registered as a class and calling class_send on self().
+""".
 class_method_self_call_class_name_in_error_test() ->
     TestClassName = 'SelfCallNameTestClass',
+    % elp:fixme W0023 intentional atom creation
     RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(TestClassName)),
     Parent = self(),
     spawn(fun() ->

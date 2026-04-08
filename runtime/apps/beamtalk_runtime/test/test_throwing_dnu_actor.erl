@@ -1,10 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor with throwing doesNotUnderstand handler
-
 -module(test_throwing_dnu_actor).
 -behaviour(gen_server).
+
+-moduledoc "Test actor with throwing doesNotUnderstand handler".
 
 %% API
 -export([start_link/0]).

@@ -1,29 +1,31 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc StackFrame wrapper for post-exception introspection (BT-107).
-%%%
-%%% Converts Erlang stacktrace entries into first-class Beamtalk StackFrame
-%%% value objects (tagged maps). Erlang stacktrace entries have the form:
-%%%   {Module, Function, ArityOrArgs, Location}
-%%% where Location is [{file, File}, {line, Line}] or [].
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% StackFrame objects are value types (tagged maps) with fields:
-%%% ```
-%%% #{
-%%%   '$beamtalk_class' => 'StackFrame',
-%%%   module => atom(),          % Erlang module name
-%%%   function => atom(),        % Erlang function name
-%%%   arity => non_neg_integer(),% Function arity
-%%%   file => binary() | nil,    % Source file path
-%%%   line => non_neg_integer() | nil, % Source line number
-%%%   class_name => atom() | nil % Beamtalk class name (if mappable)
-%%% }
-%%% ```
-
 -module(beamtalk_stack_frame).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+StackFrame wrapper for post-exception introspection (BT-107).
+
+Converts Erlang stacktrace entries into first-class Beamtalk StackFrame
+value objects (tagged maps). Erlang stacktrace entries have the form:
+  {Module, Function, ArityOrArgs, Location}
+where Location is [{file, File}, {line, Line}] or [].
+
+StackFrame objects are value types (tagged maps) with fields:
+```
+#{
+  '$beamtalk_class' => 'StackFrame',
+  module => atom(),          % Erlang module name
+  function => atom(),        % Erlang function name
+  arity => non_neg_integer(),% Function arity
+  file => binary() | nil,    % Source file path
+  line => non_neg_integer() | nil, % Source line number
+  class_name => atom() | nil % Beamtalk class name (if mappable)
+}
+```
+""".
 
 -export([
     wrap/1,
@@ -32,15 +34,14 @@
     module_to_class/1
 ]).
 
-%% @doc Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.
+-doc "Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.".
 -spec wrap(list()) -> list().
 wrap(Stacktrace) when is_list(Stacktrace) ->
     [wrap_frame(Frame) || Frame <- Stacktrace];
 wrap(_) ->
     [].
 
-%% @private
-%% @doc Convert a single Erlang stacktrace entry to a StackFrame tagged map.
+-doc "Convert a single Erlang stacktrace entry to a StackFrame tagged map.".
 -spec wrap_frame(tuple()) -> map().
 wrap_frame({Module, Function, ArityOrArgs, Location}) ->
     Arity =
@@ -79,14 +80,16 @@ wrap_frame(_Other) ->
         class_name => nil
     }.
 
-%% @doc Map Erlang module name to Beamtalk class name.
-%%
-%% Handles compiled module naming conventions:
-%%   - 'counter' → 'Counter' (user classes)
-%%   - 'bt@stdlib@integer' → 'Integer' (stdlib classes)
-%%   - 'bt@integer' → 'Integer' (stdlib alt format)
-%%   - 'beamtalk_integer' → 'Integer' (runtime primitives)
-%%   - Other modules → nil (not a Beamtalk class)
+-doc """
+Map Erlang module name to Beamtalk class name.
+
+Handles compiled module naming conventions:
+  - 'counter' → 'Counter' (user classes)
+  - 'bt@stdlib@integer' → 'Integer' (stdlib classes)
+  - 'bt@integer' → 'Integer' (stdlib alt format)
+  - 'beamtalk_integer' → 'Integer' (runtime primitives)
+  - Other modules → nil (not a Beamtalk class)
+""".
 -spec module_to_class(atom()) -> atom() | 'nil'.
 module_to_class(Module) when is_atom(Module) ->
     ModStr = atom_to_list(Module),
@@ -116,10 +119,11 @@ module_to_class(Module) when is_atom(Module) ->
 module_to_class(_) ->
     nil.
 
-%% @private
-%% @doc Convert snake_case module name to CamelCase class name atom.
-%%
-%% Uses list_to_existing_atom to avoid atom table growth from arbitrary module names.
+-doc """
+Convert snake_case module name to CamelCase class name atom.
+
+Uses list_to_existing_atom to avoid atom table growth from arbitrary module names.
+""".
 -spec snake_to_class(string()) -> atom() | 'nil'.
 snake_to_class(Snake) ->
     Words = string:split(Snake, "_", all),
@@ -130,14 +134,13 @@ snake_to_class(Snake) ->
         error:badarg -> nil
     end.
 
-%% @private
-%% @doc Capitalize first letter of a string.
+-doc "Capitalize first letter of a string.".
 -spec capitalize(string()) -> string().
 capitalize([]) -> [];
 capitalize([H | T]) when H >= $a, H =< $z -> [H - 32 | T];
 capitalize(Str) -> Str.
 
-%% @doc Dispatch a message to a StackFrame object.
+-doc "Dispatch a message to a StackFrame object.".
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch('class', [], _Frame) ->
     'StackFrame';
@@ -172,7 +175,7 @@ dispatch('file', [], #{file := File}) ->
 dispatch('printString', [], Frame) ->
     format_frame(Frame).
 
-%% @doc Check if StackFrame responds to a selector.
+-doc "Check if StackFrame responds to a selector.".
 -spec has_method(atom()) -> boolean().
 has_method('class') -> true;
 has_method('method') -> true;
@@ -185,8 +188,7 @@ has_method('file') -> true;
 has_method('printString') -> true;
 has_method(_) -> false.
 
-%% @private
-%% @doc Format a StackFrame as a human-readable string.
+-doc "Format a StackFrame as a human-readable string.".
 -spec format_frame(map()) -> binary().
 format_frame(#{
     class_name := ClassName,

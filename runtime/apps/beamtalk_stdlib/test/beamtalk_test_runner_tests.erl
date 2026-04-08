@@ -3,13 +3,16 @@
 
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_test_runner module.
-%%%
-%%% Covers path_suffix_match/2 which is the core logic for the `file`
-%%% parameter of the `test` MCP tool (BT-1234).
-
 -module(beamtalk_test_runner_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_test_runner module.
+
+Covers path_suffix_match/2 which is the core logic for the `file`
+parameter of the `test` MCP tool (BT-1234).
+""".
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% path_suffix_match/2 tests
@@ -153,6 +156,71 @@ print_string_failure_without_class_test() ->
     Str = beamtalk_test_runner:result_print_string(Result),
     ?assertNotEqual(nomatch, binary:match(Str, <<"unknown>>testX">>)),
     ?assertNotEqual(nomatch, binary:match(Str, <<"boom">>)).
+
+%%% ============================================================================
+%%% run_class/1 and run_method/2 input validation tests (BT-1927)
+%%% ============================================================================
+
+run_class_rejects_atom_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner', selector = 'run:'}},
+        beamtalk_test_runner:run_class(not_a_tuple)
+    ).
+
+run_class_rejects_integer_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_class(42)
+    ).
+
+run_class_rejects_list_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_class([1, 2, 3])
+    ).
+
+run_class_rejects_malformed_tuple_test() ->
+    %% Tuple with non-atom element 2 — should raise type_error, not badarg
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_class({beamtalk_object, 12345, mod, self()})
+    ).
+
+run_class_rejects_tuple_without_class_suffix_test() ->
+    %% Tuple with atom element 2 but no " class" suffix
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_class({beamtalk_object, 'NotAClass', mod, self()})
+    ).
+
+run_method_rejects_non_tuple_test() ->
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = type_error, class = 'TestRunner', selector = 'run:method:'
+            }
+        },
+        beamtalk_test_runner:run_method(not_a_tuple, testFoo)
+    ).
+
+run_method_rejects_list_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_method([1, 2, 3], testFoo)
+    ).
+
+run_method_rejects_non_atom_test_name_test() ->
+    %% Valid class tuple but non-atom TestName — should blame TestName, not ClassRef
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = type_error, class = 'TestRunner', selector = 'run:method:'
+            }
+        },
+        beamtalk_test_runner:run_method(
+            {beamtalk_object, 'Test class', mod, self()}, <<"not_an_atom">>
+        )
+    ).
 
 %%% ============================================================================
 %%% Helpers

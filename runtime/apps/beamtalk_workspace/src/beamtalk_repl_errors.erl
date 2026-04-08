@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Error utilities for the Beamtalk REPL.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Provides helpers for wrapping raw error terms into structured
-%%% #beamtalk_error{} records, safe atom conversion, and name formatting.
-%%% Used by protocol handlers and op modules.
-
 -module(beamtalk_repl_errors).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Error utilities for the Beamtalk REPL.
+
+Provides helpers for wrapping raw error terms into structured
+#beamtalk_error{} records, safe atom conversion, and name formatting.
+Used by protocol handlers and op modules.
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -22,7 +24,9 @@
 
 %%% Public API
 
-%% @doc Safely convert a binary to an existing atom, returning error instead of creating new atoms.
+-doc """
+Safely convert a binary to an existing atom, returning error instead of creating new atoms.
+""".
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(<<>>) ->
     {error, badarg};
@@ -35,10 +39,12 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
 safe_to_existing_atom(_) ->
     {error, badarg}.
 
-%% @doc Ensure an error reason is a structured #beamtalk_error{} record.
-%% If already structured (or a wrapped exception), passes through unchanged.
-%% Handles known bare tuple error patterns from the compile pipeline.
-%% Otherwise wraps the raw term in an internal_error.
+-doc """
+Ensure an error reason is a structured #beamtalk_error{} record.
+If already structured (or a wrapped exception), passes through unchanged.
+Handles known bare tuple error patterns from the compile pipeline.
+Otherwise wraps the raw term in an internal_error.
+""".
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err) ->
     Err;
@@ -57,6 +63,7 @@ ensure_structured_error({compile_error, [#{message := Msg} = Diag | _]}) ->
     %% BT-1235: structured diagnostic list — extract message and hint from first diagnostic
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     Err1 = beamtalk_error:with_message(Err0, Msg),
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, Diag) of
         {ok, Hint} when is_binary(Hint) -> beamtalk_error:with_hint(Err1, Hint);
         _ -> Err1
@@ -142,9 +149,11 @@ ensure_structured_error(Reason) ->
         iolist_to_binary(io_lib:format("~p", [Reason]))
     ).
 
-%% @doc Ensure an error reason is structured, with exception class context.
-%% Delegates known tuple patterns to ensure_structured_error/1 to preserve
-%% specific error kinds, only falling back to generic wrapper for unknown terms.
+-doc """
+Ensure an error reason is structured, with exception class context.
+Delegates known tuple patterns to ensure_structured_error/1 to preserve
+specific error kinds, only falling back to generic wrapper for unknown terms.
+""".
 -spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err, _Class) ->
     Err;
@@ -179,7 +188,7 @@ ensure_structured_error(Reason, Class) ->
         ])
     ).
 
-%% @doc Format a name for error messages.
+-doc "Format a name for error messages.".
 -spec format_name(term()) -> binary().
 format_name(Name) when is_atom(Name) -> atom_to_binary(Name, utf8);
 format_name(Name) when is_binary(Name) -> Name;

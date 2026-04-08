@@ -1,23 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_logger module.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests setLevel:/1 and its FFI shim. Log methods (info:, warn:, error:,
-%%% debug: and their metadata: variants) are now compiler intrinsics
-%%% (BT-1478) and tested via stdlib/test/ Beamtalk tests.
-
 -module(beamtalk_logger_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_logger module.
+
+Tests setLevel:/1 and its FFI shim. Log methods (info:, warn:, error:,
+debug: and their metadata: variants) are now compiler intrinsics
+(BT-1478) and tested via stdlib/test/ Beamtalk tests.
+""".
 
 %% Logger handler callback for log capture in tests.
 -export([log/2]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 %%% ============================================================================
 %%% setLevel:/1
 %%% ============================================================================
@@ -63,13 +63,15 @@ set_level_shim_test() ->
 %%% setLevel: deprecation warning
 %%% ============================================================================
 
-%% @doc Helper to reset the deprecation persistent_term before each test.
+-doc "Helper to reset the deprecation persistent_term before each test.".
 reset_deprecation_flag() ->
     _ = persistent_term:erase(beamtalk_logger_setlevel_deprecated),
     ok.
 
-%% @doc Install a logger handler that captures log events into the calling
-%% process's mailbox, so we can assert on warning messages.
+-doc """
+Install a logger handler that captures log events into the calling
+process's mailbox, so we can assert on warning messages.
+""".
 install_capture_handler() ->
     HandlerId = beamtalk_logger_test_capture,
     Self = self(),

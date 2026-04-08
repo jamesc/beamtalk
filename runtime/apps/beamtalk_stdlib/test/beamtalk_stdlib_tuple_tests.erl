@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_tuple module (BT-1173).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests at, as_string, do, and error paths.
-
 -module(beamtalk_stdlib_tuple_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_tuple module (BT-1173).
+
+Tests at, as_string, do, and error paths.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

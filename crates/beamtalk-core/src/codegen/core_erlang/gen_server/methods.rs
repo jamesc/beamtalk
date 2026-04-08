@@ -1737,6 +1737,13 @@ impl CoreErlangGenerator {
                 Document::Str("'undefined'")
             };
 
+            // Build doc value — propagate doc comments to runtime for protocol class objects
+            let doc_doc: Document<'static> = if let Some(ref doc) = protocol.doc_comment {
+                Document::String(Self::binary_string_literal(doc))
+            } else {
+                Document::Str("'none'")
+            };
+
             parts.push(docvec![
                 "\nlet <_ProtoReg_",
                 Document::String(name.clone()),
@@ -1751,6 +1758,8 @@ impl CoreErlangGenerator {
                 type_params_doc,
                 ", 'extending' => ",
                 extending_doc,
+                ", 'doc' => ",
+                doc_doc,
                 "}~) in",
             ]);
         }

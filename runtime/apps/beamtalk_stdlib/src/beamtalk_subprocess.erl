@@ -1,58 +1,60 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc OTP gen_server for interactive subprocess management (ADR 0051, ADR 0056).
-%%%
-%%% **DDD Context:** Actor System Context
-%%%
-%%% Each `beamtalk_subprocess` process owns one port to the `beamtalk_exec`
-%%% Rust helper binary and manages exactly one child subprocess (ChildId = 0).
-%%% stdout and stderr data are buffered independently in OTP queues; callers
-%%% block via deferred `gen_server:reply/2` until a complete line is available.
-%%%
-%%% Native backing gen_server for the Subprocess class (ADR 0056). The compiled
-%%% facade module (`bt@stdlib@subprocess`) handles class/instance dispatch;
-%%% this module only exports `start_link/1` and gen_server callbacks.
-%%%
-%%% == State Map ==
-%%%
-%%% ```erlang
-%%% #{
-%%%   port          => port(),      % beamtalk_exec port
-%%%   child_id      => 0,           % fixed — one child per gen_server
-%%%   {stdout, buffer}  => queue:queue(binary()),  % complete buffered lines
-%%%   {stdout, pending} => binary(),              % partial line fragment
-%%%   {stdout, waiting} => From | {timer, From, TimerRef} | undefined,
-%%%   {stderr, buffer}  => queue:queue(binary()),  % complete buffered lines
-%%%   {stderr, pending} => binary(),              % partial line fragment
-%%%   {stderr, waiting} => From | {timer, From, TimerRef} | undefined,
-%%%   exit_code     => nil | non_neg_integer(),
-%%%   port_closed   => boolean(),
-%%%   child_exited  => boolean()
-%%% }
-%%% ```
-%%%
-%%% == Selectors ==
-%%%
-%%% * `{'writeLine:', [Data]}` — append newline and write to subprocess stdin
-%%% * `{readLine, []}` — deferred reply; blocks until a stdout line or EOF
-%%% * `{'readLine:', [Timeout]}` — like readLine but returns nil after Timeout ms
-%%% * `{readStderrLine, []}` — deferred reply; blocks until a stderr line or EOF
-%%% * `{'readStderrLine:', [Timeout]}` — like readStderrLine but returns nil after Timeout ms
-%%% * `{lines, []}` — returns a Stream whose generator calls readLine via gen_server:call
-%%% * `{stderrLines, []}` — returns a Stream whose generator calls readStderrLine via gen_server:call
-%%% * `{exitCode, []}` — returns nil while running, integer after exit
-%%% * `{close, []}` — send kill command to helper, close port
-%%%
-%%% == References ==
-%%%
-%%% * ADR 0051 "Subprocess Execution" — Tier 2 design
-%%% * ADR 0056 "Native Erlang-Backed Actors" — native: + self delegate
-%%% * ADR 0021 "Streams and I/O" — Stream generator pattern
-%%% * `beamtalk_exec_port` — low-level port commands
-
 -module(beamtalk_subprocess).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Actor System Context
+
+-moduledoc """
+OTP gen_server for interactive subprocess management (ADR 0051, ADR 0056).
+
+Each `beamtalk_subprocess` process owns one port to the `beamtalk_exec`
+Rust helper binary and manages exactly one child subprocess (ChildId = 0).
+stdout and stderr data are buffered independently in OTP queues; callers
+block via deferred `gen_server:reply/2` until a complete line is available.
+
+Native backing gen_server for the Subprocess class (ADR 0056). The compiled
+facade module (`bt@stdlib@subprocess`) handles class/instance dispatch;
+this module only exports `start_link/1` and gen_server callbacks.
+
+== State Map ==
+
+```erlang
+#{
+  port          => port(),      % beamtalk_exec port
+  child_id      => 0,           % fixed — one child per gen_server
+  {stdout, buffer}  => queue:queue(binary()),  % complete buffered lines
+  {stdout, pending} => binary(),              % partial line fragment
+  {stdout, waiting} => From | {timer, From, TimerRef} | undefined,
+  {stderr, buffer}  => queue:queue(binary()),  % complete buffered lines
+  {stderr, pending} => binary(),              % partial line fragment
+  {stderr, waiting} => From | {timer, From, TimerRef} | undefined,
+  exit_code     => nil | non_neg_integer(),
+  port_closed   => boolean(),
+  child_exited  => boolean()
+}
+```
+
+== Selectors ==
+
+* `{'writeLine:', [Data]}` — append newline and write to subprocess stdin
+* `{readLine, []}` — deferred reply; blocks until a stdout line or EOF
+* `{'readLine:', [Timeout]}` — like readLine but returns nil after Timeout ms
+* `{readStderrLine, []}` — deferred reply; blocks until a stderr line or EOF
+* `{'readStderrLine:', [Timeout]}` — like readStderrLine but returns nil after Timeout ms
+* `{lines, []}` — returns a Stream whose generator calls readLine via gen_server:call
+* `{stderrLines, []}` — returns a Stream whose generator calls readStderrLine via gen_server:call
+* `{exitCode, []}` — returns nil while running, integer after exit
+* `{close, []}` — send kill command to helper, close port
+
+== References ==
+
+* ADR 0051 "Subprocess Execution" — Tier 2 design
+* ADR 0056 "Native Erlang-Backed Actors" — native: + self delegate
+* ADR 0021 "Streams and I/O" — Stream generator pattern
+* `beamtalk_exec_port` — low-level port commands
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -87,18 +89,20 @@
 %%% Public API
 %%% ============================================================================
 
-%% @doc Start a linked subprocess gen_server.
-%%
-%% Config must contain `executable` (binary path or name on PATH).
-%% Optional keys: `args` (Beamtalk Array or Erlang list of binaries),
-%% `env` (#{binary() => binary()}), `dir` (binary()).
-%%
-%% Called by the native facade's `spawn/1` via `spawnWith:`.
+-doc """
+Start a linked subprocess gen_server.
+
+Config must contain `executable` (binary path or name on PATH).
+Optional keys: `args` (Beamtalk Array or Erlang list of binaries),
+`env` (#{binary() => binary()}), `dir` (binary()).
+
+Called by the native facade's `spawn/1` via `spawnWith:`.
+""".
 -spec start_link(config()) -> {ok, pid()} | {error, term()}.
 start_link(Config) ->
     gen_server:start_link(?MODULE, Config, []).
 
-%% @doc Start an unlinked subprocess gen_server (useful in tests).
+-doc "Start an unlinked subprocess gen_server (useful in tests).".
 -spec start(config()) -> {ok, pid()} | {error, term()}.
 start(Config) ->
     gen_server:start(?MODULE, Config, []).
@@ -107,11 +111,13 @@ start(Config) ->
 %%% gen_server callbacks
 %%% ============================================================================
 
-%% @doc Validate config, open the exec port and spawn the child subprocess.
-%%
-%% Accepts raw Beamtalk values from `spawnWith:`: the `args` field may be a
-%% Beamtalk Array (tagged map) which is coerced to an Erlang list. The `env`
-%% field has its `$beamtalk_class` key stripped if present.
+-doc """
+Validate config, open the exec port and spawn the child subprocess.
+
+Accepts raw Beamtalk values from `spawnWith:`: the `args` field may be a
+Beamtalk Array (tagged map) which is coerced to an Erlang list. The `env`
+field has its `$beamtalk_class` key stripped if present.
+""".
 -spec init(config()) -> {ok, map()} | {stop, term()}.
 init(Config) ->
     case validate_config(Config) of
@@ -141,7 +147,7 @@ init(Config) ->
             {stop, Reason}
     end.
 
-%% @doc Dispatch sync calls.
+-doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) ->
     {reply, term(), map()} | {noreply, map()}.
 %% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
@@ -174,12 +180,12 @@ handle_call(Msg, _From, State) ->
     ?LOG_WARNING("Unknown call", #{message => Msg, domain => [beamtalk, stdlib]}),
     {reply, {error, unknown_call}, State}.
 
-%% @doc Ignore casts.
+-doc "Ignore casts.".
 -spec handle_cast(term(), map()) -> {noreply, map()}.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @doc Handle port data, timeouts, and port exit.
+-doc "Handle port data, timeouts, and port exit.".
 -spec handle_info(term(), map()) -> {noreply, map()}.
 handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
     case erlang:binary_to_term(Packet, [safe]) of
@@ -194,7 +200,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             %% to have arrived.  Flush any partial line and close the port now.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
-            catch beamtalk_exec_port:close(Port),
+            (try
+                beamtalk_exec_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             NewState = S1#{exit_code => Code, child_exited => true, port_closed => true},
             S2 = maybe_reply_eof(stdout, NewState),
             S3 = maybe_reply_eof(stderr, S2),
@@ -231,12 +241,12 @@ handle_info({read_timeout, Channel}, State) ->
 handle_info(_Msg, State) ->
     {noreply, State}.
 
-%% @doc No-op hot reload — state schema is stable.
+-doc "No-op hot reload — state schema is stable.".
 -spec code_change(term(), map(), term()) -> {ok, map()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% @doc Clean up the port and child when the gen_server stops.
+-doc "Clean up the port and child when the gen_server stops.".
 -spec terminate(term(), map()) -> ok.
 terminate(_Reason, State) ->
     cleanup_port(State),
@@ -246,10 +256,12 @@ terminate(_Reason, State) ->
 %%% Config validation (moved from dispatch/3, BT-1211)
 %%% ============================================================================
 
-%% @private Validate and normalize the config map from spawnWith:.
-%%
-%% Coerces Beamtalk Arrays to Erlang lists, strips $beamtalk_class from env,
-%% and validates types. Returns {ok, CleanConfig} or {error, Reason}.
+-doc """
+Validate and normalize the config map from spawnWith:.
+
+Coerces Beamtalk Arrays to Erlang lists, strips $beamtalk_class from env,
+and validates types. Returns {ok, CleanConfig} or {error, Reason}.
+""".
 -spec validate_config(map()) -> {ok, config()} | {error, term()}.
 validate_config(Config) when is_map(Config) ->
     case maps:get(executable, Config, undefined) of
@@ -263,7 +275,7 @@ validate_config(Config) when is_map(Config) ->
 validate_config(_Other) ->
     {error, {type_error, config, expected_map}}.
 
-%% @private Validate and coerce the args field.
+-doc "Validate and coerce the args field.".
 -spec validate_config_args(map(), binary()) -> {ok, config()} | {error, term()}.
 validate_config_args(Config, Executable) ->
     RawArgs = maps:get(args, Config, []),
@@ -279,7 +291,7 @@ validate_config_args(Config, Executable) ->
             Err
     end.
 
-%% @private Validate and clean the env field.
+-doc "Validate and clean the env field.".
 -spec validate_config_env(map(), binary(), [binary()]) -> {ok, config()} | {error, term()}.
 validate_config_env(Config, Executable, ArgsList) ->
     Base = #{executable => Executable, args => ArgsList},
@@ -298,7 +310,7 @@ validate_config_env(Config, Executable, ArgsList) ->
             {error, {type_error, env, expected_map}}
     end.
 
-%% @private Optionally add the dir field.
+-doc "Optionally add the dir field.".
 -spec maybe_add_dir(map(), config()) -> {ok, config()} | {error, term()}.
 maybe_add_dir(Config, Base) ->
     case maps:get(dir, Config, undefined) of
@@ -310,7 +322,7 @@ maybe_add_dir(Config, Base) ->
             {error, {type_error, dir, expected_binary}}
     end.
 
-%% @private Coerce a Beamtalk Array (tagged map) or plain list to an Erlang list.
+-doc "Coerce a Beamtalk Array (tagged map) or plain list to an Erlang list.".
 -spec coerce_args(term()) -> {ok, list()} | {error, term()}.
 coerce_args(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
     case array:is_array(Arr) of
@@ -322,7 +334,7 @@ coerce_args(List) when is_list(List) ->
 coerce_args(_Other) ->
     {error, {type_error, args, expected_list_or_array}}.
 
-%% @private Validate that all keys and values in env are binaries.
+-doc "Validate that all keys and values in env are binaries.".
 -spec validate_binary_env(map()) -> ok | {error, term()}.
 validate_binary_env(Env) ->
     AllBinary = maps:fold(
@@ -339,7 +351,7 @@ validate_binary_env(Env) ->
 %%% Internal handlers
 %%% ============================================================================
 
-%% @private Write Data + newline to subprocess stdin.
+-doc "Write Data + newline to subprocess stdin.".
 -spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
@@ -355,7 +367,7 @@ handle_writeLine(Data, State) ->
             {reply, nil, State}
     end.
 
-%% @private Kill subprocess and close the exec port.
+-doc "Kill subprocess and close the exec port.".
 -spec handle_close(map()) -> {reply, nil, map()}.
 handle_close(State) ->
     case maps:get(port_closed, State, false) of
@@ -373,12 +385,14 @@ handle_close(State) ->
             {reply, nil, S3}
     end.
 
-%% @private Deferred-reply read for Channel (stdout or stderr).
-%%
-%% Returns a buffered line immediately if one is available.
-%% If the buffer is empty and the port is closed, returns nil (EOF).
-%% Otherwise defers the reply: stashes From (with optional timer) in state;
-%% `handle_info` or the timeout message will deliver the final reply.
+-doc """
+Deferred-reply read for Channel (stdout or stderr).
+
+Returns a buffered line immediately if one is available.
+If the buffer is empty and the port is closed, returns nil (EOF).
+Otherwise defers the reply: stashes From (with optional timer) in state;
+`handle_info` or the timeout message will deliver the final reply.
+""".
 -spec read_line_for(channel(), term(), infinity | pos_integer(), map()) ->
     {reply, binary() | nil, map()} | {noreply, map()}.
 read_line_for(Channel, From, Timeout, State) ->
@@ -410,7 +424,7 @@ read_line_for(Channel, From, Timeout, State) ->
 %%% Internal helpers
 %%% ============================================================================
 
-%% @private Buffer incoming data and reply to any waiting caller.
+-doc "Buffer incoming data and reply to any waiting caller.".
 -spec buffer_and_maybe_reply(channel(), binary(), map()) -> {noreply, map()}.
 buffer_and_maybe_reply(Channel, Data, State) ->
     BufKey = {Channel, buffer},
@@ -439,10 +453,12 @@ buffer_and_maybe_reply(Channel, Data, State) ->
             end
     end.
 
-%% @private Flush any partial line from the pending buffer into the line queue.
-%%
-%% Called on subprocess exit: the final output may not end with a newline.
-%% Without this, partial data (e.g., `printf "hello"`) would be silently lost.
+-doc """
+Flush any partial line from the pending buffer into the line queue.
+
+Called on subprocess exit: the final output may not end with a newline.
+Without this, partial data (e.g., `printf "hello"`) would be silently lost.
+""".
 -spec flush_pending(channel(), map()) -> map().
 flush_pending(Channel, State) ->
     PendKey = {Channel, pending},
@@ -456,11 +472,13 @@ flush_pending(Channel, State) ->
             State#{BufKey => NewBuffer, PendKey => <<>>}
     end.
 
-%% @private Reply to any waiting caller: buffered data if available, nil (EOF) if empty.
-%%
-%% Called when the subprocess exits or the port closes. If the buffer has data
-%% (e.g., a partial line flushed by `flush_pending/2`), reply with the first
-%% line instead of nil — otherwise the data would be silently lost.
+-doc """
+Reply to any waiting caller: buffered data if available, nil (EOF) if empty.
+
+Called when the subprocess exits or the port closes. If the buffer has data
+(e.g., a partial line flushed by `flush_pending/2`), reply with the first
+line instead of nil — otherwise the data would be silently lost.
+""".
 -spec maybe_reply_eof(channel(), map()) -> map().
 maybe_reply_eof(Channel, State) ->
     WaitKey = {Channel, waiting},
@@ -481,7 +499,7 @@ maybe_reply_eof(Channel, State) ->
             end
     end.
 
-%% @private Reply to a waiting caller, cancelling any pending timer.
+-doc "Reply to a waiting caller, cancelling any pending timer.".
 -spec reply_to_waiter(term(), term()) -> ok.
 reply_to_waiter({timer, From, TimerRef}, Value) ->
     erlang:cancel_timer(TimerRef),
@@ -489,11 +507,13 @@ reply_to_waiter({timer, From, TimerRef}, Value) ->
 reply_to_waiter(From, Value) ->
     gen_server:reply(From, Value).
 
-%% @private Build a Stream whose generator calls readLine or readStderrLine via gen_server:call.
-%%
-%% The generator executes in the caller's process (correct for Streams per ADR 0021).
-%% Each step sends a sync message to the actor to get the next line.
-%% Returns done when the subprocess sends nil (EOF).
+-doc """
+Build a Stream whose generator calls readLine or readStderrLine via gen_server:call.
+
+The generator executes in the caller's process (correct for Streams per ADR 0021).
+Each step sends a sync message to the actor to get the next line.
+Returns done when the subprocess sends nil (EOF).
+""".
 -spec make_readline_stream(pid(), channel()) -> map().
 make_readline_stream(Pid, Channel) ->
     CallKey =
@@ -509,7 +529,7 @@ make_readline_stream(Pid, Channel) ->
     Gen = make_readline_gen(Pid, CallKey),
     beamtalk_stream:make_stream(Gen, Desc).
 
-%% @private Recursive generator: calls gen_server, returns done on nil.
+-doc "Recursive generator: calls gen_server, returns done on nil.".
 -spec make_readline_gen(pid(), term()) -> fun(() -> {binary(), fun()} | done).
 make_readline_gen(Pid, CallKey) ->
     fun() ->
@@ -519,7 +539,7 @@ make_readline_gen(Pid, CallKey) ->
         end
     end.
 
-%% @private Kill child and close the exec port during shutdown.
+-doc "Kill child and close the exec port during shutdown.".
 -spec cleanup_port(map()) -> ok.
 cleanup_port(State) ->
     case maps:get(port_closed, State, false) of
@@ -528,7 +548,15 @@ cleanup_port(State) ->
         false ->
             Port = maps:get(port, State),
             ChildId = maps:get(child_id, State),
-            catch beamtalk_exec_port:kill_child(Port, ChildId),
-            catch beamtalk_exec_port:close(Port),
+            (try
+                beamtalk_exec_port:kill_child(Port, ChildId)
+            catch
+                _:_ -> ok
+            end),
+            (try
+                beamtalk_exec_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             ok
     end.

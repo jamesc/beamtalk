@@ -1,17 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_future module
-%%%
-%%% Tests all future behaviors:
-%%% - Basic resolve/await
-%%% - Basic reject/await
-%%% - Multiple waiters
-%%% - Callbacks
-%%% - Timeout handling
-%%% - Edge cases
-
 -module(beamtalk_future_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_future module
+
+Tests all future behaviors:
+- Basic resolve/await
+- Basic reject/await
+- Multiple waiters
+- Callbacks
+- Timeout handling
+- Edge cases
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -747,7 +749,9 @@ callback_crash_log_includes_stacktrace_test() ->
         logger:remove_handler(HandlerId)
     end.
 
-%% @private Collect log events until we find one matching the expected message with stacktrace
+-doc """
+Collect log events until we find one matching the expected message with stacktrace
+""".
 collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
     collect_log_with_stacktrace(ExpectedMsg, Timeout, erlang:monotonic_time(millisecond)).
 

@@ -1,30 +1,32 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc System class implementation — OS environment, platform, and process info.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% System provides class-side methods for accessing environment variables,
-%%% detecting the operating system and architecture, and querying process info.
-%%%
-%%% ## Methods
-%%%
-%%% | Selector            | Description                              |
-%%% |---------------------|------------------------------------------|
-%%% | `getEnv:`           | Read environment variable (nil if unset) |
-%%% | `getEnv:default:`   | Read env var with fallback               |
-%%% | `setEnv:value:`     | Set environment variable                 |
-%%% | `unsetEnv:`         | Remove environment variable              |
-%%% | `osPlatform`        | OS name: linux, darwin, win32            |
-%%% | `osFamily`          | OS family: unix or win32                 |
-%%% | `architecture`      | System architecture string               |
-%%% | `hostname`          | Machine hostname                         |
-%%% | `erlangVersion`     | OTP version string                       |
-%%% | `pid`               | OS process ID                            |
-%%% | `uniqueId`          | Unique positive monotonic integer         |
-
 -module(beamtalk_system).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+System class implementation — OS environment, platform, and process info.
+
+System provides class-side methods for accessing environment variables,
+detecting the operating system and architecture, and querying process info.
+
+## Methods
+
+| Selector            | Description                              |
+|---------------------|------------------------------------------|
+| `getEnv:`           | Read environment variable (nil if unset) |
+| `getEnv:default:`   | Read env var with fallback               |
+| `setEnv:value:`     | Set environment variable                 |
+| `unsetEnv:`         | Remove environment variable              |
+| `osPlatform`        | OS name: linux, darwin, win32            |
+| `osFamily`          | OS family: unix or win32                 |
+| `architecture`      | System architecture string               |
+| `hostname`          | Machine hostname                         |
+| `erlangVersion`     | OTP version string                       |
+| `pid`               | OS process ID                            |
+| `uniqueId`          | Unique positive monotonic integer         |
+""".
 
 -export(['getEnv:'/1, 'getEnv:default:'/2]).
 -export(['setEnv:value:'/2, 'unsetEnv:'/1]).
@@ -33,14 +35,13 @@
 -export([getEnv/1, getEnv/2]).
 -export([setEnv/2, unsetEnv/1]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
 
-%% @doc Read an environment variable. Returns nil if not set.
+-doc "Read an environment variable. Returns nil if not set.".
 -spec 'getEnv:'(binary()) -> binary() | 'nil'.
 'getEnv:'(Name) when is_binary(Name) ->
     case os:getenv(binary_to_list(Name)) of
@@ -53,8 +54,8 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Read an environment variable with a default fallback.
--spec 'getEnv:default:'(binary(), binary()) -> binary().
+-doc "Read an environment variable with a default fallback.".
+-spec 'getEnv:default:'(binary(), Default :: binary()) -> binary().
 'getEnv:default:'(Name, Default) when is_binary(Name), is_binary(Default) ->
     case os:getenv(binary_to_list(Name)) of
         false -> Default;
@@ -71,8 +72,8 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Default argument must be a String">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Set an environment variable. Returns true.
--spec 'setEnv:value:'(binary(), binary()) -> 'true'.
+-doc "Set an environment variable. Returns true.".
+-spec 'setEnv:value:'(binary(), Value :: binary()) -> 'true'.
 'setEnv:value:'(Name, Value) when is_binary(Name), is_binary(Value) ->
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
     true;
@@ -87,7 +88,7 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Value argument must be a String">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Remove an environment variable. Returns true.
+-doc "Remove an environment variable. Returns true.".
 -spec 'unsetEnv:'(binary()) -> 'true'.
 'unsetEnv:'(Name) when is_binary(Name) ->
     os:unsetenv(binary_to_list(Name)),
@@ -98,84 +99,84 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Return the OS platform name.
-%% Maps Erlang os:type() to familiar platform strings.
+-doc """
+Return the OS platform name.
+Maps Erlang os:type() to familiar platform strings.
+""".
 -spec osPlatform() -> binary().
 osPlatform() ->
     {_Family, Name} = os:type(),
     platform_name(Name).
 
-%% @doc Return the OS family: unix or win32.
+-doc "Return the OS family: unix or win32.".
 -spec osFamily() -> binary().
 osFamily() ->
     {Family, _Name} = os:type(),
     atom_to_binary(Family, utf8).
 
-%% @doc Return the system architecture string.
+-doc "Return the system architecture string.".
 -spec architecture() -> binary().
 architecture() ->
     list_to_binary(erlang:system_info(system_architecture)).
 
-%% @doc Return the machine hostname.
+-doc "Return the machine hostname.".
 -spec hostname() -> binary().
 hostname() ->
-    case catch inet:gethostname() of
-        {ok, Hostname} ->
-            list_to_binary(Hostname);
-        {error, Reason} ->
-            ?LOG_ERROR("Failed to resolve hostname", #{
+    %% inet:gethostname/0 spec says it always returns {ok, Hostname},
+    %% but we wrap in try for defensive safety.
+    try
+        {ok, Hostname} = inet:gethostname(),
+        list_to_binary(Hostname)
+    catch
+        Class:Reason ->
+            ?LOG_ERROR("Hostname lookup failed", #{
+                domain => [beamtalk, stdlib],
                 module => ?MODULE,
                 function => hostname,
+                class => Class,
                 reason => Reason
             }),
             Error0 = beamtalk_error:new(runtime_error, 'System'),
             Error1 = beamtalk_error:with_selector(Error0, hostname),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Could not resolve hostname from OS">>),
-            beamtalk_error:raise(Error3);
-        {'EXIT', Reason} ->
-            ?LOG_ERROR("Hostname lookup crashed", #{
-                module => ?MODULE,
-                function => hostname,
-                reason => Reason
-            }),
-            Error0 = beamtalk_error:new(runtime_error, 'System'),
-            Error1 = beamtalk_error:with_selector(Error0, hostname),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+            Error2 = beamtalk_error:with_details(Error1, #{class => Class, reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Could not resolve hostname from OS">>),
             beamtalk_error:raise(Error3)
     end.
 
-%% @doc Return the OTP version string.
+-doc "Return the OTP version string.".
 -spec erlangVersion() -> binary().
 erlangVersion() ->
     list_to_binary(erlang:system_info(otp_release)).
 
-%% @doc Return the OS process ID as an integer.
+-doc "Return the OS process ID as an integer.".
 -spec pid() -> integer().
 pid() ->
     list_to_integer(os:getpid()).
 
-%% @doc Return a unique positive monotonic integer.
-%% Each call returns a value strictly greater than any previous call.
+-doc """
+Return a unique positive monotonic integer.
+Each call returns a value strictly greater than any previous call.
+""".
 -spec uniqueId() -> pos_integer().
 uniqueId() ->
     erlang:unique_integer([positive, monotonic]).
 
-%% @doc Shims for (Erlang beamtalk_system) FFI dispatch.
-%% The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
-%% its first keyword before calling direct_call/3, so `getEnv:` → `getEnv`
-%% and `getEnv:default:` → `getEnv`. These shims exist so the Beamtalk
-%% selectors `(Erlang beamtalk_system) getEnv: name` and
-%% `(Erlang beamtalk_system) getEnv: name default: fallback` dispatch to
-%% getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
+-doc """
+Shims for (Erlang beamtalk_system) FFI dispatch.
+The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
+its first keyword before calling direct_call/3, so `getEnv:` → `getEnv`
+and `getEnv:default:` → `getEnv`. These shims exist so the Beamtalk
+selectors `(Erlang beamtalk_system) getEnv: name` and
+`(Erlang beamtalk_system) getEnv: name default: fallback` dispatch to
+getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
+""".
 -spec getEnv(binary()) -> binary() | 'nil'.
 getEnv(Name) -> 'getEnv:'(Name).
 
--spec getEnv(binary(), binary()) -> binary().
+-spec getEnv(binary(), Default :: binary()) -> binary().
 getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
 
--spec setEnv(binary(), binary()) -> 'true'.
+-spec setEnv(binary(), Value :: binary()) -> 'true'.
 setEnv(Name, Value) -> 'setEnv:value:'(Name, Value).
 
 -spec unsetEnv(binary()) -> 'true'.
@@ -185,7 +186,7 @@ unsetEnv(Name) -> 'unsetEnv:'(Name).
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private Map os:type() Name atom to platform string.
+-doc "Map os:type() Name atom to platform string.".
 -spec platform_name(atom()) -> binary().
 platform_name(darwin) -> <<"darwin">>;
 platform_name(linux) -> <<"linux">>;

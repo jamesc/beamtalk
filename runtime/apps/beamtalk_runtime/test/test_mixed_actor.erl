@@ -1,10 +1,12 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor with mixed old-style (Fun/2) and new-style (Fun/4) methods for BT-159 testing
-
 -module(test_mixed_actor).
 -behaviour(gen_server).
+
+-moduledoc """
+Test actor with mixed old-style (Fun/2) and new-style (Fun/4) methods for BT-159 testing
+""".
 
 -include("beamtalk.hrl").
 

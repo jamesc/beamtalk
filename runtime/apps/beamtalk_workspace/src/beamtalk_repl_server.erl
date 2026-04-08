@@ -1,29 +1,31 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc WebSocket server for Beamtalk REPL (ADR 0020).
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Starts a cowboy HTTP/WebSocket listener for the REPL protocol.
-%%% Client connections are handled by beamtalk_ws_handler.
-%%% This module manages the listener lifecycle, port/nonce discovery,
-%%% and protocol request dispatch.
-%%%
-%%% Op handlers are delegated to domain-specific modules (BT-705):
-%%% - beamtalk_repl_ops_eval: eval, clear (deprecated), bindings (deprecated)
-%%% - beamtalk_repl_ops_load: load-file (deprecated), load-source, reload (deprecated), modules (deprecated)
-%%% - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
-%%% - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
-%%% - beamtalk_repl_ops_dev: complete, docs (deprecated), describe, show-codegen
-%%% - beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats, export-traces (ADR 0069)
-%%%
-%%% Deprecated ops (BT-849 / ADR 0040 Phase 6) are superseded by Beamtalk-native
-%%% message sends but remain functional for WebSocket client backward compatibility.
-%%% See ADR 0040 for migration guidance.
-
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+WebSocket server for Beamtalk REPL (ADR 0020).
+
+Starts a cowboy HTTP/WebSocket listener for the REPL protocol.
+Client connections are handled by beamtalk_ws_handler.
+This module manages the listener lifecycle, port/nonce discovery,
+and protocol request dispatch.
+
+Op handlers are delegated to domain-specific modules (BT-705):
+- beamtalk_repl_ops_eval: eval, clear (deprecated), bindings (deprecated)
+- beamtalk_repl_ops_load: load-file (deprecated), load-source, reload (deprecated), modules (deprecated)
+- beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
+- beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
+- beamtalk_repl_ops_dev: complete, docs (deprecated), describe, show-codegen
+- beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats, export-traces (ADR 0069)
+
+Deprecated ops (BT-849 / ADR 0040 Phase 6) are superseded by Beamtalk-native
+message sends but remain functional for WebSocket client backward compatibility.
+See ADR 0040 for migration guidance.
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -78,36 +80,43 @@
 
 %%% Public API
 
-%% @doc Start the REPL WebSocket server (ADR 0020).
-%% Listens on the specified port for incoming REPL connections.
-%% Accepts a map with `port` key, or a plain port number for backward compatibility.
+-doc """
+Start the REPL WebSocket server (ADR 0020).
+Listens on the specified port for incoming REPL connections.
+Accepts a map with `port` key, or a plain port number for backward compatibility.
+""".
 -spec start_link(map() | inet:port_number()) -> {ok, pid()} | {error, term()}.
 start_link(#{port := _} = Config) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []);
 start_link(Port) when is_integer(Port) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, #{port => Port}, []).
 
-%% @doc Get the actual port the server is listening on.
-%% Useful when port 0 was requested (OS-assigned ephemeral port).
+-doc """
+Get the actual port the server is listening on.
+Useful when port 0 was requested (OS-assigned ephemeral port).
+""".
 -spec get_port() -> {ok, inet:port_number()}.
 get_port() ->
     gen_server:call(?MODULE, get_port).
 
-%% @doc Get the nonce for this server instance.
-%% Used for stale port file detection (BT-611).
+-doc """
+Get the nonce for this server instance.
+Used for stale port file detection (BT-611).
+""".
 -spec get_nonce() -> {ok, binary()}.
 get_nonce() ->
     gen_server:call(?MODULE, get_nonce).
 
-%% @doc Get the web port if a separate browser listener was started.
-%% Returns `undefined` if --web-port was not specified.
+-doc """
+Get the web port if a separate browser listener was started.
+Returns `undefined` if --web-port was not specified.
+""".
 -spec get_web_port() -> {ok, inet:port_number() | undefined}.
 get_web_port() ->
     gen_server:call(?MODULE, get_web_port).
 
 %%% gen_server callbacks
 
-%% @private
 init(Config) ->
     Port = maps:get(port, Config),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
@@ -151,7 +160,6 @@ init(Config) ->
             {stop, {listen_failed, Reason}}
     end.
 
-%% @private
 handle_call(get_port, _From, State) ->
     {reply, {ok, State#state.port}, State};
 handle_call(get_nonce, _From, State) ->
@@ -161,11 +169,9 @@ handle_call(get_web_port, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
 handle_info(shutdown_requested, State) ->
     %% Shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
     ?LOG_INFO("Executing requested shutdown", #{domain => [beamtalk, runtime]}),
@@ -174,7 +180,6 @@ handle_info(shutdown_requested, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(Reason, #state{port = Port, web_port = WebPort}) ->
     ?LOG_INFO("REPL server shutting down", #{
         reason => Reason, port => Port, domain => [beamtalk, runtime]
@@ -186,17 +191,17 @@ terminate(Reason, #state{port = Port, web_port = WebPort}) ->
     end,
     ok.
 
-%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Web Listener (BT-689)
 
-%% @private
-%% @doc Optionally start a separate cowboy HTTP listener for browser access.
-%% When web_port is undefined, no additional listener is started.
-%% When web_port is specified, starts a listener serving the browser UI
-%% on that port, separate from the WebSocket protocol port.
+-doc """
+Optionally start a separate cowboy HTTP listener for browser access.
+When web_port is undefined, no additional listener is started.
+When web_port is specified, starts a listener serving the browser UI
+on that port, separate from the WebSocket protocol port.
+""".
 -spec maybe_start_web_listener(undefined | inet:port_number(), inet:ip_address()) ->
     undefined | inet:port_number().
 maybe_start_web_listener(undefined, _BindAddr) ->
@@ -232,10 +237,11 @@ maybe_start_web_listener(WebPort, BindAddr) ->
 
 %%% Port File
 
-%% @private
-%% @doc Write the actual bound port to a file in the workspace directory.
-%% This is needed when port=0 is used (OS assigns ephemeral port) so the
-%% CLI can discover the actual port after BEAM startup.
+-doc """
+Write the actual bound port to a file in the workspace directory.
+This is needed when port=0 is used (OS assigns ephemeral port) so the
+CLI can discover the actual port after BEAM startup.
+""".
 -spec write_port_file(binary() | undefined, inet:port_number(), binary()) -> ok.
 write_port_file(undefined, _Port, _Nonce) ->
     ok;
@@ -324,9 +330,10 @@ write_port_file(WorkspaceId, Port, Nonce) ->
 
 %%% Nonce Generation
 
-%% @private
-%% @doc Generate a random nonce for stale port file detection (BT-611).
-%% Returns a 16-character hex string.
+-doc """
+Generate a random nonce for stale port file detection (BT-611).
+Returns a 16-character hex string.
+""".
 -spec generate_nonce() -> binary().
 generate_nonce() ->
     Bytes = crypto:strong_rand_bytes(8),
@@ -338,8 +345,10 @@ generate_nonce() ->
 
 %%% Session ID Generation
 
-%% @doc Generate a unique session ID.
-%% Uses crypto:strong_rand_bytes for unpredictable IDs (prevents session ID guessing).
+-doc """
+Generate a unique session ID.
+Uses crypto:strong_rand_bytes for unpredictable IDs (prevents session ID guessing).
+""".
 -spec generate_session_id() -> binary().
 generate_session_id() ->
     Timestamp = erlang:system_time(microsecond),
@@ -349,9 +358,11 @@ generate_session_id() ->
 
 %%% Protocol-aware request handling
 
-%% @doc Handle a protocol message by dispatching to appropriate API.
-%% Returns JSON binary response using protocol encoding.
-%% Called by beamtalk_ws_handler after authentication.
+-doc """
+Handle a protocol message by dispatching to appropriate API.
+Returns JSON binary response using protocol encoding.
+Called by beamtalk_ws_handler after authentication.
+""".
 handle_protocol_request(Msg, SessionPid) ->
     Op = beamtalk_repl_protocol:get_op(Msg),
     Params = beamtalk_repl_protocol:get_params(Msg),
@@ -372,13 +383,14 @@ handle_protocol_request(Msg, SessionPid) ->
             )
     end.
 
-%% @private
-%% @doc Dispatch protocol ops to domain-specific handler modules (BT-705).
-%%
-%% Deprecated ops (BT-849 / ADR 0040 Phase 6): load-file, reload, modules,
-%% bindings, clear, docs. These ops remain functional for WebSocket client
-%% backward compatibility (ADR 0017) but are superseded by Beamtalk-native
-%% message sends. WebSocket clients should migrate to sending eval requests.
+-doc """
+Dispatch protocol ops to domain-specific handler modules (BT-705).
+
+Deprecated ops (BT-849 / ADR 0040 Phase 6): load-file, reload, modules,
+bindings, clear, docs. These ops remain functional for WebSocket client
+backward compatibility (ADR 0017) but are superseded by Beamtalk-native
+message sends. WebSocket clients should migrate to sending eval requests.
+""".
 handle_op(<<"eval">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_eval:handle(<<"eval">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindings">> ->
@@ -435,7 +447,8 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"show-codegen">>;
     Op =:= <<"test">>;
     Op =:= <<"test-all">>;
-    Op =:= <<"erlang-help">>
+    Op =:= <<"erlang-help">>;
+    Op =:= <<"erlang-complete">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"docs">>, Params, Msg, SessionPid) ->
@@ -474,10 +487,12 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
 
 %%% Protocol Parsing and Formatting
 
-%% @doc Parse a request from the CLI (legacy interface).
-%% Expected format: JSON with "type" field.
-%% New code should use beamtalk_repl_protocol:decode/1 instead.
-%% Implementation lives in beamtalk_repl_protocol (extracted BT-865).
+-doc """
+Parse a request from the CLI (legacy interface).
+Expected format: JSON with "type" field.
+New code should use beamtalk_repl_protocol:decode/1 instead.
+Implementation lives in beamtalk_repl_protocol (extracted BT-865).
+""".
 -spec parse_request(binary()) ->
     {eval, string()}
     | {clear_bindings}
@@ -500,35 +515,39 @@ parse_request(Data) -> beamtalk_repl_protocol:parse_request(Data).
 %%% continue to work without modification.
 
 -ifdef(TEST).
-%% @private Delegate to beamtalk_repl_ops_dev.
+-doc "Delegate to beamtalk_repl_ops_dev.".
 base_protocol_response(Msg) -> beamtalk_repl_ops_dev:base_protocol_response(Msg).
 
-%% @private Delegate to beamtalk_repl_ops_actors.
+-doc "Delegate to beamtalk_repl_ops_actors.".
 validate_actor_pid(PidStr) -> beamtalk_repl_ops_actors:validate_actor_pid(PidStr).
 is_known_actor(Pid) -> beamtalk_repl_ops_actors:is_known_actor(Pid).
 
-%% @private Delegate to beamtalk_repl_ops_load.
+-doc "Delegate to beamtalk_repl_ops_load.".
 resolve_class_to_module(ClassName) -> beamtalk_repl_ops_load:resolve_class_to_module(ClassName).
 resolve_module_atoms(ModuleAtom, Classes) ->
     beamtalk_repl_ops_load:resolve_module_atoms(ModuleAtom, Classes).
 
-%% @private Delegate to beamtalk_repl_ops_dev.
+-doc "Delegate to beamtalk_repl_ops_dev.".
 get_completions(Prefix) -> beamtalk_repl_ops_dev:get_completions(Prefix).
 make_class_not_found_error(ClassName) ->
     beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
 
-%% @private Delegate to beamtalk_repl_errors (extracted BT-865).
+-doc "Delegate to beamtalk_repl_errors (extracted BT-865).".
 ensure_structured_error(Reason, Class) ->
     beamtalk_repl_errors:ensure_structured_error(Reason, Class).
 format_name(Name) -> beamtalk_repl_errors:format_name(Name).
 -endif.
 
-%% @doc Safely convert a binary to an existing atom, returning error instead of creating new atoms.
-%% Implementation lives in beamtalk_repl_errors (extracted BT-865).
+-doc """
+Safely convert a binary to an existing atom, returning error instead of creating new atoms.
+Implementation lives in beamtalk_repl_errors (extracted BT-865).
+""".
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).
 
-%% @doc Ensure an error reason is a structured #beamtalk_error{} record.
-%% Implementation lives in beamtalk_repl_errors (extracted BT-865).
+-doc """
+Ensure an error reason is a structured #beamtalk_error{} record.
+Implementation lives in beamtalk_repl_errors (extracted BT-865).
+""".
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
 ensure_structured_error(Reason) -> beamtalk_repl_errors:ensure_structured_error(Reason).

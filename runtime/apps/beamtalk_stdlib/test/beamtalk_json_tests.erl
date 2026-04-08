@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_json module (BT-1142).
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% Tests cover parse:/1, generate:/1, prettyPrint:/1, and the FFI no-colon
-%%% aliases (parse/1, generate/1, prettyPrint/1).
-
 -module(beamtalk_json_tests).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+EUnit tests for beamtalk_json module (BT-1142).
+
+Tests cover parse:/1, generate:/1, prettyPrint:/1, and the FFI no-colon
+aliases (parse/1, generate/1, prettyPrint/1).
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

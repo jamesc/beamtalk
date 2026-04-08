@@ -1,19 +1,21 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_transcript_stream.
-%%%
-%%% Tests all TranscriptStream behaviours:
-%%% - show: writes to buffer
-%%% - cr writes newline to buffer
-%%% - subscribe/unsubscribe lifecycle
-%%% - subscriber receives output
-%%% - dead subscriber auto-removed
-%%% - recent returns buffer contents
-%%% - clear empties buffer
-%%% - buffer overflow drops oldest
-
 -module(beamtalk_transcript_stream_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_transcript_stream.
+
+Tests all TranscriptStream behaviours:
+- show: writes to buffer
+- cr writes newline to buffer
+- subscribe/unsubscribe lifecycle
+- subscriber receives output
+- dead subscriber auto-removed
+- recent returns buffer contents
+- clear empties buffer
+- buffer overflow drops oldest
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -21,7 +23,7 @@
 %%% Helper
 %%% ============================================================================
 
-%% @private Flush all transcript_output messages from the mailbox.
+-doc "Flush all transcript_output messages from the mailbox.".
 flush_transcript() ->
     receive
         {transcript_output, _} -> flush_transcript()

@@ -1,20 +1,21 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for sessions, clone, close, health, and shutdown operations.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Extracted from beamtalk_repl_server (BT-705).
-
 -module(beamtalk_repl_ops_session).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Op handlers for sessions, clone, close, health, and shutdown operations.
+
+Extracted from beamtalk_repl_server (BT-705).
+""".
+
 -include_lib("kernel/include/logger.hrl").
 
 -export([handle/4]).
 
-%% @doc Handle sessions/clone/close/health/shutdown ops.
+-doc "Handle sessions/clone/close/health/shutdown ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"sessions">>, _Params, Msg, _SessionPid) ->
     case whereis(beamtalk_session_sup) of

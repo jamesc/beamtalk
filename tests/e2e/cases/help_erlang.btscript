@@ -36,3 +36,17 @@
 // :help Erlang with a type name (not an exported function) — should show type definition (BT-1901)
 :help Erlang gen_server from
 // => gen_server:from_
+
+// === BT-1903: BeamtalkInterface erlangHelp: API ===
+
+// Beamtalk erlangHelp: with a known module — should return module docs
+Beamtalk erlangHelp: "lists"
+// => Erlang module: lists_
+
+// Beamtalk erlangHelp: with selector — should return function docs
+Beamtalk erlangHelp: "lists" selector: #reverse
+// => lists:reverse_
+
+// Beamtalk erlangHelp: with a known module — maps
+Beamtalk erlangHelp: "maps"
+// => Erlang module: maps_

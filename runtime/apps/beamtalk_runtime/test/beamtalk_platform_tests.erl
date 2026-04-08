@@ -2,11 +2,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_platform module.
-%%%
-%%% Tests platform-specific helpers: home directory, OS detection, and path utilities.
-
 -module(beamtalk_platform_tests).
+
+-moduledoc """
+EUnit tests for beamtalk_platform module.
+
+Tests platform-specific helpers: home directory, OS detection, and path utilities.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

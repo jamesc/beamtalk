@@ -79,6 +79,15 @@
     span :: {binary(), integer(), integer(), integer(), integer()} | undefined
 }).
 
+%% @doc Type alias for Beamtalk class/object references passed through FFI.
+%%
+%% Beamtalk objects are represented as tuples at the BEAM level. This broad type
+%% alias replaces bare `term()` in FFI specs to signal that a parameter is
+%% expected to be a Beamtalk object (class tuple or actor reference), not an
+%% arbitrary term.
+-type beamtalk_object() :: tuple().
+-export_type([beamtalk_object/0]).
+
 %% Maximum class hierarchy depth before aborting chain walks.
 %% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
 -define(MAX_HIERARCHY_DEPTH, 20).

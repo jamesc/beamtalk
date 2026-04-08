@@ -3,15 +3,18 @@
 
 %%% **DDD Context:** Runtime benchmark — gen_server counter with map state
 %%%
-%%% @doc Erlang gen_server counter using a map for state (no dispatch layer).
-%%%
-%%% Baseline for overhead comparison: same map-based state as Beamtalk actors,
-%%% but with direct pattern matching in handle_call — no method table lookup,
-%%% no make_self, no dispatch indirection. Isolates the cost of map state vs
-%%% record state from the cost of Beamtalk's dispatch machinery.
 
 -module(bench_erlang_gs_map).
 -behaviour(gen_server).
+
+-moduledoc """
+Erlang gen_server counter using a map for state (no dispatch layer).
+
+Baseline for overhead comparison: same map-based state as Beamtalk actors,
+but with direct pattern matching in handle_call — no method table lookup,
+no make_self, no dispatch indirection. Isolates the cost of map state vs
+record state from the cost of Beamtalk's dispatch machinery.
+""".
 
 -export([start_link/0, increment/1, get_value/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).

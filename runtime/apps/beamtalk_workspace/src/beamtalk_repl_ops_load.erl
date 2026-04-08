@@ -1,13 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for load-file, load-source, load-project, reload, unload, and modules operations.
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Extracted from beamtalk_repl_server (BT-705).
-
 -module(beamtalk_repl_ops_load).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Op handlers for load-file, load-source, load-project, reload, unload, and modules operations.
+
+Extracted from beamtalk_repl_server (BT-705).
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -41,27 +43,29 @@
 %%% sync_project/2 — shared incremental sync logic (BT-1723)
 %%% ============================================================================
 
-%% @doc Perform an incremental project sync.
-%%
-%% Scans the project at `Path` for `.bt` and `.erl` files, classifies them
-%% as changed/unchanged/deleted by mtime, compiles changed files in dependency
-%% order, and returns a result map with summary statistics.
-%%
-%% `Options` is a map with optional keys:
-%%   - `include_tests` (boolean, default false) — include test/ directory
-%%   - `force` (boolean, default false) — recompile all files regardless of mtime
-%%   - `session_pid` (pid() | undefined) — REPL session for module tracking
-%%
-%% Returns `{ok, ResultMap}` where ResultMap contains:
-%%   - `classes` — list of loaded class name binaries
-%%   - `errors` — list of structured error maps
-%%   - `summary` — human-readable summary binary
-%%   - `changed_count` — number of files reloaded
-%%   - `unchanged_count` — number of unchanged files
-%%   - `deleted_count` — number of deleted files
-%%   - `total_files` — total file count including deleted
-%%
-%% Returns `{error, #beamtalk_error{}}` if no beamtalk.toml found.
+-doc """
+Perform an incremental project sync.
+
+Scans the project at `Path` for `.bt` and `.erl` files, classifies them
+as changed/unchanged/deleted by mtime, compiles changed files in dependency
+order, and returns a result map with summary statistics.
+
+`Options` is a map with optional keys:
+  - `include_tests` (boolean, default false) — include test/ directory
+  - `force` (boolean, default false) — recompile all files regardless of mtime
+  - `session_pid` (pid() | undefined) — REPL session for module tracking
+
+Returns `{ok, ResultMap}` where ResultMap contains:
+  - `classes` — list of loaded class name binaries
+  - `errors` — list of structured error maps
+  - `summary` — human-readable summary binary
+  - `changed_count` — number of files reloaded
+  - `unchanged_count` — number of unchanged files
+  - `deleted_count` — number of deleted files
+  - `total_files` — total file count including deleted
+
+Returns `{error, #beamtalk_error{}}` if no beamtalk.toml found.
+""".
 -spec sync_project(string(), map()) ->
     {ok, map()} | {error, #beamtalk_error{}}.
 sync_project(Path, Options) ->
@@ -86,7 +90,7 @@ sync_project(Path, Options) ->
             do_sync_project(AbsPath, IncludeTests, Force, SessionPid)
     end.
 
-%% @private Core sync logic, called after validating beamtalk.toml exists.
+-doc "Core sync logic, called after validating beamtalk.toml exists.".
 -spec do_sync_project(string(), boolean(), boolean(), pid() | undefined) -> {ok, map()}.
 do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     %% Activate pre-compiled dependency modules before loading project files,
@@ -161,6 +165,7 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
                 #{domain => [beamtalk, runtime]}
             ),
             %% Unload the native module from the VM before removing the mtime.
+            % elp:fixme W0023 intentional atom creation
             ModName = list_to_atom(filename:basename(P, ".erl")),
             case code:is_loaded(ModName) of
                 false ->
@@ -209,7 +214,7 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         not sets:is_element(P, BtErrorPaths)
     ],
     record_file_mtimes_from_snapshot(SuccessfulBtMtimes),
-    Errors = lists:reverse(NativeErrors) ++ BtErrors,
+    Errors = lists:reverse(NativeErrors, BtErrors),
     ClassNames =
         [
             case maps:get(name, C, "") of
@@ -235,7 +240,7 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         total_files => TotalFiles
     }}.
 
-%% @doc Handle load/reload/unload/modules ops.
+-doc "Handle load/reload/unload/modules ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"load-project">>, Params, Msg, SessionPid) ->
     PathBin = maps:get(<<"path">>, Params, <<".">>),
@@ -456,7 +461,7 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     WorkspaceExtra =
         case beamtalk_workspace_meta:loaded_modules() of
             {ok, WsMods} ->
-                TrackedSet = maps:from_list([{N, true} || {N, _} <- TrackedModules]),
+                TrackedSet = maps:from_keys([N || {N, _} <- TrackedModules], true),
                 lists:filtermap(
                     fun({ModName, SourcePath}) ->
                         case maps:is_key(ModName, TrackedSet) of
@@ -499,9 +504,11 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
 
 %%% Internal helpers
 
-%% @private Format a dependency activation error as a structured error map.
-%% Matches the `#{<<"path">> => ..., <<"kind">> => ..., <<"message">> => ...}`
-%% format used by native Erlang and Beamtalk compilation errors.
+-doc """
+Format a dependency activation error as a structured error map.
+Matches the `#{<<"path">> => ..., <<"kind">> => ..., <<"message">> => ...}`
+format used by native Erlang and Beamtalk compilation errors.
+""".
 -spec format_dep_error(module(), term()) -> map().
 format_dep_error(Mod, Reason) ->
     #{
@@ -512,8 +519,7 @@ format_dep_error(Mod, Reason) ->
         )
     }.
 
-%% @private
-%% @doc Recursively find all .bt files in a directory.
+-doc "Recursively find all .bt files in a directory.".
 -spec find_bt_files(string()) -> [string()].
 find_bt_files(Dir) ->
     case filelib:is_dir(Dir) of
@@ -523,9 +529,10 @@ find_bt_files(Dir) ->
             filelib:fold_files(Dir, ".*\\.bt$", true, fun(F, Acc) -> [F | Acc] end, [])
     end.
 
-%% @private
-%% @doc Find all .erl files in a directory, recursively but skipping test/.
-%% Returns an empty list if the directory does not exist.
+-doc """
+Find all .erl files in a directory, recursively but skipping test/.
+Returns an empty list if the directory does not exist.
+""".
 -spec find_erl_files(string()) -> [string()].
 find_erl_files(Dir) ->
     case filelib:is_dir(Dir) of
@@ -539,10 +546,11 @@ find_erl_files(Dir) ->
             [F || F <- AllErl, not lists:prefix(TestPrefix, F)]
     end.
 
-%% @private
-%% @doc Compile a list of native .erl files via compile:file/2.
-%% Returns {Errors, CompiledCount} where Errors is a list of structured error maps.
-%% Include paths are set to native/include/ if present.
+-doc """
+Compile a list of native .erl files via compile:file/2.
+Returns {Errors, CompiledCount} where Errors is a list of structured error maps.
+Include paths are set to native/include/ if present.
+""".
 -spec compile_native_erl_files([string()], string()) -> {[map()], non_neg_integer()}.
 compile_native_erl_files([], _ProjectRoot) ->
     {[], 0};
@@ -615,8 +623,7 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
         ErlFiles
     ).
 
-%% @private
-%% @doc Format Erlang compile errors into structured error maps.
+-doc "Format Erlang compile errors into structured error maps.".
 -spec format_erl_compile_errors(string(), [{string(), [term()]}]) -> [map()].
 format_erl_compile_errors(ErlPath, CompileErrors) ->
     PathBin = list_to_binary(ErlPath),
@@ -650,8 +657,7 @@ format_erl_compile_errors(ErlPath, CompileErrors) ->
         CompileErrors
     ).
 
-%% @private
-%% @doc Log Erlang compilation warnings.
+-doc "Log Erlang compilation warnings.".
 -spec log_erl_warnings(string(), [{string(), [term()]}]) -> ok.
 log_erl_warnings(_ErlPath, []) ->
     ok;
@@ -676,9 +682,10 @@ log_erl_warnings(ErlPath, Warnings) ->
         Warnings
     ).
 
-%% @private
-%% @doc Extract the declared class name and superclass from a .bt source file.
-%% Returns {ClassName, SuperClass} as binaries, or {undefined, undefined}.
+-doc """
+Extract the declared class name and superclass from a .bt source file.
+Returns {ClassName, SuperClass} as binaries, or {undefined, undefined}.
+""".
 -spec extract_bt_class_info(string()) -> {binary() | undefined, binary() | undefined}.
 extract_bt_class_info(Path) ->
     case file:read_file(Path) of
@@ -691,9 +698,10 @@ extract_bt_class_info(Path) ->
             {undefined, undefined}
     end.
 
-%% @private
-%% @doc Sort .bt files in topological dependency order (superclass before subclass).
-%% Files whose superclass is not in the project set come first.
+-doc """
+Sort .bt files in topological dependency order (superclass before subclass).
+Files whose superclass is not in the project set come first.
+""".
 -spec sort_bt_files_by_deps([string()]) -> [string()].
 sort_bt_files_by_deps([]) ->
     [];
@@ -717,7 +725,6 @@ sort_bt_files_by_deps(Files) ->
     ),
     topo_sort_loop(Ready, Pending, []).
 
-%% @private
 -spec topo_sort_loop([map()], [map()], [string()]) -> [string()].
 topo_sort_loop([], [], Acc) ->
     lists:reverse(Acc);
@@ -730,7 +737,7 @@ topo_sort_loop([], Pending, Acc) ->
         [length(Pending)],
         #{domain => [beamtalk, runtime]}
     ),
-    lists:reverse(Acc) ++ [maps:get(path, I) || I <- Pending];
+    lists:reverse(Acc, [maps:get(path, I) || I <- Pending]);
 topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
     {NowReady, StillPending} = lists:partition(
         fun(#{super := Super}) -> Super =:= Class end,
@@ -738,17 +745,18 @@ topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
     ),
     topo_sort_loop(Ready ++ NowReady, StillPending, [Path | Acc]).
 
-%% @private
-%% @doc Load files one by one, accumulating class maps and per-file error maps.
-%% Accumulates in reverse to avoid quadratic ++ and reverses at the end.
-%% Per-file errors are returned as structured maps with path, kind, and message
-%% so callers can handle partial failures programmatically.
-%%
-%% BT-1608: Class indexes are rebuilt after each successful file load so that
-%% later files in the batch can reference classes loaded earlier (e.g. test
-%% files referencing fixture classes). The original BT-1543 optimisation of
-%% building indexes once caused "Undefined function" errors when test files
-%% were compiled before their fixture dependencies were visible in the index.
+-doc """
+Load files one by one, accumulating class maps and per-file error maps.
+Accumulates in reverse to avoid quadratic ++ and reverses at the end.
+Per-file errors are returned as structured maps with path, kind, and message
+so callers can handle partial failures programmatically.
+
+BT-1608: Class indexes are rebuilt after each successful file load so that
+later files in the batch can reference classes loaded earlier (e.g. test
+files referencing fixture classes). The original BT-1543 optimisation of
+building indexes once caused "Undefined function" errors when test files
+were compiled before their fixture dependencies were visible in the index.
+""".
 -spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
 load_files_sequential(Files, SessionPid) ->
     Indexes0 = beamtalk_repl_compiler:build_class_indexes(),
@@ -769,11 +777,12 @@ load_files_sequential(Files, SessionPid) ->
         ),
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
 
-%% @private
-%% @doc Load files without a session (BT-1723).
-%% Uses beamtalk_repl_loader:reload_class_file/1 for stateless compilation.
-%% Called by sync_project when no SessionPid is available (e.g., from
-%% the Workspace sync primitive).
+-doc """
+Load files without a session (BT-1723).
+Uses beamtalk_repl_loader:reload_class_file/1 for stateless compilation.
+Called by sync_project when no SessionPid is available (e.g., from
+the Workspace sync primitive).
+""".
 -spec load_files_stateless([string()]) -> {[map()], [map()]}.
 load_files_stateless(Files) ->
     {RevClasses, RevErrors} =
@@ -792,10 +801,11 @@ load_files_stateless(Files) ->
         ),
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
 
-%% @private
-%% @doc Build structured error maps for a per-file load failure.
-%% For compile errors with a diagnostic list, returns one error map per diagnostic
-%% with line numbers preserved. Other errors return a single-element list.
+-doc """
+Build structured error maps for a per-file load failure.
+For compile errors with a diagnostic list, returns one error map per diagnostic
+with line numbers preserved. Other errors return a single-element list.
+""".
 -spec structured_file_errors(string(), term()) -> [map()].
 structured_file_errors(Path, {compile_error, Diagnostics}) when
     is_list(Diagnostics), Diagnostics =/= []
@@ -817,8 +827,7 @@ structured_file_errors(Path, Reason) ->
         end
     ].
 
-%% @private
-%% @doc Convert a single compiler diagnostic map to a structured error map.
+-doc "Convert a single compiler diagnostic map to a structured error map.".
 -spec diagnostic_to_error_map(binary(), term()) -> map().
 diagnostic_to_error_map(PathBin, D) when is_map(D) ->
     Msg = maps:get(message, D, <<"Unknown error">>),
@@ -828,10 +837,12 @@ diagnostic_to_error_map(PathBin, D) when is_map(D) ->
         <<"message">> => Msg
     },
     ErrMap1 =
+        % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(line, D) of
             {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
             _ -> ErrMap0
         end,
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, D) of
         {ok, Hint} when is_binary(Hint) -> ErrMap1#{<<"hint">> => Hint};
         _ -> ErrMap1
@@ -849,10 +860,11 @@ diagnostic_to_error_map(PathBin, D) ->
         <<"message">> => iolist_to_binary(io_lib:format("~p", [D]))
     }.
 
-%% @private
-%% @doc Collect collision warnings for the loaded classes after a file load.
-%% BT-737: Drains warnings from the ETS table keyed by class name and
-%% formats them as human-readable binary strings for the protocol response.
+-doc """
+Collect collision warnings for the loaded classes after a file load.
+BT-737: Drains warnings from the ETS table keyed by class name and
+formats them as human-readable binary strings for the protocol response.
+""".
 -spec collect_load_warnings([map()]) -> [binary()].
 collect_load_warnings(Classes) ->
     %% Use safe_to_existing_atom (not list_to_atom) to avoid leaking atoms for
@@ -875,12 +887,13 @@ collect_load_warnings(Classes) ->
      || {ClassName, OldModule, NewModule} <- Collisions
     ].
 
-%% @private
-%% @doc Collect collision warnings with package-aware draining.
-%% BT-742: Uses the module atom to derive the package, then drains only
-%% that package's warnings — leaving sibling packages' warnings intact.
-%% Falls back to unqualified drain when ModuleAtom is undefined (e.g.,
-%% path-based :reload without a known module).
+-doc """
+Collect collision warnings with package-aware draining.
+BT-742: Uses the module atom to derive the package, then drains only
+that package's warnings — leaving sibling packages' warnings intact.
+Falls back to unqualified drain when ModuleAtom is undefined (e.g.,
+path-based :reload without a known module).
+""".
 -spec collect_load_warnings_qualified([map()], atom() | undefined) -> [binary()].
 collect_load_warnings_qualified(Classes, undefined) ->
     %% No module context — fall back to unqualified drain (drains all packages).
@@ -906,7 +919,6 @@ collect_load_warnings_qualified(Classes, ModuleAtom) ->
      || {ClassName, OldModule, NewModule} <- Collisions
     ].
 
-%% @private
 -spec format_collision_warning(atom(), atom(), atom()) -> binary().
 format_collision_warning(ClassName, OldModule, NewModule) ->
     ClassBin = atom_to_binary(ClassName, utf8),
@@ -941,10 +953,12 @@ format_collision_warning(ClassName, OldModule, NewModule) ->
         QualifiedHint
     ]).
 
-%% @private Extract the package segment from a bt@{pkg}@{class} module name.
-%% Returns the package name binary or undefined.
-%% Only 3-part names (bt@{pkg}@{class}) have a package; 2-part names (bt@{class})
-%% are stdlib/unqualified and return undefined.
+-doc """
+Extract the package segment from a bt@{pkg}@{class} module name.
+Returns the package name binary or undefined.
+Only 3-part names (bt@{pkg}@{class}) have a package; 2-part names (bt@{class})
+are stdlib/unqualified and return undefined.
+""".
 -spec extract_package_from_module(atom()) -> binary() | undefined.
 extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
     ModStr = atom_to_list(ModuleName),
@@ -955,7 +969,6 @@ extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
             undefined
     end.
 
-%% @private
 -spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) ->
     binary().
 do_reload(Path, ModuleAtom, Msg, SessionPid) ->
@@ -989,7 +1002,6 @@ do_reload(Path, ModuleAtom, Msg, SessionPid) ->
             )
     end.
 
-%% @private
 -spec trigger_actor_code_change(atom() | undefined, [map()]) ->
     {non_neg_integer(), [{pid(), term()}]}.
 trigger_actor_code_change(ModuleAtom, Classes) ->
@@ -1020,7 +1032,6 @@ trigger_actor_code_change(ModuleAtom, Classes) ->
             {Count, lists:reverse(FailsRev)}
     end.
 
-%% @private
 -spec resolve_module_atoms(atom() | undefined, [map()]) -> [atom()].
 resolve_module_atoms(ModuleAtom, _Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
     [ModuleAtom];
@@ -1047,7 +1058,6 @@ resolve_module_atoms(undefined, Classes) ->
         Classes
     ).
 
-%% @private
 -spec resolve_class_to_module(atom()) -> atom().
 resolve_class_to_module(ClassName) ->
     ClassPids =
@@ -1073,9 +1083,10 @@ resolve_class_to_module(ClassName, [Pid | Rest]) ->
             resolve_class_to_module(ClassName, Rest)
     end.
 
-%% @private
-%% @doc Resolve a source path for a module when workspace_meta has none.
-%% Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+-doc """
+Resolve a source path for a module when workspace_meta has none.
+Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+""".
 -spec resolve_source_path(atom()) -> string().
 resolve_source_path(ModName) ->
     try
@@ -1088,9 +1099,10 @@ resolve_source_path(ModName) ->
         _:_ -> "unknown"
     end.
 
-%% @private
-%% @doc Build a map from BEAM module atom to Beamtalk class name binary.
-%% Queries all registered class processes in a single pass.
+-doc """
+Build a map from BEAM module atom to Beamtalk class name binary.
+Queries all registered class processes in a single pass.
+""".
 -spec module_to_class_name_map() -> #{atom() => binary()}.
 module_to_class_name_map() ->
     Pids =
@@ -1117,11 +1129,12 @@ module_to_class_name_map() ->
 %%% BT-1717: Demand-driven native .erl recompilation on single-file reload
 %%% ===================================================================
 
-%% @private
-%% @doc Extract native module references from a .bt source file.
-%% Returns a deduplicated list of Erlang module name binaries referenced via:
-%%   - `native: module_name` annotation in the class header
-%%   - `(Erlang module_name)` FFI calls in method bodies
+-doc """
+Extract native module references from a .bt source file.
+Returns a deduplicated list of Erlang module name binaries referenced via:
+  - `native: module_name` annotation in the class header
+  - `(Erlang module_name)` FFI calls in method bodies
+""".
 -spec extract_native_refs(string()) -> [binary()].
 extract_native_refs(Path) ->
     case file:read_file(Path) of
@@ -1153,15 +1166,15 @@ extract_native_refs(Path) ->
             []
     end.
 
-%% @private
-%% @doc Find the project root by walking up from a file path to find beamtalk.toml.
-%% Returns the directory containing beamtalk.toml, or undefined if not found.
+-doc """
+Find the project root by walking up from a file path to find beamtalk.toml.
+Returns the directory containing beamtalk.toml, or undefined if not found.
+""".
 -spec find_project_root(string()) -> string() | undefined.
 find_project_root(Path) ->
     Dir = filename:dirname(filename:absname(Path)),
     find_project_root_walk(Dir).
 
-%% @private
 -spec find_project_root_walk(string()) -> string() | undefined.
 find_project_root_walk(Dir) ->
     Parent = filename:dirname(Dir),
@@ -1176,11 +1189,12 @@ find_project_root_walk(Dir) ->
             end
     end.
 
-%% @private
-%% @doc Check native module references from a .bt file and recompile stale .erl files.
-%% For each native module referenced, checks if native/{module}.erl exists in the
-%% project and if it's newer than its loaded .beam. If so, recompiles via compile:file/2.
-%% Returns {ok, RecompiledCount} or {error, Errors}.
+-doc """
+Check native module references from a .bt file and recompile stale .erl files.
+For each native module referenced, checks if native/{module}.erl exists in the
+project and if it's newer than its loaded .beam. If so, recompiles via compile:file/2.
+Returns {ok, RecompiledCount} or {error, Errors}.
+""".
 -spec maybe_recompile_native_deps(string(), string() | undefined) ->
     {ok, non_neg_integer()} | {error, [map()]}.
 maybe_recompile_native_deps(_Path, undefined) ->
@@ -1227,13 +1241,15 @@ maybe_recompile_native_deps(Path, ProjectRoot) ->
             end
     end.
 
-%% @private
-%% @doc Check if a native .erl file is newer than its loaded .beam counterpart.
-%% Returns true if:
-%%   - The module is not loaded at all (needs compilation)
-%%   - The .erl file's mtime is newer than the .beam file's mtime
+-doc """
+Check if a native .erl file is newer than its loaded .beam counterpart.
+Returns true if:
+  - The module is not loaded at all (needs compilation)
+  - The .erl file's mtime is newer than the .beam file's mtime
+""".
 -spec is_native_erl_stale(string(), binary()) -> boolean().
 is_native_erl_stale(ErlFile, ModBin) ->
+    % elp:fixme W0023 intentional atom creation
     ModAtom = binary_to_atom(ModBin, utf8),
     case code:is_loaded(ModAtom) of
         false ->
@@ -1262,17 +1278,19 @@ is_native_erl_stale(ErlFile, ModBin) ->
             ErlMtime > BeamMtime
     end.
 
-%% @private
-%% @doc Record the .erl file's mtime when a native module is compiled in-memory.
-%% Used by is_native_erl_stale/2 to detect changes since last compilation.
+-doc """
+Record the .erl file's mtime when a native module is compiled in-memory.
+Used by is_native_erl_stale/2 to detect changes since last compilation.
+""".
 -spec set_native_compile_mtime(atom(), calendar:datetime()) -> ok.
 set_native_compile_mtime(ModAtom, Mtime) ->
     persistent_term:put({beamtalk_native_mtime, ModAtom}, Mtime),
     ok.
 
-%% @private
-%% @doc Retrieve the .erl file's mtime that was recorded at compilation time.
-%% Returns epoch if no mtime was recorded (triggers recompilation).
+-doc """
+Retrieve the .erl file's mtime that was recorded at compilation time.
+Returns epoch if no mtime was recorded (triggers recompilation).
+""".
 -spec get_native_compile_mtime(atom()) -> calendar:datetime().
 get_native_compile_mtime(ModAtom) ->
     try
@@ -1286,17 +1304,18 @@ get_native_compile_mtime(ModAtom) ->
 %%% BT-1685: Incremental load-project helpers
 %%% ===================================================================
 
-%% @private
-%% @doc Classify files into changed, unchanged, and deleted lists.
-%%
-%% A file is "changed" if:
-%%   - It is new (not in PreviousMtimes)
-%%   - Its current mtime differs from the stored mtime
-%%
-%% A file is "unchanged" if its mtime matches the stored value.
-%%
-%% "Deleted" files are those present in PreviousMtimes but not in
-%% the current file list.
+-doc """
+Classify files into changed, unchanged, and deleted lists.
+
+A file is "changed" if:
+  - It is new (not in PreviousMtimes)
+  - Its current mtime differs from the stored mtime
+
+A file is "unchanged" if its mtime matches the stored value.
+
+"Deleted" files are those present in PreviousMtimes but not in
+the current file list.
+""".
 -spec classify_files_by_change([string()], #{string() => calendar:datetime()}) ->
     {Changed :: [string()], Unchanged :: [string()], Deleted :: [string()]}.
 classify_files_by_change(CurrentFiles, PreviousMtimes) ->
@@ -1322,9 +1341,10 @@ classify_files_by_change(CurrentFiles, PreviousMtimes) ->
     ],
     {Changed, Unchanged, Deleted}.
 
-%% @private
-%% @doc Get the mtime of a file.
-%% Returns {{0,0,0},{0,0,0}} if the file doesn't exist or can't be read.
+-doc """
+Get the mtime of a file.
+Returns {{0,0,0},{0,0,0}} if the file doesn't exist or can't be read.
+""".
 -spec get_file_mtime(string()) -> calendar:datetime().
 get_file_mtime(Path) ->
     case filelib:last_modified(Path) of
@@ -1332,15 +1352,15 @@ get_file_mtime(Path) ->
         Mtime -> Mtime
     end.
 
-%% @private
-%% @doc Snapshot mtimes for a list of files before loading.
-%% Returns a list of {Path, Mtime} tuples.
+-doc """
+Snapshot mtimes for a list of files before loading.
+Returns a list of {Path, Mtime} tuples.
+""".
 -spec snapshot_file_mtimes([string()]) -> [{string(), calendar:datetime()}].
 snapshot_file_mtimes(Files) ->
     [{Path, get_file_mtime(Path)} || Path <- Files].
 
-%% @private
-%% @doc Record file mtimes from a pre-load snapshot.
+-doc "Record file mtimes from a pre-load snapshot.".
 -spec record_file_mtimes_from_snapshot([{string(), calendar:datetime()}]) -> ok.
 record_file_mtimes_from_snapshot(Snapshot) ->
     lists:foreach(
@@ -1350,10 +1370,11 @@ record_file_mtimes_from_snapshot(Snapshot) ->
         Snapshot
     ).
 
-%% @private
-%% @doc Handle files that were previously loaded but have been deleted.
-%% Unregisters their classes from the class registry and unloads their BEAM modules.
-%% Returns the count of deleted files processed.
+-doc """
+Handle files that were previously loaded but have been deleted.
+Unregisters their classes from the class registry and unloads their BEAM modules.
+Returns the count of deleted files processed.
+""".
 -spec handle_deleted_files([string()], pid() | undefined) -> non_neg_integer().
 handle_deleted_files([], _SessionPid) ->
     0;
@@ -1380,8 +1401,7 @@ handle_deleted_files(DeletedFiles, SessionPid) ->
     ),
     length(DeletedFiles).
 
-%% @private
-%% @doc Find and unload all modules that were loaded from a given source path.
+-doc "Find and unload all modules that were loaded from a given source path.".
 -spec unload_modules_for_path(string(), pid() | undefined, #{atom() => binary()}, [
     {atom(), string() | undefined}
 ]) -> ok.
@@ -1391,6 +1411,7 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
             case SourcePath =:= Path of
                 true ->
                     %% Try to find class name for this module and remove it.
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(ModuleName, ModToClass) of
                         {ok, ClassNameBin} ->
                             case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
@@ -1417,9 +1438,10 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
         LoadedModules
     ).
 
-%% @private
-%% @doc Build the incremental summary message.
-%% Format: "Reloaded 2 of 7 files (5 unchanged)" or "Reloaded 2 of 7 files (3 unchanged, 2 deleted)"
+-doc """
+Build the incremental summary message.
+Format: "Reloaded 2 of 7 files (5 unchanged)" or "Reloaded 2 of 7 files (3 unchanged, 2 deleted)"
+""".
 -spec build_incremental_summary(
     non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()
 ) -> binary().

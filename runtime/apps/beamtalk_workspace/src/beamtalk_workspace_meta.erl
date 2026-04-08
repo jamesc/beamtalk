@@ -1,21 +1,23 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Workspace metadata tracking
-%%%
-%%% **DDD Context:** Workspace Context
-%%%
-%%% Stores metadata about the workspace including:
-%%% - Workspace ID
-%%% - Project path
-%%% - Creation timestamp
-%%% - Last activity timestamp
-%%%
-%%% This module provides a gen_server that tracks workspace state
-%%% and can be queried by other components (e.g., idle monitor).
-
 -module(beamtalk_workspace_meta).
 -behaviour(gen_server).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Workspace metadata tracking
+
+Stores metadata about the workspace including:
+- Workspace ID
+- Project path
+- Creation timestamp
+- Last activity timestamp
+
+This module provides a gen_server that tracks workspace state
+and can be queried by other components (e.g., idle monitor).
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -92,12 +94,12 @@
 
 %%% Public API
 
-%% @doc Start the workspace metadata server.
+-doc "Start the workspace metadata server.".
 -spec start_link(init_metadata()) -> {ok, pid()} | {error, term()}.
 start_link(InitialMetadata) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, InitialMetadata, []).
 
-%% @doc Get all workspace metadata.
+-doc "Get all workspace metadata.".
 -spec get_metadata() -> {ok, metadata()} | {error, not_started}.
 get_metadata() ->
     try
@@ -107,13 +109,15 @@ get_metadata() ->
             {error, not_started}
     end.
 
-%% @doc Alias for get_metadata/0 (ADR 0004 API)
+-doc "Alias for get_metadata/0 (ADR 0004 API)".
 -spec get() -> {ok, metadata()} | {error, not_started}.
 get() ->
     get_metadata().
 
-%% @doc Get the package name for the current workspace.
-%% Returns `undefined` if no package is configured or the server is not started.
+-doc """
+Get the package name for the current workspace.
+Returns `undefined` if no package is configured or the server is not started.
+""".
 -spec get_package_name() -> binary() | undefined.
 get_package_name() ->
     try
@@ -123,8 +127,10 @@ get_package_name() ->
             undefined
     end.
 
-%% @doc Update the last activity timestamp to now.
-%% Called by other components when activity occurs (message sent, code loaded, etc.)
+-doc """
+Update the last activity timestamp to now.
+Called by other components when activity occurs (message sent, code loaded, etc.)
+""".
 -spec update_activity() -> ok.
 update_activity() ->
     try
@@ -135,8 +141,10 @@ update_activity() ->
             ok
     end.
 
-%% @doc Get the last activity timestamp.
-%% Returns the timestamp in seconds since epoch, or {error, not_started}.
+-doc """
+Get the last activity timestamp.
+Returns the timestamp in seconds since epoch, or {error, not_started}.
+""".
 -spec get_last_activity() -> {ok, integer()} | {error, not_started}.
 get_last_activity() ->
     try
@@ -146,7 +154,7 @@ get_last_activity() ->
             {error, not_started}
     end.
 
-%% @doc Register a supervised actor PID.
+-doc "Register a supervised actor PID.".
 -spec register_actor(pid()) -> ok.
 register_actor(Pid) when is_pid(Pid) ->
     try
@@ -156,7 +164,7 @@ register_actor(Pid) when is_pid(Pid) ->
             ok
     end.
 
-%% @doc Unregister a supervised actor PID.
+-doc "Unregister a supervised actor PID.".
 -spec unregister_actor(pid()) -> ok.
 unregister_actor(Pid) when is_pid(Pid) ->
     try
@@ -166,7 +174,7 @@ unregister_actor(Pid) when is_pid(Pid) ->
             ok
     end.
 
-%% @doc Get list of supervised actor PIDs.
+-doc "Get list of supervised actor PIDs.".
 -spec supervised_actors() -> {ok, [pid()]} | {error, not_started}.
 supervised_actors() ->
     try
@@ -176,12 +184,12 @@ supervised_actors() ->
             {error, not_started}
     end.
 
-%% @doc Register a loaded module with no source path.
+-doc "Register a loaded module with no source path.".
 -spec register_module(atom()) -> ok.
 register_module(Module) ->
     register_module(Module, undefined).
 
-%% @doc Register a loaded module with its .bt source file path.
+-doc "Register a loaded module with its .bt source file path.".
 -spec register_module(atom(), string() | binary() | undefined) -> ok.
 register_module(Module, SourcePath) when is_atom(Module) ->
     %% Normalise binary to string so persist_metadata_to_disk/1 always sees a list.
@@ -193,7 +201,9 @@ register_module(Module, SourcePath) when is_atom(Module) ->
             ok
     end.
 
-%% @doc Unregister a loaded module (BT-1239: called when a class is removed from the system).
+-doc """
+Unregister a loaded module (BT-1239: called when a class is removed from the system).
+""".
 -spec unregister_module(atom()) -> ok.
 unregister_module(Module) when is_atom(Module) ->
     try
@@ -203,7 +213,7 @@ unregister_module(Module) when is_atom(Module) ->
             ok
     end.
 
-%% @doc Get list of loaded modules with their source paths.
+-doc "Get list of loaded modules with their source paths.".
 -spec loaded_modules() -> {ok, [{atom(), string() | undefined}]} | {error, not_started}.
 loaded_modules() ->
     try
@@ -213,7 +223,7 @@ loaded_modules() ->
             {error, not_started}
     end.
 
-%% @doc Store source text for a class (for later method patching via >>).
+-doc "Store source text for a class (for later method patching via >>).".
 -spec set_class_source(binary(), string()) -> ok.
 set_class_source(ClassName, Source) when is_binary(ClassName) ->
     try
@@ -223,7 +233,9 @@ set_class_source(ClassName, Source) when is_binary(ClassName) ->
             ok
     end.
 
-%% @doc Get stored source text for a class. Returns undefined if not found or server not started.
+-doc """
+Get stored source text for a class. Returns undefined if not found or server not started.
+""".
 -spec get_class_source(binary()) -> string() | undefined.
 get_class_source(ClassName) when is_binary(ClassName) ->
     try
@@ -233,8 +245,10 @@ get_class_source(ClassName) when is_binary(ClassName) ->
             undefined
     end.
 
-%% @doc Store the mtime for a loaded .bt file (BT-1685).
-%% Called after each successful file load during load-project.
+-doc """
+Store the mtime for a loaded .bt file (BT-1685).
+Called after each successful file load during load-project.
+""".
 -spec set_file_mtime(string(), calendar:datetime()) -> ok.
 set_file_mtime(FilePath, Mtime) when is_list(FilePath) ->
     try
@@ -244,8 +258,10 @@ set_file_mtime(FilePath, Mtime) when is_list(FilePath) ->
             ok
     end.
 
-%% @doc Get all tracked file mtimes (BT-1685).
-%% Returns a map from absolute file path to its mtime at last load.
+-doc """
+Get all tracked file mtimes (BT-1685).
+Returns a map from absolute file path to its mtime at last load.
+""".
 -spec get_file_mtimes() -> {ok, #{string() => calendar:datetime()}} | {error, not_started}.
 get_file_mtimes() ->
     try
@@ -255,8 +271,10 @@ get_file_mtimes() ->
             {error, not_started}
     end.
 
-%% @doc Clear all tracked file mtimes (BT-1685).
-%% Used when force-reloading a project.
+-doc """
+Clear all tracked file mtimes (BT-1685).
+Used when force-reloading a project.
+""".
 -spec clear_file_mtimes() -> ok.
 clear_file_mtimes() ->
     try
@@ -266,8 +284,10 @@ clear_file_mtimes() ->
             ok
     end.
 
-%% @doc Remove mtime tracking for a single file (BT-1685).
-%% Used when a file is detected as deleted during incremental reload.
+-doc """
+Remove mtime tracking for a single file (BT-1685).
+Used when a file is detected as deleted during incremental reload.
+""".
 -spec remove_file_mtime(string()) -> ok.
 remove_file_mtime(FilePath) when is_list(FilePath) ->
     try
@@ -279,7 +299,6 @@ remove_file_mtime(FilePath) when is_list(FilePath) ->
 
 %%% gen_server callbacks
 
-%% @private
 init(InitialMetadata) ->
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
@@ -353,7 +372,6 @@ init(InitialMetadata) ->
 
     {ok, State2}.
 
-%% @private
 handle_call(get_metadata, _From, State) ->
     Metadata = #{
         workspace_id => State#state.workspace_id,
@@ -380,7 +398,7 @@ handle_call({get_class_source, ClassName}, _From, State) ->
     {reply, Result, State};
 handle_call({set_class_source, ClassName, Source}, _From, State) ->
     Sources = State#state.class_sources,
-    State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
+    State2 = State#state{class_sources = Sources#{ClassName => Source}},
     store_state_in_ets(State2),
     {reply, ok, schedule_persist(State2)};
 handle_call(get_file_mtimes, _From, State) ->
@@ -388,7 +406,6 @@ handle_call(get_file_mtimes, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-%% @private
 handle_cast(update_activity, State) ->
     Now = erlang:system_time(second),
     State2 = State#state{last_activity = Now},
@@ -422,7 +439,7 @@ handle_cast({register_module, Module, NewSource}, State) ->
             undefined -> maps:get(Module, Modules, undefined);
             _ -> NewSource
         end,
-    State2 = State#state{loaded_modules = maps:put(Module, EffectiveSource, Modules)},
+    State2 = State#state{loaded_modules = Modules#{Module => EffectiveSource}},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({unregister_module, Module}, State) ->
@@ -433,7 +450,7 @@ handle_cast({unregister_module, Module}, State) ->
     {noreply, schedule_persist(State2)};
 handle_cast({set_file_mtime, FilePath, Mtime}, State) ->
     Mtimes = State#state.file_mtimes,
-    State2 = State#state{file_mtimes = maps:put(FilePath, Mtime, Mtimes)},
+    State2 = State#state{file_mtimes = Mtimes#{FilePath => Mtime}},
     store_state_in_ets(State2),
     {noreply, State2};
 handle_cast(clear_file_mtimes, State) ->
@@ -448,7 +465,6 @@ handle_cast({remove_file_mtime, FilePath}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @private
 handle_info(persist_to_disk, State) ->
     persist_metadata_to_disk(State),
     {noreply, State#state{persist_timer = undefined}};
@@ -460,7 +476,6 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @private
 terminate(_Reason, State) ->
     %% Cancel any pending persist timer before shutdown
     case State#state.persist_timer of
@@ -471,16 +486,16 @@ terminate(_Reason, State) ->
     persist_metadata_to_disk(State),
     ok.
 
-%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal functions
 
-%% @private
-%% Schedule a debounced persist to disk.
-%% Cancels any pending timer and resets the debounce window.
-%% No-op in run mode (metadata_path = undefined).
+-doc """
+Schedule a debounced persist to disk.
+Cancels any pending timer and resets the debounce window.
+No-op in run mode (metadata_path = undefined).
+""".
 schedule_persist(#state{metadata_path = undefined} = State) ->
     State;
 schedule_persist(#state{persist_timer = OldTimer} = State) ->
@@ -491,8 +506,7 @@ schedule_persist(#state{persist_timer = OldTimer} = State) ->
     NewRef = erlang:send_after(?PERSIST_DELAY_MS, self(), persist_to_disk),
     State#state{persist_timer = NewRef}.
 
-%% @private
-%% Store state in ETS for fast read access
+-doc "Store state in ETS for fast read access".
 store_state_in_ets(State) ->
     case ets:whereis(?WORKSPACE_META_TABLE) of
         % Table doesn't exist yet, skip
@@ -500,9 +514,10 @@ store_state_in_ets(State) ->
         _Tid -> ets:insert(?WORKSPACE_META_TABLE, {metadata, State})
     end.
 
-%% @private
-%% Load metadata from disk if available.
-%% Skipped in run mode (metadata_path = undefined).
+-doc """
+Load metadata from disk if available.
+Skipped in run mode (metadata_path = undefined).
+""".
 load_metadata_from_disk(#state{metadata_path = undefined} = State) ->
     State;
 load_metadata_from_disk(State) ->
@@ -576,7 +591,7 @@ load_metadata_from_disk(State) ->
                                 maps:fold(
                                     fun
                                         (K, V, Acc) when is_binary(K), is_binary(V) ->
-                                            maps:put(K, binary_to_list(V), Acc);
+                                            Acc#{K => binary_to_list(V)};
                                         (_, _, Acc) ->
                                             Acc
                                     end,
@@ -612,9 +627,10 @@ load_metadata_from_disk(State) ->
             State
     end.
 
-%% @private
-%% Persist metadata to disk in JSON format.
-%% Skipped in run mode (metadata_path = undefined — no workspace registration).
+-doc """
+Persist metadata to disk in JSON format.
+Skipped in run mode (metadata_path = undefined — no workspace registration).
+""".
 persist_metadata_to_disk(#state{metadata_path = undefined}) ->
     ok;
 persist_metadata_to_disk(State) ->
@@ -657,7 +673,7 @@ persist_metadata_to_disk(State) ->
                             end
                     end
             }
-         || {M, S} <- maps:to_list(State#state.loaded_modules)
+         || M := S <- State#state.loaded_modules
         ],
         <<"class_sources">> => maps:fold(
             fun(ClassName, Source, Acc) ->
@@ -668,7 +684,7 @@ persist_metadata_to_disk(State) ->
                     end,
                 case SourceBin of
                     null -> Acc;
-                    _ -> maps:put(ClassName, SourceBin, Acc)
+                    _ -> Acc#{ClassName => SourceBin}
                 end
             end,
             #{},
@@ -690,12 +706,14 @@ persist_metadata_to_disk(State) ->
             {error, Reason}
     end.
 
-%% @private
-%% Remove an actor PID from the supervised list and cancel its monitor.
-%% Used by both explicit unregister and DOWN message handling.
+-doc """
+Remove an actor PID from the supervised list and cancel its monitor.
+Used by both explicit unregister and DOWN message handling.
+""".
 -spec remove_actor(pid(), #state{}) -> #state{}.
 remove_actor(Pid, State) ->
     MonRefs = State#state.monitor_refs,
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Pid, MonRefs) of
         {ok, Ref} -> demonitor(Ref, [flush]);
         error -> ok
@@ -705,9 +723,10 @@ remove_actor(Pid, State) ->
         monitor_refs = maps:remove(Pid, MonRefs)
     }.
 
-%% @private
-%% Normalise a source path value to a string (list).
-%% Accepts binary, list, or undefined. Returns undefined on any conversion failure.
+-doc """
+Normalise a source path value to a string (list).
+Accepts binary, list, or undefined. Returns undefined on any conversion failure.
+""".
 -spec normalize_source_path(term()) -> string() | undefined.
 normalize_source_path(undefined) ->
     undefined;
@@ -721,7 +740,6 @@ normalize_source_path(S) when is_list(S) ->
 normalize_source_path(_) ->
     undefined.
 
-%% @private
 safe_existing_atom(Binary) ->
     try binary_to_existing_atom(Binary, utf8) of
         Atom -> Atom
@@ -729,10 +747,11 @@ safe_existing_atom(Binary) ->
         _:_ -> undefined
     end.
 
-%% @private
-%% BT-775: Detect the package name from beamtalk.toml at the given project path.
-%% Uses simple regex extraction — no TOML parser needed since we only need
-%% the `name = "..."` field from the `[package]` section.
+-doc """
+BT-775: Detect the package name from beamtalk.toml at the given project path.
+Uses simple regex extraction — no TOML parser needed since we only need
+the `name = "..."` field from the `[package]` section.
+""".
 -spec detect_package_name(binary() | undefined) -> binary() | undefined.
 detect_package_name(undefined) ->
     undefined;
@@ -745,9 +764,10 @@ detect_package_name(ProjectPath) when is_binary(ProjectPath) ->
             undefined
     end.
 
-%% @private
-%% Extract the package name from beamtalk.toml content.
-%% Matches `name = "..."` after `[package]` section header.
+-doc """
+Extract the package name from beamtalk.toml content.
+Matches `name = "..."` after `[package]` section header.
+""".
 -spec extract_package_name(binary()) -> binary() | undefined.
 extract_package_name(Content) ->
     %% Find the [package] section and extract name = "value"

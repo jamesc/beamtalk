@@ -1,14 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_compiler_server internal functions.
-%%
-%% Tests response handlers, compile_core_erlang,
-%% and gen_server edge cases (unknown call, cast, info).
-%% Integration tests (compile_expression, compile, diagnostics, version)
-%% are covered in beamtalk_compiler_tests.erl.
-
 -module(beamtalk_compiler_server_tests).
+
+-moduledoc """
+Tests for beamtalk_compiler_server internal functions.
+
+Tests response handlers, compile_core_erlang,
+and gen_server edge cases (unknown call, cast, info).
+Integration tests (compile_expression, compile, diagnostics, version)
+are covered in beamtalk_compiler_tests.erl.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
 

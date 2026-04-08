@@ -1,11 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for beamtalk_repl_eval module
-%%%
-%%% Tests expression evaluation, file loading, and compilation.
-
 -module(beamtalk_repl_eval_tests).
+
+-moduledoc """
+Unit tests for beamtalk_repl_eval module
+
+Tests expression evaluation, file loading, and compilation.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -1362,7 +1364,7 @@ do_eval_trace_preserves_existing_bindings_on_error_test() ->
 %% Protocol definition error handling tests (BT-1616)
 %%====================================================================
 
-%% @doc Test that code:load_binary failure returns a structured #beamtalk_error{}.
+-doc "Test that code:load_binary failure returns a structured #beamtalk_error{}.".
 handle_protocol_definition_load_failure_returns_structured_error_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     ProtocolInfo = #{
@@ -1375,7 +1377,7 @@ handle_protocol_definition_load_failure_returns_structured_error_test() ->
     {error, Err, _, _, _} = Result,
     ?assertEqual(io_error, Err#beamtalk_error.kind).
 
-%% @doc Test that register_class/0 failure surfaces as a structured #beamtalk_error{}.
+-doc "Test that register_class/0 failure surfaces as a structured #beamtalk_error{}.".
 handle_protocol_definition_register_class_failure_returns_structured_error_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     %% Dynamically compile a module whose register_class/0 throws an error
@@ -1408,7 +1410,7 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
     code:purge(ModuleName),
     code:delete(ModuleName).
 
-%% @doc Test that successful protocol definition calls register_class/0.
+-doc "Test that successful protocol definition calls register_class/0.".
 handle_protocol_definition_success_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     %% Dynamically compile a module whose register_class/0 sets a process flag
@@ -1443,7 +1445,7 @@ handle_protocol_definition_success_test() ->
     code:purge(ModuleName),
     code:delete(ModuleName).
 
-%% @doc Test protocol definition success when register_class/0 is not exported.
+-doc "Test protocol definition success when register_class/0 is not exported.".
 handle_protocol_definition_no_register_class_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     %% Dynamically compile a module without register_class/0

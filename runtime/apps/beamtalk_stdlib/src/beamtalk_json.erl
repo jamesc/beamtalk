@@ -1,54 +1,57 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc JSON class implementation — JSON encoding/decoding via OTP json module.
-%%%
-%%% **DDD Context:** Object System Context
-%%%
-%%% JSON provides class-side methods for parsing and generating JSON strings.
-%%% Wraps the OTP `json` module (OTP 27+) with proper type mapping and structured error handling.
-%%%
-%%% ## Type Mapping
-%%%
-%%% | JSON          | Beamtalk     |
-%%% |---------------|--------------|
-%%% | object        | Dictionary   |
-%%% | array         | List         |
-%%% | string        | String       |
-%%% | number (int)  | Integer      |
-%%% | number (float)| Float        |
-%%% | true/false    | true/false   |
-%%% | null          | nil          |
-%%%
-%%% ## Methods
-%%%
-%%% | Selector        | Description                              |
-%%% |-----------------|------------------------------------------|
-%%% | `parse:`        | JSON string → Beamtalk value             |
-%%% | `generate:`     | Beamtalk value → JSON string             |
-%%% | `prettyPrint:`  | Beamtalk value → formatted JSON string   |
-
 -module(beamtalk_json).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+JSON class implementation — JSON encoding/decoding via OTP json module.
+
+JSON provides class-side methods for parsing and generating JSON strings.
+Wraps the OTP `json` module (OTP 27+) with proper type mapping and structured error handling.
+
+## Type Mapping
+
+| JSON          | Beamtalk     |
+|---------------|--------------|
+| object        | Dictionary   |
+| array         | List         |
+| string        | String       |
+| number (int)  | Integer      |
+| number (float)| Float        |
+| true/false    | true/false   |
+| null          | nil          |
+
+## Methods
+
+| Selector        | Description                              |
+|-----------------|------------------------------------------|
+| `parse:`        | JSON string → Beamtalk value             |
+| `generate:`     | Beamtalk value → JSON string             |
+| `prettyPrint:`  | Beamtalk value → formatted JSON string   |
+""".
 
 -export(['parse:'/1, 'generate:'/1, 'prettyPrint:'/1]).
 -export([parse/1, generate/1, prettyPrint/1]).
 -export([prettify_term/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
 
-%% @doc Parse a JSON string into a Beamtalk value.
-%%
-%% JSON objects become Dictionaries (maps with binary keys), arrays become
-%% Lists, strings become Strings, numbers become Integer or Float,
-%% true/false stay as atoms, null becomes nil.
-%%
-%% Returns `Result ok: value` on success, `Result error:` on invalid JSON.
-%% Type error (non-String argument) still raises.
+-doc """
+Parse a JSON string into a Beamtalk value.
+
+JSON objects become Dictionaries (maps with binary keys), arrays become
+Lists, strings become Strings, numbers become Integer or Float,
+true/false stay as atoms, null becomes nil.
+
+Returns `Result ok: value` on success, `Result error:` on invalid JSON.
+Type error (non-String argument) still raises.
+""".
 -spec 'parse:'(binary()) -> beamtalk_result:t().
 'parse:'(JsonStr) when is_binary(JsonStr) ->
     try
@@ -75,11 +78,13 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Generate a JSON string from a Beamtalk value.
-%%
-%% Dictionaries become JSON objects, Lists become arrays, Strings become
-%% JSON strings, Integer/Float become numbers, true/false become JSON
-%% booleans, nil becomes null.
+-doc """
+Generate a JSON string from a Beamtalk value.
+
+Dictionaries become JSON objects, Lists become arrays, Strings become
+JSON strings, Integer/Float become numbers, true/false become JSON
+booleans, nil becomes null.
+""".
 -spec 'generate:'(term()) -> binary().
 'generate:'(Value) ->
     try
@@ -101,7 +106,7 @@
             beamtalk_error:raise(Error3)
     end.
 
-%% @doc Generate a pretty-printed JSON string with indentation.
+-doc "Generate a pretty-printed JSON string with indentation.".
 -spec 'prettyPrint:'(term()) -> binary().
 'prettyPrint:'(Value) ->
     try
@@ -128,20 +133,24 @@
 %%% FFI aliases — no-colon names for Erlang FFI dispatch
 %%% ============================================================================
 
-%% @doc FFI alias for parse:/1 — called via (Erlang beamtalk_json) parse: str.
+-doc "FFI alias for parse:/1 — called via (Erlang beamtalk_json) parse: str.".
 -spec parse(binary()) -> term().
 parse(X) -> 'parse:'(X).
 
-%% @doc FFI alias for generate:/1 — called via (Erlang beamtalk_json) generate: val.
+-doc "FFI alias for generate:/1 — called via (Erlang beamtalk_json) generate: val.".
 -spec generate(term()) -> binary().
 generate(X) -> 'generate:'(X).
 
-%% @doc FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
+-doc """
+FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
+""".
 -spec prettyPrint(term()) -> binary().
 prettyPrint(X) -> 'prettyPrint:'(X).
 
-%% @doc Encode a term to pretty-printed JSON binary.
-%% Used by runtime internals (trace_store, workspace_meta) for human-readable output.
+-doc """
+Encode a term to pretty-printed JSON binary.
+Used by runtime internals (trace_store, workspace_meta) for human-readable output.
+""".
 -spec prettify_term(term()) -> binary().
 prettify_term(Term) ->
     Compact = iolist_to_binary(json:encode(Term)),
@@ -151,25 +160,27 @@ prettify_term(Term) ->
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private
-%% @doc Normalize JSON decoded values to Beamtalk conventions.
-%%
-%% json:decode returns `null` as the atom `null`; Beamtalk uses `nil`.
+-doc """
+Normalize JSON decoded values to Beamtalk conventions.
+
+json:decode returns `null` as the atom `null`; Beamtalk uses `nil`.
+""".
 -spec normalize_decoded(term()) -> term().
 normalize_decoded(null) ->
     nil;
 normalize_decoded(Map) when is_map(Map) ->
     maps:map(fun(_K, V) -> normalize_decoded(V) end, Map);
 normalize_decoded(List) when is_list(List) ->
-    lists:map(fun normalize_decoded/1, List);
+    [normalize_decoded(E) || E <- List];
 normalize_decoded(Other) ->
     Other.
 
-%% @private
-%% @doc Prepare a Beamtalk value for JSON encoding.
-%%
-%% Beamtalk uses `nil` for null; json:encode expects `null`.
-%% Maps with `$beamtalk_class` tags are stripped of metadata.
+-doc """
+Prepare a Beamtalk value for JSON encoding.
+
+Beamtalk uses `nil` for null; json:encode expects `null`.
+Maps with `$beamtalk_class` tags are stripped of metadata.
+""".
 -spec prepare_for_encode(term()) -> term().
 prepare_for_encode(nil) ->
     null;
@@ -178,7 +189,7 @@ prepare_for_encode(Map) when is_map(Map) ->
     Cleaned = maps:remove('$beamtalk_class', Map),
     maps:map(fun(_K, V) -> prepare_for_encode(V) end, Cleaned);
 prepare_for_encode(List) when is_list(List) ->
-    lists:map(fun prepare_for_encode/1, List);
+    [prepare_for_encode(E) || E <- List];
 prepare_for_encode(true) ->
     true;
 prepare_for_encode(false) ->
@@ -199,9 +210,10 @@ prepare_for_encode(Other) ->
     ),
     beamtalk_error:raise(Error2).
 
-%% @private
-%% @doc Pretty-print a compact JSON binary with 2-space indentation.
-%% Custom JSON pretty-printer (does not require json:format/1 from OTP 27.1+).
+-doc """
+Pretty-print a compact JSON binary with 2-space indentation.
+Custom JSON pretty-printer (does not require json:format/1 from OTP 27.1+).
+""".
 -spec prettify(binary()) -> binary().
 prettify(Bin) ->
     prettify(Bin, 0, false, []).

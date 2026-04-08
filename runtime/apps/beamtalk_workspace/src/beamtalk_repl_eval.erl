@@ -1,15 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Expression evaluation orchestration for the Beamtalk REPL
-%%%
-%%% **DDD Context:** REPL Session Context
-%%%
-%%% Orchestrates compilation, module loading, execution, and result processing
-%%% for REPL expressions. Delegates compilation to beamtalk_repl_compiler and
-%%% module loading to beamtalk_repl_loader (BT-863).
-
 -module(beamtalk_repl_eval).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Expression evaluation orchestration for the Beamtalk REPL
+
+Orchestrates compilation, module loading, execution, and result processing
+for REPL expressions. Delegates compilation to beamtalk_repl_compiler and
+module loading to beamtalk_repl_loader (BT-863).
+""".
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -45,19 +47,20 @@
 
 %%% Public API
 
-%% @doc Evaluate a Beamtalk expression.
+-doc "Evaluate a Beamtalk expression.".
 -spec do_eval(string(), beamtalk_repl_state:state()) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
     do_eval(Expression, State, undefined).
 
-%% @doc Evaluate with optional streaming subscriber (BT-696).
+-doc "Evaluate with optional streaming subscriber (BT-696).".
 -spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State, Subscriber) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
@@ -66,7 +69,7 @@ do_eval(Expression, State, Subscriber) ->
     WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
-    Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
+    Bindings = Bindings0#{?WORKSPACE_BINDINGS_KEY => WorkspaceOnlyBindings},
 
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
@@ -101,16 +104,19 @@ do_eval(Expression, State, Subscriber) ->
             wrap_compile_err(Reason, NewState)
     end.
 
-%% @doc Evaluate a Beamtalk expression in trace mode (BT-1238).
-%%
-%% Returns `{ok, Steps, Output, Warnings, State}' where
-%% `Steps = [{SourceBin, Value}]' — one entry per top-level statement —
-%% or `{error, Reason, Output, Warnings, State}' on failure.
+-doc """
+Evaluate a Beamtalk expression in trace mode (BT-1238).
+
+Returns `{ok, Steps, Output, Warnings, State}' where
+`Steps = [{SourceBin, Value}]' — one entry per top-level statement —
+or `{error, Reason, Output, Warnings, State}' on failure.
+""".
 -spec do_eval_trace(string(), beamtalk_repl_state:state()) ->
     {ok, [{binary(), term()}], binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
+    % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
@@ -118,7 +124,7 @@ do_eval_trace(Expression, State) ->
     WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
-    Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
+    Bindings = Bindings0#{?WORKSPACE_BINDINGS_KEY => WorkspaceOnlyBindings},
 
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
@@ -129,7 +135,7 @@ do_eval_trace(Expression, State) ->
                     BindingsWithRegistry =
                         case RegistryPid of
                             undefined -> Bindings;
-                            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+                            _ -> Bindings#{?INTERNAL_REGISTRY_KEY => RegistryPid}
                         end,
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
@@ -158,7 +164,7 @@ do_eval_trace(Expression, State) ->
                                     FutExObj = beamtalk_exception_handler:ensure_wrapped(
                                         FutureReason
                                     ),
-                                    FutBindings = maps:put('_error', FutExObj, CleanBindings),
+                                    FutBindings = CleanBindings#{'_error' => FutExObj},
                                     ErrState = beamtalk_repl_state:set_bindings(
                                         FutBindings, NewState
                                     ),
@@ -180,7 +186,7 @@ do_eval_trace(Expression, State) ->
                                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
                                     Class, Reason, Stacktrace
                                 ),
-                                CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                                CaughtBindings = Bindings#{'_error' => CaughtExObj},
                                 CaughtState = beamtalk_repl_state:set_bindings(
                                     CaughtBindings, NewState
                                 ),
@@ -205,7 +211,7 @@ do_eval_trace(Expression, State) ->
             wrap_compile_err(Reason, NewState)
     end.
 
-%% @doc Compile a Beamtalk expression and return Core Erlang source (BT-700).
+-doc "Compile a Beamtalk expression and return Core Erlang source (BT-700).".
 -spec do_show_codegen(string(), beamtalk_repl_state:state()) ->
     {ok, binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), [binary()], beamtalk_repl_state:state()}.
@@ -230,25 +236,25 @@ do_show_codegen(Expression, State) ->
             {error, Reason, [], NewState}
     end.
 
-%% @doc Load a Beamtalk file and register its classes.
+-doc "Load a Beamtalk file and register its classes.".
 -spec handle_load(string(), beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State) ->
     beamtalk_repl_loader:handle_load(Path, State).
 
-%% @doc Load a Beamtalk file with pre-built class indexes (BT-1543).
+-doc "Load a Beamtalk file with pre-built class indexes (BT-1543).".
 -spec handle_load(string(), beamtalk_repl_state:state(), map()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State, PrebuiltIndexes) ->
     beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes).
 
-%% @doc Load Beamtalk source from an inline binary string (no file path).
+-doc "Load Beamtalk source from an inline binary string (no file path).".
 -spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load_source(SourceBin, Label, State) ->
     beamtalk_repl_loader:handle_load_source(SourceBin, Label, State).
 
-%% @doc Compile and load a source file without REPL session state (BT-845).
+-doc "Compile and load a source file without REPL session state (BT-845).".
 -spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path) ->
     beamtalk_repl_loader:reload_class_file(Path).
@@ -259,7 +265,7 @@ reload_class_file(Path, ExpectedClassName) ->
 
 %%% Internal functions
 
-%% @doc Handle inline class definition: load class module, eval trailing expressions.
+-doc "Handle inline class definition: load class module, eval trailing expressions.".
 -spec handle_class_definition(
     map(),
     [binary()],
@@ -298,14 +304,14 @@ handle_class_definition(
             {error, Err, <<>>, Warnings, NewState2}
     end.
 
-%% @doc Handle standalone method definition: recompile and reload target class.
+-doc "Handle standalone method definition: recompile and reload target class.".
 -spec handle_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 handle_method_definition(MethodInfo, Warnings, Expression, State) ->
     beamtalk_repl_loader:reload_method_definition(MethodInfo, Warnings, Expression, State).
 
-%% @doc Handle protocol definition: load module and register protocol (BT-1612).
+-doc "Handle protocol definition: load module and register protocol (BT-1612).".
 -spec handle_protocol_definition(map(), [binary()], beamtalk_repl_state:state()) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -340,8 +346,10 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
             wrap_load_err(Reason, Warnings, State)
     end.
 
-%% @private Attempt to call register_class/0 on a protocol module.
-%% Returns ok if successful or not exported, or {error, #beamtalk_error{}} on failure.
+-doc """
+Attempt to call register_class/0 on a protocol module.
+Returns ok if successful or not exported, or {error, #beamtalk_error{}} on failure.
+""".
 -spec maybe_register_protocol_class(atom()) -> ok | {error, #beamtalk_error{}}.
 maybe_register_protocol_class(ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
@@ -375,7 +383,7 @@ maybe_register_protocol_class(ModuleName) ->
             ok
     end.
 
-%% @doc Evaluate a loaded module: capture IO, execute, process result, cleanup.
+-doc "Evaluate a loaded module: capture IO, execute, process result, cleanup.".
 -spec eval_loaded_module(
     atom(),
     string(),
@@ -395,7 +403,7 @@ eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Wa
         catch
             Class:Reason:Stacktrace ->
                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
-                CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                CaughtBindings = Bindings#{'_error' => CaughtExObj},
                 CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
                 {error, {eval_error, Class, CaughtExObj}, CaughtState}
         after
@@ -404,38 +412,38 @@ eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Wa
     Output = beamtalk_io_capture:stop(CaptureRef),
     inject_output(EvalResult, Output, Warnings).
 
-%% @doc Execute module and process the result (assignment/future handling).
+-doc "Execute module and process the result (assignment/future handling).".
 -spec execute_and_process(atom(), string(), map(), pid() | undefined, beamtalk_repl_state:state()) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
     BindingsWithRegistry =
         case RegistryPid of
             undefined -> Bindings;
-            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+            _ -> Bindings#{?INTERNAL_REGISTRY_KEY => RegistryPid}
         end,
     {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
     CleanBindings = strip_internal_bindings(UpdatedBindings),
     Result = maybe_await_future(RawResult),
     process_eval_result(Result, Expression, CleanBindings, State).
 
-%% @doc Process evaluation result: handle rejected futures and assignments.
+-doc "Process evaluation result: handle rejected futures and assignments.".
 -spec process_eval_result(term(), string(), map(), beamtalk_repl_state:state()) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 process_eval_result({future_rejected, ErrorReason}, _Expression, CleanBindings, State) ->
     FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
-    FutBindings = maps:put('_error', FutExObj, CleanBindings),
+    FutBindings = CleanBindings#{'_error' => FutExObj},
     FinalState = beamtalk_repl_state:set_bindings(FutBindings, State),
     {error, FutExObj, FinalState};
 process_eval_result(Result, Expression, CleanBindings, State) ->
     case extract_assignment(Expression) of
         {ok, VarName} ->
-            NewBindings = maps:put(VarName, Result, CleanBindings),
+            NewBindings = CleanBindings#{VarName => Result},
             {ok, Result, beamtalk_repl_state:set_bindings(NewBindings, State)};
         none ->
             {ok, Result, beamtalk_repl_state:set_bindings(CleanBindings, State)}
     end.
 
-%% @doc Purge eval module if no living actors reference it.
+-doc "Purge eval module if no living actors reference it.".
 -spec cleanup_module(atom(), pid() | undefined) -> ok.
 cleanup_module(ModuleName, RegistryPid) ->
     case should_purge_module(ModuleName, RegistryPid) of
@@ -449,19 +457,21 @@ cleanup_module(ModuleName, RegistryPid) ->
     end,
     ok.
 
-%% @doc Rebuild bindings by extracting variable assignments from awaited trace steps (BT-1261).
-%%
-%% For each step whose source text is a simple assignment (`VarName := Expr`), the
-%% binding is updated with the awaited (resolved) value from the step.  This ensures
-%% that if the RHS was a future the session binding holds the final value, not the
-%% raw `{beamtalk_future, Pid}` handle stored by the evaluator before awaiting.
+-doc """
+Rebuild bindings by extracting variable assignments from awaited trace steps (BT-1261).
+
+For each step whose source text is a simple assignment (`VarName := Expr`), the
+binding is updated with the awaited (resolved) value from the step.  This ensures
+that if the RHS was a future the session binding holds the final value, not the
+raw `{beamtalk_future, Pid}` handle stored by the evaluator before awaiting.
+""".
 -spec rebuild_bindings_from_steps([{binary(), term()}], map()) -> map().
 rebuild_bindings_from_steps(Steps, Bindings) ->
     lists:foldl(
         fun({Src, AwaitedVal}, Acc) ->
             SrcStr = binary_to_list(Src),
             case extract_assignment(SrcStr) of
-                {ok, VarName} -> maps:put(VarName, AwaitedVal, Acc);
+                {ok, VarName} -> Acc#{VarName => AwaitedVal};
                 none -> Acc
             end
         end,
@@ -469,7 +479,7 @@ rebuild_bindings_from_steps(Steps, Bindings) ->
         Steps
     ).
 
-%% @doc Extract variable name from assignment expression.
+-doc "Extract variable name from assignment expression.".
 -spec extract_assignment(string()) -> {ok, atom()} | none.
 extract_assignment(Expression) ->
     case re:run(Expression, "\\.\\s+\\S", []) of
@@ -483,12 +493,13 @@ extract_assignment(Expression) ->
                     [{capture, [1], list}]
                 )
             of
+                % elp:fixme W0023 intentional atom creation
                 {match, [VarName]} -> {ok, list_to_atom(VarName)};
                 nomatch -> none
             end
     end.
 
-%% @doc Auto-await a Future if the result is a tagged future tuple (BT-840).
+-doc "Auto-await a Future if the result is a tagged future tuple (BT-840).".
 -spec maybe_await_future(term()) -> term().
 maybe_await_future({beamtalk_future, _} = Future) ->
     try beamtalk_runtime_api:future_await(Future, 30000) of
@@ -504,7 +515,7 @@ maybe_await_future({beamtalk_future, _} = Future) ->
 maybe_await_future(Value) ->
     Value.
 
-%% @doc Check if a module should be purged (no living actors reference it).
+-doc "Check if a module should be purged (no living actors reference it).".
 -spec should_purge_module(atom(), pid() | undefined) -> boolean().
 should_purge_module(_ModuleName, undefined) ->
     true;
@@ -512,7 +523,7 @@ should_purge_module(ModuleName, RegistryPid) ->
     Actors = beamtalk_repl_actors:list_actors(RegistryPid),
     not lists:any(fun(#{module := ActorModule}) -> ActorModule =:= ModuleName end, Actors).
 
-%% @doc Strip internal plumbing keys from bindings map (BT-153).
+-doc "Strip internal plumbing keys from bindings map (BT-153).".
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
     %% BT-881: Strip workspace-only binding keys injected by do_eval.
@@ -522,6 +533,7 @@ strip_internal_bindings(Bindings) ->
                 WithoutMeta = maps:remove(?WORKSPACE_BINDINGS_KEY, Bindings),
                 maps:fold(
                     fun(Key, OriginalValue, Acc) ->
+                        % elp:fixme W0032 maps:find with complex branch logic
                         case maps:find(Key, Acc) of
                             {ok, OriginalValue} -> maps:remove(Key, Acc);
                             _ -> Acc
@@ -535,21 +547,21 @@ strip_internal_bindings(Bindings) ->
         end,
     maps:remove(?INTERNAL_REGISTRY_KEY, Stripped0).
 
-%% @doc Inject captured output and warnings into an eval result tuple.
+-doc "Inject captured output and warnings into an eval result tuple.".
 -spec inject_output(tuple(), binary(), [binary()]) -> tuple().
 inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
     {error, Reason, Output, Warnings, State}.
 
-%% @private Wrap a compile error as a structured #beamtalk_error{} result tuple.
+-doc "Wrap a compile error as a structured #beamtalk_error{} result tuple.".
 -spec wrap_compile_err(term(), beamtalk_repl_state:state()) ->
     {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
 wrap_compile_err(Reason, State) ->
     Err = beamtalk_repl_errors:ensure_structured_error({compile_error, Reason}),
     {error, Err, <<>>, [], State}.
 
-%% @private Wrap a load error as a structured #beamtalk_error{} result tuple.
+-doc "Wrap a load error as a structured #beamtalk_error{} result tuple.".
 -spec wrap_load_err(term(), [binary()], beamtalk_repl_state:state()) ->
     {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
 wrap_load_err(Reason, Warnings, State) ->
