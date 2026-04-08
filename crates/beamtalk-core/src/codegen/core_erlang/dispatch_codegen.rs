@@ -48,14 +48,24 @@ impl CoreErlangGenerator {
     /// over arguments with comma separation found throughout dispatch codegen.
     /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
     ///
-    /// Uses `expression_doc` for each argument, joining with commas.
+    /// BT-1935: Uses `expression_doc_with_open_scope` to detect and close any
+    /// open let-chains produced by class method self-sends used as arguments.
+    /// Without this, an argument like `(self classMethod: x)` embeds an open
+    /// `let ... in ` chain inside the argument list, producing invalid Core Erlang.
     fn capture_argument_list_doc(&mut self, arguments: &[Expression]) -> Result<Document<'static>> {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            parts.push(self.expression_doc(arg)?);
+            let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
+            if let Some(result_var) = open_scope {
+                // Close the open scope inline: the let-chain + result_var forms
+                // a valid closed expression (e.g., `let X = ... in X`).
+                parts.push(docvec![doc, Document::String(result_var)]);
+            } else {
+                parts.push(doc);
+            }
         }
         Ok(Document::Vec(parts))
     }
@@ -324,12 +334,22 @@ impl CoreErlangGenerator {
             );
         }
 
-        let receiver_doc = self.expression_doc(receiver)?;
+        // BT-1935: Use expression_doc_with_open_scope to detect open let-chains
+        // from class method self-sends used as the receiver expression.
+        let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        let actual_receiver = if let Some(result_var) = receiver_open_scope {
+            // Close the open scope: append the result variable to form a valid
+            // closed expression in receiver position.
+            docvec![receiver_doc, Document::String(result_var)]
+        } else {
+            receiver_doc
+        };
 
         let doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
-            receiver_doc,
+            actual_receiver,
             Document::String(format!(", '{selector_atom}', [")),
             args_doc,
             "])"
