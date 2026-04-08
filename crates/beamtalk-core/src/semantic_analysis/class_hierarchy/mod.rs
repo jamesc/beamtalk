@@ -46,6 +46,11 @@ pub struct ClassHierarchy {
     method_indexes: SelectorIndexMap,
     /// Per-class selector → method-vec index for class methods.
     class_method_indexes: SelectorIndexMap,
+    /// Names of synthetic protocol class entries (BT-1933).
+    ///
+    /// Tracked so `merge()` can prefer real class definitions over
+    /// synthetic protocol entries when files define both.
+    protocol_classes: HashSet<EcoString>,
 }
 
 impl ClassHierarchy {
@@ -130,6 +135,91 @@ impl ClassHierarchy {
         (Ok(hierarchy), diagnostics)
     }
 
+    /// Register protocol definitions as synthetic class entries (BT-1933).
+    ///
+    /// Each protocol definition (e.g., `protocol Printable`) gets a synthetic
+    /// `ClassInfo` entry as a sealed abstract subclass of `Protocol`, with
+    /// class-side methods `requiredMethods` and `conformingClasses`.
+    ///
+    /// This enables LSP features (completions, `has_class` checks) to work
+    /// with protocol names the same way they work with class names.
+    ///
+    /// Called from the language service layer *after* `build()`, not during it,
+    /// to avoid interfering with `ProtocolRegistry::register_module`'s
+    /// namespace collision checks.
+    pub fn register_protocol_classes(&mut self, module: &Module) {
+        let mut inserted = false;
+        for protocol_def in &module.protocols {
+            let name = &protocol_def.name.name;
+
+            // Don't overwrite real classes (namespace collision is diagnosed elsewhere)
+            if self.classes.contains_key(name.as_str()) {
+                continue;
+            }
+
+            let class_methods = vec![
+                MethodInfo {
+                    selector: "requiredMethods".into(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: name.clone(),
+                    is_sealed: true,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: Some("List".into()),
+                    param_types: vec![],
+                    doc: Some(
+                        format!("Return the required method selectors for the `{name}` protocol.")
+                            .into(),
+                    ),
+                },
+                MethodInfo {
+                    selector: "conformingClasses".into(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: name.clone(),
+                    is_sealed: true,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: Some("List".into()),
+                    param_types: vec![],
+                    doc: Some(
+                        format!("Return the classes conforming to the `{name}` protocol.").into(),
+                    ),
+                },
+            ];
+
+            self.classes.insert(
+                name.clone(),
+                ClassInfo {
+                    name: name.clone(),
+                    superclass: Some("Protocol".into()),
+                    is_sealed: true,
+                    is_abstract: true,
+                    is_typed: true,
+                    is_internal: false,
+                    package: None,
+                    is_value: false,
+                    is_native: false,
+                    state: vec![],
+                    state_types: HashMap::new(),
+                    methods: vec![],
+                    class_methods,
+                    class_variables: vec![],
+                    type_params: vec![],
+                    type_param_bounds: vec![],
+                    superclass_type_args: vec![],
+                },
+            );
+            self.protocol_classes.insert(name.clone());
+            inserted = true;
+        }
+
+        if inserted {
+            self.rebuild_all_indexes();
+        }
+    }
+
     /// Create a hierarchy with only built-in classes.
     ///
     /// The built-in class map is computed once and cached in a `OnceLock`.
@@ -146,6 +236,7 @@ impl ClassHierarchy {
                     classes,
                     method_indexes,
                     class_method_indexes,
+                    protocol_classes: HashSet::new(),
                 }
             })
             .clone()
@@ -407,12 +498,34 @@ impl ClassHierarchy {
     /// Built-in classes from `other` are skipped (they already exist in `self`).
     /// User-defined classes from `other` overwrite any existing entry with the
     /// same name, allowing incremental file updates.
+    ///
+    /// BT-1933: Synthetic protocol class entries never overwrite real class
+    /// definitions. A real incoming class *does* overwrite a synthetic protocol.
     pub fn merge(&mut self, other: &ClassHierarchy) {
         let mut changed = false;
         for (name, info) in &other.classes {
             if builtins::is_builtin_class(name) {
                 continue;
             }
+            let incoming_is_protocol = other.protocol_classes.contains(name);
+            let existing_is_real =
+                self.classes.contains_key(name) && !self.protocol_classes.contains(name);
+
+            // Don't let a synthetic protocol entry overwrite a real class
+            if incoming_is_protocol && existing_is_real {
+                continue;
+            }
+
+            // If a real class replaces a synthetic protocol, unmark it
+            if !incoming_is_protocol && self.protocol_classes.contains(name) {
+                self.protocol_classes.remove(name);
+            }
+
+            // Track synthetic protocol entries
+            if incoming_is_protocol {
+                self.protocol_classes.insert(name.clone());
+            }
+
             self.classes.insert(name.clone(), info.clone());
             changed = true;
         }
@@ -430,6 +543,7 @@ impl ClassHierarchy {
                 self.classes.remove(name);
                 self.method_indexes.remove(name);
                 self.class_method_indexes.remove(name);
+                self.protocol_classes.remove(name);
             }
         }
     }

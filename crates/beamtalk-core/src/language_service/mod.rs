@@ -597,7 +597,11 @@ impl LanguageService for SimpleLanguageService {
         // when diagnostics are requested, avoiding duplicate work.
         let (class_hierarchy_result, hierarchy_diags) =
             crate::semantic_analysis::ClassHierarchy::build(&module);
-        if let Ok(class_hierarchy) = class_hierarchy_result {
+        if let Ok(mut class_hierarchy) = class_hierarchy_result {
+            // BT-1933: Register protocol definitions as synthetic class entries
+            // so LSP features (completions, has_class) work with protocol names.
+            class_hierarchy.register_protocol_classes(&module);
+
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
@@ -1712,5 +1716,74 @@ mod tests {
 
         service.set_native_types(NativeTypeRegistry::new());
         assert!(service.native_types().is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-1933: Protocol class object completions via SimpleLanguageService
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn protocol_registered_in_project_index() {
+        let mut service = SimpleLanguageService::new();
+
+        let file = Utf8PathBuf::from("proto.bt");
+        let source = "Protocol define: Printable\n  asString -> String";
+        service.update_file(file.clone(), source.to_string());
+
+        // Protocol should be visible in project index as a class
+        assert!(
+            service.project_index.hierarchy().has_class("Printable"),
+            "Protocol should be registered in project hierarchy"
+        );
+
+        // Protocol class should have the expected class methods
+        let class = service
+            .project_index
+            .hierarchy()
+            .get_class("Printable")
+            .expect("Printable should be a class in the hierarchy");
+        assert_eq!(class.superclass.as_deref(), Some("Protocol"));
+        assert!(class.is_sealed);
+        assert!(class.is_abstract);
+        let selectors: Vec<_> = class
+            .class_methods
+            .iter()
+            .map(|m| m.selector.as_str())
+            .collect();
+        assert!(
+            selectors.contains(&"requiredMethods"),
+            "Protocol class should have requiredMethods, got: {selectors:?}"
+        );
+        assert!(
+            selectors.contains(&"conformingClasses"),
+            "Protocol class should have conformingClasses, got: {selectors:?}"
+        );
+    }
+
+    #[test]
+    fn protocol_visible_cross_file_in_project_index() {
+        let mut service = SimpleLanguageService::new();
+
+        // File A defines a protocol
+        service.update_file(
+            Utf8PathBuf::from("a.bt"),
+            "Protocol define: Printable\n  asString -> String".to_string(),
+        );
+
+        // File B defines a class
+        service.update_file(
+            Utf8PathBuf::from("b.bt"),
+            "Object subclass: Foo\n  bar => 1".to_string(),
+        );
+
+        // Both should be visible in merged hierarchy
+        assert!(
+            service.project_index.hierarchy().has_class("Printable"),
+            "Protocol from file A should be visible in merged hierarchy"
+        );
+        assert!(
+            service.project_index.hierarchy().has_class("Foo"),
+            "Class from file B should be visible in merged hierarchy"
+        );
     }
 }
