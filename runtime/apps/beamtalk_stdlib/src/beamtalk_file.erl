@@ -151,7 +151,7 @@ Write string contents to a file.
 Creates the file if it doesn't exist, overwrites if it does.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'writeAll:contents:'(binary(), Contents :: binary()) -> beamtalk_result:t().
+-spec 'writeAll:contents:'(binary(), Contents :: term()) -> beamtalk_result:t().
 'writeAll:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     %% Ensure directory exists
@@ -240,7 +240,7 @@ Creates the file if it doesn't exist, overwrites if it does.
 Auto-creates parent directories. Contents must be a binary.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'writeBinary:contents:'(binary(), Contents :: iodata()) -> beamtalk_result:t().
+-spec 'writeBinary:contents:'(binary(), Contents :: term()) -> beamtalk_result:t().
 'writeBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
@@ -288,7 +288,7 @@ Opens the file in append mode and writes the binary contents.
 Auto-creates parent directories. Contents must be a binary.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'appendBinary:contents:'(binary(), Contents :: iodata()) -> beamtalk_result:t().
+-spec 'appendBinary:contents:'(binary(), Contents :: term()) -> beamtalk_result:t().
 'appendBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
@@ -878,12 +878,12 @@ Returns the system temp directory as a String.
 
 exists(Path) -> 'exists:'(Path).
 readAll(Path) -> 'readAll:'(Path).
--spec writeAll(binary(), Contents :: iodata()) -> beamtalk_result:t().
+-spec writeAll(binary(), Contents :: term()) -> beamtalk_result:t().
 writeAll(Path, Contents) -> 'writeAll:contents:'(Path, Contents).
 readBinary(Path) -> 'readBinary:'(Path).
--spec writeBinary(binary(), Contents :: iodata()) -> beamtalk_result:t().
+-spec writeBinary(binary(), Contents :: term()) -> beamtalk_result:t().
 writeBinary(Path, Contents) -> 'writeBinary:contents:'(Path, Contents).
--spec appendBinary(binary(), Contents :: iodata()) -> beamtalk_result:t().
+-spec appendBinary(binary(), Contents :: term()) -> beamtalk_result:t().
 appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
 -spec open(binary(), Do :: fun((map()) -> term())) -> beamtalk_result:t().

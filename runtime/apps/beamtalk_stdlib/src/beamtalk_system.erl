@@ -122,24 +122,20 @@ architecture() ->
 -doc "Return the machine hostname.".
 -spec hostname() -> binary().
 hostname() ->
-    case
-        try
-            inet:gethostname()
-        catch
-            _:_ -> {error, nxdomain}
-        end
-    of
-        {ok, Hostname} ->
-            list_to_binary(Hostname);
-        {error, Reason} ->
-            ?LOG_ERROR("Failed to resolve hostname", #{
+    try
+        {ok, Hostname} = inet:gethostname(),
+        list_to_binary(Hostname)
+    catch
+        Class:Reason ->
+            ?LOG_ERROR("Hostname lookup failed", #{
                 module => ?MODULE,
                 function => hostname,
+                class => Class,
                 reason => Reason
             }),
             Error0 = beamtalk_error:new(runtime_error, 'System'),
             Error1 = beamtalk_error:with_selector(Error0, hostname),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+            Error2 = beamtalk_error:with_details(Error1, #{class => Class, reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Could not resolve hostname from OS">>),
             beamtalk_error:raise(Error3)
     end.
