@@ -11372,8 +11372,17 @@ fn block_params_more_than_signature_extra_stays_dynamic() {
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
-    // The first param (n) should be typed, but extra stays Dynamic
-    // We just verify it doesn't crash; extra param is not used, so no warning
+    // The first param (n) is used and should still be typed from List(Integer),
+    // so no Dynamic inference warning should be emitted for this block.
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "used block param should still be typed when extra params are present, got: {dynamic_warnings:?}"
+    );
 }
 
 #[test]
