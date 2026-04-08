@@ -501,4 +501,32 @@ mod tests {
             "Protocol class should be removed when file is removed"
         );
     }
+
+    #[test]
+    fn real_class_not_overwritten_by_protocol_cross_file() {
+        // If file A defines class Foo and file B defines protocol Foo,
+        // the real class should win regardless of indexing order.
+        let mut index = ProjectIndex::new();
+
+        // File A: real class
+        let tokens_a = lex_with_eof("Object subclass: Foo\n  bar => 1");
+        let (module_a, _) = parse(tokens_a);
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
+
+        // File B: protocol with same name (indexed after)
+        let tokens_b = lex_with_eof("Protocol define: Foo\n  baz");
+        let (module_b, _) = parse(tokens_b);
+        let mut hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        hierarchy_b.register_protocol_classes(&module_b);
+        index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
+
+        // Real class should still be the active definition
+        let class = index.hierarchy().get_class("Foo").unwrap();
+        assert_eq!(
+            class.superclass.as_deref(),
+            Some("Object"),
+            "Real class Foo should not be overwritten by protocol Foo from another file"
+        );
+    }
 }
