@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1935: Test fixture for class method call results used as inline
+// arguments or receivers in other message sends.
+
+Object subclass: ClassMethodInlineResult
+
+  class helper: x :: Integer -> Integer => x + 1
+
+  class format: x :: Integer -> String => x printString
+
+  class defaultFor: flag :: Boolean -> String =>
+    flag ifTrue: [""] ifFalse: ["default"]
+
+  // Class method result as receiver of another message send
+  class helperAsString: x :: Integer -> String => (self helper: x) printString
+
+  // Chained: class method result as argument to another self class method
+  class doubleFormat: x :: Integer -> String => self format: (self helper: x)
+
+  // Empty string in ifTrue:ifFalse: inside class method
+  class emptyOrValue: flag :: Boolean -> String =>
+    flag ifTrue: [""] ifFalse: ["hello"]
+
+  // Combined: class method result inside conditional block
+  class conditionalHelper: x flag: flag :: Boolean -> String =>
+    flag ifTrue: [(self helper: x) printString] ifFalse: ["none"]
+
+  // Edge case: sub-expression self-send followed by another self-send
+  class multiSend: x :: Integer -> String =>
+    val1 := (self helper: x) printString
+    val2 := self helper: 0
+    val1 ++ (val2 printString)

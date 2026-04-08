@@ -295,12 +295,26 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
 
-            // Generate the key
-            parts.push(self.expression_doc(&pair.key)?);
+            // BT-1935: Close open-scope let-chains from class method self-sends.
+            let saved_cv = self.class_var_version();
+            let (key_doc, key_open) = self.expression_doc_with_open_scope(&pair.key)?;
+            if let Some(result_var) = key_open {
+                self.set_class_var_version(saved_cv);
+                parts.push(docvec![key_doc, Document::String(result_var)]);
+            } else {
+                parts.push(key_doc);
+            }
+
             parts.push(Document::Str(" => "));
 
-            // Generate the value
-            parts.push(self.expression_doc(&pair.value)?);
+            let saved_cv2 = self.class_var_version();
+            let (val_doc, val_open) = self.expression_doc_with_open_scope(&pair.value)?;
+            if let Some(result_var) = val_open {
+                self.set_class_var_version(saved_cv2);
+                parts.push(docvec![val_doc, Document::String(result_var)]);
+            } else {
+                parts.push(val_doc);
+            }
         }
 
         parts.push(Document::Str(" }~"));
@@ -320,13 +334,28 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            parts.push(self.expression_doc(elem)?);
+            // BT-1935: Close open-scope let-chains from class method self-sends.
+            let saved_cv = self.class_var_version();
+            let (doc, open_scope) = self.expression_doc_with_open_scope(elem)?;
+            if let Some(result_var) = open_scope {
+                self.set_class_var_version(saved_cv);
+                parts.push(docvec![doc, Document::String(result_var)]);
+            } else {
+                parts.push(doc);
+            }
         }
         if let Some(t) = tail {
             if !elements.is_empty() {
                 parts.push(Document::Str(" | "));
             }
-            parts.push(self.expression_doc(t)?);
+            let saved_cv = self.class_var_version();
+            let (doc, open_scope) = self.expression_doc_with_open_scope(t)?;
+            if let Some(result_var) = open_scope {
+                self.set_class_var_version(saved_cv);
+                parts.push(docvec![doc, Document::String(result_var)]);
+            } else {
+                parts.push(doc);
+            }
         }
         parts.push(Document::Str("]"));
         Ok(Document::Vec(parts))
@@ -348,7 +377,15 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            parts.push(self.expression_doc(elem)?);
+            // BT-1935: Close any open-scope let-chains from class method self-sends.
+            let saved_cv = self.class_var_version();
+            let (doc, open_scope) = self.expression_doc_with_open_scope(elem)?;
+            if let Some(result_var) = open_scope {
+                self.set_class_var_version(saved_cv);
+                parts.push(docvec![doc, Document::String(result_var)]);
+            } else {
+                parts.push(doc);
+            }
         }
         parts.push(Document::Str("])"));
         Ok(Document::Vec(parts))

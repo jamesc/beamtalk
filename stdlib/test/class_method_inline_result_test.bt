@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1935: Regression tests for class method call results used as inline
+// arguments or receivers. Previously generated invalid Core Erlang with
+// unclosed open-scope let-chains in argument/receiver positions.
+
+TestCase subclass: ClassMethodInlineResultTest
+
+  // Class method result used as receiver of another message send
+  testClassMethodResultAsReceiver =>
+    result := ClassMethodInlineResult helperAsString: 41
+    self assert: result equals: "42"
+
+  // Class method result as argument to another self class method call
+  testChainedClassMethodCalls =>
+    result := ClassMethodInlineResult doubleFormat: 41
+    self assert: result equals: "42"
+
+  // Empty string in ifTrue:ifFalse: inside class method
+  testEmptyStringInConditionalBlock =>
+    result := ClassMethodInlineResult emptyOrValue: true
+    self assert: result equals: ""
+
+  testNonEmptyStringInConditionalBlock =>
+    result := ClassMethodInlineResult emptyOrValue: false
+    self assert: result equals: "hello"
+
+  // Combined: class method call result inside conditional block
+  testClassMethodResultInConditionalBlock =>
+    result := ClassMethodInlineResult conditionalHelper: 41 flag: true
+    self assert: result equals: "42"
+
+  testClassMethodResultInConditionalBlockFalse =>
+    result := ClassMethodInlineResult conditionalHelper: 41 flag: false
+    self assert: result equals: "none"
+
+  // Edge case: sub-expression self-send followed by another self-send
+  testMultipleSelfSendsWithSubExpression =>
+    result := ClassMethodInlineResult multiSend: 41
+    self assert: result equals: "421"
