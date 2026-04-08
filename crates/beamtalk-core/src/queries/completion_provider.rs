@@ -2733,4 +2733,81 @@ mod tests {
         // But not for `doself.co`
         assert!(!is_after_self_dot("doself.co", 9));
     }
+
+    // -----------------------------------------------------------------------
+    // BT-1933: Protocol class object completions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn protocol_class_object_completions() {
+        // Protocol class objects should offer requiredMethods and conformingClasses.
+        let source = "Protocol define: Printable\n  asString -> String\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        hierarchy.register_protocol_classes(&module);
+
+        // Directly test add_receiver_type_completions with a Class receiver
+        let context = ClassContext::TopLevel;
+        let receiver = ReceiverSide::Class(EcoString::from("Printable"));
+        let mut completions = Vec::new();
+        let result = add_receiver_type_completions(
+            &hierarchy,
+            Some(&receiver),
+            &context,
+            None,
+            &mut completions,
+        );
+
+        assert!(
+            result,
+            "add_receiver_type_completions should return true for protocol class"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "requiredMethods"),
+            "Protocol class should offer 'requiredMethods' completion, got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "conformingClasses"),
+            "Protocol class should offer 'conformingClasses' completion"
+        );
+    }
+
+    #[test]
+    fn protocol_class_visible_in_hierarchy() {
+        // After register_protocol_classes, the protocol name should appear as a class
+        let source = "Protocol define: Printable\n  asString -> String\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        hierarchy.register_protocol_classes(&module);
+
+        assert!(
+            hierarchy.has_class("Printable"),
+            "Printable should be registered as a class in the hierarchy"
+        );
+        let class = hierarchy.get_class("Printable").unwrap();
+        assert_eq!(class.superclass.as_deref(), Some("Protocol"));
+        assert!(class.is_sealed);
+        assert!(class.is_abstract);
+        assert_eq!(class.class_methods.len(), 2);
+    }
+
+    #[test]
+    fn protocol_class_does_not_overwrite_real_class() {
+        // If a class and protocol share a name, the class wins
+        let source = "Object subclass: Foo\n  bar => 1\n\nProtocol define: Foo\n  baz\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        hierarchy.register_protocol_classes(&module);
+
+        let class = hierarchy.get_class("Foo").unwrap();
+        assert_eq!(
+            class.superclass.as_deref(),
+            Some("Object"),
+            "Real class should not be overwritten by protocol entry"
+        );
+    }
 }
