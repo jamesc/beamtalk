@@ -86,7 +86,6 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 -define(SLOT_TOTAL_DURATION, 5).
 -define(SLOT_MIN_DURATION, 6).
 -define(SLOT_MAX_DURATION, 7).
--define(SLOT_RESERVED, 8).
 -define(SLOTS_PER_KEY, 8).
 
 %% Sentinel value for min duration — large enough that any real duration will be smaller.
@@ -593,7 +592,7 @@ is preserved, which is the primary goal of the heir mechanism.
 ensure_table(Name, Opts) ->
     case ets:whereis(Name) of
         undefined ->
-            Name = ets:new(Name, Opts);
+            _Name = ets:new(Name, Opts);
         _Tid ->
             %% Table already exists (inherited via heir after crash).
             %% Public table — reads/writes work regardless of owner.
@@ -1050,14 +1049,15 @@ do_get_stats(FilterPid) ->
                     Stats = read_counter_stats(CounterRef, SlotBase),
                     PidKey = list_to_binary(pid_to_list(Pid)),
                     PidStats =
+                        % elp:fixme W0032 maps:find with complex branch logic
                         case maps:find(PidKey, Acc) of
                             {ok, Existing} -> Existing;
                             error -> #{class => lookup_class_for_pid(Pid), methods => #{}}
                         end,
-                    Methods = maps:get(methods, PidStats),
+                    Methods = map_get(methods, PidStats),
                     SelKey = atom_to_binary(Selector, utf8),
-                    NewMethods = maps:put(SelKey, Stats, Methods),
-                    maps:put(PidKey, PidStats#{methods => NewMethods}, Acc);
+                    NewMethods = Methods#{SelKey => Stats},
+                    Acc#{PidKey => PidStats#{methods => NewMethods}};
                 false ->
                     Acc
             end
@@ -1277,7 +1277,7 @@ to_binary_keys(Map) when is_map(Map) ->
                     _ when is_map(V) -> to_binary_keys(V);
                     _ -> V
                 end,
-            maps:put(BinKey, BinVal, Acc)
+            Acc#{BinKey => BinVal}
         end,
         #{},
         Map

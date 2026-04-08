@@ -109,7 +109,11 @@ delete_nonexistent_is_safe_test() ->
 lookup_when_table_absent_returns_not_found_test() ->
     %% Save real contents so we can restore the table afterward.
     Saved = ets:tab2list(beamtalk_class_module),
-    catch ets:delete(beamtalk_class_module),
+    (try
+        ets:delete(beamtalk_class_module)
+    catch
+        _:_ -> ok
+    end),
     try
         %% Must not crash when the table does not exist.
         ?assertEqual(not_found, beamtalk_class_module_table:lookup('AnyClass'))

@@ -31,8 +31,6 @@ BT-419: Created as part of Array→List rename and compiled stdlib migration.
     reverse_group_values/1
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -doc "Access element at 1-based index with bounds checking.".
 -spec at(list(), term()) -> term().
 at(List, N) when is_list(List), not is_integer(N) ->
@@ -213,7 +211,7 @@ group_by(List, Block) when is_list(List), is_function(Block, 1) ->
         fun(Item, Acc) ->
             Key = Block(Item),
             Existing = maps:get(Key, Acc, []),
-            maps:put(Key, [Item | Existing], Acc)
+            Acc#{Key => [Item | Existing]}
         end,
         #{},
         List

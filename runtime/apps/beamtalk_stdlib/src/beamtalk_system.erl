@@ -55,7 +55,7 @@ detecting the operating system and architecture, and querying process info.
     beamtalk_error:raise(Error2).
 
 -doc "Read an environment variable with a default fallback.".
--spec 'getEnv:default:'(binary(), binary()) -> binary().
+-spec 'getEnv:default:'(binary(), Default :: binary()) -> binary().
 'getEnv:default:'(Name, Default) when is_binary(Name), is_binary(Default) ->
     case os:getenv(binary_to_list(Name)) of
         false -> Default;
@@ -73,7 +73,7 @@ detecting the operating system and architecture, and querying process info.
     beamtalk_error:raise(Error2).
 
 -doc "Set an environment variable. Returns true.".
--spec 'setEnv:value:'(binary(), binary()) -> 'true'.
+-spec 'setEnv:value:'(binary(), Value :: binary()) -> 'true'.
 'setEnv:value:'(Name, Value) when is_binary(Name), is_binary(Value) ->
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
     true;
@@ -122,29 +122,23 @@ architecture() ->
 -doc "Return the machine hostname.".
 -spec hostname() -> binary().
 hostname() ->
-    case catch inet:gethostname() of
-        {ok, Hostname} ->
-            list_to_binary(Hostname);
-        {error, Reason} ->
-            ?LOG_ERROR("Failed to resolve hostname", #{
+    %% inet:gethostname/0 spec says it always returns {ok, Hostname},
+    %% but we wrap in try for defensive safety.
+    try
+        {ok, Hostname} = inet:gethostname(),
+        list_to_binary(Hostname)
+    catch
+        Class:Reason ->
+            ?LOG_ERROR("Hostname lookup failed", #{
+                domain => [beamtalk, stdlib],
                 module => ?MODULE,
                 function => hostname,
+                class => Class,
                 reason => Reason
             }),
             Error0 = beamtalk_error:new(runtime_error, 'System'),
             Error1 = beamtalk_error:with_selector(Error0, hostname),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Could not resolve hostname from OS">>),
-            beamtalk_error:raise(Error3);
-        {'EXIT', Reason} ->
-            ?LOG_ERROR("Hostname lookup crashed", #{
-                module => ?MODULE,
-                function => hostname,
-                reason => Reason
-            }),
-            Error0 = beamtalk_error:new(runtime_error, 'System'),
-            Error1 = beamtalk_error:with_selector(Error0, hostname),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+            Error2 = beamtalk_error:with_details(Error1, #{class => Class, reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Could not resolve hostname from OS">>),
             beamtalk_error:raise(Error3)
     end.
@@ -179,10 +173,10 @@ getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
 -spec getEnv(binary()) -> binary() | 'nil'.
 getEnv(Name) -> 'getEnv:'(Name).
 
--spec getEnv(binary(), binary()) -> binary().
+-spec getEnv(binary(), Default :: binary()) -> binary().
 getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
 
--spec setEnv(binary(), binary()) -> 'true'.
+-spec setEnv(binary(), Value :: binary()) -> 'true'.
 setEnv(Name, Value) -> 'setEnv:value:'(Name, Value).
 
 -spec unsetEnv(binary()) -> 'true'.

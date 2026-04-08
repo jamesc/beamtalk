@@ -268,7 +268,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             %% Flush pending partial lines, then notify the delegate.
             S0 = push_pending(stdout, State),
             S1 = push_pending(stderr, S0),
-            catch beamtalk_subprocess_port:close(Port),
+            (try
+                beamtalk_subprocess_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             NewState = S1#{exit_code => Code, port_closed => true},
             cast_notify(NewState, 'subprocessExit:from:', [Code]),
             {noreply, NewState};
@@ -303,8 +307,16 @@ terminate(_Reason, State) ->
         false ->
             Port = maps:get(port, State),
             ChildId = maps:get(child_id, State),
-            catch beamtalk_subprocess_port:kill_child(Port, ChildId),
-            catch beamtalk_subprocess_port:close(Port),
+            (try
+                beamtalk_subprocess_port:kill_child(Port, ChildId)
+            catch
+                _:_ -> ok
+            end),
+            (try
+                beamtalk_subprocess_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             ok
     end.
 
@@ -349,8 +361,16 @@ handle_close(State) ->
             {reply, nil, State};
         false ->
             #{port := Port, child_id := ChildId} = State,
-            catch beamtalk_subprocess_port:kill_child(Port, ChildId),
-            catch beamtalk_subprocess_port:close(Port),
+            (try
+                beamtalk_subprocess_port:kill_child(Port, ChildId)
+            catch
+                _:_ -> ok
+            end),
+            (try
+                beamtalk_subprocess_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             {reply, nil, State#{port_closed => true}}
     end.
 

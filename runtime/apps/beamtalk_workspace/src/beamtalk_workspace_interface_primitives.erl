@@ -164,7 +164,7 @@ globals() ->
 Register a value in the workspace namespace under a given atom name.
 Called via `(Erlang beamtalk_workspace_interface_primitives) bind: value as: name`.
 """.
--spec bind(term(), atom() | term()) -> 'nil'.
+-spec bind(term(), As :: atom() | term()) -> 'nil'.
 bind(Value, Name) ->
     ensure_bindings_table(),
     case to_atom_name(Name) of
@@ -242,7 +242,7 @@ explicitly during iterative development).
 If the supervisor is already running under the workspace tree, returns the
 existing instance (idempotent).
 """.
--spec startSupervisor(tuple()) -> tuple().
+-spec startSupervisor(term()) -> term().
 startSupervisor(ClassArg) ->
     case beamtalk_class_registry:is_class_object(ClassArg) of
         false ->
@@ -323,12 +323,14 @@ workspace_child_handle(ChildId = {user_supervisor, ClassName}) ->
             not_found
     end.
 
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_start_supervisor_type_error/1}).
 raise_start_supervisor_type_error(Message) ->
     Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_start_supervisor_error/1}).
 raise_start_supervisor_error(Message) when is_binary(Message) ->
     Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
@@ -351,7 +353,7 @@ Called via `(Erlang beamtalk_workspace_interface_primitives) stopSupervisor: MyS
 Works for both workspace-attached supervisors and the root application
 supervisor. Cleanly shuts down the supervisor and all its children.
 """.
--spec stopSupervisor(tuple()) -> nil.
+-spec stopSupervisor(term()) -> nil.
 stopSupervisor(ClassArg) ->
     case beamtalk_class_registry:is_class_object(ClassArg) of
         false ->
@@ -405,6 +407,7 @@ do_stop_supervisor(ClassName) ->
             end
     end.
 
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_stop_supervisor_type_error/1}).
 raise_stop_supervisor_type_error(Message) ->
     Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
@@ -678,9 +681,9 @@ handle_globals(UserBindings) ->
     Classes = handle_classes(),
     lists:foldl(
         fun
-            ({beamtalk_object, ClassTag, _Mod, _Pid} = ClassObj, Acc) ->
+            (#beamtalk_object{class = ClassTag} = ClassObj, Acc) ->
                 ClassName = base_class_name(ClassTag),
-                maps:put(ClassName, ClassObj, Acc);
+                Acc#{ClassName => ClassObj};
             (_, Acc) ->
                 Acc
         end,
@@ -695,12 +698,12 @@ handle_session_bindings(UserBindings) ->
     Base1 =
         case resolve_singleton('TranscriptStream') of
             nil -> Base0;
-            TranscriptObj -> maps:put('Transcript', TranscriptObj, Base0)
+            TranscriptObj -> Base0#{'Transcript' => TranscriptObj}
         end,
     Base2 =
         case resolve_singleton('BeamtalkInterface') of
             nil -> Base1;
-            BeamtalkObj -> maps:put('Beamtalk', BeamtalkObj, Base1)
+            BeamtalkObj -> Base1#{'Beamtalk' => BeamtalkObj}
         end,
     %% Resolve Workspace from singleton state, same as Beamtalk/Transcript.
     %% Falls back to a plain tagged-map if the class var hasn't been wired yet.
@@ -709,7 +712,7 @@ handle_session_bindings(UserBindings) ->
             nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
             Obj -> Obj
         end,
-    maps:put('Workspace', WorkspaceObj, Base2).
+    Base2#{'Workspace' => WorkspaceObj}.
 
 -doc "Convert a name argument to an atom.".
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
@@ -754,7 +757,7 @@ maybe_warn_loaded_class(AtomName) ->
     Classes = handle_classes(),
     IsLoadedClass = lists:any(
         fun
-            ({beamtalk_object, ClassTag, _Mod, _Pid}) ->
+            (#beamtalk_object{class = ClassTag}) ->
                 base_class_name(ClassTag) =:= AtomName;
             (_) ->
                 false
@@ -863,5 +866,5 @@ value_type_name(nil) -> <<"nil">>;
 value_type_name(V) when is_atom(V) -> <<"Symbol">>;
 value_type_name(V) when is_list(V) -> <<"List">>;
 value_type_name(V) when is_map(V) -> <<"Dictionary">>;
-value_type_name({beamtalk_object, _, _, _}) -> <<"Object">>;
+value_type_name(#beamtalk_object{}) -> <<"Object">>;
 value_type_name(_) -> <<"Unknown">>.

@@ -20,6 +20,7 @@ Replaces the former beamtalk_map.erl hand-written dispatch module.
 -doc "Get value at key, or evaluate block if absent.".
 -spec at_if_absent(map(), term(), fun(() -> term())) -> term().
 at_if_absent(Map, Key, Block) when is_function(Block, 0) ->
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(Key, Map) of
         {ok, Value} -> Value;
         error -> Block()
@@ -34,7 +35,7 @@ do(Map, Block) when is_function(Block, 1) ->
 -doc "Iterate over all key-value pairs, calling block with key and value.".
 -spec do_with_key(map(), fun((term(), term()) -> term())) -> 'nil'.
 do_with_key(Map, Block) when is_function(Block, 2) ->
-    maps:foreach(fun(K, V) -> Block(K, V) end, Map),
+    maps:foreach(Block, Map),
     nil.
 
 -doc "Test if the dictionary contains the given value.".

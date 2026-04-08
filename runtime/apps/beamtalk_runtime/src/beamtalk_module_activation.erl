@@ -218,6 +218,7 @@ activate_module(Module, Opts) ->
             case try_register_class(Module, Domain) of
                 ok ->
                     SourcePath = extract_source_path(Module),
+                    % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(on_activate, Opts) of
                         {ok, Callback} ->
                             try
@@ -310,7 +311,7 @@ sort_modules_by_dependency(EbinDir, Modules) ->
         Modules
     ),
     Sorted = topo_sort(lists:reverse(WithClass)),
-    lists:reverse(WithoutClass) ++ [Mod || {Mod, _, _} <- Sorted].
+    lists:reverse(WithoutClass, [Mod || {Mod, _, _} <- Sorted]).
 
 -doc """
 Topological sort of class entries by superclass dependency.
@@ -394,6 +395,7 @@ load_app_from_ebin(EbinDir) ->
                     BaseName = filename:rootname(AppFile),
                     case is_valid_module_name(BaseName) of
                         false -> false;
+                        % elp:fixme W0023 intentional atom creation
                         true -> load_single_app(list_to_atom(BaseName))
                     end
                 end,
@@ -497,7 +499,7 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            lists:reverse(Acc) ++ Deferred;
+            lists:reverse(Acc, Deferred);
         _ ->
             NewEmitted = lists:foldl(
                 fun(Entry, S) ->
@@ -506,7 +508,7 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
                 Emitted,
                 Ready
             ),
-            topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready) ++ Acc)
+            topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready, Acc))
     end.
 
 -doc "Extract class name from an entry (map or tuple).".
@@ -548,6 +550,7 @@ beam_file_to_module(File) ->
                 true ->
                     case is_valid_module_name(ModName) of
                         true ->
+                            % elp:fixme W0023 intentional atom creation
                             {true, list_to_atom(ModName)};
                         false ->
                             ?LOG_WARNING(

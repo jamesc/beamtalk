@@ -34,8 +34,6 @@ method argumentCount    // => 0
 """.
 -export([dispatch/3, has_method/1]).
 
--include("beamtalk.hrl").
-
 -doc "Dispatch a message to a CompiledMethod map.".
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch(Selector, Args, Value) ->

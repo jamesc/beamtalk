@@ -54,7 +54,7 @@ to the canonical `'after:do:'/2` implementation.
 %%% ============================================================================
 
 -doc "Evaluate `Block` once after `Ms` milliseconds. Returns a Timer.".
--spec 'after:do:'(integer(), function()) -> t().
+-spec 'after:do:'(integer(), Do :: function()) -> t().
 'after:do:'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() ->
         receive
@@ -62,7 +62,11 @@ to the canonical `'after:do:'/2` implementation.
                 From ! {Ref, canceled},
                 ok
         after Ms ->
-            catch Block()
+            try
+                Block()
+            catch
+                _:_ -> ok
+            end
         end
     end),
     make_timer(Pid);
@@ -74,7 +78,7 @@ to the canonical `'after:do:'/2` implementation.
     raise_error('after:do:', <<"Expected an Integer duration and a Block">>).
 
 -doc "Evaluate `Block` every `Ms` milliseconds. Returns a Timer.".
--spec 'every:do:'(integer(), function()) -> t().
+-spec 'every:do:'(integer(), Do :: function()) -> t().
 'every:do:'(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
@@ -150,11 +154,11 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 %%% ============================================================================
 
 -doc "FFI shim: `(Erlang beamtalk_timer) after: ms do: block`".
--spec 'after'(integer(), function()) -> t().
+-spec 'after'(integer(), Do :: function()) -> t().
 'after'(Ms, Block) -> 'after:do:'(Ms, Block).
 
 -doc "FFI shim: `(Erlang beamtalk_timer) every: ms do: block`".
--spec every(integer(), function()) -> t().
+-spec every(integer(), Do :: function()) -> t().
 every(Ms, Block) -> 'every:do:'(Ms, Block).
 
 -doc "FFI shim: `(Erlang beamtalk_timer) sleep: ms`".
@@ -176,7 +180,11 @@ repeat_loop(Ms, Block) ->
             From ! {Ref, canceled},
             ok
     after Ms ->
-        catch Block(),
+        (try
+            Block()
+        catch
+            _:_ -> ok
+        end),
         repeat_loop(Ms, Block)
     end.
 

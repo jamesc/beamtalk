@@ -230,6 +230,6 @@ Format: `#[elem1, elem2, ...]`
 -spec print_string(map()) -> binary().
 print_string(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
     Elements = array:to_list(Arr),
-    Parts = lists:map(fun(E) -> beamtalk_primitive:print_string(E) end, Elements),
+    Parts = [beamtalk_primitive:print_string(E) || E <- Elements],
     Joined = lists:join(<<", ">>, Parts),
     iolist_to_binary(["#[", Joined, "]"]).

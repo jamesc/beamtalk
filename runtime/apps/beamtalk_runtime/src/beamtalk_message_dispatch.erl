@@ -49,10 +49,9 @@ See: ADR 0006 (Unified Method Dispatch), BT-430, ADR 0043 (BT-918)
 """.
 -export([send/3, send/4, cast/3]).
 
--include("beamtalk.hrl").
-
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
+% elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({nowarn_function, [send/3, send/4, cast/3]}).
 
 -doc """

@@ -200,7 +200,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             %% to have arrived.  Flush any partial line and close the port now.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
-            catch beamtalk_exec_port:close(Port),
+            (try
+                beamtalk_exec_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             NewState = S1#{exit_code => Code, child_exited => true, port_closed => true},
             S2 = maybe_reply_eof(stdout, NewState),
             S3 = maybe_reply_eof(stderr, S2),
@@ -544,7 +548,15 @@ cleanup_port(State) ->
         false ->
             Port = maps:get(port, State),
             ChildId = maps:get(child_id, State),
-            catch beamtalk_exec_port:kill_child(Port, ChildId),
-            catch beamtalk_exec_port:close(Port),
+            (try
+                beamtalk_exec_port:kill_child(Port, ChildId)
+            catch
+                _:_ -> ok
+            end),
+            (try
+                beamtalk_exec_port:close(Port)
+            catch
+                _:_ -> ok
+            end),
             ok
     end.

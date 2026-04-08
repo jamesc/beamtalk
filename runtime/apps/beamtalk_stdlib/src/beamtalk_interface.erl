@@ -129,7 +129,7 @@ help(ClassArg) ->
 Format method documentation (help: aClass selector: aSelector).
 Called via `(Erlang beamtalk_interface) help: aClass selector: aSelector`.
 """.
--spec help(term(), atom()) -> binary().
+-spec help(term(), Selector :: atom()) -> binary().
 help(ClassArg, SelectorArg) ->
     case handle_help_selector(ClassArg, SelectorArg) of
         {error, Err} -> beamtalk_error:raise(Err);
@@ -186,7 +186,7 @@ handle_globals() ->
         fun({Name, ModuleName, Pid}, Acc) ->
             ClassTag = beamtalk_class_registry:class_object_tag(Name),
             ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
-            maps:put(Name, ClassObj, Acc)
+            Acc#{Name => ClassObj}
         end,
         #{},
         beamtalk_class_registry:live_class_entries()
@@ -250,7 +250,7 @@ handle_help_selector(ClassArg, SelectorArg) ->
 
 -doc "Resolve a class argument to an atom class name.".
 -spec resolve_class_name(term()) -> {ok, atom()} | {error, #beamtalk_error{}}.
-resolve_class_name({beamtalk_object, _ClassTag, _Mod, ClassPid}) when is_pid(ClassPid) ->
+resolve_class_name(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
     try
         Name = beamtalk_object_class:class_name(ClassPid),
         {ok, Name}
@@ -535,7 +535,7 @@ group_by_class(Methods) ->
     Grouped = lists:foldl(
         fun({Selector, DefClass}, Acc) ->
             Existing = maps:get(DefClass, Acc, []),
-            maps:put(DefClass, [Selector | Existing], Acc)
+            Acc#{DefClass => [Selector | Existing]}
         end,
         #{},
         Methods

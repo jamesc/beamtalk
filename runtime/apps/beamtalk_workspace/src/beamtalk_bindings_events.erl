@@ -19,8 +19,6 @@ after each successful eval so that all connected WebSocket clients
 display regardless of which session performed the evaluation.
 """.
 
--include_lib("kernel/include/logger.hrl").
-
 %% Public API
 -export([
     start_link/1,

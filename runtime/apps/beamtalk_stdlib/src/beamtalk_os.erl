@@ -54,7 +54,7 @@ Behaves like `run:` but the caller controls the wall-clock deadline.
 Raises `#beamtalk_error{kind = timeout}` if the command has not exited
 within `TimeoutMs` milliseconds.
 """.
--spec 'run:timeout:'(binary(), pos_integer()) -> binary().
+-spec 'run:timeout:'(binary(), Timeout :: pos_integer()) -> binary().
 'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0 ->
     run_cmd(Cmd, TimeoutMs, 'run:timeout:');
 'run:timeout:'(Cmd, _TimeoutMs) when not is_binary(Cmd) ->
@@ -67,7 +67,7 @@ within `TimeoutMs` milliseconds.
 run(Cmd) -> 'run:'(Cmd).
 
 -doc "FFI shim for (Erlang beamtalk_os) run: cmd timeout: ms dispatch.".
--spec run(binary(), pos_integer()) -> binary().
+-spec run(binary(), Timeout :: pos_integer()) -> binary().
 run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 
 %%% ============================================================================

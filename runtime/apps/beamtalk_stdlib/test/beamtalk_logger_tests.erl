@@ -18,8 +18,6 @@ debug: and their metadata: variants) are now compiler intrinsics
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 %%% ============================================================================
 %%% setLevel:/1
 %%% ============================================================================

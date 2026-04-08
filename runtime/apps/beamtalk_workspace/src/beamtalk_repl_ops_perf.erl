@@ -22,8 +22,6 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
-
 -export([handle/4, describe_ops/0]).
 
 -doc "Handle enable-tracing, get-traces, actor-stats, and export-traces ops.".

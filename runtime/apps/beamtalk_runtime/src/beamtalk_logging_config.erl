@@ -235,6 +235,7 @@ enableDebug(Target) when is_atom(Target) ->
             end;
         {domain, Domain} ->
             ensure_table(),
+            % elp:fixme W0023 intentional atom creation
             FilterId = list_to_atom("beamtalk_debug_domain_" ++ atom_to_list(Target)),
             FilterFun = fun(LogEvent, _Extra) ->
                 case LogEvent of
@@ -292,7 +293,7 @@ disableDebug(Target) when is_atom(Target) ->
     case subsystem_modules(Target) of
         {module_level, Modules} ->
             ensure_table(),
-            lists:foreach(fun(M) -> logger:unset_module_level(M) end, Modules),
+            lists:foreach(fun logger:unset_module_level/1, Modules),
             case Target of
                 supervisor -> disable_supervisor_progress();
                 _ -> ok
@@ -308,7 +309,7 @@ disableDebug(Target) when is_atom(Target) ->
             ensure_table(),
             case ets:lookup(?DEBUG_TABLE, Target) of
                 [{Target, subsystem, FilterIds}] ->
-                    lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds),
+                    lists:foreach(fun logger:remove_handler/1, FilterIds),
                     ets:delete(?DEBUG_TABLE, Target),
                     nil;
                 [] ->
@@ -376,7 +377,7 @@ disableAllDebug() ->
             ({Target, subsystem, FilterIds}) ->
                 case subsystem_modules(Target) of
                     {module_level, Modules} ->
-                        lists:foreach(fun(M) -> logger:unset_module_level(M) end, Modules),
+                        lists:foreach(fun logger:unset_module_level/1, Modules),
                         case Target of
                             supervisor -> disable_supervisor_progress();
                             _ -> ok
@@ -384,18 +385,18 @@ disableAllDebug() ->
                     {mcp_signal, _} ->
                         remove_mcp_signal_file();
                     {domain, _Domain} ->
-                        lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds);
+                        lists:foreach(fun logger:remove_handler/1, FilterIds);
                     unknown ->
                         ok
                 end;
             ({ClassName, user_class, FilterIds}) ->
-                lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+                lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
                 case beamtalk_class_module_table:lookup(ClassName) of
                     {ok, Module} -> logger:unset_module_level(Module);
                     not_found -> ok
                 end;
             ({_Pid, actor_instance, {_ClassName, FilterIds}}) ->
-                lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds)
+                lists:foreach(fun logger:remove_primary_filter/1, FilterIds)
         end,
         Targets
     ),
@@ -413,12 +414,7 @@ loggerInfo() ->
                 <<"  (none)">>;
             _ ->
                 iolist_to_binary(
-                    lists:map(
-                        fun(T) ->
-                            format_debug_target(T)
-                        end,
-                        Active
-                    )
+                    [format_debug_target(T) || T <- Active]
                 )
         end,
     LogFile = find_log_file(),
@@ -457,6 +453,7 @@ detect_target_type(#beamtalk_object{class = ClassTag, pid = Pid}) ->
         true ->
             %% Class reference — strip " class" suffix to get the actual class name
             ClassStr = atom_to_list(ClassTag),
+            % elp:fixme W0023 intentional atom creation - class name derived from known class tag
             ClassName = list_to_atom(lists:sublist(ClassStr, length(ClassStr) - 6)),
             {class, ClassName};
         false ->
@@ -480,6 +477,7 @@ level on the compiled class module for direct `?LOG_*` calls.
 -spec enable_class_debug(atom()) -> nil | #beamtalk_error{}.
 enable_class_debug(ClassName) ->
     ensure_table(),
+    % elp:fixme W0023 intentional atom creation
     FilterId = list_to_atom("beamtalk_debug_class_" ++ atom_to_list(ClassName)),
     FilterFun = fun(LogEvent, _Extra) ->
         case LogEvent of
@@ -506,7 +504,7 @@ disable_class_debug(ClassName) ->
     ensure_table(),
     case ets:lookup(?DEBUG_TABLE, ClassName) of
         [{ClassName, user_class, FilterIds}] ->
-            lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+            lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
             case beamtalk_class_module_table:lookup(ClassName) of
                 {ok, Module} -> logger:unset_module_level(Module);
                 not_found -> ok
@@ -530,6 +528,7 @@ the actor's PID. This is transient — lost when the actor restarts.
 -spec enable_actor_debug(pid(), atom()) -> nil.
 enable_actor_debug(Pid, ClassName) ->
     ensure_table(),
+    % elp:fixme W0023 intentional atom creation
     FilterId = list_to_atom(
         "beamtalk_debug_actor_" ++ pid_to_list(Pid)
     ),
@@ -551,7 +550,7 @@ disable_actor_debug(Pid) ->
     ensure_table(),
     case ets:lookup(?DEBUG_TABLE, Pid) of
         [{Pid, actor_instance, {_ClassName, FilterIds}}] ->
-            lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+            lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
             ets:delete(?DEBUG_TABLE, Pid),
             nil;
         [] ->

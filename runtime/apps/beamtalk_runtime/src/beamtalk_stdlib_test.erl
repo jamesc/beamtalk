@@ -181,7 +181,7 @@ check_error_kind(Kind, ExpectedKind, Location, Bindings) ->
 maybe_bind(none, _Value, Bindings) ->
     Bindings;
 maybe_bind(VarName, Value, Bindings) ->
-    maps:put(VarName, Value, Bindings).
+    Bindings#{VarName => Value}.
 
 %% ──────────────────────────────────────────────────────────────────────────
 %% format_result/1 — Beamtalk value → display string

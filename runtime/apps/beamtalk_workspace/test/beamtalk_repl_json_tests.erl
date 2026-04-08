@@ -1344,7 +1344,11 @@ term_to_json_port_test() ->
     Port = open_port({spawn, Command}, []),
     Result = beamtalk_repl_json:term_to_json(Port),
     ?assert(is_binary(Result)),
-    catch port_close(Port).
+    (try
+        port_close(Port)
+    catch
+        _:_ -> ok
+    end).
 
 %%% format_response with port value test
 
@@ -1360,7 +1364,11 @@ format_response_with_unserializable_test() ->
     Response = beamtalk_repl_json:format_response(Port),
     Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    catch port_close(Port).
+    (try
+        port_close(Port)
+    catch
+        _:_ -> ok
+    end).
 
 %%% format_error_message v2 additional edge cases
 

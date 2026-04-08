@@ -38,7 +38,6 @@ to subscribers via `{transcript_output, Text}' messages.
 * ADR 0056 "Native Erlang-Backed Actors" — native: + self delegate
 """.
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %% API

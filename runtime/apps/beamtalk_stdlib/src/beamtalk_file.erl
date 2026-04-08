@@ -92,7 +92,6 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
     handleLines/1
 ]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
@@ -152,7 +151,7 @@ Write string contents to a file.
 Creates the file if it doesn't exist, overwrites if it does.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'writeAll:contents:'(binary(), binary()) -> beamtalk_result:t().
+-spec 'writeAll:contents:'(binary(), Contents :: term()) -> beamtalk_result:t().
 'writeAll:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     %% Ensure directory exists
@@ -241,7 +240,7 @@ Creates the file if it doesn't exist, overwrites if it does.
 Auto-creates parent directories. Contents must be a binary.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'writeBinary:contents:'(binary(), binary()) -> beamtalk_result:t().
+-spec 'writeBinary:contents:'(binary(), Contents :: term()) -> beamtalk_result:t().
 'writeBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
@@ -289,7 +288,7 @@ Opens the file in append mode and writes the binary contents.
 Auto-creates parent directories. Contents must be a binary.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'appendBinary:contents:'(binary(), binary()) -> beamtalk_result:t().
+-spec 'appendBinary:contents:'(binary(), Contents :: term()) -> beamtalk_result:t().
 'appendBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
@@ -386,7 +385,7 @@ Opens the file, passes a FileHandle to the block, and ensures the handle
 is closed when the block exits (whether normally or via exception).
 Returns a Result ok map with the result of the block.
 """.
--spec 'open:do:'(binary(), fun((map()) -> term())) -> beamtalk_result:t().
+-spec 'open:do:'(binary(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
 'open:do:'(Path, Block) when is_binary(Path), is_function(Block, 1) ->
     case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
@@ -705,7 +704,7 @@ Rename or move a file or directory.
 
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'rename:to:'(binary(), binary()) -> beamtalk_result:t().
+-spec 'rename:to:'(binary(), To :: binary()) -> beamtalk_result:t().
 'rename:to:'(From, To) when is_binary(From), is_binary(To) ->
     case file:rename(unicode:characters_to_list(From), unicode:characters_to_list(To)) of
         ok ->
@@ -879,11 +878,15 @@ Returns the system temp directory as a String.
 
 exists(Path) -> 'exists:'(Path).
 readAll(Path) -> 'readAll:'(Path).
+-spec writeAll(binary(), Contents :: term()) -> beamtalk_result:t().
 writeAll(Path, Contents) -> 'writeAll:contents:'(Path, Contents).
 readBinary(Path) -> 'readBinary:'(Path).
+-spec writeBinary(binary(), Contents :: term()) -> beamtalk_result:t().
 writeBinary(Path, Contents) -> 'writeBinary:contents:'(Path, Contents).
+-spec appendBinary(binary(), Contents :: term()) -> beamtalk_result:t().
 appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
+-spec open(binary(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
 open(Path, Block) -> 'open:do:'(Path, Block).
 isDirectory(Path) -> 'isDirectory:'(Path).
 isFile(Path) -> 'isFile:'(Path).
@@ -892,6 +895,7 @@ mkdirAll(Path) -> 'mkdirAll:'(Path).
 listDirectory(Path) -> 'listDirectory:'(Path).
 delete(Path) -> 'delete:'(Path).
 deleteAll(Path) -> 'deleteAll:'(Path).
+-spec rename(binary(), To :: binary()) -> beamtalk_result:t().
 rename(From, To) -> 'rename:to:'(From, To).
 absolutePath(Path) -> 'absolutePath:'(Path).
 lastModified(Path) -> 'lastModified:'(Path).

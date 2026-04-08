@@ -38,7 +38,11 @@ teardown(ClassNames) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
             end
         end,
         ClassNames
@@ -111,7 +115,11 @@ class_class_test_() ->
                     ?assertEqual('Metaclass', MetaObj#beamtalk_object.class),
                     ?assertEqual(Pid, MetaObj#beamtalk_object.pid)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -132,7 +140,11 @@ class_name_test_() ->
                         beamtalk_behaviour_intrinsics:className(ClassObj)
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -152,7 +164,11 @@ class_local_methods_empty_test_() ->
                     ?assert(is_list(Methods)),
                     ?assertEqual([], Methods)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -173,7 +189,11 @@ class_local_methods_with_methods_test_() ->
                     ?assert(lists:member('getValue', Methods)),
                     ?assert(lists:member('setValue:', Methods))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -203,7 +223,11 @@ class_local_methods_metaclass_with_class_methods_test_() ->
                     ?assert(lists:member('myClassMethod', Methods)),
                     ?assert(lists:member('otherClassMethod', Methods))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -232,7 +256,11 @@ class_local_methods_metaclass_no_class_methods_test_() ->
                     %% Verify instance methods are NOT returned
                     ?assertNot(lists:member('instanceMethod', Methods))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -267,7 +295,11 @@ class_includes_selector_metaclass_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -287,7 +319,11 @@ class_field_names_empty_test_() ->
                     ?assert(is_list(Fields)),
                     ?assertEqual([], Fields)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -308,7 +344,11 @@ class_field_names_with_fields_test_() ->
                     ?assert(lists:member(x, Fields)),
                     ?assert(lists:member(y, Fields))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -333,7 +373,11 @@ class_includes_selector_true_test_() ->
                         beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'increment')
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -349,7 +393,11 @@ class_includes_selector_false_test_() ->
                         beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nonExistent')
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -367,7 +415,11 @@ class_doc_nil_initially_test_() ->
                 try
                     ?assertEqual(nil, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -384,7 +436,11 @@ class_set_doc_and_get_test_() ->
                     ?assertEqual(ClassObj, RetObj),
                     ?assertEqual(Doc, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -415,7 +471,11 @@ class_set_method_doc_test_() ->
                         beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'myMethod')
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -432,7 +492,11 @@ class_doc_for_nonexistent_method_test_() ->
                         beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'nosuchMethod')
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -461,7 +525,11 @@ metaclass_superclass_returns_metaclass_or_nil_test_() ->
                             ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
                     end
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -481,8 +549,16 @@ metaclass_superclass_with_registered_parent_test_() ->
                     %% Should return the metaclass of the parent
                     ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
                 after
-                    catch gen_server:stop(ChildPid, normal, 5000),
-                    catch gen_server:stop(ParentPid, normal, 5000)
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
@@ -502,7 +578,11 @@ class_subclasses_empty_test_() ->
                     ?assert(is_list(Subclasses)),
                     ?assertEqual([], Subclasses)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -532,7 +612,11 @@ class_superclass_returns_object_or_nil_test_() ->
                             )
                     end
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -554,8 +638,16 @@ class_superclass_with_registered_parent_test_() ->
                         beamtalk_behaviour_intrinsics:className(Super)
                     )
                 after
-                    catch gen_server:stop(ChildPid, normal, 5000),
-                    catch gen_server:stop(ParentPid, normal, 5000)
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
@@ -574,7 +666,11 @@ class_all_superclasses_returns_list_test_() ->
                     Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
                     ?assert(is_list(Supers))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -597,9 +693,21 @@ class_all_superclasses_with_hierarchy_test_() ->
                     ?assert(lists:member('BT1792BiMiddle', SuperNames)),
                     ?assert(lists:member('BT1792BiGrand', SuperNames))
                 after
-                    catch gen_server:stop(ChildPid, normal, 5000),
-                    catch gen_server:stop(ParentPid, normal, 5000),
-                    catch gen_server:stop(GrandPid, normal, 5000)
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(GrandPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
@@ -619,7 +727,11 @@ class_all_subclasses_empty_test_() ->
                     ?assert(is_list(AllSub)),
                     ?assertEqual([], AllSub)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -642,8 +754,16 @@ class_subclasses_with_child_test_() ->
                     AllSubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- AllSub],
                     ?assert(lists:member('BT1792BiChild', AllSubNames))
                 after
-                    catch gen_server:stop(ChildPid, normal, 5000),
-                    catch gen_server:stop(ParentPid, normal, 5000)
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
@@ -669,7 +789,11 @@ class_methods_includes_local_test_() ->
                     ?assert(lists:member('foo', Methods)),
                     ?assert(lists:member('bar', Methods))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -694,7 +818,11 @@ class_can_understand_true_test_() ->
                         beamtalk_behaviour_intrinsics:classCanUnderstand(ClassObj, 'quux')
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -710,7 +838,11 @@ class_can_understand_false_test_() ->
                         beamtalk_behaviour_intrinsics:classCanUnderstand(ClassObj, 'nope')
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -737,7 +869,11 @@ class_can_understand_from_name_true_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -755,7 +891,11 @@ class_can_understand_from_name_false_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -790,8 +930,16 @@ class_inherits_from_direct_parent_test_() ->
                         beamtalk_behaviour_intrinsics:classInheritsFrom(ParentObj, ChildObj)
                     )
                 after
-                    catch gen_server:stop(ChildPid, normal, 5000),
-                    catch gen_server:stop(ParentPid, normal, 5000)
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
@@ -812,7 +960,11 @@ class_includes_behaviour_self_test_() ->
                         beamtalk_behaviour_intrinsics:classIncludesBehaviour(ClassObj, ClassObj)
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -836,8 +988,16 @@ class_includes_behaviour_ancestor_test_() ->
                         beamtalk_behaviour_intrinsics:classIncludesBehaviour(ParentObj, ChildObj)
                     )
                 after
-                    catch gen_server:stop(ChildPid, normal, 5000),
-                    catch gen_server:stop(ParentPid, normal, 5000)
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
@@ -867,7 +1027,11 @@ class_which_includes_selector_found_test_() ->
                         beamtalk_behaviour_intrinsics:className(Result)
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -884,7 +1048,11 @@ class_which_includes_selector_nil_test_() ->
                     ),
                     ?assertEqual(nil, Result)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -909,7 +1077,11 @@ class_all_field_names_test_() ->
                     ?assert(lists:member(x, AllFields)),
                     ?assert(lists:member(y, AllFields))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -924,7 +1096,11 @@ class_all_field_names_empty_test_() ->
                     AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ClassObj),
                     ?assert(is_list(AllFields))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -948,7 +1124,11 @@ metaclass_this_class_test_() ->
                         beamtalk_behaviour_intrinsics:className(ThisClass)
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -976,7 +1156,11 @@ metaclass_all_methods_test_() ->
                     %% Should include the class method we defined
                     ?assert(lists:member('myClassFn', AllMethods))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1004,7 +1188,11 @@ metaclass_class_methods_test_() ->
                     ?assert(lists:member('classM1', ClassMethods)),
                     ?assert(lists:member('classM2', ClassMethods))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1031,7 +1219,11 @@ metaclass_local_class_methods_test_() ->
                     ?assert(is_list(LocalCM)),
                     ?assert(lists:member('localCM', LocalCM))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1048,7 +1240,11 @@ metaclass_local_class_methods_empty_test_() ->
                     ?assert(is_list(LocalCM)),
                     ?assertEqual([], LocalCM)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1077,7 +1273,11 @@ metaclass_includes_selector_true_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1096,7 +1296,11 @@ metaclass_includes_selector_false_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1119,7 +1323,11 @@ class_conforms_to_unknown_protocol_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1134,7 +1342,11 @@ class_protocols_returns_list_test_() ->
                     Protocols = beamtalk_behaviour_intrinsics:classProtocols(ClassObj),
                     ?assert(is_list(Protocols))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1156,7 +1368,11 @@ class_source_file_nil_for_dynamic_test_() ->
                         beamtalk_behaviour_intrinsics:classSourceFile(ClassObj)
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1181,7 +1397,11 @@ class_class_idempotent_test_() ->
                         MetaMetaObj#beamtalk_object.pid
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]

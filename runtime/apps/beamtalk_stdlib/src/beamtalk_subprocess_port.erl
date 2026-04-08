@@ -27,8 +27,6 @@ other while keeping both DRY.
 * `close/1` — close the exec port
 """.
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 -export([
     split_lines/1,
     flush_and_collect/2,

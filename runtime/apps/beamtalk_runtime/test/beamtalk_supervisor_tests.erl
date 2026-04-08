@@ -287,12 +287,20 @@ stale_handle_stop_test() ->
 root_registry_returns_nil_when_empty_test() ->
     %% get_root/0 returns nil when no root has been registered.
     %% Delete the table first so we start from a clean state.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     ?assertEqual(nil, beamtalk_supervisor:get_root()).
 
 root_registry_roundtrip_test() ->
     %% register_root/1 followed by get_root/0 returns the same tuple.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     FakePid = self(),
     SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', FakePid},
     ok = beamtalk_supervisor:register_root(SupTuple),
@@ -300,7 +308,11 @@ root_registry_roundtrip_test() ->
 
 root_registry_overwrite_test() ->
     %% A second register_root/1 call replaces the previous entry.
-    catch ets:delete(beamtalk_root_supervisor),
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
     Pid1 = self(),
     Pid2 = spawn(fun() -> ok end),
     beamtalk_supervisor:register_root({beamtalk_supervisor, 'Old', old_mod, Pid1}),
@@ -416,7 +428,11 @@ setup_fake_class(ClassName) ->
 -doc "Clean up after a fake class test.".
 cleanup_fake_class(ClassName, FakeClassPid) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
-    catch unregister(RegName),
+    (try
+        unregister(RegName)
+    catch
+        _:_ -> ok
+    end),
     FakeClassPid ! stop,
     beamtalk_class_module_table:delete(ClassName),
     ok.

@@ -132,7 +132,7 @@ matches_class(nil, _Error) ->
     true;
 matches_class(Filter, #{'$beamtalk_class' := _, error := Error}) ->
     matches_class(Filter, Error);
-matches_class({beamtalk_object, ClassName, _, _}, Error) ->
+matches_class(#beamtalk_object{class = ClassName}, Error) ->
     matches_class_name(ClassName, Error);
 matches_class(ClassName, Error) when is_atom(ClassName) ->
     matches_class_name(ClassName, Error);
@@ -177,6 +177,7 @@ e.g., 'RuntimeError class' → 'RuntimeError', 'TypeError' → 'TypeError'
 strip_class_suffix(ClassName) ->
     Str = atom_to_list(ClassName),
     case lists:suffix(" class", Str) of
+        % elp:fixme W0023 class name derived from known class tag in exception path
         true -> list_to_atom(lists:sublist(Str, length(Str) - 6));
         false -> ClassName
     end.

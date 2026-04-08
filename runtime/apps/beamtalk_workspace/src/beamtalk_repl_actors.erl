@@ -231,8 +231,8 @@ handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
         spawned_at => erlang:system_time(second)
     },
 
-    NewActors = maps:put(ActorPid, Metadata, Actors),
-    NewMonitors = maps:put(MonitorRef, ActorPid, Monitors),
+    NewActors = Actors#{ActorPid => Metadata},
+    NewMonitors = Monitors#{MonitorRef => ActorPid},
 
     NewState = State#state{actors = NewActors, monitors = NewMonitors},
     notify_subscribers({actor_spawned, Metadata}, NewState),
@@ -242,7 +242,7 @@ handle_call({unregister, ActorPid}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
 
     %% Find and demonitor all references for this actor
-    MonitorRefs = [Ref || {Ref, Pid} <- maps:to_list(Monitors), Pid =:= ActorPid],
+    MonitorRefs = [Ref || Ref := Pid <- Monitors, Pid =:= ActorPid],
     lists:foreach(fun erlang:demonitor/1, MonitorRefs),
 
     %% Remove monitor references
@@ -281,6 +281,7 @@ handle_call({kill, ActorPid}, _From, State) ->
     end;
 handle_call({get_actor, ActorPid}, _From, State) ->
     #state{actors = Actors} = State,
+    % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(ActorPid, Actors) of
         {ok, Metadata} ->
             {reply, {ok, Metadata}, State};
