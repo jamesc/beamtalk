@@ -60,3 +60,7 @@
 // BT-1659: :help with unknown package-qualified class — should show error
 :help xyzzy@FakeClass
 // => ERROR: Unknown class: xyzzy@FakeClass
+
+// ADR 0068: :help with a protocol name — should show protocol class docs
+:help Printable
+// => == Printable < Protocol ==_[protocol]_

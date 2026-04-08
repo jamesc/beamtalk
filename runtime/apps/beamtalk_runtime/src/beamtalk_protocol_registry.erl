@@ -110,6 +110,7 @@ register_protocol(#{name := Name} = Info) ->
         [Name],
         #{domain => [beamtalk, runtime]}
     ),
+    maybe_create_protocol_class(Name, Info),
     ok;
 register_protocol(BadInfo) ->
     ?LOG_WARNING(
@@ -383,4 +384,90 @@ check_class_extension(MetaclassTag, Selector) ->
         error:badarg ->
             %% ETS table doesn't exist yet (early bootstrap)
             false
+    end.
+
+%%% ============================================================================
+%%% Protocol Class Object Creation (ADR 0068)
+%%% ============================================================================
+
+-doc """
+Create a class object for a protocol if one doesn't already exist.
+
+Protocol class objects are sealed abstract subclasses of Protocol that
+respond to class-side messages like `requiredMethods` and `conformingClasses`.
+This is called from `register_protocol/1` after storing the protocol metadata.
+
+Skipped during early bootstrap (before the Protocol class exists) and for
+hot reload (class already exists).
+""".
+-spec maybe_create_protocol_class(atom(), map()) -> ok.
+maybe_create_protocol_class(Name, Info) ->
+    %% Only create if the Protocol class exists (not during early bootstrap)
+    %% and this protocol doesn't already have a class object (idempotent).
+    case beamtalk_class_registry:whereis_class('Protocol') of
+        undefined ->
+            %% Protocol class not loaded yet — skip (early bootstrap).
+            ok;
+        _ProtocolPid ->
+            case beamtalk_class_registry:whereis_class(Name) of
+                undefined ->
+                    create_protocol_class(Name, Info);
+                _Pid ->
+                    %% Already exists (hot reload) — no-op.
+                    ok
+            end
+    end.
+
+-doc """
+Create a sealed abstract class object for a protocol definition.
+
+Uses `beamtalk_protocol_object` as the shared dispatch module for all
+protocol class objects. The class methods (`requiredMethods`, `conformingClasses`)
+extract the protocol name from the ClassSelf tuple and query the registry.
+""".
+-spec create_protocol_class(atom(), map()) -> ok.
+create_protocol_class(Name, Info) ->
+    Doc = maps:get(doc, Info, none),
+    ClassInfo = #{
+        module => beamtalk_protocol_object,
+        superclass => 'Protocol',
+        is_sealed => true,
+        is_abstract => true,
+        meta => #{
+            is_sealed => true,
+            is_abstract => true
+        },
+        class_methods => #{
+            requiredMethods => #{arity => 0, is_sealed => true},
+            conformingClasses => #{arity => 0, is_sealed => true}
+        },
+        class_method_signatures => #{
+            requiredMethods => <<"requiredMethods -> List">>,
+            conformingClasses => <<"conformingClasses -> List">>
+        },
+        class_method_docs => #{
+            requiredMethods => <<"Return the required method selectors for this protocol.">>,
+            conformingClasses => <<"Return the classes conforming to this protocol.">>
+        },
+        instance_methods => #{},
+        fields => [],
+        doc => Doc
+    },
+    case beamtalk_object_class:start(Name, ClassInfo) of
+        {ok, _Pid} ->
+            ?LOG_DEBUG(
+                "Created class object for protocol ~p",
+                [Name],
+                #{domain => [beamtalk, runtime]}
+            ),
+            ok;
+        {error, {already_started, _Pid}} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Failed to create class object for protocol ~p: ~p",
+                [Name, Reason],
+                #{domain => [beamtalk, runtime]}
+            ),
+            ok
     end.

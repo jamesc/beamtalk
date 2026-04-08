@@ -116,8 +116,12 @@ format_class_docs(ClassName) ->
                 SeeAlso = build_see_also(ClassName, Superclass, ModuleDoc),
 
                 %% Format the output
+                IsProtocol = beamtalk_protocol_registry:is_protocol(ClassName),
                 Modifiers = #{
-                    is_sealed => IsSealed, is_abstract => IsAbstract, is_internal => IsInternal
+                    is_sealed => IsSealed,
+                    is_abstract => IsAbstract,
+                    is_internal => IsInternal,
+                    is_protocol => IsProtocol
                 },
                 Output = format_class_output(
                     ClassName,
@@ -633,6 +637,10 @@ ADR 0071 Phase 5: Include [internal] annotation when present.
 -spec format_modifiers(map()) -> binary().
 format_modifiers(Modifiers) ->
     Tags = lists:filter(fun(T) -> T =/= <<>> end, [
+        case maps:get(is_protocol, Modifiers, false) of
+            true -> <<"[protocol]">>;
+            false -> <<>>
+        end,
         case maps:get(is_internal, Modifiers, false) of
             true -> <<"[internal]">>;
             false -> <<>>
