@@ -206,7 +206,7 @@ handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
             ),
             beamtalk_error:raise(Err2)
     end;
-handle_erlang_help(ModuleArg) ->
+handle_erlang_help(_ModuleArg) ->
     Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
     Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:'),
     Err2 = beamtalk_error:with_message(

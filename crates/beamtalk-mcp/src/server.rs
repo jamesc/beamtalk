@@ -2220,6 +2220,42 @@ mod tests {
         );
     }
 
+    // --- validate_erlang_module_name ---
+
+    #[test]
+    fn validate_erlang_module_name_valid() {
+        assert!(validate_erlang_module_name("lists").is_ok());
+        assert!(validate_erlang_module_name("maps").is_ok());
+        assert!(validate_erlang_module_name("beamtalk_runtime").is_ok());
+        assert!(validate_erlang_module_name("_private").is_ok());
+    }
+
+    #[test]
+    fn validate_erlang_module_name_empty_is_error() {
+        assert!(validate_erlang_module_name("").is_err());
+    }
+
+    #[test]
+    fn validate_erlang_module_name_uppercase_start_is_error() {
+        assert!(validate_erlang_module_name("Lists").is_err());
+    }
+
+    #[test]
+    fn validate_erlang_module_name_space_is_error() {
+        assert!(validate_erlang_module_name("my module").is_err());
+    }
+
+    #[test]
+    fn validate_erlang_module_name_hyphen_is_error() {
+        assert!(validate_erlang_module_name("my-module").is_err());
+    }
+
+    #[test]
+    fn validate_erlang_module_name_error_contains_name() {
+        let err = validate_erlang_module_name("BadModule").unwrap_err();
+        assert!(err.message.contains("BadModule"));
+    }
+
     // --- validate_selector ---
 
     #[test]
