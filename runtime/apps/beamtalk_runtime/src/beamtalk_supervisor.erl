@@ -78,7 +78,7 @@ Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 Returns `{beamtalk_supervisor, ClassName, Module, Pid}`.
 Idempotent: if the supervisor is already running, returns the existing instance.
 """.
--spec startLink(term()) -> term().
+-spec startLink(beamtalk_object()) -> term().
 startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -178,7 +178,7 @@ Return the running supervisor instance, or nil if not started.
 Called from `class current` on Supervisor and DynamicSupervisor subclasses.
 Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 """.
--spec current(term()) -> term() | nil.
+-spec current(beamtalk_object()) -> term() | nil.
 current(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -220,7 +220,7 @@ Matches by child module (position 4 in which_children tuples) rather than child 
 so that custom ids set via `withId:` in SupervisionSpec still resolve correctly.
 Returns {beamtalk_supervisor, ...} for supervisor subclasses, {beamtalk_object, ...} otherwise.
 """.
--spec whichChild(term(), Class :: term()) -> term() | nil.
+-spec whichChild(term(), Class :: beamtalk_object()) -> term() | nil.
 whichChild(Self, ClassArg) ->
     SupPid = element(4, Self),
     ClassName = element(2, Self),
@@ -258,7 +258,7 @@ Raises a runtime_error if the child is not found or cannot be terminated.
 %% Canonical specs for the two BT selectors that map to this function:
 %%   Supervisor:        terminate: aClass  → terminateChild: self class: aClass
 %%   DynamicSupervisor: terminateChild: child → terminateChild: self child: child
--spec 'terminateChild:class:'(term(), Class :: term()) -> nil.
+-spec 'terminateChild:class:'(term(), Class :: beamtalk_object()) -> nil.
 'terminateChild:class:'(Self, Class) -> terminateChild(Self, Class).
 -spec 'terminateChild:child:'(term(), Child :: term()) -> nil.
 'terminateChild:child:'(Self, Child) -> terminateChild(Self, Child).
@@ -542,7 +542,7 @@ Build a ClassSelf tuple for use in direct class method calls during supervisor i
 The pid field is set to the class gen_server pid (may be blocked, but ClassSelf is
 used only as a value object — pure class methods do not send messages to self).
 """.
--spec make_init_class_self(atom(), module()) -> term().
+-spec make_init_class_self(atom(), module()) -> beamtalk_object().
 make_init_class_self(ClassName, Module) ->
     ClassPid = beamtalk_class_registry:whereis_class(ClassName),
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),

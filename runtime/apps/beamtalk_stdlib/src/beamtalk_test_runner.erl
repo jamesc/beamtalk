@@ -20,6 +20,7 @@ TestResult is a tagged map:
 ```
 """.
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
     %% TestRunner class-side primitives
@@ -164,20 +165,44 @@ Run all tests in a single class.
 
 ClassRef is a class tuple — element 2 is 'ClassName class' atom.
 """.
--spec run_class(term()) -> test_result().
-run_class(ClassRef) ->
+-spec run_class(beamtalk_object()) -> test_result().
+run_class(ClassRef) when is_tuple(ClassRef), tuple_size(ClassRef) >= 2 ->
     ClassName = extract_class_name(ClassRef),
-    run_class_by_name(ClassName).
+    run_class_by_name(ClassName);
+run_class(Invalid) ->
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "run: expects a class reference (tuple), got: ~p",
+            [Invalid]
+        )
+    ),
+    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
+    Error1 = beamtalk_error:with_selector(Error0, 'run:'),
+    Error2 = beamtalk_error:with_message(Error1, Msg),
+    beamtalk_error:raise(Error2).
 
 -doc """
 Run a single test method in a class.
 
 ClassRef is a class tuple, TestName is a symbol atom.
 """.
--spec run_method(term(), Method :: atom()) -> map().
-run_method(ClassRef, TestName) when is_atom(TestName) ->
+-spec run_method(beamtalk_object(), Method :: atom()) -> map().
+run_method(ClassRef, TestName) when
+    is_tuple(ClassRef), tuple_size(ClassRef) >= 2, is_atom(TestName)
+->
     ClassName = extract_class_name(ClassRef),
-    run_method_by_name(ClassName, TestName).
+    run_method_by_name(ClassName, TestName);
+run_method(Invalid, _TestName) ->
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "run:method: expects a class reference (tuple with >= 2 elements), got: ~p",
+            [Invalid]
+        )
+    ),
+    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
+    Error1 = beamtalk_error:with_selector(Error0, 'run:method:'),
+    Error2 = beamtalk_error:with_message(Error1, Msg),
+    beamtalk_error:raise(Error2).
 
 %%====================================================================
 %% TestResult instance primitives
@@ -567,7 +592,7 @@ Extract class name from a class reference tuple.
 Class references have element 2 = 'ClassName class' atom.
 Strip the trailing " class" (6 chars) to get the bare class name.
 """.
--spec extract_class_name(term()) -> atom().
+-spec extract_class_name(beamtalk_object()) -> atom().
 extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     Tag = element(2, ClassRef),
     TagStr = atom_to_list(Tag),
@@ -786,11 +811,11 @@ runAll() -> run_all().
 runAll(MaxJobs) -> run_all(MaxJobs).
 
 %% run: → run/1  (TestRunner run: testClass)
--spec run(term()) -> test_result().
+-spec run(beamtalk_object()) -> test_result().
 run(TestClass) -> run_class(TestClass).
 
 %% run:method: → run/2  (TestRunner run: testClass method: testName)
--spec run(term(), Method :: atom()) -> test_result().
+-spec run(beamtalk_object(), Method :: atom()) -> test_result().
 run(TestClass, TestName) -> run_method(TestClass, TestName).
 
 %% TestResult instance shims — passed: → passed/1, etc.

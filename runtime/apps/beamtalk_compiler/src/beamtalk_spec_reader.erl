@@ -664,7 +664,7 @@ map_type({type, _, float, []}) ->
 map_type({type, _, number, []}) ->
     <<"Number">>;
 map_type({type, _, binary, _}) ->
-    <<"String">>;
+    <<"String | Binary">>;
 map_type({type, _, boolean, []}) ->
     <<"Boolean">>;
 map_type({type, _, atom, []}) ->

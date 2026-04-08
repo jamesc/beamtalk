@@ -12,6 +12,7 @@ Covers path_suffix_match/2 which is the core logic for the `file`
 parameter of the `test` MCP tool (BT-1234).
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% path_suffix_match/2 tests
@@ -155,6 +156,44 @@ print_string_failure_without_class_test() ->
     Str = beamtalk_test_runner:result_print_string(Result),
     ?assertNotEqual(nomatch, binary:match(Str, <<"unknown>>testX">>)),
     ?assertNotEqual(nomatch, binary:match(Str, <<"boom">>)).
+
+%%% ============================================================================
+%%% run_class/1 and run_method/2 input validation tests (BT-1927)
+%%% ============================================================================
+
+run_class_rejects_non_tuple_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner', selector = 'run:'}},
+        beamtalk_test_runner:run_class(not_a_tuple)
+    ).
+
+run_class_rejects_atom_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_class(some_atom)
+    ).
+
+run_class_rejects_integer_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_class(42)
+    ).
+
+run_method_rejects_non_tuple_test() ->
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = type_error, class = 'TestRunner', selector = 'run:method:'
+            }
+        },
+        beamtalk_test_runner:run_method(not_a_tuple, testFoo)
+    ).
+
+run_method_rejects_list_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'TestRunner'}},
+        beamtalk_test_runner:run_method([1, 2, 3], testFoo)
+    ).
 
 %%% ============================================================================
 %%% Helpers
