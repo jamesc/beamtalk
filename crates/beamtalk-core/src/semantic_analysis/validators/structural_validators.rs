@@ -13,8 +13,8 @@
 
 use crate::ast::{Expression, ExpressionStatement, MessageSelector, Module};
 use crate::ast_walker::{walk_expression, walk_module};
-use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 // ── Unresolved class references ──────────────────────────────────────────────
@@ -584,7 +584,13 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
+        check_unresolved_classes(
+            &module,
+            &hierarchy,
+            &ProtocolRegistry::new(),
+            &[],
+            &mut diags,
+        );
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Unresolved class `NonExistent`"));
@@ -604,7 +610,13 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
+        check_unresolved_classes(
+            &module,
+            &hierarchy,
+            &ProtocolRegistry::new(),
+            &[],
+            &mut diags,
+        );
 
         assert!(diags.is_empty(), "Builtins should not trigger warnings");
     }
@@ -617,7 +629,13 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
+        check_unresolved_classes(
+            &module,
+            &hierarchy,
+            &ProtocolRegistry::new(),
+            &[],
+            &mut diags,
+        );
 
         assert!(
             diags.is_empty(),
@@ -924,7 +942,13 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
+        check_unresolved_classes(
+            &module,
+            &hierarchy,
+            &ProtocolRegistry::new(),
+            &[],
+            &mut diags,
+        );
 
         assert!(
             diags.is_empty(),
@@ -954,7 +978,13 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
+        check_unresolved_classes(
+            &module,
+            &hierarchy,
+            &ProtocolRegistry::new(),
+            &[],
+            &mut diags,
+        );
 
         assert_eq!(
             diags.len(),
