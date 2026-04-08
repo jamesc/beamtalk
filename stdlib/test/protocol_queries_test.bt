@@ -75,3 +75,25 @@ TestCase subclass: ProtocolQueriesTest
     methods := Protocol requiredMethods: #Creatable
     self assert: methods size equals: 1
     self assert: (methods includes: #'class create') equals: true
+
+  // --- ADR 0068: Protocol objects as first-class class objects ---
+  // Protocols are sealed abstract subclasses of Protocol with class methods.
+  testProtocolObjectRequiredMethods =>
+    // Direct message send on protocol object (not via Protocol class)
+    methods := Displayable requiredMethods
+    self assert: (methods includes: #asString) equals: true
+    self assert: (methods includes: #printString) equals: true
+
+  testProtocolObjectConformingClasses =>
+    // Direct message send returns conforming class names (atoms)
+    classes := HasSize conformingClasses
+    self assert: (classes includes: #String) equals: true
+
+  testProtocolObjectSuperclass =>
+    // Protocol objects are subclasses of Protocol
+    self assert: Displayable superclass equals: Protocol
+
+  testProtocolObjectInAllClasses =>
+    // Protocol objects appear in allClasses (returned as atoms)
+    all := (Erlang beamtalk_interface) allClasses
+    self assert: (all includes: #Displayable) equals: true
