@@ -291,9 +291,10 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
         // BT-1935: Close open-scope let-chains from class method self-sends.
+        // Restore class var version BEFORE generating args so they see the
+        // correct version, not one scoped inside the receiver's closed let-chain.
         let saved_cv = self.class_var_version();
         let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let actual_receiver = if let Some(result_var) = receiver_open_scope {
             self.set_class_var_version(saved_cv);
@@ -301,6 +302,8 @@ impl CoreErlangGenerator {
         } else {
             receiver_doc
         };
+
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
             "call 'beamtalk_message_dispatch':'cast'(",
@@ -350,18 +353,19 @@ impl CoreErlangGenerator {
 
         // BT-1935: Use expression_doc_with_open_scope to detect open let-chains
         // from class method self-sends used as the receiver expression.
+        // Restore class var version BEFORE generating args so they see the
+        // correct version, not one scoped inside the receiver's closed let-chain.
         let saved_cv = self.class_var_version();
         let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let actual_receiver = if let Some(result_var) = receiver_open_scope {
-            // Close the open scope: append the result variable to form a valid
-            // closed expression in receiver position. Roll back class var version.
             self.set_class_var_version(saved_cv);
             docvec![receiver_doc, Document::String(result_var)]
         } else {
             receiver_doc
         };
+
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
