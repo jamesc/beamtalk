@@ -82,10 +82,13 @@ impl ProjectIndex {
             let (module, _parse_diagnostics) = parse(tokens);
             let (file_hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
             all_diagnostics.extend(hierarchy_diags);
-            let file_hierarchy = match file_hierarchy_result {
+            let mut file_hierarchy = match file_hierarchy_result {
                 Ok(h) => h,
                 Err(e) => return (Err(e), all_diagnostics),
             };
+
+            // BT-1933: Register protocol definitions as synthetic class entries
+            file_hierarchy.register_protocol_classes(&module);
 
             // Track which classes came from this stdlib file
             let class_names: Vec<EcoString> = file_hierarchy
@@ -449,5 +452,81 @@ mod tests {
         let index = ProjectIndex::new();
         let file = Utf8PathBuf::from("nonexistent.bt");
         assert_eq!(index.package_for_file(&file), None);
+    }
+
+    // BT-1933: Protocol class objects in project index
+
+    #[test]
+    fn protocol_classes_visible_cross_file() {
+        let mut index = ProjectIndex::new();
+
+        // File A defines a protocol
+        let tokens_a = lex_with_eof("Protocol define: Printable\n  asString -> String");
+        let (module_a, _) = parse(tokens_a);
+        let mut hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        hierarchy_a.register_protocol_classes(&module_a);
+        index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
+
+        // File B defines a class
+        let tokens_b = lex_with_eof("Object subclass: Foo\n  bar => 1");
+        let (module_b, _) = parse(tokens_b);
+        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
+
+        // Both should be visible in merged hierarchy
+        assert!(
+            index.hierarchy().has_class("Printable"),
+            "Protocol from file A should be visible in merged hierarchy"
+        );
+        assert!(
+            index.hierarchy().has_class("Foo"),
+            "Class from file B should be visible in merged hierarchy"
+        );
+    }
+
+    #[test]
+    fn protocol_class_removed_with_file() {
+        let mut index = ProjectIndex::new();
+
+        let tokens = lex_with_eof("Protocol define: Printable\n  asString -> String");
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        hierarchy.register_protocol_classes(&module);
+        index.update_file(Utf8PathBuf::from("proto.bt"), &hierarchy);
+        assert!(index.hierarchy().has_class("Printable"));
+
+        index.remove_file(&Utf8PathBuf::from("proto.bt"));
+        assert!(
+            !index.hierarchy().has_class("Printable"),
+            "Protocol class should be removed when file is removed"
+        );
+    }
+
+    #[test]
+    fn real_class_not_overwritten_by_protocol_cross_file() {
+        // If file A defines class Foo and file B defines protocol Foo,
+        // the real class should win regardless of indexing order.
+        let mut index = ProjectIndex::new();
+
+        // File A: real class
+        let tokens_a = lex_with_eof("Object subclass: Foo\n  bar => 1");
+        let (module_a, _) = parse(tokens_a);
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
+
+        // File B: protocol with same name (indexed after)
+        let tokens_b = lex_with_eof("Protocol define: Foo\n  baz");
+        let (module_b, _) = parse(tokens_b);
+        let mut hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        hierarchy_b.register_protocol_classes(&module_b);
+        index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
+
+        // Real class should still be the active definition
+        let class = index.hierarchy().get_class("Foo").unwrap();
+        assert_eq!(
+            class.superclass.as_deref(),
+            Some("Object"),
+            "Real class Foo should not be overwritten by protocol Foo from another file"
+        );
     }
 }
