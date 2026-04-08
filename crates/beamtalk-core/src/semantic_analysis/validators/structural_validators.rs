@@ -13,6 +13,7 @@
 
 use crate::ast::{Expression, ExpressionStatement, MessageSelector, Module};
 use crate::ast_walker::{walk_expression, walk_module};
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
@@ -21,12 +22,14 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 /// BT-1726: Warn on class references that don't exist in the hierarchy.
 ///
 /// Walks all expressions looking for `ClassReference` nodes whose name is
-/// not found in the `ClassHierarchy`. Skips built-in names (`Erlang`, `Self`,
-/// `Nil`, `True`, `False`), type parameters of the enclosing class, and
-/// REPL workspace bindings passed via `known_vars`.
+/// not found in the `ClassHierarchy` or `ProtocolRegistry`. Skips built-in
+/// names (`Erlang`, `Self`, `Nil`, `True`, `False`), type parameters of
+/// the enclosing class, protocol names, and REPL workspace bindings passed
+/// via `known_vars`.
 pub(crate) fn check_unresolved_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
     known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -36,6 +39,7 @@ pub(crate) fn check_unresolved_classes(
     walk_stmts(
         &module.expressions,
         hierarchy,
+        protocol_registry,
         &empty_params,
         known_vars,
         diagnostics,
@@ -52,6 +56,7 @@ pub(crate) fn check_unresolved_classes(
             walk_stmts(
                 &method.body,
                 hierarchy,
+                protocol_registry,
                 &class_type_params,
                 known_vars,
                 diagnostics,
@@ -64,6 +69,7 @@ pub(crate) fn check_unresolved_classes(
         walk_stmts(
             &standalone.method.body,
             hierarchy,
+            protocol_registry,
             &empty_params,
             known_vars,
             diagnostics,
@@ -75,13 +81,21 @@ pub(crate) fn check_unresolved_classes(
 fn walk_stmts(
     stmts: &[ExpressionStatement],
     hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
     type_param_names: &[&str],
     known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for stmt in stmts {
         walk_expression(&stmt.expression, &mut |expr| {
-            visit_unresolved_class(expr, hierarchy, type_param_names, known_vars, diagnostics);
+            visit_unresolved_class(
+                expr,
+                hierarchy,
+                protocol_registry,
+                type_param_names,
+                known_vars,
+                diagnostics,
+            );
         });
     }
 }
@@ -96,6 +110,7 @@ const BUILTIN_CLASS_NAMES: &[&str] = &["Erlang", "Self", "Nil", "True", "False"]
 fn visit_unresolved_class(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
     type_param_names: &[&str],
     known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
@@ -103,13 +118,15 @@ fn visit_unresolved_class(
     if let Expression::ClassReference { name, span, .. } = expr {
         let class_name = name.name.as_str();
 
-        // Skip builtins, type parameters, known REPL bindings, and classes that exist.
+        // Skip builtins, type parameters, known REPL bindings, classes, and protocols.
         // Known vars covers REPL workspace bindings like `Workspace` and `Transcript`
         // which are capitalized variables, not class references.
+        // Protocols are first-class objects (BT-1928) and valid class references.
         if BUILTIN_CLASS_NAMES.contains(&class_name)
             || type_param_names.contains(&class_name)
             || known_vars.contains(&class_name)
             || hierarchy.has_class(class_name)
+            || protocol_registry.has_protocol(class_name)
         {
             return;
         }
@@ -567,7 +584,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Unresolved class `NonExistent`"));
@@ -587,7 +604,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
 
         assert!(diags.is_empty(), "Builtins should not trigger warnings");
     }
@@ -600,7 +617,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -620,6 +637,7 @@ mod tests {
         check_unresolved_classes(
             &module,
             &hierarchy,
+            &ProtocolRegistry::new(),
             &["Workspace", "Transcript"],
             &mut diags,
         );
@@ -627,6 +645,33 @@ mod tests {
         assert!(
             diags.is_empty(),
             "Known REPL variables should not trigger unresolved class warnings"
+        );
+    }
+
+    #[test]
+    fn test_unresolved_class_skips_protocols() {
+        // Protocol names like Printable are first-class class objects (BT-1928)
+        // and should not trigger unresolved class warnings.
+        let module = empty_module_with_exprs(vec![class_ref("Printable")]);
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_test_protocol(crate::semantic_analysis::ProtocolInfo {
+            name: "Printable".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            span: test_span(),
+        });
+        let mut diags = Vec::new();
+
+        check_unresolved_classes(&module, &hierarchy, &registry, &[], &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Protocol names should not trigger unresolved class warnings"
         );
     }
 
@@ -879,7 +924,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -909,7 +954,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &[], &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &[], &mut diags);
 
         assert_eq!(
             diags.len(),
