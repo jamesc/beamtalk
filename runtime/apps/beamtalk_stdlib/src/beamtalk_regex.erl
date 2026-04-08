@@ -36,8 +36,14 @@ Regex objects are represented as tagged maps:
     split_regex/2
 ]).
 
--type t() :: #{'$beamtalk_class' := 'Regex', atom() => term()}.
--export_type([t/0]).
+-type regex_option() :: caseless | multiline | dotall | extended | ungreedy.
+-type t() :: #{
+    '$beamtalk_class' := 'Regex',
+    source := binary(),
+    compiled := re:mp(),
+    atom() => term()
+}.
+-export_type([t/0, regex_option/0]).
 
 %%% ============================================================================
 %%% Class Methods — Constructors
@@ -78,7 +84,7 @@ Compile a regex pattern string with PCRE options.
 Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 Unknown options still raise (programming error).
 """.
--spec 'from:options:'(binary(), Options :: list()) -> beamtalk_result:t().
+-spec 'from:options:'(binary(), Options :: [regex_option()]) -> beamtalk_result:t().
 'from:options:'(Pattern, Options) when is_binary(Pattern), is_list(Options) ->
     ErlOpts = translate_options(Options),
     case re:compile(Pattern, ErlOpts) of
@@ -114,7 +120,7 @@ from(Pattern) -> 'from:'(Pattern).
 -doc """
 FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
 """.
--spec from(binary(), Options :: list()) -> beamtalk_result:t().
+-spec from(binary(), Options :: [regex_option()]) -> beamtalk_result:t().
 from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 
 %%% ============================================================================

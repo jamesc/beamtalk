@@ -122,12 +122,15 @@ architecture() ->
 -doc "Return the machine hostname.".
 -spec hostname() -> binary().
 hostname() ->
+    %% inet:gethostname/0 spec says it always returns {ok, Hostname},
+    %% but we wrap in try for defensive safety.
     try
         {ok, Hostname} = inet:gethostname(),
         list_to_binary(Hostname)
     catch
         Class:Reason ->
             ?LOG_ERROR("Hostname lookup failed", #{
+                domain => [beamtalk, stdlib],
                 module => ?MODULE,
                 function => hostname,
                 class => Class,
