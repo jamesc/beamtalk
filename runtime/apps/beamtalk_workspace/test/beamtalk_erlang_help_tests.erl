@@ -108,8 +108,48 @@ dedupe_removes_plain_alias_when_keyword_exists_test() ->
     ?assertEqual(1, length(Result)),
     ?assertEqual(<<"parse:">>, maps:get(name, hd(Result))).
 
+dedupe_keeps_both_when_arities_differ_test() ->
+    Specs = [
+        #{name => <<"parse">>, arity => 0, params => [], return_type => <<"Map">>},
+        #{name => <<"parse:">>, arity => 1, params => [], return_type => <<"Map">>}
+    ],
+    Result = beamtalk_erlang_help:dedupe_keyword_aliases(Specs),
+    ?assertEqual(2, length(Result)).
+
+dedupe_no_change_for_regular_erlang_modules_test() ->
+    Specs = [
+        #{name => <<"format">>, arity => 2, params => [], return_type => <<"Binary">>},
+        #{name => <<"parse">>, arity => 1, params => [], return_type => <<"Map">>}
+    ],
+    Result = beamtalk_erlang_help:dedupe_keyword_aliases(Specs),
+    ?assertEqual(2, length(Result)).
+
+dedupe_removes_multiple_aliases_test() ->
+    Specs = [
+        #{name => <<"parse">>, arity => 1, params => [], return_type => <<"Map">>},
+        #{name => <<"parse:">>, arity => 1, params => [], return_type => <<"Map">>},
+        #{name => <<"generate">>, arity => 1, params => [], return_type => <<"Binary">>},
+        #{name => <<"generate:">>, arity => 1, params => [], return_type => <<"Binary">>},
+        #{name => <<"version">>, arity => 0, params => [], return_type => <<"String">>}
+    ],
+    Result = beamtalk_erlang_help:dedupe_keyword_aliases(Specs),
+    Names = [maps:get(name, S) || S <- Result],
+    ?assertEqual([<<"generate:">>, <<"parse:">>, <<"version">>], lists:sort(Names)).
+
 dedupe_empty_list_test() ->
     ?assertEqual([], beamtalk_erlang_help:dedupe_keyword_aliases([])).
+
+dedupe_removes_multi_keyword_alias_test() ->
+    %% BT-1904: run/2 is the dispatch alias for 'run:timeout:'/2
+    Specs = [
+        #{name => <<"run:">>, arity => 1, params => [], return_type => <<"String">>},
+        #{name => <<"run">>, arity => 1, params => [], return_type => <<"String">>},
+        #{name => <<"run:timeout:">>, arity => 2, params => [], return_type => <<"String">>},
+        #{name => <<"run">>, arity => 2, params => [], return_type => <<"String">>}
+    ],
+    Result = beamtalk_erlang_help:dedupe_keyword_aliases(Specs),
+    Names = [{maps:get(name, S), maps:get(arity, S)} || S <- Result],
+    ?assertEqual([{<<"run:">>, 1}, {<<"run:timeout:">>, 2}], lists:sort(Names)).
 
 %%====================================================================
 %% find_function_arities/2

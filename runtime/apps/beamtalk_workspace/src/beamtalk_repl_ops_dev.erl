@@ -120,7 +120,7 @@ handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
                         try Module:module_info(exports) of
                             Exports ->
                                 Filtered = [
-                                    atom_to_binary(F)
+                                    atom_to_binary(F, utf8)
                                  || {F, _A} <- Exports,
                                     F =/= module_info
                                 ],

@@ -85,9 +85,8 @@ format_function_help(Module, Function) when is_atom(Function) ->
 -doc """
 List available Erlang module names for tab completion.
 
-Returns modules that have either specs or EEP-48 docs, sorted
-alphabetically. Filters out Beamtalk-internal compiled modules
-(bt@* prefix).
+Returns all available module names sorted alphabetically, filtering
+out Beamtalk-internal compiled modules (bt@* prefix).
 """.
 -spec available_modules() -> [binary()].
 available_modules() ->
