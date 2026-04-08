@@ -34,3 +34,8 @@ TestCase subclass: ClassMethodInlineResultTest
   testClassMethodResultInConditionalBlockFalse =>
     result := ClassMethodInlineResult conditionalHelper: 41 flag: false
     self assert: result equals: "none"
+
+  // Edge case: sub-expression self-send followed by another self-send
+  testMultipleSelfSendsWithSubExpression =>
+    result := ClassMethodInlineResult multiSend: 41
+    self assert: result equals: "421"

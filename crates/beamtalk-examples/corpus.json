@@ -11516,10 +11516,11 @@
         "testClassMethodResultInConditionalBlock",
         "testClassMethodResultInConditionalBlockFalse",
         "testEmptyStringInConditionalBlock",
+        "testMultipleSelfSendsWithSubExpression",
         "testNonEmptyStringInConditionalBlock",
         "unless"
       ],
-      "source": "// BT-1935: Regression tests for class method call results used as inline\n// arguments or receivers. Previously generated invalid Core Erlang with\n// unclosed open-scope let-chains in argument/receiver positions.\n\nTestCase subclass: ClassMethodInlineResultTest\n\n  // Class method result used as receiver of another message send\n  testClassMethodResultAsReceiver =>\n    result := ClassMethodInlineResult helperAsString: 41\n    self assert: result equals: \"42\"\n\n  // Class method result as argument to another self class method call\n  testChainedClassMethodCalls =>\n    result := ClassMethodInlineResult doubleFormat: 41\n    self assert: result equals: \"42\"\n\n  // Empty string in ifTrue:ifFalse: inside class method\n  testEmptyStringInConditionalBlock =>\n    result := ClassMethodInlineResult emptyOrValue: true\n    self assert: result equals: \"\"\n\n  testNonEmptyStringInConditionalBlock =>\n    result := ClassMethodInlineResult emptyOrValue: false\n    self assert: result equals: \"hello\"\n\n  // Combined: class method call result inside conditional block\n  testClassMethodResultInConditionalBlock =>\n    result := ClassMethodInlineResult conditionalHelper: 41 flag: true\n    self assert: result equals: \"42\"\n\n  testClassMethodResultInConditionalBlockFalse =>\n    result := ClassMethodInlineResult conditionalHelper: 41 flag: false\n    self assert: result equals: \"none\"",
+      "source": "// BT-1935: Regression tests for class method call results used as inline\n// arguments or receivers. Previously generated invalid Core Erlang with\n// unclosed open-scope let-chains in argument/receiver positions.\n\nTestCase subclass: ClassMethodInlineResultTest\n\n  // Class method result used as receiver of another message send\n  testClassMethodResultAsReceiver =>\n    result := ClassMethodInlineResult helperAsString: 41\n    self assert: result equals: \"42\"\n\n  // Class method result as argument to another self class method call\n  testChainedClassMethodCalls =>\n    result := ClassMethodInlineResult doubleFormat: 41\n    self assert: result equals: \"42\"\n\n  // Empty string in ifTrue:ifFalse: inside class method\n  testEmptyStringInConditionalBlock =>\n    result := ClassMethodInlineResult emptyOrValue: true\n    self assert: result equals: \"\"\n\n  testNonEmptyStringInConditionalBlock =>\n    result := ClassMethodInlineResult emptyOrValue: false\n    self assert: result equals: \"hello\"\n\n  // Combined: class method call result inside conditional block\n  testClassMethodResultInConditionalBlock =>\n    result := ClassMethodInlineResult conditionalHelper: 41 flag: true\n    self assert: result equals: \"42\"\n\n  testClassMethodResultInConditionalBlockFalse =>\n    result := ClassMethodInlineResult conditionalHelper: 41 flag: false\n    self assert: result equals: \"none\"\n\n  // Edge case: sub-expression self-send followed by another self-send\n  testMultipleSelfSendsWithSubExpression =>\n    result := ClassMethodInlineResult multiSend: 41\n    self assert: result equals: \"421\"",
       "explanation": "BT-1935: Regression tests for class method call results used as inline arguments or receivers. Previously generated invalid Core Erlang with unclosed open-scope let-chains in argument/receiver positions."
     },
     {
@@ -14387,8 +14388,13 @@
       "tags": [
         "ClassMethodInlineResult",
         "Object",
+        "append",
+        "assign",
+        "assignment",
         "branch",
         "class_method_inline_result",
+        "concat",
+        "concatenate",
         "conditional",
         "conditionalHelper:flag:",
         "defaultFor:",
@@ -14403,16 +14409,21 @@
         "if not",
         "inherit",
         "inheritance",
+        "multiSend:",
+        "mutate",
+        "mutation",
         "negation",
         "object",
+        "set",
         "string conversion",
+        "string join",
         "subclassing",
         "ternary",
         "toString",
         "to_string",
         "unless"
       ],
-      "source": "// BT-1935: Test fixture for class method call results used as inline\n// arguments or receivers in other message sends.\n\nObject subclass: ClassMethodInlineResult\n\n  class helper: x :: Integer -> Integer => x + 1\n\n  class format: x :: Integer -> String => x printString\n\n  class defaultFor: flag :: Boolean -> String =>\n    flag ifTrue: [\"\"] ifFalse: [\"default\"]\n\n  // Class method result as receiver of another message send\n  class helperAsString: x :: Integer -> String => (self helper: x) printString\n\n  // Chained: class method result as argument to another self class method\n  class doubleFormat: x :: Integer -> String => self format: (self helper: x)\n\n  // Empty string in ifTrue:ifFalse: inside class method\n  class emptyOrValue: flag :: Boolean -> String =>\n    flag ifTrue: [\"\"] ifFalse: [\"hello\"]\n\n  // Combined: class method result inside conditional block\n  class conditionalHelper: x flag: flag :: Boolean -> String =>\n    flag ifTrue: [(self helper: x) printString] ifFalse: [\"none\"]",
+      "source": "// BT-1935: Test fixture for class method call results used as inline\n// arguments or receivers in other message sends.\n\nObject subclass: ClassMethodInlineResult\n\n  class helper: x :: Integer -> Integer => x + 1\n\n  class format: x :: Integer -> String => x printString\n\n  class defaultFor: flag :: Boolean -> String =>\n    flag ifTrue: [\"\"] ifFalse: [\"default\"]\n\n  // Class method result as receiver of another message send\n  class helperAsString: x :: Integer -> String => (self helper: x) printString\n\n  // Chained: class method result as argument to another self class method\n  class doubleFormat: x :: Integer -> String => self format: (self helper: x)\n\n  // Empty string in ifTrue:ifFalse: inside class method\n  class emptyOrValue: flag :: Boolean -> String =>\n    flag ifTrue: [\"\"] ifFalse: [\"hello\"]\n\n  // Combined: class method result inside conditional block\n  class conditionalHelper: x flag: flag :: Boolean -> String =>\n    flag ifTrue: [(self helper: x) printString] ifFalse: [\"none\"]\n\n  // Edge case: sub-expression self-send followed by another self-send\n  class multiSend: x :: Integer -> String =>\n    val1 := (self helper: x) printString\n    val2 := self helper: 0\n    val1 ++ (val2 printString)",
       "explanation": "BT-1935: Test fixture for class method call results used as inline arguments or receivers in other message sends."
     },
     {

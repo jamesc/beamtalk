@@ -349,8 +349,10 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             // BT-1935: Close any open-scope let-chains from class method self-sends.
+            let saved_cv = self.class_var_version();
             let (doc, open_scope) = self.expression_doc_with_open_scope(elem)?;
             if let Some(result_var) = open_scope {
+                self.set_class_var_version(saved_cv);
                 parts.push(docvec![doc, Document::String(result_var)]);
             } else {
                 parts.push(doc);

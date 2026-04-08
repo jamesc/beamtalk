@@ -26,3 +26,9 @@ Object subclass: ClassMethodInlineResult
   // Combined: class method result inside conditional block
   class conditionalHelper: x flag: flag :: Boolean -> String =>
     flag ifTrue: [(self helper: x) printString] ifFalse: ["none"]
+
+  // Edge case: sub-expression self-send followed by another self-send
+  class multiSend: x :: Integer -> String =>
+    val1 := (self helper: x) printString
+    val2 := self helper: 0
+    val1 ++ (val2 printString)

@@ -58,10 +58,15 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
+            let saved_cv = self.class_var_version();
             let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
             if let Some(result_var) = open_scope {
                 // Close the open scope inline: the let-chain + result_var forms
                 // a valid closed expression (e.g., `let X = ... in X`).
+                // Roll back class var version since the ClassVarsN binding is
+                // scoped inside the closed expression and not visible to
+                // subsequent code.
+                self.set_class_var_version(saved_cv);
                 parts.push(docvec![doc, Document::String(result_var)]);
             } else {
                 parts.push(doc);
@@ -285,12 +290,21 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
-        let receiver_doc = self.expression_doc(receiver)?;
+        // BT-1935: Close open-scope let-chains from class method self-sends.
+        let saved_cv = self.class_var_version();
+        let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        let actual_receiver = if let Some(result_var) = receiver_open_scope {
+            self.set_class_var_version(saved_cv);
+            docvec![receiver_doc, Document::String(result_var)]
+        } else {
+            receiver_doc
+        };
 
         let doc = docvec![
             "call 'beamtalk_message_dispatch':'cast'(",
-            receiver_doc,
+            actual_receiver,
             ", '",
             Document::String(selector_atom),
             "', [",
@@ -336,12 +350,14 @@ impl CoreErlangGenerator {
 
         // BT-1935: Use expression_doc_with_open_scope to detect open let-chains
         // from class method self-sends used as the receiver expression.
+        let saved_cv = self.class_var_version();
         let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let actual_receiver = if let Some(result_var) = receiver_open_scope {
             // Close the open scope: append the result variable to form a valid
-            // closed expression in receiver position.
+            // closed expression in receiver position. Roll back class var version.
+            self.set_class_var_version(saved_cv);
             docvec![receiver_doc, Document::String(result_var)]
         } else {
             receiver_doc
@@ -1581,13 +1597,30 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        let receiver_doc = self.expression_doc(receiver)?;
-        let arg_doc = self.expression_doc(&arguments[0])?;
+        // BT-1935: Close open-scope let-chains from class method self-sends.
+        let saved_cv = self.class_var_version();
+        let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        let actual_receiver = if let Some(result_var) = receiver_open_scope {
+            self.set_class_var_version(saved_cv);
+            docvec![receiver_doc, Document::String(result_var)]
+        } else {
+            receiver_doc
+        };
+
+        let saved_cv2 = self.class_var_version();
+        let (arg_doc, arg_open_scope) = self.expression_doc_with_open_scope(&arguments[0])?;
+        let actual_arg = if let Some(result_var) = arg_open_scope {
+            self.set_class_var_version(saved_cv2);
+            docvec![arg_doc, Document::String(result_var)]
+        } else {
+            arg_doc
+        };
+
         let doc = docvec![
             "call 'beamtalk_method_resolver':'resolve'(",
-            receiver_doc,
+            actual_receiver,
             ", ",
-            arg_doc,
+            actual_arg,
             ")"
         ];
         Ok(doc)
