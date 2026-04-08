@@ -38,9 +38,7 @@ Extracted from beamtalk_repl_server (BT-705).
 -ifdef(TEST).
 -export([
     get_session_bindings/1,
-    validate_selector_if_present/5,
-    dedupe_keyword_aliases/1,
-    format_beamtalk_signature/3
+    validate_selector_if_present/5
 ]).
 -endif.
 
@@ -90,6 +88,64 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
                 get_context_completions(Code, Bindings);
             false ->
                 get_completions(Code)
+        end,
+    case beamtalk_repl_protocol:is_legacy(Msg) of
+        true ->
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"completions">>,
+                    <<"completions">> => Completions
+                })
+            );
+        false ->
+            Base = base_protocol_response(Msg),
+            iolist_to_binary(
+                json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
+            )
+    end;
+handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
+    %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
+    Prefix = maps:get(<<"prefix">>, Params, <<>>),
+    ModuleBin = nonempty_or_undefined(maps:get(<<"module">>, Params, undefined)),
+    Completions =
+        case ModuleBin of
+            undefined ->
+                %% Complete module names
+                All = beamtalk_erlang_help:available_modules(),
+                [M || M <- All, binary:match(M, Prefix) =:= {0, byte_size(Prefix)}];
+            _ ->
+                %% Complete function names within a module.
+                %% Use beamtalk_erlang_help to avoid triggering module autoload during completion.
+                try binary_to_existing_atom(ModuleBin, utf8) of
+                    Module ->
+                        %% get_object_code avoids autoload and on_load side effects.
+                        case code:get_object_code(Module) of
+                            {Module, _Binary, _Filename} ->
+                                %% Module is already loaded; safe to get exports.
+                                try Module:module_info(exports) of
+                                    Exports ->
+                                        Filtered = [
+                                            atom_to_binary(F, utf8)
+                                         || {F, _A} <- Exports,
+                                            F =/= module_info
+                                        ],
+                                        Unique = lists:usort(Filtered),
+                                        [
+                                            F
+                                         || F <- Unique,
+                                            binary:match(F, Prefix) =:= {0, byte_size(Prefix)}
+                                        ]
+                                catch
+                                    _:_ -> []
+                                end;
+                            error ->
+                                %% Module not loaded; fall back to empty completions
+                                %% to avoid triggering autoload during a read-only operation.
+                                []
+                        end
+                catch
+                    error:badarg -> []
+                end
         end,
     case beamtalk_repl_protocol:is_legacy(Msg) of
         true ->
@@ -177,9 +233,9 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
     end;
 handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
     %% BT-1852: `:help Erlang <module>` and `:help Erlang <module> <function>`
-    %% Combines type specs (from abstract_code) with EEP-48 docs.
+    %% Delegates to beamtalk_erlang_help for formatting.
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
-    FunctionBin = maps:get(<<"function">>, Params, undefined),
+    FunctionBin = nonempty_or_undefined(maps:get(<<"function">>, Params, undefined)),
     case ModuleBin of
         <<>> ->
             Err = beamtalk_error:new(invalid_argument, 'REPL'),
@@ -193,21 +249,40 @@ handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
             %% from repeated queries with typos (atoms are never GC'd).
             try binary_to_existing_atom(ModuleBin, utf8) of
                 Module ->
-                    case FunctionBin of
-                        undefined ->
-                            format_erlang_module_help(Module, Msg);
-                        _ ->
-                            try binary_to_existing_atom(FunctionBin, utf8) of
-                                Function ->
-                                    format_erlang_function_help(Module, Function, Msg)
-                            catch
-                                error:badarg ->
-                                    %% Atom doesn't exist — can't be an exported function,
-                                    %% but might be a type name. Try type lookup by binary.
-                                    format_erlang_type_by_name_or_not_found(
-                                        Module, FunctionBin, Msg
-                                    )
-                            end
+                    Result =
+                        case FunctionBin of
+                            undefined ->
+                                beamtalk_erlang_help:format_module_help(Module);
+                            _ ->
+                                beamtalk_erlang_help:format_function_help(Module, FunctionBin)
+                        end,
+                    case Result of
+                        {ok, Text} ->
+                            beamtalk_repl_protocol:encode_docs(Text, Msg);
+                        {error, not_found} ->
+                            What =
+                                case FunctionBin of
+                                    undefined ->
+                                        iolist_to_binary([
+                                            <<"Erlang module '">>, ModuleBin, <<"'">>
+                                        ]);
+                                    _ ->
+                                        iolist_to_binary([
+                                            ModuleBin, <<":">>, FunctionBin
+                                        ])
+                                end,
+                            Hint =
+                                case FunctionBin of
+                                    undefined ->
+                                        <<"Check the module name and ensure it is available on the code path.">>;
+                                    _ ->
+                                        iolist_to_binary([
+                                            <<"Use :help Erlang ">>,
+                                            ModuleBin,
+                                            <<" to see available functions and types.">>
+                                        ])
+                                end,
+                            format_erlang_not_found_error(What, Hint, Msg)
                     end
             catch
                 error:badarg ->
@@ -546,9 +621,9 @@ compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
     %% Prefer the live in-memory source over the on-disk file; the metadata is
     %% updated by handle_load and method-patching so it reflects the current state.
     CompilePath =
-        case SourcePath of
-            "unknown" -> undefined;
-            _ -> SourcePath
+        if
+            SourcePath =:= "unknown" -> undefined;
+            true -> SourcePath
         end,
     SourceResult =
         case beamtalk_workspace_meta:get_class_source(ClassBin) of
@@ -1788,6 +1863,14 @@ base_ops() ->
             <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]
         },
         <<"describe">> => #{<<"params">> => []},
+        <<"erlang-help">> => #{
+            <<"params">> => [<<"module">>],
+            <<"optional">> => [<<"function">>]
+        },
+        <<"erlang-complete">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"prefix">>, <<"module">>]
+        },
         <<"shutdown">> => #{<<"params">> => [<<"cookie">>]}
     }.
 
@@ -1987,558 +2070,3 @@ format_erlang_not_found_error(What, Hint, Msg) ->
     beamtalk_repl_protocol:encode_error(
         Err2, Msg, fun beamtalk_repl_json:format_error_message/1
     ).
-
--doc """
-Format help for an entire Erlang module.
-
-Shows type signatures from `-spec` attributes when available, plus
-module-level EEP-48 documentation if present.
-""".
--spec format_erlang_module_help(module(), beamtalk_repl_protocol:protocol_msg()) -> binary().
-format_erlang_module_help(Module, Msg) ->
-    case code:which(Module) of
-        non_existing ->
-            format_erlang_not_found_error(
-                iolist_to_binary([
-                    <<"Erlang module '">>,
-                    atom_to_binary(Module, utf8),
-                    <<"'">>
-                ]),
-                <<"Check the module name and ensure it is available on the code path.">>,
-                Msg
-            );
-        preloaded ->
-            %% Preloaded modules have no .beam file; show exports only.
-            format_erlang_module_exports(Module, Msg);
-        cover_compiled ->
-            format_erlang_module_exports(Module, Msg);
-        BeamPath when is_list(BeamPath) ->
-            format_erlang_module_with_specs(Module, BeamPath, Msg)
-    end.
-
--doc "Format module help when we have a .beam path (specs + docs).".
--spec format_erlang_module_with_specs(
-    module(), file:filename(), beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-format_erlang_module_with_specs(Module, BeamPath, Msg) ->
-    ModName = atom_to_binary(Module, utf8),
-    %% Read type specs from abstract code
-    Specs =
-        case beamtalk_spec_reader:read_specs(BeamPath) of
-            {ok, SpecList} -> SpecList;
-            {error, _} -> []
-        end,
-    %% Read module-level doc
-    ModDoc =
-        case beamtalk_native_docs:module_doc(Module) of
-            #{doc := ModDocText} -> ModDocText;
-            {error, _} -> <<>>
-        end,
-    %% Build output
-    Header = iolist_to_binary([<<"Erlang module: ">>, ModName, <<"\n">>]),
-    DocSection =
-        case ModDoc of
-            <<>> -> <<>>;
-            _ -> iolist_to_binary([<<"\n">>, ModDoc, <<"\n">>])
-        end,
-    FnSection =
-        case Specs of
-            [] ->
-                %% No specs — try EEP-48 signatures, then fall back to exports list
-                format_eep48_signatures_or_exports(Module);
-            _ ->
-                format_specs_list(Module, Specs)
-        end,
-    FullText = iolist_to_binary([Header, DocSection, <<"\n">>, FnSection]),
-    beamtalk_repl_protocol:encode_docs(FullText, Msg).
-
--doc "Format module help when we only have exports (preloaded/cover_compiled).".
--spec format_erlang_module_exports(module(), beamtalk_repl_protocol:protocol_msg()) -> binary().
-format_erlang_module_exports(Module, Msg) ->
-    ModName = atom_to_binary(Module, utf8),
-    Header = iolist_to_binary([<<"Erlang module: ">>, ModName, <<"\n">>]),
-    FnSection = format_exports_list(Module),
-    DocText = iolist_to_binary([Header, <<"\n">>, FnSection]),
-    beamtalk_repl_protocol:encode_docs(DocText, Msg).
-
--doc "Format a bare exports list for modules without specs.".
--spec format_exports_list(module()) -> binary().
-format_exports_list(Module) ->
-    try Module:module_info(exports) of
-        Exports ->
-            %% Filter out module_info/0,1
-            Filtered = [
-                {F, A}
-             || {F, A} <- Exports,
-                F =/= module_info
-            ],
-            Sorted = lists:sort(Filtered),
-            Lines = [
-                iolist_to_binary([
-                    <<"  ">>,
-                    atom_to_binary(F, utf8),
-                    <<"/">>,
-                    integer_to_binary(A)
-                ])
-             || {F, A} <- Sorted
-            ],
-            iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>])
-    catch
-        _:_ -> <<"(no export information available)\n">>
-    end.
-
--doc """
-Try to show EEP-48 signatures for exported functions; fall back to
-bare exports list when no EEP-48 docs are available.
-""".
--spec format_eep48_signatures_or_exports(module()) -> binary().
-format_eep48_signatures_or_exports(Module) ->
-    try Module:module_info(exports) of
-        Exports ->
-            Filtered = [{F, A} || {F, A} <- Exports, F =/= module_info],
-            %% Single lookup per function: filter hidden and get signature in one pass
-            Lookups = [
-                {{F, A}, beamtalk_native_docs:lookup(Module, F, A)}
-             || {F, A} <- Filtered
-            ],
-            Visible = [
-                {{F, A}, Doc}
-             || {{F, A}, Doc} <- Lookups,
-                Doc =/= {error, hidden}
-            ],
-            Sorted = lists:sort(Visible),
-            Lines = [
-                case Doc of
-                    #{sig := Sig} when Sig =/= <<>> ->
-                        iolist_to_binary([<<"  ">>, Sig]);
-                    _ ->
-                        iolist_to_binary([
-                            <<"  ">>,
-                            atom_to_binary(F, utf8),
-                            <<"/">>,
-                            integer_to_binary(A)
-                        ])
-                end
-             || {{F, A}, Doc} <- Sorted
-            ],
-            iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>])
-    catch
-        _:_ -> <<"(no export information available)\n">>
-    end.
-
--doc """
-Format specs into a readable list with Beamtalk-style signatures.
-Filters out functions marked as hidden (@private) in EEP-48 docs.
-""".
--spec format_specs_list(module(), [map()]) -> binary().
-format_specs_list(Module, Specs) ->
-    %% Deduplicate: when both foo/N and 'foo:'/N exist, keep only 'foo:'/N
-    %% (the colon-suffixed variant is the keyword message; the plain one is
-    %% just a dispatch alias generated by the compiler).
-    Deduped = dedupe_keyword_aliases(Specs),
-    %% Filter out hidden (@private) functions
-    Visible = lists:filter(
-        fun(Spec) ->
-            Name = maps:get(name, Spec),
-            Arity = maps:get(arity, Spec),
-            FnAtom =
-                if
-                    is_atom(Name) ->
-                        Name;
-                    is_binary(Name) ->
-                        try
-                            binary_to_existing_atom(Name, utf8)
-                        catch
-                            error:badarg -> Name
-                        end;
-                    true ->
-                        Name
-                end,
-            not beamtalk_native_docs:is_hidden(Module, FnAtom, Arity)
-        end,
-        Deduped
-    ),
-    Sorted = lists:sort(
-        fun(A, B) ->
-            {maps:get(name, A), maps:get(arity, A)} =<
-                {maps:get(name, B), maps:get(arity, B)}
-        end,
-        Visible
-    ),
-    Lines = lists:map(
-        fun(Spec) ->
-            Name = maps:get(name, Spec),
-            Params = maps:get(params, Spec, []),
-            RetType = maps:get(return_type, Spec, <<"Dynamic">>),
-            NameBin =
-                if
-                    is_atom(Name) -> atom_to_binary(Name, utf8);
-                    is_binary(Name) -> Name;
-                    true -> iolist_to_binary(io_lib:format("~p", [Name]))
-                end,
-            Sig = format_beamtalk_signature(NameBin, Params, RetType),
-            iolist_to_binary([<<"  ">>, Sig])
-        end,
-        Sorted
-    ),
-    iolist_to_binary([<<"Functions:\n">>, lists:join(<<"\n">>, Lines), <<"\n">>]).
-
--doc """
-Remove dispatch-alias specs that duplicate keyword messages.
-
-When a Beamtalk native module exports both `parse/1` (FFI alias) and
-`'parse:'/1` (keyword message), both appear in specs.  The plain variant
-is just a compiler-generated dispatch alias, so we hide it when the
-colon-suffixed variant exists at the same arity.  This also handles
-multi-keyword selectors: `run/2` is the alias for `'run:timeout:'/2`.
-""".
--spec dedupe_keyword_aliases([map()]) -> [map()].
-dedupe_keyword_aliases(Specs) ->
-    %% Build a set of {BaseName, Arity} for all colon-suffixed names
-    ColonSet = sets:from_list([
-        {base_keyword_name(maps:get(name, S)), maps:get(arity, S)}
-     || S <- Specs,
-        is_keyword_name(maps:get(name, S))
-    ]),
-    %% Keep a spec unless its plain name is shadowed by a colon-suffixed variant
-    [
-        S
-     || S <- Specs,
-        not is_keyword_alias(maps:get(name, S), maps:get(arity, S), ColonSet)
-    ].
-
--doc """
-True when the spec name does NOT end in ':' but a colon-suffixed
-variant at the same arity exists in the set.
-""".
--spec is_keyword_alias(binary(), non_neg_integer(), sets:set()) -> boolean().
-is_keyword_alias(Name, Arity, ColonSet) ->
-    case is_keyword_name(Name) of
-        %% This IS the keyword variant — keep it
-        true -> false;
-        false -> sets:is_element({Name, Arity}, ColonSet)
-    end.
-
--doc "True when a binary name ends with ':'.".
--spec is_keyword_name(binary()) -> boolean().
-is_keyword_name(<<>>) -> false;
-is_keyword_name(Name) -> binary:last(Name) =:= $:.
-
--doc """
-Extract the base name from a keyword selector — the segment before
-the first colon.  Works for both single-keyword (`parse:` → `parse`) and
-multi-keyword selectors (`run:timeout:` → `run`).
-""".
--spec base_keyword_name(binary()) -> binary().
-base_keyword_name(Name) ->
-    case binary:match(Name, <<":">>) of
-        {Pos, _} -> binary:part(Name, 0, Pos);
-        nomatch -> Name
-    end.
-
--doc """
-Format a single function as a Beamtalk-style type signature.
-
-Examples:
-  reverse: list :: List -> List
-  seq: from :: Integer to: to :: Integer -> List
-  node -> Symbol  (nullary)
-""".
--spec format_beamtalk_signature(binary(), [map()], binary()) -> binary().
-format_beamtalk_signature(Name, [], RetType) ->
-    iolist_to_binary([Name, <<" -> ">>, RetType]);
-format_beamtalk_signature(Name, Params, RetType) ->
-    ParamParts = format_params(Name, Params, 0),
-    iolist_to_binary([lists:join(<<" ">>, ParamParts), <<" -> ">>, RetType]).
-
--doc "Format parameter list with keywords.".
--spec format_params(binary(), [map()], non_neg_integer()) -> [iodata()].
-format_params(_Name, [], _Idx) ->
-    [];
-format_params(Name, [Param | Rest], 0) ->
-    ParamName = maps:get(name, Param, <<"arg">>),
-    ParamType = maps:get(type, Param, <<"Dynamic">>),
-    %% Keyword message names already end in ':' — don't double it
-    Keyword =
-        case binary:last(Name) of
-            $: -> Name;
-            _ -> iolist_to_binary([Name, <<":">>])
-        end,
-    Part = iolist_to_binary([Keyword, <<" ">>, format_param_name(ParamName), <<" :: ">>, ParamType]),
-    [Part | format_params(Name, Rest, 1)];
-format_params(Name, [Param | Rest], Idx) ->
-    ParamName = maps:get(name, Param, <<"arg">>),
-    ParamType = maps:get(type, Param, <<"Dynamic">>),
-    Keyword = iolist_to_binary([format_param_name(ParamName), <<":">>]),
-    Part = iolist_to_binary([Keyword, <<" ">>, format_param_name(ParamName), <<" :: ">>, ParamType]),
-    [Part | format_params(Name, Rest, Idx + 1)].
-
--doc "Format a parameter name, using a fallback for empty/missing names.".
--spec format_param_name(binary()) -> binary().
-format_param_name(<<>>) -> <<"arg">>;
-format_param_name(Name) -> Name.
-
--doc """
-Format help for a specific Erlang function in a module.
-
-Shows the type signature plus EEP-48 doc with examples when available.
-""".
--spec format_erlang_function_help(
-    module(), atom(), beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-format_erlang_function_help(Module, Function, Msg) ->
-    case code:which(Module) of
-        non_existing ->
-            format_erlang_not_found_error(
-                iolist_to_binary([
-                    <<"Erlang module '">>,
-                    atom_to_binary(Module, utf8),
-                    <<"'">>
-                ]),
-                <<"Check the module name and ensure it is available on the code path.">>,
-                Msg
-            );
-        BeamLoc ->
-            BeamPath =
-                case BeamLoc of
-                    preloaded -> preloaded;
-                    cover_compiled -> cover_compiled;
-                    P when is_list(P) -> P
-                end,
-            format_erlang_function_with_docs(Module, Function, BeamPath, Msg)
-    end.
-
--doc "Format help for a specific function, combining specs and docs.".
--spec format_erlang_function_with_docs(
-    module(),
-    atom(),
-    file:filename() | preloaded | cover_compiled,
-    beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-format_erlang_function_with_docs(Module, Function, BeamPath, Msg) ->
-    FnName = atom_to_binary(Function, utf8),
-    ModName = atom_to_binary(Module, utf8),
-    %% Find all arities for this function
-    Arities = find_function_arities(Module, Function),
-    %% Single lookup per arity: filter hidden and collect docs in one pass
-    ArityDocs = [
-        {A, beamtalk_native_docs:lookup(Module, Function, A)}
-     || A <- Arities
-    ],
-    VisibleArities = [A || {A, Doc} <- ArityDocs, Doc =/= {error, hidden}],
-    case VisibleArities of
-        [] ->
-            %% No visible exported function — fall through to type lookup
-            format_erlang_type_or_not_found(Module, Function, BeamPath, Msg);
-        _ ->
-            %% Read specs and raw specs if we have a beam path
-            {Specs, RawSpecs} =
-                case BeamPath of
-                    preloaded ->
-                        {[], []};
-                    cover_compiled ->
-                        {[], []};
-                    Path ->
-                        MappedSpecs =
-                            case beamtalk_spec_reader:read_specs(Path) of
-                                {ok, AllSpecs} ->
-                                    [
-                                        S
-                                     || S <- AllSpecs,
-                                        maps:get(name, S) =:= Function orelse
-                                            maps:get(name, S) =:= FnName
-                                    ];
-                                {error, _} ->
-                                    []
-                            end,
-                        OrigSpecs =
-                            case beamtalk_spec_reader:read_raw_specs(Path) of
-                                {ok, AllRaw} ->
-                                    [
-                                        {N, A, Form}
-                                     || {N, A, Form} <- AllRaw,
-                                        N =:= Function
-                                    ];
-                                {error, _} ->
-                                    []
-                            end,
-                        {MappedSpecs, OrigSpecs}
-                end,
-            %% Build Erlang spec section (original -spec lines)
-            ErlSpecSection =
-                case RawSpecs of
-                    [] ->
-                        <<>>;
-                    _ ->
-                        ErlLines = [
-                            iolist_to_binary([
-                                <<"  Erlang: ">>,
-                                beamtalk_spec_reader:format_erlang_spec(Form)
-                            ])
-                         || {_N, _A, Form} <- RawSpecs
-                        ],
-                        iolist_to_binary(lists:join(<<"\n">>, ErlLines))
-                end,
-            %% Build Beamtalk signature section
-            BtSigSection =
-                case Specs of
-                    [] ->
-                        %% No specs — show arity info
-                        ArityLines = [
-                            iolist_to_binary([
-                                <<"  ">>, FnName, <<"/">>, integer_to_binary(A)
-                            ])
-                         || A <- VisibleArities
-                        ],
-                        iolist_to_binary(lists:join(<<"\n">>, ArityLines));
-                    _ ->
-                        SigLines = lists:map(
-                            fun(Spec) ->
-                                Params = maps:get(params, Spec, []),
-                                RetType = maps:get(return_type, Spec, <<"Dynamic">>),
-                                iolist_to_binary([
-                                    <<"  ">>,
-                                    format_beamtalk_signature(FnName, Params, RetType)
-                                ])
-                            end,
-                            Specs
-                        ),
-                        iolist_to_binary(lists:join(<<"\n">>, SigLines))
-                end,
-            %% Combine Erlang spec + Beamtalk signature
-            SigSection =
-                case ErlSpecSection of
-                    <<>> -> BtSigSection;
-                    _ -> iolist_to_binary([ErlSpecSection, <<"\n">>, BtSigSection])
-                end,
-            %% Extract docs from pre-fetched lookups (no second disk read)
-            DocSections = lists:filtermap(
-                fun({_Arity, Doc}) ->
-                    case Doc of
-                        #{doc := DocText, examples := Examples} ->
-                            DocPart =
-                                case DocText of
-                                    <<>> -> [];
-                                    _ -> [DocText]
-                                end,
-                            ExPart =
-                                case Examples of
-                                    <<>> -> [];
-                                    _ -> [<<"\n">>, Examples]
-                                end,
-                            case DocPart ++ ExPart of
-                                [] -> false;
-                                Combined -> {true, iolist_to_binary(Combined)}
-                            end;
-                        {error, _} ->
-                            false
-                    end
-                end,
-                [{A, D} || {A, D} <- ArityDocs, D =/= {error, hidden}]
-            ),
-            FnDocText =
-                case DocSections of
-                    [] -> <<>>;
-                    _ -> iolist_to_binary([<<"\n">>, lists:join(<<"\n\n">>, DocSections)])
-                end,
-            FnHeader = iolist_to_binary([ModName, <<":">>, FnName, <<"\n">>]),
-            FullText = iolist_to_binary([FnHeader, SigSection, FnDocText, <<"\n">>]),
-            beamtalk_repl_protocol:encode_docs(FullText, Msg)
-    end.
-
--doc """
-Fall through to type definition lookup when no exported function matches.
-
-Searches the module's abstract_code for a `-type` definition matching the
-given name (as atom). If found, pretty-prints it. Otherwise shows not-found.
-""".
--spec format_erlang_type_or_not_found(
-    module(),
-    atom(),
-    file:filename() | preloaded | cover_compiled,
-    beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-format_erlang_type_or_not_found(Module, Name, BeamPath, Msg) ->
-    NameBin = atom_to_binary(Name, utf8),
-    TypeResult = find_types_in_beam(BeamPath, fun(N) -> N =:= Name end),
-    render_type_result_or_not_found(Module, NameBin, TypeResult, Msg).
-
--doc """
-Type lookup by binary name — used when the atom doesn't exist yet.
-
-Searches abstract_code for type definitions matching the binary name,
-comparing via atom_to_binary. This avoids creating atoms for user typos.
-""".
--spec format_erlang_type_by_name_or_not_found(
-    module(), binary(), beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-format_erlang_type_by_name_or_not_found(Module, NameBin, Msg) ->
-    BeamPath = code:which(Module),
-    TypeResult = find_types_in_beam(BeamPath, fun(N) -> atom_to_binary(N, utf8) =:= NameBin end),
-    render_type_result_or_not_found(Module, NameBin, TypeResult, Msg).
-
--doc "Search for type definitions in a beam file matching a predicate.".
--spec find_types_in_beam(
-    file:filename() | preloaded | cover_compiled | non_existing,
-    fun((atom()) -> boolean())
-) -> {ok, [{atom(), non_neg_integer(), tuple()}]} | {error, term()}.
-find_types_in_beam(preloaded, _Pred) ->
-    {error, no_debug_info};
-find_types_in_beam(cover_compiled, _Pred) ->
-    {error, no_debug_info};
-find_types_in_beam(non_existing, _Pred) ->
-    {error, not_found};
-find_types_in_beam(Path, Pred) ->
-    case beamtalk_spec_reader:read_types(Path) of
-        {ok, AllTypes} ->
-            Matching = [{N, A, Form} || {N, A, Form} <- AllTypes, Pred(N)],
-            case Matching of
-                [] -> {error, not_found};
-                _ -> {ok, Matching}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
--doc "Render matched type definitions, or show a not-found error.".
--spec render_type_result_or_not_found(
-    module(),
-    binary(),
-    {ok, [{atom(), non_neg_integer(), tuple()}]} | {error, term()},
-    beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-render_type_result_or_not_found(Module, NameBin, {ok, Types}, Msg) ->
-    ModName = atom_to_binary(Module, utf8),
-    TypeLines = [
-        iolist_to_binary([
-            <<"  ">>,
-            beamtalk_spec_reader:format_erlang_type(Form)
-        ])
-     || {_N, _A, Form} <- Types
-    ],
-    Header = iolist_to_binary([ModName, <<":">>, NameBin, <<"\n">>]),
-    Body = iolist_to_binary(lists:join(<<"\n">>, TypeLines)),
-    FullText = iolist_to_binary([Header, Body, <<"\n">>]),
-    beamtalk_repl_protocol:encode_docs(FullText, Msg);
-render_type_result_or_not_found(Module, NameBin, {error, _}, Msg) ->
-    ModName = atom_to_binary(Module, utf8),
-    format_erlang_not_found_error(
-        iolist_to_binary([ModName, <<":">>, NameBin]),
-        iolist_to_binary([
-            <<"Use :help Erlang ">>,
-            ModName,
-            <<" to see available functions and types.">>
-        ]),
-        Msg
-    ).
-
--doc "Find all arities for a function exported by a module.".
--spec find_function_arities(module(), atom()) -> [non_neg_integer()].
-find_function_arities(Module, Function) ->
-    try Module:module_info(exports) of
-        Exports ->
-            Arities = [A || {F, A} <- Exports, F =:= Function],
-            lists:sort(Arities)
-    catch
-        _:_ -> []
-    end.

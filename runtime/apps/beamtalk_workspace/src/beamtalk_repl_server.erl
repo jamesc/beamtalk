@@ -447,7 +447,8 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"show-codegen">>;
     Op =:= <<"test">>;
     Op =:= <<"test-all">>;
-    Op =:= <<"erlang-help">>
+    Op =:= <<"erlang-help">>;
+    Op =:= <<"erlang-complete">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"docs">>, Params, Msg, SessionPid) ->

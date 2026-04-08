@@ -69,6 +69,26 @@ sealed typed Object subclass: BeamtalkInterface
   sealed help: aClass :: Class selector: aSelector :: Symbol -> String =>
     (Erlang beamtalk_interface) help: aClass selector: aSelector
 
+  /// Show documentation for an Erlang module: type signatures and EEP-48 docs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk erlangHelp: "lists"
+  /// Beamtalk erlangHelp: "maps"
+  /// ```
+  sealed erlangHelp: moduleName :: String -> String =>
+    (Erlang beamtalk_interface) erlangHelp: moduleName
+
+  /// Show documentation for a specific function in an Erlang module.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk erlangHelp: "lists" selector: #reverse
+  /// Beamtalk erlangHelp: "maps" selector: #get
+  /// ```
+  sealed erlangHelp: moduleName :: String selector: functionName :: Symbol -> String =>
+    (Erlang beamtalk_interface) erlangHelp: moduleName selector: functionName
+
   /// Return the Beamtalk version string.
   ///
   /// ## Examples
