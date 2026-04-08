@@ -143,6 +143,7 @@ impl ClassHierarchy {
     /// to avoid interfering with `ProtocolRegistry::register_module`'s
     /// namespace collision checks.
     pub fn register_protocol_classes(&mut self, module: &Module) {
+        let mut inserted = false;
         for protocol_def in &module.protocols {
             let name = &protocol_def.name.name;
 
@@ -205,9 +206,10 @@ impl ClassHierarchy {
                     superclass_type_args: vec![],
                 },
             );
+            inserted = true;
         }
 
-        if !module.protocols.is_empty() {
+        if inserted {
             self.rebuild_all_indexes();
         }
     }
