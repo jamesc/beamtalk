@@ -64,7 +64,7 @@ pub use value_objects::{
 mod property_tests;
 
 use crate::ast::{
-    Expression, Identifier, MessageSelector, MethodDefinition, Module, TypeAnnotation,
+    Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern, TypeAnnotation,
 };
 use crate::semantic_analysis::type_checker::NativeTypeRegistry;
 use crate::source_analysis::Span;
@@ -697,8 +697,21 @@ impl SimpleLanguageService {
             }),
             Expression::Match { value, arms, .. } => Self::find_identifier_in_expr(value, offset)
                 .or_else(|| {
-                    arms.iter()
-                        .find_map(|arm| Self::find_identifier_in_expr(&arm.body, offset))
+                    arms.iter().find_map(|arm| {
+                        // BT-1940: walk pattern, guard, and body so that
+                        // goto-definition on a class name inside a constructor
+                        // pattern (`Result ok: v`) or inside a `when:` guard
+                        // navigates to the class declaration. Keeps parity with
+                        // `references_provider::collect_class_refs` which
+                        // already walks all three.
+                        Self::find_identifier_in_pattern(&arm.pattern, offset_val)
+                            .or_else(|| {
+                                arm.guard
+                                    .as_ref()
+                                    .and_then(|g| Self::find_identifier_in_expr(g, offset))
+                            })
+                            .or_else(|| Self::find_identifier_in_expr(&arm.body, offset))
+                    })
                 }),
             Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
                 if let crate::ast::StringSegment::Interpolation(expr) = seg {
@@ -708,6 +721,60 @@ impl SimpleLanguageService {
                 }
             }),
             _ => None,
+        }
+    }
+
+    /// Recursively searches for a class name identifier inside a destructuring
+    /// pattern. (BT-1940)
+    ///
+    /// Only `Pattern::Constructor` carries a class identifier (`Result` in
+    /// `Result ok: v`). All other variants just host nested patterns, which we
+    /// walk so a cursor on a constructor name nested inside a tuple, list, map,
+    /// or rest pattern still finds the class. Wildcards, literals, and plain
+    /// variable bindings have no class identifier to navigate to.
+    fn find_identifier_in_pattern(
+        pattern: &Pattern,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        let span = pattern.span();
+        if offset_val < span.start() || offset_val >= span.end() {
+            return None;
+        }
+        match pattern {
+            Pattern::Constructor {
+                class, keywords, ..
+            } => {
+                if offset_val >= class.span.start() && offset_val < class.span.end() {
+                    return Some((class.clone(), class.span));
+                }
+                keywords
+                    .iter()
+                    .find_map(|(_, p)| Self::find_identifier_in_pattern(p, offset_val))
+            }
+            Pattern::Tuple { elements, .. } => elements
+                .iter()
+                .find_map(|p| Self::find_identifier_in_pattern(p, offset_val)),
+            Pattern::Array { elements, rest, .. } => elements
+                .iter()
+                .find_map(|p| Self::find_identifier_in_pattern(p, offset_val))
+                .or_else(|| {
+                    rest.as_deref()
+                        .and_then(|r| Self::find_identifier_in_pattern(r, offset_val))
+                }),
+            Pattern::List { elements, tail, .. } => elements
+                .iter()
+                .find_map(|p| Self::find_identifier_in_pattern(p, offset_val))
+                .or_else(|| {
+                    tail.as_deref()
+                        .and_then(|t| Self::find_identifier_in_pattern(t, offset_val))
+                }),
+            Pattern::Map { pairs, .. } => pairs
+                .iter()
+                .find_map(|pair| Self::find_identifier_in_pattern(&pair.value, offset_val)),
+            Pattern::Binary { segments, .. } => segments
+                .iter()
+                .find_map(|seg| Self::find_identifier_in_pattern(&seg.value, offset_val)),
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) => None,
         }
     }
 
@@ -1562,6 +1629,83 @@ mod tests {
         assert!(def.is_some());
         let loc = def.unwrap();
         assert_eq!(loc.file, integer_file);
+    }
+
+    // BT-1940: goto-definition on the class name inside a constructor
+    // pattern (e.g. `Result` in `Result ok: v`) must navigate to the class
+    // declaration. Prior to the pattern walker the cursor returned None.
+    #[test]
+    fn goto_definition_constructor_pattern_class_name() {
+        let mut service = SimpleLanguageService::new();
+        let result_file = Utf8PathBuf::from("Result.bt");
+        let classify_file = Utf8PathBuf::from("classify.bt");
+
+        service.update_file(
+            result_file.clone(),
+            "Value subclass: Result\n  ok: v\n  error: e".to_string(),
+        );
+        // The match arm `Result ok: v -> v` starts on line 2, col 4.
+        // `Result` occupies columns 4..10, so column 5 lands on the 'e' of
+        // "Result" — inside the class identifier.
+        service.update_file(
+            classify_file.clone(),
+            "Object subclass: Classifier\n  \
+             classify: r =>\n    \
+             r match: [\n      \
+             Result ok: v -> v;\n      \
+             Result error: _ -> 0\n    ]"
+                .to_string(),
+        );
+
+        // Line 3 (0-indexed) is `      Result ok: v -> v;`; column 8
+        // lands inside "Result".
+        let def = service.goto_definition(&classify_file, Position::new(3, 8));
+        assert!(
+            def.is_some(),
+            "goto-definition on constructor pattern class name returned None"
+        );
+        let loc = def.unwrap();
+        assert_eq!(loc.file, result_file);
+    }
+
+    // BT-1940: goto-definition must also reach identifiers inside a `when:`
+    // guard, not just the pattern and the arm body. `references_provider`
+    // already walks guards; this test pins the parity in `find_identifier_in_expr`.
+    #[test]
+    fn goto_definition_inside_match_arm_guard() {
+        let mut service = SimpleLanguageService::new();
+        let threshold_file = Utf8PathBuf::from("Threshold.bt");
+        let guarded_file = Utf8PathBuf::from("guarded.bt");
+
+        service.update_file(
+            threshold_file.clone(),
+            "Object subclass: Threshold\n  limit -> Integer => 10".to_string(),
+        );
+        // Match arm with a guard referencing `Threshold` from the class body:
+        //   r match: [
+        //     v when: v > Threshold limit -> v;
+        //     _ -> 0
+        //   ]
+        service.update_file(
+            guarded_file.clone(),
+            "Object subclass: Guarded\n  \
+             check: r =>\n    \
+             r match: [\n      \
+             v when: v > Threshold limit -> v;\n      \
+             _ -> 0\n    ]"
+                .to_string(),
+        );
+
+        // Line 3 (0-indexed) is `      v when: v > Threshold limit -> v;`.
+        // `Threshold` starts at column 17 ("      v when: v > " = 18 chars, so
+        // column 18 lands on 'T').
+        let def = service.goto_definition(&guarded_file, Position::new(3, 20));
+        assert!(
+            def.is_some(),
+            "goto-definition on identifier inside match arm guard returned None"
+        );
+        let loc = def.unwrap();
+        assert_eq!(loc.file, threshold_file);
     }
 
     #[test]
