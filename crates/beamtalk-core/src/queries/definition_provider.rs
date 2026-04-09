@@ -224,8 +224,11 @@ pub fn find_overridden_method_definition<'a>(
 ) -> Option<Location> {
     let hierarchy = project_index.hierarchy();
 
-    // MRO walk order: the receiver class itself, then its ancestors.
-    let mut mro: Vec<EcoString> = Vec::with_capacity(1);
+    // MRO walk order: the receiver class itself, then its ancestors. The
+    // initial capacity covers the typical hierarchy depth (receiver → a
+    // handful of user ancestors → Object → ProtoObject) without forcing
+    // an immediate reallocation when `extend` appends the superclass chain.
+    let mut mro: Vec<EcoString> = Vec::with_capacity(8);
     mro.push(receiver_class.class_name.clone());
     mro.extend(hierarchy.superclass_chain(receiver_class.class_name.as_str()));
 
