@@ -220,13 +220,15 @@ impl CoreErlangGenerator {
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
+            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
+            let recv_doc = docs.remove(0);
             let recv_var = self.fresh_temp_var("ValRecv");
-            let recv_code = self.expression_doc(receiver)?;
-            docvec![
+            let call_doc = docvec![
                 "let ",
                 Document::String(recv_var.clone()),
                 " = ",
-                recv_code,
+                recv_doc,
                 " in case call 'erlang':'is_function'(",
                 Document::String(recv_var.clone()),
                 ") of 'true' when 'true' -> apply ",
@@ -234,7 +236,8 @@ impl CoreErlangGenerator {
                 " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
                 Document::String(recv_var),
                 ", 'value', []) end",
-            ]
+            ];
+            self.finalize_dispatch_with_preamble(preamble, call_doc, "ValRes")
         };
         Ok(Some(doc))
     }
@@ -698,17 +701,27 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Document<'static>> {
-        let recv_var = self.fresh_temp_var("ValRecv");
-        let recv_code = self.expression_doc(receiver)?;
-
         let mut arg_vars: Vec<String> = Vec::with_capacity(arguments.len());
-        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() * 2 + 3);
 
+        // BT-1942: Hoist open-scope receiver (e.g. class method self-send) inline so
+        // its ClassVarsN binding remains visible to subsequent arg bindings.
+        // Each sub-expression is bound sequentially, so per-sub-expression inline
+        // hoisting preserves left-to-right evaluation order.
+        let mut any_open_scope = false;
+        let (recv_preamble, mut recv_docs) =
+            self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
+        let recv_doc = recv_docs.remove(0);
+        if !matches!(recv_preamble, Document::Nil) {
+            any_open_scope = true;
+            parts.push(recv_preamble);
+        }
+        let recv_var = self.fresh_temp_var("ValRecv");
         parts.push(docvec![
             "let ",
             Document::String(recv_var.clone()),
             " = ",
-            recv_code,
+            recv_doc,
             " in ",
         ]);
 
@@ -727,7 +740,14 @@ impl CoreErlangGenerator {
                     " in ",
                 ]);
             } else {
-                let arg_code = self.expression_doc(arg)?;
+                // BT-1942: Hoist open-scope arg (e.g. class method self-send).
+                let (arg_preamble, mut arg_docs) =
+                    self.capture_subexpr_sequence(&[arg], "ValArg")?;
+                let arg_code = arg_docs.remove(0);
+                if !matches!(arg_preamble, Document::Nil) {
+                    any_open_scope = true;
+                    parts.push(arg_preamble);
+                }
                 parts.push(docvec![
                     "let ",
                     Document::String(arg_var.clone()),
@@ -747,7 +767,7 @@ impl CoreErlangGenerator {
 
         let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
 
-        parts.push(docvec![
+        let case_doc = docvec![
             "case call 'erlang':'is_function'(",
             Document::String(recv_var.clone()),
             ") of 'true' when 'true' -> apply ",
@@ -761,7 +781,24 @@ impl CoreErlangGenerator {
             "', ",
             send_list,
             ") end",
-        ]);
+        ];
+
+        // BT-1942: If any sub-expression produced an open scope from a class
+        // method self-send, wrap the case result and propagate the open scope
+        // upward so the enclosing context can see the advanced ClassVarsN.
+        if any_open_scope {
+            let result_var = self.fresh_temp_var("ValRes");
+            parts.push(docvec![
+                "let ",
+                Document::String(result_var.clone()),
+                " = ",
+                case_doc,
+                " in ",
+            ]);
+            self.last_open_scope_result = Some(result_var);
+        } else {
+            parts.push(case_doc);
+        }
 
         Ok(Document::Vec(parts))
     }
@@ -992,18 +1029,17 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "class" if arguments.is_empty() => {
                     // BT-412: Return class as first-class object (#beamtalk_object{})
-                    let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.expression_doc(receiver)?;
-                    let doc = docvec![
-                        "let ",
-                        Document::String(recv_var.clone()),
-                        " = ",
-                        recv_code,
-                        " in call 'beamtalk_primitive':'class_of_object'(",
-                        Document::String(recv_var),
+                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+                    let recv_doc = docs.remove(0);
+                    let call_doc = docvec![
+                        "call 'beamtalk_primitive':'class_of_object'(",
+                        recv_doc,
                         ")",
                     ];
-                    Ok(Some(doc))
+                    Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble, call_doc, "ClassRes",
+                    )))
                 }
                 _ => Ok(None),
             },
@@ -1012,94 +1048,69 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "perform:withArguments:" if arguments.len() == 2 => {
-                        let receiver_var = self.fresh_var("Receiver");
-                        let selector_var = self.fresh_var("Selector");
-                        let args_var = self.fresh_var("Args");
-
-                        let recv_code = self.expression_doc(receiver)?;
-                        let sel_code = self.expression_doc(&arguments[0])?;
-                        let args_code = self.expression_doc(&arguments[1])?;
-
-                        let doc = docvec![
-                            "let ",
-                            Document::String(receiver_var.clone()),
-                            " = ",
-                            recv_code,
-                            " in let ",
-                            Document::String(selector_var.clone()),
-                            " = ",
-                            sel_code,
-                            " in let ",
-                            Document::String(args_var.clone()),
-                            " = ",
-                            args_code,
-                            " in call 'beamtalk_message_dispatch':'send'(",
-                            Document::String(receiver_var),
+                        // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
+                        let (preamble, mut docs) = self.capture_subexpr_sequence(
+                            &[receiver, &arguments[0], &arguments[1]],
+                            "Perf",
+                        )?;
+                        let recv_doc = docs.remove(0);
+                        let sel_doc = docs.remove(0);
+                        let args_doc = docs.remove(0);
+                        let call_doc = docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            recv_doc,
                             ", ",
-                            Document::String(selector_var),
+                            sel_doc,
                             ", ",
-                            Document::String(args_var),
+                            args_doc,
                             ")",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble, call_doc, "PerfRes",
+                        )))
                     }
                     // BT-1664: Execute a class method in the caller's process,
                     // bypassing the class object's gen_server.
                     "performLocally:withArguments:" if arguments.len() == 2 => {
-                        let receiver_var = self.fresh_var("Receiver");
-                        let selector_var = self.fresh_var("Selector");
-                        let args_var = self.fresh_var("Args");
-
-                        let recv_code = self.expression_doc(receiver)?;
-                        let sel_code = self.expression_doc(&arguments[0])?;
-                        let args_code = self.expression_doc(&arguments[1])?;
-
-                        let doc = docvec![
-                            "let ",
-                            Document::String(receiver_var.clone()),
-                            " = ",
-                            recv_code,
-                            " in let ",
-                            Document::String(selector_var.clone()),
-                            " = ",
-                            sel_code,
-                            " in let ",
-                            Document::String(args_var.clone()),
-                            " = ",
-                            args_code,
-                            " in call 'beamtalk_object_class':'local_call'(",
-                            Document::String(receiver_var),
+                        // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
+                        let (preamble, mut docs) = self.capture_subexpr_sequence(
+                            &[receiver, &arguments[0], &arguments[1]],
+                            "PerfLoc",
+                        )?;
+                        let recv_doc = docs.remove(0);
+                        let sel_doc = docs.remove(0);
+                        let args_doc = docs.remove(0);
+                        let call_doc = docvec![
+                            "call 'beamtalk_object_class':'local_call'(",
+                            recv_doc,
                             ", ",
-                            Document::String(selector_var),
+                            sel_doc,
                             ", ",
-                            Document::String(args_var),
+                            args_doc,
                             ")",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble,
+                            call_doc,
+                            "PerfLocRes",
+                        )))
                     }
                     "perform:" if arguments.len() == 1 => {
-                        let receiver_var = self.fresh_var("Receiver");
-                        let selector_var = self.fresh_var("Selector");
-
-                        let recv_code = self.expression_doc(receiver)?;
-                        let sel_code = self.expression_doc(&arguments[0])?;
-
-                        let doc = docvec![
-                            "let ",
-                            Document::String(receiver_var.clone()),
-                            " = ",
-                            recv_code,
-                            " in let ",
-                            Document::String(selector_var.clone()),
-                            " = ",
-                            sel_code,
-                            " in call 'beamtalk_message_dispatch':'send'(",
-                            Document::String(receiver_var),
+                        // BT-1942: Hoist open-scope receiver + selector arg.
+                        let (preamble, mut docs) =
+                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "Perf")?;
+                        let recv_doc = docs.remove(0);
+                        let sel_doc = docs.remove(0);
+                        let call_doc = docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            recv_doc,
                             ", ",
-                            Document::String(selector_var),
+                            sel_doc,
                             ", [])",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble, call_doc, "PerfRes",
+                        )))
                     }
                     _ => Ok(None),
                 }
@@ -1164,32 +1175,42 @@ impl CoreErlangGenerator {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "isNil" if arguments.is_empty() => {
+                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+                    let recv_doc = docs.remove(0);
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.expression_doc(receiver)?;
-                    let doc = docvec![
+                    let call_doc = docvec![
                         "let ",
                         Document::String(recv_var.clone()),
                         " = ",
-                        recv_code,
+                        recv_doc,
                         " in case ",
                         Document::String(recv_var),
                         " of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end",
                     ];
-                    Ok(Some(doc))
+                    Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble, call_doc, "IsNilRes",
+                    )))
                 }
                 "notNil" if arguments.is_empty() => {
+                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+                    let recv_doc = docs.remove(0);
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.expression_doc(receiver)?;
-                    let doc = docvec![
+                    let call_doc = docvec![
                         "let ",
                         Document::String(recv_var.clone()),
                         " = ",
-                        recv_code,
+                        recv_doc,
                         " in case ",
                         Document::String(recv_var),
                         " of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end",
                     ];
-                    Ok(Some(doc))
+                    Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "NotNilRes",
+                    )))
                 }
                 _ => Ok(None),
             },
@@ -1198,19 +1219,22 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "ifNil:" if arguments.len() == 1 => {
+                        // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
+                        let (preamble, mut docs) =
+                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNil")?;
+                        let recv_doc = docs.remove(0);
+                        let block_doc = docs.remove(0);
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NilBlk");
-                        let recv_code = self.expression_doc(receiver)?;
-                        let block_code = self.expression_doc(&arguments[0])?;
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(recv_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(block_var.clone()),
                             " = ",
-                            block_code,
+                            block_doc,
                             " in case ",
                             Document::String(recv_var.clone()),
                             " of <'nil'> when 'true' -> apply ",
@@ -1219,7 +1243,9 @@ impl CoreErlangGenerator {
                             Document::String(recv_var),
                             " end",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble, call_doc, "IfNilRes",
+                        )))
                     }
                     "ifNotNil:" if arguments.len() == 1 => {
                         // BT-1226: When in actor context or loop body, check if the block
@@ -1244,54 +1270,66 @@ impl CoreErlangGenerator {
                             }
                         }
                         // If the block has 0 parameters, don't pass the receiver (avoids badarity)
-                        let recv_var = self.fresh_temp_var("Obj");
-                        let block_var = self.fresh_temp_var("NotNilBlk");
+                        // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
-                        let recv_code = self.expression_doc(receiver)?;
-                        let block_code = self.expression_doc(&arguments[0])?;
+                        let (preamble, mut docs) =
+                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNotNil")?;
+                        let recv_doc = docs.remove(0);
+                        let block_doc = docs.remove(0);
+                        let recv_var = self.fresh_temp_var("Obj");
+                        let block_var = self.fresh_temp_var("NotNilBlk");
                         let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(recv_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(block_var),
                             " = ",
-                            block_code,
+                            block_doc,
                             " in case ",
                             Document::String(recv_var),
                             " of <'nil'> when 'true' -> 'nil' <_> when 'true' -> ",
                             apply,
                             " end",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble,
+                            call_doc,
+                            "IfNotNilRes",
+                        )))
                     }
                     "ifNil:ifNotNil:" if arguments.len() == 2 => {
                         // If the notNil block has 0 parameters, don't pass the receiver
+                        // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
+                        let (preamble, mut docs) = self.capture_subexpr_sequence(
+                            &[receiver, &arguments[0], &arguments[1]],
+                            "IfNilNotNil",
+                        )?;
+                        let recv_doc = docs.remove(0);
+                        let nil_doc = docs.remove(0);
+                        let not_nil_doc = docs.remove(0);
                         let recv_var = self.fresh_temp_var("Obj");
                         let nil_var = self.fresh_temp_var("NilBlk");
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                        let block_takes_arg =
-                            validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
-                        let recv_code = self.expression_doc(receiver)?;
-                        let nil_code = self.expression_doc(&arguments[0])?;
-                        let not_nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(recv_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(nil_var.clone()),
                             " = ",
-                            nil_code,
+                            nil_doc,
                             " in let ",
                             Document::String(not_nil_var),
                             " = ",
-                            not_nil_code,
+                            not_nil_doc,
                             " in case ",
                             Document::String(recv_var),
                             " of <'nil'> when 'true' -> apply ",
@@ -1300,32 +1338,41 @@ impl CoreErlangGenerator {
                             apply,
                             " end",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble,
+                            call_doc,
+                            "IfNilNotNilRes",
+                        )))
                     }
                     "ifNotNil:ifNil:" if arguments.len() == 2 => {
                         // If the notNil block has 0 parameters, don't pass the receiver
+                        // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
+                        let (preamble, mut docs) = self.capture_subexpr_sequence(
+                            &[receiver, &arguments[0], &arguments[1]],
+                            "IfNotNilNil",
+                        )?;
+                        let recv_doc = docs.remove(0);
+                        let not_nil_doc = docs.remove(0);
+                        let nil_doc = docs.remove(0);
                         let recv_var = self.fresh_temp_var("Obj");
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
                         let nil_var = self.fresh_temp_var("NilBlk");
-                        let block_takes_arg =
-                            validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
-                        let recv_code = self.expression_doc(receiver)?;
-                        let not_nil_code = self.expression_doc(&arguments[0])?;
-                        let nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(recv_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(not_nil_var.clone()),
                             " = ",
-                            not_nil_code,
+                            not_nil_doc,
                             " in let ",
                             Document::String(nil_var.clone()),
                             " = ",
-                            nil_code,
+                            nil_doc,
                             " in case ",
                             Document::String(recv_var),
                             " of <'nil'> when 'true' -> apply ",
@@ -1334,7 +1381,11 @@ impl CoreErlangGenerator {
                             apply,
                             " end",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble,
+                            call_doc,
+                            "IfNotNilNilRes",
+                        )))
                     }
                     _ => Ok(None),
                 }
@@ -1365,24 +1416,26 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "error:" if arguments.len() == 1 => {
+                        // BT-1942: Hoist open-scope receiver + message (e.g. class method self-sends).
+                        let (preamble, mut docs) =
+                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "Err")?;
+                        let recv_doc = docs.remove(0);
+                        let msg_doc = docs.remove(0);
                         let recv_var = self.fresh_temp_var("Obj");
                         let msg_var = self.fresh_temp_var("Msg");
                         let class_var = self.fresh_temp_var("Class");
                         let err0 = self.fresh_temp_var("Err");
                         let err1 = self.fresh_temp_var("Err");
 
-                        let recv_code = self.expression_doc(receiver)?;
-                        let msg_code = self.expression_doc(&arguments[0])?;
-
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(recv_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(msg_var.clone()),
                             " = ",
-                            msg_code,
+                            msg_doc,
                             " in let ",
                             Document::String(class_var.clone()),
                             " = call 'beamtalk_primitive':'class_of'(",
@@ -1401,7 +1454,9 @@ impl CoreErlangGenerator {
                             Document::String(err1),
                             ")",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble, call_doc, "ErrRes",
+                        )))
                     }
                     _ => Ok(None),
                 }
@@ -1426,22 +1481,35 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
                     // Identity: just return the receiver
-                    let recv_code = self.expression_doc(receiver)?;
-                    Ok(Some(docvec![recv_code]))
+                    // BT-1942: Preserve open scope (e.g. class method self-send) so the
+                    // mutated ClassVarsN binding propagates upward. Wrap as a dispatch
+                    // value so `finalize_dispatch_with_preamble` can emit the preamble.
+                    let (preamble, mut docs) =
+                        self.capture_subexpr_sequence(&[receiver], "Yourself")?;
+                    let recv_doc = docs.remove(0);
+                    Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        recv_doc,
+                        "YourselfRes",
+                    )))
                 }
                 "hash" if arguments.is_empty() => {
+                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+                    let recv_doc = docs.remove(0);
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.expression_doc(receiver)?;
-                    let doc = docvec![
+                    let call_doc = docvec![
                         "let ",
                         Document::String(recv_var.clone()),
                         " = ",
-                        recv_code,
+                        recv_doc,
                         " in call 'erlang':'phash2'(",
                         Document::String(recv_var),
                         ")",
                     ];
-                    Ok(Some(doc))
+                    Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble, call_doc, "HashRes",
+                    )))
                 }
                 // BT-477: printString removed as intrinsic — now uses polymorphic
                 // dispatch via Object >> printString and per-class overrides.
@@ -1491,20 +1559,22 @@ impl CoreErlangGenerator {
                         }
                     }
 
+                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                    let (preamble, mut docs) =
+                        self.capture_subexpr_sequence(&[receiver], "FNames")?;
+                    let recv_doc = docs.remove(0);
                     let receiver_var = self.fresh_var("Receiver");
                     let pid_var = self.fresh_var("Pid");
-
-                    let recv_code = self.expression_doc(receiver)?;
 
                     // BT-924: If receiver is a map (value object or stdlib tagged map),
                     // delegate to beamtalk_primitive:send which routes through the
                     // correct dispatch/3 for the receiver's class kind.
                     // Actor (tuple) receivers use sync_send (ADR-0043).
-                    let doc = docvec![
+                    let call_doc = docvec![
                         "let ",
                         Document::String(receiver_var.clone()),
                         " = ",
-                        recv_code,
+                        recv_doc,
                         " in case call 'erlang':'is_map'(",
                         Document::String(receiver_var.clone()),
                         ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
@@ -1517,7 +1587,11 @@ impl CoreErlangGenerator {
                         Document::String(pid_var),
                         ", 'fieldNames', []) end",
                     ];
-                    Ok(Some(doc))
+                    Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "FNamesRes",
+                    )))
                 }
                 _ => Ok(None),
             },
@@ -1526,28 +1600,34 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "respondsTo:" if arguments.len() == 1 => {
+                        // BT-1942: Hoist open-scope receiver + selector (e.g. class method self-sends).
+                        let (preamble, mut docs) =
+                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "RespTo")?;
+                        let recv_doc = docs.remove(0);
+                        let sel_doc = docs.remove(0);
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        let recv_code = self.expression_doc(receiver)?;
-                        let sel_code = self.expression_doc(&arguments[0])?;
-
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(receiver_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(selector_var.clone()),
                             " = ",
-                            sel_code,
+                            sel_doc,
                             " in call 'beamtalk_primitive':'responds_to'(",
                             Document::String(receiver_var),
                             ", ",
                             Document::String(selector_var),
                             ")",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble,
+                            call_doc,
+                            "RespToRes",
+                        )))
                     }
                     "fieldAt:" if arguments.len() == 1 => {
                         // BT-1321: Fast-path for `self` receiver in actor context.
@@ -1574,6 +1654,11 @@ impl CoreErlangGenerator {
                             }
                         }
 
+                        // BT-1942: Hoist open-scope receiver + name (e.g. class method self-sends).
+                        let (preamble, mut docs) =
+                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "FAt")?;
+                        let recv_doc = docs.remove(0);
+                        let name_doc = docs.remove(0);
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
@@ -1586,22 +1671,19 @@ impl CoreErlangGenerator {
                         let hint =
                             Self::binary_string_literal("Value types have no instance variables");
 
-                        let recv_code = self.expression_doc(receiver)?;
-                        let name_code = self.expression_doc(&arguments[0])?;
-
                         // BT-924: The non-actor branch is split:
                         //   - map receiver → delegate to beamtalk_primitive:send (routes
                         //     through dispatch/3 which respects ClassKind::Value vs Object)
                         //   - other (primitive literal) → raise immutable_value
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(receiver_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(name_var.clone()),
                             " = ",
-                            name_code,
+                            name_doc,
                             " in case case call 'erlang':'is_tuple'(",
                             Document::String(receiver_var.clone()),
                             ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
@@ -1648,7 +1730,9 @@ impl CoreErlangGenerator {
                             Document::String(error_hint),
                             ") end end",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble, call_doc, "FAtRes",
+                        )))
                     }
                     "fieldAt:put:" if arguments.len() == 2 => {
                         // BT-1321: Fast-path for `self` receiver in actor context.
@@ -1693,6 +1777,14 @@ impl CoreErlangGenerator {
                             }
                         }
 
+                        // BT-1942: Hoist open-scope receiver + name + value (e.g. class method self-sends).
+                        let (preamble, mut docs) = self.capture_subexpr_sequence(
+                            &[receiver, &arguments[0], &arguments[1]],
+                            "FAtPut",
+                        )?;
+                        let recv_doc = docs.remove(0);
+                        let name_doc = docs.remove(0);
+                        let value_doc = docs.remove(0);
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
@@ -1705,23 +1797,19 @@ impl CoreErlangGenerator {
                             "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance",
                         );
 
-                        let recv_code = self.expression_doc(receiver)?;
-                        let name_code = self.expression_doc(&arguments[0])?;
-                        let value_code = self.expression_doc(&arguments[1])?;
-
-                        let doc = docvec![
+                        let call_doc = docvec![
                             "let ",
                             Document::String(receiver_var.clone()),
                             " = ",
-                            recv_code,
+                            recv_doc,
                             " in let ",
                             Document::String(name_var.clone()),
                             " = ",
-                            name_code,
+                            name_doc,
                             " in let ",
                             Document::String(value_var.clone()),
                             " = ",
-                            value_code,
+                            value_doc,
                             " in case case call 'erlang':'is_tuple'(",
                             Document::String(receiver_var.clone()),
                             ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
@@ -1762,7 +1850,11 @@ impl CoreErlangGenerator {
                             Document::String(error_hint),
                             ") end",
                         ];
-                        Ok(Some(doc))
+                        Ok(Some(self.finalize_dispatch_with_preamble(
+                            preamble,
+                            call_doc,
+                            "FAtPutRes",
+                        )))
                     }
                     _ => Ok(None),
                 }
@@ -1937,7 +2029,13 @@ impl CoreErlangGenerator {
         // logger:log/3 expects a char-list string, a report, or {Format, Args}.
         // Passing a binary directly causes the formatter to crash with
         // "FORMATTER CRASH: {string, <<\"...\">>}".
-        let raw_msg_doc = self.expression_doc(&arguments[0])?;
+        //
+        // BT-1942: Hoist message arg (and optional metadata arg) so class method
+        // self-sends in sub-expression position (e.g. `Logger info: (self tick)`)
+        // thread their class var mutations through to the enclosing scope.
+        let arg_exprs: Vec<&Expression> = arguments.iter().collect();
+        let (preamble, mut arg_docs) = self.capture_subexpr_sequence(&arg_exprs, "LogArg")?;
+        let raw_msg_doc = arg_docs.remove(0);
         let msg_doc = docvec!["{\"~ts\", [", raw_msg_doc, "]}"];
 
         // Build domain metadata map
@@ -1968,7 +2066,8 @@ impl CoreErlangGenerator {
 
         let log_call_doc = if has_metadata {
             // With user metadata: merge user map with compiler-injected map
-            let user_meta_doc = self.expression_doc(&arguments[1])?;
+            // BT-1942: user_meta_doc is the hoisted doc for arguments[1].
+            let user_meta_doc = arg_docs.remove(0);
             let merge_var = self.fresh_temp_var("LogMeta");
             docvec![
                 "let ",
@@ -1998,7 +2097,7 @@ impl CoreErlangGenerator {
             ]
         };
 
-        let doc = docvec![
+        let call_doc = docvec![
             "let ",
             Document::String(discard_var),
             " = ",
@@ -2006,7 +2105,9 @@ impl CoreErlangGenerator {
             " in 'nil'"
         ];
 
-        Ok(Some(doc))
+        Ok(Some(self.finalize_dispatch_with_preamble(
+            preamble, call_doc, "LogRes",
+        )))
     }
 }
 

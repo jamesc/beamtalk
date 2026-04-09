@@ -2005,16 +2005,29 @@ impl CoreErlangGenerator {
         value: &Expression,
         has_class_vars: bool,
     ) -> Result<Document<'static>> {
+        // BT-1942: Use `expression_doc_with_open_scope` so an explicit
+        // `^ expr` where `expr` produces an open let-chain (e.g.
+        // `(self tick) class` or any ProtoObject/Object intrinsic fed a
+        // class method self-send) is emitted correctly. The open chain
+        // must be emitted as a prefix; the value is the returned result
+        // variable, not the chain wrapped in another let binding (which
+        // would produce invalid double-`in` Core Erlang).
         if has_class_vars {
             let result_var = self.fresh_temp_var("Ret");
-            let value_str = self.expression_doc(value)?;
+            let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
+            let (preamble, value_doc) = if let Some(open_scope_result) = open_scope {
+                (value_str, Document::String(open_scope_result))
+            } else {
+                (Document::Nil, value_str)
+            };
             if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
+                    preamble,
                     "let ",
                     Document::String(result_var.clone()),
                     " = ",
-                    value_str,
+                    value_doc,
                     " in {'class_var_result', ",
                     Document::String(result_var),
                     ", ",
@@ -2023,16 +2036,23 @@ impl CoreErlangGenerator {
                 ])
             } else {
                 Ok(docvec![
+                    preamble,
                     "let ",
                     Document::String(result_var.clone()),
                     " = ",
-                    value_str,
+                    value_doc,
                     " in ",
                     Document::String(result_var),
                 ])
             }
         } else {
-            self.expression_doc(value)
+            // BT-1942: Same treatment for the no-class-vars path.
+            let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
+            if let Some(open_scope_result) = open_scope {
+                Ok(docvec![value_str, Document::String(open_scope_result)])
+            } else {
+                Ok(value_str)
+            }
         }
     }
 
@@ -2168,15 +2188,31 @@ impl CoreErlangGenerator {
             // BT-1392: Non-last conditional that mutates captured outer locals.
             self.generate_vt_conditional_open(expr)
         } else {
+            // BT-1942: Detect open-scope results produced by the expression
+            // itself (e.g. a ProtoObject/Object intrinsic whose receiver is a
+            // class method self-send). Emit the open chain as-is and bind the
+            // result var to the seq temp so subsequent code can sequence
+            // after it while keeping ClassVarsN in scope.
             let tmp_var = self.fresh_temp_var("seq");
-            let expr_str = self.expression_doc(expr)?;
-            Ok(docvec![
-                "let ",
-                Document::String(tmp_var),
-                " = ",
-                expr_str,
-                " in "
-            ])
+            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+            if let Some(result_var) = open_scope {
+                Ok(docvec![
+                    expr_str,
+                    "let ",
+                    Document::String(tmp_var),
+                    " = ",
+                    Document::String(result_var),
+                    " in "
+                ])
+            } else {
+                Ok(docvec![
+                    "let ",
+                    Document::String(tmp_var),
+                    " = ",
+                    expr_str,
+                    " in "
+                ])
+            }
         }
     }
 
