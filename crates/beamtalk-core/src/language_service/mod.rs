@@ -63,10 +63,13 @@ pub use value_objects::{
 #[cfg(test)]
 mod property_tests;
 
-use crate::ast::{Expression, Identifier, Module, TypeAnnotation};
+use crate::ast::{
+    Expression, Identifier, MessageSelector, MethodDefinition, Module, TypeAnnotation,
+};
 use crate::semantic_analysis::type_checker::NativeTypeRegistry;
 use crate::source_analysis::Span;
 use camino::Utf8PathBuf;
+use ecow::EcoString;
 use std::collections::HashMap;
 
 /// The language service trait.
@@ -253,6 +256,71 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
         self.files.get(file).map(|data| data.source.clone())
+    }
+
+    /// If the offset falls inside the header of a method *definition*
+    /// (the selector area of `bar => ...`, `+ other => ...`, or
+    /// `at: i put: v => ...`), returns the method's selector name.
+    ///
+    /// Returns `None` if the offset is inside a method body, a parameter
+    /// name, a parameter/return type annotation, or outside any method.
+    ///
+    /// This powers "Find All References" (and, indirectly, rename) when the
+    /// user's cursor is on the selector of the method definition itself —
+    /// not on a call site.
+    fn find_method_header_selector_at_offset(module: &Module, offset: u32) -> Option<EcoString> {
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                if Self::offset_in_method_header_selector(method, offset) {
+                    return Some(method.selector.name());
+                }
+            }
+        }
+        for smd in &module.method_definitions {
+            if Self::offset_in_method_header_selector(&smd.method, offset) {
+                return Some(smd.method.selector.name());
+            }
+        }
+        None
+    }
+
+    /// Checks whether `offset` lies on the selector of a method definition
+    /// header.
+    ///
+    /// For keyword selectors we have precise per-keyword spans and only accept
+    /// offsets that fall within one of those keyword parts. For unary and
+    /// binary selectors, `MessageSelector` does not carry a span, so we use
+    /// the coarser rule "inside `method.span`, but before any parameter,
+    /// return type, or body element". This still rejects clicks on parameter
+    /// names, type annotations, and body expressions, which is what matters.
+    fn offset_in_method_header_selector(method: &MethodDefinition, offset: u32) -> bool {
+        if offset < method.span.start() || offset >= method.span.end() {
+            return false;
+        }
+
+        match &method.selector {
+            MessageSelector::Keyword(parts) => parts
+                .iter()
+                .any(|part| offset >= part.span.start() && offset < part.span.end()),
+            MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                // The header ends at the first of: first parameter name,
+                // return type annotation, or first body statement.
+                let mut header_end = method.span.end();
+                if let Some(first_param) = method.parameters.first() {
+                    header_end = header_end.min(first_param.name.span.start());
+                    if let Some(ta) = &first_param.type_annotation {
+                        header_end = header_end.min(ta.span().start());
+                    }
+                }
+                if let Some(rt) = &method.return_type {
+                    header_end = header_end.min(rt.span().start());
+                }
+                if let Some(first_stmt) = method.body.first() {
+                    header_end = header_end.min(first_stmt.expression.span().start());
+                }
+                offset < header_end
+            }
+        }
     }
 
     /// Finds a method selector at a given byte offset in a module.
@@ -740,7 +808,8 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        // 1. Try selector-based references (cursor on a method keyword)
+        // 1. Try selector-based references (cursor on a method keyword in a
+        //    call site — e.g. `x bar`, `a + b`, `x at: 1 put: 2`)
         if let Some(selector_lookup) =
             Self::find_selector_at_offset(&file_data.module, offset.get())
         {
@@ -750,7 +819,21 @@ impl LanguageService for SimpleLanguageService {
             );
         }
 
-        // 2. Try identifier-based references (cursor on a name)
+        // 2. Try selector-based references at a method *definition header*
+        //    (cursor on the selector in `bar => ...`, `+ other => ...`, or
+        //    `at: i put: v => ...`). Without this check, clicking on the name
+        //    where a method is defined would fall through to the identifier
+        //    path and return nothing.
+        if let Some(selector_name) =
+            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
+        {
+            return crate::queries::references_provider::find_selector_references(
+                selector_name.as_str(),
+                self.files.iter().map(|(path, data)| (path, &data.module)),
+            );
+        }
+
+        // 3. Try identifier-based references (cursor on a name)
         let Some((ident, _span)) = self.find_identifier_at_position(file, position) else {
             return Vec::new();
         };
@@ -1018,6 +1101,148 @@ mod tests {
         // Find references to 'x'
         let refs = service.find_references(&file, Position::new(0, 0));
         assert_eq!(refs.len(), 2); // Assignment and usage
+    }
+
+    #[test]
+    fn find_references_from_method_definition_header_unary() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        // Method `bar` defined in class Foo, and called via `x bar`.
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  bar => 1\nx := Foo new\nx bar".to_string(),
+        );
+
+        // Cursor ON the unary method definition header (the `bar` on line 1 col 2)
+        let refs = service.find_references(&file, Position::new(1, 2));
+        assert!(
+            refs.len() >= 2,
+            "expected >=2 refs from definition header, got {}",
+            refs.len()
+        );
+    }
+
+    #[test]
+    fn find_references_from_method_definition_header_keyword() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  at: i put: v => v\nx at: 1 put: 2".to_string(),
+        );
+
+        // Cursor on the `at:` keyword in the method header (line 1, col 2)
+        let refs = service.find_references(&file, Position::new(1, 2));
+        assert!(
+            refs.len() >= 2,
+            "expected >=2 refs from keyword header `at:`, got {}",
+            refs.len()
+        );
+
+        // Cursor on the `put:` keyword in the method header (line 1, col 8)
+        let refs_put = service.find_references(&file, Position::new(1, 8));
+        assert!(
+            refs_put.len() >= 2,
+            "expected >=2 refs from keyword header `put:`, got {}",
+            refs_put.len()
+        );
+    }
+
+    #[test]
+    fn find_references_from_method_definition_header_binary() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Vec\n  + other => other\nx + y".to_string(),
+        );
+
+        // Cursor on the `+` binary selector in the method header (line 1, col 2)
+        let refs = service.find_references(&file, Position::new(1, 2));
+        assert!(
+            refs.len() >= 2,
+            "expected >=2 refs from binary header `+`, got {}",
+            refs.len()
+        );
+    }
+
+    #[test]
+    fn find_references_from_method_definition_header_cross_file() {
+        // The definition-header path must integrate with cross-file search:
+        // clicking on a method name in its definition should find every call
+        // site in every indexed file.
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  bar => 1".to_string(),
+        );
+        service.update_file(file_b.clone(), "x := Foo new\nx bar".to_string());
+
+        // Cursor on the `bar` in the definition in file_a
+        let refs = service.find_references(&file_a, Position::new(1, 2));
+        assert!(
+            refs.iter().any(|r| r.file == file_a),
+            "missing definition in file_a: {refs:?}"
+        );
+        assert!(
+            refs.iter().any(|r| r.file == file_b),
+            "missing call site in file_b: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_parameter_name_in_header() {
+        // Clicking on a parameter name must NOT be treated as "on the
+        // selector". Here we click on `i` in `at: i put: v`. The reference
+        // count for `i` across the file should be smaller than the count we
+        // would get if we'd matched on the `at:put:` selector (which is 2:
+        // the definition and the call site).
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  at: i put: v => v\nx at: 1 put: 2".to_string(),
+        );
+
+        // Column 6 = position of `i` on line 1 (`  at: i put: v => v`)
+        let refs_on_param = service.find_references(&file, Position::new(1, 6));
+        let refs_on_selector = service.find_references(&file, Position::new(1, 2));
+        assert_ne!(
+            refs_on_param.len(),
+            refs_on_selector.len(),
+            "param-name click must not be mistaken for selector click"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_body_expression_in_method() {
+        // Clicking on a body expression must not be treated as "on the
+        // selector" — otherwise every expression in the method body would
+        // falsely return the full set of call sites for the method.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  bar => myVar\nx bar\ny bar".to_string(),
+        );
+
+        // Line 1, col 9 = `myVar` in the body (not the selector `bar`)
+        let refs_on_body = service.find_references(&file, Position::new(1, 9));
+        // Line 1, col 2 = `bar` selector in the header
+        let refs_on_header = service.find_references(&file, Position::new(1, 2));
+
+        // The header click finds `bar` refs: 1 def + 2 call sites = 3.
+        // The body click finds `myVar` refs: just the one expression.
+        assert_ne!(refs_on_body.len(), refs_on_header.len());
+        assert!(refs_on_body.len() < refs_on_header.len());
     }
 
     #[test]
