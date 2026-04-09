@@ -239,6 +239,14 @@ pub fn find_overridden_method_definition<'a>(
     // Cross-file first-wins matches the previous behaviour — the earlier
     // implementation also returned the first file in iteration order that
     // contained the match.
+    //
+    // Common-case short-circuit: the MRO starts with the receiver class
+    // itself, so if any file contributes a match for that class, it's
+    // automatically the best possible answer and no later file can beat it.
+    // Return early to avoid an unnecessary full-workspace scan in the
+    // typical "immediate parent defines the method" case. This preserves
+    // the early-exit behaviour the pre-BT-1943 implementation had.
+    let nearest = receiver_class.class_name.as_str();
     let mut candidates: HashMap<EcoString, Location> = HashMap::new();
     for (file_path, module) in files {
         collect_method_definitions_in_module(
@@ -249,14 +257,21 @@ pub fn find_overridden_method_definition<'a>(
             receiver_class.class_side,
             &mut candidates,
         );
+        if let Some(location) = candidates.remove(nearest) {
+            return Some(location);
+        }
     }
 
-    // Walk MRO in nearest-ancestor-first order and return the first hit.
-    // Strict MRO-only: if none of the visited classes defines the selector,
-    // return None rather than falling back to any other class. We use
-    // `remove` (not `get`) to move the Location out of the map without a
-    // clone — each MRO entry is only visited once anyway.
-    for class_name in &mro {
+    // Walk the rest of the MRO in nearest-first order. We already handled
+    // `mro[0]` (the receiver class itself) inside the loop above, so skip
+    // it here — if it's not in `candidates` by this point, no file ever
+    // contributed it and there's nothing more to do for that entry.
+    //
+    // Strict MRO-only: if none of the remaining ancestors defines the
+    // selector either, return None rather than falling back to any other
+    // class. We use `remove` (not `get`) to move the Location out of the
+    // map without a clone — each MRO entry is visited at most once.
+    for class_name in mro.iter().skip(1) {
         if let Some(location) = candidates.remove(class_name) {
             return Some(location);
         }
