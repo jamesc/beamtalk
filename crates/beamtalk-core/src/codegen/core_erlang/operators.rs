@@ -84,8 +84,13 @@ impl CoreErlangGenerator {
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
 
+        // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
+        // format!(). erlang_op is one of the static literals in the match
+        // arms above, so Document::Str is safe.
         let call_doc = docvec![
-            format!("call 'erlang':'{erlang_op}'("),
+            "call 'erlang':'",
+            Document::Str(erlang_op),
+            "'(",
             left_code,
             ", ",
             right_code,
@@ -163,23 +168,31 @@ impl CoreErlangGenerator {
                 ")])",
             ]
         } else {
-            // Runtime dispatch: check is_list at runtime
+            // Runtime dispatch: check is_list at runtime.
+            // CLAUDE.md: built entirely with Document/docvec!, no format!().
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
             docvec![
-                format!("let {left_var} = "),
+                "let ",
+                Document::String(left_var.clone()),
+                " = ",
                 left_code,
-                format!(" in let {right_var} = "),
+                " in let ",
+                Document::String(right_var.clone()),
+                " = ",
                 right_code,
-                format!(
-                    " in case call 'erlang':'is_list'({left_var}) of \
-                     <'true'> when 'true' -> call 'erlang':'++'({left_var}, {right_var}) \
-                     <'false'> when 'true' -> \
-                       call 'erlang':'iolist_to_binary'(\
-                         [call 'erlang':'binary_to_list'({left_var}), \
-                          call 'erlang':'binary_to_list'({right_var})]) \
-                     end"
-                ),
+                " in case call 'erlang':'is_list'(",
+                Document::String(left_var.clone()),
+                ") of <'true'> when 'true' -> call 'erlang':'++'(",
+                Document::String(left_var.clone()),
+                ", ",
+                Document::String(right_var.clone()),
+                ") <'false'> when 'true' -> \
+                   call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
+                Document::String(left_var),
+                "), call 'erlang':'binary_to_list'(",
+                Document::String(right_var),
+                ")]) end",
             ]
         };
 
