@@ -13,7 +13,9 @@
 
 TestCase subclass: ClassVarSubExprTest
 
-  setUp => ClassVarSubExpr resetCounter
+  setUp =>
+    ClassVarSubExpr resetCounter
+    self
 
   // Baseline — confirms `tick` works when called at statement level.
   testTickAloneMutatesClassVar =>
