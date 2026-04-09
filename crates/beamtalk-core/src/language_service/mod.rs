@@ -1143,11 +1143,13 @@ mod tests {
             "Object subclass: Foo\n  bar => 1\nx := Foo new\nx bar".to_string(),
         );
 
-        // Cursor ON the unary method definition header (the `bar` on line 1 col 2)
+        // Cursor ON the unary method definition header (the `bar` on line 1 col 2).
+        // Expected: 1 definition + 1 call site = 2 refs.
         let refs = service.find_references(&file, Position::new(1, 2));
-        assert!(
-            refs.len() >= 2,
-            "expected >=2 refs from definition header, got {}",
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from unary header, got {}",
             refs.len()
         );
     }
@@ -1162,19 +1164,23 @@ mod tests {
             "Object subclass: Foo\n  at: i put: v => v\nx at: 1 put: 2".to_string(),
         );
 
-        // Cursor on the `at:` keyword in the method header (line 1, col 2)
+        // Cursor on the `at:` keyword in the method header (line 1, col 2).
+        // Expected: 1 definition + 1 call site = 2 refs.
         let refs = service.find_references(&file, Position::new(1, 2));
-        assert!(
-            refs.len() >= 2,
-            "expected >=2 refs from keyword header `at:`, got {}",
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `at:` header, got {}",
             refs.len()
         );
 
-        // Cursor on the `put:` keyword in the method header (line 1, col 8)
+        // Cursor on the `put:` keyword in the method header (line 1, col 8) —
+        // must return the same full `at:put:` reference set.
         let refs_put = service.find_references(&file, Position::new(1, 8));
-        assert!(
-            refs_put.len() >= 2,
-            "expected >=2 refs from keyword header `put:`, got {}",
+        assert_eq!(
+            refs_put.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `put:` header, got {}",
             refs_put.len()
         );
     }
@@ -1189,11 +1195,13 @@ mod tests {
             "Object subclass: Vec\n  + other => other\nx + y".to_string(),
         );
 
-        // Cursor on the `+` binary selector in the method header (line 1, col 2)
+        // Cursor on the `+` binary selector in the method header (line 1, col 2).
+        // Expected: 1 definition + 1 call site = 2 refs.
         let refs = service.find_references(&file, Position::new(1, 2));
-        assert!(
-            refs.len() >= 2,
-            "expected >=2 refs from binary header `+`, got {}",
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from binary header `+`, got {}",
             refs.len()
         );
     }
@@ -1213,8 +1221,15 @@ mod tests {
         );
         service.update_file(file_b.clone(), "x := Foo new\nx bar".to_string());
 
-        // Cursor on the `bar` in the definition in file_a
+        // Cursor on the `bar` in the definition in file_a.
+        // Expected: 1 definition in file_a + 1 call site in file_b = 2 refs.
         let refs = service.find_references(&file_a, Position::new(1, 2));
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 cross-file refs (def in file_a + call in file_b), got {}: {refs:?}",
+            refs.len()
+        );
         assert!(
             refs.iter().any(|r| r.file == file_a),
             "missing definition in file_a: {refs:?}"
@@ -1228,10 +1243,11 @@ mod tests {
     #[test]
     fn find_references_rejects_click_on_parameter_name_in_header() {
         // Clicking on a parameter name must NOT be treated as "on the
-        // selector". Here we click on `i` in `at: i put: v`. The reference
-        // count for `i` across the file should be smaller than the count we
-        // would get if we'd matched on the `at:put:` selector (which is 2:
-        // the definition and the call site).
+        // selector". Here we click on `i` in `at: i put: v`. The parameter
+        // name has no uses in the body (body is just `v`), so the identifier
+        // fallback should also return no cross-file matches. The point is
+        // that the click must not be mistaken for a click on the `at:put:`
+        // selector (which would return 2 refs).
         let mut service = SimpleLanguageService::new();
         let file = Utf8PathBuf::from("test.bt");
 
@@ -1242,11 +1258,14 @@ mod tests {
 
         // Column 6 = position of `i` on line 1 (`  at: i put: v => v`)
         let refs_on_param = service.find_references(&file, Position::new(1, 6));
+        // Sanity-check that a click on the selector would return 2, so an
+        // over-matching bug in the header heuristic would surface as 2 here.
         let refs_on_selector = service.find_references(&file, Position::new(1, 2));
+        assert_eq!(refs_on_selector.len(), 2);
         assert_ne!(
             refs_on_param.len(),
-            refs_on_selector.len(),
-            "param-name click must not be mistaken for selector click"
+            2,
+            "param-name click was mistaken for `at:put:` selector click"
         );
     }
 
@@ -1269,9 +1288,19 @@ mod tests {
         let refs_on_header = service.find_references(&file, Position::new(1, 2));
 
         // The header click finds `bar` refs: 1 def + 2 call sites = 3.
-        // The body click finds `myVar` refs: just the one expression.
-        assert_ne!(refs_on_body.len(), refs_on_header.len());
-        assert!(refs_on_body.len() < refs_on_header.len());
+        assert_eq!(
+            refs_on_header.len(),
+            3,
+            "header click should return def + two call sites, got {}",
+            refs_on_header.len()
+        );
+        // The body click finds `myVar` refs: just the one occurrence in the body.
+        assert_eq!(
+            refs_on_body.len(),
+            1,
+            "body click should only return the single `myVar` occurrence, got {}",
+            refs_on_body.len()
+        );
     }
 
     #[test]
