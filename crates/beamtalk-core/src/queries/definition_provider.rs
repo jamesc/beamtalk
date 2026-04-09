@@ -200,6 +200,18 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
 /// Standalone methods are NOT registered in `ClassHierarchy`, so we must
 /// walk the chain manually via `superclass_chain` and rely on
 /// `find_method_in_module` (which already handles both shapes) to match.
+///
+/// # Complexity
+///
+/// Worst case O(|MRO| × |files|) calls to `find_method_in_module`, where
+/// `|MRO|` is the length of the superclass chain and `|files|` is the number
+/// of indexed files. The common case — where the nearest ancestor's method
+/// exists somewhere in the workspace — early-exits on the first match, so
+/// typical cost is roughly O(|files|) for a single goto-definition request.
+/// For typical projects this comfortably meets the <100ms responsiveness
+/// target noted at the top of this module. A more aggressive optimization
+/// (single-pass file walk that collects candidates into a map keyed by
+/// class name) is tracked by BT-1943.
 #[must_use]
 pub fn find_overridden_method_definition<'a>(
     selector: &str,
