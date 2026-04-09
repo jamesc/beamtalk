@@ -1881,12 +1881,17 @@ impl CoreErlangGenerator {
         let instance_selector = super::selector_mangler::safe_atom_name(&raw);
         let binding_val_var = self.fresh_var("BindingVal");
         let state_var = self.current_state_var();
+        let lookup_var = self.fresh_temp_var("Lookup");
 
-        // BT-1942: Always bind arguments to temp vars BEFORE the case expression,
-        // so they are evaluated exactly once and the temp var refs can be reused
-        // in both case branches (fixing a pre-existing double-evaluation bug when
-        // args have side effects). Also hoists any open let-chain from class
-        // method self-sends so mutations propagate to the surrounding scope.
+        // BT-1942: Preserve the "receiver first, then args" evaluation order
+        // expected by Smalltalk/Beamtalk message-send semantics. The receiver
+        // here is the class-binding lookup (`maps:find(ClassName, State)`),
+        // which we bind to a temp BEFORE the arg preamble runs so a dispatch
+        // whose class name is unresolved still evaluates the lookup first.
+        // We then bind arguments to temp vars so they are evaluated exactly
+        // once (fixing a pre-existing double-compilation of `args_doc` in both
+        // `case` branches) and so open let-chains from class method self-sends
+        // propagate to the surrounding scope.
         let (arg_preamble, arg_refs, any_open_scope) =
             self.bind_args_to_temps(arguments, "BindArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
@@ -1914,10 +1919,13 @@ impl CoreErlangGenerator {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
 
+        // BT-1942: `let Lookup = maps:find(...) in <arg_preamble> case Lookup of ...`
+        // — lookup first, then args, then the dispatch branches.
+        let lookup_binding = Document::String(format!(
+            "let {lookup_var} = call 'maps':'find'('{class_name}', {state_var}) in "
+        ));
         let case_doc = docvec![
-            Document::String(format!(
-                "case call 'maps':'find'('{class_name}', {state_var}) of "
-            )),
+            Document::String(format!("case {lookup_var} of ")),
             Document::String(format!("<{{'ok', {binding_val_var}}}> when 'true' -> ")),
             Document::String(format!(
                 "call 'beamtalk_message_dispatch':'send'({binding_val_var}, '{instance_selector}', ["
@@ -1933,6 +1941,7 @@ impl CoreErlangGenerator {
         if any_open_scope {
             let result_var = self.fresh_temp_var("BindClassRes");
             let doc = docvec![
+                lookup_binding,
                 arg_preamble,
                 "let ",
                 Document::String(result_var.clone()),
@@ -1943,7 +1952,7 @@ impl CoreErlangGenerator {
             self.last_open_scope_result = Some(result_var);
             Ok(doc)
         } else {
-            Ok(docvec![arg_preamble, case_doc])
+            Ok(docvec![lookup_binding, arg_preamble, case_doc])
         }
     }
 
@@ -1976,17 +1985,20 @@ impl CoreErlangGenerator {
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
-        // BT-1942: Bind args to temp vars before the case so they are evaluated
-        // once; also hoist any open let-chain from class method self-sends so
-        // class var mutations propagate upward.
+        let lookup_var = self.fresh_temp_var("WsLookup");
+        // BT-1942: Bind the class registry lookup to a temp BEFORE evaluating
+        // args, preserving "receiver first, then args" message-send semantics.
+        // Then bind args to temp vars so they are evaluated once and their open
+        // let-chains propagate upward.
         let (arg_preamble, arg_refs, any_open_scope) =
             self.bind_args_to_temps(arguments, "WsArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
+        let lookup_binding = Document::String(format!(
+            "let {lookup_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
+        ));
         let case_doc = docvec![
-            Document::String(format!(
-                "case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "
-            )),
+            Document::String(format!("case {lookup_var} of ")),
             "<'undefined'> when 'true' -> 'nil' ",
             Document::String(format!("<{class_pid_var}> when 'true' -> ")),
             Document::String(format!(
@@ -1999,6 +2011,7 @@ impl CoreErlangGenerator {
         if any_open_scope {
             let result_var = self.fresh_temp_var("WsClassRes");
             let doc = docvec![
+                lookup_binding,
                 arg_preamble,
                 "let ",
                 Document::String(result_var.clone()),
@@ -2009,7 +2022,7 @@ impl CoreErlangGenerator {
             self.last_open_scope_result = Some(result_var);
             Ok(doc)
         } else {
-            Ok(docvec![arg_preamble, case_doc])
+            Ok(docvec![lookup_binding, arg_preamble, case_doc])
         }
     }
 
