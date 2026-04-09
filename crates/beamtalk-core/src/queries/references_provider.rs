@@ -377,8 +377,9 @@ fn collect_class_refs(
 /// Only `Pattern::Constructor` carries a class identifier (`Result` in
 /// `Result ok: v`). All other variants just host nested patterns, which we walk
 /// so a constructor nested inside a tuple, list, array, map, or binary pattern
-/// is still reported. Mirrors `find_identifier_in_pattern` in `language_service::mod`
-/// so goto-definition and find-references see the same set of sites.
+/// is still reported. Mirrors `find_identifier_in_pattern` in
+/// `crate::language_service` so goto-definition and find-references see the
+/// same set of sites.
 fn collect_pattern_class_refs(
     pattern: &Pattern,
     class_name: &str,

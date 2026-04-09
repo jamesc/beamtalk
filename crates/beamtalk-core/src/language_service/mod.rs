@@ -698,10 +698,18 @@ impl SimpleLanguageService {
             Expression::Match { value, arms, .. } => Self::find_identifier_in_expr(value, offset)
                 .or_else(|| {
                     arms.iter().find_map(|arm| {
-                        // BT-1940: walk patterns too so that goto-definition on a
-                        // class name inside a constructor pattern (e.g. `Result ok: v`)
-                        // navigates to the class declaration.
+                        // BT-1940: walk pattern, guard, and body so that
+                        // goto-definition on a class name inside a constructor
+                        // pattern (`Result ok: v`) or inside a `when:` guard
+                        // navigates to the class declaration. Keeps parity with
+                        // `references_provider::collect_class_refs` which
+                        // already walks all three.
                         Self::find_identifier_in_pattern(&arm.pattern, offset_val)
+                            .or_else(|| {
+                                arm.guard
+                                    .as_ref()
+                                    .and_then(|g| Self::find_identifier_in_expr(g, offset))
+                            })
                             .or_else(|| Self::find_identifier_in_expr(&arm.body, offset))
                     })
                 }),
@@ -1658,6 +1666,46 @@ mod tests {
         );
         let loc = def.unwrap();
         assert_eq!(loc.file, result_file);
+    }
+
+    // BT-1940: goto-definition must also reach identifiers inside a `when:`
+    // guard, not just the pattern and the arm body. `references_provider`
+    // already walks guards; this test pins the parity in `find_identifier_in_expr`.
+    #[test]
+    fn goto_definition_inside_match_arm_guard() {
+        let mut service = SimpleLanguageService::new();
+        let threshold_file = Utf8PathBuf::from("Threshold.bt");
+        let guarded_file = Utf8PathBuf::from("guarded.bt");
+
+        service.update_file(
+            threshold_file.clone(),
+            "Object subclass: Threshold\n  limit -> Integer => 10".to_string(),
+        );
+        // Match arm with a guard referencing `Threshold` from the class body:
+        //   r match: [
+        //     v when: v > Threshold limit -> v;
+        //     _ -> 0
+        //   ]
+        service.update_file(
+            guarded_file.clone(),
+            "Object subclass: Guarded\n  \
+             check: r =>\n    \
+             r match: [\n      \
+             v when: v > Threshold limit -> v;\n      \
+             _ -> 0\n    ]"
+                .to_string(),
+        );
+
+        // Line 3 (0-indexed) is `      v when: v > Threshold limit -> v;`.
+        // `Threshold` starts at column 17 ("      v when: v > " = 18 chars, so
+        // column 18 lands on 'T').
+        let def = service.goto_definition(&guarded_file, Position::new(3, 20));
+        assert!(
+            def.is_some(),
+            "goto-definition on identifier inside match arm guard returned None"
+        );
+        let loc = def.unwrap();
+        assert_eq!(loc.file, threshold_file);
     }
 
     #[test]
