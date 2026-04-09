@@ -73,16 +73,23 @@ impl CoreErlangGenerator {
             }
         };
 
-        let left_code = self.expression_doc(left)?;
-        let right_code = self.expression_doc(&arguments[0])?;
+        // BT-1937: A class method self-send used as a binary operand produces
+        // an open let-chain that we must hoist out so the operator call ends
+        // up with valid Core Erlang AND class var mutations from the operand
+        // are visible to the enclosing method body.
+        let (left_preamble, left_code) = self.split_subexpr_for_preamble(left)?;
+        let (right_preamble, right_code) = self.split_subexpr_for_preamble(&arguments[0])?;
+        let preamble = Self::combine_preambles(left_preamble, right_preamble);
 
-        Ok(docvec![
+        let call_doc = docvec![
             format!("call 'erlang':'{erlang_op}'("),
             left_code,
             ", ",
             right_code,
             ")",
-        ])
+        ];
+
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "BinOp"))
     }
 
     /// Generates `**` exponentiation via `math:pow/2` + `erlang:round/1`.
@@ -98,15 +105,18 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> Result<Document<'static>> {
-        let left_code = self.expression_doc(left)?;
-        let right_code = self.expression_doc(right)?;
-        Ok(docvec![
+        // BT-1937: Hoist open let-chains from class method self-send operands.
+        let (left_preamble, left_code) = self.split_subexpr_for_preamble(left)?;
+        let (right_preamble, right_code) = self.split_subexpr_for_preamble(right)?;
+        let preamble = Self::combine_preambles(left_preamble, right_preamble);
+        let call_doc = docvec![
             "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
             left_code,
             "), call 'erlang':'float'(",
             right_code,
             ")))",
-        ])
+        ];
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "PowRes"))
     }
 
     /// Generates `++` concatenation with runtime type dispatch.
@@ -128,35 +138,30 @@ impl CoreErlangGenerator {
         );
         let is_string = matches!(left, Expression::Literal(Literal::String(_), _));
 
-        if is_list {
+        // BT-1937: Hoist open let-chains from class method self-send operands
+        // so class var mutations propagate to the enclosing scope and the
+        // generated Core Erlang is well-formed.
+        let (left_preamble, left_code) = self.split_subexpr_for_preamble(left)?;
+        let (right_preamble, right_code) = self.split_subexpr_for_preamble(right)?;
+        let preamble = Self::combine_preambles(left_preamble, right_preamble);
+
+        let call_doc = if is_list {
             // List concatenation: erlang:'++'
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
-            Ok(docvec![
-                "call 'erlang':'++'(",
-                left_code,
-                ", ",
-                right_code,
-                ")",
-            ])
+            docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",]
         } else if is_string {
             // String concatenation: iolist_to_binary
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
-            Ok(docvec![
+            docvec![
                 "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
                 left_code,
                 "), call 'erlang':'binary_to_list'(",
                 right_code,
                 ")])",
-            ])
+            ]
         } else {
             // Runtime dispatch: check is_list at runtime
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
-            Ok(docvec![
+            docvec![
                 format!("let {left_var} = "),
                 left_code,
                 format!(" in let {right_var} = "),
@@ -170,7 +175,9 @@ impl CoreErlangGenerator {
                           call 'erlang':'binary_to_list'({right_var})]) \
                      end"
                 ),
-            ])
-        }
+            ]
+        };
+
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "ConcatRes"))
     }
 }
