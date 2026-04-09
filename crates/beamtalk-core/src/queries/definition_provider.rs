@@ -196,10 +196,11 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
 ///
 /// The walk visits `receiver_class` first and then its superclass chain.
 /// Both class-body methods (`class.methods` / `class.class_methods`) and
-/// standalone Tonel-style definitions (`module.method_definitions`) are
-/// considered. Standalone methods are NOT registered in `ClassHierarchy`,
-/// so the MRO walk happens via [`ClassHierarchy::superclass_chain`] and
-/// candidate spans are harvested by walking each module's AST directly.
+/// Tonel-style standalone definitions (`module.method_definitions`) are
+/// considered. Tonel-style definitions live on the module, not on the
+/// `ClassDefinition`, so candidate spans are harvested by walking each
+/// module's AST directly; the MRO walk itself still uses
+/// [`ClassHierarchy::superclass_chain`] to produce the class ordering.
 ///
 /// # Complexity (BT-1943)
 ///
@@ -1477,6 +1478,88 @@ mod tests {
         assert!(
             loc.is_none(),
             "Parent has no `greet`; Sibling must not leak through the single-pass walk, got {loc:?}"
+        );
+    }
+
+    #[test]
+    fn find_overridden_class_side_methods_resolve_via_class_side_branch() {
+        // Locks the `class.class_methods` branch of
+        // `collect_method_definitions_in_module`: with `class_side: true`,
+        // the single-pass walk must look at class-side definitions only.
+        // An instance-side method with the same selector must NOT leak
+        // through (that would indicate the class-side filter is broken).
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source(
+            "Object subclass: Parent\n  class greet => 1\n  greet => 99\n\
+             Parent subclass: Child\n  class greet => 2",
+        );
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut index = ProjectIndex::new();
+        index.update_file(file.clone(), &hierarchy);
+
+        let receiver = ReceiverClassContext {
+            class_name: EcoString::from("Parent"),
+            class_side: true,
+        };
+        let loc = find_overridden_method_definition("greet", &receiver, &index, [(&file, &module)])
+            .expect("Parent has a class-side greet");
+        assert_eq!(loc.file, file);
+        // The returned span must point at a class-side method, not at the
+        // instance-side one with the same selector. Parent's class-side
+        // `greet` is authored before its instance-side `greet`, so its span
+        // should come first in the source. Assert explicitly that the
+        // returned span matches the class-side method's recorded span.
+        let parent = &module.classes[0];
+        let class_side_span = parent
+            .class_methods
+            .iter()
+            .find(|m| m.selector.name() == "greet")
+            .map(|m| m.span)
+            .expect("Parent has a class-side greet in the AST");
+        assert_eq!(
+            loc.span, class_side_span,
+            "class_side=true must return the class-side method span"
+        );
+    }
+
+    #[test]
+    fn find_overridden_standalone_tonel_method_resolves() {
+        // Locks the `module.method_definitions` branch of
+        // `collect_method_definitions_in_module`: Tonel-style
+        // `Parent >> greet => ...` lives on the module, not the class
+        // definition. The single-pass walk must harvest its span from
+        // `module.method_definitions` (not `class.methods`).
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source(
+            "Object subclass: Parent\n\
+             Parent subclass: Child\n\
+             Parent >> greet => 1\n\
+             Child >> greet => 2",
+        );
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut index = ProjectIndex::new();
+        index.update_file(file.clone(), &hierarchy);
+
+        let receiver = ReceiverClassContext {
+            class_name: EcoString::from("Parent"),
+            class_side: false,
+        };
+        let loc = find_overridden_method_definition("greet", &receiver, &index, [(&file, &module)])
+            .expect("Parent has a standalone greet");
+        assert_eq!(loc.file, file);
+        // The returned span must match the standalone-definition span
+        // (`smd.span`), not the inner `smd.method.span`, mirroring the
+        // behaviour of `find_method_in_module`.
+        let parent_standalone = module
+            .method_definitions
+            .iter()
+            .find(|smd| smd.class_name.name == "Parent" && smd.method.selector.name() == "greet")
+            .expect("Parent's standalone greet is in module.method_definitions");
+        assert_eq!(
+            loc.span, parent_standalone.span,
+            "standalone lookup must return smd.span, not smd.method.span"
         );
     }
 
