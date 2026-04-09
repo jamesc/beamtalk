@@ -73,13 +73,16 @@ impl CoreErlangGenerator {
             }
         };
 
-        // BT-1937: A class method self-send used as a binary operand produces
-        // an open let-chain that we must hoist out so the operator call ends
-        // up with valid Core Erlang AND class var mutations from the operand
-        // are visible to the enclosing method body.
-        let (left_preamble, left_code) = self.split_subexpr_for_preamble(left)?;
-        let (right_preamble, right_code) = self.split_subexpr_for_preamble(&arguments[0])?;
-        let preamble = Self::combine_preambles(left_preamble, right_preamble);
+        // BT-1937: Capture both operands in evaluation order. When either
+        // operand produces an open let-chain (e.g., a class method self-send
+        // mutating a class var), capture_subexpr_sequence force-hoists BOTH
+        // operands into a preamble so left-to-right evaluation order is
+        // preserved. When neither has an open scope, both operands stay
+        // inline and there is no hoisting overhead.
+        let exprs: [&Expression; 2] = [left, &arguments[0]];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "BinOp")?;
+        let right_code = docs.pop().expect("right operand");
+        let left_code = docs.pop().expect("left operand");
 
         let call_doc = docvec![
             format!("call 'erlang':'{erlang_op}'("),
@@ -105,10 +108,11 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-1937: Hoist open let-chains from class method self-send operands.
-        let (left_preamble, left_code) = self.split_subexpr_for_preamble(left)?;
-        let (right_preamble, right_code) = self.split_subexpr_for_preamble(right)?;
-        let preamble = Self::combine_preambles(left_preamble, right_preamble);
+        // BT-1937: Capture both operands preserving evaluation order.
+        let exprs: [&Expression; 2] = [left, right];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "PowOp")?;
+        let right_code = docs.pop().expect("right operand");
+        let left_code = docs.pop().expect("left operand");
         let call_doc = docvec![
             "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
             left_code,
@@ -138,12 +142,13 @@ impl CoreErlangGenerator {
         );
         let is_string = matches!(left, Expression::Literal(Literal::String(_), _));
 
-        // BT-1937: Hoist open let-chains from class method self-send operands
-        // so class var mutations propagate to the enclosing scope and the
-        // generated Core Erlang is well-formed.
-        let (left_preamble, left_code) = self.split_subexpr_for_preamble(left)?;
-        let (right_preamble, right_code) = self.split_subexpr_for_preamble(right)?;
-        let preamble = Self::combine_preambles(left_preamble, right_preamble);
+        // BT-1937: Capture both operands preserving evaluation order. When
+        // either operand has an open scope, BOTH are force-hoisted into the
+        // preamble so left-to-right evaluation order is preserved.
+        let exprs: [&Expression; 2] = [left, right];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ConcatOp")?;
+        let right_code = docs.pop().expect("right operand");
+        let left_code = docs.pop().expect("left operand");
 
         let call_doc = if is_list {
             // List concatenation: erlang:'++'

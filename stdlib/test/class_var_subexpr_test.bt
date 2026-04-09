@@ -86,3 +86,23 @@ TestCase subclass: ClassVarSubExprTest
   testConcatMutatesClassVar =>
     ClassVarSubExpr tickConcat
     self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1937 evaluation order: when arg1 is a plain class var read and arg2
+  // is a class method self-send that mutates the same class var, the read
+  // must observe the PRE-mutation value (left-to-right semantics) and the
+  // counter must end up incremented.
+  testReadThenTickPreservesEvalOrder =>
+    self assert: ClassVarSubExpr readThenTick equals: "0,1"
+
+  testReadThenTickMutatesClassVar =>
+    ClassVarSubExpr readThenTick
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // Inverse: arg1 mutates first, arg2 reads. The read must observe the
+  // POST-mutation value.
+  testTickThenReadPreservesEvalOrder =>
+    self assert: ClassVarSubExpr tickThenRead equals: "1,1"
+
+  testTickThenReadMutatesClassVar =>
+    ClassVarSubExpr tickThenRead
+    self assert: ClassVarSubExpr currentCounter equals: 1

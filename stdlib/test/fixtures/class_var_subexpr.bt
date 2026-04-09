@@ -47,6 +47,16 @@ Object subclass: ClassVarSubExpr
   // Class method self-send as the right-hand side of `++` (concat).
   class tickConcat => "n=" ++ (self tick) printString
 
+  // Evaluation-order test: read self.counter as the first argument and run
+  // a self-send that mutates counter as the second argument. The read must
+  // observe the PRE-mutation value (left-to-right semantics), and the
+  // counter must end mutated by the second argument.
+  class readThenTick => self combine: self.counter with: (self tick)
+
+  // Inverse: tick first, then read. The read must observe the POST-mutation
+  // value, and the counter must end mutated by the first argument.
+  class tickThenRead => self combine: (self tick) with: self.counter
+
   class currentCounter => self.counter
 
   class resetCounter => self.counter := 0

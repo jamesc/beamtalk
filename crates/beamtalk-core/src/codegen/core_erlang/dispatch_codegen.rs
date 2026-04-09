@@ -85,76 +85,101 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-1937: Argument list capture that **hoists** open let-chains from
-    /// sub-expression class method self-sends into a separate preamble document
-    /// instead of closing them inline.
+    /// BT-1937: Captures a sequence of sub-expressions, preserving left-to-right
+    /// evaluation order **even when only some sub-expressions produce open scopes**
+    /// from class method self-sends.
     ///
-    /// Returns `(preamble, args_doc)` where:
-    /// - `preamble` is the concatenation of any open let-chains produced by
-    ///   sub-expressions that mutated `ClassVarsN`. The caller MUST emit the
-    ///   preamble before the dispatch call so the `ClassVarsN` bindings stay in
-    ///   scope at the outer level. If no argument produced an open scope, the
-    ///   preamble is `Document::Nil`.
-    /// - `args_doc` is the comma-separated argument list, with hoisted args
-    ///   replaced by their result variable names.
+    /// Returns `(preamble, docs)` where `docs` is one document per input
+    /// expression in the same order. If no sub-expression produces an open
+    /// scope, the preamble is `Document::Nil` and each `doc` is the inline
+    /// expression document — there is no hoisting overhead in the common case.
     ///
-    /// Unlike [`capture_argument_list_doc`](Self::capture_argument_list_doc),
-    /// this helper does NOT roll back `class_var_version`. Subsequent code
-    /// (including the dispatch call itself, later arguments, and following
-    /// statements) will see the advanced version, so references to `ClassVars`
-    /// pick up the mutations performed by earlier arguments.
+    /// If at least one sub-expression produces an open scope, **every**
+    /// sub-expression is hoisted into the preamble in order:
+    /// - Sub-expressions with their own open scope contribute their existing
+    ///   let-chain (no rebinding — `result_var` is already in scope after the
+    ///   chain).
+    /// - Plain sub-expressions get a fresh `let _Var<i> = ... in ` binding.
     ///
-    /// Callers in class-method context should use
-    /// [`finalize_dispatch_with_preamble`](Self::finalize_dispatch_with_preamble)
-    /// to wrap their dispatch call when the returned preamble is non-empty.
+    /// This is the key to preserving evaluation order: without the unconditional
+    /// hoist, a hoisted later sub-expression would execute its preamble before
+    /// the inline earlier sub-expression in the call site — reversing the
+    /// observable order of side effects (BT-1937 review feedback).
+    ///
+    /// `class_var_version` is NOT rolled back. Subsequent code (the call,
+    /// later sub-expressions, following statements) will see the advanced
+    /// version, so references to `ClassVars` pick up earlier mutations.
+    pub(super) fn capture_subexpr_sequence(
+        &mut self,
+        exprs: &[&Expression],
+        prefix: &str,
+    ) -> Result<(Document<'static>, Vec<Document<'static>>)> {
+        // First pass: split each sub-expression into (its_preamble, its_doc).
+        let mut splits: Vec<(Document<'static>, Document<'static>)> =
+            Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            splits.push(self.split_subexpr_for_preamble(expr)?);
+        }
+
+        let any_open = splits.iter().any(|(p, _)| !matches!(p, Document::Nil));
+
+        if !any_open {
+            // Fast path: no hoisting needed. Inline all sub-expression docs.
+            let docs: Vec<_> = splits.into_iter().map(|(_, d)| d).collect();
+            return Ok((Document::Nil, docs));
+        }
+
+        // Hoist every sub-expression to preserve evaluation order.
+        // - Sub-expressions that already produced an open scope contribute
+        //   their existing chain (no rebinding).
+        // - Plain sub-expressions get a fresh let binding.
+        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
+        let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(exprs.len());
+        for (expr_preamble, expr_doc) in splits {
+            if matches!(expr_preamble, Document::Nil) {
+                let var = self.fresh_temp_var(prefix);
+                preamble_parts.push(docvec![
+                    "let ",
+                    Document::String(var.clone()),
+                    " = ",
+                    expr_doc,
+                    " in ",
+                ]);
+                var_docs.push(Document::String(var));
+            } else {
+                preamble_parts.push(expr_preamble);
+                var_docs.push(expr_doc);
+            }
+        }
+
+        Ok((Document::Vec(preamble_parts), var_docs))
+    }
+
+    /// BT-1937: Captures an argument list using
+    /// [`capture_subexpr_sequence`](Self::capture_subexpr_sequence) and joins
+    /// the resulting docs with commas. Convenience wrapper for the common
+    /// "no receiver, just args" pattern.
+    ///
+    /// Returns `(preamble, args_doc)` where `args_doc` is comma-separated.
     pub(super) fn capture_args_with_preamble(
         &mut self,
         arguments: &[Expression],
     ) -> Result<(Document<'static>, Document<'static>)> {
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
-        let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() * 2);
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                arg_parts.push(Document::Str(", "));
-            }
-            let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-            if let Some(result_var) = open_scope {
-                // Hoist the open let-chain into the preamble. The argument in
-                // the call site becomes just the result variable. Note that
-                // class_var_version is intentionally NOT rolled back — the
-                // ClassVarsN binding produced by the open chain remains in
-                // scope at the outer level (where the preamble will be
-                // emitted), so later args and the call itself can reference
-                // the new ClassVarsN.
-                preamble_parts.push(doc);
-                arg_parts.push(Document::String(result_var));
-            } else {
-                arg_parts.push(doc);
-            }
-        }
-        let preamble = if preamble_parts.is_empty() {
-            Document::Nil
-        } else {
-            Document::Vec(preamble_parts)
-        };
-        Ok((preamble, Document::Vec(arg_parts)))
+        let exprs: Vec<&Expression> = arguments.iter().collect();
+        let (preamble, var_docs) = self.capture_subexpr_sequence(&exprs, "Arg")?;
+        Ok((preamble, Self::join_docs_with_commas(var_docs)))
     }
 
-    /// BT-1937: Concatenates two hoisted preambles, treating `Document::Nil`
-    /// as empty. Order is preserved: `first` is emitted before `second`, which
-    /// matches the natural evaluation order of "receiver before arguments".
-    pub(super) fn combine_preambles(
-        first: Document<'static>,
-        second: Document<'static>,
-    ) -> Document<'static> {
-        let first_empty = matches!(first, Document::Nil);
-        let second_empty = matches!(second, Document::Nil);
-        match (first_empty, second_empty) {
-            (true, true) => Document::Nil,
-            (true, false) => second,
-            (false, true) => first,
-            (false, false) => Document::Vec(vec![first, second]),
+    /// BT-1937: Joins a list of documents into a comma-separated `Document::Vec`.
+    fn join_docs_with_commas(docs: Vec<Document<'static>>) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2);
+        for (i, doc) in docs.into_iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(doc);
         }
+        Document::Vec(parts)
     }
 
     /// BT-1937: Splits a sub-expression into a hoisted preamble and the
@@ -168,7 +193,7 @@ impl CoreErlangGenerator {
     /// the `ClassVarsN` binding remains in scope at the outer level so
     /// subsequent code (later args, the enclosing call, following statements)
     /// can reference the new version.
-    pub(super) fn split_subexpr_for_preamble(
+    fn split_subexpr_for_preamble(
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
@@ -430,15 +455,19 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
-        // BT-1937: Hoist open let-chains from sub-expression class method
-        // self-sends in the receiver and arguments into a preamble emitted
-        // before the cast call. Class var version is NOT rolled back, so
-        // ClassVarsN bindings produced by the receiver/args remain in scope
-        // at the outer level when finalize_dispatch_with_preamble propagates
-        // the open scope upward via last_open_scope_result.
-        let (receiver_preamble, actual_receiver) = self.split_subexpr_for_preamble(receiver)?;
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
-        let preamble = Self::combine_preambles(receiver_preamble, args_preamble);
+        // BT-1937: Capture receiver + args as one ordered sub-expression
+        // sequence so left-to-right evaluation order is preserved when ANY
+        // sub-expression has an open scope from a class method self-send.
+        // capture_subexpr_sequence force-hoists every sub-expression in that
+        // case; the fast path (no open scopes) leaves them inline.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
+        all_exprs.push(receiver);
+        for arg in arguments {
+            all_exprs.push(arg);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Cast")?;
+        let actual_receiver = docs.remove(0);
+        let args_doc = Self::join_docs_with_commas(docs);
 
         let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'cast'(",
@@ -486,15 +515,16 @@ impl CoreErlangGenerator {
             );
         }
 
-        // BT-1937: Hoist open let-chains from sub-expression class method
-        // self-sends in the receiver and arguments into a preamble emitted
-        // before the dispatch call. Class var version is NOT rolled back, so
-        // ClassVarsN bindings produced by the receiver/args remain in scope
-        // at the outer level when finalize_dispatch_with_preamble propagates
-        // the open scope upward via last_open_scope_result.
-        let (receiver_preamble, actual_receiver) = self.split_subexpr_for_preamble(receiver)?;
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
-        let preamble = Self::combine_preambles(receiver_preamble, args_preamble);
+        // BT-1937: Capture receiver + args as one ordered sub-expression
+        // sequence so left-to-right evaluation order is preserved.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
+        all_exprs.push(receiver);
+        for arg in arguments {
+            all_exprs.push(arg);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Disp")?;
+        let actual_receiver = docs.remove(0);
+        let args_doc = Self::join_docs_with_commas(docs);
 
         let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
@@ -1748,19 +1778,18 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        // BT-1937: Hoist open let-chains from sub-expression class method
-        // self-sends in the receiver and the argument into a preamble. The
-        // preamble is emitted before the resolve call so the ClassVarsN
-        // bindings stay in scope at the outer level.
-        let (receiver_preamble, actual_receiver) = self.split_subexpr_for_preamble(receiver)?;
-        let (arg_preamble, args_doc) = self.capture_args_with_preamble(&arguments[..1])?;
-        let preamble = Self::combine_preambles(receiver_preamble, arg_preamble);
+        // BT-1937: Capture receiver + arg as one ordered sequence so
+        // left-to-right evaluation order is preserved.
+        let exprs: [&Expression; 2] = [receiver, &arguments[0]];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "Lookup")?;
+        let arg_doc = docs.pop().expect("arg");
+        let actual_receiver = docs.pop().expect("receiver");
 
         let call_doc = docvec![
             "call 'beamtalk_method_resolver':'resolve'(",
             actual_receiver,
             ", ",
-            args_doc,
+            arg_doc,
             ")"
         ];
         Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "MethodLookup"))

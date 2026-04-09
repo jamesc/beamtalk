@@ -288,40 +288,31 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("~{}~"));
         }
 
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
-        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        // BT-1937: Capture all keys and values as one ordered sequence so
+        // capture_subexpr_sequence can force-hoist every sub-expression in
+        // left-to-right order when ANY of them produces an open scope.
+        // Preserves the source-order semantics: key1, val1, key2, val2, ...
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(pairs.len() * 2);
+        for pair in pairs {
+            all_exprs.push(&pair.key);
+            all_exprs.push(&pair.value);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "MapLit")?;
 
-        for (i, pair) in pairs.iter().enumerate() {
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        let mut docs_iter = docs.drain(..);
+        for (i, _pair) in pairs.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-
-            // BT-1937: Hoist open let-chains from sub-expression class method
-            // self-sends so class var mutations propagate to the enclosing
-            // scope. The literal itself is closed by
-            // finalize_dispatch_with_preamble below.
-            let (key_preamble, key_doc) = self.split_subexpr_for_preamble(&pair.key)?;
-            if !matches!(key_preamble, Document::Nil) {
-                preamble_parts.push(key_preamble);
-            }
+            let key_doc = docs_iter.next().expect("key doc");
+            let val_doc = docs_iter.next().expect("value doc");
             parts.push(key_doc);
-
             parts.push(Document::Str(" => "));
-
-            let (val_preamble, val_doc) = self.split_subexpr_for_preamble(&pair.value)?;
-            if !matches!(val_preamble, Document::Nil) {
-                preamble_parts.push(val_preamble);
-            }
             parts.push(val_doc);
         }
-
         parts.push(Document::Str(" }~"));
         let literal_doc = Document::Vec(parts);
-        let preamble = if preamble_parts.is_empty() {
-            Document::Nil
-        } else {
-            Document::Vec(preamble_parts)
-        };
         Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "MapLit"))
     }
 
@@ -333,36 +324,34 @@ impl CoreErlangGenerator {
         elements: &[Expression],
         tail: Option<&Expression>,
     ) -> Result<Document<'static>> {
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
+        // BT-1937: Capture all elements + optional tail as one ordered
+        // sequence so evaluation order is preserved when sub-expressions have
+        // open scopes.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(elements.len() + 1);
+        for elem in elements {
+            all_exprs.push(elem);
+        }
+        if let Some(t) = tail {
+            all_exprs.push(t);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "ListLit")?;
+
         let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
-        for (i, elem) in elements.iter().enumerate() {
+        let mut docs_iter = docs.drain(..);
+        for i in 0..elements.len() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            // BT-1937: Hoist preambles from class method self-send sub-expressions.
-            let (elem_preamble, elem_doc) = self.split_subexpr_for_preamble(elem)?;
-            if !matches!(elem_preamble, Document::Nil) {
-                preamble_parts.push(elem_preamble);
-            }
-            parts.push(elem_doc);
+            parts.push(docs_iter.next().expect("element doc"));
         }
-        if let Some(t) = tail {
+        if tail.is_some() {
             if !elements.is_empty() {
                 parts.push(Document::Str(" | "));
             }
-            let (tail_preamble, tail_doc) = self.split_subexpr_for_preamble(t)?;
-            if !matches!(tail_preamble, Document::Nil) {
-                preamble_parts.push(tail_preamble);
-            }
-            parts.push(tail_doc);
+            parts.push(docs_iter.next().expect("tail doc"));
         }
         parts.push(Document::Str("]"));
         let literal_doc = Document::Vec(parts);
-        let preamble = if preamble_parts.is_empty() {
-            Document::Nil
-        } else {
-            Document::Vec(preamble_parts)
-        };
         Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ListLit"))
     }
 
@@ -376,27 +365,22 @@ impl CoreErlangGenerator {
         &mut self,
         elements: &[Expression],
     ) -> Result<Document<'static>> {
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
+        // BT-1937: Capture all elements as one ordered sequence so evaluation
+        // order is preserved when sub-expressions have open scopes.
+        let exprs: Vec<&Expression> = elements.iter().collect();
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ArrLit")?;
+
         let mut parts: Vec<Document<'static>> =
             vec![Document::Str("call 'beamtalk_array':'from_list'([")];
-        for (i, elem) in elements.iter().enumerate() {
+        let mut docs_iter = docs.drain(..);
+        for i in 0..elements.len() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            // BT-1937: Hoist preambles from class method self-send sub-expressions.
-            let (elem_preamble, elem_doc) = self.split_subexpr_for_preamble(elem)?;
-            if !matches!(elem_preamble, Document::Nil) {
-                preamble_parts.push(elem_preamble);
-            }
-            parts.push(elem_doc);
+            parts.push(docs_iter.next().expect("element doc"));
         }
         parts.push(Document::Str("])"));
         let literal_doc = Document::Vec(parts);
-        let preamble = if preamble_parts.is_empty() {
-            Document::Nil
-        } else {
-            Document::Vec(preamble_parts)
-        };
         Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ArrLit"))
     }
 
