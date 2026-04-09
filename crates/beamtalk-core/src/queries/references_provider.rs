@@ -31,8 +31,8 @@
 //! - LSP specification: Language Server Protocol textDocument/references
 
 use crate::ast::{
-    ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, ProtocolDefinition,
-    ProtocolMethodSignature, StateDeclaration, TypeAnnotation, TypeParamDecl,
+    ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
+    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation, TypeParamDecl,
 };
 use crate::language_service::Location;
 use crate::source_analysis::Span;
@@ -338,6 +338,9 @@ fn collect_class_refs(
         Expression::Match { value, arms, .. } => {
             collect_class_refs(value, class_name, file_path, results);
             for arm in arms {
+                // BT-1940: walk arm patterns so constructor pattern class names
+                // (e.g. `Result` in `Result ok: v`) are reported as references.
+                collect_pattern_class_refs(&arm.pattern, class_name, file_path, results);
                 if let Some(guard) = &arm.guard {
                     collect_class_refs(guard, class_name, file_path, results);
                 }
@@ -366,6 +369,65 @@ fn collect_class_refs(
             }
         }
         _ => {}
+    }
+}
+
+/// Recursively collect class name references inside a destructuring pattern. (BT-1940)
+///
+/// Only `Pattern::Constructor` carries a class identifier (`Result` in
+/// `Result ok: v`). All other variants just host nested patterns, which we walk
+/// so a constructor nested inside a tuple, list, array, map, or binary pattern
+/// is still reported. Mirrors `find_identifier_in_pattern` in `language_service::mod`
+/// so goto-definition and find-references see the same set of sites.
+fn collect_pattern_class_refs(
+    pattern: &Pattern,
+    class_name: &str,
+    file_path: &Utf8PathBuf,
+    results: &mut Vec<Location>,
+) {
+    match pattern {
+        Pattern::Constructor {
+            class, keywords, ..
+        } => {
+            if class.name == class_name {
+                results.push(Location::new(file_path.clone(), class.span));
+            }
+            for (_, nested) in keywords {
+                collect_pattern_class_refs(nested, class_name, file_path, results);
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                collect_pattern_class_refs(element, class_name, file_path, results);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                collect_pattern_class_refs(element, class_name, file_path, results);
+            }
+            if let Some(rest_pat) = rest {
+                collect_pattern_class_refs(rest_pat, class_name, file_path, results);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                collect_pattern_class_refs(element, class_name, file_path, results);
+            }
+            if let Some(tail_pat) = tail {
+                collect_pattern_class_refs(tail_pat, class_name, file_path, results);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_pattern_class_refs(&pair.value, class_name, file_path, results);
+            }
+        }
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                collect_pattern_class_refs(&segment.value, class_name, file_path, results);
+            }
+        }
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) => {}
     }
 }
 
@@ -864,5 +926,66 @@ mod tests {
         let refs = find_class_references("Printable", [(&file, &module)]);
         // Expect: Printable definition + parameter type + return type in Renderable.
         assert_eq!(refs.len(), 3, "expected 3 refs, got {refs:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-1940: Constructor patterns in match arms must report the class name
+    // as a reference. Prior to this fix, `find_class_references` walked the
+    // arm body and guard but not the pattern, so `Result ok: v -> v` was
+    // invisible to find-references on `Result`.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn find_class_references_in_constructor_pattern() {
+        let file = Utf8PathBuf::from("classify.bt");
+        let module = parse_source(
+            "Value subclass: Result\n  ok: v\n  error: e\n\n\
+             Object subclass: Classifier\n  \
+             classify: r => r match: [\n    \
+             Result ok: v -> v;\n    \
+             Result error: _ -> 0\n  ]\n",
+        );
+
+        let refs = find_class_references("Result", [(&file, &module)]);
+        // Expect: class definition + two constructor pattern sites.
+        // The method body does not reference `Result` as an expression.
+        assert_eq!(refs.len(), 3, "expected 3 refs, got {refs:?}");
+        // First ref is the class definition.
+        assert!(refs.iter().any(|r| r.span == module.classes[0].name.span));
+    }
+
+    #[test]
+    fn find_class_references_constructor_pattern_plus_expression() {
+        let file = Utf8PathBuf::from("flow.bt");
+        let module = parse_source(
+            "Value subclass: Result\n  ok: v\n  error: e\n\n\
+             Object subclass: Flow\n  \
+             run => (Result ok: 1) match: [\n    \
+             Result ok: v -> v;\n    \
+             Result error: _ -> 0\n  ]\n",
+        );
+
+        let refs = find_class_references("Result", [(&file, &module)]);
+        // Expect: class definition + expression-site `Result ok: 1`
+        // + two constructor pattern sites.
+        assert_eq!(refs.len(), 4, "expected 4 refs, got {refs:?}");
+    }
+
+    #[test]
+    fn find_class_references_constructor_pattern_with_guard() {
+        let file = Utf8PathBuf::from("guarded.bt");
+        let module = parse_source(
+            "Value subclass: Result\n  ok: v\n  error: e\n\n\
+             Object subclass: Guarded\n  \
+             run: r => r match: [\n    \
+             Result ok: v when: v > 0 -> v;\n    \
+             Result ok: _ -> 0;\n    \
+             Result error: _ -> -1\n  ]\n",
+        );
+
+        let refs = find_class_references("Result", [(&file, &module)]);
+        // Expect: class definition + three constructor pattern sites
+        // (one with a guard, two without).
+        assert_eq!(refs.len(), 4, "expected 4 refs, got {refs:?}");
     }
 }
