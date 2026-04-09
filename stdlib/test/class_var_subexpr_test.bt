@@ -106,3 +106,91 @@ TestCase subclass: ClassVarSubExprTest
   testTickThenReadMutatesClassVar =>
     ClassVarSubExpr tickThenRead
     self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1942: `(self tick) class` — ProtoObject `class` intrinsic with an
+  // open-scope receiver. The counter must increment and the result must be
+  // the class of the Integer returned by `tick`.
+  testTickClassMutatesClassVar =>
+    ClassVarSubExpr tickClass
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1942: `(self tick) isNil` / `notNil` — nil protocol intrinsics.
+  testTickIsNilMutatesClassVar =>
+    ClassVarSubExpr tickIsNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickIsNilReturnsFalse =>
+    self assert: ClassVarSubExpr tickIsNil equals: false
+
+  testTickNotNilMutatesClassVar =>
+    ClassVarSubExpr tickNotNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickNotNilReturnsTrue =>
+    self assert: ClassVarSubExpr tickNotNil equals: true
+
+  // BT-1942: `(self tick) ifNil:` / `ifNotNil:` — nil conditionals. The
+  // counter must increment regardless of which branch runs.
+  testTickIfNilMutatesClassVar =>
+    ClassVarSubExpr tickIfNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickIfNotNilMutatesClassVar =>
+    ClassVarSubExpr tickIfNotNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickIfNotNilReturnsPrintString =>
+    self assert: ClassVarSubExpr tickIfNotNil equals: "1"
+
+  // BT-1942: two-way nil conditionals.
+  testTickIfNilIfNotNilMutatesClassVar =>
+    ClassVarSubExpr tickIfNilIfNotNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickIfNotNilIfNilMutatesClassVar =>
+    ClassVarSubExpr tickIfNotNilIfNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1942: `(self tick) yourself` / `hash` — object identity intrinsics.
+  testTickYourselfMutatesClassVar =>
+    ClassVarSubExpr tickYourself
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickYourselfReturnsTickResult =>
+    self assert: ClassVarSubExpr tickYourself equals: 1
+
+  testTickHashMutatesClassVar =>
+    ClassVarSubExpr tickHash
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1942: `(self tick) respondsTo:` — object reflection intrinsic.
+  testTickRespondsToMutatesClassVar =>
+    ClassVarSubExpr tickRespondsTo
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickRespondsToReturnsTrue =>
+    self assert: ClassVarSubExpr tickRespondsTo equals: true
+
+  // BT-1942: `someBlock value: (self tick)` — value keyword guard on a
+  // non-block-literal receiver. Must compile AND increment the counter.
+  testTickAsBlockValueArgMutatesClassVar =>
+    ClassVarSubExpr tickAsBlockValueArg
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1942: `Logger info: <arg with (self tick)>` — logger intrinsic.
+  // The counter must mutate even though Logger returns nil.
+  testTickAsLoggerArgMutatesClassVar =>
+    ClassVarSubExpr tickAsLoggerArg
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1942: `(self tick) > 0 ifTrue: [...]` inside a loop body —
+  // exercises `generate_if_true_with_mutations` with an open-scope
+  // receiver from BT-1937's binary op hoisting. Before this fix the
+  // generated Core Erlang was malformed (the open let-chain was embedded
+  // inside `let _Cond = ... in case`); the test runs the method to
+  // confirm compilation + execution succeed. The class var mutation
+  // observed by the enclosing method is a separate concern (class vars
+  // don't thread through `to:do:` loops — pre-existing limitation).
+  testTickInLoopConditionalCompilesAndRuns =>
+    result := ClassVarSubExpr tickInLoopConditional
+    self assert: result notNil

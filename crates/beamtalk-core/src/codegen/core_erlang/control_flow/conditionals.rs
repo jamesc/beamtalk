@@ -59,18 +59,29 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
+        // BT-1942: The receiver may be a class method self-send (or sub-expression
+        // containing one) whose class var mutations are emitted as an open
+        // let-chain. Split the open chain into a preamble (the let-chain) and
+        // the value doc (the result variable). The preamble is emitted BEFORE
+        // the case binding so ClassVarsN stays in scope inside the case.
+        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
+            (cond_chain, Document::String(result_var))
+        } else {
+            (Document::Nil, cond_chain)
+        };
         let cond_var = self.fresh_temp_var("Cond");
-        let cond_doc = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
         let (branch_doc, _) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
 
         Ok(docvec![
+            cond_preamble,
             "let ",
             Document::String(cond_var.clone()),
             " = ",
-            cond_doc,
+            cond_val_doc,
             " in case ",
             Document::String(cond_var),
             " of <'true'> when 'true' -> let StateAcc = ",
@@ -94,18 +105,25 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
+        // BT-1942: Split open let-chain from class method self-send sub-expressions.
+        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
+            (cond_chain, Document::String(result_var))
+        } else {
+            (Document::Nil, cond_chain)
+        };
         let cond_var = self.fresh_temp_var("Cond");
-        let cond_doc = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
         let (branch_doc, _) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
 
         Ok(docvec![
+            cond_preamble,
             "let ",
             Document::String(cond_var.clone()),
             " = ",
-            cond_doc,
+            cond_val_doc,
             " in case ",
             Document::String(cond_var),
             " of <'true'> when 'true' -> {'nil', ",
@@ -128,8 +146,14 @@ impl CoreErlangGenerator {
         true_block: &Block,
         false_block: &Block,
     ) -> Result<Document<'static>> {
+        // BT-1942: Split open let-chain from class method self-send sub-expressions.
+        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
+            (cond_chain, Document::String(result_var))
+        } else {
+            (Document::Nil, cond_chain)
+        };
         let cond_var = self.fresh_temp_var("Cond");
-        let cond_doc = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
         // True branch
@@ -141,10 +165,11 @@ impl CoreErlangGenerator {
             self.with_branch_context(|this| this.generate_conditional_branch_inline(false_block))?;
 
         Ok(docvec![
+            cond_preamble,
             "let ",
             Document::String(cond_var.clone()),
             " = ",
-            cond_doc,
+            cond_val_doc,
             " in case ",
             Document::String(cond_var),
             " of <'true'> when 'true' -> let StateAcc = ",
@@ -173,8 +198,14 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
+        // BT-1942: Split open let-chain from class method self-send sub-expressions.
+        let (recv_chain, recv_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        let (recv_preamble, recv_val_doc) = if let Some(result_var) = recv_open_scope {
+            (recv_chain, Document::String(result_var))
+        } else {
+            (Document::Nil, recv_chain)
+        };
         let obj_var = self.fresh_temp_var("Obj");
-        let recv_code = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
         let (branch_doc, _) = self.with_branch_context(|this| {
@@ -190,10 +221,11 @@ impl CoreErlangGenerator {
         })?;
 
         Ok(docvec![
+            recv_preamble,
             "let ",
             Document::String(obj_var.clone()),
             " = ",
-            recv_code,
+            recv_val_doc,
             " in case ",
             Document::String(obj_var),
             " of <'nil'> when 'true' -> {'nil', ",

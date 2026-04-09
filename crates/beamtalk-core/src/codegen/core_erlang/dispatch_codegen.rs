@@ -170,6 +170,62 @@ impl CoreErlangGenerator {
         Ok((preamble, Self::join_docs_with_commas(var_docs)))
     }
 
+    /// BT-1942: Binds every argument expression to a fresh temp var via a
+    /// preamble, returning `(preamble, arg_refs, any_open_scope)`.
+    ///
+    /// Use this when an argument list is referenced multiple times in the
+    /// generated code (e.g., both branches of an inline `case ... of`),
+    /// to avoid double-evaluating side-effecting arguments and to hoist any
+    /// open let-chain produced by class method self-sends.
+    ///
+    /// Unlike [`capture_args_with_preamble`](Self::capture_args_with_preamble),
+    /// this always emits let-bindings in the preamble (even in the fast path
+    /// with no open scopes) so the returned `arg_refs` are pure variable
+    /// references with no side effects.
+    ///
+    /// `any_open_scope` is `true` if any argument produced an open let-chain
+    /// from a class method self-send — the caller should then propagate the
+    /// scope upward via `last_open_scope_result`.
+    pub(super) fn bind_args_to_temps(
+        &mut self,
+        arguments: &[Expression],
+        prefix: &str,
+    ) -> Result<(Document<'static>, Vec<Document<'static>>, bool)> {
+        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
+        let mut arg_refs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut any_open_scope = false;
+        for arg in arguments {
+            let (arg_doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
+            let arg_var = self.fresh_temp_var(prefix);
+            if let Some(result_var) = open_scope {
+                any_open_scope = true;
+                preamble_parts.push(arg_doc);
+                preamble_parts.push(docvec![
+                    "let ",
+                    Document::String(arg_var.clone()),
+                    " = ",
+                    Document::String(result_var),
+                    " in ",
+                ]);
+            } else {
+                preamble_parts.push(docvec![
+                    "let ",
+                    Document::String(arg_var.clone()),
+                    " = ",
+                    arg_doc,
+                    " in ",
+                ]);
+            }
+            arg_refs.push(Document::String(arg_var));
+        }
+        let preamble = if preamble_parts.is_empty() {
+            Document::Nil
+        } else {
+            Document::Vec(preamble_parts)
+        };
+        Ok((preamble, arg_refs, any_open_scope))
+    }
+
     /// BT-1937: Joins a list of documents into a comma-separated `Document::Vec`.
     fn join_docs_with_commas(docs: Vec<Document<'static>>) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2);
@@ -1825,7 +1881,15 @@ impl CoreErlangGenerator {
         let instance_selector = super::selector_mangler::safe_atom_name(&raw);
         let binding_val_var = self.fresh_var("BindingVal");
         let state_var = self.current_state_var();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        // BT-1942: Always bind arguments to temp vars BEFORE the case expression,
+        // so they are evaluated exactly once and the temp var refs can be reused
+        // in both case branches (fixing a pre-existing double-evaluation bug when
+        // args have side effects). Also hoists any open let-chain from class
+        // method self-sends so mutations propagate to the surrounding scope.
+        let (arg_preamble, arg_refs, any_open_scope) =
+            self.bind_args_to_temps(arguments, "BindArg")?;
+        let args_doc = Self::join_docs_with_commas(arg_refs);
 
         // BT-1639: Build the class-side fallback: direct call or gen_server
         let class_fallback: Document<'static> =
@@ -1850,7 +1914,7 @@ impl CoreErlangGenerator {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
 
-        let doc = docvec![
+        let case_doc = docvec![
             Document::String(format!(
                 "case call 'maps':'find'('{class_name}', {state_var}) of "
             )),
@@ -1865,7 +1929,22 @@ impl CoreErlangGenerator {
             " end"
         ];
 
-        Ok(doc)
+        // BT-1942: Propagate open scope upward if any arg mutated class vars.
+        if any_open_scope {
+            let result_var = self.fresh_temp_var("BindClassRes");
+            let doc = docvec![
+                arg_preamble,
+                "let ",
+                Document::String(result_var.clone()),
+                " = ",
+                case_doc,
+                " in ",
+            ];
+            self.last_open_scope_result = Some(result_var);
+            Ok(doc)
+        } else {
+            Ok(docvec![arg_preamble, case_doc])
+        }
     }
 
     /// Generates workspace-mode class send for actor/value-type methods.
@@ -1897,9 +1976,14 @@ impl CoreErlangGenerator {
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
-        let args_doc = self.capture_argument_list_doc(arguments)?;
+        // BT-1942: Bind args to temp vars before the case so they are evaluated
+        // once; also hoist any open let-chain from class method self-sends so
+        // class var mutations propagate upward.
+        let (arg_preamble, arg_refs, any_open_scope) =
+            self.bind_args_to_temps(arguments, "WsArg")?;
+        let args_doc = Self::join_docs_with_commas(arg_refs);
 
-        let doc = docvec![
+        let case_doc = docvec![
             Document::String(format!(
                 "case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "
             )),
@@ -1912,7 +1996,21 @@ impl CoreErlangGenerator {
             "]) end"
         ];
 
-        Ok(doc)
+        if any_open_scope {
+            let result_var = self.fresh_temp_var("WsClassRes");
+            let doc = docvec![
+                arg_preamble,
+                "let ",
+                Document::String(result_var.clone()),
+                " = ",
+                case_doc,
+                " in ",
+            ];
+            self.last_open_scope_result = Some(result_var);
+            Ok(doc)
+        } else {
+            Ok(docvec![arg_preamble, case_doc])
+        }
     }
 
     /// Generates a class-level method call (BT-215).

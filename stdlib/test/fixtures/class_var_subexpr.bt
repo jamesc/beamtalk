@@ -60,3 +60,59 @@ Object subclass: ClassVarSubExpr
   class currentCounter => self.counter
 
   class resetCounter => self.counter := 0
+
+  // BT-1942: `(self tick) class` — class method self-send as receiver of a
+  // ProtoObject intrinsic. Before the fix this produced malformed Core Erlang
+  // because `class` inlined the receiver inside a `let _Obj = <open> in ...`.
+  class tickClass => (self tick) class
+
+  // BT-1942: `(self tick) isNil` / `notNil` — nil protocol intrinsics.
+  class tickIsNil => (self tick) isNil
+
+  class tickNotNil => (self tick) notNil
+
+  // BT-1942: `(self tick) ifNil: [...]` / `ifNotNil: [...]` — nil conditional
+  // intrinsics. Both should compile AND tick the counter once.
+  class tickIfNil => (self tick) ifNil: ["was nil"]
+
+  class tickIfNotNil => (self tick) ifNotNil: [:v | v printString]
+
+  // BT-1942: `(self tick) ifNil:ifNotNil:` / `ifNotNil:ifNil:` — two-way nil
+  // conditionals.
+  class tickIfNilIfNotNil =>
+    (self tick) ifNil: ["nil"] ifNotNil: [:v | v printString]
+
+  class tickIfNotNilIfNil =>
+    (self tick) ifNotNil: [:v | v printString] ifNil: ["nil"]
+
+  // BT-1942: `(self tick) yourself` / `hash` — object identity intrinsics.
+  class tickYourself => (self tick) yourself
+
+  class tickHash => (self tick) hash
+
+  // BT-1942: `(self tick) respondsTo: #foo` — object reflection.
+  class tickRespondsTo => (self tick) respondsTo: #printString
+
+  // BT-1942: `someBlock value: (self tick)` — value keyword guard on a
+  // non-block receiver (identity block that returns its argument).
+  class tickAsBlockValueArg =>
+    identity := [:x | x printString]
+    identity value: (self tick)
+
+  // BT-1942: `Logger info: (self tick)` — logger intrinsic. Logger returns
+  // nil but the class var must still be mutated.
+  class tickAsLoggerArg =>
+    Logger info: (self tick) printString
+    self.counter
+
+  // BT-1942: `(self tick) > 0 ifTrue: [...]` inside a loop body —
+  // exercises `generate_if_true_with_mutations` receiver path. Running in
+  // a `to:do:` loop sets `in_loop_body`, and the local write inside the
+  // `ifTrue:` block triggers the mutation-threaded conditional codegen.
+  // The binary op receiver `(self tick) > 0` carries the open let-chain
+  // from BT-1937 through to the conditional, which must split the chain
+  // into a preamble so ClassVarsN stays in scope for the case binding.
+  class tickInLoopConditional =>
+    hits := 0
+    1 to: 1 do: [:i | (self tick) > 0 ifTrue: [hits := hits + 1]]
+    hits
