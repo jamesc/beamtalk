@@ -287,12 +287,41 @@ impl SimpleLanguageService {
     /// Checks whether `offset` lies on the selector of a method definition
     /// header.
     ///
-    /// For keyword selectors we have precise per-keyword spans and only accept
-    /// offsets that fall within one of those keyword parts. For unary and
-    /// binary selectors, `MessageSelector` does not carry a span, so we use
-    /// the coarser rule "inside `method.span`, but before any parameter,
-    /// return type, or body element". This still rejects clicks on parameter
-    /// names, type annotations, and body expressions, which is what matters.
+    /// # Precision contract
+    ///
+    /// For keyword selectors we have precise per-keyword spans and only
+    /// accept offsets that fall within one of those keyword parts.
+    ///
+    /// For unary and binary selectors, `MessageSelector` does not carry a
+    /// span for the selector token itself, so we use the coarser rule
+    /// "inside `method.span`, but before any parameter, return type, or
+    /// body element".
+    ///
+    /// **What this rule guarantees (the precision that matters):**
+    /// - Clicks on parameter names are rejected.
+    /// - Clicks on parameter type annotations are rejected.
+    /// - Clicks on return type annotations are rejected.
+    /// - Clicks on body expressions are rejected.
+    ///
+    /// **What this rule is deliberately permissive about:**
+    /// - Clicks on `sealed` / `internal` / `class` modifiers at the start
+    ///   of the header match. `method.span.start()` is captured before
+    ///   modifiers are consumed, so they're inside the header window.
+    /// - Clicks on `->` punctuation between the selector and a return type
+    ///   match, because `->` is neither in `method.span` outside the header
+    ///   nor inside the return type annotation span.
+    /// - Clicks on whitespace inside the header window match.
+    ///
+    /// In all of those cases the answer to *Find All References on this
+    /// method* is still this method's reference set, so the extra
+    /// permissiveness is harmless UX — not a wrong answer.
+    ///
+    /// A tighter rule would require either adding a `selector_span` field
+    /// to `MethodDefinition` (cascading into ~70 construction sites across
+    /// parser, codegen, and test fixtures) or lexing the header from file
+    /// source. Neither is justified by the UX gain today; rename refactoring
+    /// or semantic tokens for selectors would be the natural moment to add
+    /// precise spans.
     fn offset_in_method_header_selector(method: &MethodDefinition, offset: u32) -> bool {
         if offset < method.span.start() || offset >= method.span.end() {
             return false;
