@@ -51,11 +51,12 @@ pub fn find_definition_in_module(module: &Module, name: &str) -> Option<Span> {
 /// Resolution order:
 /// 1. Local variable assignment in `current_file`
 /// 2. Class definition matching the identifier name in any indexed file
-/// 3. Protocol definition matching the identifier name in any indexed file
-///
-/// Class definitions take precedence over protocol definitions on name
-/// collision, matching the precedence rule enforced by
-/// `ClassHierarchy::register_protocol_classes` (BT-1933).
+/// 3. Protocol definition matching the identifier name in any indexed file —
+///    but *only* when the hierarchy marks the name as a synthetic protocol
+///    class entry (BT-1933). This prevents a preindexed real class (from
+///    `with_stdlib` / `with_project_index`) from being shadowed by an open
+///    protocol with the same name when the real class source file isn't
+///    present in `files`.
 ///
 /// The `files` parameter provides access to parsed modules for all indexed files.
 #[must_use]
@@ -74,9 +75,10 @@ pub fn find_definition_cross_file<'a>(
     // 2. Class or protocol definition in the project index.
     //
     // BT-1933 registers protocol names as synthetic class entries, so
-    // `has_class` returns true for both. We walk the indexed files once,
-    // recording the first matching class and protocol we see, then return
-    // the class (if any) so real classes take precedence over protocols.
+    // `has_class` returns true for both. We walk the indexed files once
+    // looking for a real class declaration — that wins unconditionally.
+    // Otherwise, fall back to a protocol match only when the hierarchy
+    // explicitly marks the name as a protocol class (`is_protocol_class`).
     //
     // Built-in/stdlib classes can still have source files (e.g. stdlib/src/*.bt),
     // so we always search indexed files for a concrete declaration span.
@@ -97,8 +99,15 @@ pub fn find_definition_cross_file<'a>(
                 }
             }
         }
+        // Only return the protocol fallback when the hierarchy definitively
+        // knows this name as a protocol. Otherwise, the hierarchy entry refers
+        // to a real class whose source isn't open; returning None keeps the
+        // behaviour consistent with class-only lookup (stdlib classes with no
+        // open source file already return None).
         if let Some(location) = protocol_match {
-            return Some(location);
+            if project_index.hierarchy().is_protocol_class(name) {
+                return Some(location);
+            }
         }
     }
 
@@ -1177,5 +1186,46 @@ mod tests {
         let loc =
             find_definition_cross_file("Nonexistent", &file, &module, &index, [(&file, &module)]);
         assert!(loc.is_none());
+    }
+
+    #[test]
+    fn goto_definition_prefers_preindexed_real_class_over_open_protocol() {
+        // Regression for CodeRabbit finding on BT-1936:
+        // A preindexed real class (e.g. from stdlib) whose source file is NOT
+        // passed into `files` must not be shadowed by an open protocol that
+        // happens to share a name. Returning `None` here is correct: we know a
+        // real class exists but cannot produce a concrete location for it.
+        //
+        // Build a hierarchy that contains a real class `Foo` from a closed
+        // file, then merge in an open protocol `Foo` from the user's file.
+        let file_real_class = Utf8PathBuf::from("stdlib/src/Foo.bt");
+        let module_real_class = parse_source("Object subclass: Foo\n  bar => 1\n");
+        let hierarchy_real_class = ClassHierarchy::build(&module_real_class).0.unwrap();
+
+        let file_protocol = Utf8PathBuf::from("user.bt");
+        let module_protocol = parse_source("Protocol define: Foo\n  baz -> Integer\n");
+
+        let mut index = ProjectIndex::new();
+        // Step 1: index the real class file so the hierarchy knows Foo is a class.
+        index.update_file(file_real_class.clone(), &hierarchy_real_class);
+        // Step 2: index the protocol file — register_protocol_classes refuses to
+        // overwrite the real class entry, so `is_protocol_class("Foo")` stays false.
+        index.update_file(
+            file_protocol.clone(),
+            &hierarchy_with_protocols(&module_protocol),
+        );
+
+        // Only `file_protocol` is "open" — the real class source isn't in `files`.
+        let loc = find_definition_cross_file(
+            "Foo",
+            &file_protocol,
+            &module_protocol,
+            &index,
+            [(&file_protocol, &module_protocol)],
+        );
+        assert!(
+            loc.is_none(),
+            "open protocol must not shadow a preindexed real class, got {loc:?}"
+        );
     }
 }

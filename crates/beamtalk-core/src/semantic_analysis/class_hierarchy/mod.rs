@@ -254,6 +254,21 @@ impl ClassHierarchy {
         self.classes.contains_key(name)
     }
 
+    /// Check if `name` is a synthetic protocol class entry (BT-1933).
+    ///
+    /// Returns `true` when `register_protocol_classes` inserted the entry for a
+    /// protocol definition. Returns `false` for real classes (even if those
+    /// classes extend `Protocol` directly) and for names that aren't in the
+    /// hierarchy at all.
+    ///
+    /// Used by goto-definition to distinguish "name refers to a protocol" from
+    /// "name refers to a class we haven't loaded a source file for" when a
+    /// protocol and a real class share a name across files (BT-1936).
+    #[must_use]
+    pub fn is_protocol_class(&self, name: &str) -> bool {
+        self.protocol_classes.contains(name)
+    }
+
     /// Returns an iterator over all class names in the hierarchy.
     pub fn class_names(&self) -> impl Iterator<Item = &EcoString> {
         self.classes.keys()
