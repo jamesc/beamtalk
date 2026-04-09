@@ -312,80 +312,23 @@ impl SimpleLanguageService {
         let offset = position.to_byte_offset(&file_data.source)?;
         let offset_val = offset.get();
 
-        // Check class definitions (name, superclass, method bodies)
         for class in &file_data.module.classes {
-            if offset_val >= class.name.span.start() && offset_val < class.name.span.end() {
-                return Some((class.name.clone(), class.name.span));
-            }
-            if let Some(ref superclass) = class.superclass {
-                if offset_val >= superclass.span.start() && offset_val < superclass.span.end() {
-                    return Some((superclass.clone(), superclass.span));
-                }
-            }
-
-            for state in class.state.iter().chain(class.class_variables.iter()) {
-                if let Some(type_annotation) = &state.type_annotation {
-                    if let Some(ident) =
-                        Self::find_identifier_in_type_annotation(type_annotation, offset_val)
-                    {
-                        return Some(ident);
-                    }
-                }
-            }
-
-            // Search method bodies
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for parameter in &method.parameters {
-                    if let Some(type_annotation) = &parameter.type_annotation {
-                        if let Some(ident) =
-                            Self::find_identifier_in_type_annotation(type_annotation, offset_val)
-                        {
-                            return Some(ident);
-                        }
-                    }
-                }
-                if let Some(return_type) = &method.return_type {
-                    if let Some(ident) =
-                        Self::find_identifier_in_type_annotation(return_type, offset_val)
-                    {
-                        return Some(ident);
-                    }
-                }
-                for stmt in &method.body {
-                    if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
-                        return Some(ident);
-                    }
-                }
+            if let Some(ident) = Self::find_identifier_in_class(class, offset, offset_val) {
+                return Some(ident);
             }
         }
 
-        // Check standalone method definitions
+        // BT-1936: Check protocol definitions (name, extending, type-param bounds, method sigs)
+        for protocol in &file_data.module.protocols {
+            if let Some(ident) = Self::find_identifier_in_protocol(protocol, offset_val) {
+                return Some(ident);
+            }
+        }
+
         for smd in &file_data.module.method_definitions {
-            if offset_val >= smd.class_name.span.start() && offset_val < smd.class_name.span.end() {
-                return Some((smd.class_name.clone(), smd.class_name.span));
-            }
-
-            for parameter in &smd.method.parameters {
-                if let Some(type_annotation) = &parameter.type_annotation {
-                    if let Some(ident) =
-                        Self::find_identifier_in_type_annotation(type_annotation, offset_val)
-                    {
-                        return Some(ident);
-                    }
-                }
-            }
-            if let Some(return_type) = &smd.method.return_type {
-                if let Some(ident) =
-                    Self::find_identifier_in_type_annotation(return_type, offset_val)
-                {
-                    return Some(ident);
-                }
-            }
-
-            for stmt in &smd.method.body {
-                if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
-                    return Some(ident);
-                }
+            if let Some(ident) = Self::find_identifier_in_standalone_method(smd, offset, offset_val)
+            {
+                return Some(ident);
             }
         }
 
@@ -396,6 +339,165 @@ impl SimpleLanguageService {
             }
         }
 
+        None
+    }
+
+    /// Walk a class definition looking for an identifier at the given offset.
+    ///
+    /// Covers: class name, superclass, type-parameter bounds (BT-1936), state /
+    /// class-variable type annotations, and method bodies (parameters, return
+    /// type, body statements).
+    fn find_identifier_in_class(
+        class: &crate::ast::ClassDefinition,
+        offset: ByteOffset,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        if offset_val >= class.name.span.start() && offset_val < class.name.span.end() {
+            return Some((class.name.clone(), class.name.span));
+        }
+        if let Some(ref superclass) = class.superclass {
+            if offset_val >= superclass.span.start() && offset_val < superclass.span.end() {
+                return Some((superclass.clone(), superclass.span));
+            }
+        }
+        if let Some(ident) = Self::find_identifier_in_type_params(&class.type_params, offset_val) {
+            return Some(ident);
+        }
+        for state in class.state.iter().chain(class.class_variables.iter()) {
+            if let Some(type_annotation) = &state.type_annotation {
+                if let Some(ident) =
+                    Self::find_identifier_in_type_annotation(type_annotation, offset_val)
+                {
+                    return Some(ident);
+                }
+            }
+        }
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            if let Some(ident) = Self::find_identifier_in_method_signature_and_body(
+                &method.parameters,
+                method.return_type.as_ref(),
+                &method.body,
+                offset,
+                offset_val,
+            ) {
+                return Some(ident);
+            }
+        }
+        None
+    }
+
+    /// Walk a protocol definition looking for an identifier at the given offset.
+    ///
+    /// Covers: protocol name, `extending:` target, type-parameter bounds, and
+    /// method signature type annotations (both instance and class-side). (BT-1936)
+    fn find_identifier_in_protocol(
+        protocol: &crate::ast::ProtocolDefinition,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        if offset_val >= protocol.name.span.start() && offset_val < protocol.name.span.end() {
+            return Some((protocol.name.clone(), protocol.name.span));
+        }
+        if let Some(ref extending) = protocol.extending {
+            if offset_val >= extending.span.start() && offset_val < extending.span.end() {
+                return Some((extending.clone(), extending.span));
+            }
+        }
+        if let Some(ident) = Self::find_identifier_in_type_params(&protocol.type_params, offset_val)
+        {
+            return Some(ident);
+        }
+        for sig in protocol
+            .method_signatures
+            .iter()
+            .chain(protocol.class_method_signatures.iter())
+        {
+            for parameter in &sig.parameters {
+                if let Some(type_annotation) = &parameter.type_annotation {
+                    if let Some(ident) =
+                        Self::find_identifier_in_type_annotation(type_annotation, offset_val)
+                    {
+                        return Some(ident);
+                    }
+                }
+            }
+            if let Some(return_type) = &sig.return_type {
+                if let Some(ident) =
+                    Self::find_identifier_in_type_annotation(return_type, offset_val)
+                {
+                    return Some(ident);
+                }
+            }
+        }
+        None
+    }
+
+    /// Walk a Tonel-style standalone method definition for an identifier at `offset`.
+    fn find_identifier_in_standalone_method(
+        smd: &crate::ast::StandaloneMethodDefinition,
+        offset: ByteOffset,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        if offset_val >= smd.class_name.span.start() && offset_val < smd.class_name.span.end() {
+            return Some((smd.class_name.clone(), smd.class_name.span));
+        }
+        Self::find_identifier_in_method_signature_and_body(
+            &smd.method.parameters,
+            smd.method.return_type.as_ref(),
+            &smd.method.body,
+            offset,
+            offset_val,
+        )
+    }
+
+    /// Walk a method's parameter types, return type, and body for an identifier
+    /// at the given offset. Shared by class methods and standalone methods.
+    fn find_identifier_in_method_signature_and_body(
+        parameters: &[crate::ast::ParameterDefinition],
+        return_type: Option<&TypeAnnotation>,
+        body: &[crate::ast::ExpressionStatement],
+        offset: ByteOffset,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        for parameter in parameters {
+            if let Some(type_annotation) = &parameter.type_annotation {
+                if let Some(ident) =
+                    Self::find_identifier_in_type_annotation(type_annotation, offset_val)
+                {
+                    return Some(ident);
+                }
+            }
+        }
+        if let Some(return_type) = return_type {
+            if let Some(ident) = Self::find_identifier_in_type_annotation(return_type, offset_val) {
+                return Some(ident);
+            }
+        }
+        for stmt in body {
+            if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
+                return Some(ident);
+            }
+        }
+        None
+    }
+
+    /// Check a list of `TypeParamDecl` for an identifier at the offset.
+    ///
+    /// Returns the protocol bound identifier when the cursor is on the bound,
+    /// e.g., `Printable` in `Logger(T :: Printable)` or `Mapper(T :: Printable)`.
+    /// The parameter name itself (e.g., `T`) is intentionally not returned —
+    /// type-parameter names are local to their declaration and have no global
+    /// definition to navigate to. (BT-1936)
+    fn find_identifier_in_type_params(
+        type_params: &[crate::ast::TypeParamDecl],
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        for param in type_params {
+            if let Some(bound) = &param.bound {
+                if offset_val >= bound.span.start() && offset_val < bound.span.end() {
+                    return Some((bound.clone(), bound.span));
+                }
+            }
+        }
         None
     }
 
@@ -1785,5 +1887,90 @@ mod tests {
             service.project_index.hierarchy().has_class("Foo"),
             "Class from file B should be visible in merged hierarchy"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-1936: Goto-definition and find-references for protocol names
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn goto_definition_protocol_from_class_type_param_bound() {
+        // Click on `Printable` inside `Logger(T :: Printable)` in another file.
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("printable.bt");
+        let file_b = Utf8PathBuf::from("logger.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Protocol define: Printable\n  asString -> String".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Actor subclass: Logger(T :: Printable)\n  log: msg => self".to_string(),
+        );
+
+        // `Actor subclass: Logger(T :: Printable)`
+        //  0         1         2         3
+        //  0123456789012345678901234567890123456789
+        // "Printable" starts at column 29; click at column 32.
+        let def = service.goto_definition(&file_b, Position::new(0, 32));
+        let loc = def.expect("goto-def should navigate to protocol declaration");
+        assert_eq!(loc.file, file_a);
+    }
+
+    #[test]
+    fn goto_definition_protocol_from_extending_clause() {
+        // Click on `Comparable` inside `extending: Comparable`.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("protocols.bt");
+        service.update_file(
+            file.clone(),
+            "Protocol define: Comparable\n  < other :: Self -> Boolean\n\n\
+             Protocol define: Sortable\n  extending: Comparable\n  sortKey -> Object"
+                .to_string(),
+        );
+
+        // Line 4 (0-indexed) is `  extending: Comparable`
+        //   0         1         2
+        //   01234567890123456789012345
+        //   "  extending: Comparable"  — "Comparable" starts at col 13.
+        let def = service.goto_definition(&file, Position::new(4, 15));
+        let loc = def.expect("goto-def should find Comparable protocol");
+        assert_eq!(loc.file, file);
+    }
+
+    #[test]
+    fn find_references_protocol_from_definition_site() {
+        // Click on the protocol definition name and find: the definition itself
+        // plus all usages (extending target, type-param bounds).
+        let mut service = SimpleLanguageService::new();
+        let file_proto = Utf8PathBuf::from("printable.bt");
+        let file_logger = Utf8PathBuf::from("logger.bt");
+        let file_sortable = Utf8PathBuf::from("sortable.bt");
+
+        service.update_file(
+            file_proto.clone(),
+            "Protocol define: Printable\n  asString -> String".to_string(),
+        );
+        service.update_file(
+            file_logger.clone(),
+            "Actor subclass: Logger(T :: Printable)\n  log: msg => self".to_string(),
+        );
+        service.update_file(
+            file_sortable.clone(),
+            "Protocol define: Sortable\n  extending: Printable\n  sortKey -> Object".to_string(),
+        );
+
+        // "Protocol define: Printable" — `Printable` starts at column 17.
+        let refs = service.find_references(&file_proto, Position::new(0, 20));
+        // Expect: definition (file_proto) + bound (file_logger) + extending (file_sortable) = 3.
+        assert_eq!(
+            refs.len(),
+            3,
+            "expected 3 protocol references, got {refs:?}"
+        );
+        assert!(refs.iter().any(|r| r.file == file_proto));
+        assert!(refs.iter().any(|r| r.file == file_logger));
+        assert!(refs.iter().any(|r| r.file == file_sortable));
     }
 }
