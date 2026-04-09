@@ -1270,6 +1270,57 @@ mod tests {
     }
 
     #[test]
+    fn find_references_from_class_method_definition_header() {
+        // The helper walks both `class.methods` and `class.class_methods`;
+        // pin coverage for the class-side path so it doesn't regress.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  class ping => 1\nFoo ping".to_string(),
+        );
+
+        // Cursor on `ping` in the class-method definition header (line 1 col 8
+        // — after `  class `).
+        let refs = service.find_references(&file, Position::new(1, 8));
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 refs (class-method def + `Foo ping` call), got {}: {refs:?}",
+            refs.len()
+        );
+    }
+
+    #[test]
+    fn find_references_from_standalone_method_definition_header() {
+        // The helper walks `module.method_definitions` (Tonel-style `Foo >>
+        // bar => ...`); pin coverage for that path too.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        // Line layout:
+        //   0: Object subclass: Foo
+        //   1: Foo >> bar => 1
+        //   2: x := Foo new
+        //   3: x bar
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\nFoo >> bar => 1\nx := Foo new\nx bar".to_string(),
+        );
+
+        // Cursor on `bar` in the standalone definition header: line 1,
+        // column 7 (columns: F=0, o=1, o=2, ' '=3, >=4, >=5, ' '=6, b=7).
+        let refs = service.find_references(&file, Position::new(1, 7));
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 refs (standalone def + `x bar` call), got {}: {refs:?}",
+            refs.len()
+        );
+    }
+
+    #[test]
     fn find_references_rejects_click_on_body_expression_in_method() {
         // Clicking on a body expression must not be treated as "on the
         // selector" — otherwise every expression in the method body would
