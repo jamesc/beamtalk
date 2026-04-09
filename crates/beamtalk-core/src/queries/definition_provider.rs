@@ -180,6 +180,92 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
     None
 }
 
+/// Find the definition of a method selector scoped to the MRO starting at
+/// `receiver_class`, without the cross-class global-search fallback used by
+/// [`find_method_definition_cross_file_with_receiver`].
+///
+/// This is the scoped lookup needed for "Go to Definition on a method header"
+/// (BT-1939): given the enclosing class's superclass, return the nearest
+/// ancestor that defines the selector, or `None` if no ancestor does. The
+/// global fallback present in the standard receiver-based lookup must be
+/// disabled here, because it would otherwise navigate back to the current
+/// class's own definition of the selector (or to an unrelated class that
+/// happens to define the same name) — the exact opposite of "go to my
+/// parent's method".
+///
+/// The walk visits `receiver_class` first and then its superclass chain.
+/// For each visited class we search all indexed files for a matching method
+/// definition — both class-body methods (`class.methods` / `class.class_methods`)
+/// and standalone Tonel-style definitions (`module.method_definitions`).
+/// Standalone methods are NOT registered in `ClassHierarchy`, so we must
+/// walk the chain manually via `superclass_chain` and rely on
+/// `find_method_in_module` (which already handles both shapes) to match.
+#[must_use]
+pub fn find_overridden_method_definition<'a>(
+    selector: &str,
+    receiver_class: &ReceiverClassContext,
+    project_index: &ProjectIndex,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Option<Location> {
+    let hierarchy = project_index.hierarchy();
+
+    // MRO walk order: the receiver class itself, then its ancestors.
+    let mut mro: Vec<EcoString> = Vec::new();
+    mro.push(receiver_class.class_name.clone());
+    mro.extend(hierarchy.superclass_chain(receiver_class.class_name.as_str()));
+
+    // Collect files once so we can re-iterate for each class in the MRO.
+    let files: Vec<(&Utf8PathBuf, &Module)> = files.into_iter().collect();
+
+    for class_name in &mro {
+        for (file_path, module) in &files {
+            if let Some(span) = find_method_in_module(
+                module,
+                class_name.as_str(),
+                selector,
+                Some(receiver_class.class_side),
+            ) {
+                return Some(Location::new((*file_path).clone(), span));
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the immediate superclass of the class enclosing `offset`, returning
+/// a [`ReceiverClassContext`] suitable for passing to
+/// [`find_overridden_method_definition`].
+///
+/// This powers "Go to Definition on a method header" (BT-1939): when the
+/// cursor is on the selector in a method definition header, the desired
+/// navigation target is the overridden parent method. Callers detect the
+/// header click separately (via `offset_in_method_header_selector`) and then
+/// use this helper to produce a receiver context pointing at the enclosing
+/// class's immediate superclass. [`find_overridden_method_definition`] then
+/// walks the MRO from that superclass upward to locate the nearest ancestor
+/// that defines the selector, matching standard override semantics.
+///
+/// Returns `None` when:
+/// - The offset is not inside any method definition (top-level code), or
+/// - The enclosing class has no superclass (e.g. `ProtoObject`).
+///
+/// The `class_side` flag in the returned context mirrors the enclosing
+/// method's side (instance-side or class-side), so a class-side method header
+/// click correctly resolves to the parent's class-side method.
+#[must_use]
+pub fn resolve_enclosing_superclass_context(
+    module: &Module,
+    offset: u32,
+    hierarchy: &ClassHierarchy,
+) -> Option<ReceiverClassContext> {
+    find_class_context(module, offset)
+        .superclass_name(hierarchy)
+        .map(|(class_name, class_side)| ReceiverClassContext {
+            class_name,
+            class_side,
+        })
+}
+
 /// Resolve receiver class context for a selector lookup at the given offset.
 #[must_use]
 pub fn resolve_receiver_class_context(
