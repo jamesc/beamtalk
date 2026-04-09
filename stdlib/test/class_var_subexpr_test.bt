@@ -1,0 +1,108 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1937: Regression tests for class var mutations performed by class
+// method self-sends used as sub-expressions of another message send.
+//
+// Before BT-1937, the inner self-send's `ClassVarsN` binding was scoped
+// inside the closed sub-expression and the outer dispatch fell back to the
+// pre-mutation `ClassVars`, silently dropping the update. The fix hoists the
+// inner open let-chain into a preamble emitted at the outer level so the
+// new ClassVarsN stays in scope when the outer call runs and when the
+// enclosing method returns its `class_var_result` tuple.
+
+TestCase subclass: ClassVarSubExprTest
+
+  setUp =>
+    ClassVarSubExpr resetCounter
+    self
+
+  // Baseline — confirms `tick` works when called at statement level.
+  testTickAloneMutatesClassVar =>
+    ClassVarSubExpr tick
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1937: tick called as the argument of another class method self-send.
+  // Both the value returned by the outer call AND the persisted class var
+  // must reflect the inner tick.
+  testTickAsArgumentReturnsCorrectString =>
+    result := ClassVarSubExpr tickAsArgument
+    self assert: result equals: "1"
+
+  testTickAsArgumentMutatesClassVar =>
+    ClassVarSubExpr tickAsArgument
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1937: tick called as the receiver of another message send (printString
+  // dispatched on the result of `self tick`). The class var must still
+  // increment even though the dispatch is unrelated to class vars.
+  testTickAsReceiverReturnsCorrectString =>
+    result := ClassVarSubExpr tickAsReceiver
+    self assert: result equals: "1"
+
+  testTickAsReceiverMutatesClassVar =>
+    ClassVarSubExpr tickAsReceiver
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1937: two sub-expression self-sends in one outer call. Each ticks the
+  // counter, so after one call the counter must be 2 and the second tick
+  // must observe the value produced by the first.
+  testTickPairThreadsBothMutations =>
+    result := ClassVarSubExpr tickPair
+    self assert: result equals: "1,2"
+
+  testTickPairCounterIsTwo =>
+    ClassVarSubExpr tickPair
+    self assert: ClassVarSubExpr currentCounter equals: 2
+
+  // BT-1937: subsequent statements after a sub-expression self-send must
+  // see the mutated class var. tickAsArgument leaves counter=1, then we
+  // tick again at statement level and confirm it's 2.
+  testStatementAfterSubExpressionSeesMutation =>
+    ClassVarSubExpr tickAsArgument
+    ClassVarSubExpr tick
+    self assert: ClassVarSubExpr currentCounter equals: 2
+
+  // BT-1937: class method self-send as a binary operator operand. Before the
+  // fix this also produced malformed Core Erlang (the let-chain was embedded
+  // inside the call without being closed).
+  testBinaryOperatorWithSubExpression =>
+    self assert: ClassVarSubExpr tickPlusOne equals: 2
+
+  testBinaryOperatorMutatesClassVar =>
+    ClassVarSubExpr tickPlusOne
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1937: class method self-sends as list literal elements. Each element
+  // ticks the counter, so the single call must leave counter at 3.
+  testListLiteralWithSubExpressions =>
+    ClassVarSubExpr tickList
+    self assert: ClassVarSubExpr currentCounter equals: 3
+
+  // BT-1937: class method self-send used in a `++` concat sub-expression.
+  testConcatWithSubExpression =>
+    self assert: ClassVarSubExpr tickConcat equals: "n=1"
+
+  testConcatMutatesClassVar =>
+    ClassVarSubExpr tickConcat
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // BT-1937 evaluation order: when arg1 is a plain class var read and arg2
+  // is a class method self-send that mutates the same class var, the read
+  // must observe the PRE-mutation value (left-to-right semantics) and the
+  // counter must end up incremented.
+  testReadThenTickPreservesEvalOrder =>
+    self assert: ClassVarSubExpr readThenTick equals: "0,1"
+
+  testReadThenTickMutatesClassVar =>
+    ClassVarSubExpr readThenTick
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // Inverse: arg1 mutates first, arg2 reads. The read must observe the
+  // POST-mutation value.
+  testTickThenReadPreservesEvalOrder =>
+    self assert: ClassVarSubExpr tickThenRead equals: "1,1"
+
+  testTickThenReadMutatesClassVar =>
+    ClassVarSubExpr tickThenRead
+    self assert: ClassVarSubExpr currentCounter equals: 1

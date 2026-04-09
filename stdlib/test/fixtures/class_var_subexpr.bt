@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1937: Fixture for class var mutations from sub-expression class method
+// self-sends. Each method here mutates `counter` from a class method that
+// is invoked as a sub-expression of another message send (argument position,
+// receiver position, etc.). Without the BT-1937 fix, the mutation produced
+// by the inner self-send is silently dropped because its `ClassVarsN`
+// binding is scoped inside the closed sub-expression.
+
+Object subclass: ClassVarSubExpr
+  classState: counter = 0
+
+  // Mutates the class var and returns the new value.
+  class tick =>
+    self.counter := self.counter + 1
+    self.counter
+
+  // Identity-style class method used as a wrapper around its argument so we
+  // can test that the inner mutation propagates THROUGH the outer call.
+  class describe: x :: Integer -> String => x printString
+
+  // (BT-1937 root case) Class method self-send used as the keyword argument
+  // of another class method self-send.
+  class tickAsArgument => self describe: (self tick)
+
+  // Class method self-send used as the receiver of another message send.
+  // After this method runs once, counter must be 1.
+  class tickAsReceiver => (self tick) printString
+
+  // Two sub-expression self-sends in the same outer call. Each one mutates
+  // counter, so a single call should leave counter at 2.
+  class tickPair => self combine: (self tick) with: (self tick)
+
+  // Helper used by tickPair: returns a string built from both inputs.
+  class combine: a with: b :: Integer -> String =>
+    a printString ++ "," ++ b printString
+
+  // Class method self-send as operand of a binary operator. Counter must
+  // increment AND the binary op must produce valid Core Erlang.
+  class tickPlusOne => (self tick) + 1
+
+  // Class method self-send as element of a list literal. Each element ticks
+  // the counter so a single call must leave counter at 3.
+  class tickList => #(self tick, self tick, self tick)
+
+  // Class method self-send as the right-hand side of `++` (concat).
+  class tickConcat => "n=" ++ (self tick) printString
+
+  // Evaluation-order test: read self.counter as the first argument and run
+  // a self-send that mutates counter as the second argument. The read must
+  // observe the PRE-mutation value (left-to-right semantics), and the
+  // counter must end mutated by the second argument.
+  class readThenTick => self combine: self.counter with: (self tick)
+
+  // Inverse: tick first, then read. The read must observe the POST-mutation
+  // value, and the counter must end mutated by the first argument.
+  class tickThenRead => self combine: (self tick) with: self.counter
+
+  class currentCounter => self.counter
+
+  class resetCounter => self.counter := 0

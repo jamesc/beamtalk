@@ -288,37 +288,32 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("~{}~"));
         }
 
-        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        // BT-1937: Capture all keys and values as one ordered sequence so
+        // capture_subexpr_sequence can force-hoist every sub-expression in
+        // left-to-right order when ANY of them produces an open scope.
+        // Preserves the source-order semantics: key1, val1, key2, val2, ...
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(pairs.len() * 2);
+        for pair in pairs {
+            all_exprs.push(&pair.key);
+            all_exprs.push(&pair.value);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "MapLit")?;
 
-        for (i, pair) in pairs.iter().enumerate() {
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        let mut docs_iter = docs.drain(..);
+        for (i, _pair) in pairs.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-
-            // BT-1935: Close open-scope let-chains from class method self-sends.
-            let saved_cv = self.class_var_version();
-            let (key_doc, key_open) = self.expression_doc_with_open_scope(&pair.key)?;
-            if let Some(result_var) = key_open {
-                self.set_class_var_version(saved_cv);
-                parts.push(docvec![key_doc, Document::String(result_var)]);
-            } else {
-                parts.push(key_doc);
-            }
-
+            let key_doc = docs_iter.next().expect("key doc");
+            let val_doc = docs_iter.next().expect("value doc");
+            parts.push(key_doc);
             parts.push(Document::Str(" => "));
-
-            let saved_cv2 = self.class_var_version();
-            let (val_doc, val_open) = self.expression_doc_with_open_scope(&pair.value)?;
-            if let Some(result_var) = val_open {
-                self.set_class_var_version(saved_cv2);
-                parts.push(docvec![val_doc, Document::String(result_var)]);
-            } else {
-                parts.push(val_doc);
-            }
+            parts.push(val_doc);
         }
-
         parts.push(Document::Str(" }~"));
-        Ok(Document::Vec(parts))
+        let literal_doc = Document::Vec(parts);
+        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "MapLit"))
     }
 
     /// Generates code for a list literal: `#(1, 2, 3)` → `[1, 2, 3]`
@@ -329,36 +324,35 @@ impl CoreErlangGenerator {
         elements: &[Expression],
         tail: Option<&Expression>,
     ) -> Result<Document<'static>> {
+        // BT-1937: Capture all elements + optional tail as one ordered
+        // sequence so evaluation order is preserved when sub-expressions have
+        // open scopes.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(elements.len() + 1);
+        for elem in elements {
+            all_exprs.push(elem);
+        }
+        if let Some(t) = tail {
+            all_exprs.push(t);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "ListLit")?;
+
         let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
-        for (i, elem) in elements.iter().enumerate() {
+        let mut docs_iter = docs.drain(..);
+        for i in 0..elements.len() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            // BT-1935: Close open-scope let-chains from class method self-sends.
-            let saved_cv = self.class_var_version();
-            let (doc, open_scope) = self.expression_doc_with_open_scope(elem)?;
-            if let Some(result_var) = open_scope {
-                self.set_class_var_version(saved_cv);
-                parts.push(docvec![doc, Document::String(result_var)]);
-            } else {
-                parts.push(doc);
-            }
+            parts.push(docs_iter.next().expect("element doc"));
         }
-        if let Some(t) = tail {
+        if tail.is_some() {
             if !elements.is_empty() {
                 parts.push(Document::Str(" | "));
             }
-            let saved_cv = self.class_var_version();
-            let (doc, open_scope) = self.expression_doc_with_open_scope(t)?;
-            if let Some(result_var) = open_scope {
-                self.set_class_var_version(saved_cv);
-                parts.push(docvec![doc, Document::String(result_var)]);
-            } else {
-                parts.push(doc);
-            }
+            parts.push(docs_iter.next().expect("tail doc"));
         }
         parts.push(Document::Str("]"));
-        Ok(Document::Vec(parts))
+        let literal_doc = Document::Vec(parts);
+        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ListLit"))
     }
 
     /// Generates code for an array literal: `#[1, 2, 3]`
@@ -371,24 +365,23 @@ impl CoreErlangGenerator {
         &mut self,
         elements: &[Expression],
     ) -> Result<Document<'static>> {
+        // BT-1937: Capture all elements as one ordered sequence so evaluation
+        // order is preserved when sub-expressions have open scopes.
+        let exprs: Vec<&Expression> = elements.iter().collect();
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ArrLit")?;
+
         let mut parts: Vec<Document<'static>> =
             vec![Document::Str("call 'beamtalk_array':'from_list'([")];
-        for (i, elem) in elements.iter().enumerate() {
+        let mut docs_iter = docs.drain(..);
+        for i in 0..elements.len() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            // BT-1935: Close any open-scope let-chains from class method self-sends.
-            let saved_cv = self.class_var_version();
-            let (doc, open_scope) = self.expression_doc_with_open_scope(elem)?;
-            if let Some(result_var) = open_scope {
-                self.set_class_var_version(saved_cv);
-                parts.push(docvec![doc, Document::String(result_var)]);
-            } else {
-                parts.push(doc);
-            }
+            parts.push(docs_iter.next().expect("element doc"));
         }
         parts.push(Document::Str("])"));
-        Ok(Document::Vec(parts))
+        let literal_doc = Document::Vec(parts);
+        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ArrLit"))
     }
 
     /// Generates code for field access (e.g., `self.value`).
@@ -696,6 +689,12 @@ impl CoreErlangGenerator {
         self.block_depth -= 1;
         self.set_class_var_version(saved_class_var_version);
         self.pop_scope();
+        // BT-1937: The block is a closed `fun () -> ... end` expression. Any
+        // open let-chain produced inside the body is closed by the body
+        // handlers and scoped inside the fun, so the block as a whole MUST
+        // NOT propagate an open scope to its outer context. Clear the
+        // side-channel in case the body's last statement left it set.
+        self.last_open_scope_result = None;
         Ok(docvec![header, body_result?])
     }
 
@@ -790,6 +789,10 @@ impl CoreErlangGenerator {
         // BT-1475: Ensure block_depth and scope are restored even on error.
         self.block_depth -= 1;
         self.pop_scope();
+        // BT-1937: Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
+        // expressions and must not propagate an open scope from their body to
+        // the outer context.
+        self.last_open_scope_result = None;
 
         Ok(docvec![header, Document::Vec(docs?)])
     }
@@ -1383,8 +1386,21 @@ impl CoreErlangGenerator {
                 }
             }
             BlockExprKind::LastExpr => {
-                // Last expression: generate directly (its value is the block's result)
-                self.generate_expression(expr)
+                // Last expression: its value is the block's result. BT-1937: a
+                // message send whose receiver/args contain a class method
+                // self-send may produce an open let-chain that we must close
+                // here so the block body is a complete closed expression. The
+                // ClassVarsN bindings inside the chain stay scoped inside the
+                // block's `fun () -> ... end` and do not leak to the outer
+                // method body — that is handled in generate_block by
+                // saving/restoring class_var_version and clearing
+                // last_open_scope_result.
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                if let Some(result_var) = open_scope {
+                    Ok(docvec![expr_doc, Document::String(result_var)])
+                } else {
+                    Ok(expr_doc)
+                }
             }
             BlockExprKind::FieldAssignment => {
                 // Field assignment not at end: generate WITHOUT closing the value.
@@ -1412,9 +1428,21 @@ impl CoreErlangGenerator {
                 }
             }
             BlockExprKind::SideEffect => {
-                // Not an assignment or loop - generate and discard result
-                let expr_doc = self.expression_doc(expr)?;
-                Ok(docvec!["let _Unit = ", expr_doc, " in "])
+                // Not an assignment or loop - generate and discard result.
+                // BT-1937: handle open scopes from message sends whose
+                // receiver/args contain class method self-sends, by closing
+                // the chain here and binding the result var.
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                if let Some(result_var) = open_scope {
+                    Ok(docvec![
+                        expr_doc,
+                        "let _Unit = ",
+                        Document::String(result_var),
+                        " in "
+                    ])
+                } else {
+                    Ok(docvec!["let _Unit = ", expr_doc, " in "])
+                }
             }
         }
     }

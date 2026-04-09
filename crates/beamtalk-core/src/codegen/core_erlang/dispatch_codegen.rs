@@ -52,6 +52,16 @@ impl CoreErlangGenerator {
     /// open let-chains produced by class method self-sends used as arguments.
     /// Without this, an argument like `(self classMethod: x)` embeds an open
     /// `let ... in ` chain inside the argument list, producing invalid Core Erlang.
+    ///
+    /// **WARNING (BT-1937):** This helper closes open let-chains inline and
+    /// rolls back `class_var_version`, which causes class-var mutations
+    /// performed by sub-expression class method self-sends to be silently
+    /// dropped. Use this only for actor-context dispatch sites that never
+    /// observe such open scopes (their args cannot mutate class vars). For
+    /// class-method-context dispatch sites, use
+    /// [`capture_args_with_preamble`](Self::capture_args_with_preamble) and
+    /// emit the returned preamble before the dispatch call so the
+    /// `ClassVarsN` bindings remain in scope at the outer level.
     fn capture_argument_list_doc(&mut self, arguments: &[Expression]) -> Result<Document<'static>> {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
@@ -73,6 +83,161 @@ impl CoreErlangGenerator {
             }
         }
         Ok(Document::Vec(parts))
+    }
+
+    /// BT-1937: Captures a sequence of sub-expressions, preserving left-to-right
+    /// evaluation order **even when only some sub-expressions produce open scopes**
+    /// from class method self-sends.
+    ///
+    /// Returns `(preamble, docs)` where `docs` is one document per input
+    /// expression in the same order. If no sub-expression produces an open
+    /// scope, the preamble is `Document::Nil` and each `doc` is the inline
+    /// expression document — there is no hoisting overhead in the common case.
+    ///
+    /// If at least one sub-expression produces an open scope, **every**
+    /// sub-expression is hoisted into the preamble in order:
+    /// - Sub-expressions with their own open scope contribute their existing
+    ///   let-chain (no rebinding — `result_var` is already in scope after the
+    ///   chain).
+    /// - Plain sub-expressions get a fresh `let _Var<i> = ... in ` binding.
+    ///
+    /// This is the key to preserving evaluation order: without the unconditional
+    /// hoist, a hoisted later sub-expression would execute its preamble before
+    /// the inline earlier sub-expression in the call site — reversing the
+    /// observable order of side effects (BT-1937 review feedback).
+    ///
+    /// `class_var_version` is NOT rolled back. Subsequent code (the call,
+    /// later sub-expressions, following statements) will see the advanced
+    /// version, so references to `ClassVars` pick up earlier mutations.
+    pub(super) fn capture_subexpr_sequence(
+        &mut self,
+        exprs: &[&Expression],
+        prefix: &str,
+    ) -> Result<(Document<'static>, Vec<Document<'static>>)> {
+        // First pass: split each sub-expression into (its_preamble, its_doc).
+        let mut splits: Vec<(Document<'static>, Document<'static>)> =
+            Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            splits.push(self.split_subexpr_for_preamble(expr)?);
+        }
+
+        let any_open = splits.iter().any(|(p, _)| !matches!(p, Document::Nil));
+
+        if !any_open {
+            // Fast path: no hoisting needed. Inline all sub-expression docs.
+            let docs: Vec<_> = splits.into_iter().map(|(_, d)| d).collect();
+            return Ok((Document::Nil, docs));
+        }
+
+        // Hoist every sub-expression to preserve evaluation order.
+        // - Sub-expressions that already produced an open scope contribute
+        //   their existing chain (no rebinding).
+        // - Plain sub-expressions get a fresh let binding.
+        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
+        let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(exprs.len());
+        for (expr_preamble, expr_doc) in splits {
+            if matches!(expr_preamble, Document::Nil) {
+                let var = self.fresh_temp_var(prefix);
+                preamble_parts.push(docvec![
+                    "let ",
+                    Document::String(var.clone()),
+                    " = ",
+                    expr_doc,
+                    " in ",
+                ]);
+                var_docs.push(Document::String(var));
+            } else {
+                preamble_parts.push(expr_preamble);
+                var_docs.push(expr_doc);
+            }
+        }
+
+        Ok((Document::Vec(preamble_parts), var_docs))
+    }
+
+    /// BT-1937: Captures an argument list using
+    /// [`capture_subexpr_sequence`](Self::capture_subexpr_sequence) and joins
+    /// the resulting docs with commas. Convenience wrapper for the common
+    /// "no receiver, just args" pattern.
+    ///
+    /// Returns `(preamble, args_doc)` where `args_doc` is comma-separated.
+    pub(super) fn capture_args_with_preamble(
+        &mut self,
+        arguments: &[Expression],
+    ) -> Result<(Document<'static>, Document<'static>)> {
+        let exprs: Vec<&Expression> = arguments.iter().collect();
+        let (preamble, var_docs) = self.capture_subexpr_sequence(&exprs, "Arg")?;
+        Ok((preamble, Self::join_docs_with_commas(var_docs)))
+    }
+
+    /// BT-1937: Joins a list of documents into a comma-separated `Document::Vec`.
+    fn join_docs_with_commas(docs: Vec<Document<'static>>) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2);
+        for (i, doc) in docs.into_iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(doc);
+        }
+        Document::Vec(parts)
+    }
+
+    /// BT-1937: Splits a sub-expression into a hoisted preamble and the
+    /// document used in its enclosing call/literal/operator.
+    ///
+    /// If the sub-expression produces an open let-chain (e.g., a class method
+    /// self-send that mutates class vars), the chain becomes the preamble and
+    /// the value used at the use site is just the result variable. Otherwise
+    /// the preamble is `Document::Nil` and the original doc is used directly.
+    /// `class_var_version` is NOT rolled back when a preamble is produced —
+    /// the `ClassVarsN` binding remains in scope at the outer level so
+    /// subsequent code (later args, the enclosing call, following statements)
+    /// can reference the new version.
+    fn split_subexpr_for_preamble(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<(Document<'static>, Document<'static>)> {
+        let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+        if let Some(result_var) = open_scope {
+            Ok((expr_doc, Document::String(result_var)))
+        } else {
+            Ok((Document::Nil, expr_doc))
+        }
+    }
+
+    /// BT-1937: Wraps a closed dispatch `call_doc` with an optional hoisted
+    /// preamble from [`capture_args_with_preamble`](Self::capture_args_with_preamble)
+    /// or from a receiver's open scope.
+    ///
+    /// If `preamble` is `Document::Nil`, returns `call_doc` unchanged (the
+    /// original closed-expression behavior).
+    ///
+    /// If `preamble` is non-empty, returns
+    /// `preamble + let _ResultVar = call_doc in ` (an open let-chain) and
+    /// stores `_ResultVar` in `last_open_scope_result`. The enclosing
+    /// expression context (statement, local-var binding, outer message send)
+    /// must close or further propagate the open scope so that the `ClassVarsN`
+    /// bindings stay visible to subsequent code.
+    pub(super) fn finalize_dispatch_with_preamble(
+        &mut self,
+        preamble: Document<'static>,
+        call_doc: Document<'static>,
+        result_prefix: &str,
+    ) -> Document<'static> {
+        if matches!(preamble, Document::Nil) {
+            return call_doc;
+        }
+        let result_var = self.fresh_temp_var(result_prefix);
+        let doc = docvec![
+            preamble,
+            "let ",
+            Document::String(result_var.clone()),
+            " = ",
+            call_doc,
+            " in ",
+        ];
+        self.last_open_scope_result = Some(result_var);
+        doc
     }
 
     /// Generates code for a message send.
@@ -290,22 +455,21 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
-        // BT-1935: Close open-scope let-chains from class method self-sends.
-        // Restore class var version BEFORE generating args so they see the
-        // correct version, not one scoped inside the receiver's closed let-chain.
-        let saved_cv = self.class_var_version();
-        let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        // BT-1937: Capture receiver + args as one ordered sub-expression
+        // sequence so left-to-right evaluation order is preserved when ANY
+        // sub-expression has an open scope from a class method self-send.
+        // capture_subexpr_sequence force-hoists every sub-expression in that
+        // case; the fast path (no open scopes) leaves them inline.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
+        all_exprs.push(receiver);
+        for arg in arguments {
+            all_exprs.push(arg);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Cast")?;
+        let actual_receiver = docs.remove(0);
+        let args_doc = Self::join_docs_with_commas(docs);
 
-        let actual_receiver = if let Some(result_var) = receiver_open_scope {
-            self.set_class_var_version(saved_cv);
-            docvec![receiver_doc, Document::String(result_var)]
-        } else {
-            receiver_doc
-        };
-
-        let args_doc = self.capture_argument_list_doc(arguments)?;
-
-        let doc = docvec![
+        let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'cast'(",
             actual_receiver,
             ", '",
@@ -315,7 +479,7 @@ impl CoreErlangGenerator {
             "])",
         ];
 
-        Ok(doc)
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "CastRes"))
     }
 
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
@@ -351,23 +515,18 @@ impl CoreErlangGenerator {
             );
         }
 
-        // BT-1935: Use expression_doc_with_open_scope to detect open let-chains
-        // from class method self-sends used as the receiver expression.
-        // Restore class var version BEFORE generating args so they see the
-        // correct version, not one scoped inside the receiver's closed let-chain.
-        let saved_cv = self.class_var_version();
-        let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        // BT-1937: Capture receiver + args as one ordered sub-expression
+        // sequence so left-to-right evaluation order is preserved.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
+        all_exprs.push(receiver);
+        for arg in arguments {
+            all_exprs.push(arg);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Disp")?;
+        let actual_receiver = docs.remove(0);
+        let args_doc = Self::join_docs_with_commas(docs);
 
-        let actual_receiver = if let Some(result_var) = receiver_open_scope {
-            self.set_class_var_version(saved_cv);
-            docvec![receiver_doc, Document::String(result_var)]
-        } else {
-            receiver_doc
-        };
-
-        let args_doc = self.capture_argument_list_doc(arguments)?;
-
-        let doc = docvec![
+        let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             actual_receiver,
             Document::String(format!(", '{selector_atom}', [")),
@@ -375,7 +534,7 @@ impl CoreErlangGenerator {
             "])"
         ];
 
-        Ok(doc)
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "DispRes"))
     }
 
     /// Handles spawn, spawnWith:, await, awaitForever, and await: intrinsics.
@@ -737,9 +896,16 @@ impl CoreErlangGenerator {
         if self.class_method_selectors().contains(&selector_atom) {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
             let call_result = self.fresh_temp_var("CMR");
-            let cv = self.current_class_var();
             let module = self.module_name.clone();
-            let args_doc = self.capture_argument_list_doc(arguments)?;
+            // BT-1937: Hoist any open let-chains from sub-expression class
+            // method self-sends in the args. The preamble must be emitted
+            // before our own `let _CMR = ...` so the ClassVarsN bindings it
+            // produces stay in scope at the outer level. capture_args_with_preamble
+            // does NOT roll back class_var_version, so the snapshot we take
+            // afterwards (`cv`) reflects the post-args version — that is the
+            // ClassVars binding to thread into the callee.
+            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
 
             let new_cv = self.next_class_var();
@@ -751,6 +917,7 @@ impl CoreErlangGenerator {
             let plain_res = self.fresh_temp_var("PR");
 
             let doc = docvec![
+                args_preamble,
                 Document::String(format!(
                     "let {call_result} = call '{module}':'class_{selector_atom}'(ClassSelf, {cv}"
                 )),
@@ -783,13 +950,16 @@ impl CoreErlangGenerator {
             .is_some_and(|kw| kw == selector_atom)
         {
             let module = self.module_name.clone();
+            // BT-1937: Hoist preambles from sub-expression class var mutations
+            // in the args. cv is read AFTER capture_args_with_preamble so it
+            // reflects the post-args ClassVars version.
+            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
             let cv = self.current_class_var();
-            let args_doc = self.capture_argument_list_doc(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
             // BT-1408: Hash long keyword constructor atoms to stay within
             // Erlang's 255-char atom limit.
             let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
-            let doc = docvec![
+            let call_doc = docvec![
                 "call '",
                 Document::Eco(module),
                 "':'",
@@ -800,7 +970,7 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(doc);
+            return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "Slot"));
         }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn.
@@ -815,19 +985,21 @@ impl CoreErlangGenerator {
         let module = self.module_name.clone();
         match selector_atom.as_str() {
             "new" | "new:" => {
-                let args_doc = self.capture_argument_list_doc(arguments)?;
-                let doc = docvec![
+                // BT-1937: Hoist preambles from sub-expression class var mutations.
+                let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+                let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_new'(",
                     "call 'erlang':'get'('beamtalk_class_name'), ",
                     "call 'erlang':'get'('beamtalk_class_module'), [",
                     args_doc,
                     "])"
                 ];
-                return Ok(doc);
+                return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "NewRes"));
             }
             "spawn" | "spawnWith:" => {
-                let args_doc = self.capture_argument_list_doc(arguments)?;
-                let doc = docvec![
+                // BT-1937: Hoist preambles from sub-expression class var mutations.
+                let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+                let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_spawn'(",
                     "call 'erlang':'get'('beamtalk_class_name'), ",
                     "call 'erlang':'get'('beamtalk_class_module'), ",
@@ -835,21 +1007,26 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                return Ok(doc);
+                return Ok(self.finalize_dispatch_with_preamble(
+                    args_preamble,
+                    call_doc,
+                    "SpawnRes",
+                ));
             }
             _ => {}
         }
 
         // Other built-in exports (superclass, methods, etc.)
+        // BT-1937: Hoist preambles from sub-expression class var mutations.
         let fun_name = selector_atom.replace(':', "");
-        let args_doc = self.capture_argument_list_doc(arguments)?;
+        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
 
-        let doc = docvec![
+        let call_doc = docvec![
             Document::String(format!("call '{module}':'{fun_name}'(")),
             args_doc,
             ")"
         ];
-        Ok(doc)
+        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"))
     }
 
     /// Generates synchronous self-dispatch for actor self-sends (BT-330).
@@ -1601,33 +1778,21 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        // BT-1935: Close open-scope let-chains from class method self-sends.
-        let saved_cv = self.class_var_version();
-        let (receiver_doc, receiver_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let actual_receiver = if let Some(result_var) = receiver_open_scope {
-            self.set_class_var_version(saved_cv);
-            docvec![receiver_doc, Document::String(result_var)]
-        } else {
-            receiver_doc
-        };
+        // BT-1937: Capture receiver + arg as one ordered sequence so
+        // left-to-right evaluation order is preserved.
+        let exprs: [&Expression; 2] = [receiver, &arguments[0]];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "Lookup")?;
+        let arg_doc = docs.pop().expect("arg");
+        let actual_receiver = docs.pop().expect("receiver");
 
-        let saved_cv2 = self.class_var_version();
-        let (arg_doc, arg_open_scope) = self.expression_doc_with_open_scope(&arguments[0])?;
-        let actual_arg = if let Some(result_var) = arg_open_scope {
-            self.set_class_var_version(saved_cv2);
-            docvec![arg_doc, Document::String(result_var)]
-        } else {
-            arg_doc
-        };
-
-        let doc = docvec![
+        let call_doc = docvec![
             "call 'beamtalk_method_resolver':'resolve'(",
             actual_receiver,
             ", ",
-            actual_arg,
+            arg_doc,
             ")"
         ];
-        Ok(doc)
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "MethodLookup"))
     }
 
     /// Generates a binding-aware class method call (ADR 0019 Phase 3).
@@ -1793,11 +1958,12 @@ impl CoreErlangGenerator {
         // Fallback: gen_server dispatch via class_send
         // BT-1408: Hash long selector atoms (e.g. keyword constructors with many
         // fields) to stay within Erlang's 255-char atom limit.
+        // BT-1937: Hoist preambles from sub-expression class var mutations.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
-        let args_doc = self.capture_argument_list_doc(arguments)?;
+        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
 
-        let doc = docvec![
+        let call_doc = docvec![
             Document::String(format!(
                 "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
             )),
@@ -1808,7 +1974,7 @@ impl CoreErlangGenerator {
             "])"
         ];
 
-        Ok(doc)
+        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassCall"))
     }
 
     /// BT-1639: Generates a direct function call to a sealed class method.
@@ -1826,12 +1992,13 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        // BT-1937: Hoist preambles from sub-expression class var mutations.
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
-        let args_doc = self.capture_argument_list_doc(arguments)?;
+        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
 
         // Core Erlang empty map is ~{}~ (not #{} which is Erlang source syntax)
-        let doc = docvec![
+        let call_doc = docvec![
             "call '",
             Document::String(module_name.to_string()),
             "':'",
@@ -1842,7 +2009,7 @@ impl CoreErlangGenerator {
             ")"
         ];
 
-        Ok(doc)
+        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "DirectCall"))
     }
 
     /// BT-1639: Generates the `gen_server` `class_send` fallback for binding-aware dispatch.

@@ -73,16 +73,31 @@ impl CoreErlangGenerator {
             }
         };
 
-        let left_code = self.expression_doc(left)?;
-        let right_code = self.expression_doc(&arguments[0])?;
+        // BT-1937: Capture both operands in evaluation order. When either
+        // operand produces an open let-chain (e.g., a class method self-send
+        // mutating a class var), capture_subexpr_sequence force-hoists BOTH
+        // operands into a preamble so left-to-right evaluation order is
+        // preserved. When neither has an open scope, both operands stay
+        // inline and there is no hoisting overhead.
+        let exprs: [&Expression; 2] = [left, &arguments[0]];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "BinOp")?;
+        let right_code = docs.pop().expect("right operand");
+        let left_code = docs.pop().expect("left operand");
 
-        Ok(docvec![
-            format!("call 'erlang':'{erlang_op}'("),
+        // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
+        // format!(). erlang_op is one of the static literals in the match
+        // arms above, so Document::Str is safe.
+        let call_doc = docvec![
+            "call 'erlang':'",
+            Document::Str(erlang_op),
+            "'(",
             left_code,
             ", ",
             right_code,
             ")",
-        ])
+        ];
+
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "BinOp"))
     }
 
     /// Generates `**` exponentiation via `math:pow/2` + `erlang:round/1`.
@@ -98,15 +113,19 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> Result<Document<'static>> {
-        let left_code = self.expression_doc(left)?;
-        let right_code = self.expression_doc(right)?;
-        Ok(docvec![
+        // BT-1937: Capture both operands preserving evaluation order.
+        let exprs: [&Expression; 2] = [left, right];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "PowOp")?;
+        let right_code = docs.pop().expect("right operand");
+        let left_code = docs.pop().expect("left operand");
+        let call_doc = docvec![
             "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
             left_code,
             "), call 'erlang':'float'(",
             right_code,
             ")))",
-        ])
+        ];
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "PowRes"))
     }
 
     /// Generates `++` concatenation with runtime type dispatch.
@@ -128,49 +147,55 @@ impl CoreErlangGenerator {
         );
         let is_string = matches!(left, Expression::Literal(Literal::String(_), _));
 
-        if is_list {
+        // BT-1937: Capture both operands preserving evaluation order. When
+        // either operand has an open scope, BOTH are force-hoisted into the
+        // preamble so left-to-right evaluation order is preserved.
+        let exprs: [&Expression; 2] = [left, right];
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ConcatOp")?;
+        let right_code = docs.pop().expect("right operand");
+        let left_code = docs.pop().expect("left operand");
+
+        let call_doc = if is_list {
             // List concatenation: erlang:'++'
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
-            Ok(docvec![
-                "call 'erlang':'++'(",
-                left_code,
-                ", ",
-                right_code,
-                ")",
-            ])
+            docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",]
         } else if is_string {
             // String concatenation: iolist_to_binary
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
-            Ok(docvec![
+            docvec![
                 "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
                 left_code,
                 "), call 'erlang':'binary_to_list'(",
                 right_code,
                 ")])",
-            ])
+            ]
         } else {
-            // Runtime dispatch: check is_list at runtime
+            // Runtime dispatch: check is_list at runtime.
+            // CLAUDE.md: built entirely with Document/docvec!, no format!().
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
-            Ok(docvec![
-                format!("let {left_var} = "),
+            docvec![
+                "let ",
+                Document::String(left_var.clone()),
+                " = ",
                 left_code,
-                format!(" in let {right_var} = "),
+                " in let ",
+                Document::String(right_var.clone()),
+                " = ",
                 right_code,
-                format!(
-                    " in case call 'erlang':'is_list'({left_var}) of \
-                     <'true'> when 'true' -> call 'erlang':'++'({left_var}, {right_var}) \
-                     <'false'> when 'true' -> \
-                       call 'erlang':'iolist_to_binary'(\
-                         [call 'erlang':'binary_to_list'({left_var}), \
-                          call 'erlang':'binary_to_list'({right_var})]) \
-                     end"
-                ),
-            ])
-        }
+                " in case call 'erlang':'is_list'(",
+                Document::String(left_var.clone()),
+                ") of <'true'> when 'true' -> call 'erlang':'++'(",
+                Document::String(left_var.clone()),
+                ", ",
+                Document::String(right_var.clone()),
+                ") <'false'> when 'true' -> \
+                   call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
+                Document::String(left_var),
+                "), call 'erlang':'binary_to_list'(",
+                Document::String(right_var),
+                ")]) end",
+            ]
+        };
+
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "ConcatRes"))
     }
 }
