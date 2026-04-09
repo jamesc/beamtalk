@@ -253,7 +253,9 @@ pub fn find_overridden_method_definition<'a>(
 
     // Walk MRO in nearest-ancestor-first order and return the first hit.
     // Strict MRO-only: if none of the visited classes defines the selector,
-    // return None rather than falling back to any other class.
+    // return None rather than falling back to any other class. We use
+    // `remove` (not `get`) to move the Location out of the map without a
+    // clone — each MRO entry is only visited once anyway.
     for class_name in &mro {
         if let Some(location) = candidates.remove(class_name) {
             return Some(location);
@@ -1444,8 +1446,7 @@ mod tests {
              Object subclass: Sibling\n  greet => 99\n\
              Parent subclass: Child\n  greet => 2",
         );
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        hierarchy.register_protocol_classes(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let mut index = ProjectIndex::new();
         index.update_file(file.clone(), &hierarchy);
@@ -1466,14 +1467,12 @@ mod tests {
         // If multiple ancestors define the selector, the nearest one must
         // win. A single-pass implementation that accidentally iterates the
         // candidate map in hash order rather than MRO order would fail this.
+        let source = "Object subclass: Grandparent\n  greet => 1\n\
+                      Grandparent subclass: Parent\n  greet => 2\n\
+                      Parent subclass: Child\n  greet => 3";
         let file = Utf8PathBuf::from("test.bt");
-        let module = parse_source(
-            "Object subclass: Grandparent\n  greet => 1\n\
-             Grandparent subclass: Parent\n  greet => 2\n\
-             Parent subclass: Child\n  greet => 3",
-        );
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        hierarchy.register_protocol_classes(&module);
+        let module = parse_source(source);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let mut index = ProjectIndex::new();
         index.update_file(file.clone(), &hierarchy);
@@ -1490,11 +1489,7 @@ mod tests {
         // Parent's greet lives strictly after Grandparent's greet in source
         // order, so its span must start at or after Parent's class declaration
         // (and definitely after Grandparent's greet body).
-        let parent_decl = "Grandparent subclass: Parent";
-        let source = "Object subclass: Grandparent\n  greet => 1\n\
-                      Grandparent subclass: Parent\n  greet => 2\n\
-                      Parent subclass: Child\n  greet => 3";
-        let parent_decl_offset = source.find(parent_decl).unwrap();
+        let parent_decl_offset = source.find("Grandparent subclass: Parent").unwrap();
         assert!(
             (loc.span.start() as usize) >= parent_decl_offset,
             "expected Parent's greet (≥ {parent_decl_offset}), got {}",
@@ -1531,8 +1526,7 @@ mod tests {
         // `superclass_chain("Class99")` knows the full ancestry.
         let mut index = ProjectIndex::new();
         for (path, module) in &files_modules {
-            let mut hierarchy = ClassHierarchy::build(module).0.unwrap();
-            hierarchy.register_protocol_classes(module);
+            let hierarchy = ClassHierarchy::build(module).0.unwrap();
             index.update_file(path.clone(), &hierarchy);
         }
 
@@ -1601,8 +1595,7 @@ mod tests {
 
         let mut index = ProjectIndex::new();
         for (path, module) in &files_modules {
-            let mut hierarchy = ClassHierarchy::build(module).0.unwrap();
-            hierarchy.register_protocol_classes(module);
+            let hierarchy = ClassHierarchy::build(module).0.unwrap();
             index.update_file(path.clone(), &hierarchy);
         }
 
