@@ -194,3 +194,17 @@ TestCase subclass: ClassVarSubExprTest
   testTickInLoopConditionalCompilesAndRuns =>
     result := ClassVarSubExpr tickInLoopConditional
     self assert: result notNil
+
+  // BT-1942: Explicit `^` return with an open-scope receiver.
+  // `generate_class_method_return` must hoist the open let-chain so
+  // ClassVarsN stays in scope for the wrapping `class_var_result` tuple.
+  testTickReturnClassMutatesClassVar =>
+    ClassVarSubExpr tickReturnClass
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickReturnIsNilMutatesClassVar =>
+    ClassVarSubExpr tickReturnIsNil
+    self assert: ClassVarSubExpr currentCounter equals: 1
+
+  testTickReturnIsNilReturnsFalse =>
+    self assert: ClassVarSubExpr tickReturnIsNil equals: false

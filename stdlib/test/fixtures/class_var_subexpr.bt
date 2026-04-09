@@ -116,3 +116,12 @@ Object subclass: ClassVarSubExpr
     hits := 0
     1 to: 1 do: [:i | (self tick) > 0 ifTrue: [hits := hits + 1]]
     hits
+
+  // BT-1942: Explicit `^` return with an open-scope receiver. Before the
+  // fix, `generate_class_method_return` used `expression_doc(value)` which
+  // did not handle the open let-chain, producing a malformed
+  // `let _Ret = let _CMR = ... in ... in  in ` (double `in`).
+  class tickReturnClass => ^(self tick) class
+
+  // BT-1942: Explicit `^` return of a nil-protocol intrinsic result.
+  class tickReturnIsNil => ^(self tick) isNil
