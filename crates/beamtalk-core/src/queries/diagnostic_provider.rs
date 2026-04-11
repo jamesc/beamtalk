@@ -941,7 +941,7 @@ mod tests {
     fn typed_state_no_default_no_warning() {
         // BT-1947: A type annotation replaces the need for a default value.
         // `state: deps :: OrchestratorDeps` (no default) should produce no
-        // uninitialized warning. An @expect type is now stale here.
+        // uninitialized warning.
         let source = "\
 Actor subclass: MyActor
   state: running :: Dictionary = #{}
