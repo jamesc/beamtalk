@@ -830,7 +830,9 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
+                        None
+                    }
                 });
             }
             None
@@ -842,7 +844,9 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
+                        None
+                    }
                 })
             } else {
                 None
@@ -863,7 +867,9 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
+                        None
+                    }
                 })
             } else {
                 None
@@ -881,7 +887,9 @@ fn find_receiver_in_expr(
                     InferredType::Known { class_name: n, .. } => {
                         Some(ReceiverSide::Instance(n.clone()))
                     }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) => None,
+                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
+                        None
+                    }
                 })
             } else {
                 find_receiver_in_expr(expression, offset, type_map)

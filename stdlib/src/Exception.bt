@@ -26,7 +26,7 @@ Object subclass: Exception
   /// Exception signal: "something went wrong"
   /// MyCustomError signal: "bad input"
   /// ```
-  class signal: msg :: String -> Nil => @primitive "classSignal:"
+  class signal: msg :: String -> Never => @primitive "classSignal:"
 
   /// Create and raise a new exception with the class name as the message.
   ///
@@ -34,7 +34,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// Exception signal
   /// ```
-  class signal -> Nil => @primitive "classSignal"
+  class signal -> Never => @primitive "classSignal"
 
   /// Return the error message string.
   ///
@@ -101,7 +101,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// (Exception new) signal
   /// ```
-  signal -> Nil => @primitive "signal"
+  signal -> Never => @primitive "signal"
 
   /// Raise this exception instance with the given message.
   ///
@@ -109,4 +109,4 @@ Object subclass: Exception
   /// ```beamtalk
   /// (Exception new) signal: "something went wrong"
   /// ```
-  signal: msg :: String -> Nil => @primitive "signal:"
+  signal: msg :: String -> Never => @primitive "signal:"

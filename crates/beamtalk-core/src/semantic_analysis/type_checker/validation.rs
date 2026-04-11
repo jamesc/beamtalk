@@ -435,6 +435,10 @@ impl TypeChecker {
         if actual == expected {
             return true;
         }
+        // Never is the bottom type — compatible with everything.
+        if actual.as_str() == "Never" {
+            return true;
+        }
         // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
         // If expected contains `|`, split into members and check if actual matches any.
         if expected.contains(" | ") {
@@ -588,7 +592,7 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                InferredType::Dynamic(_) => {} // Dynamic arguments — skip (conservative)
+                InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
             }
         }
     }
@@ -677,7 +681,7 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Dynamic(_) => {} // Can't check
+            InferredType::Dynamic(_) | InferredType::Never => {} // Can't check
         }
     }
 
@@ -940,7 +944,7 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
-            InferredType::Dynamic(_) => {} // Dynamic values — skip (conservative)
+            InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
         }
     }
 
@@ -1428,6 +1432,7 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
+            InferredType::Never => {} // Never — skip (expression diverges)
         }
     }
 
@@ -1569,8 +1574,8 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                // Dynamic values: can't verify bounds (skip silently).
-                InferredType::Dynamic(_) => {}
+                // Dynamic/Never values: can't verify bounds (skip silently).
+                InferredType::Dynamic(_) | InferredType::Never => {}
             }
         }
     }
