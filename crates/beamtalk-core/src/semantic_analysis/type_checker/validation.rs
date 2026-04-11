@@ -435,9 +435,14 @@ impl TypeChecker {
         if actual == expected {
             return true;
         }
-        // Never is the bottom type — compatible with everything.
+        // Never is the bottom type — compatible with everything as actual.
+        // As expected, only Never itself is compatible (a non-divergent method
+        // returning Integer does not satisfy -> Never).
         if actual.as_str() == "Never" {
             return true;
+        }
+        if expected.as_str() == "Never" {
+            return false;
         }
         // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
         // If expected contains `|`, split into members and check if actual matches any.

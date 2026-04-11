@@ -202,18 +202,22 @@ impl TypeChecker {
                     .iter()
                     .any(|s| matches!(s.expression, Expression::Primitive { .. }))
             {
-                if let InferredType::Known {
-                    class_name: ref inferred,
-                    ..
-                } = body_type
-                {
+                let inferred_name = match &body_type {
+                    InferredType::Known {
+                        class_name: inferred,
+                        ..
+                    } => Some(inferred.clone()),
+                    InferredType::Never => Some(EcoString::from("Never")),
+                    _ => None,
+                };
+                if let Some(inferred) = inferred_name {
                     self.method_return_types.insert(
                         (
                             class_name.clone(),
                             standalone.method.selector.name(),
                             standalone.is_class_method,
                         ),
-                        inferred.clone(),
+                        inferred,
                     );
                 }
             }
