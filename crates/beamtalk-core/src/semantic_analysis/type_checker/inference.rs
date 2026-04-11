@@ -613,6 +613,7 @@ impl TypeChecker {
                     .iter()
                     .map(|arm| {
                         let mut arm_env = env.child();
+                        Self::bind_pattern_vars(&arm.pattern, &mut arm_env);
                         if let Some(guard) = &arm.guard {
                             self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
                         }

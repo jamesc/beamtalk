@@ -5,7 +5,7 @@
 use super::*;
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
-    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MatchArm,
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
@@ -574,6 +574,72 @@ fn test_match_returns_dynamic() {
         InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::AmbiguousControlFlow),
         other => panic!("expected Dynamic(AmbiguousControlFlow), got {other:?}"),
     }
+}
+
+#[test]
+fn test_match_arm_pattern_vars_bound_in_body() {
+    // Outer env has `n :: Integer`. The match arm pattern binds `n` as Dynamic,
+    // which should shadow the outer binding. Sending a nonexistent selector to
+    // a Dynamic receiver produces no warning, but sending it to Integer would.
+    // This ensures the test fails if bind_pattern_vars is not called.
+    let mut checker = TypeChecker::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set("n", InferredType::known("Integer"));
+
+    let match_expr = Expression::Match {
+        value: Box::new(int_lit(42)),
+        arms: vec![MatchArm::new(
+            Pattern::Variable(ident("n")),
+            msg_send(
+                var("n"),
+                MessageSelector::Unary("definitelyMissing".into()),
+                vec![],
+            ),
+            span(),
+        )],
+        span: span(),
+    };
+
+    let _ = checker.infer_expr(&match_expr, &hierarchy, &mut env, false);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "match-bound var `n` should shadow outer Integer binding — no DNU warnings: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn test_match_arm_pattern_vars_bound_in_guard() {
+    // Same shadowing strategy: outer `n :: Integer`, pattern rebinds as Dynamic.
+    // Sending a nonexistent selector in the guard should produce no warning
+    // only if the pattern var is correctly bound.
+    let mut checker = TypeChecker::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set("n", InferredType::known("Integer"));
+
+    let match_expr = Expression::Match {
+        value: Box::new(int_lit(42)),
+        arms: vec![MatchArm::with_guard(
+            Pattern::Variable(ident("n")),
+            msg_send(
+                var("n"),
+                MessageSelector::Unary("definitelyMissing".into()),
+                vec![],
+            ),
+            var("n"),
+            span(),
+        )],
+        span: span(),
+    };
+
+    let _ = checker.infer_expr(&match_expr, &hierarchy, &mut env, false);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "match-bound var `n` in guard should shadow outer Integer binding — no DNU warnings: {:?}",
+        checker.diagnostics()
+    );
 }
 
 #[test]
