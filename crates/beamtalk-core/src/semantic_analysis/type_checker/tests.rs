@@ -5,7 +5,7 @@
 use super::*;
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
-    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MatchArm,
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
@@ -574,6 +574,72 @@ fn test_match_returns_dynamic() {
         InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::AmbiguousControlFlow),
         other => panic!("expected Dynamic(AmbiguousControlFlow), got {other:?}"),
     }
+}
+
+#[test]
+fn test_match_arm_pattern_vars_bound_in_body() {
+    // match x { n => n + 1 }
+    // `n` is pattern-bound — sending `+` to it should NOT produce a DNU warning
+    // because it should be Dynamic, not unknown.
+    let method = make_method(
+        "doMatch",
+        vec![Expression::Match {
+            value: Box::new(int_lit(42)),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(ident("n")),
+                msg_send(
+                    var("n"),
+                    MessageSelector::Binary("+".into()),
+                    vec![int_lit(1)],
+                ),
+                span(),
+            )],
+            span: span(),
+        }],
+    );
+    let class = make_class_with_methods("Thing", vec![method]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "match-bound var `n` should be Dynamic — no DNU warnings: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn test_match_arm_pattern_vars_bound_in_guard() {
+    // match x { n when n > 0 => n }
+    // `n` in the guard should also resolve as Dynamic, not produce a warning.
+    let method = make_method(
+        "doMatch",
+        vec![Expression::Match {
+            value: Box::new(int_lit(42)),
+            arms: vec![MatchArm::with_guard(
+                Pattern::Variable(ident("n")),
+                msg_send(
+                    var("n"),
+                    MessageSelector::Binary(">".into()),
+                    vec![int_lit(0)],
+                ),
+                var("n"),
+                span(),
+            )],
+            span: span(),
+        }],
+    );
+    let class = make_class_with_methods("Thing", vec![method]);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "match-bound var `n` in guard should be Dynamic — no DNU warnings: {:?}",
+        checker.diagnostics()
+    );
 }
 
 #[test]
