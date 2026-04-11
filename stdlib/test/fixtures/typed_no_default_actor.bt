@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TypedNoDefaultActor — test fixture for BT-1947
+//
+// Demonstrates typed state fields without default values.
+// The type annotation replaces the need for a default.
+
+typed Actor subclass: TypedNoDefaultActor
+  state: label :: String
+  state: count :: Integer = 0
+
+  initialize -> String => self.label := "initialized"
+
+  getLabel -> String => self.label
+
+  getCount -> Integer => self.count
+
+  setLabel: newLabel :: String -> String =>
+    self.label := newLabel
+    self.label
+
+  increment -> Integer =>
+    self.count := self.count + 1
+    self.count

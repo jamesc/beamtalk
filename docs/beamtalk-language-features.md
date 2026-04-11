@@ -846,7 +846,7 @@ collect: block :: Block -> Self =>
 - Type mismatch diagnostics are warnings, never compile-stopping errors.
 - Invalid annotation forms (e.g., `Self` in parameter position) are errors.
 - `typed` classes require parameter/return annotations on non-primitive methods.
-- Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments.
+- Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
@@ -3025,10 +3025,6 @@ This is preferred over `@expect dnu` at type-erasure boundaries because it commu
 **Declaration-level `@expect`:** In addition to suppressing diagnostics on expressions, `@expect` can be placed before `state:`/`field:` declarations and method definitions inside a class body. This suppresses diagnostics that fire on the declaration itself:
 
 ```beamtalk
-Actor subclass: Orchestrator
-  @expect type
-  state: deps :: OrchestratorDeps    // factory-required, no sensible default — suppress uninitialized warning
-
 typed Object subclass: Collection(E)
   @expect type
   first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning
