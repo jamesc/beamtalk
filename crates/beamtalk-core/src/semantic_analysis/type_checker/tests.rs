@@ -11438,3 +11438,64 @@ fn block_params_typed_in_cascade_sends() {
         "cascade sort: block params should be typed from List(Integer), got: {dynamic_warnings:?}"
     );
 }
+
+// ── BT-1945: Never bottom type ──────────────────────────────────────────────
+
+#[test]
+fn never_union_identity() {
+    // T | Never = T
+    let result = InferredType::union_of(&[InferredType::known("Integer"), InferredType::Never]);
+    assert_eq!(result, InferredType::known("Integer"));
+}
+
+#[test]
+fn never_union_identity_reversed() {
+    // Never | T = T
+    let result = InferredType::union_of(&[InferredType::Never, InferredType::known("String")]);
+    assert_eq!(result, InferredType::known("String"));
+}
+
+#[test]
+fn never_union_multiple() {
+    // T | Never | U = T | U
+    let result = InferredType::union_of(&[
+        InferredType::known("Integer"),
+        InferredType::Never,
+        InferredType::known("String"),
+    ]);
+    assert_eq!(result, InferredType::simple_union(&["Integer", "String"]));
+}
+
+#[test]
+fn never_union_all_never() {
+    // Never | Never = Never
+    let result = InferredType::union_of(&[InferredType::Never, InferredType::Never]);
+    assert_eq!(result, InferredType::Never);
+}
+
+#[test]
+fn never_display_name() {
+    assert_eq!(InferredType::Never.display_name(), Some("Never".into()));
+}
+
+#[test]
+fn never_equality() {
+    assert_eq!(InferredType::Never, InferredType::Never);
+    assert_ne!(InferredType::Never, InferredType::known("Never"));
+    assert_ne!(
+        InferredType::Never,
+        InferredType::Dynamic(DynamicReason::Unknown)
+    );
+}
+
+#[test]
+fn never_as_known_is_none() {
+    assert!(InferredType::Never.as_known().is_none());
+}
+
+#[test]
+fn resolve_type_annotation_never() {
+    let ann = TypeAnnotation::Simple(ident("Never"));
+    let result = TypeChecker::resolve_type_annotation(&ann);
+    assert_eq!(result, InferredType::Never);
+}

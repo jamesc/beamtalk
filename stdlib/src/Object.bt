@@ -237,4 +237,4 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// self error: "something went wrong"
   /// ```
-  error: message :: String => @intrinsic error
+  error: message :: String -> Never => @intrinsic error

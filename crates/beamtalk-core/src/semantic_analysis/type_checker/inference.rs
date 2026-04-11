@@ -112,14 +112,18 @@ impl TypeChecker {
                         .iter()
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
-                    if let InferredType::Known {
-                        class_name: ref inferred,
-                        ..
-                    } = body_type
-                    {
+                    let inferred_name = match &body_type {
+                        InferredType::Known {
+                            class_name: inferred,
+                            ..
+                        } => Some(inferred.clone()),
+                        InferredType::Never => Some(EcoString::from("Never")),
+                        _ => None,
+                    };
+                    if let Some(inferred) = inferred_name {
                         self.method_return_types.insert(
                             (class.name.name.clone(), method.selector.name(), false),
-                            inferred.clone(),
+                            inferred,
                         );
                     }
                 }
@@ -142,14 +146,18 @@ impl TypeChecker {
                         .iter()
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
-                    if let InferredType::Known {
-                        class_name: ref inferred,
-                        ..
-                    } = body_type
-                    {
+                    let inferred_name = match &body_type {
+                        InferredType::Known {
+                            class_name: inferred,
+                            ..
+                        } => Some(inferred.clone()),
+                        InferredType::Never => Some(EcoString::from("Never")),
+                        _ => None,
+                    };
+                    if let Some(inferred) = inferred_name {
                         self.method_return_types.insert(
                             (class.name.name.clone(), method.selector.name(), true),
-                            inferred.clone(),
+                            inferred,
                         );
                     }
                 }
@@ -194,18 +202,22 @@ impl TypeChecker {
                     .iter()
                     .any(|s| matches!(s.expression, Expression::Primitive { .. }))
             {
-                if let InferredType::Known {
-                    class_name: ref inferred,
-                    ..
-                } = body_type
-                {
+                let inferred_name = match &body_type {
+                    InferredType::Known {
+                        class_name: inferred,
+                        ..
+                    } => Some(inferred.clone()),
+                    InferredType::Never => Some(EcoString::from("Never")),
+                    _ => None,
+                };
+                if let Some(inferred) = inferred_name {
                     self.method_return_types.insert(
                         (
                             class_name.clone(),
                             standalone.method.selector.name(),
                             standalone.is_class_method,
                         ),
-                        inferred.clone(),
+                        inferred,
                     );
                 }
             }
@@ -253,6 +265,9 @@ impl TypeChecker {
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         match ann {
             TypeAnnotation::Simple(type_id) => {
+                if type_id.name.as_str() == "Never" {
+                    return InferredType::Never;
+                }
                 let name = Self::resolve_type_keyword(&type_id.name);
                 InferredType::known(name)
             }
@@ -306,6 +321,9 @@ impl TypeChecker {
     /// - `"String | nil"` → `Union(["String", "UndefinedObject"])`
     /// - `"List(String)"` → `Known("List", type_args: [Known("String")])`
     pub(super) fn resolve_type_name_string(type_name: &EcoString) -> InferredType {
+        if type_name.as_str() == "Never" {
+            return InferredType::Never;
+        }
         // Split on `|` respecting parenthesis nesting, so
         // `Result(String | Integer, Error)` is not split at the inner `|`.
         if type_name.contains('|') {
@@ -588,17 +606,24 @@ impl TypeChecker {
                 InferredType::known("Block")
             }
 
-            // Match — result is Dynamic (branches may differ)
+            // Match — union of arm body types (Never arms are eliminated)
             Expression::Match { value, arms, .. } => {
                 self.infer_expr(value, hierarchy, env, in_abstract_method);
-                for arm in arms {
-                    let mut arm_env = env.child();
-                    if let Some(guard) = &arm.guard {
-                        self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
-                    }
-                    self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
+                let arm_types: Vec<InferredType> = arms
+                    .iter()
+                    .map(|arm| {
+                        let mut arm_env = env.child();
+                        if let Some(guard) = &arm.guard {
+                            self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
+                        }
+                        self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method)
+                    })
+                    .collect();
+                if arm_types.is_empty() {
+                    InferredType::Dynamic(DynamicReason::AmbiguousControlFlow)
+                } else {
+                    InferredType::union_of(&arm_types)
                 }
-                InferredType::Dynamic(DynamicReason::AmbiguousControlFlow)
             }
 
             // Map literal → Dictionary
@@ -946,6 +971,11 @@ impl TypeChecker {
                         };
                     }
 
+                    // BT-1945: `Never` resolves to the bottom type (divergent methods)
+                    if ret_ty.as_str() == "Never" {
+                        return InferredType::Never;
+                    }
+
                     // Build substitution map, composing through inheritance chain
                     // if the method is inherited (ADR 0068 Phase 1b, BT-1577)
                     let subst = Self::build_inherited_substitution_map(
@@ -1004,6 +1034,9 @@ impl TypeChecker {
             // return types are available for chain resolution without a second pass.
             let key = (class_name.clone(), selector_name.clone(), false);
             if let Some(ret_ty) = self.method_return_types.get(&key) {
+                if ret_ty.as_str() == "Never" {
+                    return InferredType::Never;
+                }
                 return InferredType::known(ret_ty.clone());
             }
         }
@@ -1338,6 +1371,9 @@ impl TypeChecker {
                         if ret_ty.as_str() == "Self" {
                             // Self resolves to the concrete member type (with type args)
                             return_types.push(member.clone());
+                        } else if ret_ty.as_str() == "Never" {
+                            // BT-1945: Bottom type for divergent methods
+                            return_types.push(InferredType::Never);
                         } else {
                             // BT-1857: Apply generic substitution for parameterised
                             // union members (e.g. Array(Integer) in a union).

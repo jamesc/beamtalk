@@ -73,7 +73,6 @@ abstract typed Value subclass: Number
   /// 0 sign            // => 0
   /// ```
   sign -> Integer =>
-    @expect type
     self match: [
       _ when: [self > 0] -> 1;
       _ when: [self < 0] -> -1;
