@@ -1451,17 +1451,15 @@ fn test_expect_all_suppresses_typed_method_warnings() {
 }
 
 #[test]
-fn test_expect_type_suppresses_uninitialized_state_warning() {
-    // BT-1883: @expect type on an uninitialized state field should suppress
-    // the warning without producing a stale @expect warning.
-    let mut typed_no_default = StateDeclaration::with_type(
+fn test_typed_no_default_state_no_warning() {
+    // BT-1947: A type annotation replaces the need for a default value.
+    // `state: count :: Integer` (no default) should produce no warnings.
+    let typed_no_default = StateDeclaration::with_type(
         ident("count"),
         TypeAnnotation::simple("Integer", span()),
         span(),
     );
-    typed_no_default.expect = Some((ExpectCategory::Type, None, span()));
 
-    // Need at least one typed field WITH a default to trigger the sibling-default heuristic
     let typed_with_default = StateDeclaration::with_type_and_default(
         ident("name"),
         TypeAnnotation::simple("String", span()),
@@ -1482,10 +1480,16 @@ fn test_expect_type_suppresses_uninitialized_state_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let diags = run_with_expect(&module, &hierarchy);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
     assert!(
-        diags.is_empty(),
-        "@expect type on uninitialized state should suppress warning with no stale warning, got: {diags:?}"
+        uninitialized.is_empty(),
+        "Typed state with type annotation should not warn about uninitialized (BT-1947), got: {uninitialized:?}"
     );
 }
 
@@ -2548,13 +2552,12 @@ fn test_union_type_annotation_no_false_positive() {
     );
 }
 
-// --- Uninitialized typed state field warnings (BT-1831) ---
+// --- Typed state field declarations (BT-1831, BT-1947) ---
 
 #[test]
-fn test_uninitialized_typed_state_warns() {
-    // Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
-    // The sibling-default heuristic triggers: warns on `name` since the class has
-    // at least one typed field with a default (lifecycle-nil pattern).
+fn test_typed_state_no_default_no_warn() {
+    // BT-1947: Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
+    // Type annotation replaces the need for a default — no uninitialized warning.
     let state = vec![
         StateDeclaration::with_type(
             ident("name"),
@@ -2578,14 +2581,10 @@ fn test_uninitialized_typed_state_warns() {
         .iter()
         .filter(|d| d.message.contains("uninitialized"))
         .collect();
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Expected 1 uninitialized warning, got: {:?}",
-        checker.diagnostics()
+    assert!(
+        warnings.is_empty(),
+        "BT-1947: Typed state without default should not warn, got: {warnings:?}"
     );
-    assert!(warnings[0].message.contains("name"));
-    assert!(warnings[0].message.contains("String"));
 }
 
 #[test]

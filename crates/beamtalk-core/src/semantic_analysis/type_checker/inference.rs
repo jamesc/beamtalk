@@ -166,8 +166,8 @@ impl TypeChecker {
             // Check state default values match declared types
             self.check_state_defaults(class, hierarchy);
 
-            // Warn about typed state fields with no default that aren't nilable
-            self.check_uninitialized_state(class);
+            // BT-1947: Uninitialized state warning removed — type annotation
+            // replaces the need for a default value.
 
             // Clear typed class context after processing all methods
             self.typed_class_context = None;

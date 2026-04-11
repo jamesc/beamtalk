@@ -938,13 +938,13 @@ mod tests {
     // ── BT-1856: Declaration-level @expect ──────────────────────────────────────
 
     #[test]
-    fn expect_type_on_state_suppresses_uninitialized_warning() {
-        // @expect type before a typed state field with no default should suppress
-        // the uninitialized-field warning.
+    fn typed_state_no_default_no_warning() {
+        // BT-1947: A type annotation replaces the need for a default value.
+        // `state: deps :: OrchestratorDeps` (no default) should produce no
+        // uninitialized warning. An @expect type is now stale here.
         let source = "\
 Actor subclass: MyActor
   state: running :: Dictionary = #{}
-  @expect type
   state: deps :: OrchestratorDeps
 ";
         let tokens = lex_with_eof(source);
@@ -956,7 +956,7 @@ Actor subclass: MyActor
             .any(|d| d.message.contains("uninitialized"));
         assert!(
             !uninitialized,
-            "@expect type should suppress uninitialized warning, got: {diagnostics:?}"
+            "Typed state without default should not warn (BT-1947), got: {diagnostics:?}"
         );
     }
 
