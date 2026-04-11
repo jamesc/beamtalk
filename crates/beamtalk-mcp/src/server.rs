@@ -63,6 +63,7 @@ pub struct BeamtalkMcp {
     /// Shared REPL client used by all tool handlers.
     client: Arc<ReplClient>,
     /// Router that dispatches incoming MCP tool calls to handler methods.
+    #[expect(dead_code, reason = "will be used when tool routing is wired up")]
     tool_router: ToolRouter<Self>,
 }
 
