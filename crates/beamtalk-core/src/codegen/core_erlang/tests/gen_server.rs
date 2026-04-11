@@ -3543,3 +3543,70 @@ fn protocol_only_module_generates_register_class() {
         "Should not call class_builder:register. Got:\n{code}"
     );
 }
+
+#[test]
+#[allow(clippy::similar_names)]
+fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
+    // BT-1944: Type annotations on method params should be erasable — they
+    // must NOT change the generated Core Erlang dispatch/body code for actors.
+    // Uses a multi-keyword method matching the original reproducer:
+    // `executeActivity:selector:args:timeout:` with `:: Integer | Nil` on last param.
+    let untyped_src = concat!(
+        "Actor subclass: TestActor\n",
+        "  state: count = 0\n",
+        "  executeActivity: act selector: sel args: a timeout: t =>\n",
+        "    self.count := self.count + 1\n",
+        "    t\n",
+    );
+    let typed_src = concat!(
+        "Actor subclass: TestActor\n",
+        "  state: count = 0\n",
+        "  executeActivity: act selector: sel args: a timeout: t :: Integer | Nil =>\n",
+        "    self.count := self.count + 1\n",
+        "    t\n",
+    );
+
+    let tokens_u = crate::source_analysis::lex_with_eof(untyped_src);
+    let (module_u, _) = crate::source_analysis::parse(tokens_u);
+    let code_u = generate_module(
+        &module_u,
+        CodegenOptions::new("test_actor").with_workspace_mode(true),
+    )
+    .expect("untyped should compile");
+
+    let tokens_t = crate::source_analysis::lex_with_eof(typed_src);
+    let (module_t, _) = crate::source_analysis::parse(tokens_t);
+    let code_t = generate_module(
+        &module_t,
+        CodegenOptions::new("test_actor").with_workspace_mode(true),
+    )
+    .expect("typed should compile");
+
+    // Strip metadata lines that naturally differ (source text, param types).
+    // Everything else — dispatch, body, exports — must be identical.
+    let strip_metadata = |code: &str| -> String {
+        code.lines()
+            .filter(|line| {
+                !line.contains("'param_types'")
+                    && !line.contains("'methodSource'")
+                    && !line.contains("'methodSignatures'")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let code_u_stripped = strip_metadata(&code_u);
+    let code_t_stripped = strip_metadata(&code_t);
+
+    assert_eq!(
+        code_u_stripped, code_t_stripped,
+        "BT-1944: Typed param changed dispatch/body code (beyond metadata)"
+    );
+
+    // Actor instance methods should NOT generate spec attributes — methods are
+    // dispatch clauses inside safe_dispatch/3, not standalone functions.
+    assert!(
+        !code_t.contains("'spec' ="),
+        "BT-1944: Actor instance method should NOT generate spec attribute"
+    );
+}
