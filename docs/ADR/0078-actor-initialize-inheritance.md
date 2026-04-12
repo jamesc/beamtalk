@@ -133,8 +133,11 @@ Counter subclass: DoubleCounter
 `super initialize` follows standard Beamtalk super-dispatch semantics:
 - Skips the current class, starts method lookup at the immediate superclass
 - If the superclass doesn't define `initialize`, walks further up the chain
-- If no ancestor defines `initialize`, the send is a no-op (no `doesNotUnderstand` — initialize is an optional lifecycle hook)
+- `Actor.bt` defines a default `initialize -> Nil => nil`, so `super initialize` always finds a method — it never raises `doesNotUnderstand`
+- If no intermediate ancestor overrides `initialize`, the call reaches `Actor`'s no-op default and returns `nil`
 - The parent's `initialize` executes with access to the same state map (flat state model)
+
+**Idempotency requirement**: Parent `initialize` methods should be safe to call via `super`. Avoid side effects that cannot be repeated (e.g., spawning linked processes without guards). This is the same contract as Smalltalk's `super initialize`.
 
 ## Prior Art
 
@@ -191,7 +194,7 @@ Initialization failures are caught immediately at spawn time (fail-fast), not as
 - **BEAM veteran**: "Hidden gen_server callbacks I can't see in traces"
 - **Language designer**: "Creates a future breaking change if we move to slot initializers — auto-chaining would need to be removed"
 
-**Rejected because**: Auto-chaining adds implicit behavior that would need to be *removed* when declarative slot initializers arrive. Explicit `super initialize` is additive — it can simply be deleted when slot initializers make it unnecessary.
+**Rejected because**: Auto-chaining adds implicit behavior that conflicts with declarative slot initializers. Consider: if a parent declares `state: db :: Database = Database connect` (slot initializer), the slot initializer runs at construction time. If auto-chaining also runs the parent's `initialize` (which may also call `Database connect`), the field gets initialized twice — once declaratively, once imperatively. Removing auto-chaining to fix this would be a breaking change for any code that relied on it. With explicit `super initialize`, the programmer simply deletes the `super initialize` line when they add a slot initializer — no implicit behavior to undo.
 
 ### Alternative C: Validate-only (flat initialization)
 - **Newcomer**: "Simple — one method sets everything"
@@ -226,7 +229,8 @@ Initialization failures are caught immediately at spawn time (fail-fast), not as
 ### Negative
 - Programmers must remember to write `super initialize` (mitigated by compiler warning)
 - Warning is a lint-level check, not a hard guarantee — can be suppressed with `@expect`
-- `super initialize` when no ancestor defines `initialize` is a silent no-op (could confuse)
+- Parent `initialize` methods must be idempotent-safe (same contract as Smalltalk's `super initialize`)
+- When slot initializers (Option D) arrive, developers must remove `super initialize` lines (mechanical but required)
 
 ### Neutral
 - `super` dispatch for `initialize` uses the existing `beamtalk_dispatch:super/5` — no new runtime mechanism
@@ -235,25 +239,27 @@ Initialization failures are caught immediately at spawn time (fail-fast), not as
 
 ## Implementation
 
-### Phase 1: Compiler Warning (S)
+### Phase 1: Compiler Warning + Super Safety (S)
+These must ship together — the warning tells developers to add `super initialize`, so `super initialize` must be safe before the warning fires.
 - **Type checker**: When checking an `initialize` method, walk the superclass chain via `ClassHierarchy` to find ancestor typed-no-default fields. If any exist and the method body has no `super` send with selector `initialize`, emit a warning.
+- **Runtime verification**: Confirm `super initialize` is safe when no intermediate ancestor overrides `initialize` (reaches `Actor`'s no-op default). This should already work — `Actor.bt` defines `initialize -> Nil => nil` — but needs a test to prove it.
 - **Files**: `crates/beamtalk-core/src/semantic_analysis/type_checker/`
-- **Test**: BUnit test with a subclass that omits `super initialize` — verify warning is emitted
+- **Tests**:
+  - BUnit test: subclass that omits `super initialize` — verify warning is emitted
+  - BUnit test: actor subclass of Actor base calling `super initialize` — verify no error
 
 ### Phase 2: Inherited Field Validation (S)
 - **Codegen**: Extend `generate_post_initialize_check` in `callbacks.rs` to walk the superclass chain and collect all typed-no-default fields, not just the current class's own. BT-1951 covers this.
 - **Files**: `crates/beamtalk-core/src/codegen/core_erlang/gen_server/callbacks.rs`
 - **Test**: BUnit test with parent typed-no-default field, child forgets to init → `UninitializedStateError`
 
-### Phase 3: Super Initialize No-Op Safety (S)
-- **Runtime**: Ensure `super initialize` when no ancestor defines `initialize` is a clean no-op (not a `doesNotUnderstand` error). This may already work if dispatch falls through gracefully.
-- **Test**: Actor subclass of Actor base calling `super initialize` — verify no error
-
 ### Future Evolution: Declarative Slot Initializers
 When the language evolves to support initializer expressions on state declarations (e.g., `state: db :: Database = Database connect`), the `super initialize` pattern becomes optional:
 - Slot initializers would run automatically for each class in the hierarchy
 - `initialize` methods would be used only for imperative post-construction logic
 - The compiler warning for missing `super initialize` would be removed for classes where all inherited typed-no-default fields have slot initializers
+
+**Migration from B → D**: When slot initializers land, the compiler should emit a new warning: "`super initialize` is unnecessary — parent fields have slot initializers." This gives developers a clear signal to remove the `super initialize` line. The migration is mechanical: delete `super initialize`, verify tests pass.
 
 ## Migration Path
 
