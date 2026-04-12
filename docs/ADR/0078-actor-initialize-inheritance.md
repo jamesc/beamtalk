@@ -1,7 +1,7 @@
 # ADR 0078: Actor Initialize Inheritance
 
 ## Status
-Proposed (2026-04-12)
+Accepted (2026-04-12)
 
 ## Context
 
