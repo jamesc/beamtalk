@@ -36,7 +36,7 @@ DatabaseActor subclass: CachingDatabaseActor
   // CachingDatabaseActor has no idea it needs to set db
 ```
 
-This is a known anti-pattern in Smalltalk ("forgetting `super initialize`") but in classic Smalltalk it's purely convention — there's no enforcement. Beamtalk can do better.
+This is a known anti-pattern in Smalltalk ("forgetting `super initialize`") but in classic Smalltalk it's purely convention — there's no enforcement. Beamtalk can do better by not requiring the programmer to remember at all.
 
 ### Constraints
 
@@ -47,37 +47,21 @@ This is a known anti-pattern in Smalltalk ("forgetting `super initialize`") but 
 
 ## Decision
 
-Require explicit `super initialize` in actor `initialize` methods when the class inherits typed-no-default state fields. Enforce this with a **compiler warning** (not an error, to avoid breaking existing code).
+Auto-chain `initialize` methods up the class hierarchy. When an actor spawns, codegen dispatches `initialize` on every class in the hierarchy that defines one, **deepest ancestor first** (parent before child). The programmer never writes `super initialize` — the platform handles it.
 
-### Compiler Warning
+### Auto-Chain Semantics
 
-When all of these conditions are true:
-- The class is an Actor subclass (not Value or Object)
-- The class defines an `initialize` method
-- An ancestor class has typed-no-default state fields (`state: x :: Type`, no `= default`)
+When `handle_continue` receives the `initialize` token:
 
-Then the compiler checks whether the `initialize` method body contains a `super initialize` send. If not, emit:
-
-```text
-warning: initialize does not call `super initialize`
-  --> my_actor.bt:10:3
-   |
-10 |   initialize =>
-   |   ^^^^^^^^^^
-   = help: DatabaseActor declares `state: db :: Database` which requires initialization
-   = help: Add `super initialize` to ensure inherited fields are set
-```
-
-### Runtime Validation
-
-Extend the BT-1949 post-initialize check to validate **all** typed-no-default fields in the inheritance chain, not just the current class's own fields. This catches cases where:
-- The programmer ignores the warning
-- The parent class is in a different compilation unit (cross-file inheritance)
-- The parent adds a new typed-no-default field after the child was written
+1. Walk the class hierarchy from `Actor` (root) down to the leaf class
+2. For each class that defines its own `initialize` method, dispatch it against the current state
+3. Each `initialize` sees the state left by the previous one (parent's fields are already set)
+4. After the full chain completes, run the BT-1949 `UninitializedStateError` check on all fields (including inherited)
+5. If any `initialize` in the chain fails, stop the actor immediately — same as current behavior
 
 ### Code Examples
 
-**Correct usage:**
+**Just works — no super call needed:**
 ```beamtalk
 Actor subclass: DatabaseActor
   state: db :: Database
@@ -89,78 +73,107 @@ DatabaseActor subclass: CachingDatabaseActor
   state: cache :: Cache
 
   initialize =>
-    super initialize              // calls DatabaseActor's initialize, sets db
-    self.cache := Cache new       // sets cache
+    // db is already set — DatabaseActor's initialize ran first
+    self.cache := Cache new
 ```
 
-**Warning on missing super:**
+**Deep hierarchy — each level handles its own fields:**
 ```beamtalk
-DatabaseActor subclass: BadCachingActor
+Actor subclass: BaseService
+  state: logger :: Logger
+
+  initialize =>
+    self.logger := Logger forClass: self class
+
+BaseService subclass: DatabaseService
+  state: db :: Database
+
+  initialize =>
+    // logger is already set by BaseService's initialize
+    self.db := Database connect
+
+DatabaseService subclass: CachingDatabaseService
   state: cache :: Cache
 
   initialize =>
+    // logger and db are already set
     self.cache := Cache new
-    // warning: initialize does not call `super initialize`
-    // DatabaseActor declares `state: db :: Database` which requires initialization
 ```
 
-**Runtime error if warning is ignored:**
+**No initialize needed — parent handles everything:**
+```beamtalk
+DatabaseActor subclass: ReadOnlyDatabaseActor
+  // No initialize — inherits DatabaseActor's initialize which sets db
+  // No new typed-no-default fields — nothing to do
+  query: sql => self.db query: sql
+```
+
+**Runtime error if parent's initialize forgets a field:**
 ```text
-UninitializedStateError: BadCachingActor field 'db' (:: Database) was not initialized
+UninitializedStateError: DatabaseActor field 'db' (:: Database) was not initialized
 ```
 
-**No warning needed when parent has no typed-no-default fields:**
-```beamtalk
-Actor subclass: Counter
-  state: value = 0           // has default, no issue
-
-Counter subclass: LoggingCounter
-  state: log :: Array
-
-  initialize =>
-    self.log := Array new     // no warning — Counter has no typed-no-default fields
+**Compiler warning if `super initialize` is used (redundant):**
+```text
+warning: explicit `super initialize` is unnecessary — parent initializers run automatically
+  --> my_actor.bt:12:5
+   |
+12 |     super initialize
+   |     ^^^^^^^^^^^^^^^^
+   = help: Remove this line — Beamtalk auto-chains initialize up the hierarchy
 ```
 
-**No warning when class has no initialize:**
-```beamtalk
-Counter subclass: DoubleCounter
-  // No initialize, no typed-no-default fields — nothing to warn about
-  doubleIncrement => self.value := self.value + 2
+### Execution Order
+
+Initialize methods execute **parent-first** (most distant ancestor → leaf):
+
+```
+Actor.initialize        (no-op default)
+  → BaseService.initialize   (sets logger)
+    → DatabaseService.initialize   (sets db)
+      → CachingDatabaseService.initialize   (sets cache)
 ```
 
-### Super Initialize Semantics
+This matches constructor chaining in Java, Kotlin, and Swift — parent is fully initialized before child runs.
 
-`super initialize` follows standard Beamtalk super-dispatch semantics:
-- Skips the current class, starts method lookup at the immediate superclass
-- If the superclass doesn't define `initialize`, walks further up the chain
-- `Actor.bt` defines a default `initialize -> Nil => nil`, so `super initialize` always finds a method — it never raises `doesNotUnderstand`
-- If no intermediate ancestor overrides `initialize`, the call reaches `Actor`'s no-op default and returns `nil`
-- The parent's `initialize` executes with access to the same state map (flat state model)
+### Error Handling
 
-**Idempotency requirement**: Parent `initialize` methods should be safe to call via `super`. Avoid side effects that cannot be repeated (e.g., spawning linked processes without guards). This is the same contract as Smalltalk's `super initialize`.
+If any `initialize` in the chain raises an error:
+- The chain stops immediately (no further initializers run)
+- The actor stops with the error
+- `safe_spawn` translates this to a catchable `InstantiationError`
+- Under a supervisor, the child start fails and the supervisor's restart strategy applies
+
+### Runtime Validation
+
+After the full chain completes, extend the BT-1949 post-initialize check to validate **all** typed-no-default fields in the inheritance chain. This catches cases where:
+- A class's `initialize` forgets to set one of its own fields
+- A parent class adds a new typed-no-default field but doesn't update its `initialize`
+- Cross-file inheritance where the compiler can't see the full hierarchy
 
 ## Prior Art
 
 ### Pharo/Squeak Smalltalk
 Explicit `super initialize` is convention but not enforced. Forgetting it is one of the most common Smalltalk bugs. Instance variables default to `nil` silently. Some teams use lint rules but the language itself provides no safety net.
 
-**Adopted**: The explicit `super initialize` call pattern.
-**Improved**: Compiler warning when inherited typed fields exist, plus runtime validation.
+**Improved upon**: Beamtalk auto-chains instead of relying on the programmer to remember. The classic Smalltalk bug is eliminated by design.
 
 ### Newspeak
 Slot initializer expressions are declarative — evaluated automatically at construction time for each class in the hierarchy. No explicit super call needed. Parent slot initializers run as part of object creation.
 
-**Noted as future direction**: Declarative slot initializers (see Future Evolution below) would eliminate the need for both `initialize` and `super initialize` in most cases. The current decision is designed to not preclude this evolution.
+**Adopted the principle**: The platform handles parent initialization, not the programmer. Auto-chaining `initialize` is the imperative equivalent of Newspeak's declarative slot initializers.
+
+**Noted as future direction**: Declarative slot initializers would complement auto-chained `initialize` — slot initializers handle declarative setup, `initialize` handles imperative post-construction logic.
 
 ### Swift
-Designated initializers must call `super.init(...)`. The compiler enforces this at compile time and requires all stored properties to be assigned before the super call. Two-phase initialization prevents access to `self` before all properties are set.
+Designated initializers must call `super.init(...)`. The compiler enforces this at compile time. Two-phase initialization prevents access to `self` before all properties are set.
 
-**Adapted**: Compiler warning (not error) for missing super-init. We chose a warning because the runtime `UninitializedStateError` check (BT-1949) is the actual enforcement mechanism — the warning is an early signal, not the safety net itself.
+**Departed from**: Swift requires explicit `super.init()`. Beamtalk auto-chains because in a flat-state model (single map), there's no two-phase concern — all fields exist in the map from the start, just with `nil` values.
 
 ### Kotlin
-Constructor chaining is automatic via `class Sub : Parent(args)`. `lateinit var` properties are checked at runtime on access (not at construction time).
+Constructor chaining is automatic via `class Sub : Parent(args)`. `init {}` blocks run in declaration order.
 
-**Rejected**: Kotlin's access-time checking. Beamtalk checks at initialization time (fail-fast) rather than on first access (fail-late).
+**Adopted**: Kotlin's automatic constructor chaining model. Parent `init` blocks run before child `init` blocks without explicit calls.
 
 ### Pony
 No inheritance — uses composition and traits. All actor fields must be definitely assigned in the constructor (compile-time enforcement).
@@ -170,117 +183,119 @@ No inheritance — uses composition and traits. All actor fields must be definit
 ### Erlang/OTP
 No inheritance in gen_server. Each module's `init/1` is independent. "Inheritance" is manual module calls with state merging — exactly what Beamtalk codegen does today.
 
-**Context**: Beamtalk's `init/1` chaining with `__skip_initialize__` is already the OTP-idiomatic pattern. This ADR layers programmer-facing initialization semantics on top.
+**Context**: Beamtalk's class inheritance already departs from OTP's flat module model. Auto-chaining `initialize` is consistent with that departure — if we have inheritance, initialization should follow the hierarchy automatically.
 
 ## User Impact
 
 ### Newcomer (from Python/JS/Ruby)
-Familiar pattern — most OOP languages require calling `super().__init__()` or equivalent. The compiler warning guides them. The error message names the specific field and parent class.
+Cannot get this wrong — parent initialization runs automatically. No `super()` call to remember. Matches the "it just works" expectation from Kotlin and modern Java.
 
 ### Smalltalk Developer
-This IS the Smalltalk pattern, but with the safety net Smalltalk never had. The warning catches the classic "forgot super initialize" bug at compile time.
+A departure from Smalltalk's explicit `super initialize` convention, but one that eliminates Smalltalk's most common initialization bug. The auto-chain model is closer to Newspeak than Pharo.
 
 ### Erlang/BEAM Developer
-No change to the gen_server model. `super initialize` is just a dispatch call within `handle_continue`. Observable in `:observer` and `sys:get_state/1` as normal.
+Auto-chaining adds implicit behavior inside `handle_continue` that has no OTP equivalent. However, class inheritance itself has no OTP equivalent — this is consistent with the existing departure. Each `initialize` call is visible in traces as a `dispatch` call.
 
 ### Production Operator
-Initialization failures are caught immediately at spawn time (fail-fast) as a catchable `InstantiationError`, not as mysterious `doesNotUnderstand` on `nil` later. Under a supervisor, the child start fails and the supervisor's restart strategy applies. Clear error messages identify the uninitialized field.
+Initialization failures are caught immediately at spawn time (fail-fast) as a catchable `InstantiationError`. Under a supervisor, the child start fails and the supervisor's restart strategy applies. The execution order (parent-first) is deterministic and traceable.
 
 ## Steelman Analysis
 
-For each rejected alternative, the strongest possible argument from each cohort. If a steelman doesn't make you pause, it's not strong enough.
+For each rejected alternative, the strongest possible argument from each cohort.
 
-### Alternative A: Auto-chain initialize up the hierarchy
+### Alternative B: Explicit `super initialize` with compiler warning
 
-- 🧑‍💻 **Newcomer**: "Every time I subclass, I have to remember a magic incantation (`super initialize`) or my app breaks at runtime. In Python, `__init_subclass__` handles this. In Java, the compiler forces `super()`. Beamtalk gives me a *warning* I can ignore and a *runtime crash* when I do. Auto-chaining means I literally cannot get this wrong."
-- 🎩 **Smalltalk purist**: "Newspeak proved that the language should handle initialization, not the programmer. `super initialize` is a 40-year-old mistake — every Smalltalk team warns newcomers about it, every Smalltalk linter checks for it. We're building a new language. Why import a known-bad pattern and then bolt on a compiler warning to compensate for its badness?"
-- ⚙️ **BEAM veteran**: "OTP supervisors auto-chain child specs. OTP applications auto-start dependencies. The BEAM philosophy is: declare the dependency graph, let the platform handle ordering. Auto-chaining `initialize` is the same principle — declare state, let codegen handle setup."
-- 🎨 **Language designer**: "The slot initializer future (Option D) will *also* auto-run parent initializers. If we ship auto-chaining now, Option D is an evolution of the same model — declarative expressions replace imperative methods, but the chaining semantics don't change. With Option B, we ship one model now and replace it with a fundamentally different model later."
+- 🧑‍💻 **Newcomer**: "At least I can see the call chain explicitly in my code. With auto-chaining, I have to *know* that parents run first — it's invisible."
+- 🎩 **Smalltalk purist**: "Explicit is better than implicit. I want to control *when* parent initialization runs relative to my own setup. What if I need to set something before the parent's initialize?"
+- ⚙️ **BEAM veteran**: "I can trace `super initialize` in the code. Auto-chaining is invisible magic inside codegen that I can't see in the source."
+- 🎨 **Language designer**: "B has the lowest migration cost to D (slot initializers). With B, you just delete the `super initialize` line. With A, you have to *add* logic to suppress auto-chaining if slot initializers conflict."
 
-**Rejected because**: Auto-chaining creates an implicit contract between parent and child that conflicts with declarative slot initializers. If a parent has both a slot initializer (`state: db :: Database = Database connect`) and an `initialize` method, auto-chaining would run both — double-initializing the field. Removing auto-chaining to fix this is a breaking change. With explicit `super initialize`, the programmer simply deletes the line when slot initializers make it unnecessary.
+**Rejected because**: If you should *always* call `super initialize`, making it explicit just imports a known-bad pattern from Smalltalk and adds a compiler warning to compensate. The warning is an admission that the design is error-prone. Auto-chaining does the right thing by default — the programmer literally cannot forget.
 
-**Why this is still a close call**: The "known-bad pattern" argument from the Smalltalk purist is genuinely strong. We're choosing B partly because it's the path of least commitment, not because `super initialize` is a great design. The compiler warning is an admission that the pattern is error-prone.
+**Why this is still a close call**: The language designer's point about B → D migration is real. With auto-chaining, when slot initializers arrive, we need to ensure that a field with a slot initializer doesn't *also* get set by `initialize`. But this is a solvable problem at the slot initializer design stage — not a reason to reject auto-chaining now.
 
 ### Alternative C: Validate-only (flat initialization)
 
-- 🧑‍💻 **Newcomer**: "One method, one place to look, everything is explicit. I can read `initialize` and see every field being set. No hidden parent logic running that I have to know about. When I debug, there's one `initialize` call in the stack, not a chain."
-- ⚙️ **BEAM veteran**: "In OTP, each module owns its own `init/1`. There's no inheritance chain. One process, one init, one state map. `super initialize` creates a Smalltalk abstraction that fights the platform — BEAM processes don't have parent processes that initialize them. The flat model matches how gen_server actually works."
-- 🏭 **Production operator**: "I can look at one file and know exactly what happens at startup. With `super initialize`, I have to trace a chain of classes to understand initialization — and if any parent's initialize has side effects (opens connections, starts timers), I need to understand the whole chain to debug startup failures."
-- 🎨 **Language designer**: "This is the honest design. Beamtalk's state is a flat map, not an object with encapsulated instance variables. The child *already* has direct access to `self.db` — there's no encapsulation boundary. Why pretend there is one by hiding initialization behind `super`? Let the runtime check enforce the contract, and let the programmer decide how to satisfy it."
+- 🧑‍💻 **Newcomer**: "One method, one place to look, everything is explicit. No hidden parent logic."
+- ⚙️ **BEAM veteran**: "In OTP, each module owns its own `init/1`. One process, one init, one state map. The flat model matches how gen_server actually works."
+- 🏭 **Production operator**: "I can look at one file and know exactly what happens at startup. No chain to trace."
+- 🎨 **Language designer**: "Beamtalk's state is a flat map. The child already has direct access to `self.db`. Why pretend there's an encapsulation boundary?"
 
-**Rejected because**: When a parent adds a new typed-no-default field, every subclass must be updated — even subclasses that have no knowledge of the parent's internals. This coupling is fragile and scales poorly with deep hierarchies. The "no encapsulation" argument is honest about the current state, but `super initialize` at least lets parent and child evolve independently.
-
-**Why this is still a close call**: The BEAM veteran's argument is architecturally sound — Beamtalk's state *is* flat, and `super initialize` imports an abstraction from languages where instance variables are scoped per class. We're choosing B partly because the alternative (DRY violations) is worse in practice, even if C is more honest about the runtime model.
+**Rejected because**: When a parent adds a new typed-no-default field, every subclass must be updated — even subclasses that have no knowledge of the parent's internals. This coupling is fragile. Auto-chaining lets parent and child evolve independently.
 
 ### Alternative D: Declarative slot initializers (Newspeak-style)
 
-- 🧑‍💻 **Newcomer**: "I write `state: db :: Database = Database connect` and it just works. No initialize method, no super calls, no warnings to satisfy. The declaration IS the initialization. This is how modern languages work — Swift, Kotlin, Dart all let you initialize fields inline."
-- 🎩 **Smalltalk purist**: "This is Newspeak's best idea and it's the one Gilad Bracha got right. Slot initializers are evaluated in declaration order during construction, automatically for every class in the hierarchy. No `initialize` method, no `super` call, no convention to forget. The language handles it."
-- 🎨 **Language designer**: "Every other option is a workaround for the fact that typed-no-default fields don't have initializers. Option D fixes the root cause. B adds a warning to compensate for a missing feature. C adds a runtime check to compensate for a missing feature. D *is* the feature. Every line of code we write for B is technical debt with a known expiry date."
-- ⚙️ **BEAM veteran**: "I'm worried about evaluation order and `self` access during initialization. But Newspeak solved this — initializer expressions can reference constructor parameters and earlier slots but not `self`. The constraints are well-understood. And the generated code is simpler: each field becomes a map entry computed at spawn time. No `handle_continue` dispatch chain."
+- 🧑‍💻 **Newcomer**: "The declaration IS the initialization. This is how Swift, Kotlin, and Dart work."
+- 🎩 **Smalltalk purist**: "This is Newspeak's best idea. No `initialize`, no `super`, no convention to forget."
+- 🎨 **Language designer**: "Every other option is a workaround for the fact that typed-no-default fields don't have initializers. D fixes the root cause."
 
-**Noted as future direction**: The language designer's argument — "every line of B is tech debt with a known expiry" — is the strongest argument in this ADR. We chose B because D is XL effort and we need a solution now. But D should not be deferred indefinitely.
+**Noted as future direction**: D is the right long-term answer, but XL implementation effort. Auto-chaining (A) is complementary — when D arrives, slot initializers handle declarative setup and `initialize` handles imperative post-construction logic. The auto-chaining semantics don't need to change.
 
 ### Tension Points
 
-- **The Smalltalk purist and the language designer both argue against B** — the purist because `super initialize` is a known-bad pattern, the designer because B is temporary scaffolding. Neither is wrong.
-- **The BEAM veteran is genuinely split**: C matches the platform model, but B is more practical for evolving hierarchies. Neither option feels native to BEAM.
-- **The newcomer prefers A or D** — both "just work" without remembering patterns. B requires learning a convention and heeding a warning.
-- **The key insight is not that B is the best design — it's that B has the lowest migration cost to D.** Auto-chaining (A) creates implicit behavior that must be removed. Validate-only (C) forces patterns that must be rewritten. `super initialize` (B) is a line that gets deleted. That's it.
+- **The Smalltalk purist wants explicit control** — but the 40-year track record shows programmers forget `super initialize`. The purist's preference causes the purist's most common bug.
+- **The BEAM veteran wants OTP purity** — but class inheritance already breaks that. Auto-chaining is consistent with the existing departure.
+- **The language designer worries about A → D migration** — but auto-chaining + slot initializers are complementary, not conflicting. The migration concern is solvable at D's design stage.
+- **Everyone agrees on D long-term** — A is the best interim solution because it shares D's core principle: the platform handles parent initialization, not the programmer.
 
 ## Consequences
 
 ### Positive
-- Catches the classic "forgot super initialize" bug at compile time
-- Runtime validation provides a safety net for cross-file inheritance
-- No breaking changes to existing code (warning, not error)
-- Clean migration path to declarative slot initializers in the future
-- Familiar pattern for developers from most OOP backgrounds
+- Eliminates the classic "forgot super initialize" bug by design
+- Parent and child can evolve independently — adding fields to a parent doesn't break subclasses
+- No new syntax to learn — initialization "just works"
+- Runtime validation (BT-1949) provides a safety net for any remaining gaps
+- Complementary with future declarative slot initializers (Option D)
 
 ### Negative
-- Programmers must remember to write `super initialize` (mitigated by compiler warning)
-- Warning is a lint-level check, not a hard guarantee — can be suppressed with `@expect`
-- Parent `initialize` methods must be idempotent-safe (same contract as Smalltalk's `super initialize`)
-- When slot initializers (Option D) arrive, developers must remove `super initialize` lines (mechanical but required)
+- Implicit behavior — parent `initialize` runs without any visible call in the child's source
+- Programmer cannot control when parent `initialize` runs relative to child setup (always parent-first)
+- Each `initialize` in the chain must be independent — child's initialize cannot assume parent's initialize hasn't run yet
+- Compiler warning needed for explicit `super initialize` (now redundant and potentially harmful if it causes double-init)
 
 ### Neutral
-- `super` dispatch for `initialize` uses the existing `beamtalk_dispatch:super/5` — no new runtime mechanism
-- The `__skip_initialize__` flag mechanism in `init/1` remains unchanged
-- BT-1949's post-initialize check in `handle_continue` is extended, not replaced
+- Execution order (parent-first) matches Java, Kotlin, Swift constructor chaining
+- `Actor.bt` defines `initialize -> Nil => nil`, so the chain always terminates cleanly
+- BT-1949's post-initialize check in `handle_continue` is extended to validate all inherited fields
 
 ## Implementation
 
-### Phase 1: Compiler Warning + Super Safety (S)
-These must ship together — the warning tells developers to add `super initialize`, so `super initialize` must be safe before the warning fires.
-- **Type checker**: When checking an `initialize` method, walk the superclass chain via `ClassHierarchy` to find ancestor typed-no-default fields. If any exist and the method body has no `super` send with selector `initialize`, emit a warning.
-- **Runtime verification**: Confirm `super initialize` is safe when no intermediate ancestor overrides `initialize` (reaches `Actor`'s no-op default). This should already work — `Actor.bt` defines `initialize -> Nil => nil` — but needs a test to prove it.
-- **Files**: `crates/beamtalk-core/src/semantic_analysis/type_checker/`
+### Phase 1: Auto-chain codegen + inherited field validation (M)
+- **Codegen**: Modify `handle_continue` generation in `callbacks.rs` to walk the class hierarchy and dispatch `initialize` on each class that defines one, parent-first. Remove `__skip_initialize__` flag from `init/1` — parent `initialize` methods are no longer suppressed, they're explicitly chained by the leaf's `handle_continue`.
+- **Codegen**: Extend `generate_post_initialize_check` to validate all typed-no-default fields in the hierarchy, not just the current class's own (BT-1951).
+- **Files**: `crates/beamtalk-core/src/codegen/core_erlang/gen_server/callbacks.rs`, `crates/beamtalk-core/src/codegen/core_erlang/gen_server/state.rs`
 - **Tests**:
-  - BUnit test: subclass that omits `super initialize` — verify warning is emitted
-  - BUnit test: actor subclass of Actor base calling `super initialize` — verify no error
+  - BUnit test: parent sets typed-no-default field in initialize, child doesn't mention it — works
+  - BUnit test: parent forgets its own field — `UninitializedStateError`
+  - BUnit test: deep hierarchy (3 levels) — all initializers run in order
+  - BUnit test: child with no initialize, parent has initialize — parent's runs
 
-### Phase 2: Inherited Field Validation (S)
-- **Codegen**: Extend `generate_post_initialize_check` in `callbacks.rs` to walk the superclass chain and collect all typed-no-default fields, not just the current class's own. BT-1951 covers this.
-- **Files**: `crates/beamtalk-core/src/codegen/core_erlang/gen_server/callbacks.rs`
-- **Test**: BUnit test with parent typed-no-default field, child forgets to init → `UninitializedStateError`
+### Phase 2: Compiler warning for redundant `super initialize` (S)
+- **Type checker**: When an `initialize` method contains `super initialize`, emit a warning: "explicit `super initialize` is unnecessary — parent initializers run automatically."
+- **Files**: `crates/beamtalk-core/src/semantic_analysis/type_checker/`
+- **Test**: BUnit test with `super initialize` in body — verify warning is emitted
+
+### Note on `__skip_initialize__`
+
+The `__skip_initialize__` flag in `init/1` currently prevents parent `initialize` from running when the parent's `init/1` is called as a state-building helper. With auto-chaining, this flag is still needed for `init/1` (parent's init should still just return state, not dispatch initialize). The change is in `handle_continue` — instead of dispatching initialize once on the leaf, it dispatches initialize on each class in the chain.
 
 ### Future Evolution: Declarative Slot Initializers
-When the language evolves to support initializer expressions on state declarations (e.g., `state: db :: Database = Database connect`), the `super initialize` pattern becomes optional:
-- Slot initializers would run automatically for each class in the hierarchy
-- `initialize` methods would be used only for imperative post-construction logic
-- The compiler warning for missing `super initialize` would be removed for classes where all inherited typed-no-default fields have slot initializers
-
-**Migration from B → D**: When slot initializers land, the compiler should emit a new warning: "`super initialize` is unnecessary — parent fields have slot initializers." This gives developers a clear signal to remove the `super initialize` line. The migration is mechanical: delete `super initialize`, verify tests pass.
+When the language evolves to support initializer expressions on state declarations (e.g., `state: db :: Database = Database connect`):
+- Slot initializers run at `init/1` time (before `handle_continue`)
+- `initialize` methods run at `handle_continue` time (after slot initializers)
+- Auto-chaining still applies to `initialize` — it handles imperative post-construction logic
+- The compiler should warn if an `initialize` method sets a field that already has a slot initializer
 
 ## Migration Path
 
 No migration needed — this is purely additive:
-- Existing code without typed-no-default fields: no change
-- Existing code with typed-no-default fields: gets a warning if `super initialize` is missing
-- The warning can be suppressed with `@expect` if the programmer knows what they're doing
+- Existing code without `initialize`: no change
+- Existing code with `initialize` that doesn't call `super initialize`: parent initializers now run automatically (this is the desired fix)
+- Existing code with explicit `super initialize`: gets a compiler warning (redundant), but behavior is unchanged if parent's `initialize` is idempotent
+- The `super initialize` warning can be suppressed with `@expect` during migration
 
 ## References
 - Related issues: BT-1949 (UninitializedStateError check), BT-1951 (inherited field validation)
 - Related ADRs: ADR 0065 (OTP primitives for actor lifecycle), ADR 0067 (state/field keywords)
-- Prior art: Pharo `super initialize`, Newspeak slot initializers, Swift designated initializers
+- Prior art: Newspeak slot initializers, Kotlin automatic constructor chaining, Swift designated initializers
 - Documentation: `docs/beamtalk-language-features.md` (Actor Lifecycle Hooks)
