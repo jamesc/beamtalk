@@ -1873,6 +1873,37 @@ fn parse_standalone_method_with_union_typed_keyword_param() {
 }
 
 #[test]
+fn parse_multi_keyword_method_with_union_typed_last_param() {
+    // BT-1944: Multi-keyword method with `:: Integer | Nil` on last param
+    let module = parse_ok(
+        "Actor subclass: WorkerPool
+  executeActivity: act selector: sel args: a timeout: t :: Integer | Nil =>
+    self",
+    );
+    let method = &module.classes[0].methods[0];
+    assert_eq!(
+        method.selector.name(),
+        "executeActivity:selector:args:timeout:"
+    );
+    assert_eq!(method.parameters.len(), 4);
+    // First 3 params should be untyped
+    assert!(method.parameters[0].type_annotation.is_none());
+    assert!(method.parameters[1].type_annotation.is_none());
+    assert!(method.parameters[2].type_annotation.is_none());
+    // Last param should have union type annotation
+    assert!(
+        method.parameters[3].type_annotation.is_some(),
+        "timeout param should have type annotation"
+    );
+    match method.parameters[3].type_annotation.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Union { types, .. } => {
+            assert_eq!(types.len(), 2, "should be a 2-member union");
+        }
+        other => panic!("expected Union type annotation, got: {other:?}"),
+    }
+}
+
+#[test]
 fn parse_malformed_return_type_recovers() {
     // `-> =>` (missing type name) should still detect the method definition
     // and let parse_type_annotation emit the error, not truncate class parsing

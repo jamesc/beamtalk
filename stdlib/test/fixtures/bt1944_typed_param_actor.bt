@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1944: Test fixture — actor with typed and untyped method params
+
+Actor subclass: BT1944TypedParamActor
+  state: callCount = 0
+
+  doUntyped: x =>
+    self.callCount := self.callCount + 1
+    x
+
+  doTyped: x :: Integer | Nil =>
+    self.callCount := self.callCount + 1
+    x
+
+  doTypedObject: x :: Object | Nil =>
+    self.callCount := self.callCount + 1
+    x
+
+  count => self.callCount

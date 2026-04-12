@@ -92,7 +92,9 @@ compile_expression_trace(Expression, ModuleName, Bindings) ->
 
 -doc "Compile a Beamtalk file to bytecode.".
 -spec compile_file(string(), string(), boolean(), binary() | undefined) ->
-    {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
+    {ok, binary(), [#{name := string(), superclass := string()}], atom()}
+    | {ok, protocol_definition, map(), [binary()]}
+    | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
 
@@ -103,7 +105,9 @@ Like `compile_file/4' but accepts pre-built class indexes to avoid
 redundant class registry scans during batch loads.
 """.
 -spec compile_file(string(), string(), boolean(), binary() | undefined, map()) ->
-    {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
+    {ok, binary(), [#{name := string(), superclass := string()}], atom()}
+    | {ok, protocol_definition, map(), [binary()]}
+    | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes).
 
@@ -463,6 +467,10 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
                     % elp:fixme W0023 intentional atom creation
                     ModuleName = binary_to_atom(ModNameBin, utf8),
                     compile_file_core(CoreErlang, ModuleName, Classes);
+                %% BT-1950: Protocol definitions from the compile path — compile
+                %% Core Erlang to BEAM and return a protocol_definition result.
+                {ok, protocol_definition, ProtocolInfo} ->
+                    compile_protocol_definition_result(ProtocolInfo);
                 {error, Diagnostics} ->
                     {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
             end

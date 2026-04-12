@@ -753,6 +753,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             class_module_index,
             pre_class_hierarchy,
             module_name_override.as_deref(),
+            false, // REPL expressions are never stdlib
         );
     }
 
@@ -989,6 +990,7 @@ fn handle_inline_class_definition(
 /// with protocol registration via BT-1610), then returns a `protocol_definition`
 /// response so the Erlang side can load and execute the module.
 /// BT-1670: Accepts optional `module_name_override` for package-mode consistency.
+#[allow(clippy::too_many_arguments)]
 fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
     source: &str,
@@ -997,10 +999,11 @@ fn handle_inline_protocol_definition(
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     module_name_override: Option<&str>,
+    stdlib_mode: bool,
 ) -> Term {
     let first_protocol_name = &module.protocols[0].name.name;
     let protocol_module_name =
-        derive_class_module_name(first_protocol_name, module_name_override, false);
+        derive_class_module_name(first_protocol_name, module_name_override, stdlib_mode);
 
     let protocol_names: Vec<String> = module
         .protocols
@@ -1139,13 +1142,6 @@ fn handle_compile(request: &Map) -> Term {
         }
     };
 
-    // Extract class info
-    let classes: Vec<(String, String)> = module
-        .classes
-        .iter()
-        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
-        .collect();
-
     let class_module_index = match extract_optional_string_map(request, "class_module_index") {
         Ok(map) => map,
         Err(resp) => return resp,
@@ -1155,6 +1151,31 @@ fn handle_compile(request: &Map) -> Term {
             Ok(map) => map,
             Err(resp) => return resp,
         };
+
+    // BT-1950: Protocol-only files need the same early-return path as
+    // handle_compile_expression (BT-1612). generate_module assumes at least
+    // one class exists and errors with "Value type module has no class" for
+    // protocol-only files. Route through the protocol codegen instead.
+    if !module.protocols.is_empty() && module.classes.is_empty() {
+        let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
+        return handle_inline_protocol_definition(
+            &module,
+            &source,
+            &warning_msgs,
+            &class_superclass_index,
+            class_module_index,
+            pre_class_hierarchy,
+            module_name_override.as_deref(),
+            stdlib_mode,
+        );
+    }
+
+    // Extract class info
+    let classes: Vec<(String, String)> = module
+        .classes
+        .iter()
+        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
+        .collect();
 
     // BT-845/BT-860: Extract optional source file path to embed as beamtalk_source attribute.
     let source_path = map_get(request, "source_path").and_then(term_to_string);
@@ -1843,17 +1864,32 @@ mod tests {
             "Protocol-only file should compile successfully"
         );
 
+        // BT-1950: Protocol-only files now return a protocol_definition response
+        let kind = map_get(m, "kind").and_then(term_to_atom);
+        assert_eq!(
+            kind.as_deref(),
+            Some("protocol_definition"),
+            "Protocol-only file should return protocol_definition kind"
+        );
+
         let module_name = map_get(m, "module_name").and_then(term_to_string);
         assert_eq!(module_name.as_deref(), Some("bt@awaitable"));
 
-        // Classes list should be present and empty for protocol-only files
-        let classes = map_get(m, "classes").expect("response should include 'classes' key");
-        let Term::List(list) = classes else {
-            panic!("Expected classes to be a list, got: {classes:?}");
+        // Protocols list should contain the protocol name
+        let protocols = map_get(m, "protocols").expect("response should include 'protocols' key");
+        let Term::List(list) = protocols else {
+            panic!("Expected protocols to be a list, got: {protocols:?}");
         };
+        assert_eq!(list.elements.len(), 1, "Should have one protocol");
+        assert_eq!(
+            term_to_string(&list.elements[0]).as_deref(),
+            Some("Awaitable")
+        );
+
+        // core_erlang should be present
         assert!(
-            list.elements.is_empty(),
-            "Protocol-only file should have no classes"
+            map_get(m, "core_erlang").is_some(),
+            "Protocol response should include core_erlang"
         );
     }
 
@@ -1873,6 +1909,10 @@ mod tests {
 
         let status = map_get(m, "status").and_then(term_to_atom);
         assert_eq!(status.as_deref(), Some("ok"));
+
+        // BT-1950: Protocol-only files return protocol_definition kind
+        let kind = map_get(m, "kind").and_then(term_to_atom);
+        assert_eq!(kind.as_deref(), Some("protocol_definition"));
 
         let module_name = map_get(m, "module_name").and_then(term_to_string);
         assert_eq!(module_name.as_deref(), Some("bt@exdura@awaitable"));

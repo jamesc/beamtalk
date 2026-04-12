@@ -299,18 +299,31 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
 /// Returns a vector of spec attribute Documents, one per annotated method.
 /// Only primary methods generate specs.
 /// Includes both instance methods and class-side methods.
+///
+/// BT-1944: For actor classes (`is_value_type: false`), instance method specs
+/// are skipped because actor methods are dispatch clauses inside `safe_dispatch/3`,
+/// not standalone functions — a spec referencing a non-existent function is invalid.
+/// Value type methods ARE standalone functions, so their specs are valid.
 pub fn generate_class_specs(
     class: &ClassDefinition,
     is_value_type: bool,
 ) -> Vec<Document<'static>> {
-    let instance_specs = class
-        .methods
-        .iter()
-        .filter(|m| m.kind == MethodKind::Primary)
-        .filter_map(|m| {
-            generate_method_spec(m, is_value_type)
-                .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
-        });
+    // BT-1944: Only generate instance method specs for value types where methods
+    // are standalone functions. Actor instance methods live inside safe_dispatch/3.
+    let instance_specs: Box<dyn Iterator<Item = Document<'static>>> = if is_value_type {
+        Box::new(
+            class
+                .methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .filter_map(|m| {
+                    generate_method_spec(m, is_value_type)
+                        .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
+                }),
+        )
+    } else {
+        Box::new(std::iter::empty())
+    };
 
     let class_specs = class
         .class_methods

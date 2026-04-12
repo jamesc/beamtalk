@@ -24219,6 +24219,16 @@
       "explanation": "Point - a simple value type for testing BT-213"
     },
     {
+      "id": "tests-e2e-fixtures-protocol-loadable",
+      "title": "Protocol Loadable",
+      "category": "e2e-fixtures",
+      "tags": [
+        "protocol_loadable"
+      ],
+      "source": "// Test protocol definition for load-file e2e test (BT-1950).\nProtocol define: LoadableProtocol\n  doSomething -> String",
+      "explanation": "Test protocol definition for load-file e2e test (BT-1950)."
+    },
+    {
       "id": "tests-e2e-fixtures-rectangle",
       "title": "Rectangle",
       "category": "e2e-fixtures",
