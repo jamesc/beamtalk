@@ -4,7 +4,8 @@
 // UninitializedStateActor — test fixture for BT-1949
 //
 // Actor with a typed-no-default field that the initialize method
-// forgets to set. Should raise UninitializedStateError at startup.
+// forgets to set. Spawn raises #instantiation_error with the
+// UninitializedStateError details in the hint.
 
 typed Actor subclass: UninitializedStateActor
   state: connection :: String

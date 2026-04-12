@@ -1,11 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for BT-1949: UninitializedStateError after Actor initialize.
+// Tests for BT-1949: post-initialize check for typed-no-default fields.
+//
+// Uninitialized typed fields cause spawn to raise #instantiation_error
+// with UninitializedStateError details in the hint.
 //
 // Fixtures:
 //   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)
 //   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)
+//   stdlib/test/fixtures/nil_allowed_state_actor.bt   (nilable field, nil is valid)
 
 TestCase subclass: UninitializedStateTest
 
@@ -23,16 +27,19 @@ TestCase subclass: UninitializedStateTest
     self should: [UninitializedStateActor spawn] raise: #instantiation_error
 
   testUninitializedErrorContainsClassName =>
-    result := [UninitializedStateActor spawn] on: Exception do: [:e | e message]
-    self assert: (result includesSubstring: "UninitializedStateActor")
+    e := [UninitializedStateActor spawn] on: Exception do: [:ex | ex]
+    self assert: e kind equals: #instantiation_error
+    self assert: (e message includesSubstring: "UninitializedStateActor")
 
   testUninitializedErrorHintContainsFieldName =>
-    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
-    self assert: (result includesSubstring: "connection")
+    e := [UninitializedStateActor spawn] on: Exception do: [:ex | ex]
+    self assert: e kind equals: #instantiation_error
+    self assert: (e hint includesSubstring: "connection")
 
   testUninitializedErrorHintContainsTypeName =>
-    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
-    self assert: (result includesSubstring: "String")
+    e := [UninitializedStateActor spawn] on: Exception do: [:ex | ex]
+    self assert: e kind equals: #instantiation_error
+    self assert: (e hint includesSubstring: "String")
 
   // === Nilable typed-no-default field: nil is valid, no error ===
   testNilAllowedFieldLeftNilSpawnsSuccessfully =>
