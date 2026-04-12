@@ -58,7 +58,7 @@ When all of these conditions are true:
 
 Then the compiler checks whether the `initialize` method body contains a `super initialize` send. If not, emit:
 
-```
+```text
 warning: initialize does not call `super initialize`
   --> my_actor.bt:10:3
    |
@@ -105,7 +105,7 @@ DatabaseActor subclass: BadCachingActor
 ```
 
 **Runtime error if warning is ignored:**
-```
+```text
 UninitializedStateError: BadCachingActor field 'db' (:: Database) was not initialized
 ```
 
@@ -184,7 +184,7 @@ This IS the Smalltalk pattern, but with the safety net Smalltalk never had. The 
 No change to the gen_server model. `super initialize` is just a dispatch call within `handle_continue`. Observable in `:observer` and `sys:get_state/1` as normal.
 
 ### Production Operator
-Initialization failures are caught immediately at spawn time (fail-fast), not as mysterious `doesNotUnderstand` on `nil` later. Clear error message identifies the uninitialized field.
+Initialization failures are caught immediately at spawn time (fail-fast) as a catchable `InstantiationError`, not as mysterious `doesNotUnderstand` on `nil` later. Under a supervisor, the child start fails and the supervisor's restart strategy applies. Clear error messages identify the uninitialized field.
 
 ## Steelman Analysis
 
