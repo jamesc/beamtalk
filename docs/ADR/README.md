@@ -101,6 +101,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Accepted | 2026-04-02 |
 | [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Accepted | 2026-04-03 |
 | [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Accepted | 2026-04-05 |
+| [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Proposed | 2026-04-12 |
 
 ## Creating New ADRs
 
