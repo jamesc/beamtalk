@@ -30,7 +30,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  allClasses -> List => (Erlang beamtalk_interface) allClasses
+  allClasses -> List(Symbol) => (Erlang beamtalk_interface) allClasses
 
   /// Look up a class by name (symbol).
   ///
@@ -140,7 +140,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk debugTargets
   /// ```
-  debugTargets -> List => (Erlang beamtalk_logging_config) debugTargets
+  debugTargets -> List(Symbol) => (Erlang beamtalk_logging_config) debugTargets
 
   /// Enable debug logging for a subsystem, class, or actor instance.
   ///
@@ -176,7 +176,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk activeDebugTargets
   /// ```
-  activeDebugTargets -> List =>
+  activeDebugTargets -> List(Symbol) =>
     (Erlang beamtalk_logging_config) activeDebugTargets
 
   /// Disable all debug targets.

@@ -117,7 +117,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 yourself            // => 42
   /// ```
-  sealed yourself => self
+  sealed yourself -> Self => self
 
   /// Return a hash value for the receiver.
   ///
@@ -141,7 +141,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 fieldNames             // => #()
   /// ```
-  sealed fieldNames -> List => @intrinsic fieldNames
+  sealed fieldNames -> List(Symbol) => @intrinsic fieldNames
 
   /// Return the value of the named field.
   ///
@@ -182,7 +182,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// self subclassResponsibility
   /// ```
-  subclassResponsibility =>
+  subclassResponsibility -> Never =>
     self error: "This method is abstract and must be overridden by a subclass"
 
   /// Raise an error indicating this method has not yet been implemented.
@@ -194,7 +194,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// self notImplemented
   /// ```
-  notImplemented => self error: "Method not yet implemented"
+  notImplemented -> Never => self error: "Method not yet implemented"
 
   /// Send aValue to the current transcript without a trailing newline.
   ///
@@ -204,7 +204,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 show: "value: "
   /// ```
-  show: aValue =>
+  show: aValue -> Self =>
     TranscriptStream current ifNotNil: [:t | t show: aValue]
     self
 
@@ -216,7 +216,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 showCr: "hello world"
   /// ```
-  showCr: aValue =>
+  showCr: aValue -> Self =>
     TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
     self
 
