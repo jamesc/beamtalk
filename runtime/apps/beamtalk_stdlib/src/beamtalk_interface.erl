@@ -22,7 +22,7 @@ dictionary or ETS state is required.
 
 | Selector          | Description                                       |
 |-------------------|---------------------------------------------------|
-| `allClasses'      | List of all registered class names                |
+| `allClasses'      | List of all registered classes (class objects)     |
 | `classNamed:'     | Class object reference by name, or nil            |
 | `globals'         | Class registry snapshot as a map                  |
 | `help:'           | Formatted class documentation                     |
@@ -57,7 +57,7 @@ Called by the compiled `bt@stdlib@beamtalk_interface:dispatch/3`.
 """.
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Self) ->
-    [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()];
+    allClasses();
 dispatch('classNamed:', [ClassName], _Self) ->
     handle_class_named(ClassName);
 dispatch(globals, [], _Self) ->
@@ -91,12 +91,18 @@ dispatch(Selector, _Args, _Self) ->
 %%% ============================================================================
 
 -doc """
-Return list of all registered class names.
+Return list of all registered classes as class objects.
 Called via `(Erlang beamtalk_interface) allClasses`.
 """.
--spec allClasses() -> [atom()].
+-spec allClasses() -> [tuple()].
 allClasses() ->
-    [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()].
+    [
+        begin
+            ClassTag = beamtalk_class_registry:class_object_tag(Name),
+            {beamtalk_object, ClassTag, Mod, Pid}
+        end
+     || {Name, Mod, Pid} <- beamtalk_class_registry:live_class_entries()
+    ].
 
 -doc """
 Look up a class by name (atom or binary).

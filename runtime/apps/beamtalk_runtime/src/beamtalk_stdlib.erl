@@ -259,16 +259,21 @@ discover_and_load_fallback(Dir) ->
 Dispatch a class method on the Beamtalk global class.
 
 The Beamtalk class provides system reflection methods:
-- allClasses: Returns list of all registered class names
+- allClasses: Returns list of all registered classes (class objects)
 - classNamed: Look up a class by name (returns class pid or nil)
 - globals: Returns global namespace (placeholder - returns empty map)
 - version: Returns Beamtalk version string
 """.
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Receiver) ->
-    %% Return list of all registered class names
-    Pids = beamtalk_class_registry:all_classes(),
-    [beamtalk_object_class:class_name(Pid) || Pid <- Pids];
+    %% Return list of all registered classes as class objects
+    [
+        begin
+            ClassTag = beamtalk_class_registry:class_object_tag(Name),
+            {beamtalk_object, ClassTag, Mod, Pid}
+        end
+     || {Name, Mod, Pid} <- beamtalk_class_registry:live_class_entries()
+    ];
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
     %% Look up a class by name, return wrapped class object or nil.
     %% BT-1768: If the class is not registered but has a module table entry,

@@ -1046,7 +1046,7 @@ do_eval(Expression, State, Subscriber) ->
 - (None — stateless façade, no mutable entities)
 
 **Value Objects:**
-- `ClassList`: Ordered list of all registered class names
+- `ClassList`: Ordered list of all registered class objects
 - `ActorList`: List of `{pid, class, spawned_at}` tuples for all supervised actors
 - `SessionList`: List of active REPL session IDs
 - `ModuleList`: List of loaded Beamtalk module atoms
@@ -1058,7 +1058,7 @@ do_eval(Expression, State, Subscriber) ->
 
 | Message | Return | Delegates To |
 |---------|--------|-------------|
-| `Beamtalk allClasses` | List of class names | `beamtalk_class_registry` |
+| `Beamtalk allClasses` | List of class objects | `beamtalk_class_registry` |
 | `Beamtalk classNamed: #Counter` | Class metadata | `beamtalk_class_registry` |
 | `Beamtalk actors` | List of running actors | `beamtalk_workspace_meta` |
 | `Beamtalk modules` | List of loaded modules | `beamtalk_workspace_meta` |

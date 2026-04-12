@@ -94,7 +94,7 @@ The system prevents binding names that conflict with built-in globals
 
 ```beamtalk
 Beamtalk version              // the Beamtalk version string
-Beamtalk allClasses           // list all registered class names
+Beamtalk allClasses           // list all registered classes
 Beamtalk classNamed: #Integer // look up a class by name
 Beamtalk globals              // Dictionary of all system-level names
 ```
@@ -155,7 +155,7 @@ Workspace globals            → Dictionary of all bindings
 
 ```text
 Beamtalk version                      → String
-Beamtalk allClasses                   → List of class names
+Beamtalk allClasses                   → List of class objects
 Beamtalk classNamed: name             → class object or nil
 Beamtalk globals                      → Dictionary of system names
 Beamtalk help: aClass                 → class documentation
