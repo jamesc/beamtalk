@@ -753,6 +753,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             class_module_index,
             pre_class_hierarchy,
             module_name_override.as_deref(),
+            false, // REPL expressions are never stdlib
         );
     }
 
@@ -989,6 +990,7 @@ fn handle_inline_class_definition(
 /// with protocol registration via BT-1610), then returns a `protocol_definition`
 /// response so the Erlang side can load and execute the module.
 /// BT-1670: Accepts optional `module_name_override` for package-mode consistency.
+#[allow(clippy::too_many_arguments)]
 fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
     source: &str,
@@ -997,10 +999,11 @@ fn handle_inline_protocol_definition(
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     module_name_override: Option<&str>,
+    stdlib_mode: bool,
 ) -> Term {
     let first_protocol_name = &module.protocols[0].name.name;
     let protocol_module_name =
-        derive_class_module_name(first_protocol_name, module_name_override, false);
+        derive_class_module_name(first_protocol_name, module_name_override, stdlib_mode);
 
     let protocol_names: Vec<String> = module
         .protocols
@@ -1163,6 +1166,7 @@ fn handle_compile(request: &Map) -> Term {
             class_module_index,
             pre_class_hierarchy,
             module_name_override.as_deref(),
+            stdlib_mode,
         );
     }
 

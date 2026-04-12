@@ -340,6 +340,10 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 load_protocol_module(ProtocolInfo, Path, State) ->
     #{binary := Binary, module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
+    ProtocolClassNames = [
+        #{name => binary_to_list(P), superclass => "Object"}
+     || P <- Protocols
+    ],
     LoadPath =
         case Path of
             undefined -> "";
@@ -348,16 +352,18 @@ load_protocol_module(ProtocolInfo, Path, State) ->
     case code:load_binary(ModuleName, LoadPath, Binary) of
         {module, ModuleName} ->
             %% activate_module calls register_class/0 which registers the protocol
-            ProtocolClassNames = [
-                #{name => binary_to_list(P), superclass => "Object"}
-             || P <- Protocols
-            ],
             activate_module(ModuleName, ProtocolClassNames, Path),
             NewState1 = maybe_add_loaded_module(ModuleName, State),
             NewState2 = track_module_source(ModuleName, Path, NewState1),
             {ok, ProtocolClassNames, NewState2};
         {error, Reason} ->
-            {error, {load_error, Reason}, State}
+            ClassAtoms = class_name_atoms(ProtocolClassNames),
+            case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
+                [{_ClassName, StructuredError} | _] ->
+                    {error, StructuredError, State};
+                [] ->
+                    {error, {load_error, Reason}, State}
+            end
     end.
 
 %% BT-1950: Load a protocol module without session state (stateless path).
@@ -365,16 +371,22 @@ load_protocol_module(ProtocolInfo, Path, State) ->
 -spec load_protocol_module_stateless(map(), string()) -> {ok, [map()]} | {error, term()}.
 load_protocol_module_stateless(ProtocolInfo, Path) ->
     #{binary := Binary, module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
+    ProtocolClassNames = [
+        #{name => binary_to_list(P), superclass => "Object"}
+     || P <- Protocols
+    ],
     case code:load_binary(ModuleName, Path, Binary) of
         {module, ModuleName} ->
-            ProtocolClassNames = [
-                #{name => binary_to_list(P), superclass => "Object"}
-             || P <- Protocols
-            ],
             activate_module(ModuleName, ProtocolClassNames, Path),
             {ok, ProtocolClassNames};
         {error, Reason} ->
-            {error, {load_error, Reason}}
+            ClassAtoms = class_name_atoms(ProtocolClassNames),
+            case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
+                [{_ClassName, StructuredError} | _] ->
+                    {error, StructuredError};
+                [] ->
+                    {error, {load_error, Reason}}
+            end
     end.
 
 %% Add a module to the loaded modules list if not already present.

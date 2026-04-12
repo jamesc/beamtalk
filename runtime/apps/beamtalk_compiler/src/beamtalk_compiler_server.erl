@@ -114,7 +114,9 @@ compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
 -doc """
 Compile a file/class definition.
 Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
-Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or `{error, Diagnostics}'.
+Returns `{ok, #{core_erlang, module_name, classes, warnings}}',
+`{ok, protocol_definition, #{core_erlang, module_name, protocols, warnings}}',
+or `{error, Diagnostics}'.
 """.
 -spec compile(binary(), map()) ->
     {ok, map()} | {ok, protocol_definition, map()} | {error, [map()]}.
