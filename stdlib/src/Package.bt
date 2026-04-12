@@ -23,8 +23,8 @@
 sealed typed Value subclass: Package
   field: name :: String = ""
   field: version :: String = ""
-  field: classes :: List = #()
-  field: dependencies :: List = #()
+  field: classes :: List(Symbol) = #()
+  field: dependencies :: List(String) = #()
   field: source :: String = ""
 
   // ===== Class Methods — Discovery =====
@@ -39,7 +39,7 @@ sealed typed Value subclass: Package
   /// Package all includes: "stdlib"
   /// // => true
   /// ```
-  class sealed all -> List => (Erlang beamtalk_package) all
+  class sealed all -> List(String) => (Erlang beamtalk_package) all
 
   /// Return a Package for the given package name.
   ///
@@ -62,7 +62,7 @@ sealed typed Value subclass: Package
   /// Package classes: "stdlib"
   /// // => _
   /// ```
-  class sealed classes: name :: String -> List =>
+  class sealed classes: name :: String -> List(Symbol) =>
     (Erlang beamtalk_package) classes: name
 
   /// Return a List of dependency package names (Strings) for the given package.
@@ -74,7 +74,7 @@ sealed typed Value subclass: Package
   /// Package dependencies: "stdlib"
   /// // => _
   /// ```
-  class sealed dependencies: name :: String -> List =>
+  class sealed dependencies: name :: String -> List(String) =>
     (Erlang beamtalk_package) dependencies: name
 
   /// Return the package name (String) that owns the given class name (Symbol).
@@ -116,7 +116,7 @@ sealed typed Value subclass: Package
   /// (Package named: "stdlib") classes includes: #Object
   /// // => true
   /// ```
-  classes -> List => self.classes
+  classes -> List(Symbol) => self.classes
 
   /// The list of dependency package names (Strings) for this package.
   ///
@@ -125,7 +125,7 @@ sealed typed Value subclass: Package
   /// (Package named: "stdlib") dependencies
   /// // => _
   /// ```
-  dependencies -> List => self.dependencies
+  dependencies -> List(String) => self.dependencies
 
   /// The package source description.
   source -> String => self.source
