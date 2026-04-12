@@ -206,7 +206,7 @@ impl CoreErlangGenerator {
             push_fn(self.generate_abstract_callbacks_doc())?;
         } else {
             // BT-1541: handle_continue dispatches initialize after the loop starts
-            push_fn(self.generate_handle_continue()?)?;
+            push_fn(self.generate_handle_continue(module)?)?;
             push_fn(self.generate_handle_cast()?)?;
             push_fn(self.generate_handle_call()?)?;
             push_fn(self.generate_handle_info()?)?;

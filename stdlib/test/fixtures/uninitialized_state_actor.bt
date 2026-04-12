@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// UninitializedStateActor — test fixture for BT-1949
+//
+// Actor with a typed-no-default field that the initialize method
+// forgets to set. Should raise UninitializedStateError at startup.
+
+typed Actor subclass: UninitializedStateActor
+  state: connection :: String
+  state: count :: Integer = 0
+
+  initialize -> Integer =>
+    // Deliberately does NOT set self.connection
+    self.count := 1
+
+  getConnection -> String => self.connection
+
+  getCount -> Integer => self.count
