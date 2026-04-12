@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// NilAllowedStateActor — test fixture for BT-1949
+//
+// Actor with a nilable typed-no-default field (:: String | Nil).
+// Should NOT raise UninitializedStateError since nil is valid.
+
+typed Actor subclass: NilAllowedStateActor
+  state: label :: String | Nil
+  state: count :: Integer = 0
+
+  initialize -> Integer =>
+    // Deliberately does NOT set self.label — nil is valid for String | Nil
+    self.count := 1
+
+  getLabel -> String | Nil => self.label
+
+  getCount -> Integer => self.count

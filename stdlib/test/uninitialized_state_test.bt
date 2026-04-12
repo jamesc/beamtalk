@@ -33,3 +33,12 @@ TestCase subclass: UninitializedStateTest
   testUninitializedErrorHintContainsTypeName =>
     result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
     self assert: (result includesSubstring: "String")
+
+  // === Nilable typed-no-default field: nil is valid, no error ===
+  testNilAllowedFieldLeftNilSpawnsSuccessfully =>
+    a := NilAllowedStateActor spawn
+    self assert: a getLabel equals: nil
+
+  testNilAllowedFieldOtherStateWorks =>
+    a := NilAllowedStateActor spawn
+    self assert: a getCount equals: 1
