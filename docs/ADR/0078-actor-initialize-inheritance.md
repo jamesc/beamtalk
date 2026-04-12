@@ -188,34 +188,45 @@ Initialization failures are caught immediately at spawn time (fail-fast), not as
 
 ## Steelman Analysis
 
-### Alternative A: Auto-chain initialize up the hierarchy
-- **Newcomer**: "Just works — I don't have to think about parent setup"
-- **Smalltalk purist**: "Implicit magic — I lose control of initialization order"
-- **BEAM veteran**: "Hidden gen_server callbacks I can't see in traces"
-- **Language designer**: "Creates a future breaking change if we move to slot initializers — auto-chaining would need to be removed"
+For each rejected alternative, the strongest possible argument from each cohort. If a steelman doesn't make you pause, it's not strong enough.
 
-**Rejected because**: Auto-chaining adds implicit behavior that conflicts with declarative slot initializers. Consider: if a parent declares `state: db :: Database = Database connect` (slot initializer), the slot initializer runs at construction time. If auto-chaining also runs the parent's `initialize` (which may also call `Database connect`), the field gets initialized twice — once declaratively, once imperatively. Removing auto-chaining to fix this would be a breaking change for any code that relied on it. With explicit `super initialize`, the programmer simply deletes the `super initialize` line when they add a slot initializer — no implicit behavior to undo.
+### Alternative A: Auto-chain initialize up the hierarchy
+
+- 🧑‍💻 **Newcomer**: "Every time I subclass, I have to remember a magic incantation (`super initialize`) or my app breaks at runtime. In Python, `__init_subclass__` handles this. In Java, the compiler forces `super()`. Beamtalk gives me a *warning* I can ignore and a *runtime crash* when I do. Auto-chaining means I literally cannot get this wrong."
+- 🎩 **Smalltalk purist**: "Newspeak proved that the language should handle initialization, not the programmer. `super initialize` is a 40-year-old mistake — every Smalltalk team warns newcomers about it, every Smalltalk linter checks for it. We're building a new language. Why import a known-bad pattern and then bolt on a compiler warning to compensate for its badness?"
+- ⚙️ **BEAM veteran**: "OTP supervisors auto-chain child specs. OTP applications auto-start dependencies. The BEAM philosophy is: declare the dependency graph, let the platform handle ordering. Auto-chaining `initialize` is the same principle — declare state, let codegen handle setup."
+- 🎨 **Language designer**: "The slot initializer future (Option D) will *also* auto-run parent initializers. If we ship auto-chaining now, Option D is an evolution of the same model — declarative expressions replace imperative methods, but the chaining semantics don't change. With Option B, we ship one model now and replace it with a fundamentally different model later."
+
+**Rejected because**: Auto-chaining creates an implicit contract between parent and child that conflicts with declarative slot initializers. If a parent has both a slot initializer (`state: db :: Database = Database connect`) and an `initialize` method, auto-chaining would run both — double-initializing the field. Removing auto-chaining to fix this is a breaking change. With explicit `super initialize`, the programmer simply deletes the line when slot initializers make it unnecessary.
+
+**Why this is still a close call**: The "known-bad pattern" argument from the Smalltalk purist is genuinely strong. We're choosing B partly because it's the path of least commitment, not because `super initialize` is a great design. The compiler warning is an admission that the pattern is error-prone.
 
 ### Alternative C: Validate-only (flat initialization)
-- **Newcomer**: "Simple — one method sets everything"
-- **Smalltalk purist**: "Violates encapsulation — child must know parent's initialization internals"
-- **BEAM veteran**: "Most predictable — one init callback, easy to trace"
-- **Language designer**: "Forces DRY violations and breaks when parent adds new typed fields"
 
-**Rejected because**: Forcing the child to duplicate parent initialization logic is fragile and violates encapsulation. When a parent adds a new typed-no-default field, all subclasses must be updated — even if they have no knowledge of the parent's internals.
+- 🧑‍💻 **Newcomer**: "One method, one place to look, everything is explicit. I can read `initialize` and see every field being set. No hidden parent logic running that I have to know about. When I debug, there's one `initialize` call in the stack, not a chain."
+- ⚙️ **BEAM veteran**: "In OTP, each module owns its own `init/1`. There's no inheritance chain. One process, one init, one state map. `super initialize` creates a Smalltalk abstraction that fights the platform — BEAM processes don't have parent processes that initialize them. The flat model matches how gen_server actually works."
+- 🏭 **Production operator**: "I can look at one file and know exactly what happens at startup. With `super initialize`, I have to trace a chain of classes to understand initialization — and if any parent's initialize has side effects (opens connections, starts timers), I need to understand the whole chain to debug startup failures."
+- 🎨 **Language designer**: "This is the honest design. Beamtalk's state is a flat map, not an object with encapsulated instance variables. The child *already* has direct access to `self.db` — there's no encapsulation boundary. Why pretend there is one by hiding initialization behind `super`? Let the runtime check enforce the contract, and let the programmer decide how to satisfy it."
+
+**Rejected because**: When a parent adds a new typed-no-default field, every subclass must be updated — even subclasses that have no knowledge of the parent's internals. This coupling is fragile and scales poorly with deep hierarchies. The "no encapsulation" argument is honest about the current state, but `super initialize` at least lets parent and child evolve independently.
+
+**Why this is still a close call**: The BEAM veteran's argument is architecturally sound — Beamtalk's state *is* flat, and `super initialize` imports an abstraction from languages where instance variables are scoped per class. We're choosing B partly because the alternative (DRY violations) is worse in practice, even if C is more honest about the runtime model.
 
 ### Alternative D: Declarative slot initializers (Newspeak-style)
-- **Newcomer**: "Most readable — each field declares its own setup"
-- **Smalltalk purist**: "Newspeak's best idea — and it eliminates super-init entirely"
-- **BEAM veteran**: "Concerned about evaluation order and error handling complexity"
-- **Language designer**: "The right long-term answer, but XL implementation effort"
 
-**Noted as future direction**: See Future Evolution below.
+- 🧑‍💻 **Newcomer**: "I write `state: db :: Database = Database connect` and it just works. No initialize method, no super calls, no warnings to satisfy. The declaration IS the initialization. This is how modern languages work — Swift, Kotlin, Dart all let you initialize fields inline."
+- 🎩 **Smalltalk purist**: "This is Newspeak's best idea and it's the one Gilad Bracha got right. Slot initializers are evaluated in declaration order during construction, automatically for every class in the hierarchy. No `initialize` method, no `super` call, no convention to forget. The language handles it."
+- 🎨 **Language designer**: "Every other option is a workaround for the fact that typed-no-default fields don't have initializers. Option D fixes the root cause. B adds a warning to compensate for a missing feature. C adds a runtime check to compensate for a missing feature. D *is* the feature. Every line of code we write for B is technical debt with a known expiry date."
+- ⚙️ **BEAM veteran**: "I'm worried about evaluation order and `self` access during initialization. But Newspeak solved this — initializer expressions can reference constructor parameters and earlier slots but not `self`. The constraints are well-understood. And the generated code is simpler: each field becomes a map entry computed at spawn time. No `handle_continue` dispatch chain."
+
+**Noted as future direction**: The language designer's argument — "every line of B is tech debt with a known expiry" — is the strongest argument in this ADR. We chose B because D is XL effort and we need a solution now. But D should not be deferred indefinitely.
 
 ### Tension Points
-- Newcomers and Smalltalk purists agree on Option D long-term but differ on the interim solution
-- BEAM veterans prefer the simplest runtime model (C) but accept B's explicitness
-- The key insight: B is the only option that doesn't create a future migration burden when D arrives
+
+- **The Smalltalk purist and the language designer both argue against B** — the purist because `super initialize` is a known-bad pattern, the designer because B is temporary scaffolding. Neither is wrong.
+- **The BEAM veteran is genuinely split**: C matches the platform model, but B is more practical for evolving hierarchies. Neither option feels native to BEAM.
+- **The newcomer prefers A or D** — both "just work" without remembering patterns. B requires learning a convention and heeding a warning.
+- **The key insight is not that B is the best design — it's that B has the lowest migration cost to D.** Auto-chaining (A) creates implicit behavior that must be removed. Validate-only (C) forces patterns that must be rewritten. `super initialize` (B) is a line that gets deleted. That's it.
 
 ## Consequences
 
