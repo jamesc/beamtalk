@@ -114,7 +114,7 @@ sealed typed Collection subclass: Set(E)
   /// ```beamtalk
   /// (Set new add: 1) asList        // => #(1)
   /// ```
-  asList -> List => @primitive "asList"
+  asList -> List(E) => @primitive "asList"
 
   /// Create a set from a list of elements.
   ///

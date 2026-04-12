@@ -185,7 +185,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101)) toBytes   // => #(104, 101)
   /// ```
-  toBytes -> List => @primitive "toBytes"
+  toBytes -> List(Integer) => @primitive "toBytes"
 
   /// Validate UTF-8 and return the binary as a String.
   ///
