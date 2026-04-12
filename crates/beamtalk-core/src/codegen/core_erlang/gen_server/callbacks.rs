@@ -11,7 +11,7 @@
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
-use crate::ast::Module;
+use crate::ast::{ClassDefinition, Module, TypeAnnotation};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -359,6 +359,171 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-1949: Generates the success body for `handle_continue` after initialize.
+    ///
+    /// If the class has typed-no-default state fields (type annotation but no `= default`),
+    /// emits a check that each such field is no longer nil. If any are still nil,
+    /// raises `UninitializedStateError` with the class name, field name, and expected type.
+    /// If there are no such fields, returns a plain `{'noreply', InitNewState}`.
+    #[allow(clippy::too_many_lines)]
+    fn generate_post_initialize_check(
+        &self,
+        current_class: Option<&ClassDefinition>,
+        class_name: &ecow::EcoString,
+    ) -> Document<'static> {
+        // Collect typed-no-default fields: have type annotation, no default value,
+        // and the type is NOT nilable (a union containing Nil — nil is a valid value).
+        let typed_no_default: Vec<_> = current_class
+            .map(|c| {
+                c.state
+                    .iter()
+                    .filter(|s| {
+                        s.type_annotation.is_some()
+                            && s.default_value.is_none()
+                            && !Self::is_nilable_type(s.type_annotation.as_ref())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if typed_no_default.is_empty() {
+            return docvec![line(), "{'noreply', InitNewState}"];
+        }
+
+        // Build nested checks: each field gets a case that either stops or continues.
+        // We build from the inside out — the innermost is {'noreply', InitNewState}.
+        let mut body: Document<'static> = docvec!["{'noreply', InitNewState}"];
+
+        for (i, field) in typed_no_default.iter().enumerate().rev() {
+            let field_name = field.name.name.to_string();
+            let type_name = field
+                .type_annotation
+                .as_ref()
+                .map_or_else(|| "Unknown".to_string(), Self::type_annotation_display);
+            let idx = i.to_string();
+            let check_var = format!("_ChkVal{idx}");
+            let err_var0 = format!("_UErr{idx}a");
+            let err_var1 = format!("_UErr{idx}b");
+            let err_msg_var = format!("_UErrMsg{idx}");
+            let class_name_var = format!("_UErrClass{idx}");
+            let hint_msg =
+                format!("{class_name} field '{field_name}' (:: {type_name}) was not initialized",);
+            let hint_binary = Self::binary_string_literal(&hint_msg);
+
+            body = docvec![
+                "let ",
+                Document::String(check_var.clone()),
+                " = call 'maps':'get'('",
+                Document::String(field_name),
+                "', InitNewState) in",
+                line(),
+                "case ",
+                Document::String(check_var),
+                " of",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "<'nil'> when 'true' ->",
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                "let ",
+                                Document::String(err_var0.clone()),
+                                " = call 'beamtalk_error':'new'('uninitialized_state_error', '",
+                                Document::String(class_name.to_string()),
+                                "') in",
+                                line(),
+                                "let ",
+                                Document::String(err_var1.clone()),
+                                " = call 'beamtalk_error':'with_hint'(",
+                                Document::String(err_var0),
+                                ", ",
+                                Document::String(hint_binary),
+                                ") in",
+                                line(),
+                                "let ",
+                                Document::String(err_msg_var.clone()),
+                                " = call 'beamtalk_error':'format_safe'(",
+                                Document::String(err_var1.clone()),
+                                ") in",
+                                line(),
+                                "let ",
+                                Document::String(class_name_var.clone()),
+                                " = call '",
+                                Document::Eco(self.module_name.clone()),
+                                "':'class_name'() in",
+                                line(),
+                                "let _ = call 'logger':'error'(",
+                                Document::String(err_msg_var),
+                                ", ~{'class' => ",
+                                Document::String(class_name_var),
+                                ", 'reason' => ",
+                                Document::String(err_var1.clone()),
+                                ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
+                                line(),
+                                "{'stop', ",
+                                Document::String(err_var1),
+                                ", InitNewState}",
+                            ]
+                        ),
+                        line(),
+                        "<_> when 'true' ->",
+                        nest(INDENT, docvec![line(), body]),
+                    ]
+                ),
+                line(),
+                "end",
+            ];
+        }
+
+        docvec![
+            line(),
+            "%% BT-1949: Verify typed-no-default fields were initialized",
+            line(),
+            body,
+        ]
+    }
+
+    /// Returns true if the type annotation includes `Nil` (making nil a valid value).
+    fn is_nilable_type(ta: Option<&TypeAnnotation>) -> bool {
+        match ta {
+            Some(TypeAnnotation::Simple(id)) => id.name == "Nil",
+            Some(TypeAnnotation::Union { types, .. }) => {
+                types.iter().any(|t| Self::is_nilable_type(Some(t)))
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns a human-readable string for a type annotation (for error messages).
+    fn type_annotation_display(ta: &TypeAnnotation) -> String {
+        match ta {
+            TypeAnnotation::Simple(id) => id.name.to_string(),
+            TypeAnnotation::Union { types, .. } => types
+                .iter()
+                .map(Self::type_annotation_display)
+                .collect::<Vec<_>>()
+                .join(" | "),
+            TypeAnnotation::Singleton { name, .. } => format!("#{name}"),
+            TypeAnnotation::Generic {
+                base, parameters, ..
+            } => {
+                let params = parameters
+                    .iter()
+                    .map(Self::type_annotation_display)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({params})", base.name)
+            }
+            TypeAnnotation::FalseOr { inner, .. } => {
+                format!("{} | False", Self::type_annotation_display(inner))
+            }
+            TypeAnnotation::SelfType { .. } => "Self".to_string(),
+        }
+    }
+
     /// Generates the `handle_continue/2` callback (BT-1541).
     ///
     /// Dispatches `initialize` via `safe_dispatch` when the continuation token
@@ -389,9 +554,19 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_continue(
         &self,
+        module: &Module,
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
         let module_name_for_log = module_name.clone();
+
+        // BT-1949: Find typed-no-default fields for post-initialize validation.
+        let current_class = module.classes.iter().find(|c| {
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
+        });
+        let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
+        let success_body = self.generate_post_initialize_check(current_class, &class_name);
+
         let doc = docvec![
             "'handle_continue'/2 = fun (Continue, State) ->",
             nest(
@@ -423,10 +598,7 @@ impl CoreErlangGenerator {
                                         docvec![
                                             line(),
                                             "<{'reply', _InitResult, InitNewState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![line(), "{'noreply', InitNewState}"]
-                                            ),
+                                            nest(INDENT, success_body,),
                                             line(),
                                             // BT-1822: Destructure error triple to capture stacktrace
                                             "<{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->",

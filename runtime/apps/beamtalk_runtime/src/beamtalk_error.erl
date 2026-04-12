@@ -349,6 +349,10 @@ generate_message(callback_failed, Class, undefined) ->
     iolist_to_binary(io_lib:format("Callback failed for ~s", [Class]));
 generate_message(callback_failed, Class, Selector) ->
     iolist_to_binary(io_lib:format("Callback '~s' failed for ~s", [Selector, Class]));
+generate_message(uninitialized_state_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("UninitializedStateError in ~s", [Class]));
+generate_message(uninitialized_state_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("UninitializedStateError in '~s' on ~s", [Selector, Class]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->
