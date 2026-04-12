@@ -155,7 +155,7 @@ Slot initializer expressions are declarative — evaluated automatically at cons
 ### Swift
 Designated initializers must call `super.init(...)`. The compiler enforces this at compile time and requires all stored properties to be assigned before the super call. Two-phase initialization prevents access to `self` before all properties are set.
 
-**Adapted**: Compiler warning (not error) for missing super-init. We chose a warning because Beamtalk's `initialize` is optional and the runtime check provides a safety net.
+**Adapted**: Compiler warning (not error) for missing super-init. We chose a warning because the runtime `UninitializedStateError` check (BT-1949) is the actual enforcement mechanism — the warning is an early signal, not the safety net itself.
 
 ### Kotlin
 Constructor chaining is automatic via `class Sub : Parent(args)`. `lateinit var` properties are checked at runtime on access (not at construction time).
