@@ -294,6 +294,15 @@ No migration needed — this is purely additive:
 - Existing code with explicit `super initialize`: gets a compiler warning (redundant), but behavior is unchanged if parent's `initialize` is idempotent
 - The `super initialize` warning can be suppressed with `@expect` during migration
 
+## Implementation Tracking
+
+**Epic:** BT-1954
+**Issues:**
+- BT-1951: Auto-chain initialize in handle_continue codegen (Phase 1, M)
+- BT-1955: Compiler warning for redundant super initialize (Phase 2, S) — blocked by BT-1951
+- BT-1956: E2E test for auto-chained actor initialization (Phase 3, S) — blocked by BT-1951
+**Status:** Planned
+
 ## References
 - Related issues: BT-1949 (UninitializedStateError check), BT-1951 (inherited field validation)
 - Related ADRs: ADR 0065 (OTP primitives for actor lifecycle), ADR 0067 (state/field keywords)
