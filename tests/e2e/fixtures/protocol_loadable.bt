@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test protocol definition for load-file e2e test (BT-1950).
+Protocol define: LoadableProtocol
+  doSomething -> String

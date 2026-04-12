@@ -71,6 +71,12 @@ handle_load(Path, State) ->
                             Source, Path, StdlibMode, ModuleNameOverride
                         )
                     of
+                        %% BT-1950: Protocol definition from file compilation.
+                        %% Must be matched before the generic 4-tuple to avoid
+                        %% {ok, protocol_definition, Info, Warnings} binding to
+                        %% {ok, Binary, ClassNames, ModuleName}.
+                        {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+                            load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
                                 Binary, ClassNames, ModuleName, Source, Path, State
@@ -106,6 +112,9 @@ handle_load(Path, State, PrebuiltIndexes) ->
                             Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
                         )
                     of
+                        %% BT-1950: Protocol definition — must match before generic 4-tuple.
+                        {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+                            load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
                                 Binary, ClassNames, ModuleName, Source, Path, State
@@ -122,6 +131,9 @@ handle_load(Path, State, PrebuiltIndexes) ->
 handle_load_source(SourceBin, Label, State) ->
     Source = binary_to_list(SourceBin),
     case beamtalk_repl_compiler:compile_file(Source, Label, false, undefined) of
+        %% BT-1950: Protocol definition — must match before generic 4-tuple.
+        {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+            load_protocol_module(ProtocolInfo, undefined, State);
         {ok, Binary, ClassNames, ModuleName} ->
             load_compiled_module(Binary, ClassNames, ModuleName, Source, undefined, State);
         {error, Reason} ->
@@ -322,6 +334,49 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             end
     end.
 
+%% BT-1950: Load a protocol module into BEAM, register it, and update REPL state.
+%% Used by handle_load/2, handle_load/3, and handle_load_source.
+-spec load_protocol_module(map(), string() | undefined, beamtalk_repl_state:state()) ->
+    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+load_protocol_module(ProtocolInfo, Path, State) ->
+    #{binary := Binary, module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
+    LoadPath =
+        case Path of
+            undefined -> "";
+            _ -> Path
+        end,
+    case code:load_binary(ModuleName, LoadPath, Binary) of
+        {module, ModuleName} ->
+            %% activate_module calls register_class/0 which registers the protocol
+            ProtocolClassNames = [
+                #{name => binary_to_list(P), superclass => "Object"}
+             || P <- Protocols
+            ],
+            activate_module(ModuleName, ProtocolClassNames, Path),
+            NewState1 = maybe_add_loaded_module(ModuleName, State),
+            NewState2 = track_module_source(ModuleName, Path, NewState1),
+            {ok, ProtocolClassNames, NewState2};
+        {error, Reason} ->
+            {error, {load_error, Reason}, State}
+    end.
+
+%% BT-1950: Load a protocol module without session state (stateless path).
+%% Used by reload_compile_and_load for load_files_stateless.
+-spec load_protocol_module_stateless(map(), string()) -> {ok, [map()]} | {error, term()}.
+load_protocol_module_stateless(ProtocolInfo, Path) ->
+    #{binary := Binary, module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
+    case code:load_binary(ModuleName, Path, Binary) of
+        {module, ModuleName} ->
+            ProtocolClassNames = [
+                #{name => binary_to_list(P), superclass => "Object"}
+             || P <- Protocols
+            ],
+            activate_module(ModuleName, ProtocolClassNames, Path),
+            {ok, ProtocolClassNames};
+        {error, Reason} ->
+            {error, {load_error, Reason}}
+    end.
+
 %% Add a module to the loaded modules list if not already present.
 -spec maybe_add_loaded_module(atom(), beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
 maybe_add_loaded_module(ModuleName, State) ->
@@ -481,6 +536,9 @@ reload_class_file_impl(Path, ExpectedClassName) ->
 reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     StdlibMode = is_stdlib_path(Path),
     case beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
+        %% BT-1950: Protocol definition — must match before generic 4-tuple.
+        {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+            load_protocol_module_stateless(ProtocolInfo, Path);
         {ok, Binary, ClassNames, ModuleName} ->
             case verify_class_present(ExpectedClassName, ClassNames, Path) of
                 ok ->

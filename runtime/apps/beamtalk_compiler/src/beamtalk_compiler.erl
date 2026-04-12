@@ -96,7 +96,7 @@ Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or
 `{error, Diagnostics}'.
 """.
 -spec compile(binary(), map()) ->
-    {ok, map()} | {error, [map()]}.
+    {ok, map()} | {ok, protocol_definition, map()} | {error, [map()]}.
 compile(Source, Options) ->
     beamtalk_compiler_server:compile(Source, Options).
 
