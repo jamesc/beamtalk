@@ -203,7 +203,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace supervisors                 // => #(#Supervisor<MySup, <0.200.0>>)
   /// ```
-  supervisors -> List(Supervisor) =>
+  supervisors -> List =>
     (Erlang beamtalk_workspace_interface_primitives) supervisors
 
   /// Return a Dictionary of direct dependency packages for the current workspace.
