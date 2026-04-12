@@ -261,7 +261,7 @@ For each rejected alternative, the strongest possible argument from each cohort.
 ## Implementation
 
 ### Phase 1: Auto-chain codegen + inherited field validation (M)
-- **Codegen**: Modify `handle_continue` generation in `callbacks.rs` to walk the class hierarchy and dispatch `initialize` on each class that defines one, parent-first. Remove `__skip_initialize__` flag from `init/1` — parent `initialize` methods are no longer suppressed, they're explicitly chained by the leaf's `handle_continue`.
+- **Codegen**: Modify `handle_continue` generation in `callbacks.rs` to walk the class hierarchy and dispatch `initialize` on each class that defines one, parent-first. Keep `__skip_initialize__` in `init/1` — it still prevents parent `initialize` dispatch during state-building helper calls. The chaining happens in `handle_continue`, not `init/1`.
 - **Codegen**: Extend `generate_post_initialize_check` to validate all typed-no-default fields in the hierarchy, not just the current class's own (BT-1951).
 - **Files**: `crates/beamtalk-core/src/codegen/core_erlang/gen_server/callbacks.rs`, `crates/beamtalk-core/src/codegen/core_erlang/gen_server/state.rs`
 - **Tests**:
@@ -288,11 +288,11 @@ When the language evolves to support initializer expressions on state declaratio
 
 ## Migration Path
 
-No migration needed — this is purely additive:
+Low migration effort — most code benefits automatically, but explicit `super initialize` needs attention:
 - Existing code without `initialize`: no change
 - Existing code with `initialize` that doesn't call `super initialize`: parent initializers now run automatically (this is the desired fix)
-- Existing code with explicit `super initialize`: gets a compiler warning (redundant), but behavior is unchanged if parent's `initialize` is idempotent
-- The `super initialize` warning can be suppressed with `@expect` during migration
+- **Existing code with explicit `super initialize`**: parent's `initialize` will run **twice** (once from auto-chain, once from the explicit `super` call). Remove the explicit `super initialize` to avoid double-initialization. The compiler warning (Phase 2) flags these.
+- Migration steps: audit `initialize` methods for `super initialize` calls, remove them, verify tests pass
 
 ## Implementation Tracking
 
