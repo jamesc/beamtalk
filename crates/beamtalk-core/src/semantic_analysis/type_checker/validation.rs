@@ -435,6 +435,15 @@ impl TypeChecker {
         if actual == expected {
             return true;
         }
+        // Never is the bottom type — compatible with everything as actual.
+        // As expected, only Never itself is compatible (a non-divergent method
+        // returning Integer does not satisfy -> Never).
+        if actual.as_str() == "Never" {
+            return true;
+        }
+        if expected.as_str() == "Never" {
+            return false;
+        }
         // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
         // If expected contains `|`, split into members and check if actual matches any.
         if expected.contains(" | ") {
@@ -588,7 +597,7 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                InferredType::Dynamic(_) => {} // Dynamic arguments — skip (conservative)
+                InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
             }
         }
     }
@@ -677,7 +686,7 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Dynamic(_) => {} // Can't check
+            InferredType::Dynamic(_) | InferredType::Never => {} // Can't check
         }
     }
 
@@ -940,7 +949,7 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
-            InferredType::Dynamic(_) => {} // Dynamic values — skip (conservative)
+            InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
         }
     }
 
@@ -993,74 +1002,6 @@ impl TypeChecker {
                     )),
                 );
             }
-        }
-    }
-
-    /// Warn about typed state fields that have no default value and are not nilable.
-    ///
-    /// `state: name :: String` (no default) may be used uninitialized — emit a warning.
-    /// `state: name :: String | Nil` is fine (nil is valid), as is `state: name :: String = ""`.
-    pub(super) fn check_uninitialized_state(&mut self, class: &crate::ast::ClassDefinition) {
-        // Sibling-default heuristic (BT-1837): only warn about uninitialized fields
-        // when the class has a mix of defaulted and undefaulted typed fields. If NO
-        // typed fields have defaults, the class is factory-constructed (spawnWith:/new:)
-        // and all fields are set by the factory — warning would be a false positive.
-        let has_any_typed_default = class
-            .state
-            .iter()
-            .any(|d| d.type_annotation.is_some() && d.default_value.is_some());
-        if !has_any_typed_default {
-            return; // All-factory class — no warnings
-        }
-
-        // Collect type parameter names — generic fields can't be validated.
-        let type_param_names: Vec<&str> = class
-            .type_params
-            .iter()
-            .map(|tp| tp.name.name.as_str())
-            .collect();
-        for decl in &class.state {
-            let Some(ref type_annotation) = decl.type_annotation else {
-                continue; // No type annotation — nothing to check
-            };
-            if decl.default_value.is_some() {
-                continue; // Has a default — won't be uninitialized
-            }
-            let declared_type = type_annotation.type_name();
-            if type_param_names.contains(&declared_type.as_str()) {
-                continue; // Generic type parameter — skip
-            }
-            if Self::is_nilable_type(type_annotation) {
-                continue; // Nilable union — nil is a valid initial value
-            }
-            self.diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "State field `{}` declared as {declared_type} has no default value and may be used uninitialized",
-                        decl.name.name
-                    ),
-                    decl.span,
-                )
-                .with_category(DiagnosticCategory::Type)
-                .with_hint(format!(
-                    "Add a default value (e.g., `state: {} :: {declared_type} = ...`) or make it nilable (`{declared_type} | Nil`). \
-                     Use `@expect type` before the declaration to suppress this warning",
-                    decl.name.name
-                )),
-            );
-        }
-    }
-
-    /// Returns true if a type annotation includes `Nil` as a union member,
-    /// making nil a valid value for the field.
-    fn is_nilable_type(annotation: &TypeAnnotation) -> bool {
-        match annotation {
-            TypeAnnotation::Simple(id) => id.name == "Nil",
-            TypeAnnotation::Union { types, .. } => types.iter().any(Self::is_nilable_type),
-            TypeAnnotation::Singleton { .. }
-            | TypeAnnotation::Generic { .. }
-            | TypeAnnotation::FalseOr { .. }
-            | TypeAnnotation::SelfType { .. } => false,
         }
     }
 
@@ -1428,6 +1369,7 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
+            InferredType::Never => {} // Never — skip (expression diverges)
         }
     }
 
@@ -1569,8 +1511,8 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                // Dynamic values: can't verify bounds (skip silently).
-                InferredType::Dynamic(_) => {}
+                // Dynamic/Never values: can't verify bounds (skip silently).
+                InferredType::Dynamic(_) | InferredType::Never => {}
             }
         }
     }

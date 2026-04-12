@@ -303,6 +303,7 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
 
     match ty {
         InferredType::Dynamic(_) => "Dynamic".to_string(),
+        InferredType::Never => "Never".to_string(),
         InferredType::Known {
             class_name,
             type_args,

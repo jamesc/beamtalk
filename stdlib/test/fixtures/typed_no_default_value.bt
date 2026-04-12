@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TypedNoDefaultValue — test fixture for BT-1947
+//
+// Demonstrates typed field declarations without default values
+// on a Value class. Fields are set via the auto-generated constructor.
+
+typed Value subclass: TypedNoDefaultValue
+  field: name :: String
+  field: age :: Integer
+
+  getName -> String => self.name
+
+  getAge -> Integer => self.age

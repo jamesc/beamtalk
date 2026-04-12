@@ -102,6 +102,12 @@ pub enum InferredType {
     /// enabling hover provenance, coverage detail, and diagnostic messages.
     /// The `PartialEq` impl ignores the reason — all `Dynamic` values are equal.
     Dynamic(DynamicReason),
+    /// Bottom type — the type of expressions that never produce a value
+    /// (e.g., `self error:`, `Exception signal:`).
+    ///
+    /// `Never` is the identity element for union: `T | Never = T`.
+    /// It is a subtype of every type (bottom of the lattice).
+    Never,
 }
 
 impl PartialEq for InferredType {
@@ -125,7 +131,7 @@ impl PartialEq for InferredType {
             (Self::Union { members: a, .. }, Self::Union { members: b, .. }) => {
                 a.len() == b.len() && a.iter().all(|m| b.contains(m))
             }
-            (Self::Dynamic(_), Self::Dynamic(_)) => true,
+            (Self::Dynamic(_), Self::Dynamic(_)) | (Self::Never, Self::Never) => true,
             _ => false,
         }
     }
@@ -175,7 +181,7 @@ impl InferredType {
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
             Self::Known { class_name, .. } => Some(class_name),
-            Self::Dynamic(_) | Self::Union { .. } => None,
+            Self::Dynamic(_) | Self::Union { .. } | Self::Never => None,
         }
     }
 
@@ -232,6 +238,7 @@ impl InferredType {
                     Some(EcoString::from("Dynamic"))
                 }
             }
+            Self::Never => Some(EcoString::from("Never")),
         }
     }
 
@@ -281,9 +288,13 @@ impl InferredType {
                     }
                 }
                 Self::Dynamic(reason) => return Self::Dynamic(*reason),
+                Self::Never => { /* identity element — skip */ }
             }
         }
         match flat.len() {
+            0 if members.iter().all(|m| matches!(m, Self::Never)) && !members.is_empty() => {
+                Self::Never
+            }
             0 => Self::Dynamic(DynamicReason::Unknown),
             1 => match flat.into_iter().next().unwrap() {
                 Self::Known {

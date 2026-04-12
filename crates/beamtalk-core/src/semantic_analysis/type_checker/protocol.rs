@@ -449,6 +449,7 @@ impl TypeChecker {
                 }
             }
             InferredType::Dynamic(_) => EcoString::from("Dynamic"),
+            InferredType::Never => EcoString::from("Never"),
             InferredType::Union { members, .. } => EcoString::from(
                 members
                     .iter()

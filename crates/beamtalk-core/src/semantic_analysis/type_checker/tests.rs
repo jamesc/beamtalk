@@ -5,7 +5,7 @@
 use super::*;
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
-    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MatchArm,
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
@@ -574,6 +574,72 @@ fn test_match_returns_dynamic() {
         InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::AmbiguousControlFlow),
         other => panic!("expected Dynamic(AmbiguousControlFlow), got {other:?}"),
     }
+}
+
+#[test]
+fn test_match_arm_pattern_vars_bound_in_body() {
+    // Outer env has `n :: Integer`. The match arm pattern binds `n` as Dynamic,
+    // which should shadow the outer binding. Sending a nonexistent selector to
+    // a Dynamic receiver produces no warning, but sending it to Integer would.
+    // This ensures the test fails if bind_pattern_vars is not called.
+    let mut checker = TypeChecker::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set("n", InferredType::known("Integer"));
+
+    let match_expr = Expression::Match {
+        value: Box::new(int_lit(42)),
+        arms: vec![MatchArm::new(
+            Pattern::Variable(ident("n")),
+            msg_send(
+                var("n"),
+                MessageSelector::Unary("definitelyMissing".into()),
+                vec![],
+            ),
+            span(),
+        )],
+        span: span(),
+    };
+
+    let _ = checker.infer_expr(&match_expr, &hierarchy, &mut env, false);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "match-bound var `n` should shadow outer Integer binding — no DNU warnings: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn test_match_arm_pattern_vars_bound_in_guard() {
+    // Same shadowing strategy: outer `n :: Integer`, pattern rebinds as Dynamic.
+    // Sending a nonexistent selector in the guard should produce no warning
+    // only if the pattern var is correctly bound.
+    let mut checker = TypeChecker::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set("n", InferredType::known("Integer"));
+
+    let match_expr = Expression::Match {
+        value: Box::new(int_lit(42)),
+        arms: vec![MatchArm::with_guard(
+            Pattern::Variable(ident("n")),
+            msg_send(
+                var("n"),
+                MessageSelector::Unary("definitelyMissing".into()),
+                vec![],
+            ),
+            var("n"),
+            span(),
+        )],
+        span: span(),
+    };
+
+    let _ = checker.infer_expr(&match_expr, &hierarchy, &mut env, false);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "match-bound var `n` in guard should shadow outer Integer binding — no DNU warnings: {:?}",
+        checker.diagnostics()
+    );
 }
 
 #[test]
@@ -1451,17 +1517,15 @@ fn test_expect_all_suppresses_typed_method_warnings() {
 }
 
 #[test]
-fn test_expect_type_suppresses_uninitialized_state_warning() {
-    // BT-1883: @expect type on an uninitialized state field should suppress
-    // the warning without producing a stale @expect warning.
-    let mut typed_no_default = StateDeclaration::with_type(
+fn test_typed_no_default_state_no_warning() {
+    // BT-1947: A type annotation replaces the need for a default value.
+    // `state: count :: Integer` (no default) should produce no warnings.
+    let typed_no_default = StateDeclaration::with_type(
         ident("count"),
         TypeAnnotation::simple("Integer", span()),
         span(),
     );
-    typed_no_default.expect = Some((ExpectCategory::Type, None, span()));
 
-    // Need at least one typed field WITH a default to trigger the sibling-default heuristic
     let typed_with_default = StateDeclaration::with_type_and_default(
         ident("name"),
         TypeAnnotation::simple("String", span()),
@@ -1482,10 +1546,16 @@ fn test_expect_type_suppresses_uninitialized_state_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let diags = run_with_expect(&module, &hierarchy);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let uninitialized: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("uninitialized"))
+        .collect();
     assert!(
-        diags.is_empty(),
-        "@expect type on uninitialized state should suppress warning with no stale warning, got: {diags:?}"
+        uninitialized.is_empty(),
+        "Typed state with type annotation should not warn about uninitialized (BT-1947), got: {uninitialized:?}"
     );
 }
 
@@ -2548,13 +2618,12 @@ fn test_union_type_annotation_no_false_positive() {
     );
 }
 
-// --- Uninitialized typed state field warnings (BT-1831) ---
+// --- Typed state field declarations (BT-1831, BT-1947) ---
 
 #[test]
-fn test_uninitialized_typed_state_warns() {
-    // Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
-    // The sibling-default heuristic triggers: warns on `name` since the class has
-    // at least one typed field with a default (lifecycle-nil pattern).
+fn test_typed_state_no_default_no_warn() {
+    // BT-1947: Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
+    // Type annotation replaces the need for a default — no uninitialized warning.
     let state = vec![
         StateDeclaration::with_type(
             ident("name"),
@@ -2578,14 +2647,10 @@ fn test_uninitialized_typed_state_warns() {
         .iter()
         .filter(|d| d.message.contains("uninitialized"))
         .collect();
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Expected 1 uninitialized warning, got: {:?}",
-        checker.diagnostics()
+    assert!(
+        warnings.is_empty(),
+        "BT-1947: Typed state without default should not warn, got: {warnings:?}"
     );
-    assert!(warnings[0].message.contains("name"));
-    assert!(warnings[0].message.contains("String"));
 }
 
 #[test]
@@ -11437,4 +11502,65 @@ fn block_params_typed_in_cascade_sends() {
         dynamic_warnings.is_empty(),
         "cascade sort: block params should be typed from List(Integer), got: {dynamic_warnings:?}"
     );
+}
+
+// ── BT-1945: Never bottom type ──────────────────────────────────────────────
+
+#[test]
+fn never_union_identity() {
+    // T | Never = T
+    let result = InferredType::union_of(&[InferredType::known("Integer"), InferredType::Never]);
+    assert_eq!(result, InferredType::known("Integer"));
+}
+
+#[test]
+fn never_union_identity_reversed() {
+    // Never | T = T
+    let result = InferredType::union_of(&[InferredType::Never, InferredType::known("String")]);
+    assert_eq!(result, InferredType::known("String"));
+}
+
+#[test]
+fn never_union_multiple() {
+    // T | Never | U = T | U
+    let result = InferredType::union_of(&[
+        InferredType::known("Integer"),
+        InferredType::Never,
+        InferredType::known("String"),
+    ]);
+    assert_eq!(result, InferredType::simple_union(&["Integer", "String"]));
+}
+
+#[test]
+fn never_union_all_never() {
+    // Never | Never = Never
+    let result = InferredType::union_of(&[InferredType::Never, InferredType::Never]);
+    assert_eq!(result, InferredType::Never);
+}
+
+#[test]
+fn never_display_name() {
+    assert_eq!(InferredType::Never.display_name(), Some("Never".into()));
+}
+
+#[test]
+fn never_equality() {
+    assert_eq!(InferredType::Never, InferredType::Never);
+    assert_ne!(InferredType::Never, InferredType::known("Never"));
+    assert_ne!(
+        InferredType::Never,
+        InferredType::Dynamic(DynamicReason::Unknown)
+    );
+}
+
+#[test]
+fn never_as_known_is_none() {
+    assert!(InferredType::Never.as_known().is_none());
+}
+
+#[test]
+fn resolve_type_annotation_never() {
+    let ann = TypeAnnotation::Simple(ident("Never"));
+    let result = TypeChecker::resolve_type_annotation(&ann);
+    assert_eq!(result, InferredType::Never);
 }

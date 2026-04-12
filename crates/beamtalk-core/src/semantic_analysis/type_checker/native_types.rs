@@ -82,6 +82,9 @@ fn map_single_type_name(name: &str) -> InferredType {
     if name == "Dynamic" {
         return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
+    if name == "Never" {
+        return InferredType::Never;
+    }
 
     InferredType::Known {
         class_name: EcoString::from(name),
