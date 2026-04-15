@@ -11,7 +11,6 @@
 //   fixtures/inherited_initialize_child_no_override.bt
 //   fixtures/inherited_initialize_child_adds.bt
 //   fixtures/inherited_initialize_parent_forgets.bt
-//   fixtures/inherited_initialize_parent_forgets_child.bt
 //   fixtures/deep_hierarchy_a.bt
 //   fixtures/deep_hierarchy_b.bt
 //   fixtures/deep_hierarchy_c.bt

@@ -115,8 +115,11 @@ impl CoreErlangGenerator {
         // class defines initialize — handle_continue auto-chains each ancestor's
         // initialize parent-first. And defer when any class in the chain has
         // typed-no-default fields so the post-initialize validation runs.
-        let chain_has_initialize = current_class
-            .is_some_and(|c| !self.user_defined_initialize_chain(&c.name.name).is_empty());
+        let chain_has_initialize = current_class.is_some_and(|c| {
+            !self
+                .user_defined_initialize_chain(module, &c.name.name)
+                .is_empty()
+        });
         let chain_has_typed_no_default = current_class.is_some_and(|c| {
             !self
                 .inherited_typed_no_default_fields(module, &c.name.name)
@@ -577,14 +580,28 @@ impl CoreErlangGenerator {
     ///
     /// Uses the compile-time `ClassHierarchy` snapshot so cross-file ancestors
     /// are visible. When the hierarchy is unavailable (e.g. generator
-    /// constructed standalone without `generate_module_with_warnings`), returns
-    /// an empty list — callers fall back to the single-class dispatch path.
+    /// constructed standalone without `generate_module_with_warnings`), falls
+    /// back to the leaf class's own `initialize` method if the AST defines one
+    /// so single-class initialization still runs.
     pub(in crate::codegen::core_erlang) fn user_defined_initialize_chain(
         &self,
+        module: &Module,
         leaf_class: &str,
     ) -> Vec<InitializeChainEntry> {
         let Some(hierarchy) = self.class_hierarchy.as_ref() else {
-            return Vec::new();
+            // Fallback: AST only, leaf class initialize.
+            return module
+                .classes
+                .iter()
+                .find(|c| c.name.name == leaf_class)
+                .filter(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"))
+                .map(|c| {
+                    vec![InitializeChainEntry {
+                        class_name: c.name.name.to_string(),
+                        module_name: self.compiled_module_name(&c.name.name),
+                    }]
+                })
+                .unwrap_or_default();
         };
 
         // Build the chain parent-first: leaf's superclass_chain returns
@@ -760,7 +777,7 @@ impl CoreErlangGenerator {
         // defines its own `initialize`. Root classes (Actor/Object/ProtoObject)
         // are filtered out since their `initialize` is a no-op default.
         let chain = current_class
-            .map(|c| self.user_defined_initialize_chain(&c.name.name))
+            .map(|c| self.user_defined_initialize_chain(module, &c.name.name))
             .unwrap_or_default();
 
         // Body that runs after the dispatch chain: the post-initialize check.
@@ -913,7 +930,7 @@ impl CoreErlangGenerator {
                                         "let ",
                                         Document::String(err_class_name_var.clone()),
                                         " = call '",
-                                        Document::Eco(module_name.clone()),
+                                        Document::String(class.module_name.clone()),
                                         "':'class_name'() in",
                                     ],
                                     line(),
@@ -969,7 +986,7 @@ impl CoreErlangGenerator {
                                         "let ",
                                         Document::String(err_class_name_var2.clone()),
                                         " = call '",
-                                        Document::Eco(module_name.clone()),
+                                        Document::String(class.module_name.clone()),
                                         "':'class_name'() in",
                                     ],
                                     line(),
