@@ -1938,3 +1938,552 @@ collect_log_with_stacktrace(ExpectedMsg, Timeout, Start) ->
                 not_found
             end
     end.
+
+%%% ============================================================================
+%%% BT-1958: Trace context propagation and restoration tests
+%%% ============================================================================
+
+set_and_get_trace_context_test() ->
+    %% set_trace_context stores a map in the process dictionary
+    beamtalk_actor:clear_trace_context(),
+    beamtalk_actor:set_trace_context(#{workflowId => <<"wf-1">>}),
+    Ctx = beamtalk_actor:get_trace_context(),
+    ?assertEqual(#{workflowId => <<"wf-1">>}, Ctx),
+    beamtalk_actor:clear_trace_context().
+
+get_trace_context_empty_when_unset_test() ->
+    %% get_trace_context returns #{} when no context is set
+    erase('$beamtalk_trace_ctx'),
+    ?assertEqual(#{}, beamtalk_actor:get_trace_context()).
+
+get_trace_context_ignores_non_map_test() ->
+    %% get_trace_context returns #{} when pdict has a non-map value
+    put('$beamtalk_trace_ctx', not_a_map),
+    ?assertEqual(#{}, beamtalk_actor:get_trace_context()),
+    erase('$beamtalk_trace_ctx').
+
+clear_trace_context_removes_keys_test() ->
+    %% clear_trace_context removes the context and logger metadata keys
+    beamtalk_actor:set_trace_context(#{myKey => <<"val">>}),
+    ?assertEqual(#{myKey => <<"val">>}, beamtalk_actor:get_trace_context()),
+    beamtalk_actor:clear_trace_context(),
+    ?assertEqual(#{}, beamtalk_actor:get_trace_context()).
+
+set_trace_context_merges_test() ->
+    %% set_trace_context merges with existing context
+    beamtalk_actor:clear_trace_context(),
+    beamtalk_actor:set_trace_context(#{a => 1}),
+    beamtalk_actor:set_trace_context(#{b => 2}),
+    ?assertEqual(#{a => 1, b => 2}, beamtalk_actor:get_trace_context()),
+    beamtalk_actor:clear_trace_context().
+
+%%% ============================================================================
+%%% BT-1958: Causal trace context tests
+%%% ============================================================================
+
+get_causal_ctx_empty_when_unset_test() ->
+    erase('$beamtalk_trace_id'),
+    erase('$beamtalk_span_id'),
+    erase('$beamtalk_parent_span_id'),
+    ?assertEqual(#{}, beamtalk_actor:get_causal_ctx()).
+
+get_causal_ctx_with_trace_id_only_test() ->
+    put('$beamtalk_trace_id', 42),
+    erase('$beamtalk_span_id'),
+    erase('$beamtalk_parent_span_id'),
+    ?assertEqual(#{trace_id => 42}, beamtalk_actor:get_causal_ctx()),
+    erase('$beamtalk_trace_id').
+
+get_causal_ctx_with_all_ids_test() ->
+    put('$beamtalk_trace_id', 100),
+    put('$beamtalk_span_id', 200),
+    put('$beamtalk_parent_span_id', 50),
+    Expected = #{trace_id => 100, span_id => 200, parent_span_id => 50},
+    ?assertEqual(Expected, beamtalk_actor:get_causal_ctx()),
+    erase('$beamtalk_trace_id'),
+    erase('$beamtalk_span_id'),
+    erase('$beamtalk_parent_span_id').
+
+%%% ============================================================================
+%%% BT-1958: Propagated context tests
+%%% ============================================================================
+
+get_propagated_ctx_includes_trace_context_test() ->
+    beamtalk_actor:clear_trace_context(),
+    erase('$beamtalk_trace_id'),
+    beamtalk_actor:set_trace_context(#{reqId => <<"r-1">>}),
+    Ctx = beamtalk_actor:get_propagated_ctx(),
+    ?assertEqual(#{reqId => <<"r-1">>}, maps:get(trace_ctx, Ctx)),
+    beamtalk_actor:clear_trace_context().
+
+get_propagated_ctx_includes_causal_when_set_test() ->
+    beamtalk_actor:clear_trace_context(),
+    put('$beamtalk_trace_id', 42),
+    put('$beamtalk_span_id', 99),
+    Ctx = beamtalk_actor:get_propagated_ctx(),
+    ?assertEqual(#{trace_id => 42, span_id => 99}, maps:get(causal, Ctx)),
+    erase('$beamtalk_trace_id'),
+    erase('$beamtalk_span_id').
+
+get_propagated_ctx_no_causal_when_unset_test() ->
+    erase('$beamtalk_trace_id'),
+    Ctx = beamtalk_actor:get_propagated_ctx(),
+    ?assertEqual(false, maps:is_key(causal, Ctx)).
+
+%%% ============================================================================
+%%% BT-1958: restore_propagated_ctx tests
+%%% ============================================================================
+
+restore_propagated_ctx_restores_trace_context_test() ->
+    beamtalk_actor:clear_trace_context(),
+    PropCtx = #{
+        otel => undefined,
+        trace_ctx => #{workflowId => <<"wf-restore">>}
+    },
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    ?assertEqual(#{workflowId => <<"wf-restore">>}, beamtalk_actor:get_trace_context()),
+    beamtalk_actor:clear_trace_context().
+
+restore_propagated_ctx_clears_on_empty_trace_ctx_test() ->
+    %% When trace_ctx is #{} in propagated context, existing context is cleared
+    beamtalk_actor:set_trace_context(#{stale => <<"should-be-cleared">>}),
+    PropCtx = #{otel => undefined, trace_ctx => #{}},
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    ?assertEqual(#{}, beamtalk_actor:get_trace_context()).
+
+restore_propagated_ctx_restores_causal_context_test() ->
+    PropCtx = #{
+        otel => undefined,
+        trace_ctx => #{},
+        causal => #{trace_id => 10, span_id => 20}
+    },
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    ?assertEqual(10, get('$beamtalk_trace_id')),
+    ?assertEqual(20, get('$beamtalk_parent_span_id')),
+    erase('$beamtalk_trace_id'),
+    erase('$beamtalk_parent_span_id').
+
+restore_propagated_ctx_clears_stale_causal_context_test() ->
+    %% When no causal key in PropCtx, stale IDs are erased
+    put('$beamtalk_trace_id', 999),
+    put('$beamtalk_span_id', 888),
+    PropCtx = #{otel => undefined, trace_ctx => #{}},
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    ?assertEqual(undefined, get('$beamtalk_trace_id')),
+    ?assertEqual(undefined, get('$beamtalk_span_id')).
+
+restore_propagated_ctx_restores_call_stack_test() ->
+    FakePid = list_to_pid("<0.999.0>"),
+    PropCtx = #{
+        otel => undefined,
+        trace_ctx => #{},
+        call_stack => [FakePid]
+    },
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    ?assertEqual([FakePid], get('$bt_call_stack')),
+    erase('$bt_call_stack').
+
+restore_propagated_ctx_erases_call_stack_when_absent_test() ->
+    put('$bt_call_stack', [list_to_pid("<0.111.0>")]),
+    PropCtx = #{otel => undefined, trace_ctx => #{}},
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    ?assertEqual(undefined, get('$bt_call_stack')).
+
+restore_propagated_ctx_non_map_is_noop_test() ->
+    %% Non-map argument is silently ignored
+    beamtalk_actor:restore_propagated_ctx(not_a_map),
+    ok.
+
+%%% ============================================================================
+%%% BT-1958: sync_send/4 invalid timeout test
+%%% ============================================================================
+
+sync_send_4_invalid_timeout_raises_type_error_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+            beamtalk_actor:sync_send(Counter, getValue, [], negative_atom)
+        ),
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+            beamtalk_actor:sync_send(Counter, getValue, [], -1)
+        )
+    after
+        gen_server:stop(Counter)
+    end.
+
+%%% ============================================================================
+%%% BT-1958: sync_send delegate raises signal error
+%%% ============================================================================
+
+sync_send_delegate_raises_signal_error_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = signal}},
+            beamtalk_actor:sync_send(Counter, delegate, [])
+        )
+    after
+        gen_server:stop(Counter)
+    end.
+
+%%% ============================================================================
+%%% BT-1958: async_send delegate rejects future
+%%% ============================================================================
+
+async_send_delegate_rejects_future_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, delegate, [], Future),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = signal}},
+        beamtalk_future:await(Future, 1000)
+    ),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
+%%% BT-1958: start_link/3 named registration test
+%%% ============================================================================
+
+start_link_3_named_registration_test() ->
+    Name = {local, test_named_actor_bt1958},
+    {ok, Pid} = beamtalk_actor:start_link(Name, test_counter, 77),
+    ?assert(is_pid(Pid)),
+    ?assertEqual(Pid, whereis(test_named_actor_bt1958)),
+    Result = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(77, Result),
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% BT-1958: start_link_supervised/3 test
+%%% ============================================================================
+
+start_link_supervised_test() ->
+    {ok, Pid} = beamtalk_actor:start_link_supervised(test_counter, start_link, [33]),
+    ?assert(is_pid(Pid)),
+    Result = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(33, Result),
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% BT-1958: dispatch/4 delegate returns signal error
+%%% ============================================================================
+
+dispatch_delegate_returns_signal_error_test() ->
+    State = #{
+        '$beamtalk_class' => 'TestActor',
+        '__methods__' => #{}
+    },
+    Self = beamtalk_actor:make_self(State),
+    Result = beamtalk_actor:dispatch(delegate, [], Self, State),
+    ?assertMatch({error, #beamtalk_error{kind = signal}, _}, Result).
+
+%%% ============================================================================
+%%% BT-1958: dispatch/4 perform:withArguments:timeout: tests
+%%% ============================================================================
+
+dispatch_perform_with_timeout_valid_test() ->
+    {ok, Counter} = test_counter:start_link(99),
+    %% perform:withArguments:timeout: re-dispatches through dispatch/4
+    Result = gen_server:call(Counter, {'perform:withArguments:timeout:', [getValue, [], 5000]}),
+    ?assertEqual(99, Result),
+    gen_server:stop(Counter).
+
+dispatch_perform_with_timeout_invalid_args_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    %% Non-atom selector
+    Result1 = gen_server:call(Counter, {'perform:withArguments:timeout:', ["badSel", [], 5000]}),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result1),
+    %% Negative timeout
+    Result2 = gen_server:call(Counter, {'perform:withArguments:timeout:', [getValue, [], -1]}),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result2),
+    %% Non-list args
+    Result3 = gen_server:call(
+        Counter, {'perform:withArguments:timeout:', [getValue, notAList, 5000]}
+    ),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result3),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
+%%% BT-1958: handle_cast fire-and-forget error path
+%%% ============================================================================
+
+handle_cast_fire_and_forget_error_does_not_crash_actor_test() ->
+    %% fire-and-forget cast with a throwing method logs error, actor continues
+    {ok, Actor} = test_throwing_actor:start_link(),
+    gen_server:cast(Actor, {cast, throwError, []}),
+    timer:sleep(30),
+    %% Actor should still be alive
+    ?assert(is_process_alive(Actor)),
+    %% And still responsive
+    NormalResult = gen_server:call(Actor, {normalMethod, []}),
+    ?assertEqual(ok, NormalResult),
+    gen_server:stop(Actor).
+
+%%% ============================================================================
+%%% BT-1958: handle_call/handle_cast with propagated context wire format
+%%% ============================================================================
+
+handle_call_with_propagated_context_test() ->
+    %% Test the {Selector, Args, PropCtx} wire format for sync calls
+    {ok, Counter} = test_counter:start_link(42),
+    PropCtx = #{otel => undefined, trace_ctx => #{testKey => <<"test">>}},
+    Result = gen_server:call(Counter, {getValue, [], PropCtx}),
+    %% The call should succeed normally (PropCtx is consumed by restore_propagated_ctx)
+    ?assertEqual(42, Result),
+    gen_server:stop(Counter).
+
+handle_cast_with_propagated_context_future_test() ->
+    %% Test the {Selector, Args, FuturePid, PropCtx} wire format for async casts
+    {ok, Counter} = test_counter:start_link(0),
+    Future = beamtalk_future:new(),
+    PropCtx = #{otel => undefined, trace_ctx => #{}},
+    gen_server:cast(Counter, {increment, [], Future, PropCtx}),
+    ?assertEqual(nil, beamtalk_future:await(Future)),
+    ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+handle_cast_fire_and_forget_with_propagated_context_test() ->
+    %% Test the {cast, Selector, Args, PropCtx} wire format
+    {ok, Counter} = test_counter:start_link(0),
+    PropCtx = #{otel => undefined, trace_ctx => #{}},
+    gen_server:cast(Counter, {cast, increment, [], PropCtx}),
+    timer:sleep(20),
+    ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
+%%% BT-1958: safe_spawn error and ignore paths
+%%% ============================================================================
+
+safe_spawn_error_from_start_link_test() ->
+    %% safe_spawn returns {error, Reason} when gen_server:start_link fails
+    %% Use a module that doesn't exist to trigger an error
+    Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
+    ?assertMatch({error, _}, Result).
+
+safe_spawn_restores_trap_exit_on_error_test() ->
+    %% safe_spawn restores the original trap_exit flag even on error
+    OldTrap = process_flag(trap_exit, false),
+    try
+        _Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
+        ?assertEqual(false, process_flag(trap_exit, false))
+    after
+        process_flag(trap_exit, OldTrap)
+    end.
+
+%%% ============================================================================
+%%% BT-1958: make_self class_mod handling
+%%% ============================================================================
+
+make_self_with_class_mod_test() ->
+    State = #{
+        '$beamtalk_class' => 'MyClass',
+        '__class_mod__' => my_class_mod,
+        '__methods__' => #{}
+    },
+    Self = beamtalk_actor:make_self(State),
+    ?assertEqual('MyClass', Self#beamtalk_object.class),
+    ?assertEqual(my_class_mod, Self#beamtalk_object.class_mod).
+
+make_self_without_class_mod_test() ->
+    State = #{
+        '$beamtalk_class' => 'MyClass',
+        '__methods__' => #{}
+    },
+    Self = beamtalk_actor:make_self(State),
+    ?assertEqual('MyClass', Self#beamtalk_object.class),
+    ?assertEqual(undefined, Self#beamtalk_object.class_mod).
+
+%%% ============================================================================
+%%% BT-1958: format_method_error_message coverage (via dispatch)
+%%% ============================================================================
+
+method_badarg_error_test() ->
+    %% Trigger a badarg error in a method to cover format_method_error_message badarg path
+    {ok, Actor} = test_badarg_actor:start_link(),
+    Result = gen_server:call(Actor, {triggerBadarg, []}),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = triggerBadarg}}, Result),
+    %% Message should contain "Bad argument"
+    {error, Err} = Result,
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Bad argument">>)),
+    gen_server:stop(Actor).
+
+method_badarith_error_test() ->
+    %% Trigger a badarith error to cover format_method_error_message badarith path
+    {ok, Actor} = test_badarg_actor:start_link(),
+    Result = gen_server:call(Actor, {triggerBadarith, []}),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = runtime_error, selector = triggerBadarith}}, Result
+    ),
+    {error, Err} = Result,
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Arithmetic error">>)),
+    gen_server:stop(Actor).
+
+method_undef_error_test() ->
+    %% Trigger an undef error to cover format_method_error_message undef path
+    {ok, Actor} = test_badarg_actor:start_link(),
+    Result = gen_server:call(Actor, {triggerUndef, []}),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = triggerUndef}}, Result),
+    {error, Err} = Result,
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Undefined function">>)),
+    gen_server:stop(Actor).
+
+method_function_clause_error_test() ->
+    %% Trigger a function_clause error to cover that path
+    {ok, Actor} = test_badarg_actor:start_link(),
+    Result = gen_server:call(Actor, {triggerFunctionClause, []}),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = runtime_error, selector = triggerFunctionClause}}, Result
+    ),
+    {error, Err} = Result,
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"No matching clause">>)),
+    gen_server:stop(Actor).
+
+%%% ============================================================================
+%%% BT-1958: respondsTo: for delegate selector
+%%% ============================================================================
+
+respondsTo_delegate_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [delegate]})),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
+%%% BT-1958: Concurrent async error + future watcher tests
+%%% ============================================================================
+
+async_error_in_method_rejects_future_test() ->
+    %% Async cast to a method that throws should reject the future
+    {ok, Actor} = test_throwing_actor:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Actor, {throwError, [], Future}),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = runtime_error}},
+        beamtalk_future:await(Future, 1000)
+    ),
+    %% Actor should survive after the error
+    ?assert(is_process_alive(Actor)),
+    gen_server:stop(Actor).
+
+%%% ============================================================================
+%%% BT-1958: handle_call with unknown message format
+%%% ============================================================================
+
+handle_call_unknown_format_returns_dnu_error_test() ->
+    %% Sending a non-tuple message via gen_server:call triggers the catch-all clause
+    {ok, Counter} = test_counter:start_link(0),
+    Result = gen_server:call(Counter, just_an_atom),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
+    %% Actor should still work
+    ?assertEqual(0, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
+%%% BT-1958: terminate/2 with various reasons
+%%% ============================================================================
+
+terminate_with_different_reasons_test() ->
+    %% Test terminate with various stop reasons
+    State = #{
+        '$beamtalk_class' => 'TestActor',
+        '__methods__' => #{}
+    },
+    ?assertEqual(ok, beamtalk_actor:terminate(normal, State)),
+    ?assertEqual(ok, beamtalk_actor:terminate(shutdown, State)),
+    ?assertEqual(ok, beamtalk_actor:terminate({shutdown, timeout}, State)),
+    ?assertEqual(ok, beamtalk_actor:terminate(killed, State)).
+
+%%% ============================================================================
+%%% BT-1958: code_change/3 delegates to hot_reload
+%%% ============================================================================
+
+code_change_preserves_state_unit_test() ->
+    State = #{
+        '$beamtalk_class' => 'TestActor',
+        '__methods__' => #{},
+        value => 42
+    },
+    {ok, NewState} = beamtalk_actor:code_change("1.0.0", State, []),
+    ?assertEqual(State, NewState).
+
+%%% ============================================================================
+%%% BT-1958: sync_send/3 exit catch-all paths
+%%% ============================================================================
+
+sync_send_to_shutdown_actor_raises_actor_dead_test() ->
+    %% When an actor stops with shutdown reason during a call, we get actor_dead
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter, shutdown, 1000),
+    timer:sleep(10),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
+        beamtalk_actor:sync_send(Counter, getValue, [])
+    ).
+
+%%% ============================================================================
+%%% BT-1958: lookup_class returns unknown for non-actor pids
+%%% ============================================================================
+
+lookup_class_unknown_for_non_actor_test() ->
+    %% A regular process (not an actor) should return 'unknown' from lookup_class
+    FakePid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    try
+        %% We can't call lookup_class directly (it's not exported as a test helper)
+        %% but we can test it indirectly via cast_send which uses it
+        ok = beamtalk_actor:cast_send(FakePid, someMsg, [])
+    after
+        exit(FakePid, kill)
+    end.
+
+%%% ============================================================================
+%%% BT-1958: sync_send pid returns the raw PID
+%%% ============================================================================
+
+sync_send_pid_returns_raw_pid_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Result = beamtalk_actor:sync_send(Counter, pid, []),
+    ?assertEqual(Counter, Result),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
+%%% BT-1958: async_send onExit: with actor that's already dead
+%%% ============================================================================
+
+async_send_onExit_already_dead_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter, normal, 1000),
+    timer:sleep(10),
+    Self = self(),
+    Block = fun(Reason) -> Self ! {exit_reason_already_dead, Reason} end,
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, 'onExit:', [Block], Future),
+    %% The watcher should get a DOWN immediately and call the block
+    ?assertEqual(ok, beamtalk_future:await(Future, 2000)),
+    receive
+        {exit_reason_already_dead, _Reason} -> ok
+    after 2000 ->
+        ?assert(false)
+    end.
+
+%%% ============================================================================
+%%% BT-1958: sync_send onExit: fires block on death
+%%% ============================================================================
+
+sync_send_onExit_with_kill_reason_test() ->
+    {ok, Counter} = test_counter:start(0),
+    Self = self(),
+    Block = fun(Reason) -> Self ! {kill_exit_reason, Reason} end,
+    beamtalk_actor:sync_send(Counter, 'onExit:', [Block]),
+    exit(Counter, kill),
+    receive
+        {kill_exit_reason, killed} -> ok
+    after 2000 ->
+        ?assert(false)
+    end.
