@@ -260,3 +260,132 @@ class_method_no_extension_does_not_conform_test() ->
     }),
     %% No extension registered, no class process — should not conform
     ?assertNot(beamtalk_protocol_registry:conforms_to('NoExtClass', 'Parseable2')).
+
+%%% ============================================================================
+%%% required_methods with class methods tests (BT-1972)
+%%% ============================================================================
+
+required_methods_includes_class_methods_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'WithClassMethods',
+        required_methods => [#{selector => 'asString', arity => 0}],
+        required_class_methods => [#{selector => 'fromString:', arity => 1}],
+        type_params => [],
+        extending => undefined
+    }),
+    Methods = beamtalk_protocol_registry:required_methods('WithClassMethods'),
+    ?assert(lists:member('asString', Methods)),
+    ?assert(lists:member('class fromString:', Methods)),
+    ?assertEqual(2, length(Methods)).
+
+required_methods_class_methods_only_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'ClassOnly',
+        required_methods => [],
+        required_class_methods => [#{selector => 'create', arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    Methods = beamtalk_protocol_registry:required_methods('ClassOnly'),
+    ?assertEqual(['class create'], Methods).
+
+%%% ============================================================================
+%%% Extending protocol inheritance tests (BT-1972)
+%%% ============================================================================
+
+extending_protocol_inherits_class_methods_test() ->
+    setup(),
+    %% Parent protocol with a class method requirement
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'ParentProto',
+        required_methods => [#{selector => 'render', arity => 0}],
+        required_class_methods => [#{selector => 'create', arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    %% Child protocol extends parent, adds own method
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'ChildProto',
+        required_methods => [#{selector => 'display', arity => 0}],
+        required_class_methods => [],
+        type_params => [],
+        extending => 'ParentProto'
+    }),
+    Methods = beamtalk_protocol_registry:required_methods('ChildProto'),
+    %% Should include own + inherited instance methods
+    ?assert(lists:member('display', Methods)),
+    ?assert(lists:member('render', Methods)),
+    %% Should include inherited class methods
+    ?assert(lists:member('class create', Methods)),
+    ?assertEqual(3, length(Methods)).
+
+extending_protocol_own_methods_override_parent_test() ->
+    setup(),
+    %% Parent protocol
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BaseProto',
+        required_methods => [
+            #{selector => 'foo', arity => 0},
+            #{selector => 'bar', arity => 0}
+        ],
+        required_class_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+    %% Child overrides 'foo' (same selector, different arity)
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'DerivedProto',
+        required_methods => [#{selector => 'foo', arity => 1}],
+        required_class_methods => [],
+        type_params => [],
+        extending => 'BaseProto'
+    }),
+    Methods = beamtalk_protocol_registry:required_methods('DerivedProto'),
+    %% 'foo' from child + 'bar' from parent = 2
+    ?assert(lists:member('foo', Methods)),
+    ?assert(lists:member('bar', Methods)),
+    ?assertEqual(2, length(Methods)).
+
+extending_unknown_parent_test() ->
+    setup(),
+    %% Protocol extending a non-existent parent
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'OrphanProto',
+        required_methods => [#{selector => 'orphan', arity => 0}],
+        required_class_methods => [],
+        type_params => [],
+        extending => 'NonExistentParent'
+    }),
+    Methods = beamtalk_protocol_registry:required_methods('OrphanProto'),
+    ?assertEqual(['orphan'], Methods).
+
+%%% ============================================================================
+%%% protocol_info / is_protocol before table exists (BT-1972)
+%%% ============================================================================
+
+protocol_info_before_init_test() ->
+    %% Temporarily destroy the table to test the guard
+    case ets:info(beamtalk_protocol_registry) of
+        undefined ->
+            %% Table doesn't exist — test directly
+            ?assertEqual(undefined, beamtalk_protocol_registry:protocol_info('Foo')),
+            ?assertNot(beamtalk_protocol_registry:is_protocol('Foo')),
+            ?assertEqual([], beamtalk_protocol_registry:all_protocol_names()),
+            %% Restore
+            beamtalk_protocol_registry:init();
+        _ ->
+            %% Table exists; we can't safely delete it if owned by another process.
+            %% Just verify the functions work when protocol is absent.
+            ?assertEqual(undefined, beamtalk_protocol_registry:protocol_info('Nonexistent1972')),
+            ?assertNot(beamtalk_protocol_registry:is_protocol('Nonexistent1972'))
+    end.
+
+%%% ============================================================================
+%%% all_protocol_names empty test (BT-1972)
+%%% ============================================================================
+
+all_protocol_names_empty_test() ->
+    setup(),
+    ?assertEqual([], beamtalk_protocol_registry:all_protocol_names()).
