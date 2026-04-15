@@ -636,6 +636,9 @@ impl TypeChecker {
         let expected = match declared {
             TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
             TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
+            // BT-1952: Self class returns a class object, not an instance.
+            // Skip return-body validation since we can't meaningfully compare.
+            TypeAnnotation::SelfClass { .. } => return,
             TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
             TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
                 Self::resolve_type_annotation(declared)
@@ -702,15 +705,28 @@ impl TypeChecker {
     ) {
         let selector = method.selector.name();
         for param in &method.parameters {
-            if matches!(param.type_annotation, Some(TypeAnnotation::SelfType { .. })) {
+            if matches!(
+                param.type_annotation,
+                Some(TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. })
+            ) {
+                let label = if matches!(
+                    param.type_annotation,
+                    Some(TypeAnnotation::SelfClass { .. })
+                ) {
+                    "Self class"
+                } else {
+                    "Self"
+                };
                 self.diagnostics.push(
                     Diagnostic::error(
                         format!(
-                            "`Self` cannot be used as a parameter type in `{class_name}::{selector}` (only valid in return position)"
+                            "`{label}` cannot be used as a parameter type in `{class_name}::{selector}` (only valid in return position)"
                         ),
                         param.name.span,
                     )
-                    .with_hint("Use the concrete class name instead of `Self` for parameter types")
+                    .with_hint(format!(
+                        "Use the concrete class name instead of `{label}` for parameter types"
+                    ))
                     .with_category(DiagnosticCategory::Type),
                 );
             }

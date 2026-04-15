@@ -11,8 +11,32 @@
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, Module, TypeAnnotation};
+use crate::ast::{ClassDefinition, Module, StateDeclaration, TypeAnnotation};
 use crate::docvec;
+
+/// BT-1951 (ADR 0078): Identifies a single class's `initialize` method in the
+/// auto-chained dispatch sequence emitted by `generate_handle_continue`.
+#[derive(Debug, Clone)]
+pub(in crate::codegen::core_erlang) struct InitializeChainEntry {
+    /// Beamtalk class name (e.g. `"CachingDatabaseActor"`). Used for diagnostics.
+    #[allow(dead_code)] // reserved for future diagnostic output
+    pub class_name: String,
+    /// Compiled Erlang module name for this class (e.g. `"bt@caching_database_actor"`).
+    /// The `safe_dispatch` call targets this module so dispatch starts at the
+    /// class's own table rather than walking from the leaf.
+    pub module_name: String,
+}
+
+/// BT-1951 (ADR 0078): A typed-no-default state field annotated with the class
+/// that declared it, so post-initialize diagnostics can name the owning class
+/// rather than always the leaf.
+#[derive(Debug, Clone)]
+pub(in crate::codegen::core_erlang) struct InheritedTypedField<'a> {
+    /// Beamtalk class name that declared this field.
+    pub owning_class: String,
+    /// The state declaration from the class's AST.
+    pub state: &'a StateDeclaration,
+}
 
 impl CoreErlangGenerator {
     /// Generates the `init/1` callback for `gen_server`.
@@ -86,11 +110,22 @@ impl CoreErlangGenerator {
         // If so, dispatch it at the end of init/1 — but only when not called
         // as a parent state-building helper. The __skip_initialize__ flag in
         // InitArgs suppresses dispatch when a child's init calls us as a helper.
-        let has_initialize = current_class.is_some_and(|c| {
-            self.semantic_facts
-                .class_facts(&c.name.name)
-                .is_some_and(|cf| cf.has_instance_method("initialize"))
+        //
+        // BT-1951 (ADR 0078): Also defer to handle_continue when any *ancestor*
+        // class defines initialize — handle_continue auto-chains each ancestor's
+        // initialize parent-first. And defer when any class in the chain has
+        // typed-no-default fields so the post-initialize validation runs.
+        let chain_has_initialize = current_class.is_some_and(|c| {
+            !self
+                .user_defined_initialize_chain(module, &c.name.name)
+                .is_empty()
         });
+        let chain_has_typed_no_default = current_class.is_some_and(|c| {
+            !self
+                .inherited_typed_no_default_fields(module, &c.name.name)
+                .is_empty()
+        });
+        let has_initialize = chain_has_initialize || chain_has_typed_no_default;
 
         let module_name = self.module_name.clone();
 
@@ -359,31 +394,30 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1949: Generates the success body for `handle_continue` after initialize.
+    /// BT-1949/BT-1951: Generates the success body for `handle_continue` after
+    /// the auto-chained initialize sequence.
     ///
-    /// If the class has typed-no-default state fields (type annotation but no `= default`),
-    /// emits a check that each such field is no longer nil. If any are still nil,
-    /// raises `UninitializedStateError` with the class name, field name, and expected type.
-    /// If there are no such fields, returns a plain `{'noreply', InitNewState}`.
+    /// Collects typed-no-default state fields from the full inheritance chain
+    /// (ADR 0078). For each such field that is still `nil` after the chain
+    /// completes, raises `UninitializedStateError` with the owning class name,
+    /// field name, and expected type. If no such fields exist, returns a plain
+    /// `{'noreply', InitNewState}`.
     #[allow(clippy::too_many_lines)]
     fn generate_post_initialize_check(
         &self,
         current_class: Option<&ClassDefinition>,
-        class_name: &ecow::EcoString,
+        module: &Module,
+        // Reserved for future log-metadata enrichment that names the leaf
+        // spawning class in addition to the field's owning class.
+        _leaf_class_name: &ecow::EcoString,
     ) -> Document<'static> {
-        // Collect typed-no-default fields: have type annotation, no default value,
-        // and the type is NOT nilable (a union containing Nil — nil is a valid value).
-        let typed_no_default: Vec<_> = current_class
-            .map(|c| {
-                c.state
-                    .iter()
-                    .filter(|s| {
-                        s.type_annotation.is_some()
-                            && s.default_value.is_none()
-                            && !Self::is_nilable_type(s.type_annotation.as_ref())
-                    })
-                    .collect::<Vec<_>>()
-            })
+        // BT-1951: Collect typed-no-default fields from the full inheritance
+        // chain (leaf + ancestors), not just the current class. For ancestors
+        // defined outside this module (cross-file), the AST is unavailable and
+        // their fields are skipped; same-file ancestors are walked via the AST
+        // (matching the limitation in `collect_inherited_fields` in state.rs).
+        let typed_no_default: Vec<InheritedTypedField<'_>> = current_class
+            .map(|c| self.inherited_typed_no_default_fields(module, &c.name.name))
             .unwrap_or_default();
 
         if typed_no_default.is_empty() {
@@ -395,19 +429,25 @@ impl CoreErlangGenerator {
         let mut body: Document<'static> = docvec!["{'noreply', InitNewState}"];
 
         for (i, field) in typed_no_default.iter().enumerate().rev() {
-            let field_name = field.name.name.to_string();
+            let field_name = field.state.name.name.to_string();
             let type_name = field
+                .state
                 .type_annotation
                 .as_ref()
                 .map_or_else(|| "Unknown".to_string(), Self::type_annotation_display);
+            // BT-1951: Use the owning class name (which may be an ancestor)
+            // in the diagnostic, while keeping the leaf class in logger metadata
+            // so operators see which actor failed to start.
+            let owning_class = field.owning_class.as_str();
             let idx = i.to_string();
             let check_var = format!("_ChkVal{idx}");
             let err_var0 = format!("_UErr{idx}a");
             let err_var1 = format!("_UErr{idx}b");
             let err_msg_var = format!("_UErrMsg{idx}");
             let class_name_var = format!("_UErrClass{idx}");
-            let hint_msg =
-                format!("{class_name} field '{field_name}' (:: {type_name}) was not initialized",);
+            let hint_msg = format!(
+                "{owning_class} field '{field_name}' (:: {type_name}) was not initialized",
+            );
             let hint_binary = Self::binary_string_literal(&hint_msg);
 
             body = docvec![
@@ -432,7 +472,7 @@ impl CoreErlangGenerator {
                                 "let ",
                                 Document::String(err_var0.clone()),
                                 " = call 'beamtalk_error':'new'('uninitialized_state_error', '",
-                                Document::String(class_name.to_string()),
+                                Document::String(owning_class.to_string()),
                                 "') in",
                                 line(),
                                 "let ",
@@ -486,7 +526,7 @@ impl CoreErlangGenerator {
 
         docvec![
             line(),
-            "%% BT-1949: Verify typed-no-default fields were initialized",
+            "%% BT-1949/BT-1951: Verify typed-no-default fields (including inherited) were initialized",
             line(),
             body,
         ]
@@ -527,51 +567,457 @@ impl CoreErlangGenerator {
                 format!("{} | False", Self::type_annotation_display(inner))
             }
             TypeAnnotation::SelfType { .. } => "Self".to_string(),
+            TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
         }
     }
 
-    /// Generates the `handle_continue/2` callback (BT-1541).
+    /// BT-1951 (ADR 0078): Returns the list of user-defined initializers to run
+    /// for a class, parent-first.
     ///
-    /// Dispatches `initialize` via `safe_dispatch` when the continuation token
-    /// `{continue, initialize}` arrives. This runs after `init/1` returns, so
-    /// the `gen_server` message loop is active and self-sends work without deadlock.
+    /// Each entry identifies a class in the inheritance chain (leaf last) that
+    /// defines its own `initialize` method. Root classes (`Actor`, `Object`,
+    /// `ProtoObject`) are excluded because their `initialize` is a no-op default
+    /// — running them would generate unnecessary dispatch calls.
     ///
-    /// OTP guarantees no other messages are processed before `handle_continue`.
+    /// Uses the compile-time `ClassHierarchy` snapshot so cross-file ancestors
+    /// are visible. When the hierarchy is unavailable (e.g. generator
+    /// constructed standalone without `generate_module_with_warnings`), falls
+    /// back to the leaf class's own `initialize` method if the AST defines one
+    /// so single-class initialization still runs.
+    pub(in crate::codegen::core_erlang) fn user_defined_initialize_chain(
+        &self,
+        module: &Module,
+        leaf_class: &str,
+    ) -> Vec<InitializeChainEntry> {
+        let Some(hierarchy) = self.class_hierarchy.as_ref() else {
+            // Fallback: AST only, leaf class initialize.
+            return module
+                .classes
+                .iter()
+                .find(|c| c.name.name == leaf_class)
+                .filter(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"))
+                .map(|c| {
+                    vec![InitializeChainEntry {
+                        class_name: c.name.name.to_string(),
+                        module_name: self.compiled_module_name(&c.name.name),
+                    }]
+                })
+                .unwrap_or_default();
+        };
+
+        // Build the chain parent-first: leaf's superclass_chain returns
+        // immediate ancestors first (Actor, Object, ProtoObject at the end
+        // after user classes). Reverse to put the root ancestor first, then
+        // append the leaf.
+        let mut ordered: Vec<ecow::EcoString> = hierarchy
+            .superclass_chain(leaf_class)
+            .into_iter()
+            .rev()
+            .collect();
+        ordered.push(ecow::EcoString::from(leaf_class));
+
+        let mut out = Vec::new();
+        for name in ordered {
+            // Skip root no-op initialize owners — Actor's `initialize` is a
+            // no-op per ADR 0078 and we don't generate a dispatch for it.
+            if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
+                continue;
+            }
+            let defines_initialize = hierarchy
+                .classes()
+                .get(name.as_str())
+                .is_some_and(|info| info.methods.iter().any(|m| m.selector == "initialize"));
+            if !defines_initialize {
+                continue;
+            }
+            let module_name = self.compiled_module_name(name.as_str());
+            out.push(InitializeChainEntry {
+                class_name: name.to_string(),
+                module_name,
+            });
+        }
+        out
+    }
+
+    /// BT-1951 (ADR 0078): Collect typed-no-default state fields across the
+    /// inheritance chain for post-initialize validation.
     ///
-    /// # Generated Code
+    /// Returns fields in parent-first order (ancestors first, then the leaf's
+    /// own fields), annotated with the owning class name so diagnostics can
+    /// point at the class that declared the field.
+    ///
+    /// Only walks classes whose AST is present in the current `Module`. This
+    /// matches the existing limitation of `collect_inherited_fields` in
+    /// `state.rs` — cross-file ancestor fields are not included. Extending to
+    /// cross-file parents is future work (needs default-value metadata on
+    /// `ClassInfo`).
+    pub(in crate::codegen::core_erlang) fn inherited_typed_no_default_fields<'a>(
+        &self,
+        module: &'a Module,
+        leaf_class: &str,
+    ) -> Vec<InheritedTypedField<'a>> {
+        let Some(hierarchy) = self.class_hierarchy.as_ref() else {
+            // Fallback: AST only, leaf class fields.
+            return module
+                .classes
+                .iter()
+                .find(|c| c.name.name == leaf_class)
+                .map(|c| {
+                    c.state
+                        .iter()
+                        .filter(|s| {
+                            s.type_annotation.is_some()
+                                && s.default_value.is_none()
+                                && !Self::is_nilable_type(s.type_annotation.as_ref())
+                        })
+                        .map(|s| InheritedTypedField {
+                            owning_class: c.name.name.to_string(),
+                            state: s,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+        };
+
+        let mut ordered: Vec<ecow::EcoString> = hierarchy
+            .superclass_chain(leaf_class)
+            .into_iter()
+            .rev()
+            .collect();
+        ordered.push(ecow::EcoString::from(leaf_class));
+
+        let mut out = Vec::new();
+        for name in ordered {
+            if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
+                continue;
+            }
+            // Find the class in the current module's AST so we can read default_value.
+            let Some(class) = module.classes.iter().find(|c| c.name.name == name) else {
+                // Cross-file ancestor — AST not available in this compilation.
+                // Skip its typed-no-default fields (limitation documented on
+                // this function). A future extension could derive the list
+                // from `ClassInfo.state_types` once defaults are tracked.
+                continue;
+            };
+            for s in &class.state {
+                if s.type_annotation.is_some()
+                    && s.default_value.is_none()
+                    && !Self::is_nilable_type(s.type_annotation.as_ref())
+                {
+                    out.push(InheritedTypedField {
+                        owning_class: class.name.name.to_string(),
+                        state: s,
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Generates the `handle_continue/2` callback (BT-1541, BT-1951).
+    ///
+    /// BT-1951 (ADR 0078): Auto-chains `initialize` methods parent-first across
+    /// the full inheritance hierarchy. For each ancestor class that defines its
+    /// own `initialize`, we emit a `safe_dispatch` call, threading the state
+    /// from one initializer to the next. After the chain completes, the
+    /// post-initialize check (BT-1949) validates that every typed-no-default
+    /// field (from any class in the chain) was set.
+    ///
+    /// Dispatches run via `beamtalk_dispatch:lookup/5` with each class's own
+    /// compiled module name so that dispatch starts *at* that class and walks
+    /// upward — which finds the class's own `initialize` if present, bypassing
+    /// any overriding subclass method (this is `super`-like semantics).
+    ///
+    /// This runs after `init/1` returns, so the `gen_server` message loop is
+    /// active and self-sends do not deadlock. OTP guarantees no other messages
+    /// are processed before `handle_continue`.
+    ///
+    /// # Generated Code (single-class — no user ancestors)
     ///
     /// ```erlang
     /// 'handle_continue'/2 = fun (Continue, State) ->
     ///     case Continue of
     ///         <'initialize'> when 'true' ->
-    ///             case call 'module':'safe_dispatch'('initialize', [], State) of
-    ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
-    ///                     {'noreply', InitNewState}
-    ///                 <{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->
-    ///                     let _ = call 'logger':'error'(Msg, #{stacktrace => ...}) in
-    ///                     {'stop', {InitType, InitReason, InitStacktrace}, InitErrState}
-    ///                 <{'error', InitError, InitErrState2}> when 'true' ->
-    ///                     let _ = call 'logger':'error'(Msg, #{...}) in
-    ///                     {'stop', InitError, InitErrState2}
+    ///             <stash State> in
+    ///             let _InitResult0 = call 'module':'safe_dispatch'('initialize', [], State) in
+    ///             <restore State> in
+    ///             case _InitResult0 of
+    ///                 <{'reply', _InitRet0, InitNewState}> when 'true' ->
+    ///                     <post-init check on InitNewState>
+    ///                 ...errors...
     ///             end
     ///         <_> when 'true' -> {'noreply', State}
     ///     end
     /// ```
+    ///
+    /// # Generated Code (with ancestor chain `Grandparent -> Parent -> Child`)
+    ///
+    /// Grandparent runs first, its output state feeds Parent, whose output
+    /// feeds Child, whose output is validated.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
+    #[allow(clippy::too_many_lines)] // chain dispatch + error arms grow with hierarchy depth
     pub(in crate::codegen::core_erlang) fn generate_handle_continue(
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
-        let module_name_for_log = module_name.clone();
 
-        // BT-1949: Find typed-no-default fields for post-initialize validation.
+        // BT-1949/BT-1951: Find typed-no-default fields (leaf + ancestors) for
+        // post-initialize validation.
         let current_class = module.classes.iter().find(|c| {
             use super::super::util::module_matches_class;
             module_matches_class(&self.module_name, &c.name.name)
         });
-        let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
-        let success_body = self.generate_post_initialize_check(current_class, &class_name);
+        let leaf_class_name =
+            current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
+        let success_body =
+            self.generate_post_initialize_check(current_class, module, &leaf_class_name);
+
+        // BT-1951 (ADR 0078): Walk the user-defined initialize chain (parent-first).
+        // Each entry is the (class_name, compiled_module_name) for a class that
+        // defines its own `initialize`. Root classes (Actor/Object/ProtoObject)
+        // are filtered out since their `initialize` is a no-op default.
+        let chain = current_class
+            .map(|c| self.user_defined_initialize_chain(module, &c.name.name))
+            .unwrap_or_default();
+
+        // Body that runs after the dispatch chain: the post-initialize check.
+        // If the chain is empty (e.g. only typed-no-default fields exist with no
+        // initialize method), the post-init check runs directly against the
+        // inbound `State` by binding it to `InitNewState`.
+        let inner = if chain.is_empty() {
+            docvec![line(), "let InitNewState = State in", success_body,]
+        } else {
+            // Build the dispatch chain from last to first so each step can nest
+            // inside the previous one's success arm.
+            let mut inner: Document<'static> = success_body;
+            let n = chain.len();
+            for (i, class) in chain.iter().enumerate().rev() {
+                let idx = i.to_string();
+                let is_last = i + 1 == n;
+                let in_state_var = if i == 0 {
+                    "State".to_string()
+                } else {
+                    format!("InitState{i}")
+                };
+                let result_var = format!("_InitResult{idx}");
+                let reply_ret_var = format!("_InitRet{idx}");
+                let next_state_var = if is_last {
+                    "InitNewState".to_string()
+                } else {
+                    let next = i + 1;
+                    format!("InitState{next}")
+                };
+                let err_state_var = format!("_InitErrState{idx}");
+                let err_state_var2 = format!("_InitErrState{idx}b");
+                let err_triple_type = format!("_InitType{idx}");
+                let err_triple_reason = format!("_InitReason{idx}");
+                let err_triple_stack = format!("_InitStack{idx}");
+                let err_plain = format!("_InitError{idx}");
+                let err_msg = format!("_InitErrMsg{idx}");
+                let err_msg2 = format!("_InitErrMsg{idx}b");
+                let err_class_name_var = format!("_InitErrClass{idx}");
+                let err_class_name_var2 = format!("_InitErrClass{idx}b");
+
+                let old_state_var = format!("_OldPdict{idx}");
+                let put_ok_var = format!("_PutPdict{idx}");
+                let restore_ok_var = format!("_RestorePdict{idx}");
+                let clear_stack_var = format!("_ClearStack{idx}");
+
+                inner = docvec![
+                    line(),
+                    docvec![
+                        "let ",
+                        Document::String(old_state_var.clone()),
+                        " = call 'erlang':'get'('$bt_actor_state') in",
+                    ],
+                    line(),
+                    docvec![
+                        "let ",
+                        Document::String(put_ok_var),
+                        " = call 'erlang':'put'('$bt_actor_state', ",
+                        Document::String(in_state_var.clone()),
+                        ") in",
+                    ],
+                    line(),
+                    docvec![
+                        "let ",
+                        Document::String(result_var.clone()),
+                        " = call '",
+                        Document::String(class.module_name.clone()),
+                        "':'safe_dispatch'('initialize', [], ",
+                        Document::String(in_state_var),
+                        ") in",
+                    ],
+                    line(),
+                    docvec![
+                        "let ",
+                        Document::String(restore_ok_var.clone()),
+                        " = case ",
+                        Document::String(old_state_var.clone()),
+                        " of",
+                    ],
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<'undefined'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
+                            ),
+                            line(),
+                            "<_Prev> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end in",
+                    line(),
+                    docvec![
+                        "let ",
+                        Document::String(clear_stack_var),
+                        " = call 'erlang':'erase'('$bt_call_stack') in",
+                    ],
+                    line(),
+                    "case ",
+                    Document::String(result_var),
+                    " of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            docvec![
+                                "<{'reply', ",
+                                Document::String(reply_ret_var),
+                                ", ",
+                                Document::String(next_state_var),
+                                "}> when 'true' ->",
+                            ],
+                            nest(INDENT, inner),
+                            line(),
+                            // BT-1822: Destructure error triple to capture stacktrace
+                            docvec![
+                                "<{'error', {",
+                                Document::String(err_triple_type.clone()),
+                                ", ",
+                                Document::String(err_triple_reason.clone()),
+                                ", ",
+                                Document::String(err_triple_stack.clone()),
+                                "}, ",
+                                Document::String(err_state_var.clone()),
+                                "}> when 'true' ->",
+                            ],
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    docvec![
+                                        "let ",
+                                        Document::String(err_msg.clone()),
+                                        " = call 'beamtalk_error':'format_safe'({",
+                                        Document::String(err_triple_type.clone()),
+                                        ", ",
+                                        Document::String(err_triple_reason.clone()),
+                                        "}, ",
+                                        Document::String(err_triple_stack.clone()),
+                                        ") in",
+                                    ],
+                                    line(),
+                                    docvec![
+                                        "let ",
+                                        Document::String(err_class_name_var.clone()),
+                                        " = call '",
+                                        Document::String(class.module_name.clone()),
+                                        "':'class_name'() in",
+                                    ],
+                                    line(),
+                                    docvec![
+                                        "let _ = call 'logger':'error'(",
+                                        Document::String(err_msg),
+                                        ", ~{'class' => ",
+                                        Document::String(err_class_name_var),
+                                        ", 'reason' => {",
+                                        Document::String(err_triple_type.clone()),
+                                        ", ",
+                                        Document::String(err_triple_reason.clone()),
+                                        "}, 'stacktrace' => ",
+                                        Document::String(err_triple_stack.clone()),
+                                        ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
+                                    ],
+                                    line(),
+                                    docvec![
+                                        "{'stop', {",
+                                        Document::String(err_triple_type),
+                                        ", ",
+                                        Document::String(err_triple_reason),
+                                        ", ",
+                                        Document::String(err_triple_stack),
+                                        "}, ",
+                                        Document::String(err_state_var),
+                                        "}",
+                                    ],
+                                ]
+                            ),
+                            line(),
+                            // Fallback: plain {error, Error, State} from dispatch (DNU, #beamtalk_error{}, etc.)
+                            docvec![
+                                "<{'error', ",
+                                Document::String(err_plain.clone()),
+                                ", ",
+                                Document::String(err_state_var2.clone()),
+                                "}> when 'true' ->",
+                            ],
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    docvec![
+                                        "let ",
+                                        Document::String(err_msg2.clone()),
+                                        " = call 'beamtalk_error':'format_safe'(",
+                                        Document::String(err_plain.clone()),
+                                        ") in",
+                                    ],
+                                    line(),
+                                    docvec![
+                                        "let ",
+                                        Document::String(err_class_name_var2.clone()),
+                                        " = call '",
+                                        Document::String(class.module_name.clone()),
+                                        "':'class_name'() in",
+                                    ],
+                                    line(),
+                                    docvec![
+                                        "let _ = call 'logger':'error'(",
+                                        Document::String(err_msg2),
+                                        ", ~{'class' => ",
+                                        Document::String(err_class_name_var2),
+                                        ", 'reason' => ",
+                                        Document::String(err_plain.clone()),
+                                        ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
+                                    ],
+                                    line(),
+                                    docvec![
+                                        "{'stop', ",
+                                        Document::String(err_plain),
+                                        ", ",
+                                        Document::String(err_state_var2),
+                                        "}",
+                                    ],
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ];
+            }
+            inner
+        };
 
         let doc = docvec![
             "'handle_continue'/2 = fun (Continue, State) ->",
@@ -587,65 +1033,11 @@ impl CoreErlangGenerator {
                             "<'initialize'> when 'true' ->",
                             nest(
                                 INDENT,
-                                docvec![
-                                    // BT-1325: Stash State for re-entrant self-sends
-                                    Self::pdict_stash_preamble(),
-                                    line(),
-                                    docvec![
-                                        "let _InitDispatchResult = call '",
-                                        Document::Eco(module_name),
-                                        "':'safe_dispatch'('initialize', [], State) in",
-                                    ],
-                                    Self::pdict_restore_epilogue(),
-                                    line(),
-                                    "case _InitDispatchResult of",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "<{'reply', _InitResult, InitNewState}> when 'true' ->",
-                                            nest(INDENT, success_body,),
-                                            line(),
-                                            // BT-1822: Destructure error triple to capture stacktrace
-                                            "<{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "let InitErrorMsg = call 'beamtalk_error':'format_safe'({InitType, InitReason}, InitStacktrace) in",
-                                                    line(),
-                                                    "let InitClassName = call '",
-                                                    Document::Eco(module_name_for_log.clone()),
-                                                    "':'class_name'() in",
-                                                    line(),
-                                                    "let _ = call 'logger':'error'(InitErrorMsg, ~{'class' => InitClassName, 'reason' => {InitType, InitReason}, 'stacktrace' => InitStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
-                                                    line(),
-                                                    "{'stop', {InitType, InitReason, InitStacktrace}, InitErrState}",
-                                                ]
-                                            ),
-                                            line(),
-                                            // Fallback: plain {error, Error, State} from dispatch (DNU, #beamtalk_error{}, etc.)
-                                            "<{'error', InitError, InitErrState2}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "let InitErrorMsg2 = call 'beamtalk_error':'format_safe'(InitError) in",
-                                                    line(),
-                                                    "let InitClassName2 = call '",
-                                                    Document::Eco(module_name_for_log),
-                                                    "':'class_name'() in",
-                                                    line(),
-                                                    "let _ = call 'logger':'error'(InitErrorMsg2, ~{'class' => InitClassName2, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
-                                                    line(),
-                                                    "{'stop', InitError, InitErrState2}",
-                                                ]
-                                            ),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
+                                // BT-1951: The auto-chained dispatch body. Each
+                                // class's initialize is bracketed by its own
+                                // pdict stash/restore pair to preserve BT-1325
+                                // re-entrant self-send semantics.
+                                inner,
                             ),
                             line(),
                             "<_> when 'true' -> {'noreply', State}",

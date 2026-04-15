@@ -218,3 +218,58 @@ idempotent_reregistration() ->
     ok = beamtalk_protocol_registry:register_protocol(Proto),
     Pid2 = beamtalk_class_registry:whereis_class('TestProto1'),
     ?assertEqual(Pid1, Pid2).
+
+%%% ============================================================================
+%%% protocol_name_from_class_self error cases (BT-1972)
+%%% ============================================================================
+
+protocol_name_from_class_self_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun({_ProtocolPid, _Created}) ->
+        [
+            {"invalid tag without class suffix raises error", fun() ->
+                BadObj = #beamtalk_object{class = 'NoSuffix', class_mod = test, pid = self()},
+                ?assertError(
+                    {invalid_protocol_class_tag, 'NoSuffix'},
+                    beamtalk_protocol_object:class_requiredMethods(BadObj, #{})
+                )
+            end},
+            {"short tag raises error", fun() ->
+                BadObj = #beamtalk_object{class = 'ab', class_mod = test, pid = self()},
+                ?assertError(
+                    {invalid_protocol_class_tag, 'ab'},
+                    beamtalk_protocol_object:class_requiredMethods(BadObj, #{})
+                )
+            end},
+            {"valid tag dispatches correctly", fun() ->
+                %% Register a protocol and test that dispatch via class_self works
+                Proto = #{
+                    name => 'TestProto1',
+                    required_methods => [#{selector => 'foo', arity => 0}],
+                    required_class_methods => [],
+                    type_params => [],
+                    extending => undefined
+                },
+                ok = beamtalk_protocol_registry:register_protocol(Proto),
+                ClassSelf = #beamtalk_object{
+                    class = 'TestProto1 class', class_mod = beamtalk_protocol_object, pid = self()
+                },
+                Result = beamtalk_protocol_object:class_requiredMethods(ClassSelf, #{}),
+                ?assert(lists:member('foo', Result))
+            end},
+            {"conformingClasses dispatch with valid tag", fun() ->
+                Proto = #{
+                    name => 'TestProto1',
+                    required_methods => [#{selector => 'foo', arity => 0}],
+                    required_class_methods => [],
+                    type_params => [],
+                    extending => undefined
+                },
+                ok = beamtalk_protocol_registry:register_protocol(Proto),
+                ClassSelf = #beamtalk_object{
+                    class = 'TestProto1 class', class_mod = beamtalk_protocol_object, pid = self()
+                },
+                Result = beamtalk_protocol_object:class_conformingClasses(ClassSelf, #{}),
+                ?assert(is_list(Result))
+            end}
+        ]
+    end}.

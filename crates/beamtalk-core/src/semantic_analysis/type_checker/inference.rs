@@ -293,7 +293,9 @@ impl TypeChecker {
                 let inner_ty = Self::resolve_type_annotation(inner);
                 InferredType::union_of(&[inner_ty, InferredType::known("False")])
             }
-            TypeAnnotation::SelfType { .. } => InferredType::Dynamic(DynamicReason::Unknown),
+            TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. } => {
+                InferredType::Dynamic(DynamicReason::Unknown)
+            }
             TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
         }
     }
@@ -972,6 +974,14 @@ impl TypeChecker {
                         };
                     }
 
+                    // BT-1952: `Self class` — the method returns a class object.
+                    // Resolve to Dynamic so existing patterns like `x class = Integer`
+                    // continue to work (class objects respond to all Object messages
+                    // at runtime, but the type hierarchy doesn't model `=` as a method).
+                    if ret_ty.as_str() == "Self class" {
+                        return InferredType::Dynamic(DynamicReason::Unknown);
+                    }
+
                     // BT-1945: `Never` resolves to the bottom type (divergent methods)
                     if ret_ty.as_str() == "Never" {
                         return InferredType::Never;
@@ -1372,6 +1382,10 @@ impl TypeChecker {
                         if ret_ty.as_str() == "Self" {
                             // Self resolves to the concrete member type (with type args)
                             return_types.push(member.clone());
+                        } else if ret_ty.as_str() == "Self class" {
+                            // BT-1952: Self class — resolve to Dynamic (class objects
+                            // respond to all Object messages at runtime)
+                            return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
                         } else if ret_ty.as_str() == "Never" {
                             // BT-1945: Bottom type for divergent methods
                             return_types.push(InferredType::Never);
@@ -2745,6 +2759,15 @@ mod tests {
     #[test]
     fn resolve_self_type_annotation() {
         let ann = TypeAnnotation::SelfType { span: span() };
+        assert_eq!(
+            TypeChecker::resolve_type_annotation(&ann),
+            InferredType::Dynamic(DynamicReason::Unknown)
+        );
+    }
+
+    #[test]
+    fn resolve_self_class_type_annotation() {
+        let ann = TypeAnnotation::SelfClass { span: span() };
         assert_eq!(
             TypeChecker::resolve_type_annotation(&ann),
             InferredType::Dynamic(DynamicReason::Unknown)

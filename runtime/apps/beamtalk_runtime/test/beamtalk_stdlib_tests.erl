@@ -369,3 +369,80 @@ dispatch_unknown_selector_test() ->
         },
         beamtalk_stdlib:dispatch(nonExistentMethod, [], 'Beamtalk')
     ).
+
+%%% ============================================================================
+%%% format_bt_module/1 Tests (BT-1975)
+%%% ============================================================================
+
+format_bt_module_test_() ->
+    [
+        {"dotted module path",
+            ?_assertEqual(
+                "bt.stdlib.integer", beamtalk_stdlib:format_bt_module('bt@stdlib@integer')
+            )},
+        {"single segment module",
+            ?_assertEqual("beamtalk_runtime", beamtalk_stdlib:format_bt_module(beamtalk_runtime))},
+        {"deeply nested module",
+            ?_assertEqual(
+                "bt.sicp.scheme.lambda",
+                beamtalk_stdlib:format_bt_module('bt@sicp@scheme@lambda')
+            )},
+        {"no @ signs", ?_assertEqual("simple", beamtalk_stdlib:format_bt_module(simple))}
+    ].
+
+%%% ============================================================================
+%%% class_entry_module/1 Tests (BT-1975)
+%%% ============================================================================
+
+class_entry_module_map_test() ->
+    Entry = #{
+        name => 'Integer',
+        module => 'bt@stdlib@integer',
+        parent => 'Number',
+        package => stdlib,
+        kind => value,
+        type_params => []
+    },
+    ?assertEqual('bt@stdlib@integer', beamtalk_stdlib:class_entry_module(Entry)).
+
+class_entry_module_tuple_test() ->
+    Entry = {mod_a, 'A', 'Object'},
+    ?assertEqual(mod_a, beamtalk_stdlib:class_entry_module(Entry)).
+
+%%% ============================================================================
+%%% find_stdlib_ebin/0 Tests (BT-1975)
+%%% ============================================================================
+
+find_stdlib_ebin_test() ->
+    %% After build, stdlib should be loaded and ebin should exist
+    Dir = beamtalk_stdlib:find_stdlib_ebin(),
+    ?assert(is_list(Dir)),
+    %% Should end with "ebin"
+    ?assertEqual("ebin", filename:basename(Dir)).
+
+%%% ============================================================================
+%%% start_link/0 Tests (BT-1975)
+%%% ============================================================================
+
+start_link_test_() ->
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
+        {"start_link returns pid", fun start_link_returns_pid_test/0}
+    ]}.
+
+start_link_returns_pid_test() ->
+    %% start_link spawns a proc_lib process
+    %% Trap exits so the test process isn't killed when we clean up.
+    OldTrap = process_flag(trap_exit, true),
+    try
+        {ok, Pid} = beamtalk_stdlib:start_link(),
+        ?assert(is_pid(Pid)),
+        ?assert(is_process_alive(Pid)),
+        %% Cleanup
+        exit(Pid, shutdown),
+        receive
+            {'EXIT', Pid, _} -> ok
+        after 1000 -> ok
+        end
+    after
+        process_flag(trap_exit, OldTrap)
+    end.

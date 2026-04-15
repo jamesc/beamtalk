@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Level 3 (leaf) of a 3-level hierarchy used to verify auto-chained
+// initialize order: spawning the leaf should run A → B → C in order.
+
+E2EInitDeepB subclass: E2EInitDeepC
+
+  initialize => self.log := self.log ++ "C"

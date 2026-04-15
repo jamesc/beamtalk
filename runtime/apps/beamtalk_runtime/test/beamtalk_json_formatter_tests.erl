@@ -345,6 +345,147 @@ format_extra_meta_excludes_standard_keys_test() ->
     ?assertNot(maps:is_key(<<"file">>, Decoded)),
     ?assertNot(maps:is_key(<<"line">>, Decoded)).
 
+format_time_missing_returns_unknown_test() ->
+    Event = #{
+        level => info,
+        msg => {string, "no time"},
+        meta => #{}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"unknown">>, maps:get(<<"time">>, Decoded)).
+
+format_supervisor_progress_proplist_report_test() ->
+    %% Supervisor progress with data nested in `report` key (OTP format)
+    Report = #{
+        label => {supervisor, progress},
+        report => [
+            {supervisor, {local, my_sup}},
+            {started, [{id, child_worker}, {pid, self()}]}
+        ]
+    },
+    Event = #{
+        level => info,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"supervisor_progress">>, maps:get(<<"report_type">>, Decoded)),
+    MsgBin = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(MsgBin, <<"Supervisor">>)).
+
+format_supervisor_child_terminated_proplist_report_test() ->
+    %% Supervisor child_terminated with data nested in `report` key (OTP format)
+    Report = #{
+        label => {supervisor, child_terminated},
+        report => [
+            {supervisor, {local, test_sup}},
+            {reason, shutdown},
+            {offender, [{id, my_worker}, {pid, self()}]}
+        ]
+    },
+    Event = #{
+        level => error,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"supervisor_child_terminated">>, maps:get(<<"report_type">>, Decoded)),
+    MsgBin = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(MsgBin, <<"test_sup">>)).
+
+format_supervisor_child_terminated_with_offender_test() ->
+    %% child_terminated with top-level offender key
+    Report = #{
+        label => {supervisor, child_terminated},
+        supervisor => {local, my_sup},
+        reason => normal,
+        offender => [{id, my_child}, {pid, self()}]
+    },
+    Event = #{
+        level => warning,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"supervisor_child_terminated">>, maps:get(<<"report_type">>, Decoded)),
+    MsgBin = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(MsgBin, <<"my_child">>)).
+
+format_non_map_report_test() ->
+    %% Non-map report (e.g., a list) should be formatted via fallback
+    Event = #{
+        level => info,
+        msg => {report, [{key, value}]},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assert(is_binary(maps:get(<<"msg">>, Decoded))).
+
+format_report_with_arity2_callback_test() ->
+    %% report_cb as arity-2 function
+    Report = #{data => 42},
+    Event = #{
+        level => info,
+        msg => {report, Report},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            report_cb => fun(_R, _Opts) -> <<"arity2 formatted">> end
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"arity2 formatted">>, maps:get(<<"msg">>, Decoded)).
+
+format_extra_meta_pid_value_test() ->
+    Pid = self(),
+    Event = #{
+        level => info,
+        msg => {string, "pid meta"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            spawned_by => Pid
+        }
+    },
+    Decoded = decode_event(Event),
+    PidBin = maps:get(<<"spawned_by">>, Decoded),
+    ?assert(is_binary(PidBin)),
+    ?assertNotEqual(nomatch, binary:match(PidBin, <<"<">>)).
+
+format_extra_meta_integer_value_test() ->
+    Event = #{
+        level => info,
+        msg => {string, "integer meta"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            retry_count => 3
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"3">>, maps:get(<<"retry_count">>, Decoded)).
+
+format_non_list_stacktrace_test() ->
+    %% Non-list stacktrace (e.g., from Core Erlang catch)
+    Event = #{
+        level => error,
+        msg => {string, "crash"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            stacktrace => {some, tuple, data}
+        }
+    },
+    Decoded = decode_event(Event),
+    StackBin = maps:get(<<"stacktrace">>, Decoded),
+    ?assert(is_binary(StackBin)).
+
+format_application_controller_domain_inference_test() ->
+    Report = #{label => {application_controller, progress}},
+    Event = #{
+        level => info,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)).
+
 format_falls_back_to_plain_text_on_formatter_failure_test() ->
     %% Force the normal formatter path to fail so the catch branch is exercised.
     %% A binary in the domain list makes atom_to_list/1 crash inside format_domain.

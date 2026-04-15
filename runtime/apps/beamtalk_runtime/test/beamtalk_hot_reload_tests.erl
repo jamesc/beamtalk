@@ -166,3 +166,168 @@ trigger_code_change_dead_pid_test() ->
     {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(test_module, [DeadPid]),
     ?assertEqual(1, length(Failures)),
     [{DeadPid, _Reason}] = Failures.
+
+trigger_code_change_multiple_dead_pids_test() ->
+    %% Multiple dead PIDs all produce failures
+    Pids = [spawn(fun() -> ok end) || _ <- lists:seq(1, 3)],
+    %% Wait for all to die
+    lists:foreach(
+        fun(Pid) ->
+            Ref = erlang:monitor(process, Pid),
+            receive
+                {'DOWN', Ref, process, Pid, _} -> ok
+            after 1000 ->
+                error(timeout_waiting_for_dead_pid)
+            end
+        end,
+        Pids
+    ),
+    {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(test_module, Pids),
+    ?assertEqual(3, length(Failures)).
+
+%%====================================================================
+%% Tests for trigger_code_change/3 (with Extra)
+%%====================================================================
+
+trigger_code_change_3_empty_pids_test() ->
+    Extra = {[field1, field2], some_module},
+    {ok, Upgraded, Failures} = beamtalk_hot_reload:trigger_code_change(
+        test_module, [], Extra
+    ),
+    ?assertEqual(0, Upgraded),
+    ?assertEqual([], Failures).
+
+trigger_code_change_3_dead_pid_test() ->
+    DeadPid = spawn(fun() -> ok end),
+    Ref = erlang:monitor(process, DeadPid),
+    receive
+        {'DOWN', Ref, process, DeadPid, _} -> ok
+    after 1000 ->
+        error(timeout_waiting_for_dead_pid)
+    end,
+    Extra = {[field1], some_module},
+    {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(
+        test_module, [DeadPid], Extra
+    ),
+    ?assertEqual(1, length(Failures)).
+
+%%====================================================================
+%% Tests for code_change/3 with field migration ({NewInstanceVars, Module})
+%%====================================================================
+
+field_migration_setup() ->
+    application:ensure_all_started(beamtalk_runtime),
+    beamtalk_stdlib:init(),
+    ok = ensure_counter_loaded(),
+    ok.
+
+field_migration_teardown(_) ->
+    ok.
+
+field_migration_test_() ->
+    {setup, fun field_migration_setup/0, fun field_migration_teardown/1, fun(_) ->
+        [
+            {"adds new fields with defaults", fun test_field_migration_adds_new_fields/0},
+            {"migrates legacy __class__ key during field migration",
+                fun test_field_migration_with_legacy_class_key/0},
+            {"init failure preserves state unchanged",
+                fun test_field_migration_init_failure_preserves_state/0},
+            {"drops removed fields", fun test_field_migration_drops_removed_fields/0},
+            {"preserves internal keys from new defaults",
+                fun test_field_migration_preserves_internal_keys/0}
+        ]
+    end}.
+
+test_field_migration_adds_new_fields() ->
+    OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 42},
+    {ok, Defaults} = 'bt@counter':init(#{}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@counter'}
+    ),
+    %% Old value should be preserved
+    ?assertEqual(42, maps:get(value, NewState)),
+    %% Internal keys come from new defaults (init), not old state
+    ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
+
+test_field_migration_with_legacy_class_key() ->
+    {ok, Defaults} = 'bt@counter':init(#{}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    OldState = #{'__class__' => 'Counter', '__class_mod__' => 'bt@counter', value => 10},
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@counter'}
+    ),
+    %% Legacy __class__ key should be removed (migrated by maybe_migrate_class_key)
+    ?assertNot(maps:is_key('__class__', NewState)),
+    %% Old user field value should be preserved
+    ?assertEqual(10, maps:get(value, NewState)),
+    %% Internal keys come from new defaults
+    ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
+
+test_field_migration_init_failure_preserves_state() ->
+    OldState = #{'$beamtalk_class' => 'Fake', value => 99},
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {[value, extra], nonexistent_module}
+    ),
+    ?assertEqual(OldState, NewState).
+
+test_field_migration_drops_removed_fields() ->
+    {ok, Defaults} = 'bt@counter':init(#{}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    OldState = maps:merge(
+        #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 5},
+        #{obsolete_field => <<"should be dropped">>}
+    ),
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@counter'}
+    ),
+    ?assertNot(maps:is_key(obsolete_field, NewState)),
+    ?assertEqual(5, maps:get(value, NewState)).
+
+test_field_migration_preserves_internal_keys() ->
+    {ok, Defaults} = 'bt@counter':init(#{}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => old_mod, value => 1},
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@counter'}
+    ),
+    ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
+
+%%====================================================================
+%% Helpers
+%%====================================================================
+
+ensure_counter_loaded() ->
+    case code:ensure_loaded('bt@counter') of
+        {module, 'bt@counter'} ->
+            case beamtalk_class_registry:whereis_class('Counter') of
+                undefined ->
+                    case erlang:function_exported('bt@counter', register_class, 0) of
+                        true ->
+                            'bt@counter':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({counter_module_not_found, Reason})
+    end.

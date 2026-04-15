@@ -51,3 +51,36 @@ to_list_empty_list_test() ->
 
 to_list_single_element_test() ->
     ?assertEqual([x], beamtalk_collection:to_list([x])).
+
+to_list_nested_list_test() ->
+    ?assertEqual([[1, 2], [3, 4]], beamtalk_collection:to_list([[1, 2], [3, 4]])).
+
+to_list_mixed_types_test() ->
+    ?assertEqual([1, a, <<"str">>], beamtalk_collection:to_list([1, a, <<"str">>])).
+
+%%% ============================================================================
+%%% inject_into/3 — additional coverage
+%%% ============================================================================
+
+inject_into_string_accumulator_test() ->
+    %% Build a string by accumulating elements
+    Result = beamtalk_collection:inject_into(
+        [<<"a">>, <<"b">>, <<"c">>],
+        <<>>,
+        fun(Acc, E) -> <<Acc/binary, E/binary>> end
+    ),
+    ?assertEqual(<<"abc">>, Result).
+
+inject_into_map_accumulator_test() ->
+    %% Build a map by accumulating key-value pairs
+    Result = beamtalk_collection:inject_into(
+        [{a, 1}, {b, 2}],
+        #{},
+        fun(Acc, {K, V}) -> maps:put(K, V, Acc) end
+    ),
+    ?assertEqual(#{a => 1, b => 2}, Result).
+
+inject_into_count_test() ->
+    %% Count elements
+    Result = beamtalk_collection:inject_into([x, y, z], 0, fun(Acc, _E) -> Acc + 1 end),
+    ?assertEqual(3, Result).

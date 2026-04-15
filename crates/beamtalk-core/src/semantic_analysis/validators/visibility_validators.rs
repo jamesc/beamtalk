@@ -310,8 +310,10 @@ fn check_type_annotation_cross_package(
         TypeAnnotation::FalseOr { inner, .. } => {
             check_type_annotation_cross_package(inner, current_pkg, hierarchy, diagnostics);
         }
-        // Singleton and SelfType don't reference classes
-        TypeAnnotation::Singleton { .. } | TypeAnnotation::SelfType { .. } => {}
+        // Singleton, SelfType, and SelfClass don't reference classes
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
     }
 }
 
@@ -439,7 +441,9 @@ fn check_type_annotation_leaked(
                 diagnostics,
             );
         }
-        TypeAnnotation::Singleton { .. } | TypeAnnotation::SelfType { .. } => {}
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
     }
 }
 
