@@ -23,7 +23,7 @@ typed Supervisor subclass: ExduraSupervisor
     timerSpec := TimerManager supervisionSpec withRestart: #permanent
     #(storeSpec, poolSpec, engineSpec, timerSpec)
 
-  class initialize: sup :: Supervisor -> nil =>
+  class initialize: sup :: Supervisor -> Nil =>
     store := sup which: EventStore
     pool := sup which: ActivityWorkerPool
     engine := sup which: WorkflowEngine
