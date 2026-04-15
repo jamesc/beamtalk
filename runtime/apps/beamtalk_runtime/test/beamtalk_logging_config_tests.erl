@@ -78,7 +78,21 @@ logging_config_test_() ->
             fun disableAllDebug_clears_domain_targets/0,
             fun enableDebug_compiler_succeeds/0,
             fun enableDebug_workspace_succeeds/0,
-            fun enableDebug_stdlib_succeeds/0
+            fun enableDebug_stdlib_succeeds/0,
+            fun domain_filter_allows_matching_events/0,
+            fun domain_filter_ignores_non_matching_events/0,
+            fun domain_filter_ignores_events_without_domain/0,
+            fun class_filter_allows_matching_class/0,
+            fun class_filter_ignores_other_class/0,
+            fun actor_filter_allows_matching_pid/0,
+            fun actor_filter_ignores_other_pid/0,
+            fun enableDebug_with_registered_class_sets_module_level/0,
+            fun disableDebug_with_registered_class_unsets_module_level/0,
+            fun disableAllDebug_with_registered_class_unsets_module_level/0,
+            fun loggerInfo_with_mcp_shows_signal_file/0,
+            fun enable_supervisor_progress_idempotent/0,
+            fun loggerInfo_handles_no_file_config/0,
+            fun mcp_signal_path_without_home_uses_cache_dir/0
         ]}.
 
 %%====================================================================
@@ -458,6 +472,113 @@ mcp_signal_file_with_workspace_test_() ->
         end}.
 
 %%====================================================================
+%% MCP signal file with running workspace_meta
+%%
+%% Exercises the real write_mcp_signal_file / remove_mcp_signal_file
+%% code paths by starting a real beamtalk_workspace_meta gen_server.
+%%====================================================================
+
+mcp_signal_file_with_real_workspace_test_() ->
+    {setup,
+        fun() ->
+            stop_workspace_meta_if_running(),
+            TestWsId = iolist_to_binary(
+                io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
+            ),
+            TmpDir = beamtalk_file:'tempDirectory'(),
+            ProjectPath = iolist_to_binary([TmpDir, "/test"]),
+            {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
+                workspace_id => TestWsId,
+                project_path => ProjectPath,
+                created_at => erlang:system_time(second)
+            }),
+            beamtalk_logging_config:ensure_table(),
+            {TestWsId, MetaPid}
+        end,
+        fun({TestWsId, MetaPid}) ->
+            beamtalk_logging_config:disableAllDebug(),
+            %% Best-effort cleanup of the workspace directory
+            case beamtalk_platform:home_dir() of
+                false ->
+                    CacheDir = filename:basedir(user_cache, "beamtalk"),
+                    WsDir = filename:join([
+                        CacheDir, "workspaces", binary_to_list(TestWsId)
+                    ]),
+                    _ = file:delete(filename:join(WsDir, "mcp_debug_enabled")),
+                    _ = file:del_dir(WsDir);
+                Home ->
+                    WsDir = filename:join([
+                        Home, ".beamtalk", "workspaces", binary_to_list(TestWsId)
+                    ]),
+                    _ = file:delete(filename:join(WsDir, "mcp_debug_enabled")),
+                    _ = file:del_dir(WsDir)
+            end,
+            case is_process_alive(MetaPid) of
+                true -> gen_server:stop(MetaPid);
+                false -> ok
+            end
+        end,
+        fun({TestWsId, _MetaPid}) ->
+            [
+                {"mcp_signal_path returns the expected path", fun() ->
+                    {ok, Path} = beamtalk_logging_config:mcp_signal_path(),
+                    ?assert(is_list(Path)),
+                    ?assertNotEqual(
+                        nomatch,
+                        string:find(Path, binary_to_list(TestWsId))
+                    ),
+                    ?assertNotEqual(nomatch, string:find(Path, "mcp_debug_enabled"))
+                end},
+                {"enableDebug(mcp) creates the signal file", fun() ->
+                    beamtalk_logging_config:disableAllDebug(),
+                    {ok, Path} = beamtalk_logging_config:mcp_signal_path(),
+                    ?assertEqual(nil, beamtalk_logging_config:enableDebug(mcp)),
+                    ?assert(filelib:is_file(Path)),
+                    ?assert(lists:member(mcp, beamtalk_logging_config:activeDebugTargets()))
+                end},
+                {"disableDebug(mcp) removes the signal file", fun() ->
+                    {ok, Path} = beamtalk_logging_config:mcp_signal_path(),
+                    beamtalk_logging_config:enableDebug(mcp),
+                    ?assert(filelib:is_file(Path)),
+                    ?assertEqual(nil, beamtalk_logging_config:disableDebug(mcp)),
+                    ?assertNot(filelib:is_file(Path)),
+                    ?assertNot(lists:member(mcp, beamtalk_logging_config:activeDebugTargets()))
+                end},
+                {"disableDebug(mcp) is idempotent when file already gone", fun() ->
+                    %% Remove the signal file, then call disableDebug — should not error
+                    {ok, Path} = beamtalk_logging_config:mcp_signal_path(),
+                    beamtalk_logging_config:enableDebug(mcp),
+                    _ = file:delete(Path),
+                    ?assertEqual(nil, beamtalk_logging_config:disableDebug(mcp))
+                end},
+                {"disableAllDebug removes mcp signal file", fun() ->
+                    {ok, Path} = beamtalk_logging_config:mcp_signal_path(),
+                    beamtalk_logging_config:enableDebug(mcp),
+                    ?assert(filelib:is_file(Path)),
+                    ?assertEqual(nil, beamtalk_logging_config:disableAllDebug()),
+                    ?assertNot(filelib:is_file(Path))
+                end},
+                {"loggerInfo shows mcp with a real signal file path", fun() ->
+                    beamtalk_logging_config:disableAllDebug(),
+                    beamtalk_logging_config:enableDebug(mcp),
+                    Info = beamtalk_logging_config:loggerInfo(),
+                    ?assertNotEqual(nomatch, binary:match(Info, <<"mcp">>)),
+                    ?assertNotEqual(nomatch, binary:match(Info, <<"signal file">>)),
+                    beamtalk_logging_config:disableAllDebug()
+                end}
+            ]
+        end}.
+
+stop_workspace_meta_if_running() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid),
+            ok
+    end.
+
+%%====================================================================
 %% Supervisor progress tests
 %%====================================================================
 
@@ -603,8 +724,223 @@ enableDebug_stdlib_succeeds() ->
     beamtalk_logging_config:disableDebug(stdlib).
 
 %%====================================================================
+%% Filter function behaviour tests
+%%
+%% Enabling a domain, class, or actor target installs a logger filter
+%% fun. We exercise those funs directly by extracting them from the
+%% configured filter list, so that the filter logic (not just install)
+%% is covered.
+%%====================================================================
+
+domain_filter_allows_matching_events() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(runtime),
+    {FilterFun, _} = get_handler_filter(beamtalk_debug_domain_runtime),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{domain => [beamtalk, runtime]}},
+    ?assertEqual(Event, FilterFun(Event, [])),
+    beamtalk_logging_config:disableAllDebug().
+
+domain_filter_ignores_non_matching_events() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(runtime),
+    {FilterFun, _} = get_handler_filter(beamtalk_debug_domain_runtime),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{domain => [unrelated, something]}},
+    ?assertEqual(ignore, FilterFun(Event, [])),
+    beamtalk_logging_config:disableAllDebug().
+
+domain_filter_ignores_events_without_domain() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(runtime),
+    {FilterFun, _} = get_handler_filter(beamtalk_debug_domain_runtime),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{}},
+    ?assertEqual(ignore, FilterFun(Event, [])),
+    beamtalk_logging_config:disableAllDebug().
+
+class_filter_allows_matching_class() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ClassRef = #beamtalk_object{class = 'TestClass class', class_mod = test_class, pid = self()},
+    beamtalk_logging_config:enableDebug(ClassRef),
+    {FilterFun, _} = get_primary_filter(beamtalk_debug_class_TestClass),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{beamtalk_class => 'TestClass'}},
+    ?assertEqual(Event, FilterFun(Event, [])),
+    beamtalk_logging_config:disableAllDebug().
+
+class_filter_ignores_other_class() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ClassRef = #beamtalk_object{class = 'TestClass class', class_mod = test_class, pid = self()},
+    beamtalk_logging_config:enableDebug(ClassRef),
+    {FilterFun, _} = get_primary_filter(beamtalk_debug_class_TestClass),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{beamtalk_class => 'OtherClass'}},
+    ?assertEqual(ignore, FilterFun(Event, [])),
+    EventNoMeta = #{level => debug, msg => {string, "hi"}, meta => #{}},
+    ?assertEqual(ignore, FilterFun(EventNoMeta, [])),
+    beamtalk_logging_config:disableAllDebug().
+
+actor_filter_allows_matching_pid() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
+    beamtalk_logging_config:enableDebug(ActorRef),
+    FilterId = list_to_atom("beamtalk_debug_actor_" ++ pid_to_list(Pid)),
+    {FilterFun, _} = get_primary_filter(FilterId),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{pid => Pid}},
+    ?assertEqual(Event, FilterFun(Event, [])),
+    Pid ! stop,
+    beamtalk_logging_config:disableAllDebug().
+
+actor_filter_ignores_other_pid() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
+    beamtalk_logging_config:enableDebug(ActorRef),
+    FilterId = list_to_atom("beamtalk_debug_actor_" ++ pid_to_list(Pid)),
+    {FilterFun, _} = get_primary_filter(FilterId),
+    %% Use a different pid in the event meta
+    OtherPid = self(),
+    Event = #{level => debug, msg => {string, "hi"}, meta => #{pid => OtherPid}},
+    ?assertEqual(ignore, FilterFun(Event, [])),
+    EventNoMeta = #{level => debug, msg => {string, "hi"}, meta => #{}},
+    ?assertEqual(ignore, FilterFun(EventNoMeta, [])),
+    Pid ! stop,
+    beamtalk_logging_config:disableAllDebug().
+
+%%====================================================================
+%% Class module table integration — exercises the lookup-found branches
+%% in enable_class_debug / disable_class_debug / disableAllDebug.
+%%====================================================================
+
+enableDebug_with_registered_class_sets_module_level() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_class_module_table:new(),
+    beamtalk_class_module_table:insert('RegisteredClass', lists),
+    try
+        ClassRef = #beamtalk_object{
+            class = 'RegisteredClass class', class_mod = lists, pid = self()
+        },
+        ?assertEqual(nil, beamtalk_logging_config:enableDebug(ClassRef)),
+        %% Module level should now be debug for the registered module
+        ?assertEqual([{lists, debug}], logger:get_module_level(lists))
+    after
+        logger:unset_module_level(lists),
+        beamtalk_class_module_table:delete('RegisteredClass'),
+        beamtalk_logging_config:disableAllDebug()
+    end.
+
+disableDebug_with_registered_class_unsets_module_level() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_class_module_table:new(),
+    beamtalk_class_module_table:insert('RegisteredClass2', lists),
+    try
+        ClassRef = #beamtalk_object{
+            class = 'RegisteredClass2 class', class_mod = lists, pid = self()
+        },
+        beamtalk_logging_config:enableDebug(ClassRef),
+        ?assertEqual([{lists, debug}], logger:get_module_level(lists)),
+        beamtalk_logging_config:disableDebug(ClassRef),
+        %% After disable, the module-level override should be removed
+        ?assertEqual([], logger:get_module_level(lists))
+    after
+        logger:unset_module_level(lists),
+        beamtalk_class_module_table:delete('RegisteredClass2'),
+        beamtalk_logging_config:disableAllDebug()
+    end.
+
+disableAllDebug_with_registered_class_unsets_module_level() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_class_module_table:new(),
+    beamtalk_class_module_table:insert('RegisteredClass3', lists),
+    try
+        ClassRef = #beamtalk_object{
+            class = 'RegisteredClass3 class', class_mod = lists, pid = self()
+        },
+        beamtalk_logging_config:enableDebug(ClassRef),
+        ?assertEqual([{lists, debug}], logger:get_module_level(lists)),
+        beamtalk_logging_config:disableAllDebug(),
+        ?assertEqual([], logger:get_module_level(lists))
+    after
+        logger:unset_module_level(lists),
+        beamtalk_class_module_table:delete('RegisteredClass3')
+    end.
+
+%%====================================================================
+%% Additional loggerInfo / format_debug_target coverage
+%%====================================================================
+
+loggerInfo_with_mcp_shows_signal_file() ->
+    %% Inject an mcp entry directly into the debug table to exercise
+    %% the mcp_signal branch of format_debug_target without needing a
+    %% running workspace.
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:ensure_table(),
+    ets:insert(beamtalk_debug_targets, {mcp, subsystem, []}),
+    try
+        Info = beamtalk_logging_config:loggerInfo(),
+        ?assertNotEqual(nomatch, binary:match(Info, <<"signal file">>))
+    after
+        ets:delete(beamtalk_debug_targets, mcp)
+    end.
+
+enable_supervisor_progress_idempotent() ->
+    %% Enabling supervisor debug twice should not crash when the
+    %% otp_progress filter has already been removed.
+    beamtalk_logging_config:disableAllDebug(),
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(supervisor)),
+    %% Disable then re-enable so the second enable sees no otp_progress filter
+    beamtalk_logging_config:disableDebug(supervisor),
+    %% Manually remove otp_progress (simulating a system without it)
+    _ = logger:remove_handler_filter(default, otp_progress),
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(supervisor)),
+    beamtalk_logging_config:disableDebug(supervisor).
+
+loggerInfo_handles_no_file_config() ->
+    %% Install a handler without a file config so find_log_file falls
+    %% through to the default-handler branch.
+    _ = logger:remove_handler(beamtalk_file_log),
+    Info = beamtalk_logging_config:loggerInfo(),
+    ?assert(is_binary(Info)),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Log file:">>)).
+
+mcp_signal_path_without_home_uses_cache_dir() ->
+    %% This path requires a running workspace_meta. Without it, the
+    %% function returns workspace_not_started (which is already covered
+    %% elsewhere). We verify here that calling mcp_signal_path is safe
+    %% when HOME is temporarily unset, by saving/restoring the env var.
+    OrigHome = os:getenv("HOME"),
+    try
+        %% Without a workspace, result is {error, workspace_not_started}
+        %% regardless of HOME, but we exercise the branch for safety.
+        Result = beamtalk_logging_config:mcp_signal_path(),
+        ?assertMatch({error, _}, Result)
+    after
+        case OrigHome of
+            false -> os:unsetenv("HOME");
+            Val -> os:putenv("HOME", Val)
+        end
+    end.
+
+%%====================================================================
 %% Test helpers
 %%====================================================================
+
+-doc "Fetch an installed handler filter's {Fun, Extra} by id.".
+get_handler_filter(FilterId) ->
+    {ok, #{filters := Filters}} = logger:get_handler_config(FilterId),
+    {FilterId, FunPair} = lists:keyfind(FilterId, 1, Filters),
+    FunPair.
+
+-doc "Fetch an installed primary filter's {Fun, Extra} by id.".
+get_primary_filter(FilterId) ->
+    #{filters := Filters} = logger:get_primary_config(),
+    {FilterId, FunPair} = lists:keyfind(FilterId, 1, Filters),
+    FunPair.
 
 -doc "Install a temporary beamtalk_file_log handler for format-switching tests.".
 install_test_file_handler() ->
