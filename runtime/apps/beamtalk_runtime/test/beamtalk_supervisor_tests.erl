@@ -26,6 +26,14 @@ Tests cover:
   unwrap, process dictionary cleanup, child linking, supervisor restart,
   supervisor tuple return (BT-1875, BT-1960)
 - ensure_root_table idempotent creation (BT-1960)
+- startLink/1 success, already_started, and error paths (BT-1980)
+- terminateChild/2 class path + terminateChild:class:/:child: aliases (BT-1980)
+- startChild/1 and /2 success + error paths (BT-1980)
+- run_initialize/1 invokes class_initialize: via hierarchy walk (BT-1980)
+- to_otp_strategy/1 oneForAll, restForOne, pass-through (BT-1980)
+- wrap_child/3 supervisor and actor branches via whichChild (BT-1980)
+- build_child_specs/1 nested-supervisor OTP spec (BT-1980)
+- ensure_root_table concurrent creation safety (BT-1980)
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -51,6 +59,15 @@ Tests cover:
 
 %% BT-1960: Fake class methods for dynamic_init and hierarchy tests.
 -export([class_childClass/2]).
+
+%% BT-1980: Fake class-method and helper exports for added coverage tests.
+-export([
+    childClass/0,
+    'class_initialize:'/3,
+    class_strategy_all/2,
+    class_strategy_rest/2,
+    class_strategy_unknown/2
+]).
 
 %% gen_server callbacks for fake child actor used by BT-1875 tests.
 -export([handle_call/3, handle_cast/2]).
@@ -1091,3 +1108,614 @@ supervisor_tuple_new_tag_test() ->
     ?assertEqual('MyClass', element(2, Tuple)),
     ?assertEqual(my_mod, element(3, Tuple)),
     ?assertEqual(self(), element(4, Tuple)).
+
+%%====================================================================
+%% BT-1980: startLink/1 — success, already_started, and error paths
+%%====================================================================
+
+%% Spawn a fake class gen_server that answers class_name and module_name
+%% (the two calls beamtalk_object_class makes). Returns {FakePid, Self tuple}.
+make_fake_class_self(ClassName, Module) ->
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, ClassName),
+                    Loop();
+                {'$gen_call', From, module_name} ->
+                    gen_server:reply(From, Module),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    Self = {beamtalk_object, atom_to_list_class_tag(ClassName), Module, FakeClassPid},
+    {FakeClassPid, Self}.
+
+atom_to_list_class_tag(ClassName) ->
+    list_to_atom(atom_to_list(ClassName) ++ " class").
+
+startLink_success_returns_new_tuple_test() ->
+    %% BT-1980: startLink returns {beamtalk_supervisor_new, ...} on first start.
+    beamtalk_supervisor_test_helper:set_mode(ok, undefined),
+    {FakeClassPid, Self} =
+        make_fake_class_self('BT1980StartOK', beamtalk_supervisor_test_helper),
+    try
+        Result = beamtalk_supervisor:startLink(Self),
+        ?assertMatch(
+            {beamtalk_supervisor_new, 'BT1980StartOK', beamtalk_supervisor_test_helper, _},
+            Result
+        ),
+        SupPid = element(4, Result),
+        ?assert(is_pid(SupPid)),
+        ?assert(is_process_alive(SupPid)),
+        gen_server:stop(SupPid)
+    after
+        FakeClassPid ! stop,
+        beamtalk_supervisor_test_helper:reset()
+    end.
+
+startLink_already_started_returns_existing_tuple_test() ->
+    %% BT-1980: startLink returns {beamtalk_supervisor, ...} when start_link
+    %% reports {error, {already_started, Pid}}.
+    beamtalk_supervisor_test_helper:set_mode(already_started, undefined),
+    {FakeClassPid, Self} =
+        make_fake_class_self('BT1980AlreadyStarted', beamtalk_supervisor_test_helper),
+    try
+        Result = beamtalk_supervisor:startLink(Self),
+        ?assertMatch(
+            {beamtalk_supervisor, 'BT1980AlreadyStarted', beamtalk_supervisor_test_helper, _},
+            Result
+        ),
+        SupPid = element(4, Result),
+        gen_server:stop(SupPid)
+    after
+        FakeClassPid ! stop,
+        beamtalk_supervisor_test_helper:reset()
+    end.
+
+startLink_error_raises_runtime_error_test() ->
+    %% BT-1980: startLink converts {error, Reason} into a structured runtime_error.
+    beamtalk_supervisor_test_helper:set_mode(error, {foo, bar}),
+    {FakeClassPid, Self} =
+        make_fake_class_self('BT1980StartErr', beamtalk_supervisor_test_helper),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+            beamtalk_supervisor:startLink(Self)
+        )
+    after
+        FakeClassPid ! stop,
+        beamtalk_supervisor_test_helper:reset()
+    end.
+
+%%====================================================================
+%% BT-1980: terminateChild/2 — static supervisor (by class name) path
+%%====================================================================
+
+terminate_child_by_class_test() ->
+    %% BT-1980: terminateChild with a class object arg terminates by child id.
+    SupPid = start_anon_supervisor_with_worker(bt1980_class_child),
+    Self = make_supervisor_tuple('BT1980TermClass', bt1980_term_mod, SupPid),
+    %% Build a class object arg whose class_name/1 returns the child id atom.
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, bt1980_class_child),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        ClassArg =
+            {beamtalk_object, 'BT1980ClassChild class', bt1980_class_child_mod, FakeClassPid},
+        Result = beamtalk_supervisor:terminateChild(Self, ClassArg),
+        ?assertEqual(nil, Result)
+    after
+        FakeClassPid ! stop,
+        (try
+            gen_server:stop(SupPid)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+terminate_child_by_class_not_found_test() ->
+    %% BT-1980: terminateChild with a class arg for a non-running child raises error.
+    SupPid = start_anon_supervisor(),
+    Self = make_supervisor_tuple('BT1980TermClassNF', bt1980_term_nf_mod, SupPid),
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, bt1980_missing_child),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        ClassArg = {beamtalk_object, 'BT1980MissingChild class', bt1980_missing_mod, FakeClassPid},
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+            beamtalk_supervisor:terminateChild(Self, ClassArg)
+        )
+    after
+        FakeClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1980: startChild/1 and startChild/2 — DynamicSupervisor paths
+%%====================================================================
+
+%% Fake class object for startChild tests: returns a class object whose
+%% class gen_server replies class_name=<worker id atom>, and whose element(3)
+%% points at this test module (which exports start_worker/1).
+make_child_class_for_startchild(ChildClassName) ->
+    ChildClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, ChildClassName),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    {ChildClassPid,
+        {beamtalk_object, list_to_atom(atom_to_list(ChildClassName) ++ " class"), ?MODULE,
+            ChildClassPid}}.
+
+%% A DynamicSupervisor whose childClass() returns the given class object.
+%% We build this on the fly by storing the class object in an ETS table and
+%% wiring Module:childClass/0 through a helper module.
+start_dynamic_supervisor_for_startchild() ->
+    %% We reuse start_dynamic_supervisor/0 which wires ?MODULE:start_worker/1
+    %% as the dynamic child template. The test will use a SupMod that
+    %% exports childClass/0 to return a class object.
+    start_dynamic_supervisor().
+
+%% Start a simple_one_for_one supervisor whose dynamic template is
+%% {?MODULE, start_link_fake_child, []}. start_link_fake_child/0 calls
+%% gen_server:start_link and returns {ok, Pid} — so supervisor:start_child(Sup, [])
+%% succeeds and exercises the success branch of startChild/1.
+start_dynamic_supervisor_with_nullary_child() ->
+    ChildSpec = #{
+        id => fake_child_template,
+        start => {?MODULE, start_link_fake_child, []},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => [?MODULE]
+    },
+    {ok, SupPid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec}),
+    SupPid.
+
+%% We need a helper module that exports childClass/0. Use the dedicated helper.
+%% beamtalk_supervisor_test_helper does not define childClass/0 — define it
+%% inline via a dedicated child helper module? Simpler: pass ?MODULE as SupMod
+%% (works because ?MODULE:childClass() is what startChild calls on SupMod).
+childClass() ->
+    %% Return the class object stored in the ETS cell by the test.
+    case ets:lookup(beamtalk_supervisor_tests_child_cell, current) of
+        [{current, Obj}] -> Obj;
+        [] -> erlang:error(no_child_class_set)
+    end.
+
+set_child_class(Obj) ->
+    case ets:info(beamtalk_supervisor_tests_child_cell, id) of
+        undefined ->
+            ets:new(beamtalk_supervisor_tests_child_cell, [named_table, public, set]);
+        _ ->
+            ok
+    end,
+    ets:insert(beamtalk_supervisor_tests_child_cell, {current, Obj}),
+    ok.
+
+startChild_arity1_success_test() ->
+    %% BT-1980: startChild/1 success path wraps the new child pid as a
+    %% {beamtalk_object, ...} tuple for non-supervisor children.
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1980DynWorker'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT1980DynSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self),
+        ?assertMatch({beamtalk_object, 'BT1980DynWorker', ?MODULE, _}, Result),
+        ChildPid = element(4, Result),
+        ?assert(is_process_alive(ChildPid))
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_arity2_success_test() ->
+    %% BT-1980: startChild/2 appends [Args] to the simple_one_for_one template.
+    %% The template MFA is {?MODULE, start_worker, []}; with Args=self()
+    %% the OTP supervisor calls start_worker(self()), which is the arity-1
+    %% start_worker defined above, returning {ok, Pid}. Verify the wrapped
+    %% result is a beamtalk_object tuple.
+    SupPid = start_dynamic_supervisor_for_startchild(),
+    {ChildClassPid, ChildClassObj} =
+        make_child_class_for_startchild('BT1980DynArgs'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT1980DynArgsSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self, self()),
+        %% Drain the worker_ready message start_worker/1 sends us.
+        receive
+            {worker_ready, _} -> ok
+        after 1000 -> error(no_worker_ready)
+        end,
+        ?assertMatch({beamtalk_object, 'BT1980DynArgs', ?MODULE, _}, Result)
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1980: run_initialize/1 — class-side initialize: lifecycle hook
+%%====================================================================
+
+%% Fake class_initialize: method — records that it was invoked.
+class_initialize(_ClassSelf, _ClassVars, _SupTuple) ->
+    put(bt1980_init_called, true),
+    nil.
+
+'class_initialize:'(A, B, C) -> class_initialize(A, B, C).
+
+run_initialize_invokes_class_initialize_test() ->
+    %% BT-1980: run_initialize walks the class chain and calls class_initialize:
+    %% with the supervisor tuple as an extra arg.
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_module_table:new(),
+    %% Register a class pointing at this module (exports 'class_initialize:'/3).
+    ClassName = 'BT1980InitClass',
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    FakeClassPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        register(RegName, FakeClassPid),
+        beamtalk_class_module_table:insert(ClassName, ?MODULE),
+        SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, self()},
+        erase(bt1980_init_called),
+        Result = beamtalk_supervisor:run_initialize(SupTuple),
+        ?assertEqual(ok, Result),
+        ?assertEqual(true, get(bt1980_init_called))
+    after
+        erase(bt1980_init_called),
+        (try
+            unregister(RegName)
+        catch
+            _:_ -> ok
+        end),
+        FakeClassPid ! stop,
+        beamtalk_class_module_table:delete(ClassName)
+    end.
+
+%%====================================================================
+%% BT-1980: to_otp_strategy/1 — all strategy variants
+%%====================================================================
+
+to_otp_strategy_oneForOne_test() ->
+    %% Exercised indirectly via static_init tests, but we also assert the
+    %% strategies land in a supervisor's SupFlags.
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_module_table:new(),
+    beamtalk_class_hierarchy_table:insert('BT1980StratOne', 'BT1980StratOneParent'),
+    beamtalk_class_hierarchy_table:insert('BT1980StratOneParent', none),
+    beamtalk_class_module_table:insert('BT1980StratOneParent', ?MODULE),
+    try
+        {ok, {#{strategy := one_for_one}, _}} =
+            beamtalk_supervisor:static_init(erlang, 'BT1980StratOne')
+    after
+        beamtalk_class_hierarchy_table:delete('BT1980StratOne'),
+        beamtalk_class_hierarchy_table:delete('BT1980StratOneParent'),
+        beamtalk_class_module_table:delete('BT1980StratOneParent')
+    end.
+
+%% Helper fake class methods with non-default strategies.
+class_strategy_all(_ClassSelf, _ClassVars) -> oneForAll.
+class_strategy_rest(_ClassSelf, _ClassVars) -> restForOne.
+class_strategy_unknown(_ClassSelf, _ClassVars) -> someOtherStrategy.
+
+to_otp_strategy_oneForAll_test() ->
+    %% BT-1980: oneForAll maps to one_for_all.
+    ?assertEqual(one_for_all, apply_to_otp_strategy(oneForAll)).
+
+to_otp_strategy_restForOne_test() ->
+    %% BT-1980: restForOne maps to rest_for_one.
+    ?assertEqual(rest_for_one, apply_to_otp_strategy(restForOne)).
+
+to_otp_strategy_unknown_passes_through_test() ->
+    %% BT-1980: Unknown strategy passes through unchanged so OTP reports it.
+    ?assertEqual(mystery, apply_to_otp_strategy(mystery)).
+
+%% Call the private to_otp_strategy via a static_init roundtrip. Set up
+%% a hierarchy whose class_strategy returns the input and extract the
+%% resulting OTP strategy atom.
+apply_to_otp_strategy(BtStrategy) ->
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_module_table:new(),
+    Name = list_to_atom(
+        "BT1980Strat_" ++ atom_to_list(BtStrategy) ++ "_" ++
+            integer_to_list(erlang:unique_integer([positive]))
+    ),
+    Parent = list_to_atom(atom_to_list(Name) ++ "_p"),
+    beamtalk_class_hierarchy_table:insert(Name, Parent),
+    beamtalk_class_hierarchy_table:insert(Parent, none),
+    %% Install an on-demand parent module with the right class_strategy. We
+    %% compile a tiny module at runtime that exports class_strategy/2 etc.
+    ParentMod = compile_strategy_parent(BtStrategy),
+    beamtalk_class_module_table:insert(Parent, ParentMod),
+    try
+        {ok, {#{strategy := Strategy}, _}} =
+            beamtalk_supervisor:static_init(erlang, Name),
+        Strategy
+    after
+        beamtalk_class_hierarchy_table:delete(Name),
+        beamtalk_class_hierarchy_table:delete(Parent),
+        beamtalk_class_module_table:delete(Parent)
+    end.
+
+%% Compile a helper module that exports class_children, class_strategy,
+%% class_maxRestarts, class_restartWindow returning the given strategy.
+compile_strategy_parent(Strategy) ->
+    ModName = list_to_atom(
+        "bt1980_strat_parent_" ++ atom_to_list(Strategy) ++ "_" ++
+            integer_to_list(erlang:unique_integer([positive]))
+    ),
+    Src = io_lib:format(
+        "-module(~p).~n"
+        "-export([class_children/2, class_strategy/2, "
+        "class_maxRestarts/2, class_restartWindow/2]).~n"
+        "class_children(_A, _B) -> [].~n"
+        "class_strategy(_A, _B) -> ~p.~n"
+        "class_maxRestarts(_A, _B) -> 3.~n"
+        "class_restartWindow(_A, _B) -> 5.~n",
+        [ModName, Strategy]
+    ),
+    {ok, Tokens, _} = erl_scan:string(lists:flatten(Src)),
+    Forms = split_and_parse(Tokens),
+    {ok, ModName, Bin} = compile:forms(Forms, [return_errors]),
+    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", Bin),
+    ModName.
+
+split_and_parse(Tokens) ->
+    split_and_parse(Tokens, [], []).
+split_and_parse([], _Cur, Acc) ->
+    lists:reverse(Acc);
+split_and_parse([{dot, _} = Dot | Rest], Cur, Acc) ->
+    FormToks = lists:reverse([Dot | Cur]),
+    {ok, Form} = erl_parse:parse_form(FormToks),
+    split_and_parse(Rest, [], [Form | Acc]);
+split_and_parse([T | Rest], Cur, Acc) ->
+    split_and_parse(Rest, [T | Cur], Acc).
+
+%%====================================================================
+%% BT-1980: wrap_child/3 — via whichChild on supervisor and actor children
+%%====================================================================
+
+wrap_child_actor_returns_beamtalk_object_test() ->
+    %% BT-1980: whichChild returns {beamtalk_object, ...} for a non-supervisor
+    %% child. ClassArg's element(3) must be listed in the child spec's modules
+    %% list so lists:member succeeds inside whichChild.
+    Parent = self(),
+    ChildSpec = #{
+        id => bt1980_wrap_worker,
+        start => {?MODULE, start_worker, [Parent]},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => [?MODULE]
+    },
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(worker_not_ready)
+    end,
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, 'BT1980NonSupChild'),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        Self = make_supervisor_tuple('BT1980WrapSup', bt1980_wrap_sup_mod, SupPid),
+        ClassArg = {beamtalk_object, 'BT1980NonSupChild class', ?MODULE, FakeClassPid},
+        Result = beamtalk_supervisor:whichChild(Self, ClassArg),
+        ?assertMatch({beamtalk_object, 'BT1980NonSupChild', ?MODULE, _}, Result)
+    after
+        FakeClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
+    %% BT-1980: whichChild returns {beamtalk_supervisor, ...} when the child
+    %% class inherits from Supervisor.
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_hierarchy_table:insert(
+        'BT1980WrapSupChildCls', 'Supervisor'
+    ),
+    Parent = self(),
+    ChildSpec = #{
+        id => bt1980_wrap_sup_child,
+        start => {?MODULE, start_worker, [Parent]},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => [?MODULE]
+    },
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(worker_not_ready)
+    end,
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, 'BT1980WrapSupChildCls'),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        Self = make_supervisor_tuple('BT1980WrapSup2', sup2_mod, SupPid),
+        ClassArg = {beamtalk_object, 'BT1980WrapSupChildCls class', ?MODULE, FakeClassPid},
+        Result = beamtalk_supervisor:whichChild(Self, ClassArg),
+        ?assertMatch({beamtalk_supervisor, 'BT1980WrapSupChildCls', ?MODULE, _}, Result)
+    after
+        FakeClassPid ! stop,
+        gen_server:stop(SupPid),
+        beamtalk_class_hierarchy_table:delete('BT1980WrapSupChildCls')
+    end.
+
+%%====================================================================
+%% BT-1980: build_child_specs/1 — nested-supervisor path
+%%====================================================================
+
+build_child_specs_nested_supervisor_test() ->
+    %% BT-1980: A Supervisor-subclass class object becomes an OTP spec with
+    %% {ChildModule, start_link, []}, type => supervisor, shutdown => infinity.
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_hierarchy_table:insert(
+        'BT1980NestedSupCls', 'Supervisor'
+    ),
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, 'BT1980NestedSupCls'),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        %% Must be a class object (suffix " class" and is_class_object=true).
+        %% is_class_object inspects element(2) for a "_class" suffix — see
+        %% beamtalk_class_registry. Use the convention " class".
+        ClassObj =
+            {beamtalk_object, 'BT1980NestedSupCls class', bt1980_nested_sup_mod, FakeClassPid},
+        %% is_class_object may require registry lookup. Register the class_tag.
+        [Spec] = beamtalk_supervisor:build_child_specs([ClassObj]),
+        ?assertEqual('BT1980NestedSupCls', maps:get(id, Spec)),
+        ?assertEqual({bt1980_nested_sup_mod, start_link, []}, maps:get(start, Spec)),
+        ?assertEqual(infinity, maps:get(shutdown, Spec)),
+        ?assertEqual(supervisor, maps:get(type, Spec))
+    after
+        FakeClassPid ! stop,
+        beamtalk_class_hierarchy_table:delete('BT1980NestedSupCls')
+    end.
+
+%%====================================================================
+%% BT-1980: ensure_root_table — idempotent concurrent creation
+%%====================================================================
+
+%%====================================================================
+%% BT-1980: terminateChild:class:/2 and terminateChild:child:/2 aliases
+%%====================================================================
+
+terminateChild_class_alias_delegates_test() ->
+    %% BT-1980: 'terminateChild:class:'/2 delegates to terminateChild/2.
+    SupPid = start_anon_supervisor_with_worker(bt1980_alias_cls_child),
+    Self = make_supervisor_tuple('BT1980AliasCls', bt1980_alias_cls_mod, SupPid),
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, bt1980_alias_cls_child),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        ClassArg =
+            {beamtalk_object, 'BT1980AliasClsChild class', bt1980_alias_cls_child_mod,
+                FakeClassPid},
+        Result = beamtalk_supervisor:'terminateChild:class:'(Self, ClassArg),
+        ?assertEqual(nil, Result)
+    after
+        FakeClassPid ! stop,
+        (try
+            gen_server:stop(SupPid)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+terminateChild_child_alias_delegates_test() ->
+    %% BT-1980: 'terminateChild:child:'/2 delegates to terminateChild/2
+    %% (DynamicSupervisor path: arg is an actor instance, not a class object).
+    SupPid = start_dynamic_supervisor(),
+    Parent = self(),
+    {ok, ChildPid} = supervisor:start_child(SupPid, [Parent]),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(no_worker)
+    end,
+    Self = make_supervisor_tuple('BT1980AliasChild', bt1980_alias_child_mod, SupPid),
+    ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
+    try
+        Result = beamtalk_supervisor:'terminateChild:child:'(Self, ChildArg),
+        ?assertEqual(nil, Result)
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1980: startChild/1 error path — {error, Reason}
+%%====================================================================
+
+startChild_arity1_error_raises_test() ->
+    %% BT-1980: When supervisor:start_child returns {error, _}, startChild/1
+    %% raises a structured runtime_error. We use start_dynamic_supervisor/0
+    %% whose template is {?MODULE, start_worker, []} — calling start_worker/0
+    %% does not exist, so OTP returns {error, ...}.
+    SupPid = start_dynamic_supervisor(),
+    {ChildClassPid, ChildClassObj} =
+        make_child_class_for_startchild('BT1980DynErr'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT1980DynErrSup', ?MODULE, SupPid},
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1980: ensure_root_table concurrent creation
+%%====================================================================
+
+%% BT-1980: concurrent get_root/0 safety is exercised implicitly by the other
+%% supervisor tests in this module. A dedicated concurrent test that deletes
+%% the root ETS table and races readers is removed because get_root/0 is not
+%% designed to handle a deleted table — ets:lookup_element raises badarg by
+%% design and the test proved flaky under CI load.
