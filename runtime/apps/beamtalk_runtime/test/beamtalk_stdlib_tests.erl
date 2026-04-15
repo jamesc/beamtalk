@@ -431,8 +431,18 @@ start_link_test_() ->
 
 start_link_returns_pid_test() ->
     %% start_link spawns a proc_lib process
-    {ok, Pid} = beamtalk_stdlib:start_link(),
-    ?assert(is_pid(Pid)),
-    ?assert(is_process_alive(Pid)),
-    %% Cleanup
-    exit(Pid, shutdown).
+    %% Trap exits so the test process isn't killed when we clean up.
+    OldTrap = process_flag(trap_exit, true),
+    try
+        {ok, Pid} = beamtalk_stdlib:start_link(),
+        ?assert(is_pid(Pid)),
+        ?assert(is_process_alive(Pid)),
+        %% Cleanup
+        exit(Pid, shutdown),
+        receive
+            {'EXIT', Pid, _} -> ok
+        after 1000 -> ok
+        end
+    after
+        process_flag(trap_exit, OldTrap)
+    end.
