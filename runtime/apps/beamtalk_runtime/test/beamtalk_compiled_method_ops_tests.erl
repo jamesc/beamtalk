@@ -94,11 +94,22 @@ dispatch_responds_to_unknown_test() ->
 %%====================================================================
 
 has_method_true_for_all_builtins_test() ->
-    Builtins = ['selector', 'source', 'doc', 'argumentCount',
-                'class', 'printString', 'asString', 'respondsTo:'],
-    lists:foreach(fun(S) ->
-        ?assert(beamtalk_compiled_method_ops:has_method(S))
-    end, Builtins).
+    Builtins = [
+        'selector',
+        'source',
+        'doc',
+        'argumentCount',
+        'class',
+        'printString',
+        'asString',
+        'respondsTo:'
+    ],
+    lists:foreach(
+        fun(S) ->
+            ?assert(beamtalk_compiled_method_ops:has_method(S))
+        end,
+        Builtins
+    ).
 
 has_method_false_for_unknown_test() ->
     ?assertNot(beamtalk_compiled_method_ops:has_method('nonexistent')),

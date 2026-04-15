@@ -86,7 +86,11 @@ ref_to_string_ends_with_closing_bracket_test() ->
 
 different_pids_different_strings_test() ->
     Pid1 = self(),
-    Pid2 = spawn(fun() -> receive stop -> ok end end),
+    Pid2 = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
     S1 = beamtalk_opaque_ops:pid_to_string(Pid1),
     S2 = beamtalk_opaque_ops:pid_to_string(Pid2),
     ?assertNotEqual(S1, S2),
