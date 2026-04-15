@@ -69,11 +69,16 @@ typed Value subclass: SupervisionSpec
   field: classMethod :: Symbol | Nil = nil
   /// Registered name for the supervised actor.
   ///
-  /// When set, the supervisor starts the child via `{local, Name}` registration
-  /// (OTP idiom) so the name is re-established on every restart. The `childSpec`
-  /// startFn becomes `#spawnAs:` (when args is nil) or `#spawnWith:as:` (when
-  /// args is present). When nil (default), existing `#spawn` / `#spawnWith:`
-  /// behavior is unchanged — naming is purely additive. See ADR 0079.
+  /// When set, `childSpec` emits a startFn of `#spawnAs:` (when args is nil) or
+  /// `#spawnWith:as:` (when args is present) so the supervisor re-registers the
+  /// name on every restart. When nil (default), existing `#spawn` / `#spawnWith:`
+  /// behavior is unchanged — naming is purely additive.
+  ///
+  /// NOTE: Named supervised starts require the Phase 3 runtime implementation of
+  /// ADR 0079 (Named Actor Registration). Until that wiring lands, the
+  /// `#spawnAs:` / `#spawnWith:as:` startFns raise a `runtime_error` when the
+  /// supervisor attempts to start the child. Setting `name` on a spec used in a
+  /// live supervisor will therefore currently fail at child start.
   field: name :: Symbol | Nil = nil
 
   // === Multi-keyword fluent overrides ===
@@ -96,11 +101,11 @@ typed Value subclass: SupervisionSpec
     (self withName: aName) withRestart: policy
 
   /// Return a new spec with name and args overridden.
-  withName: aName :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
+  withName: aName :: Symbol withArgs: someArgs -> SupervisionSpec =>
     (self withName: aName) withArgs: someArgs
 
   /// Return a new spec with name, restart, and args all overridden.
-  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
+  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs -> SupervisionSpec =>
     ((self withName: aName) withRestart: policy) withArgs: someArgs
 
   // === Display ===

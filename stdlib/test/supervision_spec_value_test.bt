@@ -266,3 +266,27 @@ TestCase subclass: SupervisionSpecValueTest
     spec := (SupervisionSpec new withActorClass: Counter) withName: #counter
     spec2 := spec withClassMethod: #start:
     self should: [spec2 childSpec] raise: #user_error
+
+  // === printString formatting (BT-1989) ===
+  testPrintStringWithoutName =>
+    // When name is nil, the name segment is omitted entirely.
+    spec := Counter supervisionSpec
+    self assert: (spec printString includesSubstring: "SupervisionSpec(Counter") equals: true
+    self assert: (spec printString includesSubstring: "name:") equals: false
+    self assert: (spec printString includesSubstring: "restart: ") equals: true
+
+  testPrintStringWithNameAndId =>
+    // When name is set, the output contains `, name: <display>` after id.
+    spec := (Counter supervisionSpec withId: #primary) withName: #myCounter
+    out := spec printString
+    self assert: (out includesSubstring: "id: ") equals: true
+    self assert: (out includesSubstring: ", name: ") equals: true
+    self assert: (out includesSubstring: "myCounter") equals: true
+
+  testPrintStringWithNameOnly =>
+    // Name without id — only the name segment is present (no id segment).
+    spec := Counter supervisionSpec withName: #myCounter
+    out := spec printString
+    self assert: (out includesSubstring: ", name: ") equals: true
+    self assert: (out includesSubstring: "myCounter") equals: true
+    self assert: (out includesSubstring: "id: ") equals: false
