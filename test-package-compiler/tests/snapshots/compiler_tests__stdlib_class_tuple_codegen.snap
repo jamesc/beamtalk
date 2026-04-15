@@ -143,6 +143,7 @@ call 'beamtalk_tuple':'as_string'(Self)
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'at:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isOk' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrap' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOr:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOrElse:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'asString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -172,6 +173,7 @@ call 'beamtalk_tuple':'as_string'(Self)
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'at:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isOk' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrap' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOr:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOrElse:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'asString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

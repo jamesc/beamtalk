@@ -4081,6 +4081,7 @@ Base subclass: Child
         is_native: false,
         state: vec![eco_string("x")],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -4793,6 +4794,7 @@ fn is_assignable_to_integer_or_string() {
 ///
 /// Uses `GenResult` instead of `Result` to avoid collision with the
 /// builtin `Result` class (which has no `type_params`).
+#[allow(clippy::too_many_lines)] // test fixture — length is proportional to ClassInfo fields
 fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
@@ -4813,6 +4815,7 @@ fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             m.insert(eco_string("errReason"), eco_string("E"));
             m
         },
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("unwrap"),
@@ -6522,6 +6525,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("first"),
@@ -6579,6 +6583,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![MethodInfo {
             selector: eco_string("append:"),
             arity: 1,
@@ -6684,6 +6689,7 @@ fn generic_inheritance_concrete_superclass_type_arg() {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -6786,6 +6792,7 @@ fn generic_inheritance_multi_level_composition() {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -6875,6 +6882,7 @@ fn type_param_bounds_conforming_type_no_warning() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -6941,6 +6949,7 @@ fn type_param_bounds_non_conforming_type_warns() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -7038,6 +7047,7 @@ fn type_param_bounds_dynamic_skipped() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -7091,6 +7101,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             m.insert(eco_string("value"), eco_string("T"));
             m
         },
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![MethodInfo {
             selector: eco_string("value"),
             arity: 0,
@@ -7138,6 +7149,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             m.insert(eco_string("value"), eco_string("T"));
             m
         },
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("value"),
@@ -7184,6 +7196,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         is_native: false,
         state: vec![eco_string("value")],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -7205,6 +7218,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("printBox:"),
@@ -7358,6 +7372,7 @@ fn variance_covariant_non_conforming_rejected() {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -7629,6 +7644,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: "get:".into(),
@@ -7824,6 +7840,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
         is_native: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("processResult:"),
@@ -8193,6 +8210,7 @@ fn union_arg_all_compatible_no_warning() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -8247,6 +8265,7 @@ fn union_arg_none_compatible_warns() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -8307,6 +8326,7 @@ fn union_arg_mixed_compatible_hints() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -8367,6 +8387,7 @@ fn union_arg_dynamic_still_skips() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -8630,6 +8651,7 @@ fn union_protocol_mixed_conformance_hints() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: "sortKey".into(),
             arity: 0,
@@ -8713,6 +8735,7 @@ fn union_type_param_bounds_all_conform_no_warning() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -8776,6 +8799,7 @@ fn union_type_param_bounds_none_conform_warns() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -8850,6 +8874,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -8869,6 +8894,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![MethodInfo {
                 selector: "sortKey".into(),
                 arity: 0,
@@ -10670,6 +10696,7 @@ fn type_args_for_generic_class_no_false_positive() {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -10689,6 +10716,7 @@ fn type_args_for_generic_class_no_false_positive() {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],

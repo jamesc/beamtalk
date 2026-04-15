@@ -456,6 +456,10 @@ struct ClassMeta {
     state: Vec<String>,
     /// Declared type annotations for state fields (field name → type name).
     state_types: Vec<(String, String)>,
+    /// Which state fields have an explicit default value (field name → has default).
+    /// BT-1976: Carries cross-file default-value presence so downstream
+    /// consumers can identify typed-no-default fields without the AST.
+    state_has_default: Vec<(String, bool)>,
     /// Instance method signatures.
     methods: Vec<MethodMeta>,
     /// Class-side method signatures.
@@ -778,6 +782,12 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         })
         .collect();
 
+    let state_has_default = class
+        .state
+        .iter()
+        .map(|s| (s.name.name.to_string(), s.default_value.is_some()))
+        .collect();
+
     let class_variables = class
         .class_variables
         .iter()
@@ -815,6 +825,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         class_kind: class.class_kind,
         state,
         state_types,
+        state_has_default,
         methods,
         class_methods,
         class_variables,
@@ -1099,6 +1110,21 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("]),\n");
     }
 
+    // BT-1976: state_has_default — used by gen_server post-initialize
+    // validation to identify typed-no-default inherited fields without the AST.
+    if meta.state_has_default.is_empty() {
+        code.push_str("            state_has_default: HashMap::new(),\n");
+    } else {
+        code.push_str("            state_has_default: HashMap::from([");
+        for (i, (field, has_default)) in meta.state_has_default.iter().enumerate() {
+            if i > 0 {
+                code.push_str(", ");
+            }
+            let _ = write!(code, "(\"{field}\".into(), {has_default})");
+        }
+        code.push_str("]),\n");
+    }
+
     // Instance methods
     generate_method_list(code, "methods", &meta.methods, &meta.class_name);
     // Class methods
@@ -1379,6 +1405,7 @@ mod tests {
             class_kind: beamtalk_core::ast::ClassKind::Actor,
             state: vec!["count".to_string()],
             state_types: vec![],
+            state_has_default: vec![],
             methods: vec![
                 MethodMeta {
                     selector: "increment".to_string(),
@@ -1456,6 +1483,7 @@ mod tests {
             class_kind: beamtalk_core::ast::ClassKind::Object,
             state: vec![],
             state_types: vec![],
+            state_has_default: vec![],
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1487,6 +1515,7 @@ mod tests {
                 class_kind: beamtalk_core::ast::ClassKind::Object,
                 state: vec![],
                 state_types: vec![],
+                state_has_default: vec![],
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -1503,6 +1532,7 @@ mod tests {
                 class_kind: beamtalk_core::ast::ClassKind::Object,
                 state: vec![],
                 state_types: vec![],
+                state_has_default: vec![],
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],

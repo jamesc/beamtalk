@@ -135,6 +135,13 @@ pub struct ClassInfo {
     /// Declared type annotations for state fields (field name → type name).
     /// Only populated for fields with explicit type annotations.
     pub state_types: HashMap<EcoString, EcoString>,
+    /// Which state fields carry an explicit default value (field name → has default).
+    /// Populated for every declared state field (both typed and untyped).
+    ///
+    /// BT-1976: Needed so cross-file consumers can identify typed-no-default
+    /// fields (for post-initialize validation in `gen_server` codegen) even
+    /// when the defining class's AST is not present in the current compilation.
+    pub state_has_default: HashMap<EcoString, bool>,
     /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
@@ -246,6 +253,11 @@ impl ClassInfo {
                         .as_ref()
                         .map(|ty| (s.name.name.clone(), ty.type_name()))
                 })
+                .collect(),
+            state_has_default: class
+                .state
+                .iter()
+                .map(|s| (s.name.name.clone(), s.default_value.is_some()))
                 .collect(),
             methods: instance_methods,
             class_methods,

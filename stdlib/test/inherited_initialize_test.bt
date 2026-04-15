@@ -59,14 +59,9 @@ TestCase subclass: InheritedInitializeTest
     // Diagnostic must name the class that declared the field.
     self assert: (hint includesSubstring: "InheritedInitializeParentForgets")
 
-  // NOTE: A subclass inheriting a typed-no-default field from a cross-file
-  // parent whose `initialize` forgets to set that field is a known Phase 1
-  // limitation — the child's codegen cannot see the parent's AST to collect
-  // the inherited field into its own post-initialize check. The auto-chain
-  // itself still runs the parent's initialize (cross-file aware via
-  // ClassHierarchy); only the inherited field validation is limited.
-  // See ADR 0078 — a follow-up can embed default-value metadata on
-  // `ClassInfo` to lift this restriction.
+  // BT-1976 lifted the Phase 1 limitation: cross-file inherited
+  // typed-no-default fields are now validated too (see
+  // `cross_file_inherited_test.bt`).
 
   // === Deep hierarchy — initialize runs parent-first across 3 levels ===
   testDeepHierarchyRunsAllInitializersInOrder =>

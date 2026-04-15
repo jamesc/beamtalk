@@ -104,6 +104,7 @@ call 'erlang':'*'(Self, 2)
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -133,6 +134,7 @@ call 'erlang':'*'(Self, 2)
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

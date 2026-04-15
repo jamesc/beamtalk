@@ -295,6 +295,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'run' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -325,6 +326,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'run' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~,

@@ -1,6 +1,5 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
 //! Static class hierarchy for compile-time method resolution.
 //!
 //! **DDD Context:** Semantic Analysis
@@ -12,7 +11,6 @@
 //! - **Diagnostics**: sealed class enforcement, method existence validation
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
-
 use crate::ast::{ClassDefinition, MethodKind, Module};
 use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
@@ -20,20 +18,15 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
-
 mod builtins;
 pub(crate) mod class_info;
 mod hierarchy_queries;
 mod method_resolution;
-
 #[cfg(test)]
 mod tests;
-
 pub use class_info::{ClassInfo, MethodInfo, SuperclassTypeArg};
-
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
-
 /// Static class hierarchy built during semantic analysis.
 ///
 /// Provides compile-time knowledge of the full class hierarchy,
@@ -52,7 +45,6 @@ pub struct ClassHierarchy {
     /// synthetic protocol entries when files define both.
     protocol_classes: HashSet<EcoString>,
 }
-
 impl ClassHierarchy {
     /// Returns true if the given class name is a built-in class.
     ///
@@ -61,7 +53,6 @@ impl ClassHierarchy {
     pub fn is_builtin_class(name: &str) -> bool {
         builtins::is_builtin_class(name)
     }
-
     /// Returns true if the given class name has runtime shadowing protection.
     ///
     /// Only stdlib classes with the `bt@stdlib@` module prefix are protected
@@ -70,7 +61,6 @@ impl ClassHierarchy {
     pub fn is_runtime_protected_class(name: &str) -> bool {
         builtins::is_runtime_protected_class(name)
     }
-
     /// Build a selector-to-index map from a method vec.
     fn build_selector_index(methods: &[MethodInfo]) -> HashMap<EcoString, usize> {
         let mut index = HashMap::with_capacity(methods.len());
@@ -79,7 +69,6 @@ impl ClassHierarchy {
         }
         index
     }
-
     /// Build selector indexes for all classes in the map.
     fn build_all_indexes(
         classes: &HashMap<EcoString, ClassInfo>,
@@ -95,7 +84,6 @@ impl ClassHierarchy {
         }
         (mi, cmi)
     }
-
     /// Rebuild selector indexes for all classes.
     ///
     /// Call after bulk mutations (e.g. `add_module_classes`, `merge`, `add_from_beam_meta`)
@@ -105,7 +93,6 @@ impl ClassHierarchy {
         self.method_indexes = mi;
         self.class_method_indexes = cmi;
     }
-
     /// Build a class hierarchy from built-in definitions and a parsed module.
     ///
     /// Returns `(Ok(hierarchy), diagnostics)` where diagnostics may include
@@ -115,7 +102,6 @@ impl ClassHierarchy {
     pub fn build(module: &Module) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         Self::build_with_options(module, false)
     }
-
     /// Build a class hierarchy with explicit stdlib compilation mode.
     ///
     /// When `stdlib_mode` is true, built-in classes (e.g. `Character`) are
@@ -134,7 +120,6 @@ impl ClassHierarchy {
         hierarchy.rebuild_all_indexes();
         (Ok(hierarchy), diagnostics)
     }
-
     /// Register protocol definitions as synthetic class entries (BT-1933).
     ///
     /// Each protocol definition (e.g., `protocol Printable`) gets a synthetic
@@ -151,12 +136,10 @@ impl ClassHierarchy {
         let mut inserted = false;
         for protocol_def in &module.protocols {
             let name = &protocol_def.name.name;
-
             // Don't overwrite real classes (namespace collision is diagnosed elsewhere)
             if self.classes.contains_key(name.as_str()) {
                 continue;
             }
-
             let class_methods = vec![
                 MethodInfo {
                     selector: "requiredMethods".into(),
@@ -188,7 +171,6 @@ impl ClassHierarchy {
                     ),
                 },
             ];
-
             self.classes.insert(
                 name.clone(),
                 ClassInfo {
@@ -203,6 +185,7 @@ impl ClassHierarchy {
                     is_native: false,
                     state: vec![],
                     state_types: HashMap::new(),
+                    state_has_default: HashMap::new(),
                     methods: vec![],
                     class_methods,
                     class_variables: vec![],
@@ -214,12 +197,10 @@ impl ClassHierarchy {
             self.protocol_classes.insert(name.clone());
             inserted = true;
         }
-
         if inserted {
             self.rebuild_all_indexes();
         }
     }
-
     /// Create a hierarchy with only built-in classes.
     ///
     /// The built-in class map is computed once and cached in a `OnceLock`.
@@ -241,19 +222,16 @@ impl ClassHierarchy {
             })
             .clone()
     }
-
     /// Look up a class by name.
     #[must_use]
     pub fn get_class(&self, name: &str) -> Option<&ClassInfo> {
         self.classes.get(name)
     }
-
     /// Check if a class exists in the hierarchy.
     #[must_use]
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.contains_key(name)
     }
-
     /// Check if `name` is a synthetic protocol class entry (BT-1933).
     ///
     /// Returns `true` when `register_protocol_classes` inserted the entry for a
@@ -268,12 +246,10 @@ impl ClassHierarchy {
     pub fn is_protocol_class(&self, name: &str) -> bool {
         self.protocol_classes.contains(name)
     }
-
     /// Returns an iterator over all class names in the hierarchy.
     pub fn class_names(&self) -> impl Iterator<Item = &EcoString> {
         self.classes.keys()
     }
-
     /// BT-894: Add minimal class entries from a cross-file superclass index.
     ///
     /// For each class in the index that isn't already in the hierarchy, adds a
@@ -287,7 +263,6 @@ impl ClassHierarchy {
         // BT-1545: Track which classes are newly inserted so the is_value
         // fixup loop only walks them and their descendants, not everything.
         let mut newly_inserted: HashSet<EcoString> = HashSet::new();
-
         for (class_name, superclass_name) in index {
             if !self.classes.contains_key(class_name.as_str()) {
                 let eco_name = EcoString::from(class_name.as_str());
@@ -307,6 +282,7 @@ impl ClassHierarchy {
                         is_native: false,
                         state: Vec::new(),
                         state_types: HashMap::new(),
+                        state_has_default: HashMap::new(),
                         methods: Vec::new(),
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),
@@ -317,11 +293,9 @@ impl ClassHierarchy {
                 );
             }
         }
-
         if newly_inserted.is_empty() {
             return;
         }
-
         // BT-1528: Fix is_value for indirect Value subclasses now that all
         // entries are in the hierarchy and superclass_chain can walk them.
         // BT-1545: Only check newly-inserted classes and existing classes
@@ -329,7 +303,6 @@ impl ClassHierarchy {
         // worklist to find all affected descendants without walking every
         // class in the hierarchy.
         let mut to_check: Vec<EcoString> = newly_inserted.iter().cloned().collect();
-
         // Find existing classes whose direct superclass is newly inserted,
         // and transitively their descendants too.
         let mut visited: HashSet<EcoString> = newly_inserted.clone();
@@ -349,7 +322,6 @@ impl ClassHierarchy {
                 }
             }
         }
-
         for class_name in &to_check {
             let is_value = self.is_value_subclass(class_name.as_str());
             if let Some(info) = self.classes.get_mut(class_name.as_str()) {
@@ -359,7 +331,6 @@ impl ClassHierarchy {
             }
         }
     }
-
     /// Populate the hierarchy with user-class entries pre-deserialized from
     /// `__beamtalk_meta/0` maps (ADR 0050 Phase 4).
     ///
@@ -382,7 +353,6 @@ impl ClassHierarchy {
             self.rebuild_all_indexes();
         }
     }
-
     /// Set the `package` field on all non-builtin classes that don't already
     /// have a package assigned (ADR 0071, BT-1700).
     ///
@@ -397,7 +367,6 @@ impl ClassHierarchy {
             }
         }
     }
-
     /// Extract `ClassInfo` entries from a parsed module without diagnostics.
     ///
     /// BT-1523: Same ClassInfo-building logic as `add_module_classes` Pass 1,
@@ -412,7 +381,6 @@ impl ClassHierarchy {
             .map(ClassInfo::from_class_definition)
             .collect()
     }
-
     /// Filter `all_class_infos` to exclude classes defined in `module`,
     /// returning only cross-file class metadata suitable for injection into
     /// semantic analysis.
@@ -435,7 +403,6 @@ impl ClassHierarchy {
             .cloned()
             .collect()
     }
-
     /// Registers extension methods from the [`ExtensionIndex`] into the hierarchy.
     ///
     /// Each extension entry is converted to a [`MethodInfo`] and appended to the
@@ -458,7 +425,6 @@ impl ClassHierarchy {
             let Some(first) = locations.first() else {
                 continue;
             };
-
             let method_info = MethodInfo {
                 selector: key.selector.clone(),
                 arity: first.type_info.arity,
@@ -471,13 +437,11 @@ impl ClassHierarchy {
                 param_types: first.type_info.param_types.clone(),
                 doc: None,
             };
-
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
                 let methods = match key.side {
                     MethodSide::Instance => &mut class_info.methods,
                     MethodSide::Class => &mut class_info.class_methods,
                 };
-
                 // Don't add if a method with the same selector already exists
                 // (the class's own definition takes precedence over extensions).
                 let already_exists = methods.iter().any(|m| m.selector == key.selector);
@@ -491,13 +455,11 @@ impl ClassHierarchy {
             self.rebuild_all_indexes();
         }
     }
-
     /// Returns a reference to the underlying class map.
     #[must_use]
     pub fn classes(&self) -> &HashMap<EcoString, ClassInfo> {
         &self.classes
     }
-
     /// Returns a mutable reference to the underlying class map.
     ///
     /// Used by `ProjectIndex` for conflict resolution when re-merging.
@@ -507,7 +469,6 @@ impl ClassHierarchy {
     pub fn classes_mut(&mut self) -> &mut HashMap<EcoString, ClassInfo> {
         &mut self.classes
     }
-
     /// Merge another hierarchy's user-defined classes into this one.
     ///
     /// Built-in classes from `other` are skipped (they already exist in `self`).
@@ -525,22 +486,18 @@ impl ClassHierarchy {
             let incoming_is_protocol = other.protocol_classes.contains(name);
             let existing_is_real =
                 self.classes.contains_key(name) && !self.protocol_classes.contains(name);
-
             // Don't let a synthetic protocol entry overwrite a real class
             if incoming_is_protocol && existing_is_real {
                 continue;
             }
-
             // If a real class replaces a synthetic protocol, unmark it
             if !incoming_is_protocol && self.protocol_classes.contains(name) {
                 self.protocol_classes.remove(name);
             }
-
             // Track synthetic protocol entries
             if incoming_is_protocol {
                 self.protocol_classes.insert(name.clone());
             }
-
             self.classes.insert(name.clone(), info.clone());
             changed = true;
         }
@@ -548,7 +505,6 @@ impl ClassHierarchy {
             self.rebuild_all_indexes();
         }
     }
-
     /// Remove all classes that were defined in the given set of class names.
     ///
     /// Built-in classes are never removed.
@@ -562,7 +518,6 @@ impl ClassHierarchy {
             }
         }
     }
-
     /// Check for duplicate methods within a list of methods.
     ///
     /// Methods are considered duplicates based on their `(selector, kind)` tuple.
@@ -600,7 +555,6 @@ impl ClassHierarchy {
             }
         }
     }
-
     /// Check whether a class is allowed to subclass its declared superclass.
     ///
     /// Returns a diagnostic if the superclass is sealed and the subclass is not
@@ -637,7 +591,6 @@ impl ClassHierarchy {
             )),
         )
     }
-
     /// Add classes from a parsed module. Returns diagnostics for errors.
     ///
     /// Uses a two-pass approach to avoid definition-order sensitivity:
@@ -646,7 +599,6 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.
@@ -664,17 +616,14 @@ impl ClassHierarchy {
                 true,
                 &mut diagnostics,
             );
-
             let class_info = ClassInfo::from_class_definition(class);
             self.classes.insert(class.name.name.clone(), class_info);
         }
-
         // Pass 1.5 (BT-1528): Propagate ClassKind through the hierarchy.
         // Classes whose direct superclass is not "Actor"/"Value" but whose
         // ancestors include Actor or Value need their is_value flag corrected
         // and auto-slot methods synthesized.
         self.propagate_class_kind(module);
-
         // Pass 2: All classes in this module are now registered. Run sealed
         // superclass and method-override checks so ancestor lookups are
         // deterministic regardless of class definition order within the module.
@@ -685,7 +634,6 @@ impl ClassHierarchy {
             if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
                 diagnostics.push(diag);
             }
-
             // Check sealed method override enforcement.
             // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
             // sealed methods when compiling in stdlib mode.
@@ -741,11 +689,9 @@ impl ClassHierarchy {
                 }
             }
         }
-
         diagnostics
     }
 }
-
 impl Default for ClassHierarchy {
     fn default() -> Self {
         Self::with_builtins()

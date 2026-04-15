@@ -1,6 +1,5 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
 //! Tests for class hierarchy construction, method resolution, and inheritance rules.
 use super::builtins::builtin_method;
 use super::*;
@@ -10,16 +9,13 @@ use crate::ast::{
 };
 use crate::semantic_analysis::test_helpers::test_span;
 use crate::source_analysis::Span;
-
 // --- Value object method tests ---
-
 #[test]
 fn method_info_can_override_non_sealed() {
     let child = builtin_method("printString", 0, "Counter");
     let ancestor = builtin_method("printString", 0, "Object");
     assert!(child.can_override(&ancestor));
 }
-
 #[test]
 fn method_info_cannot_override_sealed() {
     let child = builtin_method("printString", 0, "Counter");
@@ -29,7 +25,6 @@ fn method_info_cannot_override_sealed() {
     };
     assert!(!child.can_override(&ancestor));
 }
-
 #[test]
 fn method_info_different_selectors_not_override() {
     let child = builtin_method("increment", 0, "Counter");
@@ -40,7 +35,6 @@ fn method_info_different_selectors_not_override() {
     // Different selectors → not an override (regardless of sealed status)
     assert!(!child.can_override(&sealed_ancestor));
 }
-
 #[test]
 fn class_info_can_be_subclassed() {
     let h = ClassHierarchy::with_builtins();
@@ -49,9 +43,7 @@ fn class_info_can_be_subclassed() {
     assert!(!h.get_class("Integer").unwrap().can_be_subclassed());
     assert!(!h.get_class("String").unwrap().can_be_subclassed());
 }
-
 // --- Hierarchy structure tests ---
-
 #[test]
 fn builtins_include_core_classes() {
     let h = ClassHierarchy::with_builtins();
@@ -70,44 +62,37 @@ fn builtins_include_core_classes() {
     assert!(h.has_class("False"));
     assert!(h.has_class("Collection"));
 }
-
 #[test]
 fn proto_object_has_no_superclass() {
     let h = ClassHierarchy::with_builtins();
     let proto = h.get_class("ProtoObject").unwrap();
     assert!(proto.superclass.is_none());
 }
-
 #[test]
 fn object_extends_proto_object() {
     let h = ClassHierarchy::with_builtins();
     let obj = h.get_class("Object").unwrap();
     assert_eq!(obj.superclass.as_deref(), Some("ProtoObject"));
 }
-
 #[test]
 fn actor_extends_object() {
     let h = ClassHierarchy::with_builtins();
     let actor = h.get_class("Actor").unwrap();
     assert_eq!(actor.superclass.as_deref(), Some("Object"));
 }
-
 #[test]
 fn integer_is_sealed() {
     let h = ClassHierarchy::with_builtins();
     let int = h.get_class("Integer").unwrap();
     assert!(int.is_sealed);
 }
-
 #[test]
 fn float_is_sealed() {
     let h = ClassHierarchy::with_builtins();
     let float = h.get_class("Float").unwrap();
     assert!(float.is_sealed);
 }
-
 // --- Superclass chain tests ---
-
 #[test]
 fn superclass_chain_for_actor() {
     let h = ClassHierarchy::with_builtins();
@@ -117,14 +102,12 @@ fn superclass_chain_for_actor() {
         vec![EcoString::from("Object"), EcoString::from("ProtoObject")]
     );
 }
-
 #[test]
 fn superclass_chain_for_proto_object_is_empty() {
     let h = ClassHierarchy::with_builtins();
     let chain = h.superclass_chain("ProtoObject");
     assert!(chain.is_empty());
 }
-
 #[test]
 fn superclass_chain_for_integer() {
     let h = ClassHierarchy::with_builtins();
@@ -139,22 +122,18 @@ fn superclass_chain_for_integer() {
         ]
     );
 }
-
 #[test]
 fn superclass_chain_for_unknown_class() {
     let h = ClassHierarchy::with_builtins();
     let chain = h.superclass_chain("DoesNotExist");
     assert!(chain.is_empty());
 }
-
 // --- all_methods tests ---
-
 #[test]
 fn all_methods_includes_inherited() {
     let h = ClassHierarchy::with_builtins();
     let methods = h.all_methods("Actor");
     let selectors: Vec<&str> = methods.iter().map(|m| m.selector.as_str()).collect();
-
     // Actor instance methods (spawn/spawnWith: are class-side, not instance-side)
     assert!(selectors.contains(&"stop"));
     assert!(selectors.contains(&"isAlive"));
@@ -167,22 +146,18 @@ fn all_methods_includes_inherited() {
         "spawnWith: must NOT be in instance methods"
     );
     // Note: `new` is still in Object's instance methods and thus inherited here
-
     // Inherited from Object
     assert!(selectors.contains(&"isNil"));
     assert!(selectors.contains(&"respondsTo:"));
-
     // Inherited from ProtoObject
     assert!(selectors.contains(&"class"));
     assert!(selectors.contains(&"=="));
 }
-
 #[test]
 fn actor_spawn_methods_are_class_side() {
     let h = ClassHierarchy::with_builtins();
     let class_methods = h.all_class_methods("Actor");
     let selectors: Vec<&str> = class_methods.iter().map(|m| m.selector.as_str()).collect();
-
     assert!(
         selectors.contains(&"spawn"),
         "spawn must be in class_methods"
@@ -200,7 +175,6 @@ fn actor_spawn_methods_are_class_side() {
         !selectors.contains(&"new:"),
         "new: must NOT be in Actor class_methods after BT-1524"
     );
-
     // Instance methods must NOT appear on class side
     assert!(
         !selectors.contains(&"stop"),
@@ -210,7 +184,6 @@ fn actor_spawn_methods_are_class_side() {
         !selectors.contains(&"isAlive"),
         "isAlive must NOT be in class_methods"
     );
-
     // Actor class methods carry doc strings from generated_builtins.rs
     // (sourced from Actor.bt via build-stdlib)
     let spawn = class_methods
@@ -222,7 +195,6 @@ fn actor_spawn_methods_are_class_side() {
         spawn_doc.contains("actor process"),
         "spawn doc should describe actor process creation: {spawn_doc}"
     );
-
     let spawn_with = class_methods
         .iter()
         .find(|m| m.selector == "spawnWith:")
@@ -231,15 +203,12 @@ fn actor_spawn_methods_are_class_side() {
         spawn_with.doc.as_deref().unwrap().contains("actor"),
         "spawnWith: doc should describe actor creation"
     );
-
     // BT-1524: new/new: overrides removed — no longer in Actor class_methods
 }
-
 #[test]
 fn all_methods_overrides_use_most_specific() {
     let h = ClassHierarchy::with_builtins();
     let methods = h.all_methods("Actor");
-
     // Object defines 'printString', Actor inherits it
     // Only the most-specific (Object's) version should appear once
     let print_methods: Vec<&MethodInfo> = methods
@@ -249,23 +218,19 @@ fn all_methods_overrides_use_most_specific() {
     assert_eq!(print_methods.len(), 1);
     assert_eq!(print_methods[0].defined_in.as_str(), "Object");
 }
-
 #[test]
 fn all_methods_for_unknown_class_is_empty() {
     let h = ClassHierarchy::with_builtins();
     let methods = h.all_methods("DoesNotExist");
     assert!(methods.is_empty());
 }
-
 // --- resolves_selector tests ---
-
 #[test]
 fn resolves_selector_local() {
     let h = ClassHierarchy::with_builtins();
     assert!(h.resolves_selector("Integer", "+"));
     assert!(h.resolves_selector("Integer", "abs"));
 }
-
 #[test]
 fn resolves_selector_inherited() {
     let h = ClassHierarchy::with_builtins();
@@ -274,13 +239,11 @@ fn resolves_selector_inherited() {
     // Integer inherits from ProtoObject which has class
     assert!(h.resolves_selector("Integer", "class"));
 }
-
 #[test]
 fn resolves_selector_unknown_returns_false() {
     let h = ClassHierarchy::with_builtins();
     assert!(!h.resolves_selector("Integer", "nonExistentMethod"));
 }
-
 #[test]
 fn resolves_selector_unknown_class_returns_false() {
     let h = ClassHierarchy::with_builtins();
@@ -289,7 +252,6 @@ fn resolves_selector_unknown_class_returns_false() {
     assert!(!h.resolves_selector("Nope", "isNil"));
     assert!(!h.resolves_selector("Nope", "subclassResponsibility"));
 }
-
 /// BT-889: When a class inherits from an external class (defined in a
 /// separately-compiled file and therefore absent from the hierarchy), the
 /// walk must fall through to Object so that Object-level methods are
@@ -310,7 +272,6 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
     };
     let (h, _diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     // Object method must be reachable even though Beverage is unknown.
     assert!(
         h.resolves_selector("CondimentDecorator", "subclassResponsibility"),
@@ -333,9 +294,7 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
     );
     assert_eq!(method.unwrap().defined_in.as_str(), "Object");
 }
-
 // --- User-defined class tests ---
-
 fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
     ClassDefinition {
         name: Identifier::new(name, test_span()),
@@ -380,7 +339,6 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
         span: test_span(),
     }
 }
-
 #[test]
 fn user_defined_class_added_to_hierarchy() {
     let module = Module {
@@ -396,14 +354,12 @@ fn user_defined_class_added_to_hierarchy() {
     let h = h.unwrap();
     assert!(diags.is_empty());
     assert!(h.has_class("Counter"));
-
     let counter = h.get_class("Counter").unwrap();
     assert_eq!(counter.superclass.as_deref(), Some("Actor"));
     assert_eq!(counter.state, vec![EcoString::from("count")]);
     assert_eq!(counter.methods.len(), 1);
     assert_eq!(counter.methods[0].selector.as_str(), "increment");
 }
-
 #[test]
 fn user_class_inherits_from_actor_chain() {
     let module = Module {
@@ -416,7 +372,6 @@ fn user_class_inherits_from_actor_chain() {
         file_trailing_comments: Vec::new(),
     };
     let h = ClassHierarchy::build(&module).0.unwrap();
-
     let chain = h.superclass_chain("Counter");
     assert_eq!(
         chain,
@@ -427,7 +382,6 @@ fn user_class_inherits_from_actor_chain() {
         ]
     );
 }
-
 #[test]
 fn user_class_resolves_inherited_selectors() {
     let module = Module {
@@ -440,7 +394,6 @@ fn user_class_resolves_inherited_selectors() {
         file_trailing_comments: Vec::new(),
     };
     let h = ClassHierarchy::build(&module).0.unwrap();
-
     // Local method
     assert!(h.resolves_selector("Counter", "increment"));
     // spawn is class-side on Actor — verify via all_class_methods
@@ -455,9 +408,7 @@ fn user_class_resolves_inherited_selectors() {
     // Inherited from ProtoObject
     assert!(h.resolves_selector("Counter", "class"));
 }
-
 // --- Sealed class enforcement tests ---
-
 #[test]
 fn sealed_class_subclassing_rejected() {
     let module = Module {
@@ -471,14 +422,12 @@ fn sealed_class_subclassing_rejected() {
     };
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
     assert!(diags[0].message.contains("Integer"));
     // Class IS still registered (so codegen can route correctly despite error)
     assert!(h.has_class("MyInt"));
 }
-
 #[test]
 fn sealed_string_subclassing_rejected() {
     let module = Module {
@@ -494,7 +443,6 @@ fn sealed_string_subclassing_rejected() {
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
 }
-
 #[test]
 fn non_sealed_subclassing_allowed() {
     let module = Module {
@@ -511,9 +459,7 @@ fn non_sealed_subclassing_allowed() {
     assert!(diags.is_empty());
     assert!(h.has_class("MyActor"));
 }
-
 // --- BT-791: stdlib_mode gating tests ---
-
 #[test]
 fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
@@ -534,7 +480,6 @@ fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     );
     assert!(h.has_class("Character"));
 }
-
 #[test]
 fn user_code_character_subclassing_integer_rejected() {
     // Without stdlib_mode, even a class named "Character" is rejected.
@@ -555,7 +500,6 @@ fn user_code_character_subclassing_integer_rejected() {
     // Class is still registered despite the error
     assert!(h.has_class("Character"));
 }
-
 #[test]
 fn stdlib_mode_does_not_exempt_non_builtin_class() {
     // Even in stdlib_mode, a non-builtin name extending a sealed class is rejected.
@@ -572,9 +516,7 @@ fn stdlib_mode_does_not_exempt_non_builtin_class() {
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
 }
-
 // --- BT-778: Character hierarchy tests ---
-
 #[test]
 fn character_superclass_chain_includes_integer() {
     // BT-778: Character inherits from Integer in the builtin hierarchy.
@@ -589,7 +531,6 @@ fn character_superclass_chain_includes_integer() {
         "Chain should include Number: {chain:?}"
     );
 }
-
 #[test]
 fn character_resolves_integer_selectors() {
     // BT-778: Character should resolve Integer methods via inheritance.
@@ -615,7 +556,6 @@ fn character_resolves_integer_selectors() {
         "Character should NOT understand 'bogusMethod'"
     );
 }
-
 #[test]
 fn character_is_numeric_type() {
     // BT-778: Character inherits from Integer which inherits from Number,
@@ -631,9 +571,7 @@ fn character_is_numeric_type() {
     assert!(!h.is_numeric_type("String"), "String is not numeric");
     assert!(!h.is_numeric_type("Boolean"), "Boolean is not numeric");
 }
-
 // --- Sealed method override enforcement tests ---
-
 fn make_class_with_sealed_method(
     name: &str,
     superclass: &str,
@@ -674,7 +612,6 @@ fn make_class_with_sealed_method(
         span: test_span(),
     }
 }
-
 fn make_class_with_sealed_class_method(
     name: &str,
     superclass: &str,
@@ -715,13 +652,11 @@ fn make_class_with_sealed_class_method(
         span: test_span(),
     }
 }
-
 #[test]
 fn sealed_method_override_rejected() {
     // Parent defines sealed method "doCustomWork", child tries to override it
     let parent = make_class_with_sealed_method("Parent", "Actor", "doCustomWork", true);
     let child = make_class_with_sealed_method("Child", "Parent", "doCustomWork", false);
-
     let module = Module {
         classes: vec![parent, child],
         method_definitions: Vec::new(),
@@ -733,7 +668,6 @@ fn sealed_method_override_rejected() {
     };
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`doCustomWork`"));
@@ -741,13 +675,11 @@ fn sealed_method_override_rejected() {
     // Child class is still added despite the error
     assert!(h.has_class("Child"));
 }
-
 #[test]
 fn non_sealed_method_override_allowed() {
     // Parent defines non-sealed method, child overrides it — no diagnostic
     let parent = make_class_with_sealed_method("Parent", "Actor", "doWork", false);
     let child = make_class_with_sealed_method("Child", "Parent", "doWork", false);
-
     let module = Module {
         classes: vec![parent, child],
         method_definitions: Vec::new(),
@@ -760,14 +692,12 @@ fn non_sealed_method_override_allowed() {
     let (_, diags) = ClassHierarchy::build(&module);
     assert!(diags.is_empty());
 }
-
 #[test]
 fn sealed_method_in_grandparent_enforced() {
     // Grandparent defines sealed method, grandchild tries to override it
     let grandparent = make_class_with_sealed_method("GrandParent", "Actor", "locked", true);
     let parent = make_class_with_sealed_method("Parent", "GrandParent", "doWork", false);
     let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
-
     let module = Module {
         classes: vec![grandparent, parent, grandchild],
         method_definitions: Vec::new(),
@@ -779,19 +709,16 @@ fn sealed_method_in_grandparent_enforced() {
     };
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`locked`"));
     assert!(diags[0].message.contains("`GrandParent`"));
     assert!(h.has_class("GrandChild"));
 }
-
 #[test]
 fn builtin_sealed_method_override_rejected() {
     // Object's respondsTo: is sealed in builtins — user class cannot override it
     let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
-
     let module = Module {
         classes: vec![child],
         method_definitions: Vec::new(),
@@ -803,19 +730,16 @@ fn builtin_sealed_method_override_rejected() {
     };
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`respondsTo:`"));
     assert!(diags[0].message.contains("`Object`"));
     assert!(h.has_class("MyObj"));
 }
-
 #[test]
 fn builtin_actor_spawn_override_rejected() {
     // Actor's class-side spawn is sealed in builtins — subclass cannot override it
     let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
-
     let module = Module {
         classes: vec![child],
         method_definitions: Vec::new(),
@@ -827,16 +751,13 @@ fn builtin_actor_spawn_override_rejected() {
     };
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`spawn`"));
     assert!(diags[0].message.contains("`Actor`"));
     assert!(h.has_class("MyActor"));
 }
-
 // --- MRO verification ---
-
 #[test]
 fn mro_is_depth_first() {
     // Counter -> Actor -> Object -> ProtoObject
@@ -851,10 +772,8 @@ fn mro_is_depth_first() {
     };
     let h = ClassHierarchy::build(&module).0.unwrap();
     let methods = h.all_methods("Counter");
-
     // First method should be from Counter (most specific)
     assert_eq!(methods[0].defined_in.as_str(), "Counter");
-
     // Actor methods should come before Object methods
     let actor_idx = methods
         .iter()
@@ -866,9 +785,7 @@ fn mro_is_depth_first() {
         .unwrap();
     assert!(actor_idx < object_idx);
 }
-
 // --- Edge case tests ---
-
 #[test]
 fn cycle_detection_in_superclass_chain() {
     // Manually create a cycle: A -> B -> A
@@ -887,6 +804,7 @@ fn cycle_detection_in_superclass_chain() {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![builtin_method("methodA", 0, "A")],
             class_methods: vec![],
             class_variables: vec![],
@@ -909,6 +827,7 @@ fn cycle_detection_in_superclass_chain() {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![builtin_method("methodB", 0, "B")],
             class_methods: vec![],
             class_variables: vec![],
@@ -917,18 +836,14 @@ fn cycle_detection_in_superclass_chain() {
             superclass_type_args: vec![],
         },
     );
-
     // Should not loop forever
     let chain = h.superclass_chain("A");
     assert!(chain.len() <= 2);
-
     let methods = h.all_methods("A");
     assert!(!methods.is_empty());
-
     // Should not hang
     let _ = h.resolves_selector("A", "methodB");
 }
-
 #[test]
 fn multiple_user_classes_in_module() {
     let base = ClassDefinition {
@@ -997,7 +912,6 @@ fn multiple_user_classes_in_module() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![base, derived],
         method_definitions: Vec::new(),
@@ -1010,7 +924,6 @@ fn multiple_user_classes_in_module() {
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
-
     // Derived should inherit from Base -> Actor -> Object -> ProtoObject
     assert!(h.resolves_selector("Derived", "derivedMethod"));
     assert!(h.resolves_selector("Derived", "baseMethod"));
@@ -1023,7 +936,6 @@ fn multiple_user_classes_in_module() {
     );
     assert!(h.resolves_selector("Derived", "class"));
 }
-
 #[test]
 fn user_class_with_unknown_superclass() {
     let module = Module {
@@ -1037,7 +949,6 @@ fn user_class_with_unknown_superclass() {
     };
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
-
     // No diagnostic for unknown superclass (sealed check passes)
     assert!(diags.is_empty());
     // Class is still added
@@ -1048,9 +959,7 @@ fn user_class_with_unknown_superclass() {
     let chain = h.superclass_chain("Orphan");
     assert_eq!(chain, vec![EcoString::from("NonExistent")]);
 }
-
 // --- Duplicate method detection tests ---
-
 #[test]
 fn duplicate_instance_method_detected() {
     let class = ClassDefinition {
@@ -1101,7 +1010,6 @@ fn duplicate_instance_method_detected() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1112,7 +1020,6 @@ fn duplicate_instance_method_detected() {
         file_trailing_comments: Vec::new(),
     };
     let (_, diags) = ClassHierarchy::build(&module);
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("Duplicate method"));
     assert!(diags[0].message.contains("`increment`"));
@@ -1120,7 +1027,6 @@ fn duplicate_instance_method_detected() {
     assert!(diags[0].hint.is_some());
     assert!(diags[0].hint.as_ref().unwrap().contains("already defined"));
 }
-
 #[test]
 fn duplicate_class_method_detected() {
     let class = ClassDefinition {
@@ -1171,7 +1077,6 @@ fn duplicate_class_method_detected() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1182,12 +1087,10 @@ fn duplicate_class_method_detected() {
         file_trailing_comments: Vec::new(),
     };
     let (_, diags) = ClassHierarchy::build(&module);
-
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("Duplicate class method"));
     assert!(diags[0].message.contains("`create`"));
 }
-
 #[test]
 fn no_duplicate_for_different_selectors() {
     let class = ClassDefinition {
@@ -1238,7 +1141,6 @@ fn no_duplicate_for_different_selectors() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1249,17 +1151,13 @@ fn no_duplicate_for_different_selectors() {
         file_trailing_comments: Vec::new(),
     };
     let (_, diags) = ClassHierarchy::build(&module);
-
     assert!(diags.is_empty());
 }
-
 // --- Typed class inheritance tests (BT-587) ---
-
 #[test]
 fn typed_class_is_typed() {
     let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
     class.is_typed = true;
-
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1275,15 +1173,12 @@ fn typed_class_is_typed() {
         "explicitly typed class should be typed"
     );
 }
-
 #[test]
 fn typed_class_inheritance() {
     // Parent is typed, child inherits typed
     let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
     parent.is_typed = true;
-
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
-
     let module = Module {
         classes: vec![parent, child],
         method_definitions: Vec::new(),
@@ -1294,22 +1189,18 @@ fn typed_class_inheritance() {
         file_trailing_comments: Vec::new(),
     };
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
     assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
     assert!(
         hierarchy.is_typed("UntypedChild"),
         "child of typed class should inherit typed"
     );
 }
-
 #[test]
 fn typed_class_inheritance_reverse_order() {
     // Child defined BEFORE typed parent — should still inherit typed
     let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
     parent.is_typed = true;
-
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
-
     // Note: child comes first in the vec! (reverse definition order)
     let module = Module {
         classes: vec![child, parent],
@@ -1321,20 +1212,17 @@ fn typed_class_inheritance_reverse_order() {
         file_trailing_comments: Vec::new(),
     };
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
     assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
     assert!(
         hierarchy.is_typed("UntypedChild"),
         "child of typed class should inherit typed even when defined before parent"
     );
 }
-
 #[test]
 fn non_typed_class_not_inherited() {
     // Parent is NOT typed, child should not be typed
     let parent = make_class_with_sealed_method("Parent", "Actor", "method", false);
     let child = make_class_with_sealed_method("Child", "Parent", "method", false);
-
     let module = Module {
         classes: vec![parent, child],
         method_definitions: Vec::new(),
@@ -1345,13 +1233,10 @@ fn non_typed_class_not_inherited() {
         file_trailing_comments: Vec::new(),
     };
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
     assert!(!hierarchy.is_typed("Parent"));
     assert!(!hierarchy.is_typed("Child"));
 }
-
 // --- Type annotation propagation tests ---
-
 #[test]
 fn stdlib_integer_plus_has_return_type() {
     let h = ClassHierarchy::with_builtins();
@@ -1360,7 +1245,6 @@ fn stdlib_integer_plus_has_return_type() {
         .expect("Integer >> + should exist");
     assert_eq!(method.return_type.as_deref(), Some("Integer"));
 }
-
 #[test]
 fn stdlib_integer_plus_has_param_types() {
     let h = ClassHierarchy::with_builtins();
@@ -1369,7 +1253,6 @@ fn stdlib_integer_plus_has_param_types() {
         .expect("Integer >> + should exist");
     assert_eq!(method.param_types, vec![Some("Number".into())]);
 }
-
 #[test]
 fn stdlib_unary_method_has_empty_param_types() {
     let h = ClassHierarchy::with_builtins();
@@ -1378,7 +1261,6 @@ fn stdlib_unary_method_has_empty_param_types() {
         .expect("Integer >> asFloat should exist");
     assert!(method.param_types.is_empty());
 }
-
 #[test]
 fn user_class_return_type_propagated() {
     let class = ClassDefinition {
@@ -1414,7 +1296,6 @@ fn user_class_return_type_propagated() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1430,7 +1311,6 @@ fn user_class_return_type_propagated() {
         .expect("Counter >> getValue should exist");
     assert_eq!(method.return_type.as_deref(), Some("Integer"));
 }
-
 #[test]
 fn user_class_param_types_propagated() {
     let class = ClassDefinition {
@@ -1472,7 +1352,6 @@ fn user_class_param_types_propagated() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1489,9 +1368,7 @@ fn user_class_param_types_propagated() {
     assert_eq!(method.return_type.as_deref(), Some("Counter"));
     assert_eq!(method.param_types, vec![Some("Integer".into())]);
 }
-
 // --- State field type tests ---
-
 fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
     ClassDefinition {
         name: Identifier::new(name, test_span()),
@@ -1522,7 +1399,6 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
         span: test_span(),
     }
 }
-
 #[test]
 fn state_field_type_returns_type_for_annotated_field() {
     let module = Module {
@@ -1542,7 +1418,6 @@ fn state_field_type_returns_type_for_annotated_field() {
         Some(EcoString::from("Integer"))
     );
 }
-
 #[test]
 fn state_field_type_returns_none_for_untyped_field() {
     let module = Module {
@@ -1557,7 +1432,6 @@ fn state_field_type_returns_none_for_untyped_field() {
     let h = ClassHierarchy::build(&module).0.unwrap();
     assert_eq!(h.state_field_type("Counter", "label"), None);
 }
-
 #[test]
 fn state_field_type_returns_none_for_unknown_field() {
     let module = Module {
@@ -1572,13 +1446,11 @@ fn state_field_type_returns_none_for_unknown_field() {
     let h = ClassHierarchy::build(&module).0.unwrap();
     assert_eq!(h.state_field_type("Counter", "nonexistent"), None);
 }
-
 #[test]
 fn state_field_type_returns_none_for_unknown_class() {
     let h = ClassHierarchy::with_builtins();
     assert_eq!(h.state_field_type("DoesNotExist", "count"), None);
 }
-
 #[test]
 fn state_field_type_inherited_from_parent() {
     let parent = make_typed_state_class("TypedParent", "Actor");
@@ -1607,7 +1479,6 @@ fn state_field_type_inherited_from_parent() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![parent, child],
         method_definitions: Vec::new(),
@@ -1620,7 +1491,6 @@ fn state_field_type_inherited_from_parent() {
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
-
     // Child's own typed field
     assert_eq!(
         h.state_field_type("Child", "extra"),
@@ -1634,7 +1504,6 @@ fn state_field_type_inherited_from_parent() {
     // Inherited untyped field from parent
     assert_eq!(h.state_field_type("Child", "label"), None);
 }
-
 #[test]
 fn state_field_type_builtin_classes_return_none() {
     let h = ClassHierarchy::with_builtins();
@@ -1642,7 +1511,6 @@ fn state_field_type_builtin_classes_return_none() {
     assert_eq!(h.state_field_type("Integer", "anything"), None);
     assert_eq!(h.state_field_type("Actor", "anything"), None);
 }
-
 #[test]
 fn state_field_type_shadowed_untyped_field() {
     // Parent declares `count: Integer`, child redeclares `count` without type.
@@ -1672,7 +1540,6 @@ fn state_field_type_shadowed_untyped_field() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![parent, child],
         method_definitions: Vec::new(),
@@ -1683,7 +1550,6 @@ fn state_field_type_shadowed_untyped_field() {
         file_trailing_comments: Vec::new(),
     };
     let h = ClassHierarchy::build(&module).0.unwrap();
-
     // Child's untyped `count` shadows parent's typed `count: Integer`
     assert_eq!(h.state_field_type("Child", "count"), None);
     // Parent's typed `count` is still accessible on the parent
@@ -1692,7 +1558,6 @@ fn state_field_type_shadowed_untyped_field() {
         Some(EcoString::from("Integer"))
     );
 }
-
 #[test]
 fn has_instance_dnu_override_detects_erlang() {
     // BT-1763: Erlang has doesNotUnderstand:args: as an instance method
@@ -1708,7 +1573,6 @@ fn has_instance_dnu_override_detects_erlang() {
         "Erlang should not have class-side DNU override"
     );
 }
-
 #[test]
 fn has_instance_dnu_override_detects_erlang_module() {
     // ErlangModule has doesNotUnderstand:args: as an instance method.
@@ -1723,7 +1587,6 @@ fn has_instance_dnu_override_detects_erlang_module() {
         "ErlangModule should not have class-side DNU override"
     );
 }
-
 #[test]
 fn has_dnu_override_false_for_normal_class() {
     let h = ClassHierarchy::with_builtins();
@@ -1736,9 +1599,7 @@ fn has_dnu_override_false_for_normal_class() {
         "Integer should not have class DNU override"
     );
 }
-
 // --- BT-894: Cross-file superclass enrichment tests ---
-
 #[test]
 fn add_external_superclasses_resolves_value_object_chain() {
     let mut h = ClassHierarchy::with_builtins();
@@ -1749,18 +1610,15 @@ fn add_external_superclasses_resolves_value_object_chain() {
     let mut index = HashMap::new();
     index.insert("MyParent".to_string(), "Object".to_string());
     h.add_external_superclasses(&index);
-
     // MyParent should now resolve through to Object
     let chain = h.superclass_chain("MyParent");
     assert_eq!(
         chain,
         vec![EcoString::from("Object"), EcoString::from("ProtoObject")]
     );
-
     // A child class added to the hierarchy should now resolve through MyParent → Object
     assert!(!h.is_actor_subclass("MyParent"));
 }
-
 #[test]
 fn add_external_superclasses_resolves_actor_chain() {
     let mut h = ClassHierarchy::with_builtins();
@@ -1769,31 +1627,25 @@ fn add_external_superclasses_resolves_actor_chain() {
     let mut index = HashMap::new();
     index.insert("MyActor".to_string(), "Actor".to_string());
     h.add_external_superclasses(&index);
-
     // MyActor should resolve through to Actor
     assert!(h.is_actor_subclass("MyActor"));
 }
-
 // --- is_value_subclass tests (ADR 0042) ---
-
 #[test]
 fn value_itself_is_value_subclass() {
     let h = ClassHierarchy::with_builtins();
     assert!(h.is_value_subclass("Value"));
 }
-
 #[test]
 fn object_is_not_value_subclass() {
     let h = ClassHierarchy::with_builtins();
     assert!(!h.is_value_subclass("Object"));
 }
-
 #[test]
 fn actor_is_not_value_subclass() {
     let h = ClassHierarchy::with_builtins();
     assert!(!h.is_value_subclass("Actor"));
 }
-
 #[test]
 fn user_value_subclass_detected() {
     let mut h = ClassHierarchy::with_builtins();
@@ -1802,7 +1654,6 @@ fn user_value_subclass_detected() {
     h.add_external_superclasses(&index);
     assert!(h.is_value_subclass("Point"));
 }
-
 #[test]
 fn user_object_subclass_is_not_value_subclass() {
     let mut h = ClassHierarchy::with_builtins();
@@ -1811,7 +1662,6 @@ fn user_object_subclass_is_not_value_subclass() {
     h.add_external_superclasses(&index);
     assert!(!h.is_value_subclass("Plain"));
 }
-
 #[test]
 fn add_external_superclasses_does_not_overwrite_existing() {
     let mut h = ClassHierarchy::with_builtins();
@@ -1819,14 +1669,11 @@ fn add_external_superclasses_does_not_overwrite_existing() {
     let mut index = HashMap::new();
     index.insert("Object".to_string(), "SomethingElse".to_string());
     h.add_external_superclasses(&index);
-
     // Object should still resolve to ProtoObject (built-in), not SomethingElse
     let chain = h.superclass_chain("Object");
     assert_eq!(chain, vec![EcoString::from("ProtoObject")]);
 }
-
 // --- ClassKind / is_value integration tests (BT-922) ---
-
 #[test]
 fn value_subclass_sets_is_value_flag() {
     let class = ClassDefinition {
@@ -1860,7 +1707,6 @@ fn value_subclass_sets_is_value_flag() {
     assert!(info.is_value, "Value subclass should have is_value = true");
     assert!(h.is_value_subclass("Point"));
 }
-
 #[test]
 fn value_subclass_auto_generates_slot_methods() {
     let class = ClassDefinition {
@@ -1900,7 +1746,6 @@ fn value_subclass_auto_generates_slot_methods() {
         panic!("build should succeed");
     };
     let info = h.get_class("Point").expect("Point should be registered");
-
     // Auto-generated instance methods: getters (x, y) + setters (withX:, withY:)
     let instance_sels: Vec<&str> = info.methods.iter().map(|m| m.selector.as_str()).collect();
     assert!(
@@ -1919,7 +1764,6 @@ fn value_subclass_auto_generates_slot_methods() {
         instance_sels.contains(&"withY:"),
         "setter withY: missing: {instance_sels:?}"
     );
-
     // Auto-generated class method: keyword constructor x:y:
     let class_sels: Vec<&str> = info
         .class_methods
@@ -1931,7 +1775,6 @@ fn value_subclass_auto_generates_slot_methods() {
         "keyword constructor x:y: missing: {class_sels:?}"
     );
 }
-
 #[test]
 fn value_subclass_auto_methods_have_generated_docs() {
     use crate::ast::{Expression, Literal};
@@ -1974,7 +1817,6 @@ fn value_subclass_auto_methods_have_generated_docs() {
         panic!("build should succeed");
     };
     let info = h.get_class("Point").expect("Point should be registered");
-
     // Getter doc contains field name, default, and compiler-generated tag
     let getter = info.methods.iter().find(|m| m.selector == "x").unwrap();
     let getter_doc = getter.doc.as_deref().unwrap();
@@ -1987,7 +1829,6 @@ fn value_subclass_auto_methods_have_generated_docs() {
         getter_doc.contains("*(compiler-generated)*"),
         "getter doc missing tag"
     );
-
     // Setter doc mentions class name and field name
     let setter = info
         .methods
@@ -2004,7 +1845,6 @@ fn value_subclass_auto_methods_have_generated_docs() {
         setter_doc.contains("*(compiler-generated)*"),
         "setter doc missing tag"
     );
-
     // Keyword constructor doc mentions class name and field arg with default
     let ctor = info
         .class_methods
@@ -2022,7 +1862,6 @@ fn value_subclass_auto_methods_have_generated_docs() {
         "ctor doc missing tag"
     );
 }
-
 #[test]
 fn value_subclass_auto_methods_respect_user_overrides() {
     let class = ClassDefinition {
@@ -2068,18 +1907,15 @@ fn value_subclass_auto_methods_respect_user_overrides() {
         panic!("build should succeed");
     };
     let info = h.get_class("Point").expect("Point should be registered");
-
     // User-defined `x` should appear once, not duplicated by auto-generation
     let x_count = info.methods.iter().filter(|m| m.selector == "x").count();
     assert_eq!(x_count, 1, "getter `x` should appear exactly once");
-
     // Auto-generated withX: should still be present
     assert!(
         info.methods.iter().any(|m| m.selector == "withX:"),
         "withX: should be auto-generated"
     );
 }
-
 #[test]
 fn actor_subclass_does_not_set_is_value_flag() {
     let module = Module {
@@ -2099,7 +1935,6 @@ fn actor_subclass_does_not_set_is_value_flag() {
         .expect("Counter should be registered");
     assert!(!info.is_value, "Actor subclass should not have is_value");
 }
-
 /// BT-1056: Test sealed method override detection with external superclasses.
 /// When a class inherits from an external (unknown) class, ancestor lookup
 /// should not break early; it should continue walking up the chain
@@ -2140,7 +1975,6 @@ fn sealed_override_checks_with_external_superclasses() {
         backing_module: None,
         span: test_span(),
     };
-
     // ClassC (in module) inherits from UnknownClass (external)
     // UnknownClass will later be declared to inherit from ClassB
     let override_class = ClassDefinition {
@@ -2176,7 +2010,6 @@ fn sealed_override_checks_with_external_superclasses() {
         backing_module: None,
         span: test_span(),
     };
-
     let module = Module {
         classes: vec![sealed_base, override_class],
         method_definitions: vec![],
@@ -2186,16 +2019,13 @@ fn sealed_override_checks_with_external_superclasses() {
         file_leading_comments: vec![],
         file_trailing_comments: Vec::new(),
     };
-
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     // Register external class relationship: UnknownClass <- ClassB
     let mut external_index = std::collections::HashMap::new();
     external_index.insert("UnknownClass".to_string(), "ClassB".to_string());
     h.add_external_superclasses(&external_index);
-
     // After adding external superclass info, UnknownClass should be in the hierarchy
     // and we should be able to walk from it to ClassB.
     assert!(
@@ -2212,9 +2042,7 @@ fn sealed_override_checks_with_external_superclasses() {
         "UnknownClass superclass chain should reach ClassB"
     );
 }
-
 // --- ADR 0050 Phase 4: add_from_beam_meta tests ---
-
 #[test]
 fn add_from_beam_meta_inserts_non_builtin_class() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2230,6 +2058,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
         is_native: false,
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: EcoString::from("value"),
             arity: 0,
@@ -2255,7 +2084,6 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
     assert_eq!(cls.methods.len(), 1);
     assert_eq!(cls.methods[0].selector.as_str(), "value");
 }
-
 #[test]
 fn add_from_beam_meta_preserves_existing_entries() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2272,6 +2100,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         is_native: false,
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: EcoString::from("increment"),
             arity: 0,
@@ -2291,7 +2120,6 @@ fn add_from_beam_meta_preserves_existing_entries() {
         superclass_type_args: vec![],
     };
     h.classes.insert(EcoString::from("Counter"), ast_info);
-
     // Stale cache entry with different method
     let cache_info = ClassInfo {
         name: EcoString::from("Counter"),
@@ -2305,6 +2133,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![MethodInfo {
             selector: EcoString::from("old_method"),
             arity: 0,
@@ -2324,13 +2153,11 @@ fn add_from_beam_meta_preserves_existing_entries() {
         superclass_type_args: vec![],
     };
     h.add_from_beam_meta(vec![cache_info]);
-
     // AST-derived entry should win
     let cls = h.get_class("Counter").unwrap();
     assert_eq!(cls.superclass.as_deref(), Some("Actor"));
     assert_eq!(cls.methods[0].selector.as_str(), "increment");
 }
-
 #[test]
 fn add_from_beam_meta_skips_builtins() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2347,6 +2174,7 @@ fn add_from_beam_meta_skips_builtins() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2361,9 +2189,7 @@ fn add_from_beam_meta_skips_builtins() {
         original_method_count
     );
 }
-
 // --- BT-1700: ClassInfo package + is_internal infrastructure ---
-
 #[test]
 fn classinfo_from_ast_populates_is_internal() {
     let source = "internal Actor subclass: InternalCounter\n  state: count = 0\n  increment => self.count := self.count + 1\n";
@@ -2380,7 +2206,6 @@ fn classinfo_from_ast_populates_is_internal() {
         "package should be None when built from AST (stamped later)"
     );
 }
-
 #[test]
 fn classinfo_from_ast_defaults_is_internal_false() {
     let source = "Actor subclass: PublicCounter\n  state: count = 0\n  increment => self.count := self.count + 1\n";
@@ -2393,7 +2218,6 @@ fn classinfo_from_ast_defaults_is_internal_false() {
         "is_internal should be false for non-internal classes"
     );
 }
-
 #[test]
 fn stamp_package_sets_package_on_non_builtin_classes() {
     let source = "Actor subclass: Counter\n  state: count = 0\n";
@@ -2416,7 +2240,6 @@ fn stamp_package_sets_package_on_non_builtin_classes() {
         "stdlib builtins already have package=stdlib from generated_builtins"
     );
 }
-
 #[test]
 fn stamp_package_does_not_overwrite_existing_package() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2432,6 +2255,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2448,7 +2272,6 @@ fn stamp_package_does_not_overwrite_existing_package() {
         "stamp_package should not overwrite existing package"
     );
 }
-
 #[test]
 fn add_from_beam_meta_preserves_is_internal_and_package() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2464,6 +2287,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         is_native: false,
         state: vec![],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2483,25 +2307,20 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         "package should be preserved from BEAM metadata"
     );
 }
-
 // --- extract_class_infos tests (BT-1523) ---
-
 #[test]
 fn extract_class_infos_from_empty_module() {
     let module = Module::new(vec![], crate::source_analysis::Span::default());
     let infos = ClassHierarchy::extract_class_infos(&module);
     assert!(infos.is_empty());
 }
-
 #[test]
 fn extract_class_infos_captures_methods_and_state() {
     let source = "Actor subclass: Counter\n  state: count :: Integer = 0\n  increment => self.count := self.count + 1\n  getValue => self.count\n";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
-
     let infos = ClassHierarchy::extract_class_infos(&module);
     assert_eq!(infos.len(), 1);
-
     let info = &infos[0];
     assert_eq!(info.name.as_str(), "Counter");
     assert_eq!(info.superclass.as_deref(), Some("Actor"));
@@ -2509,19 +2328,15 @@ fn extract_class_infos_captures_methods_and_state() {
     assert!(info.methods.iter().any(|m| m.selector == "increment"));
     assert!(info.methods.iter().any(|m| m.selector == "getValue"));
 }
-
 // --- Extension method registration tests (BT-1517) ---
-
 #[test]
 fn register_extensions_adds_instance_method() {
     use crate::compilation::extension_index::{
         ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     };
     use std::path::PathBuf;
-
     let mut h = ClassHierarchy::with_builtins();
     let original_count = h.all_methods("String").len();
-
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "String".into(),
@@ -2541,7 +2356,6 @@ fn register_extensions_adds_instance_method() {
         }],
     );
     h.register_extensions(&index);
-
     let methods = h.all_methods("String");
     assert_eq!(methods.len(), original_count + 1);
     let ext = methods.iter().find(|m| m.selector == "shout").unwrap();
@@ -2549,17 +2363,14 @@ fn register_extensions_adds_instance_method() {
     assert_eq!(ext.return_type.as_deref(), Some("String"));
     assert_eq!(ext.defined_in.as_str(), "String");
 }
-
 #[test]
 fn register_extensions_adds_class_method() {
     use crate::compilation::extension_index::{
         ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     };
     use std::path::PathBuf;
-
     let mut h = ClassHierarchy::with_builtins();
     let original_count = h.all_class_methods("String").len();
-
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "String".into(),
@@ -2579,23 +2390,19 @@ fn register_extensions_adds_class_method() {
         }],
     );
     h.register_extensions(&index);
-
     let methods = h.all_class_methods("String");
     assert_eq!(methods.len(), original_count + 1);
     let ext = methods.iter().find(|m| m.selector == "fromJson:").unwrap();
     assert_eq!(ext.arity, 1);
     assert_eq!(ext.param_types, vec![Some("String".into())]);
 }
-
 #[test]
 fn register_extensions_unannotated_uses_dynamic() {
     use crate::compilation::extension_index::{
         ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     };
     use std::path::PathBuf;
-
     let mut h = ClassHierarchy::with_builtins();
-
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "Array".into(),
@@ -2615,22 +2422,18 @@ fn register_extensions_unannotated_uses_dynamic() {
         }],
     );
     h.register_extensions(&index);
-
     let ext = h
         .find_method("Array", "shuffle")
         .expect("extension should be resolvable");
     assert!(ext.return_type.is_none(), "unannotated = Dynamic");
 }
-
 #[test]
 fn register_extensions_skips_unknown_class() {
     use crate::compilation::extension_index::{
         ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     };
     use std::path::PathBuf;
-
     let mut h = ClassHierarchy::with_builtins();
-
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "NonexistentClass".into(),
@@ -2653,18 +2456,15 @@ fn register_extensions_skips_unknown_class() {
     h.register_extensions(&index);
     assert!(!h.has_class("NonexistentClass"));
 }
-
 #[test]
 fn register_extensions_does_not_override_existing_method() {
     use crate::compilation::extension_index::{
         ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     };
     use std::path::PathBuf;
-
     let mut h = ClassHierarchy::with_builtins();
     // "size" already exists on String
     let original = h.find_method("String", "size").unwrap();
-
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "String".into(),
@@ -2684,25 +2484,21 @@ fn register_extensions_does_not_override_existing_method() {
         }],
     );
     h.register_extensions(&index);
-
     // Original method should be unchanged
     let after = h.find_method("String", "size").unwrap();
     assert_eq!(after.defined_in, original.defined_in);
 }
-
 #[test]
 fn register_extensions_resolves_selector() {
     use crate::compilation::extension_index::{
         ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     };
     use std::path::PathBuf;
-
     let mut h = ClassHierarchy::with_builtins();
     assert!(
         !h.resolves_selector("String", "toJson"),
         "precondition: toJson doesn't exist"
     );
-
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "String".into(),
@@ -2722,15 +2518,12 @@ fn register_extensions_resolves_selector() {
         }],
     );
     h.register_extensions(&index);
-
     assert!(
         h.resolves_selector("String", "toJson"),
         "extension should be resolvable via resolves_selector"
     );
 }
-
 // --- BT-1528: ClassKind hierarchy propagation tests ---
-
 #[test]
 fn resolve_class_kind_for_direct_value_subclass() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2739,7 +2532,6 @@ fn resolve_class_kind_for_direct_value_subclass() {
     h.add_external_superclasses(&index);
     assert_eq!(h.resolve_class_kind("Point"), ClassKind::Value);
 }
-
 #[test]
 fn resolve_class_kind_for_indirect_value_subclass() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2751,7 +2543,6 @@ fn resolve_class_kind_for_indirect_value_subclass() {
     assert_eq!(h.resolve_class_kind("MyValueChild"), ClassKind::Value);
     assert!(h.is_value_subclass("MyValueChild"));
 }
-
 #[test]
 fn resolve_class_kind_for_direct_actor_subclass() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2760,7 +2551,6 @@ fn resolve_class_kind_for_direct_actor_subclass() {
     h.add_external_superclasses(&index);
     assert_eq!(h.resolve_class_kind("Counter"), ClassKind::Actor);
 }
-
 #[test]
 fn resolve_class_kind_for_indirect_actor_subclass() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2770,14 +2560,12 @@ fn resolve_class_kind_for_indirect_actor_subclass() {
     h.add_external_superclasses(&index);
     assert_eq!(h.resolve_class_kind("SpecialActor"), ClassKind::Actor);
 }
-
 #[test]
 fn resolve_class_kind_supervisor_stays_object() {
     // Supervisor inherits from Object (not Actor, not Value)
     let h = ClassHierarchy::with_builtins();
     assert_eq!(h.resolve_class_kind("Supervisor"), ClassKind::Object);
 }
-
 #[test]
 fn indirect_value_subclass_sets_is_value_in_hierarchy() {
     // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase.
@@ -2798,7 +2586,6 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     let base_info = h
         .get_class("MyValueBase")
         .expect("MyValueBase should exist");
@@ -2806,7 +2593,6 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
         base_info.is_value,
         "MyValueBase (direct Value subclass) should have is_value = true"
     );
-
     let child_info = h
         .get_class("MyValueChild")
         .expect("MyValueChild should exist");
@@ -2815,7 +2601,6 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
         "MyValueChild (indirect Value subclass via MyValueBase) should have is_value = true"
     );
 }
-
 #[test]
 fn indirect_value_subclass_gets_auto_methods() {
     // MyValueChild inherits from MyValueBase which inherits from Value.
@@ -2835,7 +2620,6 @@ fn indirect_value_subclass_gets_auto_methods() {
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     let child_info = h
         .get_class("MyValueChild")
         .expect("MyValueChild should exist");
@@ -2855,7 +2639,6 @@ fn indirect_value_subclass_gets_auto_methods() {
         "MyValueChild should have auto-generated 'withCount:' setter"
     );
 }
-
 #[test]
 fn testcase_indirect_value_subclass() {
     // TestCase inherits from Value, MyTest inherits from TestCase.
@@ -2875,7 +2658,6 @@ fn testcase_indirect_value_subclass() {
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     assert!(
         h.is_value_subclass("MyTest"),
         "MyTest should be a Value subclass"
@@ -2883,7 +2665,6 @@ fn testcase_indirect_value_subclass() {
     let info = h.get_class("MyTest").expect("MyTest should exist");
     assert!(info.is_value, "MyTest should have is_value = true");
 }
-
 #[test]
 fn supervisor_subclass_stays_object() {
     // Supervisor inherits from Object. WebApp inherits from Supervisor.
@@ -2900,7 +2681,6 @@ fn supervisor_subclass_stays_object() {
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     let info = h.get_class("WebApp").expect("WebApp should exist");
     assert!(
         !info.is_value,
@@ -2912,7 +2692,6 @@ fn supervisor_subclass_stays_object() {
         "WebApp should resolve to ClassKind::Object"
     );
 }
-
 #[test]
 fn cross_file_indirect_value_subclass() {
     // Simulate: File A defines MyValueBase as Value subclass (external).
@@ -2929,19 +2708,16 @@ fn cross_file_indirect_value_subclass() {
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     // At this point, MyValueBase is unknown, so MyChild has is_value = false
     let info_before = h.get_class("MyChild").expect("MyChild should exist");
     assert!(
         !info_before.is_value,
         "MyChild should not have is_value before external info"
     );
-
     // Add external superclass info: MyValueBase inherits from Value
     let mut external = HashMap::new();
     external.insert("MyValueBase".to_string(), "Value".to_string());
     h.add_external_superclasses(&external);
-
     // Now MyChild should resolve as a Value subclass through the hierarchy
     assert!(
         h.is_value_subclass("MyChild"),
@@ -2954,7 +2730,6 @@ fn cross_file_indirect_value_subclass() {
         "MyChild should have is_value = true after external info added"
     );
 }
-
 #[test]
 fn add_external_superclasses_indirect_value_is_value() {
     // Both classes are added via external index:
@@ -2964,7 +2739,6 @@ fn add_external_superclasses_indirect_value_is_value() {
     index.insert("MyValueBase".to_string(), "Value".to_string());
     index.insert("MyValueChild".to_string(), "MyValueBase".to_string());
     h.add_external_superclasses(&index);
-
     let base_info = h
         .get_class("MyValueBase")
         .expect("MyValueBase should exist");
@@ -2972,7 +2746,6 @@ fn add_external_superclasses_indirect_value_is_value() {
         base_info.is_value,
         "MyValueBase should have is_value = true"
     );
-
     let child_info = h
         .get_class("MyValueChild")
         .expect("MyValueChild should exist");
@@ -2981,7 +2754,6 @@ fn add_external_superclasses_indirect_value_is_value() {
         "MyValueChild (indirect Value subclass) should have is_value = true via external superclasses"
     );
 }
-
 /// BT-1559: Cross-file Value sub-subclass should find `new:` via hierarchy walk
 /// and `propagate_cross_file_class_kind` should synthesize auto-slot methods.
 ///
@@ -3017,7 +2789,6 @@ fn cross_file_value_sub_subclass_finds_new() {
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
-
     // Inject cross-file Base class (from another file: Value subclass: Base)
     let base_info = ClassInfo {
         name: EcoString::from("Base"),
@@ -3031,6 +2802,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         is_native: false,
         state: vec![EcoString::from("x")],
         state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -3039,17 +2811,14 @@ fn cross_file_value_sub_subclass_finds_new() {
         superclass_type_args: vec![],
     };
     h.add_from_beam_meta(vec![base_info]);
-
     // Before propagation, Child should NOT be marked as Value
     let child_before = h.get_class("Child").unwrap();
     assert!(
         !child_before.is_value,
         "Child should not be is_value before propagation"
     );
-
     // Run cross-file propagation
     h.propagate_cross_file_class_kind();
-
     // After propagation, Child should be marked as Value with auto-slot methods
     let child = h.get_class("Child").unwrap();
     assert!(child.is_value, "Child should be is_value after propagation");
@@ -3061,7 +2830,6 @@ fn cross_file_value_sub_subclass_finds_new() {
         child.methods.iter().any(|m| m.selector == "withCount:"),
         "Child should have auto-generated 'withCount:' setter"
     );
-
     // find_class_method should walk: Child → Base → Value and find new:
     let result = h.find_class_method("Child", "new:");
     assert!(
