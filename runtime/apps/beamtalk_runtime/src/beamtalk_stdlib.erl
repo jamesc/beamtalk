@@ -45,6 +45,11 @@ No Erlang code changes needed.
 %% Re-export for backwards compatibility (tests reference beamtalk_stdlib:topo_sort/1)
 -export([topo_sort/1]).
 
+-ifdef(TEST).
+%% Export internal helpers for EUnit coverage (BT-1975)
+-export([format_bt_module/1, class_entry_module/1, find_stdlib_ebin/0]).
+-endif.
+
 -doc """
 Start the stdlib initializer as a supervised process.
 

@@ -92,3 +92,35 @@ supervisor_count_children_test() ->
 
     %% Cleanup
     exit(Pid, normal).
+
+%%% BT-1975: Additional coverage tests
+
+init_child_spec_shutdown_test() ->
+    {ok, {_SupFlags, [ChildSpec]}} = beamtalk_actor_sup:init([]),
+    %% Should have a 5 second shutdown timeout
+    ?assertEqual(5000, maps:get(shutdown, ChildSpec)).
+
+init_child_spec_modules_test() ->
+    {ok, {_SupFlags, [ChildSpec]}} = beamtalk_actor_sup:init([]),
+    %% Modules list should contain beamtalk_actor
+    ?assertEqual([beamtalk_actor], maps:get(modules, ChildSpec)).
+
+init_child_spec_id_test() ->
+    {ok, {_SupFlags, [ChildSpec]}} = beamtalk_actor_sup:init([]),
+    %% Child id should be beamtalk_actor
+    ?assertEqual(beamtalk_actor, maps:get(id, ChildSpec)).
+
+supervisor_registered_name_test() ->
+    %% Start the supervisor — it registers under beamtalk_actor_sup
+    {ok, Pid} = beamtalk_actor_sup:start_link(),
+    ?assertEqual(Pid, whereis(beamtalk_actor_sup)),
+    %% Cleanup
+    exit(Pid, normal).
+
+start_actor_function_exported_test() ->
+    %% Verify start_actor/3 is exported with correct arity
+    ?assert(erlang:function_exported(beamtalk_actor_sup, start_actor, 3)).
+
+start_link_function_exported_test() ->
+    %% Verify start_link/0 is exported
+    ?assert(erlang:function_exported(beamtalk_actor_sup, start_link, 0)).
