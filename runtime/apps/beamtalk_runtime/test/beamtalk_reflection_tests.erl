@@ -117,3 +117,90 @@ source_file_from_module_returns_path_for_compiled_bt_module_test() ->
             %% Skip if stdlib not compiled
             ok
     end.
+
+%%% ============================================================================
+%%% inspect_string/1 tests
+%%% ============================================================================
+
+inspect_string_empty_fields_test() ->
+    State = #{'$beamtalk_class' => 'Empty'},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assertEqual(<<"a Empty">>, Result).
+
+inspect_string_single_field_test() ->
+    State = #{'$beamtalk_class' => 'Counter', value => 0},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"Counter">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"value">>)).
+
+inspect_string_multiple_fields_test() ->
+    State = #{'$beamtalk_class' => 'Point', x => 10, y => 20},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"Point">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"x">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"y">>)).
+
+inspect_string_with_string_field_test() ->
+    State = #{'$beamtalk_class' => 'Greeter', name => <<"Alice">>},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"Greeter">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"name">>)).
+
+inspect_string_nil_field_test() ->
+    State = #{'$beamtalk_class' => 'Obj', value => nil},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"value">>)).
+
+inspect_string_defaults_class_to_object_test() ->
+    %% State without $beamtalk_class should default to 'Object'
+    State = #{},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assertEqual(<<"a Object">>, Result).
+
+inspect_string_boolean_field_test() ->
+    State = #{'$beamtalk_class' => 'Flag', active => true},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"active">>)).
+
+inspect_string_list_field_test() ->
+    State = #{'$beamtalk_class' => 'Container', items => [1, 2, 3]},
+    Result = beamtalk_reflection:inspect_string(State),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"items">>)).
+
+%%% ============================================================================
+%%% field_names/1 additional edge cases
+%%% ============================================================================
+
+field_names_filters_all_internal_prefixes_test() ->
+    %% Ensure all four internal fields are filtered
+    State = #{
+        '$beamtalk_class' => 'MyClass',
+        '__class_mod__' => my_mod,
+        '__methods__' => #{},
+        '__registry_pid__' => self(),
+        user_field => 42
+    },
+    Names = beamtalk_reflection:field_names(State),
+    ?assertEqual([user_field], Names).
+
+%%% ============================================================================
+%%% write_field/3 additional edge cases
+%%% ============================================================================
+
+write_field_overwrite_nil_test() ->
+    State = #{'$beamtalk_class' => 'Obj', value => nil},
+    {Value, NewState} = beamtalk_reflection:write_field(value, 42, State),
+    ?assertEqual(42, Value),
+    ?assertEqual(42, maps:get(value, NewState)).
+
+write_field_with_complex_key_test() ->
+    State = #{'$beamtalk_class' => 'Obj'},
+    {Value, NewState} = beamtalk_reflection:write_field(some_long_field_name, <<"data">>, State),
+    ?assertEqual(<<"data">>, Value),
+    ?assertEqual(<<"data">>, maps:get(some_long_field_name, NewState)).
