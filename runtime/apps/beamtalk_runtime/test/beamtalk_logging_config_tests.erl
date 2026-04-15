@@ -569,7 +569,8 @@ mcp_signal_file_with_real_workspace_test_() ->
 
 stop_workspace_meta_if_running() ->
     case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Pid ->
             gen_server:stop(Pid),
             ok

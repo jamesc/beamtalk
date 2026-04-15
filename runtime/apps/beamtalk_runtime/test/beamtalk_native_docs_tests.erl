@@ -399,8 +399,13 @@ lookup_with_empty_signature_list_test() ->
 lookup_with_multiple_signatures_test() ->
     %% format_signatures/1 joins multiple sigs with newlines
     FDocs = [
-        {{function, msig, 0}, [], [<<"msig() -> ok.">>, <<"msig() -> error.">>],
-            #{<<"en">> => <<"multi sig">>}, #{}}
+        {
+            {function, msig, 0},
+            [],
+            [<<"msig() -> ok.">>, <<"msig() -> error.">>],
+            #{<<"en">> => <<"multi sig">>},
+            #{}
+        }
     ],
     DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, FDocs},
     {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
