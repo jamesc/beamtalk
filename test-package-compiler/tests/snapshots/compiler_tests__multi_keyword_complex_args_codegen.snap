@@ -72,6 +72,11 @@ module 'multi_keyword_complex_args' ['start_link'/1, 'start_link'/2, 'init'/1, '
 
 
 'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'multi_keyword_complex_args')
+    end in
     let DefaultState = ~{
         '__class_mod__' => 'multi_keyword_complex_args'
     }~

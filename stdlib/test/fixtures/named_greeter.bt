@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Second actor class used by named-registration tests to exercise the
+// `wrong_class` branch of `class named:` (BT-1988 / ADR 0079).
+
+Actor subclass: NamedGreeter
+
+  greet: name :: String -> String => "Hello, " ++ name

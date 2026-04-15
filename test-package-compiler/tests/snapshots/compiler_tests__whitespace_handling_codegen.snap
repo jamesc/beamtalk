@@ -72,6 +72,11 @@ module 'whitespace_handling' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_
 
 
 'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'whitespace_handling')
+    end in
     let DefaultState = ~{
         '__class_mod__' => 'whitespace_handling'
         , 'z' => 100

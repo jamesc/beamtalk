@@ -90,7 +90,9 @@ that the Behaviour/Class libraries can rely on.
     classReload/1,
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
-    classProtocols/1
+    classProtocols/1,
+    %% ADR 0079 / BT-1988: exposed for cross-module hierarchy checks
+    walk_hierarchy/3
 ]).
 
 %%% ============================================================================

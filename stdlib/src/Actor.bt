@@ -36,6 +36,85 @@ Object subclass: Actor
   /// ```
   class sealed spawnWith: initArgs -> Self => @intrinsic actorSpawnWith
 
+  // === Named registration (ADR 0079) ===
+
+  /// Atomically spawn a new actor and register it under `name`.
+  ///
+  /// Uses `gen_server:start_link({local, Name}, ...)` under the hood so the
+  /// name is established during process startup — no TOCTOU window between
+  /// `spawn` and `registerAs:`. Prefer this over post-spawn `registerAs:`
+  /// whenever the name is known up front.
+  ///
+  /// Returns `Result ok: actor` on success, or `Result error:` with one of:
+  /// - `name_registered` — another process is already registered under `name`
+  /// - `reserved_name` — `name` is in the OTP kernel / stdlib blocklist
+  /// - `type_error` — `name` is not a Symbol
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := (Counter spawnAs: #counter) unwrap
+  /// (Counter spawnAs: #counter) onError: [:e | Logger warn: "name taken"]
+  /// ```
+  class sealed spawnAs: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor) doSpawnAs: self withName: name
+
+  /// Atomically spawn a new actor with init args and register it under `name`.
+  ///
+  /// Same contract as `spawnAs:` plus the initialisation arguments passed to
+  /// the actor's `init/1` callback.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := (Counter spawnWith: #{#count => 10} as: #counter) unwrap
+  /// ```
+  class sealed spawnWith: initArgs as: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doSpawnWith: self
+      args: initArgs
+      name: name
+
+  /// Look up a registered actor by name, checked against the receiver class.
+  ///
+  /// Returns `Result ok: actor` when a process is registered under `name` and
+  /// its class is the receiver (or any subclass). `Self` resolves to the
+  /// receiver class at the call site, so subclasses inherit a typed lookup:
+  ///
+  /// ```beamtalk
+  /// Counter named: #counter           // => Result(Counter, Error)
+  /// Actor named: #anything            // => Result(Actor, Error)
+  /// ```
+  ///
+  /// Error cases:
+  /// - `name_not_registered` — nothing registered under `name`
+  /// - `wrong_class` — registered, but not a (subclass of) the receiver class
+  /// - `type_error` — `name` is not a Symbol
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// engine := (WorkflowEngine named: #workflowEngine) unwrap
+  /// (Logger named: #counter) // => Result error: (beamtalk_error wrong_class)
+  /// ```
+  class sealed named: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor) named: self as: name
+
+  /// Return every currently-registered Beamtalk actor as `Actor` proxies.
+  ///
+  /// Filters out raw Erlang-registered processes (kernel, logger, user FFI
+  /// registrations) — only actors carrying the `'$beamtalk_actor'` marker
+  /// appear. Each returned proxy carries its real class, so
+  /// `Actor allRegistered first class` returns the concrete subclass, not
+  /// `Actor`.
+  ///
+  /// Intended for tooling and REPL discovery; production code should use
+  /// `Actor named:` to address known names directly.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor allRegistered  // => #(an Actor(Counter), an Actor(Logger))
+  /// ```
+  class sealed allRegistered -> List(Actor) =>
+    (Erlang beamtalk_actor) allRegistered: self
+
   // === Supervision defaults ===
 
   /// Default OTP restart policy for this actor class.
@@ -84,6 +163,56 @@ Object subclass: Actor
     policy := self supervisionPolicy
     spec := SupervisionSpec new withActorClass: self
     spec withRestart: policy
+
+  /// Register this (already-spawned) actor under `name`.
+  ///
+  /// Non-atomic with respect to spawn: another process may claim `name`
+  /// between the actor's `spawn` and this call. Prefer `class spawnAs:` when
+  /// the name is known at spawn time.
+  ///
+  /// On success returns `Result ok: self` so calls can be chained:
+  ///
+  /// ```beamtalk
+  /// (counter registerAs: #c) onSuccess: [:c | c increment]
+  /// ```
+  sealed registerAs: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor) registerAs: self as: name
+
+  /// Unregister this actor's name, if any. Idempotent.
+  ///
+  /// Returns `#ok` even when the actor has no registered name or the name has
+  /// already been released. When a real failure occurs (reserved name, type
+  /// error, etc.) the error is raised — consistent with other teardown methods
+  /// like `stop` and `kill`.
+  ///
+  /// When an actor process exits, Erlang automatically releases its registered
+  /// name; callers do not need to call `unregister` from `terminate:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter unregister   // => #ok
+  /// ```
+  sealed unregister -> Symbol =>
+    // FFI returns bare `ok` which auto-converts to `Result ok: nil`; discard
+    // it and return the documented `#ok` Symbol directly (ADR 0079).
+    (Erlang beamtalk_actor) unregister: self
+    #ok
+
+  /// Return the Symbol this actor is registered under, or `nil` if unnamed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter registeredName   // => #counter (or nil)
+  /// ```
+  sealed registeredName => (Erlang beamtalk_actor) registeredName: self
+
+  /// Whether this actor currently has a registered name.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter isRegistered   // => true or false
+  /// ```
+  sealed isRegistered -> Boolean => (Erlang beamtalk_actor) isRegistered: self
 
   // === Timeout proxy ===
 

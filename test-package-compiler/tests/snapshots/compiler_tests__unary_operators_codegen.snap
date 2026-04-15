@@ -72,6 +72,11 @@ module 'unary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
 
 
 'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'unary_operators')
+    end in
     let DefaultState = ~{
         '__class_mod__' => 'unary_operators'
         , 'counter' => 0

@@ -199,6 +199,21 @@ handle_getValue([], State) ->
     reserved_name/1
 ]).
 
+%% Beamtalk stdlib FFI shims for Actor.bt named registration (ADR 0079, BT-1988)
+%% Selectors are re-derived by beamtalk_erlang_proxy from the first keyword;
+%% these names deliberately differ from the runtime `spawnAs/2,3` entry points
+%% so they do not collide at the FFI dispatch layer.
+-export([
+    doSpawnAs/2,
+    doSpawnWith/3,
+    registerAs/2,
+    unregister/1,
+    registeredName/1,
+    isRegistered/1,
+    named/2,
+    allRegistered/1
+]).
+
 %% Lifecycle telemetry (BT-1638: called from compiled actor init/terminate)
 -export([maybe_execute_telemetry/3]).
 
@@ -2251,6 +2266,391 @@ to `Result error: ...`.
                 )
             )
         )}.
+
+%%% ============================================================================
+%%% Beamtalk stdlib FFI shims (ADR 0079, BT-1988)
+%%%
+%%% These functions back `stdlib/src/Actor.bt`'s named-registration API via
+%%% `(Erlang beamtalk_actor)` FFI calls. They take the class object (or actor
+%%% instance) as the first argument and translate runtime `{ok, _} | {error, _}`
+%%% tuples into the shape ADR 0076 auto-converts to `Result` at the FFI
+%%% boundary.
+%%% ============================================================================
+
+-doc """
+FFI shim for `class spawnAs: name :: Symbol -> Result(Self, Error)`.
+
+`Self` is the class object `{beamtalk_object, 'ClassName class', Module, ClassPid}`.
+Delegates to `'spawnAs'/3` with an empty args map, then wraps the returned pid
+into a `#beamtalk_object{}` carrying the receiver class.
+""".
+-spec doSpawnAs(#beamtalk_object{}, term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnAs(Self, Name) ->
+    do_spawn_with_selector(Self, #{}, Name, 'spawnAs:').
+
+-doc """
+FFI shim for `class spawnWith: initArgs as: name :: Symbol -> Result(Self, Error)`.
+
+Atomically spawns an actor registered under `Name`. Returns a tagged
+`{ok, ActorObject} | {error, #beamtalk_error{}}` tuple.
+""".
+-spec doSpawnWith(#beamtalk_object{}, term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnWith(Self, InitArgs, Name) ->
+    do_spawn_with_selector(Self, InitArgs, Name, 'spawnWith:as:').
+
+%% Shared implementation for doSpawnAs/2 and doSpawnWith/3. The `Selector`
+%% parameter controls which public-facing Beamtalk selector is threaded into
+%% returned structured errors so error messages match the method the user
+%% called.
+-spec do_spawn_with_selector(#beamtalk_object{}, term(), term(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, Module} ->
+            case 'spawnAs'(Name, Module, InitArgs) of
+                {ok, Pid} ->
+                    {ok, #beamtalk_object{
+                        class = ClassName,
+                        class_mod = Module,
+                        pid = Pid
+                    }};
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{
+                        class = ClassName,
+                        selector = Selector
+                    }};
+                {error, Reason} ->
+                    {error, generic_spawn_error(ClassName, Selector, Reason)}
+            end;
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, Selector)}
+    end.
+
+-doc """
+FFI shim for `registerAs: name :: Symbol -> Result(Self, Error)`.
+
+On success returns the receiver (the actor object) wrapped in `{ok, _}` so
+the stdlib boundary materialises it as `Result ok: self` — matching ADR 0079's
+fluent-chain contract.
+""".
+-spec registerAs(#beamtalk_object{}, term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+registerAs(Self, Name) when is_record(Self, beamtalk_object) ->
+    Pid = Self#beamtalk_object.pid,
+    ClassName = Self#beamtalk_object.class,
+    case register_name(Name, Pid) of
+        {ok, _} ->
+            {ok, Self};
+        {error, #beamtalk_error{} = Err} ->
+            {error, Err#beamtalk_error{
+                class = ClassName,
+                selector = 'registerAs:'
+            }}
+    end;
+registerAs(Self, _Name) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', 'registerAs:'),
+            iolist_to_binary(
+                io_lib:format(
+                    "registerAs: expects an Actor receiver, got ~tp", [Self]
+                )
+            )
+        )}.
+
+-doc """
+FFI shim for `unregister -> Symbol`.
+
+Idempotent: returns `#ok` even if the receiver was not registered or was
+already unregistered. Only raises on real failures (reserved-name, type error).
+""".
+-spec unregister(#beamtalk_object{}) -> ok.
+unregister(Self) when is_record(Self, beamtalk_object) ->
+    Pid = Self#beamtalk_object.pid,
+    case registered_name_for_pid(Pid) of
+        undefined ->
+            ok;
+        Name ->
+            %% TOCTOU guard: between `registered_name_for_pid/1` above and
+            %% `unregister_name/1` below, another process can claim the freed
+            %% name. Only unregister when the registry still points at our
+            %% pid; otherwise treat as idempotent (someone else beat us to it,
+            %% possibly with a replacement actor of the same name).
+            case erlang:whereis(Name) of
+                Pid ->
+                    case unregister_name(Name) of
+                        ok ->
+                            ok;
+                        {error, #beamtalk_error{kind = name_registered}} ->
+                            %% Raced with another unregister — still idempotent.
+                            ok;
+                        {error, #beamtalk_error{} = Err0} ->
+                            Err1 = beamtalk_error:with_selector(Err0, unregister),
+                            beamtalk_error:raise(
+                                Err1#beamtalk_error{class = Self#beamtalk_object.class}
+                            )
+                    end;
+                _Other ->
+                    %% Name is gone or held by another pid — nothing to do.
+                    ok
+            end
+    end;
+unregister(Self) ->
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', unregister),
+            iolist_to_binary(
+                io_lib:format(
+                    "unregister expects an Actor receiver, got ~tp", [Self]
+                )
+            )
+        )
+    ).
+
+-doc """
+FFI shim for `registeredName -> Symbol | Nil`.
+
+Returns the atom the actor is registered under, or `nil` when the actor has no
+registered name (or has terminated).
+""".
+-spec registeredName(#beamtalk_object{}) -> atom() | nil.
+registeredName(Self) when is_record(Self, beamtalk_object) ->
+    case registered_name_for_pid(Self#beamtalk_object.pid) of
+        undefined -> nil;
+        Name -> Name
+    end;
+registeredName(_) ->
+    nil.
+
+-doc """
+FFI shim for `isRegistered -> Boolean`.
+""".
+-spec isRegistered(#beamtalk_object{}) -> boolean().
+isRegistered(Self) when is_record(Self, beamtalk_object) ->
+    registered_name_for_pid(Self#beamtalk_object.pid) =/= undefined;
+isRegistered(_) ->
+    false.
+
+-doc """
+FFI shim for `class named: name :: Symbol -> Result(Self, Error)`.
+
+Looks up the pid registered under `Name`, validates the registered actor's
+class is (or descends from) the receiver class via the `'$beamtalk_actor'`
+process-dictionary marker, and returns a `#beamtalk_object{}` narrowed to the
+receiver class. Returns structured errors for the `name_not_registered`,
+`wrong_class`, and `type_error` cases per ADR 0079.
+""".
+-spec named(#beamtalk_object{}, term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+named(Self, Name) when is_atom(Name) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ReceiverClass, _ReceiverModule} ->
+            %% Hoisted out so error cases below can reference it uniformly.
+            _ = ReceiverClass,
+            case erlang:whereis(Name) of
+                undefined ->
+                    {error,
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(
+                                name_not_registered, ReceiverClass, 'named:'
+                            ),
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "No actor is registered under name '~ts'",
+                                    [Name]
+                                )
+                            )
+                        )};
+                Pid when is_pid(Pid) ->
+                    case pid_class_name(Pid) of
+                        undefined ->
+                            {error,
+                                beamtalk_error:with_hint(
+                                    beamtalk_error:new(
+                                        wrong_class, ReceiverClass, 'named:'
+                                    ),
+                                    iolist_to_binary(
+                                        io_lib:format(
+                                            "Name '~ts' is registered to a non-Beamtalk "
+                                            "process",
+                                            [Name]
+                                        )
+                                    )
+                                )};
+                        ActualClass ->
+                            case class_matches(ActualClass, ReceiverClass) of
+                                true ->
+                                    case class_mod_for(ActualClass) of
+                                        {ok, ActualModule} ->
+                                            {ok, #beamtalk_object{
+                                                class = ActualClass,
+                                                class_mod = ActualModule,
+                                                pid = Pid
+                                            }};
+                                        not_found ->
+                                            {error,
+                                                beamtalk_error:with_hint(
+                                                    beamtalk_error:new(
+                                                        wrong_class,
+                                                        ReceiverClass,
+                                                        'named:'
+                                                    ),
+                                                    iolist_to_binary(
+                                                        io_lib:format(
+                                                            "Registered actor class "
+                                                            "'~ts' has no loaded module",
+                                                            [ActualClass]
+                                                        )
+                                                    )
+                                                )}
+                                    end;
+                                false ->
+                                    {error,
+                                        beamtalk_error:with_hint(
+                                            beamtalk_error:new(
+                                                wrong_class, ReceiverClass, 'named:'
+                                            ),
+                                            iolist_to_binary(
+                                                io_lib:format(
+                                                    "Name '~ts' is registered to a "
+                                                    "~ts, not a ~ts",
+                                                    [Name, ActualClass, ReceiverClass]
+                                                )
+                                            )
+                                        )}
+                            end
+                    end
+            end;
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, 'named:')}
+    end;
+named(_Self, Name) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', 'named:'),
+            iolist_to_binary(
+                io_lib:format(
+                    "named: expects a Symbol, got ~tp", [Name]
+                )
+            )
+        )}.
+
+-doc """
+FFI shim for `class allRegistered -> List(Actor)`.
+
+Returns a list of `#beamtalk_object{}` proxies for every currently-registered
+Beamtalk actor (those carrying the `'$beamtalk_actor'` marker). Kernel
+processes and raw OTP-registered processes are excluded.
+""".
+-spec allRegistered(#beamtalk_object{}) -> [#beamtalk_object{}].
+allRegistered(_Self) ->
+    lists:filtermap(
+        fun(Name) ->
+            case erlang:whereis(Name) of
+                undefined ->
+                    false;
+                Pid when is_pid(Pid) ->
+                    case pid_class_name(Pid) of
+                        undefined ->
+                            false;
+                        ClassName ->
+                            case class_mod_for(ClassName) of
+                                {ok, Module} ->
+                                    {true, #beamtalk_object{
+                                        class = ClassName,
+                                        class_mod = Module,
+                                        pid = Pid
+                                    }};
+                                not_found ->
+                                    false
+                            end
+                    end
+            end
+        end,
+        all_registered()
+    ).
+
+%%% Internal helpers for the FFI shims above.
+
+-spec class_self_to_name_and_module(term()) ->
+    {ok, atom(), module()} | {error, #beamtalk_error{}}.
+class_self_to_name_and_module(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
+    try
+        ClassName = beamtalk_object_class:class_name(ClassPid),
+        Module = beamtalk_object_class:module_name(ClassPid),
+        {ok, ClassName, Module}
+    catch
+        exit:_ ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(type_error, 'Actor'),
+                    <<"Class object is not reachable">>
+                )}
+    end;
+class_self_to_name_and_module(Other) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor'),
+            iolist_to_binary(
+                io_lib:format(
+                    "Expected a class receiver, got ~tp", [Other]
+                )
+            )
+        )}.
+
+-spec registered_name_for_pid(pid()) -> atom() | undefined.
+registered_name_for_pid(Pid) when is_pid(Pid) ->
+    case erlang:process_info(Pid, registered_name) of
+        {registered_name, Name} -> Name;
+        [] -> undefined;
+        undefined -> undefined
+    end.
+
+-spec pid_class_name(pid()) -> atom() | undefined.
+pid_class_name(Pid) ->
+    case erlang:process_info(Pid, dictionary) of
+        {dictionary, Dict} when is_list(Dict) ->
+            case lists:keyfind('$beamtalk_actor', 1, Dict) of
+                {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
+                _ -> undefined
+            end;
+        _ ->
+            undefined
+    end.
+
+-spec class_matches(atom(), atom()) -> boolean().
+class_matches(ActualClass, ReceiverClass) when ActualClass =:= ReceiverClass ->
+    true;
+class_matches(ActualClass, ReceiverClass) ->
+    beamtalk_behaviour_intrinsics:walk_hierarchy(
+        ActualClass,
+        fun(CN, _CPid, _Acc) ->
+            case CN of
+                ReceiverClass -> {halt, true};
+                _ -> {cont, false}
+            end
+        end,
+        false
+    ).
+
+-spec class_mod_for(atom()) -> {ok, module()} | not_found.
+class_mod_for(ClassName) ->
+    case beamtalk_class_module_table:lookup(ClassName) of
+        {ok, Module} -> {ok, Module};
+        not_found -> not_found
+    end.
+
+-spec generic_spawn_error(atom(), atom(), term()) -> #beamtalk_error{}.
+generic_spawn_error(ClassName, Selector, Reason) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:with_selector(
+            beamtalk_error:new(instantiation_error, ClassName),
+            Selector
+        ),
+        iolist_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
+    ).
 
 -spec name_registered_error(atom()) -> {error, #beamtalk_error{}}.
 name_registered_error(Name) ->
