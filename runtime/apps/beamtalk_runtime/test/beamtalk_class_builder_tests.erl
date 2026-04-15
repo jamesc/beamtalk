@@ -736,8 +736,12 @@ register_class_load_callback_test_() ->
                 ?assert(is_process_alive(ClassPid)),
                 %% BuilderPid might be stopped via gen_server:stop (which might
                 %% timeout since it's not a real gen_server) or killed — either
-                %% exercises the code path.
-                gen_server:stop(ClassPid, normal, 5000),
+                %% exercises the code path. Catch timeouts from the fake builder.
+                try
+                    gen_server:stop(ClassPid, normal, 5000)
+                catch
+                    exit:_ -> ok
+                end,
                 %% Cleanup builder
                 case is_process_alive(BuilderPid) of
                     true -> exit(BuilderPid, kill);
