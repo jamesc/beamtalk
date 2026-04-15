@@ -11,6 +11,11 @@ Tests hot code reloading, actor migration, and module replacement.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
+%% BT-1980: gen_server callbacks for a minimal test actor used to exercise
+%% trigger_code_change/2,3 success paths via sys:change_code/4.
+-behaviour(gen_server).
+-export([init/1, handle_call/3, handle_cast/2, code_change/3]).
+
 %%====================================================================
 %% Tests for beamtalk_hot_reload domain service
 %%====================================================================
@@ -308,6 +313,128 @@ test_field_migration_preserves_internal_keys() ->
         v1, OldState, {NewInstanceVars, 'bt@counter'}
     ),
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
+
+%%====================================================================
+%% Helpers
+%%====================================================================
+
+%%====================================================================
+%% BT-1980: trigger_code_change — live actor success and error branches
+%%====================================================================
+
+%% Minimal gen_server for testing sys:change_code/4 success paths.
+init(State) -> {ok, State}.
+handle_call(_Msg, _From, State) -> {reply, ok, State}.
+handle_cast({set, New}, _State) -> {noreply, New};
+handle_cast(_, State) -> {noreply, State}.
+code_change(_OldVsn, _State, {crash, Reason}) -> exit(Reason);
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+
+trigger_code_change_live_actor_success_test() ->
+    %% BT-1980: trigger_code_change/2 reports Upgraded = 1 on a live actor
+    %% that accepts sys:change_code/4.
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        {ok, Upgraded, Failures} = beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid]),
+        ?assertEqual(1, Upgraded),
+        ?assertEqual([], Failures)
+    after
+        unlink(Pid),
+        gen_server:stop(Pid)
+    end.
+
+trigger_code_change_3_live_actor_success_test() ->
+    %% BT-1980: trigger_code_change/3 reports Upgraded = 1 on a live actor
+    %% with explicit Extra.
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        {ok, Upgraded, Failures} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], some_extra),
+        ?assertEqual(1, Upgraded),
+        ?assertEqual([], Failures)
+    after
+        unlink(Pid),
+        gen_server:stop(Pid)
+    end.
+
+trigger_code_change_mixed_success_and_failure_test() ->
+    %% BT-1980: Mixed live + dead pids — Upgraded counts live ones, Failures the dead.
+    {ok, LivePid} = gen_server:start_link(?MODULE, #{}, []),
+    DeadPid = spawn(fun() -> ok end),
+    Ref = erlang:monitor(process, DeadPid),
+    receive
+        {'DOWN', Ref, process, DeadPid, _} -> ok
+    after 1000 -> error(timeout)
+    end,
+    try
+        {ok, Upgraded, Failures} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [LivePid, DeadPid]),
+        ?assertEqual(1, Upgraded),
+        ?assertEqual(1, length(Failures)),
+        [{DeadPid, Reason}] = Failures,
+        ?assertEqual(noproc, Reason)
+    after
+        unlink(LivePid),
+        gen_server:stop(LivePid)
+    end.
+
+try_change_code_crash_produces_exception_failure_test() ->
+    %% BT-1980: code_change that exits is caught by try_change_code and
+    %% surfaces as {error, _} — where the reason is either a structured
+    %% {Class, Error} tuple (general catch) or an atomic reason derived
+    %% from sys:change_code's OTP wrapping. Either way the failure is
+    %% reported without propagating the exit to the caller.
+    {ok, Pid} = gen_server:start_link(?MODULE, #{}, []),
+    try
+        {ok, 0, Failures} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {crash, my_reason}),
+        ?assertEqual(1, length(Failures)),
+        [{Pid, Reason}] = Failures,
+        %% Reason must NOT be noproc (the process was alive) nor timeout,
+        %% ruling out those two specific catch clauses — this verifies the
+        %% Class:Error catch-all path produced a non-empty failure record.
+        ?assertNotEqual(noproc, Reason),
+        ?assertNotEqual(timeout, Reason)
+    after
+        %% Process may have already been killed by the exit; guard teardown.
+        case is_process_alive(Pid) of
+            true ->
+                unlink(Pid),
+                gen_server:stop(Pid);
+            false ->
+                ok
+        end
+    end.
+
+%%====================================================================
+%% BT-1980: field migration error path — non-map state
+%%====================================================================
+
+field_migration_with_non_map_state_falls_through_test() ->
+    %% BT-1980: The field-migration code_change head only matches when
+    %% State is a map. A non-map state falls through to the generic head
+    %% and is returned unchanged even when Extra is a {NewVars, Module} tuple.
+    State = [1, 2, 3],
+    {ok, NewState} =
+        beamtalk_hot_reload:code_change(v1, State, {[a, b], some_module}),
+    ?assertEqual(State, NewState).
+
+%%====================================================================
+%% BT-1980: init failure exception — covers init_error catch branch (line 105 of src)
+%%====================================================================
+
+field_migration_init_throws_returns_old_state_test() ->
+    %% BT-1980: When Module:init/1 throws any exception (not just returns
+    %% an error tuple), migrate_fields catches it and returns OldState.
+    %% Using an atom that is a loaded module but whose init/1 throws.
+    OldState = #{'$beamtalk_class' => 'X', value => 99},
+    %% gen_server:init/1 is not exported as a plain init/1 on arbitrary modules;
+    %% pick a module whose init/1 either does not exist or crashes on #{}.
+    {ok, NewState} =
+        beamtalk_hot_reload:code_change(
+            v1, OldState, {[value], lists}
+        ),
+    ?assertEqual(OldState, NewState).
 
 %%====================================================================
 %% Helpers
