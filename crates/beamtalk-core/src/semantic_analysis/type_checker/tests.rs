@@ -3443,6 +3443,215 @@ Value subclass: User
     );
 }
 
+// ---- Self in generic position tests (BT-1986, Phase 0 of ADR 0079) ----
+
+/// BT-1986: Verify that `Self` substitutes correctly when it appears as a
+/// generic type argument (e.g. `Result(Self, Error)`). This is required by
+/// ADR 0079's typed-lookup API, where `class named: name -> Result(Self, Error)`
+/// is declared once on `Actor` and subclasses like `Counter` are expected to
+/// see the return type narrowed to `Result(Counter, Error)`.
+///
+/// Observable consequence: after unwrapping via `value`, the resulting type
+/// should expose subclass-specific methods without producing false DNU
+/// warnings. `onlyOnSub` is only defined on `Sub`, so calling it on
+/// `(Sub lookup: #key) value` proves that `Self` inside `Result(Self, Error)`
+/// resolved to `Sub` (not `Base`, not `Dynamic`, not a bogus "Self" class).
+#[test]
+fn test_self_in_generic_return_type_narrows_to_subclass() {
+    let source = "
+Value subclass: Base
+  class lookup: key :: Symbol -> Result(Self, Error) => Result ok: self
+
+Base subclass: Sub
+  onlyOnSub => 42
+
+Value subclass: Driver
+  test =>
+    r := Sub lookup: #key
+    r value onlyOnSub
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // No DNU warnings for `onlyOnSub` — that method is on `Sub`, not `Base`.
+    // If Self substitution fails inside Result(Self, Error), the inner type
+    // would not be Sub and `onlyOnSub` would either warn as DNU (if resolved
+    // to Base/Self-as-class-name) or be silently skipped (if Dynamic, which
+    // still counts as working per the gradual-typing escape hatch).
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Self inside Result(Self, Error) should narrow to the receiver; \
+         got DNU warnings: {dnu_warnings:?}"
+    );
+}
+
+/// BT-1986: Direct inspection of inferred type for `Self` inside `Result(...)`.
+/// Uses `check_module` + method-body type inference to assert the outer
+/// result type is `Result(Sub, Error)`, not `Result(Self, Error)` or
+/// `Result(Dynamic, Error)`.
+#[test]
+fn test_self_in_generic_return_type_is_substituted() {
+    let source = "
+Value subclass: Base
+  class lookup: key :: Symbol -> Result(Self, Error) => Result ok: self
+
+Base subclass: Sub
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    // Build a minimal method body `Sub lookup: #key` and infer its type.
+    let probe_source = "
+Value subclass: Base
+  class lookup: key :: Symbol -> Result(Self, Error) => Result ok: self
+
+Base subclass: Sub
+
+Value subclass: Driver
+  probe =>
+    Sub lookup: #key
+";
+    let probe_tokens = crate::source_analysis::lex_with_eof(probe_source);
+    let (probe_module, probe_diags) = crate::source_analysis::parse(probe_tokens);
+    assert!(probe_diags.is_empty(), "Parse failed: {probe_diags:?}");
+    let probe_hierarchy = crate::semantic_analysis::ClassHierarchy::build(&probe_module)
+        .0
+        .unwrap();
+
+    let driver = probe_module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe")
+        .expect("probe method");
+    let stmt = probe.body.last().expect("probe has at least one statement");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    let ty = checker.infer_expr(expr, &probe_hierarchy, &mut env, false);
+
+    // Assert the outer type is Result with Sub as its first type arg.
+    match &ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(
+                class_name.as_str(),
+                "Result",
+                "Expected outer type Result, got {class_name}"
+            );
+            let first = type_args
+                .first()
+                .expect("Result should have at least one type arg");
+            let inner_name = first.as_known().map(EcoString::to_string);
+            assert_eq!(
+                inner_name.as_deref(),
+                Some("Sub"),
+                "Expected Self to be substituted to Sub, got {first:?} (full type: {ty:?})"
+            );
+        }
+        other => panic!("Expected Known(Result, [Sub, ...]), got {other:?}"),
+    }
+
+    // Sanity: a parallel module-level check should report no warnings
+    // about the generic return type itself.
+    let mut module_checker = TypeChecker::new();
+    module_checker.check_module(&module, &hierarchy);
+    let relevant: Vec<_> = module_checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Self") || d.message.contains("Result"))
+        .collect();
+    assert!(
+        relevant.is_empty(),
+        "Unexpected diagnostics mentioning Self/Result: {relevant:?}"
+    );
+}
+
+/// BT-1986: When called directly on the declaring class, `Self` inside a
+/// generic return type should resolve to that class (not `Self` as a class
+/// name, not `Dynamic`). This is the base case for ADR 0079's
+/// `Actor>>class named: -> Result(Self, Error)` — calling `Actor named: #x`
+/// on Actor itself should give `Result(Actor, Error)`.
+#[test]
+fn test_self_in_generic_return_type_on_declaring_class() {
+    let source = "
+Value subclass: Base
+  class lookup: key :: Symbol -> Result(Self, Error) => Result ok: self
+
+Value subclass: Driver
+  probe =>
+    Base lookup: #key
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe")
+        .expect("probe method");
+    let expr = &probe
+        .body
+        .last()
+        .expect("probe has at least one statement")
+        .expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "Result");
+            let first = type_args.first().expect("Result should have type args");
+            assert_eq!(
+                first.as_known().map(EcoString::to_string).as_deref(),
+                Some("Base"),
+                "Expected Self to resolve to Base on direct call, got {first:?}"
+            );
+        }
+        other => panic!("Expected Known(Result, [Base, ...]), got {other:?}"),
+    }
+}
+
 // ── infer_method_return_types / take_method_return_types tests (BT-1042) ─────
 
 fn make_class_with_methods(name: &str, instance_methods: Vec<MethodDefinition>) -> ClassDefinition {

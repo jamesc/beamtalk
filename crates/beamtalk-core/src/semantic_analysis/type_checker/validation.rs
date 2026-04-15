@@ -149,6 +149,12 @@ impl TypeChecker {
                         // BT-1836: Parse parameterized return types like "Stream(Integer)"
                         // into Known { class_name: "Stream", type_args: [Known("Integer")] }
                         // so downstream method resolution works correctly.
+                        //
+                        // BT-1986: `Self` appearing as a (nested) type argument —
+                        // e.g. `class named: -> Result(Self, Error)` on Actor —
+                        // resolves to the static receiver class. This powers
+                        // ADR 0079's typed-lookup API where `Counter named: #c`
+                        // should infer as `Result(Counter, Error)`.
                         if let Some(open) = ret_ty.find('(') {
                             let base = &ret_ty[..open];
                             let inner = &ret_ty[open + 1..ret_ty.len() - 1];
@@ -157,7 +163,9 @@ impl TypeChecker {
                                 .iter()
                                 .map(|p| {
                                     let p_eco: EcoString = (*p).into();
-                                    if super::is_generic_type_param(&p_eco) {
+                                    if p_eco.as_str() == "Self" {
+                                        super::InferredType::known(class_name.clone())
+                                    } else if super::is_generic_type_param(&p_eco) {
                                         super::InferredType::Dynamic(DynamicReason::Unknown)
                                     } else {
                                         super::InferredType::known(p_eco)
