@@ -2668,10 +2668,6 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Builds a Core Erlang map of field name → declared type atom or `'none'`.
-    ///
-    /// Example: `[StateDecl{name: "value", type: Integer}]` → `~{'value' => 'Integer'}~`
-    /// Empty slice → `~{}~`
     /// BT-1976: Builds a field-has-default map for `__beamtalk_meta/0`.
     ///
     /// Example: `[StateDecl{name: "count", default: Some(0)}]` → `~{'count' => 'true'}~`
@@ -2705,6 +2701,10 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
+    /// Builds a Core Erlang map of field name → declared type atom or `'none'`.
+    ///
+    /// Example: `[StateDecl{name: "value", type: Integer}]` → `~{'value' => 'Integer'}~`
+    /// Empty slice → `~{}~`
     pub(super) fn meta_field_types_map(state: &[StateDeclaration]) -> Document<'static> {
         if state.is_empty() {
             return Document::Str("~{}~");
