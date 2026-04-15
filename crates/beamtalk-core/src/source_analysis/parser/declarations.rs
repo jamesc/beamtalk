@@ -648,6 +648,13 @@ impl Parser {
         if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
             return false;
         }
+        // BT-1952: Check for `Self class` metatype (two-token type annotation)
+        if matches!(self.peek_at(o), Some(TokenKind::Identifier(name)) if name == "Self")
+            && matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class")
+        {
+            o += 2;
+            return matches!(self.peek_at(o), Some(TokenKind::FatArrow));
+        }
         o += 1;
         // Skip generic type parameters: `Type(T, E)`
         if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
@@ -905,11 +912,22 @@ impl Parser {
     /// - Simple types: `Integer`, `String`
     /// - Generic types: `Result(T, E)`, `Array(Integer)`, `Block(T, Result(R, E))`
     /// - Self type: `Self`
+    /// - Self class metatype: `Self class`
     fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
             if name.as_str() == "Self" {
                 self.advance();
+                // Check for `Self class` metatype annotation
+                if let TokenKind::Identifier(next) = self.current_kind() {
+                    if next.as_str() == "class" {
+                        let end_span = self.current_token().span();
+                        self.advance();
+                        return TypeAnnotation::SelfClass {
+                            span: span.merge(end_span),
+                        };
+                    }
+                }
                 TypeAnnotation::SelfType { span }
             } else {
                 let ident = Identifier::new(name.clone(), span);

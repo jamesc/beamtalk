@@ -1030,3 +1030,26 @@ fn parse_unqualified_superclass_has_no_package() {
         "unqualified superclass should have superclass_package = None"
     );
 }
+
+#[test]
+fn parse_self_class_return_type() {
+    // BT-1952: `Self class` metatype annotation
+    let module = parse_ok(
+        "Object subclass: Foo
+  class -> Self class => @primitive \"class\"",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let methods = &module.classes[0].methods;
+    assert_eq!(methods.len(), 1);
+    let ret_ty = methods[0].return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::SelfClass { .. }));
+}
+
+#[test]
+fn parse_self_class_type_name() {
+    // BT-1952: type_name() returns "Self class"
+    let ann = TypeAnnotation::SelfClass {
+        span: crate::source_analysis::Span::new(0, 0),
+    };
+    assert_eq!(ann.type_name().as_str(), "Self class");
+}

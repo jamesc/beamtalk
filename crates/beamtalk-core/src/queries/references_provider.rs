@@ -279,7 +279,9 @@ fn collect_type_annotation_refs(
         TypeAnnotation::FalseOr { inner, .. } => {
             collect_type_annotation_refs(inner, name, file_path, results);
         }
-        TypeAnnotation::Singleton { .. } | TypeAnnotation::SelfType { .. } => {}
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
     }
 }
 

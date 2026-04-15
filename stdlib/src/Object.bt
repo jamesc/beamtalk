@@ -22,7 +22,7 @@ ProtoObject subclass: Object
   /// 42 class              // => Integer
   /// "hello" class         // => String
   /// ```
-  class => @primitive "class"
+  class -> Self class => @primitive "class"
 
   /// Test if the receiver is nil. Returns false for all objects except nil.
   ///

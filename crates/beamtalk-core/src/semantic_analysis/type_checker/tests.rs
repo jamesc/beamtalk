@@ -3386,6 +3386,45 @@ result onlyOnC
     );
 }
 
+#[test]
+fn test_self_class_type_name() {
+    // BT-1952: TypeAnnotation::SelfClass::type_name() returns "Self class"
+    let ann = TypeAnnotation::SelfClass { span: span() };
+    assert_eq!(ann.type_name(), "Self class");
+}
+
+#[test]
+fn test_self_class_resolves_to_metaclass() {
+    // BT-1952: A method returning `-> Self class` should resolve to Metaclass at call sites,
+    // allowing class-specific method sends on the result.
+    let source = "
+Value subclass: Counter
+  classState: instanceCount = 0
+  class instanceCount => self.instanceCount
+  getMyClass -> Self class => self class
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    // Verify `-> Self class` parses correctly
+    let counter = &module.classes[0];
+    let get_class_method = counter
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "getMyClass")
+        .expect("getMyClass method should exist");
+    let ret_ty = get_class_method.return_type.as_ref().unwrap();
+    assert!(
+        matches!(ret_ty, TypeAnnotation::SelfClass { .. }),
+        "Return type should be SelfClass, got: {ret_ty:?}"
+    );
+}
+
 // ── infer_method_return_types / take_method_return_types tests (BT-1042) ─────
 
 fn make_class_with_methods(name: &str, instance_methods: Vec<MethodDefinition>) -> ClassDefinition {

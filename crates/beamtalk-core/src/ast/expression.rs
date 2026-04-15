@@ -783,6 +783,16 @@ pub enum TypeAnnotation {
         /// Source location.
         span: Span,
     },
+    /// The `Self class` metatype — resolves to the metaclass of the receiver at call sites.
+    ///
+    /// Only valid in return position. Indicates a method returns the class object
+    /// (metaclass) of the receiver, not an instance.
+    ///
+    /// Example: `class -> Self class`
+    SelfClass {
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl TypeAnnotation {
@@ -795,7 +805,8 @@ impl TypeAnnotation {
             | Self::Singleton { span, .. }
             | Self::Generic { span, .. }
             | Self::FalseOr { span, .. }
-            | Self::SelfType { span } => *span,
+            | Self::SelfType { span }
+            | Self::SelfClass { span } => *span,
         }
     }
 
@@ -881,6 +892,7 @@ impl TypeAnnotation {
                 eco_format!("{inner_name} | False")
             }
             Self::SelfType { .. } => "Self".into(),
+            Self::SelfClass { .. } => "Self class".into(),
         }
     }
 }
