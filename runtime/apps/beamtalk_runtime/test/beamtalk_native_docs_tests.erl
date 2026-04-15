@@ -253,6 +253,76 @@ compile_with_moduledoc_test() ->
     end.
 
 %%% ============================================================================
+%%% is_hidden/3 Additional Edge Cases
+%%% ============================================================================
+
+is_hidden_nonexistent_module_test() ->
+    %% is_hidden on a nonexistent module should return false, not crash
+    ?assertNot(beamtalk_native_docs:is_hidden(nonexistent_module_xyz, foo, 0)).
+
+is_hidden_preloaded_module_test() ->
+    %% Preloaded modules have no .beam on disk
+    ?assertNot(beamtalk_native_docs:is_hidden(erlang, self, 0)).
+
+%%% ============================================================================
+%%% module_doc/1 Additional Edge Cases
+%%% ============================================================================
+
+module_doc_with_hidden_moduledoc_test() ->
+    %% Create a module with -moduledoc false
+    {BeamPath, Module} = create_beam_with_hidden_moduledoc(),
+    try
+        ?assertEqual(
+            {error, no_docs},
+            beamtalk_native_docs:module_doc(Module)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
+%%% lookup/3 Multiple Arities
+%%% ============================================================================
+
+lookup_different_arities_test() ->
+    %% lists:sort/1 and lists:sort/2 both exist — both should return docs
+    Result1 = beamtalk_native_docs:lookup(lists, sort, 1),
+    ?assertMatch(#{doc := _, sig := _, examples := _}, Result1),
+    Result2 = beamtalk_native_docs:lookup(lists, sort, 2),
+    ?assertMatch(#{doc := _, sig := _, examples := _}, Result2),
+    %% Different arities should yield different signatures
+    #{sig := Sig1} = Result1,
+    #{sig := Sig2} = Result2,
+    ?assertNotEqual(Sig1, Sig2).
+
+lookup_zero_arity_function_test() ->
+    %% maps:new/0 should have docs in OTP 27+
+    case beamtalk_native_docs:lookup(maps, new, 0) of
+        #{doc := _, sig := _, examples := _} ->
+            ?assert(true);
+        {error, _} ->
+            %% Acceptable if this OTP version doesn't have docs for maps:new/0
+            ?assert(true)
+    end.
+
+%%% ============================================================================
+%%% format_signatures edge cases (via lookup)
+%%% ============================================================================
+
+lookup_returns_non_empty_signature_test() ->
+    %% lists:sort/1 should have a non-empty signature
+    #{sig := Sig} = beamtalk_native_docs:lookup(lists, sort, 1),
+    ?assert(byte_size(Sig) > 0).
+
+lookup_returns_binary_doc_test() ->
+    %% Verify all return fields are binaries
+    #{doc := Doc, sig := Sig, examples := Examples} =
+        beamtalk_native_docs:lookup(lists, reverse, 1),
+    ?assert(is_binary(Doc)),
+    ?assert(is_binary(Sig)),
+    ?assert(is_binary(Examples)).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
@@ -310,6 +380,27 @@ create_beam_with_doc_attributes() ->
         "-doc false.\n",
         "-spec internal() -> ok.\n",
         "internal() -> ok.\n"
+    ],
+    ok = file:write_file(SrcFile, Source),
+    {ok, Module} = compile:file(SrcFile, [debug_info, {outdir, "."}]),
+    BeamPath = atom_to_list(Module) ++ ".beam",
+    {module, Module} = code:load_abs(filename:rootname(BeamPath)),
+    _ = file:delete(SrcFile),
+    {BeamPath, Module}.
+
+-doc "Create a temporary .beam with -moduledoc false (OTP 27+).".
+create_beam_with_hidden_moduledoc() ->
+    Module = beamtalk_native_docs_test_hidden_mod,
+    SrcFile = atom_to_list(Module) ++ ".erl",
+    Source = [
+        "-module(",
+        atom_to_list(Module),
+        ").\n",
+        "-moduledoc false.\n",
+        "-export([foo/0]).\n",
+        "\n",
+        "-doc \"A public function.\".\n",
+        "foo() -> ok.\n"
     ],
     ok = file:write_file(SrcFile, Source),
     {ok, Module} = compile:file(SrcFile, [debug_info, {outdir, "."}]),

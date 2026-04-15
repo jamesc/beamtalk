@@ -223,3 +223,172 @@ test_perform_withargs_bad_type() ->
         'perform:withArguments:', ["notAnAtom", []], self_ref(), State
     ),
     ?assertMatch({error, #beamtalk_error{kind = type_error}, _}, Result).
+
+%%% ============================================================================
+%%% Display Method Tests (additional)
+%%% ============================================================================
+
+display_string_test_() ->
+    {"displayString method", [
+        {"displayString returns same as printString", fun test_display_string/0}
+    ]}.
+
+test_display_string() ->
+    State = counter_state(),
+    {reply, Str, _} = beamtalk_object_ops:dispatch('displayString', [], self_ref(), State),
+    ?assertEqual(<<"a Counter">>, Str).
+
+%%% ============================================================================
+%%% inspect on class objects (empty state) Tests
+%%% ============================================================================
+
+inspect_class_object_test_() ->
+    {"inspect on class objects (empty state)", [
+        {"inspect with empty state returns class display name", fun test_inspect_empty_state/0}
+    ]}.
+
+test_inspect_empty_state() ->
+    %% BT-753: Class objects have empty state map
+    Self = #beamtalk_object{class = 'Counter', pid = self(), class_mod = counter},
+    State = #{},
+    {reply, Str, _} = beamtalk_object_ops:dispatch(inspect, [], Self, State),
+    ?assert(is_binary(Str)).
+
+%%% ============================================================================
+%%% class_name/3 Tests (exported API)
+%%% ============================================================================
+
+class_name_test_() ->
+    {"class_name/3 extraction", [
+        {"class_name/3 from beamtalk_object record", fun test_class_name3_from_record/0},
+        {"class_name/3 from state map with class", fun test_class_name3_from_state/0},
+        {"class_name/3 falls back to default", fun test_class_name3_default/0}
+    ]}.
+
+test_class_name3_from_record() ->
+    Self = #beamtalk_object{class = 'MyClass', pid = self(), class_mod = my_class},
+    ?assertEqual('MyClass', beamtalk_object_ops:class_name(Self, #{}, 'Fallback')).
+
+test_class_name3_from_state() ->
+    State = counter_state(),
+    ?assertEqual('Counter', beamtalk_object_ops:class_name(make_ref(), State, 'Fallback')).
+
+test_class_name3_default() ->
+    ?assertEqual('Fallback', beamtalk_object_ops:class_name(make_ref(), #{}, 'Fallback')).
+
+%%% ============================================================================
+%%% has_method additional coverage
+%%% ============================================================================
+
+has_method_additional_test_() ->
+    {"has_method additional selectors", [
+        {"displayString is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('displayString'))
+        end},
+        {"perform:withArguments:timeout: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('perform:withArguments:timeout:'))
+        end},
+        {"subclassResponsibility is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method(subclassResponsibility))
+        end}
+    ]}.
+
+%%% ============================================================================
+%%% subclassResponsibility Tests
+%%% ============================================================================
+
+subclass_responsibility_test_() ->
+    {"subclassResponsibility dispatch", [
+        {"subclassResponsibility returns user_error", fun test_subclass_responsibility/0}
+    ]}.
+
+test_subclass_responsibility() ->
+    State = counter_state(),
+    Result = beamtalk_object_ops:dispatch(subclassResponsibility, [], self_ref(), State),
+    ?assertMatch({error, #beamtalk_error{kind = user_error}, _}, Result).
+
+%%% ============================================================================
+%%% perform:withArguments:timeout: Tests
+%%% ============================================================================
+
+perform_with_timeout_test_() ->
+    {"perform:withArguments:timeout: dispatch", [
+        {"perform:withArguments:timeout: bad type returns type_error",
+            fun test_perform_with_timeout_bad_type/0}
+    ]}.
+
+test_perform_with_timeout_bad_type() ->
+    State = counter_state(),
+    Result = beamtalk_object_ops:dispatch(
+        'perform:withArguments:timeout:', ["notAnAtom", [], 5000], self_ref(), State
+    ),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}, _}, Result).
+
+%%% ============================================================================
+%%% Equality / hash edge cases
+%%% ============================================================================
+
+hash_determinism_test_() ->
+    {"hash determinism", [
+        {"same self produces same hash", fun test_hash_deterministic/0},
+        {"different selfs produce different hashes (usually)", fun test_hash_different/0}
+    ]}.
+
+test_hash_deterministic() ->
+    State = counter_state(),
+    Self = self_ref(),
+    {reply, Hash1, _} = beamtalk_object_ops:dispatch(hash, [], Self, State),
+    {reply, Hash2, _} = beamtalk_object_ops:dispatch(hash, [], Self, State),
+    ?assertEqual(Hash1, Hash2).
+
+test_hash_different() ->
+    State = counter_state(),
+    {reply, Hash1, _} = beamtalk_object_ops:dispatch(hash, [], make_ref(), State),
+    {reply, Hash2, _} = beamtalk_object_ops:dispatch(hash, [], make_ref(), State),
+    %% Very unlikely to be equal for different refs
+    ?assertNotEqual(Hash1, Hash2).
+
+%%% ============================================================================
+%%% printString with beamtalk_object record Self
+%%% ============================================================================
+
+print_string_class_object_test_() ->
+    {"printString with class object Self", [
+        {"printString uses class from record when state is empty",
+            fun test_print_string_class_object/0}
+    ]}.
+
+test_print_string_class_object() ->
+    Self = #beamtalk_object{class = 'Counter', pid = self(), class_mod = counter},
+    State = #{},
+    {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], Self, State),
+    ?assert(is_binary(Str)).
+
+%%% ============================================================================
+%%% fieldAt:put: returns updated state correctly
+%%% ============================================================================
+
+field_mutation_errors_test_() ->
+    {"field mutation edge cases", [
+        {"fieldAt:put: with internal field prefix", fun test_field_at_put_internal/0},
+        {"fieldNames on empty object", fun test_field_names_empty/0}
+    ]}.
+
+test_field_at_put_internal() ->
+    State = counter_state(),
+    %% Writing to an arbitrary atom field should work
+    Result = beamtalk_object_ops:dispatch('fieldAt:put:', [new_field, 99], self_ref(), State),
+    ?assertMatch({reply, 99, _}, Result),
+    {reply, _, NewState} = Result,
+    ?assertEqual(99, maps:get(new_field, NewState)).
+
+test_field_names_empty() ->
+    %% An object with only internal fields should have empty field names
+    State = #{
+        '$beamtalk_class' => 'Empty',
+        '__class_mod__' => empty,
+        '__methods__' => #{},
+        '__registry_pid__' => self()
+    },
+    {reply, Names, _} = beamtalk_object_ops:dispatch('fieldNames', [], self_ref(), State),
+    ?assertEqual([], Names).
