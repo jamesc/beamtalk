@@ -440,8 +440,13 @@ pub(crate) fn check_redundant_super_initialize(
             check_method_body_for_super_initialize(&method.body, diagnostics);
         }
     }
-    // Also check standalone (Tonel-style) method definitions.
+    // Also check standalone (Tonel-style) method definitions — but only
+    // instance-side. Class-side `initialize` is not auto-chained, so an
+    // explicit `super initialize` there is not redundant.
     for standalone in &module.method_definitions {
+        if standalone.is_class_method {
+            continue;
+        }
         let class_name = standalone.class_name.name.as_str();
         if !hierarchy.is_actor_subclass(class_name) {
             continue;
@@ -1053,11 +1058,12 @@ mod tests {
     fn build_module_and_hierarchy(src: &str) -> (crate::ast::Module, ClassHierarchy) {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
-        // Filter out lint-severity diagnostics (e.g. redundant `.`); only error
-        // out on hard parse failures.
+        // Only treat parser Errors as hard failures — Warnings and Lint
+        // diagnostics (e.g. redundant `.`, unattached doc comments) don't
+        // invalidate the AST we need for the test.
         let hard_errs: Vec<_> = parse_diags
             .iter()
-            .filter(|d| d.severity != Severity::Lint)
+            .filter(|d| d.severity == Severity::Error)
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _diags) = ClassHierarchy::build(&module);
