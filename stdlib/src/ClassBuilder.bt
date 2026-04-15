@@ -26,7 +26,7 @@ typed Actor subclass: ClassBuilder
   state: superclassRef :: Object | Nil = nil
   state: fieldSpecs :: Dictionary = #{}
   state: methodSpecs :: Dictionary = #{}
-  state: modifiers :: List = #()
+  state: modifiers :: List(Symbol) = #()
   state: backingModule :: Symbol | Nil = nil
 
   /// Set the class name (a Symbol).
@@ -76,7 +76,7 @@ typed Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder modifier: #sealed
   /// ```
-  modifier: aSymbol :: Symbol -> List =>
+  modifier: aSymbol :: Symbol -> List(Symbol) =>
     self.modifiers := self.modifiers add: aSymbol
 
   /// Set the backing Erlang module for a native Actor class.

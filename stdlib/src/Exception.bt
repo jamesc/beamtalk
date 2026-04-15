@@ -93,7 +93,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e stackTrace]
   /// ```
-  stackTrace -> List => @primitive "stackTrace"
+  stackTrace -> List(StackFrame) => @primitive "stackTrace"
 
   /// Raise this exception.
   ///

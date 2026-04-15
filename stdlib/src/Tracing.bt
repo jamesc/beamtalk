@@ -135,7 +135,7 @@ sealed typed Object subclass: Tracing
   /// Tracing traces
   /// // => _
   /// ```
-  class sealed traces -> List => (Erlang beamtalk_tracing) traces
+  class sealed traces -> List(Dictionary) => (Erlang beamtalk_tracing) traces
 
   /// Trace events for a specific actor.
   ///
@@ -144,7 +144,7 @@ sealed typed Object subclass: Tracing
   /// // Tracing tracesFor: myCounter
   /// // => _
   /// ```
-  class sealed tracesFor: actor :: Actor -> List =>
+  class sealed tracesFor: actor :: Actor -> List(Dictionary) =>
     (Erlang beamtalk_tracing) tracesFor: actor
 
   /// Trace events for a specific actor + method.
@@ -154,7 +154,7 @@ sealed typed Object subclass: Tracing
   /// // Tracing tracesFor: myCounter selector: #increment
   /// // => _
   /// ```
-  class sealed tracesFor: actor :: Actor selector: sel :: Symbol -> List =>
+  class sealed tracesFor: actor :: Actor selector: sel :: Symbol -> List(Dictionary) =>
     (Erlang beamtalk_tracing) tracesFor: actor selector: sel
 
   // === Aggregate stats ===
@@ -188,7 +188,7 @@ sealed typed Object subclass: Tracing
   /// Tracing slowMethods: 10
   /// // => _
   /// ```
-  class sealed slowMethods: limit :: Integer -> List =>
+  class sealed slowMethods: limit :: Integer -> List(Dictionary) =>
     (Erlang beamtalk_tracing) slowMethods: limit
 
   /// Top N methods by call count (descending).
@@ -198,7 +198,7 @@ sealed typed Object subclass: Tracing
   /// Tracing hotMethods: 10
   /// // => _
   /// ```
-  class sealed hotMethods: limit :: Integer -> List =>
+  class sealed hotMethods: limit :: Integer -> List(Dictionary) =>
     (Erlang beamtalk_tracing) hotMethods: limit
 
   /// Top N methods by error + timeout rate (descending).
@@ -208,7 +208,7 @@ sealed typed Object subclass: Tracing
   /// Tracing errorMethods: 5
   /// // => _
   /// ```
-  class sealed errorMethods: limit :: Integer -> List =>
+  class sealed errorMethods: limit :: Integer -> List(Dictionary) =>
     (Erlang beamtalk_tracing) errorMethods: limit
 
   /// Top N actors by message queue length — live snapshot.
@@ -218,7 +218,7 @@ sealed typed Object subclass: Tracing
   /// Tracing bottlenecks: 5
   /// // => _
   /// ```
-  class sealed bottlenecks: limit :: Integer -> List =>
+  class sealed bottlenecks: limit :: Integer -> List(Dictionary) =>
     (Erlang beamtalk_tracing) bottlenecks: limit
 
   // === Live process health ===

@@ -28,7 +28,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actors
   /// ```
-  actors -> List => (Erlang beamtalk_workspace_interface_primitives) actors
+  actors -> List(Actor) =>
+    (Erlang beamtalk_workspace_interface_primitives) actors
 
   /// Look up a specific actor by pid string.
   ///
@@ -45,7 +46,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: aClass :: Class -> List =>
+  actorsOf: aClass :: Class -> List(Actor) =>
     @expect type
     self actors select: [:a | a class includesBehaviour: aClass]
 
@@ -55,7 +56,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace classes
   /// ```
-  classes -> List => (Erlang beamtalk_workspace_interface_primitives) classes
+  classes -> List(Behaviour) =>
+    (Erlang beamtalk_workspace_interface_primitives) classes
 
   /// Return classes that are TestCase subclasses.
   ///
@@ -63,7 +65,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace testClasses
   /// ```
-  testClasses -> List =>
+  testClasses -> List(Behaviour) =>
     @expect type
     self classes select: [:c | c inheritsFrom: TestCase]
 
@@ -108,7 +110,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace load: "examples/counter.bt"  // => [Counter]
   /// ```
-  load: path :: String -> List =>
+  load: path :: String -> List(Behaviour) =>
     (Erlang beamtalk_workspace_interface_primitives) load: path
 
   /// Run all loaded test classes and return a TestResult.

@@ -29,7 +29,7 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol requiredMethods: #Printable   // => [#asString]
   /// ```
-  class sealed requiredMethods: protocolName :: Symbol -> List =>
+  class sealed requiredMethods: protocolName :: Symbol -> List(Symbol) =>
     @primitive "protocolRequiredMethods"
 
   /// Return the list of classes conforming to a protocol.
@@ -42,7 +42,7 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol conformingClasses: #Printable   // => [Integer, String, ...]
   /// ```
-  class sealed conformingClasses: protocolName :: Symbol -> List =>
+  class sealed conformingClasses: protocolName :: Symbol -> List(Behaviour) =>
     @primitive "protocolConformingClasses"
 
   /// Test whether a name is a registered protocol.
@@ -61,4 +61,4 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol allProtocols   // => [#Printable, #Comparable, ...]
   /// ```
-  class sealed allProtocols -> List => @primitive "protocolAllProtocols"
+  class sealed allProtocols -> List(Symbol) => @primitive "protocolAllProtocols"

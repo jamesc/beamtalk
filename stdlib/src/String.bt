@@ -265,7 +265,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a,b,c" split: ","          // => #("a", "b", "c")
   /// ```
-  split: separator :: String -> List => @primitive "split:"
+  split: separator :: String -> List(String) => @primitive "split:"
 
   /// Split the string by a pattern.
   ///
@@ -273,7 +273,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a::b::c" splitOn: "::"     // => #("a", "b", "c")
   /// ```
-  splitOn: pattern :: String -> List => @primitive "splitOn:"
+  splitOn: pattern :: String -> List(String) => @primitive "splitOn:"
 
   /// Repeat the string `n` times.
   ///
@@ -289,7 +289,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a\nb\nc" lines             // => #("a", "b", "c")
   /// ```
-  lines -> List => @primitive "lines"
+  lines -> List(String) => @primitive "lines"
 
   /// Split the string into words (whitespace-separated).
   ///
@@ -297,7 +297,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello world" words         // => #("hello", "world")
   /// ```
-  words -> List => @primitive "words"
+  words -> List(String) => @primitive "words"
 
   /// Replace all occurrences of `old` with `new`.
   ///
@@ -442,7 +442,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "abc" asList                // => #("a", "b", "c")
   /// ```
-  asList -> List => @primitive "asList"
+  asList -> List(String) => @primitive "asList"
 
   /// Iterate over each grapheme cluster, evaluating `block` with each one.
   ///
@@ -525,7 +525,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a1b2c3" allMatches: "[0-9]+"              // => #("1", "2", "3")
   /// ```
-  allMatches: pattern -> List => @primitive "allMatches:"
+  allMatches: pattern -> List(String) => @primitive "allMatches:"
 
   /// Replace the first regex match with a replacement string.
   ///
@@ -551,7 +551,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a,,b,,,c" splitRegex: ",+"                // => #("a", "b", "c")
   /// ```
-  splitRegex: pattern -> List => @primitive "splitRegex:"
+  splitRegex: pattern -> List(String) => @primitive "splitRegex:"
 
   /// Return a developer-readable string representation (with surrounding quotes).
   /// Embedded double-quote characters are doubled (Beamtalk string literal convention).

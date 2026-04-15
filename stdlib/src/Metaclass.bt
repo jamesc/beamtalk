@@ -113,7 +113,7 @@ sealed typed Class subclass: Metaclass
   /// Counter class allMethods includes: #reload     // => true
   /// Counter class allMethods includes: #superclass // => true
   /// ```
-  sealed allMethods -> List => @primitive "metaclassAllMethods"
+  sealed allMethods -> List(Symbol) => @primitive "metaclassAllMethods"
 
   // --- Class-side method introspection ---
 
@@ -123,7 +123,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class classMethods   // => [...]
   /// ```
-  sealed classMethods -> List => @primitive "metaclassClassMethods"
+  sealed classMethods -> List(Symbol) => @primitive "metaclassClassMethods"
 
   /// Return class-side selectors defined locally in the described class.
   ///
@@ -131,7 +131,8 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class localClassMethods   // => [...]
   /// ```
-  sealed localClassMethods -> List => @primitive "metaclassLocalClassMethods"
+  sealed localClassMethods -> List(Symbol) =>
+    @primitive "metaclassLocalClassMethods"
 
   /// Test whether the described class defines the given class-side selector.
   ///
