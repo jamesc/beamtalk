@@ -103,3 +103,7 @@ undocumented_unsafe_blocks = "warn"
 # Allow some pedantic lints that are too noisy
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
+
+# Patch yanked transitive dependency (core2 0.4.0 was yanked from crates.io)
+[patch.crates-io]
+core2 = { git = "https://github.com/bbqsrc/core2", rev = "545e84bcb0f2" }
