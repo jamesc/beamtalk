@@ -1,7 +1,7 @@
 # ADR 0079: Named Actor Registration
 
 ## Status
-Proposed (2026-04-15)
+Accepted (2026-04-15)
 
 ## Context
 
@@ -441,10 +441,27 @@ A follow-up ADR ("Migrate Supervisor Lifecycle to Result") should do the whole c
 
 Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) deliberately stay raise-on-real-failure with idempotent success — let-it-crash applies to teardown of own resources.
 
+## Implementation Tracking
+
+**Epic:** [BT-1985](https://linear.app/beamtalk/issue/BT-1985) — Named Actor Registration (ADR 0079)
+**Status:** Planned
+
+| # | Issue | Phase | Summary |
+|---|---|---|---|
+| 1 | [BT-1986](https://linear.app/beamtalk/issue/BT-1986) | 0 | Typechecker: verify `Result(Self, Error)` works in generic position |
+| 2 | [BT-1987](https://linear.app/beamtalk/issue/BT-1987) | 1 | Runtime: intrinsics + `$beamtalk_actor` marker + `spawnAs` entry |
+| 3 | [BT-1988](https://linear.app/beamtalk/issue/BT-1988) | 2 | Stdlib: `Actor.bt` named-registration API |
+| 4 | [BT-1989](https://linear.app/beamtalk/issue/BT-1989) | 2 | Stdlib: `SupervisionSpec withName:` combinators |
+| 5 | [BT-1990](https://linear.app/beamtalk/issue/BT-1990) | 3 | Runtime: proxy dispatch + supervisor wiring + restart-survival tests |
+| 6 | [BT-1991](https://linear.app/beamtalk/issue/BT-1991) | 4 | E2E btscript + language-features docs |
+
+**Critical path:** BT-1986 → BT-1988 → BT-1990 → BT-1991.
+**Parallelisable:** BT-1987 alongside BT-1986; BT-1989 alongside BT-1988 (after BT-1987 lands).
+
 ## References
 - Related issues:
-  - [BT-1977](https://linear.app/beamtalk/issue/BT-1977/migrate-supervisor-lifecycle-methods-to-result-return-type) — Migrate Supervisor lifecycle methods to Result (follow-up from the "Future Work" section)
-  - The implementation epic for this ADR will be created via `/plan-adr` after acceptance and linked here.
+  - [BT-1985](https://linear.app/beamtalk/issue/BT-1985) — Implementation epic for this ADR
+  - [BT-1977](https://linear.app/beamtalk/issue/BT-1977/migrate-supervisor-lifecycle-methods-to-result-return-type) — Migrate Supervisor lifecycle methods to Result (follow-up, blocked by this epic)
 - Related ADRs:
   - ADR 0060 — Result Type & Hybrid Error Handling (conventions this ADR follows for Result-returning methods)
   - ADR 0065 — Complete OTP Primitives & Actor Lifecycle (deferred this ADR; this ADR supersedes its placement suggestion on Server)
