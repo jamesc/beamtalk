@@ -319,7 +319,7 @@ Make `Actor` references internally subscribe to exit signals and transparently u
 
 ### Negative
 - Introduces a flat per-node atom namespace — collisions must be managed by convention.
-- **Atom exhaustion risk.** Names are atoms, and atoms are never garbage-collected on the BEAM (the table maxes out at 1,048,576 by default). Per-tenant or per-request naming patterns (`#user_42`, `#req_abc123`) would exhaust the table and crash the VM. Documentation must steer users toward bounded, statically-known name sets and recommend `{via, Module, Term}`-backed registries (Registry/syn/gproc) for unbounded keys — exactly the use case the deferred future-ADR will address.
+- **Atom exhaustion is a theoretical risk** if users register dynamically-generated names (e.g., `#user_42`, `#req_abc123`). In practice this requires explicitly converting runtime strings to symbols — `Counter spawnAs: #counter` uses a compile-time symbol the compiler already emitted, costing zero new atoms. The realistic exhaustion path is a user reaching for `String asSymbol` or `(Erlang erlang) binary_to_atom:` in a per-tenant/per-request loop. Documentation should steer users toward bounded, statically-known names and recommend `{via, Module, Term}`-backed registries for genuinely unbounded keys — exactly the use case the deferred future-ADR will address.
 - `Actor named:` returning `nil` for lookup miss invites a small class of bugs where callers forget to check. Mitigated by proxy send raising a structured error rather than silently dropping.
 - Reserved-name blacklist requires ongoing curation as the stdlib and OTP grow.
 - Proxy handles add a small runtime indirection per send (one extra `whereis` lookup). Negligible in practice but not zero.
