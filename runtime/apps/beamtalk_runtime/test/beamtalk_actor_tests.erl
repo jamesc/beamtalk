@@ -3339,7 +3339,7 @@ cast_send_to_non_actor_pid_ok_test() ->
 %%% `spawnAs` child spec.
 %%% ============================================================================
 
-%% Helper: spawn a counter, register under Name, and return {Pid, Name, Proxy}.
+%% Helper: spawn a counter, register under Name, and return {Pid, Proxy}.
 %% Cleans up the name first so the test is hermetic across reruns.
 bt1990_setup_named_counter(Name, Initial) ->
     cleanup_name(Name),

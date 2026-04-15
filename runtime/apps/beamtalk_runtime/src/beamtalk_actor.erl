@@ -1130,7 +1130,7 @@ no_such_process_error_record(Name, Selector) ->
         Selector,
         iolist_to_binary(
             io_lib:format(
-                "No process is currently registered under name '~ts'", [Name]
+                "No process is currently registered under name '~p'", [Name]
             )
         )
     ),
@@ -2760,6 +2760,11 @@ proxies look up the current pid via `whereis/1`. Returns a structured
 """.
 -spec proxy_pid(#beamtalk_object{}, atom()) ->
     {ok, pid()} | {error, #beamtalk_error{}}.
+%% The final clause is a defensive fallback for malformed identity slots
+%% constructed outside the type system (e.g. from FFI). Dialyzer proves it
+%% unreachable given the record spec, but keep it to raise a structured
+%% error instead of `function_clause` when the invariant is violated.
+-dialyzer({no_match, proxy_pid/2}).
 proxy_pid(#beamtalk_object{pid = Pid}, _Selector) when is_pid(Pid) ->
     {ok, Pid};
 proxy_pid(#beamtalk_object{pid = {registered, Name}}, Selector) when is_atom(Name) ->
@@ -2768,7 +2773,19 @@ proxy_pid(#beamtalk_object{pid = {registered, Name}}, Selector) when is_atom(Nam
             {error, no_such_process_error_record(Name, Selector)};
         Pid when is_pid(Pid) ->
             {ok, Pid}
-    end.
+    end;
+proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, ClassName, Selector),
+            iolist_to_binary(
+                io_lib:format(
+                    "proxy_pid/2 expects pid() or {registered, atom()} in "
+                    "#beamtalk_object.pid, got ~tp",
+                    [Other]
+                )
+            )
+        )}.
 
 -spec registered_name_for_pid(pid()) -> atom() | undefined.
 registered_name_for_pid(Pid) when is_pid(Pid) ->

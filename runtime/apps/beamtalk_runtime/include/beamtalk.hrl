@@ -29,7 +29,8 @@
 %%   - a raw `pid()` for ordinary actor handles, or
 %%   - a `{registered, Name :: atom()}` tuple for name-resolving proxies.
 %% The send-site dispatch in `beamtalk_actor` recognises both shapes; the
-%% latter forces `gen_server:call(Name, ...)` so that the held reference
+%% latter re-resolves the registered name to a pid on every send (via
+%% `whereis/1` + `gen_server:call(Pid, ...)`) so that the held reference
 %% survives the actor being restarted under its registered name.
 -record(beamtalk_object, {
     % Class name (e.g., 'Counter')
