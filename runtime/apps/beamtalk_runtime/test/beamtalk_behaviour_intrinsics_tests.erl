@@ -2282,3 +2282,219 @@ class_superclass_chain_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% BT-1982: Additional coverage for behaviour intrinsics
+%%% ============================================================================
+
+%% classReload/1 on a class with no source file (dynamic class) raises
+%% no_source_file — covers the nil branch of classReload/1.
+bt1982_class_reload_no_source_file_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1982ReloadNoSrc', #{}, #{}),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = no_source_file}
+                        },
+                        beamtalk_behaviour_intrinsics:classReload(ClassObj)
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% classRemoveFromSystemByName rejects stdlib-module classes with runtime_error +
+%% a "stdlib" hint. Creates a class whose module atom starts with bt@stdlib@
+%% to exercise the stdlib protection branch.
+bt1982_class_remove_rejects_stdlib_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Construct a class whose module name looks like a stdlib module.
+                %% start/2 allows any atom as module; the stdlib check is by name prefix.
+                ClassInfo = #{
+                    name => 'BT1982StdlibProtectedX',
+                    module => 'bt@stdlib@BT1982StdlibProtectedX',
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start(
+                    'BT1982StdlibProtectedX', ClassInfo
+                ),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = runtime_error}
+                        },
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                            'BT1982StdlibProtectedX'
+                        )
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% metaclassSuperclass on a root class (superclass=none) returns nil —
+%% covers the none branch of metaclassSuperclass/1.
+bt1982_metaclass_superclass_root_returns_nil_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982RootMeta',
+                    module => test_class,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start('BT1982RootMeta', ClassInfo),
+                ClassObj = #beamtalk_object{
+                    class = 'BT1982RootMeta class',
+                    class_mod = test_class,
+                    pid = Pid
+                },
+                try
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:metaclassSuperclass(ClassObj)
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% classSuperclass on a class whose module has no __beamtalk_meta/0 (dynamic /
+%% class_builder class) exercises the gen_server-fallback branch — and the
+%% 'none' result should normalize to nil.
+bt1982_class_superclass_root_falls_through_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982SuperRootFB',
+                    %% test_class doesn't export __beamtalk_meta/0.
+                    module => test_class,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start('BT1982SuperRootFB', ClassInfo),
+                ClassObj = #beamtalk_object{
+                    class = 'BT1982SuperRootFB class',
+                    class_mod = test_class,
+                    pid = Pid
+                },
+                try
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classSuperclass(ClassObj)
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% stop_class_actors is a no-op when the actor registry is not running.
+%% It's exported as a plain function, but only called internally from
+%% classRemoveFromSystemByName — exercise that path by attempting a successful
+%% removal, which calls stop_class_actors in its success branch.
+bt1982_class_remove_success_when_registry_absent_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Register a class using a module name that permits code:delete.
+                %% We install a freshly-compiled module so code:soft_purge/1 +
+                %% code:delete/1 succeed (exercising the happy-path through
+                %% ensure_code_step/publish_class_removed/stop_class_actors).
+                ModAtom = bt1982_removable_mod,
+                Forms = [
+                    {attribute, 1, module, ModAtom},
+                    {attribute, 2, export, []}
+                ],
+                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+                {module, ModAtom} = code:load_binary(
+                    ModAtom, "bt1982_removable_mod.erl", Bin
+                ),
+                ClassName = 'BT1982Removable',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => ModAtom,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+
+                %% Remove: this calls stop_class_actors, gen_server:stop,
+                %% soft_purge, delete, soft_purge (again), publish_class_removed.
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                ),
+                %% Verify the class is gone from the registry.
+                ?assertEqual(
+                    undefined, beamtalk_class_registry:whereis_class(ClassName)
+                )
+            end)
+        ]
+    end}.
+
+%% metaclassAllMethods returns the combined method set (class-side + Behaviour
+%% protocol). Even for a dynamic class without the stdlib Class hierarchy
+%% loaded, the function should at least return a list.
+bt1982_metaclass_all_methods_returns_list_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class_with_class_methods(
+                    'BT1982MetaAll', #{}, #{}, #{
+                        'customFactory' => #{
+                            arity => 0, block => fun(_, _, _) -> ok end
+                        }
+                    }
+                ),
+                try
+                    Methods = beamtalk_behaviour_intrinsics:metaclassAllMethods(ClassObj),
+                    ?assert(is_list(Methods)),
+                    ?assert(lists:member('customFactory', Methods))
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.

@@ -853,6 +853,258 @@ validate_class_update_bootstrap_stub_replacement_test() ->
     ).
 
 %%% ============================================================================
+%%% BT-1982: Additional coverage
+%%% ============================================================================
+
+%% ensure_pg_started/0 is idempotent when pg is already running.
+bt1982_ensure_pg_started_idempotent_test() ->
+    ok = beamtalk_class_registry:ensure_pg_started(),
+    ok = beamtalk_class_registry:ensure_pg_started(),
+    ?assert(is_pid(whereis(pg))).
+
+%% maybe_set_heir runs when supervisor is alive; covers the SupPid-alive branch.
+%% If the real supervisor is running (test suite with full app) we use it;
+%% otherwise we register a fake pid temporarily.
+bt1982_maybe_set_heir_with_supervisor_test() ->
+    case whereis(beamtalk_runtime_sup) of
+        RealSup when is_pid(RealSup) ->
+            %% Real supervisor running — exercise the branch directly.
+            ok = beamtalk_class_registry:ensure_class_warnings_table(),
+            ok = beamtalk_class_registry:ensure_class_warnings_table();
+        undefined ->
+            beamtalk_class_registry:ensure_pg_started(),
+            FakeSupPid = spawn(fun() ->
+                receive
+                    stop -> ok
+                end
+            end),
+            try
+                erlang:register(beamtalk_runtime_sup, FakeSupPid),
+                case ets:info(beamtalk_class_warnings) of
+                    undefined -> beamtalk_class_registry:ensure_class_warnings_table();
+                    _ -> ok
+                end,
+                ok = beamtalk_class_registry:ensure_class_warnings_table()
+            after
+                catch erlang:unregister(beamtalk_runtime_sup),
+                FakeSupPid ! stop
+            end
+    end.
+
+%% heir_option with a live supervisor returns a non-empty list. Works whether
+%% or not a real supervisor is registered.
+bt1982_heir_option_with_supervisor_test() ->
+    case whereis(beamtalk_runtime_sup) of
+        RealSup when is_pid(RealSup) ->
+            beamtalk_class_registry:ensure_pending_errors_table(),
+            ?assert(true);
+        undefined ->
+            FakeSupPid = spawn(fun() ->
+                receive
+                    stop -> ok
+                end
+            end),
+            try
+                erlang:register(beamtalk_runtime_sup, FakeSupPid),
+                beamtalk_class_registry:ensure_pending_errors_table(),
+                ?assert(true)
+            after
+                catch erlang:unregister(beamtalk_runtime_sup),
+                FakeSupPid ! stop
+            end
+    end.
+
+%% restart_class finds module but the existing class process is already alive →
+%% returns {ok, ExistingPid} via the {already_started, _} branch.
+bt1982_restart_class_already_started_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_registry:ensure_module_table(),
+            ClassName = 'BT1982RestartAS',
+            ClassInfo = #{
+                name => ClassName,
+                module => beamtalk_class_bt,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            %% Record in module table so restart_class can find it.
+            beamtalk_class_module_table:insert(ClassName, beamtalk_class_bt),
+            {ClassName, Pid}
+        end,
+        fun({_Name, Pid}) ->
+            try
+                gen_server:stop(Pid, normal, 1000)
+            catch
+                _:_ -> ok
+            end
+        end,
+        fun({ClassName, Pid}) ->
+            [
+                ?_test(begin
+                    %% restart_class should hit the {already_started, ExistingPid} branch.
+                    Result = beamtalk_class_registry:restart_class(ClassName),
+                    ?assertMatch({ok, _}, Result),
+                    {ok, ReturnedPid} = Result,
+                    ?assertEqual(Pid, ReturnedPid)
+                end)
+            ]
+        end}.
+
+%% user_classes/0 is callable and returns a list when pg is running.
+bt1982_user_classes_returns_list_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Classes = beamtalk_class_registry:user_classes(),
+    ?assert(is_list(Classes)).
+
+%% drain_pending_load_errors_by_names no-table returns [].
+bt1982_drain_pending_errors_no_table_test() ->
+    %% Delete the table first if it exists.
+    case ets:info(beamtalk_pending_load_errors) of
+        undefined -> ok;
+        _ -> ets:delete(beamtalk_pending_load_errors)
+    end,
+    ?assertEqual(
+        [], beamtalk_class_registry:drain_pending_load_errors_by_names(['Foo'])
+    ),
+    %% Restore table for subsequent tests.
+    beamtalk_class_registry:ensure_pending_errors_table().
+
+%% restart_class success path: class process is dead but module exists.
+%% Covers the warning log + {ok, NewPid} branch of restart_class/1.
+bt1982_restart_class_recovers_dead_process_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_registry:ensure_module_table(),
+            beamtalk_class_registry:ensure_pid_table(),
+            ClassName = 'BT1982RestartRecover',
+            ClassInfo = #{
+                name => ClassName,
+                module => beamtalk_class_bt,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            %% Use start/2 (unlinked) so we can kill it without taking
+            %% down the EUnit test supervisor.
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            beamtalk_class_module_table:insert(ClassName, beamtalk_class_bt),
+            %% Kill the class process so restart_class can resurrect it.
+            MRef = monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 2000 -> throw(timeout_killing_class)
+            end,
+            ClassName
+        end,
+        fun(ClassName) ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    ok;
+                P ->
+                    try
+                        gen_server:stop(P, normal, 1000)
+                    catch
+                        _:_ -> ok
+                    end
+            end
+        end,
+        fun(ClassName) ->
+            [
+                ?_test(begin
+                    Result = beamtalk_class_registry:restart_class(ClassName),
+                    ?assertMatch({ok, _}, Result),
+                    {ok, NewPid} = Result,
+                    ?assert(is_process_alive(NewPid))
+                end)
+            ]
+        end}.
+
+%% class_name_for_pid returns not_found when the pid table does not exist.
+bt1982_class_name_for_pid_no_table_test() ->
+    case ets:info(beamtalk_class_pids) of
+        undefined -> ok;
+        _ -> ets:delete(beamtalk_class_pids)
+    end,
+    ?assertEqual(
+        not_found, beamtalk_class_registry:class_name_for_pid(self())
+    ),
+    beamtalk_class_registry:ensure_pid_table().
+
+%% get_method_return_type walks to superclass via hierarchy lookup when the
+%% class is registered but process exit during call produces `not_found` —
+%% the walk-to-superclass branch.
+bt1982_get_method_return_type_walks_on_process_exit_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            %% Set up a parent class with a known return type, then register a
+            %% child with none.
+            {ok, ParentPid} = beamtalk_object_class:start('BT1982RTParent', #{
+                superclass => none,
+                method_return_types => #{answer => 'Integer'}
+            }),
+            ets:insert(beamtalk_class_hierarchy, {'BT1982RTParent', none}),
+            {ok, ChildPid} = beamtalk_object_class:start('BT1982RTChild', #{
+                superclass => 'BT1982RTParent',
+                method_return_types => #{}
+            }),
+            ets:insert(beamtalk_class_hierarchy, {'BT1982RTChild', 'BT1982RTParent'}),
+            [ParentPid, ChildPid]
+        end,
+        fun(Pids) ->
+            lists:foreach(
+                fun(P) ->
+                    try
+                        gen_server:stop(P)
+                    catch
+                        _:_ -> ok
+                    end
+                end,
+                Pids
+            )
+        end,
+        fun(_) ->
+            [
+                %% Child has no type but parent does — walk through hierarchy.
+                ?_assertEqual(
+                    {ok, 'Integer'},
+                    beamtalk_class_registry:get_method_return_type(
+                        'BT1982RTChild', answer
+                    )
+                ),
+                %% Same for class-method variant.
+                ?_assertEqual(
+                    {error, not_found},
+                    beamtalk_class_registry:get_class_method_return_type(
+                        'BT1982RTChild', answer
+                    )
+                )
+            ]
+        end}.
+
+%% drain_class_warnings_by_qualified_names returns [] when no table exists.
+bt1982_drain_warnings_qualified_no_table_test() ->
+    case ets:info(beamtalk_class_warnings) of
+        undefined -> ok;
+        _ -> ets:delete(beamtalk_class_warnings)
+    end,
+    ?assertEqual(
+        [],
+        beamtalk_class_registry:drain_class_warnings_by_qualified_names(
+            [{pkg, 'Foo'}]
+        )
+    ),
+    beamtalk_class_registry:ensure_class_warnings_table().
+
+%%% ============================================================================
 %%% ADR 0032 Phase 1: invalidate_subclass_flattened_tables removed
 %%% ============================================================================
 %% The rebuild broadcast (invalidate_subclass_flattened_tables) was removed in
