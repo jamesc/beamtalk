@@ -1860,9 +1860,15 @@ await_initialize_preserves_full_stop_reason_test() ->
     %% await_initialize must return {error, {error, function_clause}} — not
     %% {error, error} (the bug before the pattern-match fix).
     %% Use gen_server:start (not start_link) to avoid EXIT signal killing the test.
-    {ok, Pid} = gen_server:start(test_crashing_init_actor, #{}, []),
-    Result = beamtalk_actor:await_initialize(Pid),
-    ?assertMatch({error, {error, function_clause}}, Result).
+    %% Suppress the expected gen_server crash report to avoid EUnit cancellation.
+    logger:set_primary_config(level, none),
+    try
+        {ok, Pid} = gen_server:start(test_crashing_init_actor, #{}, []),
+        Result = beamtalk_actor:await_initialize(Pid),
+        ?assertMatch({error, {error, function_clause}}, Result)
+    after
+        logger:set_primary_config(level, all)
+    end.
 
 safe_spawn_restores_trap_exit_test() ->
     %% safe_spawn restores the original trap_exit flag
