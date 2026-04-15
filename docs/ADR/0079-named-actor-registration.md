@@ -52,35 +52,60 @@ Add a local-scope process registry on `Actor`, backed by `erlang:register/2` and
 
 ### API
 
-**Spawn + register:**
+**Spawn + register (returns `Result(Actor, Error)`):**
 ```beamtalk
-Counter spawnAs: #counter                           // Counter spawn + register #counter
-Counter spawnAs: #counter with: #{#count => 10}    // spawnWith: + register
+Counter spawnAs: #counter                                // -> Result(Counter, Error)
+Counter spawnWith: #{#count => 10} as: #counter         // -> Result(Counter, Error)
+
+(Counter spawnAs: #counter)
+  onSuccess: [:c | c increment]
+  onError: [:e | Logger warn: "name taken: " ++ e printString]
+
+c := (Counter spawnAs: #counter) unwrap   // explicit "I expect success; crash if not"
 ```
 
 **Register/unregister an existing actor:**
 ```beamtalk
-someActor registerAs: #myName       // => #ok, or error if taken
-someActor unregister                // => #ok (idempotent)
-someActor registeredName            // => #myName or nil
-someActor isRegistered              // => Boolean
+someActor registerAs: #myName       // -> Result(Actor, Error) — Ok carries the receiver for fluent chaining
+someActor unregister                // -> Symbol (#ok, idempotent — teardown of own resource)
+someActor registeredName            // -> Symbol or nil
+someActor isRegistered              // -> Boolean
 ```
+
+**Why `Result` here, not raise?** `spawnAs:` and `registerAs:` operate at a registry boundary where multiple legitimate outcomes exist (`#ok` vs `#name_registered` vs `#reserved_name`) — the same shape OTP itself uses for `gen_server:start_link/3,4` and `supervisor:start_child/2`. This is *consistent* with let-it-crash, not in tension with it: let-it-crash applies to operational errors during normal running; tagged-tuple/Result returns are appropriate at startup boundaries where the caller (often a supervisor) needs to distinguish outcomes. Callers who want the crash-on-failure form write `(spawnAs: #foo) unwrap` explicitly.
+
+By contrast, `unregister`, `stop`, and `kill` return `Symbol` because they are teardowns of the actor's own resources where "already gone" is benign and any *real* failure is a programming bug — raise is correct there. See "Future Work" below for the planned migration of Supervisor lifecycle methods to the same Result convention.
 
 `spawnAs:` is the atomic form: it uses `gen_server:start_link({local, Name}, Module, Args)`, registering the name during process startup. `registerAs:` post-spawn is non-atomic — between `spawn` and `registerAs:` another process could claim the name. Prefer `spawnAs:` whenever the name is known up front; reserve `registerAs:` for cases where naming is decided dynamically after construction.
 
 When an actor process exits, Erlang unregisters its name automatically. There is no need to call `unregister` from `terminate:`.
 
-**Lookup:**
+**Lookup (typed, declared once on `Actor`):**
 ```beamtalk
-c := Actor named: #counter          // => Actor proxy, or nil if unregistered
+class named: name :: Symbol -> Result(Self, Error)
 ```
+
+`Self` resolves to the receiver class at the call site, so subclasses inherit a typed lookup with no per-class redeclaration:
+
+```beamtalk
+Counter named: #counter            // -> Result(Counter, Error)
+WorkflowEngine named: #workflowEngine   // -> Result(WorkflowEngine, Error)
+Actor named: #anything             // -> Result(Actor, Error) — base/untyped form
+```
+
+The lookup performs a runtime class check using the `'$beamtalk_actor' => ClassName` process-dict marker (see Implementation):
+- `Ok(actor)` — name is registered and the registered actor's class is (or descends from) the receiver class.
+- `Error(#name_not_registered)` — nothing registered under this name.
+- `Error(#wrong_class)` — registered, but the actor is not a `Self` (or subclass thereof). E.g., `Counter named: #x` when `#x` is registered to a `Logger`.
+
+Class hierarchy walk is part of the check: `Counter named: #x` succeeds for any `Counter` *or any subclass of `Counter`*.
 
 **Enumeration (tooling/REPL discovery):**
 ```beamtalk
 Actor allRegistered                  // => Array(Actor) of currently-registered Beamtalk actors
 ```
 
-`allRegistered` returns resolved `Actor` proxies (not symbols), parallelling `Class allClasses`. Each proxy carries its real class — `Actor allRegistered first class` returns `Counter`, not `Actor`. The list excludes raw Erlang FFI-registered processes (kernel, logger, mnesia, user-registered Erlang pids) — they are not Beamtalk actors and the API would lie about their type. This method is intended primarily for tooling and REPL exploration; production code should use `Actor named: #foo` to address known names directly rather than enumerate.
+`allRegistered` returns resolved `Actor` proxies (not symbols), paralleling `Class allClasses`. Each proxy carries its real class — `Actor allRegistered first class` returns `Counter`, not `Actor`. The list excludes raw Erlang FFI-registered processes (kernel, logger, mnesia, user-registered Erlang pids) — they are not Beamtalk actors and the API would lie about their type. This method is intended primarily for tooling and REPL exploration; production code should use `Actor named: #foo` to address known names directly rather than enumerate.
 
 `Actor named:` returns a lightweight proxy. The proxy does **not** cache a pid; each message send re-resolves the name to the current pid via the Erlang runtime. This is the key restart-survival property:
 
@@ -112,12 +137,15 @@ Supervisor subclass: ExduraSupervisor
 
 | Condition | Result |
 |---|---|
-| Duplicate registration | `#beamtalk_error{kind: #name_registered, name: ...}` |
-| Invalid name (non-Symbol) | `#beamtalk_error{kind: #type_error, ...}` |
-| Reserved name (see below) | `#beamtalk_error{kind: #reserved_name, name: ...}` |
-| Lookup miss (`Actor named:`) | Returns `nil` |
-| Send to proxy whose name is not currently registered | `#beamtalk_error{kind: #no_such_process, name: ...}` |
-| `unregister` on unregistered actor | `#ok` (idempotent) |
+| `spawnAs:` / `registerAs:` — duplicate registration | `Error(#beamtalk_error{kind: #name_registered, name: ...})` |
+| `spawnAs:` / `registerAs:` — invalid name (non-Symbol) | `Error(#beamtalk_error{kind: #type_error, ...})` |
+| `spawnAs:` / `registerAs:` — reserved name (see below) | `Error(#beamtalk_error{kind: #reserved_name, name: ...})` |
+| `spawnAs:` / `registerAs:` — success | `Ok(actor)` |
+| `T named:` — name not registered | `Error(#beamtalk_error{kind: #name_not_registered, name: ...})` |
+| `T named:` — registered to actor of wrong class | `Error(#beamtalk_error{kind: #wrong_class, name: ..., expected: ..., actual: ...})` |
+| `T named:` — success | `Ok(actor)` |
+| Send to proxy whose name is not currently registered (e.g., target died after lookup) | Raises `#beamtalk_error{kind: #no_such_process, name: ...}` |
+| `unregister` on unregistered actor | `#ok` (idempotent, raises only on type error) |
 
 Lookup returns `nil` rather than raising, matching `whereis/1` semantics — callers often want to branch on presence. Sending to a proxy whose name has since vanished is distinct and *does* raise, because the caller has committed to a send.
 
@@ -135,16 +163,20 @@ Plus any atom prefixed with `beamtalk_` (reserves the namespace for runtime infr
 ### REPL session
 
 ```
-> c := Counter spawnAs: #counter
+> c := (Counter spawnAs: #counter) unwrap
  => an Actor(Counter)
 > c registeredName
  => #counter
-> (Actor named: #counter) increment
+> (Counter named: #counter) unwrap increment
  => 1
+> Counter spawnAs: #counter
+ => Error(#beamtalk_error{kind: #name_registered, name: #counter})
+> Logger named: #counter
+ => Error(#beamtalk_error{kind: #wrong_class, name: #counter, expected: Logger, actual: Counter})
 > c stop
  => #ok
-> Actor named: #counter
- => nil
+> Counter named: #counter
+ => Error(#beamtalk_error{kind: #name_not_registered, name: #counter})
 ```
 
 ### Scope
@@ -319,7 +351,7 @@ Make `Actor` references internally subscribe to exit signals and transparently u
 
 ### Negative
 - Introduces a flat per-node atom namespace — collisions must be managed by convention.
-- **Atom exhaustion is a theoretical risk** if users register dynamically-generated names (e.g., `#user_42`, `#req_abc123`). In practice this requires explicitly converting runtime strings to symbols — `Counter spawnAs: #counter` uses a compile-time symbol the compiler already emitted, costing zero new atoms. The realistic exhaustion path is a user reaching for `String asSymbol` or `(Erlang erlang) binary_to_atom:` in a per-tenant/per-request loop. Documentation should steer users toward bounded, statically-known names and recommend `{via, Module, Term}`-backed registries for genuinely unbounded keys — exactly the use case the deferred future-ADR will address.
+- **Atom exhaustion is a theoretical risk** if users register dynamically-generated names (e.g., `#user_42`, `#req_abc123`). Compile-time symbol literals do consume atom-table entries when the module loads, but the set is bounded by program size — registering `Counter spawnAs: #counter` adds no *new* atoms beyond what the compiler already emitted for the literal. The realistic exhaustion path is a user reaching for `String asSymbol` or `(Erlang erlang) binary_to_atom:` in a per-tenant/per-request loop, where each call mints a previously-unseen atom. Documentation should steer users toward bounded, statically-known names and recommend `{via, Module, Term}`-backed registries for genuinely unbounded keys — exactly the use case the deferred future-ADR will address.
 - `Actor named:` returning `nil` for lookup miss invites a small class of bugs where callers forget to check. Mitigated by proxy send raising a structured error rather than silently dropping.
 - Reserved-name blacklist requires ongoing curation as the stdlib and OTP grow.
 - Proxy handles add a small runtime indirection per send (one extra `whereis` lookup). Negligible in practice but not zero.
@@ -334,6 +366,8 @@ Make `Actor` references internally subscribe to exit signals and transparently u
 ## Implementation
 
 **Existing runtime support.** `beamtalk_actor:start_link/3` already accepts `{local, Name} | {global, Name} | {via, Mod, Term}` as its first argument (called out in ADR 0065). Most of the runtime plumbing is in place; this ADR is mostly stdlib API + wiring it through `SupervisionSpec`.
+
+**Implementation risk: `Result(Self, ...)`.** ADR 0079's typed `class named:` declaration uses `Self` as a type argument to a generic (`Result(Self, Error)`). `Self` and parameterised types both exist in the typechecker (ADR-adjacent commit `facc2d52`), but no current stdlib code combines them — `grep -r 'Result(Self' stdlib/src/` returns no matches. If the typechecker doesn't already substitute `Self` correctly inside generic type arguments, this ADR's typed lookup needs a small targeted typechecker fix (extending the existing `Self`-substitution code path to recurse into generic arguments). It is not a redesign — `Self` semantics are already defined; this is a missing case. Phase 0 of implementation should be a one-line typechecker probe to determine whether the fix is needed before the API work begins.
 
 **Affected components:**
 - **Stdlib (`stdlib/src/Actor.bt`):** add `spawnAs:`, `spawnAs:with:`, `registerAs:`, `unregister`, `registeredName`, `isRegistered`, `class named:`, `class allRegistered`. The `class named:` method follows the existing `Package named:` / `AtomicCounter named:` convention. `allRegistered` returns resolved `Actor` proxies (parallel to `Class allClasses`, ADR/BT-1953).
@@ -364,6 +398,20 @@ Existing code using `Supervisor which:` / `initialize:` continues to work. Proje
 **After:** 4 `supervisionSpec withName: ... withRestart:` lines. Delete `initialize:`. Replace `initWithStore:pool:` with `Actor named: #eventStore` calls inside the methods that actually use the store.
 
 A follow-up issue may add a linter/warning for "supervisor `initialize:` hook that only performs `which:` lookups," suggesting the named-registration replacement.
+
+## Future Work
+
+This ADR establishes `Result(Actor, Error)` as the return shape for boundary operations on `Actor` (`spawnAs:`, `registerAs:`). The same reasoning applies to several Supervisor lifecycle methods that currently raise:
+
+- `Supervisor supervise` / `DynamicSupervisor supervise` — `start_link` returns `{ok, Pid} | {error, {already_started, Pid}} | {error, Reason}`. The `already_started` case carries genuinely useful information (the existing pid) that raise-style discards.
+- `DynamicSupervisor startChild` / `startChild:` — `supervisor:start_child/2` is the canonical Result-shaped OTP API: `{ok, Pid} | {ok, Pid, Info} | {error, already_present} | {error, {already_started, Pid}} | {error, Reason}`.
+- `Supervisor terminate:` / `DynamicSupervisor terminateChild:` — can fail with `not_found`.
+
+A follow-up ADR ("Migrate Supervisor Lifecycle to Result") should do the whole class together with a coordinated migration plan for existing user code (Exdura, symphony, etc., which all call `supervise`). This ADR provides the precedent.
+
+Lookup methods (`Supervisor which:`, `Supervisor current`, `Actor named:`) deliberately stay nil-on-miss — that matches OTP's `whereis` and is the right shape for queries.
+
+Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) deliberately stay raise-on-real-failure with idempotent success — let-it-crash applies to teardown of own resources.
 
 ## References
 - Related issues: BT-XXX (to be created by `/plan-adr`)
