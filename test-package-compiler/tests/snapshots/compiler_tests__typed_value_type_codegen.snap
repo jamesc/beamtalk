@@ -156,6 +156,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{'x' => 'Integer', 'y' => 'Integer'}~,
+      'field_has_default' => ~{'x' => 'true', 'y' => 'true'}~,
       'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'x' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'y' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withX:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withY:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'x:y:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -185,6 +186,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{'x' => 'Integer', 'y' => 'Integer'}~,
+      'field_has_default' => ~{'x' => 'true', 'y' => 'true'}~,
       'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'x' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'y' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withX:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withY:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'x:y:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~

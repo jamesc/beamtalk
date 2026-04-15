@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1976 fixture — child of `CrossFileParentForgets`. The child has no
+// `initialize` of its own; the parent's `initialize` is inherited but does
+// not set the parent's typed-no-default `required` field. Because the parent
+// is defined in a separate file, the child's codegen must read the parent's
+// field metadata from `__beamtalk_meta/0` to include `required` in the
+// post-initialize validation.
+
+typed CrossFileParentForgets subclass: CrossFileChildOfForgetful
+  state: extra :: Integer = 0
+
+  getExtra -> Integer => self.extra

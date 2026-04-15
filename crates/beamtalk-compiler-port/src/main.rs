@@ -90,6 +90,22 @@ fn term_to_atom_atom_map(
     }
 }
 
+/// BT-1976: Extract an atom→bool map (for `field_has_default`).
+fn term_to_atom_bool_map(term: &Term) -> std::collections::HashMap<ecow::EcoString, bool> {
+    match term {
+        Term::Map(m) => m
+            .map
+            .iter()
+            .filter_map(|(k, v)| {
+                let key = term_to_atom(k)?;
+                let flag = term_to_bool(v)?;
+                Some((ecow::EcoString::from(key.as_str()), flag))
+            })
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    }
+}
+
 /// Parse method infos from a `method_info` or `class_method_info` ETF map.
 ///
 /// Each entry: `selector_atom => #{arity => int, param_types => [atom...], return_type => atom}`.
@@ -203,6 +219,13 @@ fn parse_class_info_from_meta_term(
     let state_types = map_get(m, "field_types")
         .map(term_to_atom_atom_map)
         .unwrap_or_default();
+    // BT-1976: Read field_has_default map emitted by codegen. Missing key
+    // (older BEAM artifacts) → empty map; AST-less cross-file validation
+    // degrades gracefully (fields without entries are treated as "unknown",
+    // which means the post-init check skips them as before).
+    let state_has_default = map_get(m, "field_has_default")
+        .map(term_to_atom_bool_map)
+        .unwrap_or_default();
     let class_variables = map_get(m, "class_variables")
         .map(term_to_atom_list)
         .unwrap_or_default();
@@ -231,6 +254,7 @@ fn parse_class_info_from_meta_term(
         is_typed,
         state,
         state_types,
+        state_has_default,
         methods,
         class_methods,
         class_variables,

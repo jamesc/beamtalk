@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1976 fixture — cross-file parent with a typed-no-default field and
+// no `initialize` method of its own. A child in a separate file is
+// expected to set the inherited field before post-initialize validation runs.
+
+typed Actor subclass: CrossFileParentTyped
+  state: token :: String
+
+  getToken -> String => self.token

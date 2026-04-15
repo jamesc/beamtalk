@@ -105,6 +105,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -142,6 +143,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -179,6 +181,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -210,6 +213,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
       'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
       'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

@@ -11,7 +11,7 @@
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, Module, StateDeclaration, TypeAnnotation};
+use crate::ast::{ClassDefinition, Module, TypeAnnotation};
 use crate::docvec;
 
 /// BT-1951 (ADR 0078): Identifies a single class's `initialize` method in the
@@ -30,12 +30,18 @@ pub(in crate::codegen::core_erlang) struct InitializeChainEntry {
 /// BT-1951 (ADR 0078): A typed-no-default state field annotated with the class
 /// that declared it, so post-initialize diagnostics can name the owning class
 /// rather than always the leaf.
+///
+/// BT-1976: Values are owned (rather than borrowed from the AST) because
+/// cross-file ancestors produce synthetic entries from `ClassInfo` when the
+/// defining class's AST is absent from the current compilation unit.
 #[derive(Debug, Clone)]
-pub(in crate::codegen::core_erlang) struct InheritedTypedField<'a> {
+pub(in crate::codegen::core_erlang) struct InheritedTypedField {
     /// Beamtalk class name that declared this field.
     pub owning_class: String,
-    /// The state declaration from the class's AST.
-    pub state: &'a StateDeclaration,
+    /// Field (state variable) name.
+    pub field_name: String,
+    /// Human-readable type annotation (used verbatim in diagnostics).
+    pub type_name: String,
 }
 
 impl CoreErlangGenerator {
@@ -412,11 +418,12 @@ impl CoreErlangGenerator {
         _leaf_class_name: &ecow::EcoString,
     ) -> Document<'static> {
         // BT-1951: Collect typed-no-default fields from the full inheritance
-        // chain (leaf + ancestors), not just the current class. For ancestors
-        // defined outside this module (cross-file), the AST is unavailable and
-        // their fields are skipped; same-file ancestors are walked via the AST
-        // (matching the limitation in `collect_inherited_fields` in state.rs).
-        let typed_no_default: Vec<InheritedTypedField<'_>> = current_class
+        // chain (leaf + ancestors), not just the current class.
+        //
+        // BT-1976: Ancestors defined outside this module fall back to
+        // `ClassInfo` metadata so cross-file typed-no-default fields are
+        // validated too.
+        let typed_no_default: Vec<InheritedTypedField> = current_class
             .map(|c| self.inherited_typed_no_default_fields(module, &c.name.name))
             .unwrap_or_default();
 
@@ -429,12 +436,8 @@ impl CoreErlangGenerator {
         let mut body: Document<'static> = docvec!["{'noreply', InitNewState}"];
 
         for (i, field) in typed_no_default.iter().enumerate().rev() {
-            let field_name = field.state.name.name.to_string();
-            let type_name = field
-                .state
-                .type_annotation
-                .as_ref()
-                .map_or_else(|| "Unknown".to_string(), Self::type_annotation_display);
+            let field_name = field.field_name.clone();
+            let type_name = field.type_name.clone();
             // BT-1951: Use the owning class name (which may be an ancestor)
             // in the diagnostic, while keeping the leaf class in logger metadata
             // so operators see which actor failed to start.
@@ -646,16 +649,16 @@ impl CoreErlangGenerator {
     /// own fields), annotated with the owning class name so diagnostics can
     /// point at the class that declared the field.
     ///
-    /// Only walks classes whose AST is present in the current `Module`. This
-    /// matches the existing limitation of `collect_inherited_fields` in
-    /// `state.rs` — cross-file ancestor fields are not included. Extending to
-    /// cross-file parents is future work (needs default-value metadata on
-    /// `ClassInfo`).
-    pub(in crate::codegen::core_erlang) fn inherited_typed_no_default_fields<'a>(
+    /// BT-1976: When an ancestor's AST is not present in the current `Module`
+    /// (cross-file parent), the function falls back to `ClassInfo` metadata
+    /// loaded from that ancestor's `__beamtalk_meta/0` (see `state_types` /
+    /// `state_has_default`). This closes the cross-file inherited-field
+    /// validation gap left by BT-1951.
+    pub(in crate::codegen::core_erlang) fn inherited_typed_no_default_fields(
         &self,
-        module: &'a Module,
+        module: &Module,
         leaf_class: &str,
-    ) -> Vec<InheritedTypedField<'a>> {
+    ) -> Vec<InheritedTypedField> {
         let Some(hierarchy) = self.class_hierarchy.as_ref() else {
             // Fallback: AST only, leaf class fields.
             return module
@@ -672,7 +675,11 @@ impl CoreErlangGenerator {
                         })
                         .map(|s| InheritedTypedField {
                             owning_class: c.name.name.to_string(),
-                            state: s,
+                            field_name: s.name.name.to_string(),
+                            type_name: s.type_annotation.as_ref().map_or_else(
+                                || "Unknown".to_string(),
+                                Self::type_annotation_display,
+                            ),
                         })
                         .collect::<Vec<_>>()
                 })
@@ -691,27 +698,65 @@ impl CoreErlangGenerator {
             if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
                 continue;
             }
-            // Find the class in the current module's AST so we can read default_value.
-            let Some(class) = module.classes.iter().find(|c| c.name.name == name) else {
-                // Cross-file ancestor — AST not available in this compilation.
-                // Skip its typed-no-default fields (limitation documented on
-                // this function). A future extension could derive the list
-                // from `ClassInfo.state_types` once defaults are tracked.
-                continue;
-            };
-            for s in &class.state {
-                if s.type_annotation.is_some()
-                    && s.default_value.is_none()
-                    && !Self::is_nilable_type(s.type_annotation.as_ref())
-                {
+            if let Some(class) = module.classes.iter().find(|c| c.name.name == name) {
+                for s in &class.state {
+                    if s.type_annotation.is_some()
+                        && s.default_value.is_none()
+                        && !Self::is_nilable_type(s.type_annotation.as_ref())
+                    {
+                        out.push(InheritedTypedField {
+                            owning_class: class.name.name.to_string(),
+                            field_name: s.name.name.to_string(),
+                            type_name: s.type_annotation.as_ref().map_or_else(
+                                || "Unknown".to_string(),
+                                Self::type_annotation_display,
+                            ),
+                        });
+                    }
+                }
+            } else if let Some(info) = hierarchy.get_class(&name) {
+                // BT-1976: Cross-file ancestor — use ClassInfo metadata.
+                // Preserve the declaration order by iterating `info.state`.
+                for field_name in &info.state {
+                    let Some(type_name) = info.state_types.get(field_name) else {
+                        continue; // untyped field — not a typed-no-default
+                    };
+                    // Missing default-info entry (e.g., older BEAM artifact) is
+                    // conservatively treated as "has default" so we don't raise
+                    // spurious UninitializedStateError on stale metadata.
+                    let has_default = info
+                        .state_has_default
+                        .get(field_name)
+                        .copied()
+                        .unwrap_or(true);
+                    if has_default {
+                        continue;
+                    }
+                    if Self::is_nilable_type_name(type_name) {
+                        continue;
+                    }
                     out.push(InheritedTypedField {
-                        owning_class: class.name.name.to_string(),
-                        state: s,
+                        owning_class: info.name.to_string(),
+                        field_name: field_name.to_string(),
+                        type_name: type_name.to_string(),
                     });
                 }
             }
         }
         out
+    }
+
+    /// BT-1976: String form of [`Self::is_nilable_type`] for cross-file
+    /// ancestors whose types come from `ClassInfo.state_types` rather than
+    /// a parsed `TypeAnnotation`. Matches the AST path: a type is nilable if
+    /// it is `Nil` itself or a top-level union that contains `Nil`.
+    fn is_nilable_type_name(type_name: &str) -> bool {
+        if type_name == "Nil" {
+            return true;
+        }
+        // Top-level union: `"A | B | Nil"`. `type_name()` emits `" | "` as
+        // the separator (see `TypeAnnotation::type_name` in `ast/expression.rs`).
+        type_name.split(" | ").any(|t| t.trim() == "Nil")
     }
 
     /// Generates the `handle_continue/2` callback (BT-1541, BT-1951).

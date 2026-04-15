@@ -118,6 +118,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "withTimeout:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("TimeoutProxy".into()), param_types: vec![Some("Integer | Symbol".into())], doc: Some("Wrap this actor with a custom message timeout.\n\nReturns a TimeoutProxy that forwards all messages to this actor using\nthe given timeout (in milliseconds, or `#infinity`) for `gen_server:call`.\nThe default OTP timeout is 5000ms.\n\nThe proxy is a separate actor process — call `stop` on it when done.\n\n## Examples\n```beamtalk\nslowDb := db withTimeout: 30000\nslowDb query: sql              // forwarded with 30s timeout\nslowDb stop                    // stop the proxy when done\n```".into()) },
                 MethodInfo { selector: "initialize".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Optional lifecycle hook called automatically after spawn.\n\nOverride in subclasses to perform setup that goes beyond `state:` defaults,\nsuch as opening resources or computing derived state. Called synchronously\nbefore the spawned object is returned to the caller.\n\nIf `initialize` raises an error, the spawn fails with a catchable\n`InstantiationError`. Under a supervisor, the child start fails and the\nsupervisor applies its restart strategy.\n\n## Examples\n```beamtalk\nActor subclass: Stack\n  state: items = nil\n  initialize => self.items := #()\n```".into()) },
@@ -158,6 +159,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the array.\n\n## Examples\n```beamtalk\n#[1, 2, 3] size              // => 3\n#[] size                     // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test if the array has no elements.\n\n## Examples\n```beamtalk\n#[] isEmpty                  // => true\n#[1] isEmpty                 // => false\n```".into()) },
@@ -196,6 +198,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "increment".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Atomically add 1. Returns the new value.\n\n## Examples\n```beamtalk\nc increment    // => 1\n```".into()) },
                 MethodInfo { selector: "incrementBy:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Atomically add N. Returns the new value.\n\n## Examples\n```beamtalk\nc incrementBy: 5    // => 6\n```".into()) },
@@ -230,6 +233,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -253,6 +257,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["counts".into()],
             state_types: HashMap::from([("counts".into(), "Dictionary".into())]),
+            state_has_default: HashMap::from([("counts".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Total number of element occurrences (sum of all counts).\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) size   // => 3\nBag new size                     // => 0\n```".into()) },
                 MethodInfo { selector: "occurrencesOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Object".into())], doc: Some("Number of occurrences of `element` in the bag.\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) occurrencesOf: 1   // => 2\n(Bag withAll: #(1, 1, 2)) occurrencesOf: 3   // => 0\n```".into()) },
@@ -288,6 +293,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Class)".into()), param_types: vec![], doc: Some("Return a list of all registered classes as class objects.\n\n## Examples\n```beamtalk\nBeamtalk allClasses\n```".into()) },
                 MethodInfo { selector: "classNamed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up a class by name (symbol).\n\n## Examples\n```beamtalk\nBeamtalk classNamed: #Integer\n```".into()) },
@@ -333,6 +339,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: ">>".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("CompiledMethod | Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up a method by selector, returning a CompiledMethod object,\nor nil if the selector is not found in the method dictionary.\n\nFollows Smalltalk-80 convention: `Behaviour >> #selector` returns a\nCompiledMethod with selector, source, and argument count metadata.\n\n## Examples\n```beamtalk\n(Integer >> #+) selector         // => #+\n(Integer >> #+) argumentCount    // => 1\nInteger >> #nonExistent          // => nil\n```".into()) },
                 MethodInfo { selector: "superclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Behaviour | Nil".into()), param_types: vec![], doc: Some("Return the superclass of the receiver as a class object, or nil for roots.\n\n## Examples\n```beamtalk\nCounter superclass      // => Actor (as class object)\nProtoObject superclass  // => nil\n```".into()) },
@@ -383,6 +390,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the byte count of this binary.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) size   // => _\n```".into()) },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each byte (Integer 0-255), evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) do: [:b | Transcript show: b]\n```".into()) },
@@ -424,6 +432,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Evaluate a zero-argument block.\n\n## Examples\n```beamtalk\n[2 + 3] value              // => 5\n```".into()) },
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Object".into())], doc: Some("Evaluate a one-argument block with `arg`.\n\n## Examples\n```beamtalk\n[:x | x * 2] value: 3     // => 6\n```".into()) },
@@ -459,6 +468,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())], doc: Some("Conditional evaluation: evaluate `trueBlock` if true, `falseBlock` if false.".into()) },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Block".into())], doc: Some("If true, evaluate `trueBlock`.".into()) },
@@ -492,6 +502,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Character".into())], doc: Some("Test strict equality with another character.\n\n## Examples\n```beamtalk\n$A =:= $A                  // => true\n$A =:= $B                  // => false\n```".into()) },
                 MethodInfo { selector: "=/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Character".into())], doc: Some("Test strict inequality with another character.\n\n## Examples\n```beamtalk\n$A =/= $B                  // => true\n$A =/= $A                  // => false\n```".into()) },
@@ -536,6 +547,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Return the name of the class as a Symbol.\n\n## Examples\n```beamtalk\nCounter name   // => #Counter\nInteger name   // => #Integer\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a human-readable string representation.\n\n## Examples\n```beamtalk\nCounter printString   // => \"Counter\"\n```".into()) },
@@ -565,6 +577,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["className".into(), "superclassRef".into(), "fieldSpecs".into(), "methodSpecs".into(), "modifiers".into(), "backingModule".into()],
             state_types: HashMap::from([("className".into(), "Symbol | Nil".into()), ("superclassRef".into(), "Object | Nil".into()), ("fieldSpecs".into(), "Dictionary".into()), ("methodSpecs".into(), "Dictionary".into()), ("modifiers".into(), "List(Symbol)".into()), ("backingModule".into(), "Symbol | Nil".into())]),
+            state_has_default: HashMap::from([("className".into(), true), ("superclassRef".into(), true), ("fieldSpecs".into(), true), ("methodSpecs".into(), true), ("modifiers".into(), true), ("backingModule".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "name:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![Some("Symbol".into())], doc: Some("Set the class name (a Symbol).\n\n## Examples\n```beamtalk\nbuilder name: #Counter\n```".into()) },
                 MethodInfo { selector: "superclass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Object".into())], doc: Some("Set the superclass reference.\n\n## Examples\n```beamtalk\nbuilder superclass: Object\n```".into()) },
@@ -597,6 +610,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the number of elements.".into()) },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each element, evaluating `block` with each one.".into()) },
@@ -639,6 +653,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "selector".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Return the method selector as a symbol.\n\n## Examples\n```beamtalk\n(Integer >> #+) selector       // => #+\n```".into()) },
                 MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the method source code as a string.\n\n## Examples\n```beamtalk\n(Integer >> #+) source\n```".into()) },
@@ -669,6 +684,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "year".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Year component.".into()) },
                 MethodInfo { selector: "month".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Month component (1-12).".into()) },
@@ -720,6 +736,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of key-value pairs.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} size                   // => 2\n```".into()) },
                 MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(K)".into()), param_types: vec![], doc: Some("Return a list of all keys.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} keys\n```".into()) },
@@ -760,6 +777,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "startChild".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("C".into()), param_types: vec![], doc: Some("Start a new child with default args.".into()) },
                 MethodInfo { selector: "startChild:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("C".into()), param_types: vec![None], doc: Some("Start a new child with the given initialization args.".into()) },
@@ -797,6 +815,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ErlangModule".into()), param_types: vec![Some("Symbol".into()), Some("List".into())], doc: Some("Look up an Erlang module by name, returning an ErlangModule proxy.\n\nInvoked automatically when an unknown message is sent to the `Erlang`\nsingleton. The `selector` becomes the module name; `arguments` is\nalways empty for unary lookups.\nCompiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\nErlang lists       // => #ErlangModule<lists>\nErlang maps        // => #ErlangModule<maps>\n```".into()) },
             ],
@@ -822,6 +841,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ErlangModule".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into()), Some("List".into())], doc: Some("Forward an unknown message as an Erlang function call on the proxied module.\n\nInvoked automatically when any message is sent to an ErlangModule instance.\nMaps the Beamtalk selector and arguments to `erlang:apply(Module, Fun, Args)`\naccording to the selector-to-function-name rules in ADR 0028 §1.\nCompiled via `@intrinsic erlangApply` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\n(Erlang lists) reverse: #(3, 2, 1)    // => [1, 2, 3]\n(Erlang erlang) node                   // => :'nonode@nohost'\n```".into()) },
             ],
@@ -847,6 +867,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -870,6 +891,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("V | nil".into()), param_types: vec![Some("K".into())], doc: Some("Look up a key. Returns the value, or `nil` if the key is absent.\n\nFor `#bag` and `#duplicateBag` tables with multiple entries per key,\nreturns the first stored value. The current wrapper exposes only one\nvalue per key; bag tables are best suited for single-value-per-key use.\n\n## Examples\n```beamtalk\ncache at: \"key\"        // => value or nil\n```".into()) },
                 MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("K".into()), Some("V".into())], doc: Some("Insert or replace a key-value pair. Returns `nil`.\n\nFor `#bag` and `#duplicateBag` tables, all existing entries for `key`\nare removed before the new entry is inserted, giving best-effort\nupsert semantics. Concurrent writes from multiple actors to the same\nkey on a bag table are not serialized — interleaved operations may\nresult in multiple entries for that key.\n\n## Examples\n```beamtalk\ncache at: \"counter\" put: 1\n```".into()) },
@@ -907,6 +929,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "message".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the error message string.\n\n## Examples\n```beamtalk\n[1 / 0] on: Exception do: [:e | e message]\n```".into()) },
                 MethodInfo { selector: "hint".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![], doc: Some("Return the actionable hint string, or nil if none.\n\n## Examples\n```beamtalk\n[1 / 0] on: Exception do: [:e | e hint]\n```".into()) },
@@ -943,6 +966,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -966,6 +990,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())], doc: Some("If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `falseBlock` result.\n\n## Examples\n```beamtalk\nfalse ifTrue: [\"yes\"] ifFalse: [\"no\"]   // => \"no\"\n```".into()) },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("False".into()), param_types: vec![Some("Block".into())], doc: Some("If true, evaluate `trueBlock`. Returns self (false) since condition is false.\n\n## Examples\n```beamtalk\nfalse ifTrue: [\"yes\"]      // => false\n```".into()) },
@@ -997,6 +1022,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "exists:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("String".into())], doc: Some("Test if a file exists at the given path (class method).\n\n## Examples\n```beamtalk\nFile exists: \"test.txt\"   // => true or false\n```".into()) },
@@ -1041,6 +1067,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "lines".into(), arity: 0, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Stream(String)".into()), param_types: vec![], doc: Some("Return a lazy Stream of lines from this file handle.\n\nThe Stream reads lines one at a time. It must be consumed within the\n`File open:do:` block — the Stream must not escape the block.\n\n## Examples\n\n```beamtalk\nFile open: \"data.csv\" do: [:handle |\n  handle lines do: [:line | Transcript show: line].\n].\n```".into()) },
             ],
@@ -1066,6 +1093,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![Some("Number".into())], doc: Some("Add a number to the receiver.\n\n## Examples\n```beamtalk\n1.5 + 2.5        // => 4.0\n```".into()) },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![Some("Number".into())], doc: Some("Subtract a number from the receiver.\n\n## Examples\n```beamtalk\n5.0 - 2.5        // => 2.5\n```".into()) },
@@ -1133,6 +1161,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1156,6 +1185,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Number".into())], doc: Some("Add an integer to the receiver.\n\n## Examples\n```beamtalk\n3 + 4         // => 7\n-1 + 1        // => 0\n```".into()) },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Number".into())], doc: Some("Subtract an integer from the receiver.\n\n## Examples\n```beamtalk\n10 - 3        // => 7\n0 - 5         // => -5\n```".into()) },
@@ -1228,6 +1258,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["from".into(), "to".into(), "step".into()],
             state_types: HashMap::from([("from".into(), "Integer".into()), ("to".into(), "Integer".into()), ("step".into(), "Integer".into())]),
+            state_has_default: HashMap::from([("from".into(), true), ("to".into(), true), ("step".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the interval.\n\nReturns 0 when the step direction does not move from toward to.\n\n## Examples\n```beamtalk\n(1 to: 10) size      // => 10\n(1 to: 1) size       // => 1\n(1 to: 0) size       // => 0\n(1 to: 0 by: 2) size  // => 0\n```".into()) },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(1 to: 3) do: [:i | Transcript show: i]\n```".into()) },
@@ -1258,6 +1289,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "parse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into())], doc: Some("Parse a JSON string into a Beamtalk value (class method).\n\nJSON objects become Dictionaries with String keys, arrays become\nLists, strings become Strings, numbers become Integer or Float,\nbooleans stay as true/false, null becomes nil.\n\n## Examples\n```beamtalk\n(Json parse: \"[1, 2, 3]\") unwrap   // => #(1, 2, 3)\n(Json parse: \"42\") unwrap          // => 42\n(Json parse: \"null\") unwrap        // => nil\n```".into()) },
@@ -1285,6 +1317,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the list.\n\n## Examples\n```beamtalk\n#(1, 2, 3) size          // => 3\n#() size                 // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test if the list has no elements.\n\n## Examples\n```beamtalk\n#() isEmpty              // => true\n#(1) isEmpty             // => false\n```".into()) },
@@ -1355,6 +1388,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "info:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at info level.\n\n## Examples\n```beamtalk\nLogger info: \"request processed\"\n// => nil\n```".into()) },
@@ -1388,6 +1422,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a metaclass. Always true for Metaclass instances.\n\n## Examples\n```beamtalk\n42 class class isMeta   // => true\n```".into()) },
                 MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a Class (not a Metaclass). Always false.\n\n## Examples\n```beamtalk\n42 class class isClass   // => false\n```".into()) },
@@ -1427,6 +1462,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Number".into())], doc: Some("Strict equality comparison.".into()) },
                 MethodInfo { selector: "=/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Number".into())], doc: Some("Strict inequality comparison.".into()) },
@@ -1463,6 +1499,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("String".into())], doc: Some("Execute a shell command and return its trimmed stdout as a String.\n\nRuns the command through the shell with a default 30-second timeout.\nRaises a `#timeout` error if the command does not exit within the limit,\nor an `#output_too_large` error if stdout exceeds 10 MB.\n\n## Examples\n```beamtalk\nOS run: \"echo hello\"   // => \"hello\"\n```".into()) },
@@ -1489,6 +1526,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Self class".into()), param_types: vec![], doc: Some("Return the class of the receiver.\n\n## Examples\n```beamtalk\n42 class              // => Integer\n\"hello\" class         // => String\n```".into()) },
                 MethodInfo { selector: "isNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test if the receiver is nil. Returns false for all objects except nil.\n\n## Examples\n```beamtalk\n42 isNil              // => false\nnil isNil             // => true\n```".into()) },
@@ -1537,6 +1575,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["name".into(), "version".into(), "classes".into(), "dependencies".into(), "source".into()],
             state_types: HashMap::from([("name".into(), "String".into()), ("version".into(), "String".into()), ("classes".into(), "List(Symbol)".into()), ("dependencies".into(), "List(String)".into()), ("source".into(), "String".into())]),
+            state_has_default: HashMap::from([("name".into(), true), ("version".into(), true), ("classes".into(), true), ("dependencies".into(), true), ("source".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("The package name.\n\n## Examples\n```beamtalk\n(Package named: \"stdlib\") name\n// => \"stdlib\"\n```".into()) },
                 MethodInfo { selector: "version".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("The package version string.\n\n## Examples\n```beamtalk\n(Package named: \"stdlib\") version\n// => _\n```".into()) },
@@ -1579,6 +1618,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the pid to a readable string representation.\n\n## Examples\n```beamtalk\npid asString           // => \"#Pid<0.123.0>\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\npid printString        // => \"#Pid<0.123.0>\"\n```".into()) },
@@ -1612,6 +1652,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the port to a readable string representation.\n\n## Examples\n```beamtalk\nport asString          // => \"#Port<0.5>\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nport printString       // => \"#Port<0.5>\"\n```".into()) },
@@ -1642,6 +1683,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "==".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test value equality (Erlang `==`).\n\n## Examples\n```beamtalk\n42 == 42           // => true\n\"abc\" == \"abc\"     // => true\n```".into()) },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test value inequality (negation of `==`).\n\n## Examples\n```beamtalk\n1 /= 2             // => true\n42 /= 42           // => false\n```".into()) },
@@ -1673,6 +1715,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "requiredMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("List(Symbol)".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the required method selectors for a protocol.\n\nReturns a list of selector symbols. Includes methods from extended\nprotocols. Returns an empty list if the protocol is not registered.\n\n## Examples\n```beamtalk\nProtocol requiredMethods: #Printable   // => [#asString]\n```".into()) },
@@ -1701,6 +1744,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "enqueue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Queue".into()), param_types: vec![Some("Object".into())], doc: Some("Add an element to the back of the queue. Returns a new Queue.\n\nO(1) amortised.\n\n## Examples\n```beamtalk\nq2 := q enqueue: 42\n```".into()) },
                 MethodInfo { selector: "dequeue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Tuple".into()), param_types: vec![], doc: Some("Remove and return the front element as a `{value, newQueue}` Tuple.\n\nO(1) amortised. Raises `empty_queue` if the queue is empty.\n\n## Examples\n```beamtalk\nresult := q dequeue\nvalue := result at: 1\nrest := result at: 2\n```".into()) },
@@ -1732,6 +1776,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "next".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Return a random float from the instance state.\n\nNote: the instance holds an explicit seed snapshot. Calling `next`\nrepeatedly on the same instance returns the same value.\nFor advancing sequences, use class-side `Random next` (process dictionary).\n\n## Examples\n```beamtalk\nrng := Random new\nrng next                     // => 0.0..1.0\n```".into()) },
                 MethodInfo { selector: "nextInteger:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Return a random integer between 1 and max from the instance state.\n\nNote: the instance holds an explicit seed snapshot. Calling `nextInteger:`\nrepeatedly on the same instance returns the same value.\nFor advancing sequences, use class-side `Random nextInteger:` (process dictionary).\n\n## Examples\n```beamtalk\nrng := Random new\nrng nextInteger: 6           // => 1..6\n```".into()) },
@@ -1764,6 +1809,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![None], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nproc writeLine: \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()) },
                 MethodInfo { selector: "exitCode".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Get the exit code. Returns nil if the subprocess is still running.\n\n## Examples\n```beamtalk\nproc exitCode.   // => 0\n```".into()) },
@@ -1794,6 +1840,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the reference to a readable string representation.\n\n## Examples\n```beamtalk\nref asString           // => \"#Ref<0.1.2.3>\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nref printString        // => \"#Ref<0.1.2.3>\"\n```".into()) },
@@ -1825,6 +1872,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the original pattern source string.\n\n## Examples\n```beamtalk\n(Regex from: \"[0-9]+\") source              // => \"[0-9]+\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: Regex(pattern).\n\n## Examples\n```beamtalk\n(Regex from: \"[0-9]+\") printString         // => \"Regex([0-9]+)\"\n```".into()) },
@@ -1855,6 +1903,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["okValue".into(), "errReason".into(), "isOk".into()],
             state_types: HashMap::from([("okValue".into(), "T".into()), ("errReason".into(), "E".into()), ("isOk".into(), "Boolean".into())]),
+            state_has_default: HashMap::from([("okValue".into(), true), ("errReason".into(), true), ("isOk".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "ok".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("True if this Result holds a success value.\n\n## Examples\n```beamtalk\n(Result ok: 42) ok      // => true\n(Result error: #x) ok   // => false\n```".into()) },
                 MethodInfo { selector: "isError".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("True if this Result holds an error.\n\n## Examples\n```beamtalk\n(Result ok: 42) isError      // => false\n(Result error: #x) isError   // => true\n```".into()) },
@@ -1904,6 +1953,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1927,6 +1977,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "handleInfo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Server".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Handle a raw Erlang message delivered to this server's process.\n\nOverride in subclasses to process raw messages (timer events, DOWN\ntuples). The return value is always discarded.\nIf this method raises an error, the server logs a warning and\ncontinues with its pre-call state (does not crash).\n\n## Examples\n```beamtalk\nhandleInfo: msg =>\n  msg match: [\n    #tick -> [self doWork];\n    _ -> nil\n  ]\n```".into()) },
             ],
@@ -1952,6 +2003,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["elements".into()],
             state_types: HashMap::from([("elements".into(), "List".into())]),
+            state_has_default: HashMap::from([("elements".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the set.\n\n## Examples\n```beamtalk\n(Set new add: 1) size           // => 1\nSet new size                    // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test if the set has no elements.\n\n## Examples\n```beamtalk\nSet new isEmpty                 // => true\n```".into()) },
@@ -1994,6 +2046,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Return the function/method name as a symbol.\n\n## Examples\n```beamtalk\nframe method   // => #dispatch\n```".into()) },
                 MethodInfo { selector: "receiverClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![], doc: Some("Return the Beamtalk class name, or nil if not a Beamtalk class.\n\n## Examples\n```beamtalk\nframe receiverClass   // => Counter\n```".into()) },
@@ -2026,6 +2079,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Stream(E)".into()), param_types: vec![Some("Block".into())], doc: Some("Filter elements matching predicate (lazy).\n\n## Examples\n```beamtalk\n((Stream on: #(1, 2, 3, 4)) select: [:n | n > 2]) asList  // => #(3, 4)\n```".into()) },
                 MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Stream".into()), param_types: vec![Some("Block".into())], doc: Some("Transform each element (lazy).\n\n## Examples\n```beamtalk\n((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)\n```".into()) },
@@ -2067,6 +2121,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test strict equality with another string.\n\n## Examples\n```beamtalk\n\"abc\" =:= \"abc\"      // => true\n\"abc\" =:= \"xyz\"      // => false\n```".into()) },
                 MethodInfo { selector: "=/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test strict inequality with another string.\n\n## Examples\n```beamtalk\n\"abc\" =/= \"xyz\"      // => true\n\"abc\" =/= \"abc\"      // => false\n```".into()) },
@@ -2157,6 +2212,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: true,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nagent writeLine: \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()) },
                 MethodInfo { selector: "readLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Read one line from stdout. Blocks until a line is available. Returns nil at EOF.\n\n## Examples\n```beamtalk\nline := agent readLine.   // => \"hello\" or nil\n```".into()) },
@@ -2194,6 +2250,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["id".into(), "actorClass".into(), "restart".into(), "args".into(), "shutdown".into(), "classMethod".into()],
             state_types: HashMap::from([("id".into(), "Symbol | Nil".into()), ("actorClass".into(), "Class | Nil".into()), ("restart".into(), "Symbol".into()), ("args".into(), "Object | Nil".into()), ("shutdown".into(), "Integer | Nil".into()), ("classMethod".into(), "Symbol | Nil".into())]),
+            state_has_default: HashMap::from([("id".into(), true), ("actorClass".into(), true), ("restart".into(), true), ("args".into(), true), ("shutdown".into(), true), ("classMethod".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "withId:withRestart:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Return a new spec with id and restart overridden.".into()) },
                 MethodInfo { selector: "withId:withArgs:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Object".into())], doc: Some("Return a new spec with id and args overridden.".into()) },
@@ -2237,6 +2294,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "children".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![], doc: Some("Return the OTP child ids of currently-running children.".into()) },
                 MethodInfo { selector: "which:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Return the running child process for the given class, or nil.".into()) },
@@ -2275,6 +2333,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the symbol to a string.\n\n## Examples\n```beamtalk\n#hello asString        // => \"hello\"\n```".into()) },
                 MethodInfo { selector: "asAtom".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Convert the symbol to an atom (returns self).\n\n## Examples\n```beamtalk\n#hello asAtom          // => #hello\n```".into()) },
@@ -2307,6 +2366,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "getEnv:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![Some("String".into())], doc: Some("Read an environment variable by name. Returns nil if not set.\n\n## Examples\n```beamtalk\nSystem getEnv: \"HOME\"\n// => _\nSystem getEnv: \"NONEXISTENT_VAR_12345\"\n// => nil\n```".into()) },
@@ -2342,6 +2402,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "setUp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![], doc: Some("Prepare the test fixture. Called before each test method.\nOverride in subclasses to set up shared state or resources.\n\nReturns self (or an updated copy with fields set). The test runner\nuses the return value as the receiver for the test method, so\nsubclasses should return the configured instance:\n\n```beamtalk\nsetUp => self withCounter: (Counter spawn)\n```".into()) },
                 MethodInfo { selector: "tearDown".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Clean up after the test. Called after each test method.\nOverride in subclasses to release resources or reset state.".into()) },
@@ -2384,6 +2445,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "passed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of test methods that passed.\n\n## Examples\n```beamtalk\nresult passed      // => 5\n```".into()) },
                 MethodInfo { selector: "failed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of test methods that failed or raised an error.\n\n## Examples\n```beamtalk\nresult failed      // => 0\n```".into()) },
@@ -2417,6 +2479,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "runAll".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("TestResult".into()), param_types: vec![], doc: Some("Run all test methods across all discovered TestCase subclasses.\nReturns a TestResult aggregating the combined results.\nRuns all classes sequentially (equivalent to `runAll: 1`).\n\n## Examples\n```beamtalk\nresult := TestRunner runAll\nresult hasPassed       // => true\n```".into()) },
@@ -2445,6 +2508,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2468,6 +2532,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "nowS".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in seconds since the Unix epoch.\n\nWraps `erlang:system_time(second)`.\n\n## Examples\n```beamtalk\nTime nowS   // => _\n```".into()) },
@@ -2495,6 +2560,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec!["target".into(), "timeoutMs".into()],
             state_types: HashMap::from([("target".into(), "Actor | Nil".into()), ("timeoutMs".into(), "Integer | Symbol".into())]),
+            state_has_default: HashMap::from([("target".into(), true), ("timeoutMs".into(), true)]),
             methods: vec![
                 MethodInfo { selector: "setTarget:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Actor".into()), param_types: vec![Some("Actor".into())], doc: Some("Set the target actor to forward messages to.".into()) },
                 MethodInfo { selector: "setTimeoutMs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer | Symbol".into()), param_types: vec![Some("Integer | Symbol".into())], doc: Some("Set the timeout in milliseconds (or `#infinity`).".into()) },
@@ -2522,6 +2588,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "cancel".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Cancel this timer. Returns true if the timer was active, false if already done.\n\n## Examples\n```beamtalk\nt := Timer after: 10000 do: ['never' printNl]\nt cancel    // => true\nt cancel    // => false\n```".into()) },
                 MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("True if this timer is still scheduled to fire.\n\n## Examples\n```beamtalk\nt := Timer after: 10000 do: ['never' printNl]\nt isActive    // => true\nt cancel      // => true\nt isActive    // => false\n```".into()) },
@@ -2553,6 +2620,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "setContext:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Dictionary".into())], doc: Some("Set application-level trace context that propagates across actor calls.\nMerges with any existing context. Use for workflow correlation IDs,\nrequest IDs, or any application-level metadata you want in traces and logs.\n\n## Examples\n```beamtalk\nTracing setContext: #{#workflowId => \"wf-123\", #workflowType => \"OrderWorkflow\"}\n// => nil\n```".into()) },
@@ -2597,6 +2665,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: true,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "show:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to the transcript.\n\n## Examples\n```beamtalk\nTranscript show: \"hello\"\nTranscript show: 42\n```".into()) },
                 MethodInfo { selector: "cr".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Write a newline to the transcript.\n\n## Examples\n```beamtalk\nTranscript cr\n```".into()) },
@@ -2631,6 +2700,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())], doc: Some("If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.\n\n## Examples\n```beamtalk\ntrue ifTrue: [\"yes\"] ifFalse: [\"no\"]   // => \"yes\"\n```".into()) },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Block".into())], doc: Some("If true, evaluate `trueBlock`. Returns block result.\n\n## Examples\n```beamtalk\ntrue ifTrue: [\"yes\"]       // => \"yes\"\n```".into()) },
@@ -2662,6 +2732,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the tuple.\n\n## Examples\n```beamtalk\nresult size   // => 2 (e.g., an {ok, Value} tuple)\n```".into()) },
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Integer".into())], doc: Some("Return the element at the given 1-based index.\n\n## Examples\n```beamtalk\nresult at: 2   // => the value from an {ok, Value} tuple\n```".into()) },
@@ -2701,6 +2772,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2724,6 +2796,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "isNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Returns true. nil is nil.\n\n## Examples\n```beamtalk\nnil isNil                   // => true\n```".into()) },
                 MethodInfo { selector: "notNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Returns false. nil is not \"not nil\".\n\n## Examples\n```beamtalk\nnil notNil                  // => false\n```".into()) },
@@ -2758,6 +2831,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation showing fields.\n\nProduces `ClassName(field: value, ...)`. Field values are recursively\ninspected — strings are quoted, nested objects show their own inspect.\nA class with no fields produces `ClassName()`.\n\n## Examples\n```beamtalk\nValuePoint x: 3 y: 4        inspect   // => \"ValuePoint(x: 3, y: 4)\"\nValuePoint new              inspect   // => \"ValuePoint(x: 0, y: 0)\"\n```".into()) },
             ],
@@ -2786,6 +2860,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Actor)".into()), param_types: vec![], doc: Some("Return a list of all live actors as object references.\n\n## Examples\n```beamtalk\nWorkspace actors\n```".into()) },
                 MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())], doc: Some("Look up a specific actor by pid string.\n\n## Examples\n```beamtalk\nWorkspace actorAt: \"<0.132.0>\"\n```".into()) },
