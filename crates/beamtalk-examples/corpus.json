@@ -1954,7 +1954,7 @@
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "Beamtalk version\n// => \"0.3.1\"\n\nBeamtalk allClasses includes: #Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
+      "source": "Beamtalk version\n// => \"0.3.1\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -4946,7 +4946,7 @@
       "tags": [
         "22-workspace-globals"
       ],
-      "source": "Beamtalk version              // the Beamtalk version string\nBeamtalk allClasses           // list all registered class names\nBeamtalk classNamed: #Integer // look up a class by name\nBeamtalk globals              // Dictionary of all system-level names",
+      "source": "Beamtalk version              // the Beamtalk version string\nBeamtalk allClasses           // list all registered classes\nBeamtalk classNamed: #Integer // look up a class by name\nBeamtalk globals              // Dictionary of all system-level names",
       "explanation": "Code example from docs/learning/22-workspace-globals.md"
     },
     {
@@ -11241,6 +11241,37 @@
       "explanation": "BT-1226: Regression tests for multi-statement do: block bodies with state mutations.  Previously, do: block bodies with multiple field mutations (where at least one RHS involves a nested collection operation like reject:) generated invalid Core Erlang with a \"syntax error before: in\" compile error."
     },
     {
+      "id": "stdlib-test-bt1944-typed-param-erasure-test",
+      "title": "TypedParamErasureTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TestCase",
+        "TypedParamErasureTest",
+        "assign",
+        "assignment",
+        "async",
+        "bt1944_typed_param_erasure_test",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testTypedObjectParamNil",
+        "testTypedParamInteger",
+        "testTypedParamNil",
+        "testUntypedParamNil"
+      ],
+      "source": "// BT-1944: Type annotations on method params should be erasable.\n// Adding `:: Integer | Nil` should NOT change runtime behavior.\n\nTestCase subclass: TypedParamErasureTest\n\n  testUntypedParamNil =>\n    actor := BT1944TypedParamActor spawn\n    actor doUntyped: nil\n    self assert: actor count equals: 1\n\n  testTypedParamNil =>\n    actor := BT1944TypedParamActor spawn\n    actor doTyped: nil\n    self assert: actor count equals: 1\n\n  testTypedObjectParamNil =>\n    actor := BT1944TypedParamActor spawn\n    actor doTypedObject: nil\n    self assert: actor count equals: 1\n\n  testTypedParamInteger =>\n    actor := BT1944TypedParamActor spawn\n    actor doTyped: 42\n    self assert: actor count equals: 1",
+      "explanation": "BT-1944: Type annotations on method params should be erasable. Adding `:: Integer | Nil` should NOT change runtime behavior."
+    },
+    {
       "id": "stdlib-test-cast-send-test",
       "title": "CastSendTest",
       "category": "stdlib-tests",
@@ -14227,6 +14258,41 @@
       ],
       "source": "// BT-1226: Actor fixture for multi-statement do: block bodies with state mutations.\n// Exercises the exact pattern from the issue: multiple field mutations per do: iteration,\n// including mutations whose RHS involves nested collection operations (removeKey:, reject:).\n\nActor subclass: BT1226MultiStateActor\n  state: running = #{}\n  state: claimed = #()\n\n  addEntry: entry =>\n    self.running := self.running at: entry put: true\n    self.claimed := self.claimed add: entry\n\n  getState => #{#running => self.running, #claimed => self.claimed}\n\n  // Two field mutations per iteration (exact BT-1226 pattern):\n  // removeKey: on map + reject: on list with nested identity check\n  removeAll: entries =>\n    entries\n      do: [:se |\n        self.running := self.running removeKey: se\n        self.claimed := self.claimed reject: [:c | c =:= se]\n      ]\n    #{#running => self.running, #claimed => self.claimed}\n\n  // Two simple integer field mutations per iteration\n  accumulatePairs: items =>\n    items\n      do: [:x |\n        self.running := self.running at: x put: (self.claimed size + 1)\n        self.claimed := self.claimed add: x\n      ]\n    #{#running => self.running, #claimed => self.claimed}\n\n  // Three field mutations per iteration\n  processAll: items =>\n    items\n      do: [:x |\n        self.running := self.running at: x put: true\n        self.claimed := self.claimed add: x\n        self.running := self.running at: #count put: (self.claimed size)\n      ]\n    #{#running => self.running, #claimed => self.claimed}\n\n  // Local var assigned before do:, then multi-mutation do: (exact issue pattern)\n  tickLocalVar =>\n    entries := #(\"a\", \"b\", \"c\")\n    entries\n      do: [:se |\n        self.running := self.running removeKey: se\n        self.claimed := self.claimed reject: [:c | c =:= se]\n      ]\n    #{#running => self.running, #claimed => self.claimed}",
       "explanation": "BT-1226: Actor fixture for multi-statement do: block bodies with state mutations. Exercises the exact pattern from the issue: multiple field mutations per do: iteration, including mutations whose RHS involves nested collection operations (removeKey:, reject:)."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt1944-typed-param-actor",
+      "title": "BT1944TypedParamActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "BT1944TypedParamActor",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "bt1944_typed_param_actor",
+        "concurrent",
+        "count",
+        "doTyped:",
+        "doTypedObject:",
+        "doUntyped:",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-1944: Test fixture — actor with typed and untyped method params\n\nActor subclass: BT1944TypedParamActor\n  state: callCount = 0\n\n  doUntyped: x =>\n    self.callCount := self.callCount + 1\n    x\n\n  doTyped: x :: Integer | Nil =>\n    self.callCount := self.callCount + 1\n    x\n\n  doTypedObject: x :: Object | Nil =>\n    self.callCount := self.callCount + 1\n    x\n\n  count => self.callCount",
+      "explanation": "BT-1944: Test fixture — actor with typed and untyped method params"
     },
     {
       "id": "stdlib-test-fixtures-calculator",
@@ -20110,7 +20176,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// ADR 0068 Phase 2c: Runtime protocol query tests.\n// Protocol definitions are in separate fixture files:\n// fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt.\n\nTestCase subclass: ProtocolQueriesTest\n\n  // --- Protocol.isProtocol: ---\n  testIsProtocolTrue =>\n    self assert: (Protocol isProtocol: #Displayable) equals: true\n\n  testIsProtocolFalse =>\n    self assert: (Protocol isProtocol: #NotARealProtocol) equals: false\n\n  // --- Protocol.requiredMethods: ---\n  testRequiredMethodsDisplayable =>\n    methods := Protocol requiredMethods: #Displayable\n    self assert: (methods includes: #asString) equals: true\n    self assert: (methods includes: #printString) equals: true\n    self assert: methods size equals: 2\n\n  testRequiredMethodsUnknown =>\n    methods := Protocol requiredMethods: #Unknown\n    self assert: methods size equals: 0\n\n  // --- Protocol.allProtocols ---\n  testAllProtocolsIncludesRegistered =>\n    protos := Protocol allProtocols\n    self assert: (protos includes: #Displayable) equals: true\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- conformsTo: (Behaviour method on class objects) ---\n  testStringConformsToDisplayable =>\n    self assert: (String conformsTo: #Displayable) equals: true\n\n  testIntegerConformsToDisplayable =>\n    self assert: (Integer conformsTo: #Displayable) equals: true\n\n  testStringConformsToHasSize =>\n    self assert: (String conformsTo: #HasSize) equals: true\n\n  testIntegerConformsToHasSize =>\n    // Integer does not have size\n    self assert: (Integer conformsTo: #HasSize) equals: false\n\n  // --- protocols (Behaviour method on class objects) ---\n  testStringProtocolsIncludesDisplayable =>\n    protos := String protocols\n    self assert: (protos includes: #Displayable) equals: true\n\n  testStringProtocolsIncludesHasSize =>\n    protos := String protocols\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- Protocol.conformingClasses: ---\n\n  // Note: conformingClasses with a known protocol is tested via EUnit\n  // (beamtalk_protocol_registry_tests.erl). The BUnit test environment\n  // makes iterating all live class processes unreliable due to gen_server\n  // timeouts during hierarchy walks.\n  testConformingClassesUnknownReturnsEmpty =>\n    // Unknown protocol returns empty list\n    classes := Protocol conformingClasses: #NonExistentProtocol\n    self assert: classes size equals: 0\n\n  // --- BT-1611: Class method protocol tests ---\n  testCreatableIsProtocol =>\n    self assert: (Protocol isProtocol: #Creatable) equals: true\n\n  testRequiredMethodsCreatable =>\n    // Creatable has one class method requirement: `class create`\n    // Required methods returns class methods with \"class \" prefix\n    methods := Protocol requiredMethods: #Creatable\n    self assert: methods size equals: 1\n    self assert: (methods includes: #'class create') equals: true\n\n  // --- ADR 0068: Protocol objects as first-class class objects ---\n  // Protocols are sealed abstract subclasses of Protocol with class methods.\n  testProtocolObjectRequiredMethods =>\n    // Direct message send on protocol object (not via Protocol class)\n    methods := Displayable requiredMethods\n    self assert: (methods includes: #asString) equals: true\n    self assert: (methods includes: #printString) equals: true\n\n  testProtocolObjectConformingClasses =>\n    // Direct message send returns conforming class names (atoms)\n    classes := HasSize conformingClasses\n    self assert: (classes includes: #String) equals: true\n\n  testProtocolObjectSuperclass =>\n    // Protocol objects are subclasses of Protocol\n    self assert: Displayable superclass equals: Protocol\n\n  testProtocolObjectInAllClasses =>\n    // Protocol objects appear in allClasses (returned as atoms)\n    all := (Erlang beamtalk_interface) allClasses\n    self assert: (all includes: #Displayable) equals: true",
+      "source": "// ADR 0068 Phase 2c: Runtime protocol query tests.\n// Protocol definitions are in separate fixture files:\n// fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt.\n\nTestCase subclass: ProtocolQueriesTest\n\n  // --- Protocol.isProtocol: ---\n  testIsProtocolTrue =>\n    self assert: (Protocol isProtocol: #Displayable) equals: true\n\n  testIsProtocolFalse =>\n    self assert: (Protocol isProtocol: #NotARealProtocol) equals: false\n\n  // --- Protocol.requiredMethods: ---\n  testRequiredMethodsDisplayable =>\n    methods := Protocol requiredMethods: #Displayable\n    self assert: (methods includes: #asString) equals: true\n    self assert: (methods includes: #printString) equals: true\n    self assert: methods size equals: 2\n\n  testRequiredMethodsUnknown =>\n    methods := Protocol requiredMethods: #Unknown\n    self assert: methods size equals: 0\n\n  // --- Protocol.allProtocols ---\n  testAllProtocolsIncludesRegistered =>\n    protos := Protocol allProtocols\n    self assert: (protos includes: #Displayable) equals: true\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- conformsTo: (Behaviour method on class objects) ---\n  testStringConformsToDisplayable =>\n    self assert: (String conformsTo: #Displayable) equals: true\n\n  testIntegerConformsToDisplayable =>\n    self assert: (Integer conformsTo: #Displayable) equals: true\n\n  testStringConformsToHasSize =>\n    self assert: (String conformsTo: #HasSize) equals: true\n\n  testIntegerConformsToHasSize =>\n    // Integer does not have size\n    self assert: (Integer conformsTo: #HasSize) equals: false\n\n  // --- protocols (Behaviour method on class objects) ---\n  testStringProtocolsIncludesDisplayable =>\n    protos := String protocols\n    self assert: (protos includes: #Displayable) equals: true\n\n  testStringProtocolsIncludesHasSize =>\n    protos := String protocols\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- Protocol.conformingClasses: ---\n\n  // Note: conformingClasses with a known protocol is tested via EUnit\n  // (beamtalk_protocol_registry_tests.erl). The BUnit test environment\n  // makes iterating all live class processes unreliable due to gen_server\n  // timeouts during hierarchy walks.\n  testConformingClassesUnknownReturnsEmpty =>\n    // Unknown protocol returns empty list\n    classes := Protocol conformingClasses: #NonExistentProtocol\n    self assert: classes size equals: 0\n\n  // --- BT-1611: Class method protocol tests ---\n  testCreatableIsProtocol =>\n    self assert: (Protocol isProtocol: #Creatable) equals: true\n\n  testRequiredMethodsCreatable =>\n    // Creatable has one class method requirement: `class create`\n    // Required methods returns class methods with \"class \" prefix\n    methods := Protocol requiredMethods: #Creatable\n    self assert: methods size equals: 1\n    self assert: (methods includes: #'class create') equals: true\n\n  // --- ADR 0068: Protocol objects as first-class class objects ---\n  // Protocols are sealed abstract subclasses of Protocol with class methods.\n  testProtocolObjectRequiredMethods =>\n    // Direct message send on protocol object (not via Protocol class)\n    methods := Displayable requiredMethods\n    self assert: (methods includes: #asString) equals: true\n    self assert: (methods includes: #printString) equals: true\n\n  testProtocolObjectConformingClasses =>\n    // Direct message send returns conforming class names (atoms)\n    classes := HasSize conformingClasses\n    self assert: (classes includes: #String) equals: true\n\n  testProtocolObjectSuperclass =>\n    // Protocol objects are subclasses of Protocol\n    self assert: Displayable superclass equals: Protocol\n\n  testProtocolObjectInAllClasses =>\n    // Protocol objects appear in allClasses (returned as class objects)\n    all := (Erlang beamtalk_interface) allClasses\n    self assert: (all includes: Displayable) equals: true",
       "explanation": "ADR 0068 Phase 2c: Runtime protocol query tests. Protocol definitions are in separate fixture files: fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt."
     },
     {

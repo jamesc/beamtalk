@@ -24,13 +24,13 @@ sealed typed Object subclass: BeamtalkInterface
   class current: instance :: BeamtalkInterface -> BeamtalkInterface =>
     self.current := instance
 
-  /// Return a list of all registered class names.
+  /// Return a list of all registered classes as class objects.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  allClasses -> List(Symbol) => (Erlang beamtalk_interface) allClasses
+  allClasses -> List(Class) => (Erlang beamtalk_interface) allClasses
 
   /// Look up a class by name (symbol).
   ///
