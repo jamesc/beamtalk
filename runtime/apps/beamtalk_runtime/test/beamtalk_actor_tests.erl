@@ -2504,6 +2504,304 @@ sync_send_onExit_with_kill_reason_test() ->
     end.
 
 %%% ============================================================================
+%%% BT-1987 / ADR 0079: Named-registration intrinsics
+%%% ============================================================================
+%%%
+%%% Use per-test name suffixes to avoid cross-test collisions. The suffix
+%%% is the calling test name (bounded / compile-time) so we don't mint
+%%% unbounded new atoms at runtime.
+
+%% Helper: cleanup a name if registered (used in test teardown).
+cleanup_name(Name) ->
+    case erlang:whereis(Name) of
+        undefined -> ok;
+        _ -> catch erlang:unregister(Name)
+    end.
+
+is_beamtalk_actor_true_for_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    ?assert(beamtalk_actor:is_beamtalk_actor(Counter)),
+    gen_server:stop(Counter).
+
+is_beamtalk_actor_false_for_raw_process_test() ->
+    %% Spawn a bare process that is NOT a beamtalk_actor
+    Self = self(),
+    Pid = spawn(fun() ->
+        Self ! ready,
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        ready -> ok
+    end,
+    try
+        ?assertNot(beamtalk_actor:is_beamtalk_actor(Pid))
+    after
+        %% Ensure the spawned process is reaped even if the assertion fails.
+        exit(Pid, kill)
+    end.
+
+is_beamtalk_actor_false_for_kernel_process_test() ->
+    %% `init` is always running and is not a beamtalk actor.
+    InitPid = erlang:whereis(init),
+    ?assertNot(beamtalk_actor:is_beamtalk_actor(InitPid)).
+
+is_beamtalk_actor_false_for_dead_process_test() ->
+    Pid = spawn(fun() -> ok end),
+    %% Wait for the process to actually die.
+    MRef = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    after 1000 ->
+        ?assert(false)
+    end,
+    ?assertNot(beamtalk_actor:is_beamtalk_actor(Pid)).
+
+is_beamtalk_actor_false_for_non_pid_test() ->
+    %% Guarded against non-pid input: must not crash.
+    ?assertNot(beamtalk_actor:is_beamtalk_actor(not_a_pid)).
+
+%%% register_name / unregister_name / whereis_name
+
+register_name_success_test() ->
+    Name = 'bt1987_test_register_success',
+    cleanup_name(Name),
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        ?assertEqual({ok, Name}, beamtalk_actor:register_name(Name, Counter)),
+        ?assertEqual({ok, Counter}, beamtalk_actor:whereis_name(Name))
+    after
+        beamtalk_actor:unregister_name(Name),
+        gen_server:stop(Counter)
+    end.
+
+register_name_duplicate_test() ->
+    Name = 'bt1987_test_register_duplicate',
+    cleanup_name(Name),
+    {ok, A} = test_counter:start_link(0),
+    {ok, B} = test_counter:start_link(0),
+    try
+        ?assertEqual({ok, Name}, beamtalk_actor:register_name(Name, A)),
+        Result = beamtalk_actor:register_name(Name, B),
+        ?assertMatch({error, #beamtalk_error{kind = name_registered}}, Result)
+    after
+        beamtalk_actor:unregister_name(Name),
+        gen_server:stop(A),
+        gen_server:stop(B)
+    end.
+
+register_name_reserved_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        %% Reserved kernel name
+        R1 = beamtalk_actor:register_name(logger, Counter),
+        ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
+        %% Reserved beamtalk_ prefix
+        R2 = beamtalk_actor:register_name(beamtalk_something_internal, Counter),
+        ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2)
+    after
+        gen_server:stop(Counter)
+    end.
+
+register_name_non_atom_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        Result = beamtalk_actor:register_name(<<"not_atom">>, Counter),
+        ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    after
+        gen_server:stop(Counter)
+    end.
+
+register_name_non_pid_test() ->
+    Result = beamtalk_actor:register_name(some_name, not_a_pid),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+unregister_name_success_test() ->
+    Name = 'bt1987_test_unregister_success',
+    cleanup_name(Name),
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        {ok, Name} = beamtalk_actor:register_name(Name, Counter),
+        ?assertEqual(ok, beamtalk_actor:unregister_name(Name)),
+        ?assertEqual(undefined, beamtalk_actor:whereis_name(Name))
+    after
+        gen_server:stop(Counter)
+    end.
+
+unregister_name_not_registered_test() ->
+    Result = beamtalk_actor:unregister_name('bt1987_never_registered_name'),
+    ?assertMatch({error, #beamtalk_error{kind = name_registered}}, Result).
+
+unregister_name_non_atom_test() ->
+    Result = beamtalk_actor:unregister_name(<<"bin">>),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+unregister_name_reserved_test() ->
+    %% unregister_name/1 must reject reserved names before touching the
+    %% registry — otherwise `unregister_name(logger)` would silently
+    %% deregister the OTP logger process.
+    R1 = beamtalk_actor:unregister_name(logger),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
+    R2 = beamtalk_actor:unregister_name(kernel_sup),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2),
+    R3 = beamtalk_actor:unregister_name(beamtalk_something),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R3),
+    %% OTP logger must still be registered after the attempt.
+    ?assertNotEqual(undefined, erlang:whereis(logger)).
+
+register_name_dead_pid_test() ->
+    %% A `badarg` from erlang:register/2 can mean "dead pid", not just
+    %% "name already taken". The non-duplicate branch must surface as a
+    %% type_error with a useful hint rather than name_registered.
+    Name = 'bt1987_register_dead_pid',
+    cleanup_name(Name),
+    DeadPid = spawn(fun() -> ok end),
+    MRef = erlang:monitor(process, DeadPid),
+    receive
+        {'DOWN', MRef, process, DeadPid, _} -> ok
+    after 1000 ->
+        ?assert(false)
+    end,
+    Result = beamtalk_actor:register_name(Name, DeadPid),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result),
+    %% And no ghost registration was left behind.
+    ?assertEqual(undefined, erlang:whereis(Name)).
+
+whereis_name_undefined_test() ->
+    ?assertEqual(undefined, beamtalk_actor:whereis_name('bt1987_nonexistent_name')).
+
+whereis_name_non_atom_test() ->
+    Result = beamtalk_actor:whereis_name(<<"bin">>),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+%%% all_registered/0
+
+all_registered_filters_kernel_processes_test() ->
+    %% Kernel processes (e.g. `init`, `logger`) are registered but are not
+    %% beamtalk actors — they must be excluded.
+    All = beamtalk_actor:all_registered(),
+    ?assertNot(lists:member(init, All)),
+    ?assertNot(lists:member(logger, All)),
+    ?assertNot(lists:member(kernel_sup, All)).
+
+all_registered_includes_beamtalk_actor_test() ->
+    Name = 'bt1987_test_all_registered',
+    cleanup_name(Name),
+    {ok, Counter} = test_counter:start_link(0),
+    try
+        {ok, Name} = beamtalk_actor:register_name(Name, Counter),
+        All = beamtalk_actor:all_registered(),
+        ?assert(lists:member(Name, All))
+    after
+        beamtalk_actor:unregister_name(Name),
+        gen_server:stop(Counter)
+    end.
+
+%%% spawnAs/2,3
+
+spawnAs_success_test() ->
+    Name = 'bt1987_test_spawnas_success',
+    cleanup_name(Name),
+    try
+        {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+        ?assertEqual({ok, Pid}, beamtalk_actor:whereis_name(Name)),
+        ?assert(beamtalk_actor:is_beamtalk_actor(Pid)),
+        gen_server:stop(Pid)
+    after
+        cleanup_name(Name)
+    end.
+
+spawnAs_arity_2_uses_empty_args_test() ->
+    %% test_counter requires an initial value (treats atom() as numeric),
+    %% so use a spawn-capable module with [] args. Minimal check: arity-2
+    %% is a delegate to arity-3 with [] and does not crash on the shape.
+    %% We verify via reserved-name rejection which runs before start_link.
+    Result = beamtalk_actor:'spawnAs'(logger, test_counter),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, Result).
+
+spawnAs_reserved_test() ->
+    R1 = beamtalk_actor:'spawnAs'(logger, test_counter, 0),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
+    R2 = beamtalk_actor:'spawnAs'(beamtalk_foo, test_counter, 0),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2).
+
+spawnAs_duplicate_test() ->
+    Name = 'bt1987_test_spawnas_duplicate',
+    cleanup_name(Name),
+    try
+        {ok, Pid1} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+        Result = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+        ?assertMatch({error, #beamtalk_error{kind = name_registered}}, Result),
+        gen_server:stop(Pid1)
+    after
+        cleanup_name(Name)
+    end.
+
+spawnAs_non_atom_test() ->
+    R1 = beamtalk_actor:'spawnAs'(<<"not_atom">>, test_counter, 0),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, R1),
+    R2 = beamtalk_actor:'spawnAs'(my_name, "not_module", 0),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, R2).
+
+%%% Reserved-name policy
+
+reserved_name_kernel_test() ->
+    ?assert(beamtalk_actor:reserved_name(logger)),
+    ?assert(beamtalk_actor:reserved_name(kernel_sup)),
+    ?assert(beamtalk_actor:reserved_name(application_controller)),
+    ?assert(beamtalk_actor:reserved_name(code_server)),
+    ?assert(beamtalk_actor:reserved_name(init)),
+    ?assert(beamtalk_actor:reserved_name(error_logger)),
+    ?assert(beamtalk_actor:reserved_name(erl_prim_loader)),
+    ?assert(beamtalk_actor:reserved_name(erl_signal_server)),
+    ?assert(beamtalk_actor:reserved_name(erts_code_purger)),
+    ?assert(beamtalk_actor:reserved_name(file_server_2)),
+    ?assert(beamtalk_actor:reserved_name(global_name_server)),
+    ?assert(beamtalk_actor:reserved_name(inet_db)),
+    ?assert(beamtalk_actor:reserved_name(kernel_refc)),
+    ?assert(beamtalk_actor:reserved_name(kernel_safe_sup)),
+    ?assert(beamtalk_actor:reserved_name(logger_handler_watcher)),
+    ?assert(beamtalk_actor:reserved_name(logger_proxy)),
+    ?assert(beamtalk_actor:reserved_name(logger_std_h_default)),
+    ?assert(beamtalk_actor:reserved_name(logger_sup)),
+    ?assert(beamtalk_actor:reserved_name(net_kernel)),
+    ?assert(beamtalk_actor:reserved_name(net_sup)),
+    ?assert(beamtalk_actor:reserved_name(rex)),
+    ?assert(beamtalk_actor:reserved_name(socket_registry)),
+    ?assert(beamtalk_actor:reserved_name(standard_error)),
+    ?assert(beamtalk_actor:reserved_name(standard_error_sup)),
+    ?assert(beamtalk_actor:reserved_name(standard_error_writer)),
+    ?assert(beamtalk_actor:reserved_name(user)),
+    ?assert(beamtalk_actor:reserved_name(user_drv)),
+    ?assert(beamtalk_actor:reserved_name(user_drv_reader)),
+    ?assert(beamtalk_actor:reserved_name(user_drv_writer)).
+
+reserved_name_beamtalk_prefix_test() ->
+    ?assert(beamtalk_actor:reserved_name(beamtalk_runtime_sup)),
+    ?assert(beamtalk_actor:reserved_name(beamtalk_anything)),
+    ?assert(beamtalk_actor:reserved_name(beamtalk_)).
+
+reserved_name_allows_user_names_test() ->
+    ?assertNot(beamtalk_actor:reserved_name(counter)),
+    ?assertNot(beamtalk_actor:reserved_name(my_app_service)),
+    ?assertNot(beamtalk_actor:reserved_name('MyActor')),
+    %% A name that merely contains "beamtalk" but isn't prefixed:
+    ?assertNot(beamtalk_actor:reserved_name(my_beamtalk_app)).
+
+reserved_name_non_atom_test() ->
+    ?assertNot(beamtalk_actor:reserved_name(<<"logger">>)),
+    ?assertNot(beamtalk_actor:reserved_name("logger")).
+
+%%% Process-dict marker
+
+actor_carries_process_dict_marker_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    {dictionary, Dict} = erlang:process_info(Counter, dictionary),
+    ?assertEqual({'$beamtalk_actor', 'Counter'}, lists:keyfind('$beamtalk_actor', 1, Dict)),
+    gen_server:stop(Counter).
+
+%%% ============================================================================
 %%% BT-1979: Additional actor system coverage
 %%% ============================================================================
 
