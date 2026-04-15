@@ -260,7 +260,7 @@ Dispatch a class method on the Beamtalk global class.
 
 The Beamtalk class provides system reflection methods:
 - allClasses: Returns list of all registered classes (class objects)
-- classNamed: Look up a class by name (returns class pid or nil)
+- classNamed: Look up a class by name (returns class object or nil)
 - globals: Returns global namespace (placeholder - returns empty map)
 - version: Returns Beamtalk version string
 """.

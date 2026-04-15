@@ -1059,7 +1059,7 @@ do_eval(Expression, State, Subscriber) ->
 | Message | Return | Delegates To |
 |---------|--------|-------------|
 | `Beamtalk allClasses` | List of class objects | `beamtalk_class_registry` |
-| `Beamtalk classNamed: #Counter` | Class metadata | `beamtalk_class_registry` |
+| `Beamtalk classNamed: #Counter` | Class object (or nil) | `beamtalk_class_registry` |
 | `Beamtalk actors` | List of running actors | `beamtalk_workspace_meta` |
 | `Beamtalk modules` | List of loaded modules | `beamtalk_workspace_meta` |
 | `Beamtalk version` | Version string | Runtime app env |
