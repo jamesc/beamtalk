@@ -91,7 +91,10 @@ setup_bootstrap() ->
         _ -> ok
     end,
     beamtalk_extensions:init(),
-    {ok, _} = beamtalk_bootstrap:start_link(),
+    case beamtalk_bootstrap:start_link() of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
     ok.
 
 teardown_bootstrap(_) ->
