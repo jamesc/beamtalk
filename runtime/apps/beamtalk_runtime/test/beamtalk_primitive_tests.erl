@@ -8,7 +8,9 @@
 -moduledoc """
 EUnit tests for beamtalk_primitive module.
 
-Tests class_of/1, send/3, and responds_to/2 for all primitive types.
+Tests class_of/1, class_of_object/1, class_of_object_by_name/1, send/3,
+responds_to/2, class_name_to_module/1, print_string/1, and display_string/1
+for all primitive types, tagged maps, class objects, and edge cases.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -1102,3 +1104,500 @@ send_dnu_unknown_method_on_float_test() ->
         },
         beamtalk_primitive:send(3.14, 'fooBarBaz', [])
     ).
+
+%%% ============================================================================
+%%% Future selector recognition — tested via responds_to/2 on pids (BT-813)
+%%% ============================================================================
+
+responds_to_pid_all_future_selectors_test() ->
+    %% All future selectors are recognised on bare pids
+    Pid = self(),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, await)),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, awaitForever)),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, 'await:')),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, 'whenResolved:')),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, 'whenRejected:')).
+
+responds_to_pid_non_future_selectors_test() ->
+    %% Non-future selectors on pid go through module dispatch
+    Pid = self(),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, 'class')),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Pid, 'printString')).
+
+%%% ============================================================================
+%%% Immutable value type — fieldAt:put: blocked (BT-359)
+%%% Tests is_ivar_method/1 indirectly through value type dispatch.
+%%% ============================================================================
+
+value_type_field_at_read_allowed_test() ->
+    %% fieldAt: is NOT blocked — read-only reflection is allowed (BT-924)
+    Self = #{'$beamtalk_class' => 'MockVtFieldRead', x => 42},
+    create_mock_value_type_module('bt@mock_vt_field_read', 'MockVtFieldRead', []),
+    try
+        ?assertEqual(42, beamtalk_primitive:send(Self, 'fieldAt:', [x]))
+    after
+        code:purge('bt@mock_vt_field_read'),
+        code:delete('bt@mock_vt_field_read')
+    end.
+
+%%% ============================================================================
+%%% Tagged map dispatch routing — exercises module_for_value/1 indirectly
+%%% ============================================================================
+
+tagged_map_set_responds_to_test() ->
+    Set = #{'$beamtalk_class' => 'Set', elements => [1, 2]},
+    ?assertEqual(true, beamtalk_primitive:responds_to(Set, 'size')).
+
+tagged_map_dictionary_dispatch_test() ->
+    %% Plain map dispatches via bt@stdlib@dictionary
+    ?assertEqual(2, beamtalk_primitive:send(#{a => 1, b => 2}, 'size', [])).
+
+tagged_map_unknown_class_dnu_test() ->
+    %% Unknown tagged map with unregistered class raises DNU
+    Self = #{'$beamtalk_class' => 'CompletelyUnknownClass99'},
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = 'CompletelyUnknownClass99'
+            }
+        },
+        beamtalk_primitive:send(Self, 'noMethod', [])
+    ).
+
+%%% ============================================================================
+%%% print_string/1 — Additional edge cases
+%%% ============================================================================
+
+print_string_string_with_embedded_quotes_test() ->
+    %% Embedded double quotes are escaped as ""
+    ?assertEqual(
+        <<"\"she said \"\"hi\"\"\"">>, beamtalk_primitive:print_string(<<"she said \"hi\"">>)
+    ).
+
+print_string_empty_string_test() ->
+    ?assertEqual(<<"\"\"">>, beamtalk_primitive:print_string(<<>>)).
+
+print_string_pid_uses_opaque_ops_test() ->
+    Result = beamtalk_primitive:print_string(self()),
+    ?assert(is_binary(Result)),
+    %% Should have #Pid< prefix from beamtalk_opaque_ops
+    ?assertMatch(<<"#Pid<", _/binary>>, Result).
+
+print_string_port_uses_opaque_ops_test() ->
+    {ok, Port} = gen_tcp:listen(0, []),
+    try
+        Result = beamtalk_primitive:print_string(Port),
+        ?assert(is_binary(Result)),
+        ?assertMatch(<<"#Port<", _/binary>>, Result)
+    after
+        gen_tcp:close(Port)
+    end.
+
+print_string_reference_uses_opaque_ops_test() ->
+    Ref = make_ref(),
+    Result = beamtalk_primitive:print_string(Ref),
+    ?assert(is_binary(Result)),
+    ?assertMatch(<<"#Ref<", _/binary>>, Result).
+
+print_string_nested_list_test() ->
+    Result = beamtalk_primitive:print_string([[1, 2], [3]]),
+    ?assertEqual(<<"#(#(1, 2), #(3))">>, Result).
+
+print_string_list_with_strings_test() ->
+    Result = beamtalk_primitive:print_string([<<"a">>, <<"b">>]),
+    ?assertEqual(<<"#(\"a\", \"b\")">>, Result).
+
+print_string_tuple_nested_test() ->
+    Result = beamtalk_primitive:print_string({{1, 2}, {3, 4}}),
+    ?assertEqual(<<"{{1, 2}, {3, 4}}">>, Result).
+
+print_string_set_empty_test() ->
+    Set = #{'$beamtalk_class' => 'Set', elements => []},
+    ?assertEqual(<<"Set()">>, beamtalk_primitive:print_string(Set)).
+
+print_string_plain_map_empty_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            Result = beamtalk_primitive:print_string(#{}),
+            ?assertEqual(<<"#{}">>, Result)
+        end}.
+
+print_string_plain_map_sorted_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Plain map keys are sorted in the output
+            Result = beamtalk_primitive:print_string(#{b => 2, a => 1}),
+            ?assert(is_binary(Result)),
+            %% Result should contain both key-value pairs
+            ?assertMatch(<<"#{", _/binary>>, Result)
+        end}.
+
+print_string_beamtalk_object_instance_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Non-class beamtalk_object prints as "a ClassName"
+            Obj = #beamtalk_object{
+                class = 'UnknownNonClass999',
+                class_mod = 'nonexistent_module',
+                pid = self()
+            },
+            ?assertEqual(<<"a UnknownNonClass999">>, beamtalk_primitive:print_string(Obj))
+        end}.
+
+print_string_class_object_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Class object (registered class name) prints as the display name
+            case beamtalk_class_registry:whereis_class('Integer') of
+                undefined ->
+                    {skip, "Integer class not registered"};
+                _Pid ->
+                    Obj = #beamtalk_object{
+                        class = 'Integer class',
+                        class_mod = beamtalk_object_class,
+                        pid = _Pid
+                    },
+                    Result = beamtalk_primitive:print_string(Obj),
+                    ?assert(is_binary(Result)),
+                    ?assert(byte_size(Result) > 0)
+            end
+        end}.
+
+%%% ============================================================================
+%%% display_string/1 — Additional edge cases
+%%% ============================================================================
+
+display_string_map_dispatch_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Plain map display uses beamtalk_tagged_map:format_for_display
+            Result = beamtalk_primitive:display_string(#{a => 1}),
+            ?assert(is_binary(Result))
+        end}.
+
+display_string_beamtalk_object_instance_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Non-class beamtalk_object displays as "a ClassName"
+            Obj = #beamtalk_object{
+                class = 'UnknownNonClass999',
+                class_mod = 'nonexistent_module',
+                pid = self()
+            },
+            ?assertEqual(<<"a UnknownNonClass999">>, beamtalk_primitive:display_string(Obj))
+        end}.
+
+display_string_class_object_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            case beamtalk_class_registry:whereis_class('Integer') of
+                undefined ->
+                    {skip, "Integer class not registered"};
+                _Pid ->
+                    Obj = #beamtalk_object{
+                        class = 'Integer class',
+                        class_mod = beamtalk_object_class,
+                        pid = _Pid
+                    },
+                    Result = beamtalk_primitive:display_string(Obj),
+                    ?assert(is_binary(Result)),
+                    ?assert(byte_size(Result) > 0)
+            end
+        end}.
+
+display_string_tuple_fallback_test() ->
+    %% Tuples go through the catch-all io_lib:format path
+    Result = beamtalk_primitive:display_string({a, b, c}),
+    ?assert(is_binary(Result)).
+
+display_string_reference_fallback_test() ->
+    Ref = make_ref(),
+    Result = beamtalk_primitive:display_string(Ref),
+    ?assert(is_binary(Result)).
+
+%%% ============================================================================
+%%% responds_to/2 — Additional primitive types
+%%% ============================================================================
+
+responds_to_map_plain_dictionary_test() ->
+    %% Plain map responds to Dictionary methods
+    ?assertEqual(true, beamtalk_primitive:responds_to(#{}, 'size')),
+    ?assertEqual(true, beamtalk_primitive:responds_to(#{a => 1}, 'at:')),
+    ?assertEqual(false, beamtalk_primitive:responds_to(#{}, 'nonexistentMethod99')).
+
+responds_to_symbol_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(true, beamtalk_primitive:responds_to(hello, 'class')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(hello, 'printString')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(hello, 'nonexistent99'))
+    end}.
+
+responds_to_list_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(true, beamtalk_primitive:responds_to([1, 2], 'size')),
+        ?assertEqual(false, beamtalk_primitive:responds_to([1, 2], 'nonexistent99'))
+    end}.
+
+responds_to_port_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        {ok, Port} = gen_tcp:listen(0, []),
+        try
+            ?assertEqual(true, beamtalk_primitive:responds_to(Port, 'class')),
+            ?assertEqual(false, beamtalk_primitive:responds_to(Port, 'nonexistent99'))
+        after
+            gen_tcp:close(Port)
+        end
+    end}.
+
+responds_to_reference_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Ref = make_ref(),
+        ?assertEqual(true, beamtalk_primitive:responds_to(Ref, 'class')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(Ref, 'nonexistent99'))
+    end}.
+
+%%% ============================================================================
+%%% responds_to/2 — Tuple dispatch (non-object)
+%%% ============================================================================
+
+responds_to_tuple_non_object_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
+        ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'nonexistent99'))
+    end}.
+
+%%% ============================================================================
+%%% send/3 — Tuple dispatch (non-object tuples)
+%%% ============================================================================
+
+send_tuple_size_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(2, beamtalk_primitive:send({a, b}, 'size', [])),
+        ?assertEqual(3, beamtalk_primitive:send({a, b, c}, 'size', []))
+    end}.
+
+send_tuple_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('Tuple', beamtalk_primitive:send({a, b}, 'class', []))
+    end}.
+
+%%% ============================================================================
+%%% send/3 — Pid dispatch (non-future selectors)
+%%% ============================================================================
+
+send_pid_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('Pid', beamtalk_primitive:send(self(), 'class', []))
+    end}.
+
+%%% ============================================================================
+%%% class_of_object/1 — Metaclass self-grounding (ADR 0036)
+%%% ============================================================================
+
+class_of_object_metaclass_self_grounding_test() ->
+    %% A metaclass object's class is itself (idempotent)
+    MetaObj = #beamtalk_object{
+        class = 'Metaclass',
+        class_mod = beamtalk_metaclass_bt,
+        pid = self()
+    },
+    Result = beamtalk_primitive:class_of_object(MetaObj),
+    ?assertEqual(MetaObj, Result).
+
+class_of_object_non_class_beamtalk_object_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Non-class beamtalk_object returns via class_of_object_by_name
+            Obj = #beamtalk_object{
+                class = 'UnregisteredClassForTest',
+                class_mod = 'nonexistent_module',
+                pid = self()
+            },
+            Result = beamtalk_primitive:class_of_object(Obj),
+            %% Unknown class returns the atom (no pid in registry)
+            ?assertEqual('UnregisteredClassForTest', Result)
+        end}.
+
+%%% ============================================================================
+%%% class_name_from_tag — tested indirectly via responds_to on beamtalk_object
+%%% ============================================================================
+
+responds_to_beamtalk_object_unknown_tag_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Unknown class tag causes class_name_from_tag to return undefined,
+            %% which means responds_to returns false for everything.
+            Obj = #beamtalk_object{
+                class = 'NonExistentClassTag99',
+                class_mod = 'nonexistent_module',
+                pid = self()
+            },
+            ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'class'))
+        end}.
+
+%%% ============================================================================
+%%% camel_to_snake — Edge cases (tested via class_name_to_module)
+%%% Uses class names that are NOT already loaded as stdlib modules.
+%%% ============================================================================
+
+camel_to_snake_single_lower_test() ->
+    ?assertEqual('bt@a', beamtalk_primitive:class_name_to_module('A')).
+
+camel_to_snake_all_caps_test() ->
+    ?assertEqual('bt@http', beamtalk_primitive:class_name_to_module('HTTP')).
+
+camel_to_snake_trailing_caps_test() ->
+    ?assertEqual('bt@my_url', beamtalk_primitive:class_name_to_module('MyURL')).
+
+camel_to_snake_multi_word_lowercase_transition_test() ->
+    %% Underscore inserted on lowercase→uppercase transition
+    ?assertEqual('bt@foo_bar_baz', beamtalk_primitive:class_name_to_module('FooBarBaz')).
+
+%%% ============================================================================
+%%% dispatch_via_module/3 — DNU for unsupported type
+%%% ============================================================================
+
+dispatch_via_module_dnu_test() ->
+    %% Sending unknown message to primitive raises does_not_understand
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = 'Integer',
+                selector = 'totallyUnknownMethod99'
+            }
+        },
+        beamtalk_primitive:send(42, 'totallyUnknownMethod99', [])
+    ).
+
+%%% ============================================================================
+%%% send/3 — List dispatch
+%%% ============================================================================
+
+send_list_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('List', beamtalk_primitive:send([1, 2, 3], 'class', []))
+    end}.
+
+send_list_includes_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(true, beamtalk_primitive:send([1, 2, 3], 'includes:', [2])),
+        ?assertEqual(false, beamtalk_primitive:send([1, 2, 3], 'includes:', [99]))
+    end}.
+
+%%% ============================================================================
+%%% print_string/1 — Float edge cases
+%%% ============================================================================
+
+print_string_float_negative_test() ->
+    Result = beamtalk_primitive:print_string(-2.5),
+    ?assertEqual(<<"-2.5">>, Result).
+
+print_string_float_zero_test() ->
+    Result = beamtalk_primitive:print_string(0.0),
+    ?assertEqual(<<"0.0">>, Result).
+
+%%% ============================================================================
+%%% display_string/1 — Float edge cases
+%%% ============================================================================
+
+display_string_float_negative_test() ->
+    Result = beamtalk_primitive:display_string(-2.5),
+    ?assertEqual(<<"-2.5">>, Result).
+
+display_string_float_zero_test() ->
+    Result = beamtalk_primitive:display_string(0.0),
+    ?assertEqual(<<"0.0">>, Result).
