@@ -635,9 +635,10 @@ impl TypeChecker {
         // For `-> Union` / `-> FalseOr`, resolve via resolve_type_annotation
         let expected = match declared {
             TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
-            TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. } => {
-                InferredType::known(class_name.clone())
-            }
+            TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
+            // BT-1952: Self class returns a class object, not an instance.
+            // Skip return-body validation since we can't meaningfully compare.
+            TypeAnnotation::SelfClass { .. } => return,
             TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
             TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
                 Self::resolve_type_annotation(declared)

@@ -648,14 +648,16 @@ impl Parser {
         if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
             return false;
         }
-        // BT-1952: Check for `Self class` metatype (two-token type annotation)
+        // BT-1952: Check for `Self class` metatype (two-token type annotation).
+        // Advance by 2 tokens instead of 1, then fall through to the union loop
+        // so `-> Self class | Nil =>` is also recognized.
         if matches!(self.peek_at(o), Some(TokenKind::Identifier(name)) if name == "Self")
             && matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class")
         {
             o += 2;
-            return matches!(self.peek_at(o), Some(TokenKind::FatArrow));
+        } else {
+            o += 1;
         }
-        o += 1;
         // Skip generic type parameters: `Type(T, E)`
         if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
             if let Some(after) = self.skip_paren_type_params(o) {
