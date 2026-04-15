@@ -116,7 +116,7 @@ engine runWorkflow: w1    // resolves #workflowEngine, sends to that pid
 engine runWorkflow: w2    // re-resolves #workflowEngine, sends to the NEW pid
 ```
 
-If the name is not currently registered at send time, the send raises a `#beamtalk_error{kind: #no_such_process, name: ...}` — the same shape as other structured runtime errors.
+If the name is not currently registered at send time, the send raises a `no_such_process` error (structured `beamtalk_error`, same shape as other runtime errors).
 
 ### Proxy semantics
 
@@ -165,17 +165,17 @@ Supervisor subclass: ExduraSupervisor
 
 | Condition | Result |
 |---|---|
-| `spawnAs:` / `registerAs:` — duplicate registration | `Error(#beamtalk_error{kind: #name_registered, name: ...})` |
-| `spawnAs:` / `registerAs:` — invalid name (non-Symbol) | `Error(#beamtalk_error{kind: #type_error, ...})` |
-| `spawnAs:` / `registerAs:` — reserved name (see below) | `Error(#beamtalk_error{kind: #reserved_name, name: ...})` |
-| `spawnAs:` / `registerAs:` — success | `Ok(actor)` |
-| `T named:` — name not registered | `Error(#beamtalk_error{kind: #name_not_registered, name: ...})` |
-| `T named:` — registered to actor of wrong class | `Error(#beamtalk_error{kind: #wrong_class, name: ..., expected: ..., actual: ...})` |
-| `T named:` — success | `Ok(actor)` |
-| Send to proxy whose name is not currently registered (e.g., target died after lookup) | Raises `#beamtalk_error{kind: #no_such_process, name: ...}` |
+| `spawnAs:` / `registerAs:` — duplicate registration | `Result error: (beamtalk_error name_registered)` |
+| `spawnAs:` / `registerAs:` — invalid name (non-Symbol) | `Result error: (beamtalk_error type_error)` |
+| `spawnAs:` / `registerAs:` — reserved name (see below) | `Result error: (beamtalk_error reserved_name)` |
+| `spawnAs:` / `registerAs:` — success | `Result ok: actor` |
+| `T named:` — name not registered | `Result error: (beamtalk_error name_not_registered)` |
+| `T named:` — registered to actor of wrong class | `Result error: (beamtalk_error wrong_class)` |
+| `T named:` — success | `Result ok: actor` |
+| Send to proxy whose name is not currently registered (e.g., target died after lookup) | Raises `beamtalk_error no_such_process` |
 | `unregister` on unregistered actor | `#ok` (idempotent, raises only on type error) |
 
-Lookup returns `Result(Self, Error)` rather than raising — callers branch explicitly on presence and type compatibility (`Ok(actor)` / `Error(#name_not_registered)` / `Error(#wrong_class)`). Sending to a proxy whose name has since vanished (the process died between lookup and send) is distinct and *does* raise, because the caller has already committed to a send.
+Lookup returns `Result(Self, Error)` rather than raising — callers branch explicitly on presence and type compatibility (`Result ok:` / `Result error: (beamtalk_error name_not_registered)` / `Result error: (beamtalk_error wrong_class)`). Sending to a proxy whose name has since vanished (the process died between lookup and send) is distinct and *does* raise, because the caller has already committed to a send.
 
 **Reserved names** — the following OTP-kernel atoms are blocked at registration time, regardless of whether the corresponding process is currently running:
 
@@ -198,13 +198,13 @@ Plus any atom prefixed with `beamtalk_` (reserves the namespace for runtime infr
 > (Counter named: #counter) unwrap increment
  => 1
 > Counter spawnAs: #counter
- => Error(#beamtalk_error{kind: #name_registered, name: #counter})
+ => Result error: (beamtalk_error name_registered)
 > Logger named: #counter
- => Error(#beamtalk_error{kind: #wrong_class, name: #counter, expected: Logger, actual: Counter})
+ => Result error: (beamtalk_error wrong_class)
 > c stop
  => #ok
 > Counter named: #counter
- => Error(#beamtalk_error{kind: #name_not_registered, name: #counter})
+ => Result error: (beamtalk_error name_not_registered)
 ```
 
 ### Scope
@@ -380,7 +380,7 @@ Make `Actor` references internally subscribe to exit signals and transparently u
 ### Negative
 - Introduces a flat per-node atom namespace — collisions must be managed by convention.
 - **Atom exhaustion is a theoretical risk** if users register dynamically-generated names (e.g., `#user_42`, `#req_abc123`). Compile-time symbol literals do consume atom-table entries when the module loads, but the set is bounded by program size — registering `Counter spawnAs: #counter` adds no *new* atoms beyond what the compiler already emitted for the literal. The realistic exhaustion path is a user reaching for `String asSymbol` or `(Erlang erlang) binary_to_atom:` in a per-tenant/per-request loop, where each call mints a previously-unseen atom. Documentation should steer users toward bounded, statically-known names and recommend `{via, Module, Term}`-backed registries for genuinely unbounded keys — exactly the use case the deferred future-ADR will address.
-- `T named:` returning `Result(Self, Error)` requires callers to handle `Error(#name_not_registered)` / `Error(#wrong_class)` explicitly (via `onSuccess:/onError:` or `unwrap`). This is deliberately more ceremony than a raw pid/nil pair — the type system catches forgotten checks — but can feel noisy at the REPL. Mitigated by `unwrap` for "I expect this to succeed" and by `Actor allRegistered` for discovery flows.
+- `T named:` returning `Result(Self, Error)` requires callers to handle `Result error: (beamtalk_error name_not_registered)` / `Result error: (beamtalk_error wrong_class)` explicitly (via `onSuccess:/onError:` or `unwrap`). This is deliberately more ceremony than a raw pid/nil pair — the type system catches forgotten checks — but can feel noisy at the REPL. Mitigated by `unwrap` for "I expect this to succeed" and by `Actor allRegistered` for discovery flows.
 - Reserved-name blacklist requires ongoing curation as the stdlib and OTP grow.
 - Proxy handles add a small runtime indirection per send (one extra `whereis` lookup). Negligible in practice but not zero.
 - **Test isolation.** Two test cases registering the same name will conflict if run concurrently in the same node. Interim guidance: tests should suffix names with a per-test discriminator (e.g., `#counter_<testId>`), being mindful that atom-suffixed names participate in the atom-exhaustion concern above — bound the suffix space (test method name, not an unbounded counter). A first-class `unique:` test helper is deferred to a follow-up; the right shape will become clear once we observe stdlib + Exdura usage patterns.
@@ -442,11 +442,15 @@ A follow-up ADR ("Migrate Supervisor Lifecycle to Result") should do the whole c
 Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) deliberately stay raise-on-real-failure with idempotent success — let-it-crash applies to teardown of own resources.
 
 ## References
-- Related issues: BT-XXX (to be created by `/plan-adr`)
+- Related issues:
+  - [BT-1977](https://linear.app/beamtalk/issue/BT-1977/migrate-supervisor-lifecycle-methods-to-result-return-type) — Migrate Supervisor lifecycle methods to Result (follow-up from the "Future Work" section)
+  - The implementation epic for this ADR will be created via `/plan-adr` after acceptance and linked here.
 - Related ADRs:
+  - ADR 0060 — Result Type & Hybrid Error Handling (conventions this ADR follows for Result-returning methods)
   - ADR 0065 — Complete OTP Primitives & Actor Lifecycle (deferred this ADR; this ADR supersedes its placement suggestion on Server)
   - ADR 0056 — Native Erlang-Backed Actors (dispatch infrastructure the proxy builds on)
   - ADR 0059 — SupervisionSpec (fluent builder this extends)
+  - ADR 0076 — Convert Erlang ok/error Tuples to Result at FFI Boundary
   - ADR 0078 — Actor Initialize Inheritance
 - External: [Erlang `erlang:register/2`](https://www.erlang.org/doc/man/erlang#register-2), [Elixir `Process.register/2`](https://hexdocs.pm/elixir/Process.html#register/2), `global(3erl)`, `pg(3erl)`
 - Motivating example: [`beamtalk-exdura/src/exdura_supervisor.bt`](https://github.com/jamesc/beamtalk-exdura/blob/main/src/exdura_supervisor.bt)
