@@ -30,7 +30,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  allClasses -> List(Symbol) => (Erlang beamtalk_interface) allClasses
+  allClasses -> List(Class) => (Erlang beamtalk_interface) allClasses
 
   /// Look up a class by name (symbol).
   ///
