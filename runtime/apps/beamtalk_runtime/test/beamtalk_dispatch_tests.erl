@@ -111,7 +111,17 @@ dispatch_test_() ->
             {"responds_to walks full hierarchy depth", fun test_responds_to_deep_chain/0},
             {"lookup succeeds with extensions table present",
                 fun test_lookup_with_extensions_table/0},
-            {"super from class with no superclass returns DNU", fun test_super_no_superclass/0}
+            {"super from class with no superclass returns DNU", fun test_super_no_superclass/0},
+            %% BT-1981: additional dispatch-pipeline coverage
+            {"continue_to_superclass when superclass is not in registry",
+                fun test_continue_to_superclass_missing_registry/0},
+            {"extension method that raises is re-raised", fun test_extension_raises_reraised/0},
+            {"super finds and invokes extension on superclass (arity-3)",
+                fun test_super_extension_invoke/0},
+            {"compiled dispatch returning 3-tuple error is normalized to 2-tuple",
+                fun test_compiled_dispatch_returns_error_tuple/0},
+            {"invoke_method with module=undefined continues to superclass",
+                fun test_invoke_method_module_undefined_continues/0}
         ]
     end}.
 
@@ -1034,6 +1044,204 @@ test_lookup_with_extensions_table() ->
     %% increment is a local Counter method, should be found regardless of extensions
     Result = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
     ?assertMatch({reply, _, _}, Result).
+
+%% BT-1981: continue_to_superclass path when the superclass is registered
+%% in metadata but its class process is not in the registry. The walk
+%% should surface class_not_found rather than crash.
+test_continue_to_superclass_missing_registry() ->
+    %% Leaf class has a module without dispatch/4, superclass points to a
+    %% name that is NOT registered. invoke_method → continue_to_superclass
+    %% → whereis_class/1 returns undefined → class_not_found error.
+    Forms = [
+        {attribute, 1, module, bt_test_nodisp_leaf},
+        {attribute, 2, export, [{hello, 0}]},
+        {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms),
+    {module, Mod} = code:load_binary(Mod, "bt_test_nodisp_leaf.beam", Bin),
+
+    {ok, Pid} = beamtalk_object_class:start_link('NoDispLeafClass', #{
+        module => bt_test_nodisp_leaf,
+        superclass => 'UnregisteredParentClass',
+        instance_methods => #{
+            stubMethod => #{block => fun(_S, [], St) -> {reply, ok, St} end, arity => 0}
+        },
+        instance_variables => []
+    }),
+    try
+        State = #{'$beamtalk_class' => 'NoDispLeafClass'},
+        Self = make_ref(),
+        Result = beamtalk_dispatch:lookup(stubMethod, [], Self, State, 'NoDispLeafClass'),
+        ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result)
+    after
+        gen_server:stop(Pid),
+        code:purge(bt_test_nodisp_leaf),
+        code:delete(bt_test_nodisp_leaf)
+    end.
+
+%% BT-1981: extension method that raises is re-raised after logging.
+test_extension_raises_reraised() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    ThrowingFun = fun(_Args, _Self, _State) ->
+        error(extension_crash)
+    end,
+    ok = beamtalk_extensions:register('Counter', throwingExt, ThrowingFun, test_owner),
+
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    try
+        ?assertError(
+            extension_crash,
+            beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter')
+        )
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Counter', throwingExt})
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% BT-1981: invoke_method with module_name=undefined continues to superclass.
+%% Covers the 'undefined' branch in invoke_method which routes to
+%% continue_to_superclass (line 320), and its recursive lookup (line 418)
+%% when the superclass has the method.
+test_invoke_method_module_undefined_continues() ->
+    %% Parent class has a real module with dispatch/4 for the selector.
+    %% Child class explicitly has module=undefined AND the method in its
+    %% metadata → invoke_method → module_name=undefined → continue_to_superclass
+    %% → find parent → invoke parent dispatch.
+    ParentModule = bt_test_parent_dispatch,
+    Forms = [
+        {attribute, 1, module, ParentModule},
+        {attribute, 2, export, [{dispatch, 4}, {has_method, 1}]},
+        {function, 3, dispatch, 4, [
+            {clause, 3, [{var, 3, '_Sel'}, {var, 3, '_Args'}, {var, 3, '_Self'}, {var, 3, 'State'}],
+                [], [
+                    {tuple, 3, [{atom, 3, reply}, {atom, 3, parent_result}, {var, 3, 'State'}]}
+                ]}
+        ]},
+        {function, 4, has_method, 1, [
+            {clause, 4, [{var, 4, '_'}], [], [{atom, 4, true}]}
+        ]}
+    ],
+    {ok, ParentModule, Bin} = compile:forms(Forms),
+    {module, ParentModule} = code:load_binary(ParentModule, "bt_test_parent_dispatch.beam", Bin),
+
+    ParentName = 'BT1981ModUndefParent',
+    ChildName = 'BT1981ModUndefChild',
+
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, #{
+        module => ParentModule,
+        superclass => none,
+        instance_methods => #{
+            sharedMethod => #{block => fun(_S, [], St) -> {reply, ok, St} end, arity => 0}
+        },
+        instance_variables => []
+    }),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, #{
+        module => undefined,
+        superclass => ParentName,
+        instance_methods => #{
+            sharedMethod => #{block => fun(_S, [], St) -> {reply, ok, St} end, arity => 0}
+        },
+        instance_variables => []
+    }),
+    try
+        State = #{'$beamtalk_class' => ChildName},
+        Self = make_ref(),
+        %% Lookup: child has sharedMethod → invoke_method → module_name=undefined
+        %%         → continue_to_superclass → find Parent → invoke parent's dispatch.
+        Result = beamtalk_dispatch:lookup(sharedMethod, [], Self, State, ChildName),
+        ?assertMatch({reply, parent_result, _}, Result)
+    after
+        (try
+            gen_server:stop(ChildPid)
+        catch
+            _:_ -> ok
+        end),
+        (try
+            gen_server:stop(ParentPid)
+        catch
+            _:_ -> ok
+        end),
+        code:purge(ParentModule),
+        code:delete(ParentModule)
+    end.
+
+%% BT-1981: compiled dispatch/4 returning a 3-tuple error is normalized to
+%% a 2-tuple {error, Error} via the 'Other/normalize' path of invoke_method.
+test_compiled_dispatch_returns_error_tuple() ->
+    Forms = [
+        {attribute, 1, module, bt_test_dispatch_err_stub},
+        {attribute, 2, export, [{dispatch, 4}]},
+        {function, 3, dispatch, 4, [
+            {clause, 3, [{var, 3, '_Sel'}, {var, 3, '_Args'}, {var, 3, '_Self'}, {var, 3, 'State'}],
+                [], [
+                    %% Return {error, {beamtalk_error, does_not_understand, fake, sel, <<>>, <<>>, #{}}, State}
+                    {tuple, 3, [
+                        {atom, 3, error},
+                        {tuple, 3, [
+                            {atom, 3, beamtalk_error},
+                            {atom, 3, does_not_understand},
+                            {atom, 3, fake_class},
+                            {atom, 3, fake_sel},
+                            {bin, 3, []},
+                            {bin, 3, []},
+                            {map, 3, []}
+                        ]},
+                        {var, 3, 'State'}
+                    ]}
+                ]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms),
+    {module, Mod} = code:load_binary(Mod, "bt_test_dispatch_err_stub.beam", Bin),
+
+    {ok, Pid} = beamtalk_object_class:start_link('DispatchErrTupleClass', #{
+        module => bt_test_dispatch_err_stub,
+        superclass => none,
+        instance_methods => #{
+            errMethod => #{block => fun(_S, [], St) -> {reply, ok, St} end, arity => 0}
+        },
+        instance_variables => []
+    }),
+    try
+        State = #{'$beamtalk_class' => 'DispatchErrTupleClass'},
+        Self = make_ref(),
+        Result = beamtalk_dispatch:lookup(errMethod, [], Self, State, 'DispatchErrTupleClass'),
+        %% Normalized to 2-tuple
+        ?assertMatch({error, #beamtalk_error{}}, Result),
+        ?assertEqual(2, tuple_size(Result))
+    after
+        gen_server:stop(Pid),
+        code:purge(bt_test_dispatch_err_stub),
+        code:delete(bt_test_dispatch_err_stub)
+    end.
+
+%% BT-1981: super finds extension on superclass (covers super -> extension -> invoke).
+test_super_extension_invoke() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    TestFun = fun(_Args, _Self, State) -> {from_super_ext, State} end,
+    %% Register on Actor (Counter's superclass).
+    ok = beamtalk_extensions:register('Actor', superExtMethod, TestFun, test_owner),
+
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    try
+        Result = beamtalk_dispatch:super(superExtMethod, [], Self, State, 'Counter'),
+        ?assertMatch({reply, from_super_ext, _}, Result)
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Actor', superExtMethod})
+        catch
+            _:_ -> ok
+        end)
+    end.
 
 %% Test: super from a class with no superclass returns DNU (not crash)
 test_super_no_superclass() ->

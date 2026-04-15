@@ -336,3 +336,84 @@ send4_metaclass_ignores_timeout() ->
     MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = ClassPid},
     Result = beamtalk_message_dispatch:send(MetaObj, name, [], 5000),
     ?assertEqual(<<"Object class">>, Result).
+
+%% ============================================================================
+%% BT-1981: Future auto-await dispatch paths
+%% ============================================================================
+
+future_autoawait_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"send/3 auto-awaits future and redispatches", fun send3_future_autoawait/0},
+        {"send/4 auto-awaits future and redispatches", fun send4_future_autoawait/0},
+        {"cast/3 auto-awaits future and redispatches", fun cast_future_autoawait/0}
+    ]}.
+
+send3_future_autoawait() ->
+    %% BT-840: A {beamtalk_future, Pid} tagged future is auto-awaited before
+    %% redispatching. Resolve the future to an integer and verify that the
+    %% redispatch routes through primitive dispatch to produce the sum.
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, 7),
+    Result = beamtalk_message_dispatch:send(Future, '+', [3]),
+    ?assertEqual(10, Result).
+
+send4_future_autoawait() ->
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, 7),
+    Result = beamtalk_message_dispatch:send(Future, '+', [3], 5000),
+    ?assertEqual(10, Result).
+
+cast_future_autoawait() ->
+    %% cast/3 auto-awaits a future then silently ignores for primitive receivers.
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, 42),
+    ?assertEqual(ok, beamtalk_message_dispatch:cast(Future, anySelector, [])).
+
+%% ============================================================================
+%% BT-1981: send/4 class object dispatch path
+%% ============================================================================
+
+send4_class_object_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"send/4 class object delegates to class_send (ignoring timeout)",
+            fun send4_class_object_delegates/0},
+        {"send/4 with undefined pid actor raises actor_dead", fun send4_invalid_pid_raises/0}
+    ]}.
+
+send4_class_object_delegates() ->
+    %% send/4 on a class object falls through to beamtalk_object_class:class_send
+    %% (timeout is ignored because class dispatch is synchronous in-process).
+    ClassPid = beamtalk_class_registry:whereis_class('Object'),
+    ?assert(is_pid(ClassPid)),
+    ClassTag = beamtalk_class_registry:class_object_tag('Object'),
+    ClassMod = beamtalk_object_class:module_name(ClassPid),
+    ClassObj = #beamtalk_object{class = ClassTag, class_mod = ClassMod, pid = ClassPid},
+    Result = beamtalk_message_dispatch:send(ClassObj, name, [], 5000),
+    ?assertEqual('Object', Result).
+
+send4_invalid_pid_raises() ->
+    %% send/4 with invalid pid raises the same structured actor_dead error as send/3.
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = undefined},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
+        beamtalk_message_dispatch:send(Obj, increment, [], 5000)
+    ).
+
+%% ============================================================================
+%% BT-1981: Supervisor generic method dispatch (not isAlive/stop)
+%% ============================================================================
+
+supervisor_generic_dispatch_test() ->
+    %% Supervisor methods other than isAlive/stop route via hierarchy walk.
+    %% Sending a selector that isn't in any ancestor class returns a DNU
+    %% structured error from beamtalk_dispatch:lookup/5.
+    SupPid = anon_sup(),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{}},
+            beamtalk_message_dispatch:send(Sup, noSuchMethod, [])
+        )
+    after
+        gen_server:stop(SupPid)
+    end.

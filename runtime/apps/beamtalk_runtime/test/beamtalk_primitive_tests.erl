@@ -1601,3 +1601,244 @@ display_string_float_negative_test() ->
 display_string_float_zero_test() ->
     Result = beamtalk_primitive:display_string(0.0),
     ?assertEqual(<<"0.0">>, Result).
+
+%%% ============================================================================
+%%% BT-1981: Future auto-await across dispatch/reflection API
+%%% ============================================================================
+
+class_of_future_autoawait_test() ->
+    %% {beamtalk_future, _} tagged future is auto-awaited before class lookup.
+    F = beamtalk_future:new(),
+    beamtalk_future:resolve(F, 42),
+    ?assertEqual('Integer', beamtalk_primitive:class_of(F)).
+
+class_of_object_future_autoawait_test_() ->
+    {setup,
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            F = beamtalk_future:new(),
+            beamtalk_future:resolve(F, 42),
+            %% Integer is a registered class — returns a class object tuple.
+            Result = beamtalk_primitive:class_of_object(F),
+            ?assertMatch({beamtalk_object, _, _, _}, Result)
+        end}.
+
+print_string_future_autoawait_test() ->
+    F = beamtalk_future:new(),
+    beamtalk_future:resolve(F, 42),
+    ?assertEqual(<<"42">>, beamtalk_primitive:print_string(F)).
+
+display_string_future_autoawait_test() ->
+    F = beamtalk_future:new(),
+    beamtalk_future:resolve(F, <<"hello">>),
+    ?assertEqual(<<"hello">>, beamtalk_primitive:display_string(F)).
+
+send_future_autoawait_test() ->
+    %% beamtalk_primitive:send/3 auto-awaits the future before redispatch.
+    F = beamtalk_future:new(),
+    beamtalk_future:resolve(F, 5),
+    ?assertEqual(8, beamtalk_primitive:send(F, '+', [3])).
+
+responds_to_future_autoawait_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            beamtalk_stdlib:init(),
+            beamtalk_extensions:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            F = beamtalk_future:new(),
+            beamtalk_future:resolve(F, 42),
+            ?assert(beamtalk_primitive:responds_to(F, '+'))
+        end}.
+
+%%% ============================================================================
+%%% BT-1981: send_pid Future protocol selectors (BT-813)
+%%% ============================================================================
+
+send_pid_await_test() ->
+    %% 'await' on a pid routes through beamtalk_future:await.
+    F = beamtalk_future:new(),
+    {beamtalk_future, Pid} = F,
+    beamtalk_future:resolve(F, 99),
+    ?assertEqual(99, beamtalk_primitive:send(Pid, await, [])).
+
+send_pid_awaitForever_test() ->
+    F = beamtalk_future:new(),
+    {beamtalk_future, Pid} = F,
+    beamtalk_future:resolve(F, 99),
+    ?assertEqual(99, beamtalk_primitive:send(Pid, awaitForever, [])).
+
+send_pid_await_with_timeout_test() ->
+    F = beamtalk_future:new(),
+    {beamtalk_future, Pid} = F,
+    beamtalk_future:resolve(F, 123),
+    ?assertEqual(123, beamtalk_primitive:send(Pid, 'await:', [5000])).
+
+responds_to_pid_future_selector_test() ->
+    %% A bare pid responds to the Future protocol selectors (BT-813).
+    ?assert(beamtalk_primitive:responds_to(self(), await)),
+    ?assert(beamtalk_primitive:responds_to(self(), awaitForever)),
+    ?assert(beamtalk_primitive:responds_to(self(), 'await:')),
+    ?assert(beamtalk_primitive:responds_to(self(), 'whenResolved:')),
+    ?assert(beamtalk_primitive:responds_to(self(), 'whenRejected:')).
+
+%%% ============================================================================
+%%% BT-1981: send/3 — tuple fallback path (4-tuple with beamtalk_object tag
+%%% but not matching #beamtalk_object{} record pattern)
+%%% ============================================================================
+
+send_non_record_beamtalk_object_tuple_test() ->
+    %% A raw 4-tuple {beamtalk_object, Class, Mod, Pid} that wasn't constructed
+    %% as a record still routes through the tuple-fallback clause which calls
+    %% gen_server:call on element(4). Use test_counter to receive the call.
+    {ok, Counter} = test_counter:start_link(7),
+    try
+        Tuple = {beamtalk_object, 'Counter', test_counter, Counter},
+        ?assertEqual(7, beamtalk_primitive:send(Tuple, 'getValue', []))
+    after
+        gen_server:stop(Counter)
+    end.
+
+%%% ============================================================================
+%%% BT-1981: dispatch_via_module — undefined module raises DNU
+%%% ============================================================================
+
+dispatch_via_module_undefined_test() ->
+    %% A port value has no stdlib mapping in the BT test context when the port
+    %% module isn't loaded. module_for_value/1 returns a module atom for ports,
+    %% but we can exercise the undefined path by sending to a value whose
+    %% module_for_value returns undefined. Use the catch-all branch via a
+    %% map tagged with an unregistered class.
+    %% A plain map tagged with 'CompiledMethod' would route to its module;
+    %% instead send to a unmapped type: use an unmapped tagged map.
+    %% module_for_value for is_map falls through to Other → undefined for
+    %% an unknown tagged class. We simulate via tagged map with unknown class.
+    Tagged = #{'$beamtalk_class' => 'CompletelyUnknownTaggedClass'},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
+        beamtalk_primitive:send(Tagged, someSelector, [])
+    ).
+
+responds_via_module_undefined_test() ->
+    Tagged = #{'$beamtalk_class' => 'CompletelyUnknownTaggedClass'},
+    ?assertNot(beamtalk_primitive:responds_to(Tagged, anySelector)).
+
+%%% ============================================================================
+%%% BT-1981: class_name_to_module fallback
+%%% ============================================================================
+
+class_name_to_module_unknown_class_test() ->
+    %% For a class name whose static module doesn't exist and isn't in the
+    %% registry, class_name_to_module/1 returns the static module atom.
+    Mod = beamtalk_primitive:class_name_to_module('SomeUnknownTestClass'),
+    ?assertEqual('bt@some_unknown_test_class', Mod).
+
+%%% ============================================================================
+%%% BT-1981: value_type_responds_to — module with no has_method/1 fallback
+%%% ============================================================================
+
+value_type_responds_to_via_exports_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% For a tagged map type like Regex, responds_to should report
+            %% true for selectors its module handles. This exercises the
+            %% has_method/module_info fallback path.
+            Tagged = #{'$beamtalk_class' => 'Regex'},
+            %% Unknown selector should be false without crashing.
+            ?assertNot(beamtalk_primitive:responds_to(Tagged, totallyFakeSelector))
+        end}.
+
+%%% ============================================================================
+%%% BT-1981: module_for_value — tagged map variants (BT-1981)
+%%%
+%%% Each tagged-map class has its own clause in module_for_value/1; exercise
+%%% them via responds_to which routes through module_for_value.
+%%% ============================================================================
+
+module_for_value_tagged_variants_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% responds_to on each tagged map class returns false for a fake
+            %% selector but exercises the module_for_value clause.
+            Classes = [
+                'Set',
+                'Stream',
+                'Random',
+                'TestCase',
+                'Regex',
+                'DateTime',
+                'Timer',
+                'TestResult',
+                'Package',
+                'CompiledMethod',
+                'BeamtalkInterface',
+                'WorkspaceInterface'
+            ],
+            lists:foreach(
+                fun(Class) ->
+                    Tagged = #{'$beamtalk_class' => Class},
+                    %% Should return a boolean, exercising the module clause
+                    Result = beamtalk_primitive:responds_to(Tagged, zzzFakeSelector9999),
+                    ?assert(is_boolean(Result))
+                end,
+                Classes
+            )
+        end}.
+
+%%% ============================================================================
+%%% BT-1981: print_string_map — Set / Array / Stream
+%%% ============================================================================
+
+print_string_map_set_test() ->
+    %% Hand-build a Set-tagged map.
+    SetMap = #{'$beamtalk_class' => 'Set', elements => [1, 2, 3]},
+    Result = beamtalk_primitive:print_string(SetMap),
+    ?assert(is_binary(Result)),
+    %% Should start with "Set("
+    ?assertMatch(<<"Set(", _/binary>>, Result).
+
+print_string_map_array_test() ->
+    ArrMap = #{'$beamtalk_class' => 'Array', data => array:from_list([1, 2])},
+    Result = beamtalk_primitive:print_string(ArrMap),
+    ?assertMatch(<<"#[", _/binary>>, Result).
+
+%%% ============================================================================
+%%% BT-1981: responds_to — beamtalk_object records with non-class tag
+%%% ============================================================================
+
+responds_to_beamtalk_object_non_class_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            beamtalk_stdlib:init(),
+            beamtalk_extensions:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% A non-class beamtalk_object (instance-like) — route through
+            %% class_name_from_tag → beamtalk_dispatch:responds_to.
+            Obj = #beamtalk_object{class = 'Object', class_mod = bt@object, pid = self()},
+            Result = beamtalk_primitive:responds_to(Obj, 'class'),
+            ?assert(is_boolean(Result))
+        end}.
