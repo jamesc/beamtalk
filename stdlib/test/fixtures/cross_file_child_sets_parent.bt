@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1976 fixture — child in a separate file that sets its cross-file
+// parent's typed-no-default field in its own `initialize`. Must succeed
+// (no UninitializedStateError) because the child's initialize runs after
+// the parent's and fills in `token`.
+
+typed CrossFileParentTyped subclass: CrossFileChildSetsParent
+
+  initialize -> String => self.token := "set-by-child"

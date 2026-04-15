@@ -2557,6 +2557,11 @@ impl CoreErlangGenerator {
         // field_types: map of field name → declared type atom or 'none'
         let field_types_doc = Self::meta_field_types_map(&class.state);
 
+        // BT-1976: field_has_default — map of field name → 'true' | 'false'.
+        // Cross-file consumers use this to identify typed-no-default fields
+        // without the AST (post-initialize validation in gen_server codegen).
+        let field_has_default_doc = Self::meta_field_has_default_map(&class.state);
+
         // Compute auto-slot methods once and share across method_info / class_method_info
         let auto =
             crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class);
@@ -2623,6 +2628,8 @@ impl CoreErlangGenerator {
             type_params_doc,
             ",\n      'field_types' => ",
             field_types_doc,
+            ",\n      'field_has_default' => ",
+            field_has_default_doc,
             ",\n      'method_info' => ",
             method_info_doc,
             ",\n      'class_method_info' => ",
@@ -2659,6 +2666,39 @@ impl CoreErlangGenerator {
         } else {
             Document::Str("'false'")
         }
+    }
+
+    /// BT-1976: Builds a field-has-default map for `__beamtalk_meta/0`.
+    ///
+    /// Example: `[StateDecl{name: "count", default: Some(0)}]` → `~{'count' => 'true'}~`
+    /// Empty slice → `~{}~`
+    ///
+    /// Cross-file consumers read this to identify typed-no-default fields when
+    /// the class's AST is not in the current compilation unit.
+    pub(super) fn meta_field_has_default_map(state: &[StateDeclaration]) -> Document<'static> {
+        if state.is_empty() {
+            return Document::Str("~{}~");
+        }
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("~{"));
+        for (i, s) in state.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let flag = if s.default_value.is_some() {
+                Document::Str("'true'")
+            } else {
+                Document::Str("'false'")
+            };
+            parts.push(docvec![
+                "'",
+                Document::String(s.name.name.to_string()),
+                "' => ",
+                flag,
+            ]);
+        }
+        parts.push(Document::Str("}~"));
+        Document::Vec(parts)
     }
 
     /// Builds a Core Erlang map of field name → declared type atom or `'none'`.

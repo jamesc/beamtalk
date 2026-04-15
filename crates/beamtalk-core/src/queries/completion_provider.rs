@@ -1,6 +1,5 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
 //! Completion provider for the language service.
 //!
 //! **DDD Context:** Language Service
@@ -26,7 +25,6 @@
 //!
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
-
 use crate::ast::{ClassDefinition, ClassKind, Expression, MethodDefinition, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
@@ -39,7 +37,6 @@ use crate::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
-
 /// Returns `true` if the class is internal and belongs to a different package
 /// than `current_package` (ADR 0071, BT-1703).
 ///
@@ -60,7 +57,6 @@ fn is_cross_package_internal_class(info: &ClassInfo, current_package: Option<&st
     };
     class_pkg != cur_pkg
 }
-
 /// Returns `true` if the method is internal and its defining class belongs to a
 /// different package than `current_package` (ADR 0071, BT-1703).
 ///
@@ -84,7 +80,6 @@ fn is_cross_package_internal_method(
     };
     class_pkg != cur_pkg
 }
-
 /// The class context at the cursor position.
 #[derive(Debug, Clone)]
 enum ClassContext<'a> {
@@ -97,7 +92,6 @@ enum ClassContext<'a> {
     /// Cursor is at top level (not inside any class).
     TopLevel,
 }
-
 /// Computes code completions at a given position in a module.
 ///
 /// # Arguments
@@ -147,9 +141,7 @@ pub fn compute_completions(
         }
         None => return Vec::new(),
     };
-
     let mut completions = Vec::new();
-
     // Check for Erlang module context first — if we're completing
     // after "Erlang" or "Erlang <module>", return specialized completions
     if let Some(erlang_completions) =
@@ -157,10 +149,8 @@ pub fn compute_completions(
     {
         return erlang_completions;
     }
-
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
-
     // Check for `self.` context — if cursor is right after `self.` inside an
     // instance method, return state fields + instance methods (fields are only
     // accessible via `self.`).
@@ -173,7 +163,6 @@ pub fn compute_completions(
             return compute_self_dot_completions(class_name, hierarchy, current_package);
         }
     }
-
     // Enrich hierarchy with inferred return types and get the type map in a single
     // TypeChecker pass (BT-1014, BT-1047). The TypeChecker now consults its own
     // inferred method_return_types during chain resolution, so a second pass is
@@ -190,19 +179,14 @@ pub fn compute_completions(
         };
         (h, type_map)
     };
-
     // Try to find receiver type at cursor for type-filtered completions
     let receiver_type = find_receiver_type(module, offset, &type_map);
-
     // Add keyword completions (context-aware for field:/state: by class kind, BT-1537)
     add_keyword_completions(&mut completions, &context, hierarchy);
-
     // Add identifiers from the current scope (including method-local variables)
     add_identifier_completions(module, offset, &mut completions);
-
     // Add class names as completions (filtering internal classes from other packages)
     add_class_name_completions(module, hierarchy, current_package, &mut completions);
-
     // Add message completions from class hierarchy (context-aware, type-filtered)
     add_hierarchy_completions(
         module,
@@ -212,13 +196,10 @@ pub fn compute_completions(
         current_package,
         &mut completions,
     );
-
     // Remove duplicates
     deduplicate_completions(&mut completions);
-
     completions
 }
-
 /// Checks if the cursor is in an `Erlang <module>` context and returns
 /// specialized completions.
 ///
@@ -236,7 +217,6 @@ fn compute_erlang_completions(
     // Look for the Erlang context by examining the text before the cursor
     let text_before = &source[..offset as usize];
     let trimmed = text_before.trim_end();
-
     // Check for "Erlang <module>" context (cursor after module name)
     // Pattern: text ends with "Erlang <word>" where <word> is a known module
     if let Some(erlang_module) = detect_erlang_module_context(trimmed) {
@@ -274,7 +254,6 @@ fn compute_erlang_completions(
             return Some(completions);
         }
     }
-
     // Check for "Erlang" context (cursor right after "Erlang")
     // Also check by walking the AST for a ClassReference("Erlang") near cursor
     if detect_erlang_class_context(module, trimmed, offset) {
@@ -288,15 +267,12 @@ fn compute_erlang_completions(
         }
         return Some(completions);
     }
-
     None
 }
-
 /// Returns `true` if `b` is a valid Beamtalk identifier character (letter, digit, or underscore).
 fn is_identifier_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
-
 /// Detects if the text before cursor ends with `Erlang <module_name>`.
 ///
 /// Returns the module name if found and recognized.
@@ -304,7 +280,6 @@ fn detect_erlang_module_context(trimmed: &str) -> Option<&str> {
     // Find the last word (potential module name)
     let last_space = trimmed.rfind(' ')?;
     let module_name = &trimmed[last_space + 1..];
-
     // Check the text before the module name ends with "Erlang"
     let before_module = trimmed[..last_space].trim_end();
     if before_module.ends_with("Erlang") {
@@ -316,7 +291,6 @@ fn detect_erlang_module_context(trimmed: &str) -> Option<&str> {
     }
     None
 }
-
 /// Detects if the cursor is right after the `Erlang` class reference.
 fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> bool {
     // Text-based check: does the text before cursor end with "Erlang"?
@@ -326,7 +300,6 @@ fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> b
             return true;
         }
     }
-
     // Cheap textual hint before AST fallback — only scan when "Erlang" is near cursor
     if let Some(idx) = trimmed.rfind("Erlang") {
         if trimmed.len().saturating_sub(idx) <= 32 {
@@ -335,7 +308,6 @@ fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> b
     }
     false
 }
-
 /// Walks the AST to find a `ClassReference("Erlang")` expression near the cursor.
 fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
     let all_exprs = module.expressions.iter().map(|s| &s.expression).chain(
@@ -355,7 +327,6 @@ fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
                     .flat_map(|smd| smd.method.body.iter().map(|s| &s.expression)),
             ),
     );
-
     for expr in all_exprs {
         if has_erlang_class_ref_at(expr, offset) {
             return true;
@@ -363,7 +334,6 @@ fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
     }
     false
 }
-
 /// Recursively checks if an expression contains a `ClassReference("Erlang")`
 /// just before the cursor offset.
 fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
@@ -403,7 +373,6 @@ fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
         _ => false,
     }
 }
-
 /// Adds keyword completions.
 fn add_keyword_completions(
     completions: &mut Vec<Completion>,
@@ -419,12 +388,10 @@ fn add_keyword_completions(
         ("match:", "Pattern matching expression"),
         ("if:then:else:", "Conditional expression"),
     ];
-
     for (keyword, doc) in &keywords {
         completions
             .push(Completion::new(*keyword, CompletionKind::Keyword).with_documentation(*doc));
     }
-
     // Offer field:/state: based on class kind when inside a class body (BT-1537).
     if let ClassContext::ClassBody(class) = context {
         let kind = hierarchy.resolve_class_kind(&class.name.name);
@@ -449,7 +416,6 @@ fn add_keyword_completions(
         }
     }
 }
-
 /// Returns `true` if the cursor is after `self.` (possibly followed by a
 /// partial identifier the user is typing, e.g., `self.co|`).
 fn is_after_self_dot(source: &str, offset: u32) -> bool {
@@ -481,7 +447,6 @@ fn is_after_self_dot(source: &str, offset: u32) -> bool {
             .get(cursor - 6)
             .is_none_or(|&b| !is_identifier_char(b))
 }
-
 /// Computes completions for the `self.` context: state fields + instance methods.
 fn compute_self_dot_completions(
     class_name: &str,
@@ -489,7 +454,6 @@ fn compute_self_dot_completions(
     current_package: Option<&str>,
 ) -> Vec<Completion> {
     let mut completions = Vec::new();
-
     // Add state fields (including inherited from superclasses)
     for field_name in hierarchy.all_state(class_name) {
         completions.push(
@@ -497,7 +461,6 @@ fn compute_self_dot_completions(
                 .with_documentation(format!("Field: {field_name}")),
         );
     }
-
     // Add instance methods (delegate filtering uses receiver_class, not context)
     let mut seen = HashSet::new();
     for method in hierarchy.all_methods(class_name) {
@@ -520,10 +483,8 @@ fn compute_self_dot_completions(
             );
         }
     }
-
     completions
 }
-
 /// Returns the class name if the cursor is inside a standalone instance method.
 fn find_standalone_instance_class(module: &Module, offset: u32) -> Option<&str> {
     let probe = offset.saturating_sub(1);
@@ -540,16 +501,13 @@ fn find_standalone_instance_class(module: &Module, offset: u32) -> Option<&str> 
     }
     None
 }
-
 /// Adds identifier completions from the module and the current method scope.
 fn add_identifier_completions(module: &Module, offset: u32, completions: &mut Vec<Completion>) {
     let mut identifiers = HashSet::new();
-
     // Collect all identifiers from top-level expressions
     for stmt in &module.expressions {
         collect_identifiers_from_expr(&stmt.expression, &mut identifiers);
     }
-
     // Collect identifiers from the method body containing the cursor
     if let Some(method) = find_method_at_offset(module, offset) {
         for param in &method.parameters {
@@ -559,13 +517,11 @@ fn add_identifier_completions(module: &Module, offset: u32, completions: &mut Ve
             collect_identifiers_from_expr(&stmt.expression, &mut identifiers);
         }
     }
-
     // Add them as completions
     for ident in identifiers {
         completions.push(Completion::new(ident, CompletionKind::Variable));
     }
 }
-
 /// Finds the method definition containing the given byte offset.
 ///
 /// Uses `Span::end()` (exclusive) correctly: checks `offset < end`, then
@@ -595,7 +551,6 @@ fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefiniti
     }
     None
 }
-
 /// Determines the class context at a given byte offset.
 ///
 /// Walks the module's class definitions to find if the offset is inside
@@ -607,7 +562,6 @@ fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
         (offset >= span.start() && offset < span.end())
             || (probe >= span.start() && probe < span.end())
     };
-
     for class in &module.classes {
         // Check instance methods
         for method in &class.methods {
@@ -628,7 +582,6 @@ fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
     }
     ClassContext::TopLevel
 }
-
 /// Adds class names as completions (from module + hierarchy builtins).
 fn add_class_name_completions(
     module: &Module,
@@ -637,7 +590,6 @@ fn add_class_name_completions(
     completions: &mut Vec<Completion>,
 ) {
     let mut seen = HashSet::new();
-
     // Add user-defined classes from the module (with richer documentation)
     // These are always visible (same-file classes are same-package by definition).
     for class in &module.classes {
@@ -652,7 +604,6 @@ fn add_class_name_completions(
             );
         }
     }
-
     // Add all known classes from the hierarchy (builtins + any others),
     // filtering out internal classes from other packages (ADR 0071, BT-1703).
     for class_name in hierarchy.class_names() {
@@ -678,7 +629,6 @@ fn add_class_name_completions(
         }
     }
 }
-
 /// Recursively collects identifiers from an expression.
 fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<EcoString>) {
     match expr {
@@ -744,7 +694,6 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
         _ => {}
     }
 }
-
 /// Distinguishes between instance-side and class-side receivers for type-filtered completions.
 #[derive(Debug)]
 enum ReceiverSide {
@@ -753,7 +702,6 @@ enum ReceiverSide {
     /// The class itself (show class-side methods like `spawn`, `new`)
     Class(EcoString),
 }
-
 /// Finds the inferred type of the expression immediately before the cursor.
 ///
 /// This enables type-filtered completions: if the cursor follows an expression
@@ -779,7 +727,6 @@ fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Optio
                 .iter()
                 .flat_map(|smd| smd.method.body.iter().map(|s| &s.expression)),
         );
-
     for expr in expressions {
         if let Some(ty) = find_receiver_in_expr(expr, offset, type_map) {
             return Some(ty);
@@ -787,7 +734,6 @@ fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Optio
     }
     None
 }
-
 /// Recursively search for a receiver expression at the given cursor offset.
 fn find_receiver_in_expr(
     expr: &Expression,
@@ -799,7 +745,6 @@ fn find_receiver_in_expr(
     if offset < span.start() || offset > span.end() + 1 {
         return None;
     }
-
     match expr {
         // If cursor is right after a message send, the result type is the receiver
         Expression::MessageSend {
@@ -903,7 +848,6 @@ fn find_receiver_in_expr(
         _ => None,
     }
 }
-
 /// Adds completions filtered by a known receiver type.
 ///
 /// Returns `true` if completions were added (caller should skip context-based fallback).
@@ -971,7 +915,6 @@ fn add_receiver_type_completions(
         _ => false,
     }
 }
-
 /// Builds a detail string for a completion item showing type information.
 ///
 /// Example: `on Counter -> Integer` or `on Integer (other: Number) -> Number`
@@ -980,7 +923,6 @@ fn method_completion_detail(
     class_name: &str,
 ) -> String {
     let mut detail = format!("on {class_name}");
-
     // Add parameter types for keyword/binary methods
     let has_param_types = method.param_types.iter().any(Option::is_some);
     if has_param_types {
@@ -991,13 +933,11 @@ fn method_completion_detail(
             .collect();
         let _ = write!(detail, " ({})", type_parts.join(", "));
     }
-
     if let Some(ref return_type) = method.return_type {
         let _ = write!(detail, " -> {return_type}");
     }
     detail
 }
-
 /// Returns the documentation string for a method completion.
 ///
 /// Uses the generated `doc` string if present; otherwise falls back to the
@@ -1015,7 +955,6 @@ fn method_completion_doc(
         format!("{}#{}", method.defined_in, method.selector)
     }
 }
-
 /// Returns `true` if the `delegate` method from `Actor` should be excluded from completions.
 ///
 /// The sealed `delegate` method on `Actor` is only meaningful for native classes
@@ -1049,7 +988,6 @@ fn should_exclude_delegate(
         ClassContext::TopLevel => true,
     }
 }
-
 /// Adds method completions from the class hierarchy.
 ///
 /// Uses the cursor's class context to provide relevant completions:
@@ -1079,9 +1017,7 @@ fn add_hierarchy_completions(
     ) {
         return;
     }
-
     let mut seen = HashSet::new();
-
     // Fall back to context-based completions (Dynamic or no receiver)
     match context {
         ClassContext::InstanceMethod(class) => {
@@ -1186,7 +1122,6 @@ fn add_hierarchy_completions(
         }
     }
 }
-
 /// Collects methods into completions, filtering out `delegate` where inappropriate
 /// and internal methods from other packages (ADR 0071, BT-1703).
 #[allow(clippy::too_many_arguments)]
@@ -1223,7 +1158,6 @@ fn collect_method_completions(
         }
     }
 }
-
 /// Removes duplicate completions based on label.
 ///
 /// Keeps the first occurrence of each unique label.
@@ -1239,7 +1173,6 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
         }
     });
 }
-
 /// Resolve the inferred type of an expression for REPL completion fallback (BT-1068).
 ///
 /// Parses `source` as a Beamtalk expression, runs type inference using `hierarchy`,
@@ -1264,7 +1197,6 @@ pub fn resolve_expression_type(source: &str, hierarchy: &ClassHierarchy) -> Opti
         _ => None,
     }
 }
-
 #[cfg(test)]
 mod tests {
     //! Unit tests for code completion functionality.
@@ -1276,15 +1208,12 @@ mod tests {
     //! - Deduplicate repeated identifiers
     //! - Handle edge cases (invalid positions, empty source, block parameters)
     //! - Provide appropriate documentation and completion kinds
-
     use super::*;
     use crate::source_analysis::{lex_with_eof, parse};
-
     /// Parse source and compute completions with a fresh hierarchy.
     fn completions_at(source: &str, position: Position) -> Vec<Completion> {
         completions_at_with_package(source, position, None)
     }
-
     /// Parse source and compute completions with a specific package context.
     fn completions_at_with_package(
         source: &str,
@@ -1296,82 +1225,64 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         compute_completions(&module, source, position, &hierarchy, current_package, None)
     }
-
     #[test]
     fn compute_completions_includes_keywords() {
         let completions = completions_at("x := 42", Position::new(0, 0));
-
         assert!(completions.iter().any(|c| c.label == "self"));
         assert!(completions.iter().any(|c| c.label == "true"));
         assert!(completions.iter().any(|c| c.label == "false"));
     }
-
     #[test]
     fn compute_completions_includes_identifiers() {
         let completions = completions_at("x := 42.\ny := x", Position::new(1, 0));
-
         assert!(completions.iter().any(|c| c.label == "x"));
         assert!(completions.iter().any(|c| c.label == "y"));
     }
-
     #[test]
     fn compute_completions_includes_messages() {
         let completions = completions_at("", Position::new(0, 0));
-
         // Should include Object/ProtoObject methods
         assert!(completions.iter().any(|c| c.label == "isNil"));
         assert!(completions.iter().any(|c| c.label == "class"));
         assert!(completions.iter().any(|c| c.label == "respondsTo:"));
     }
-
     #[test]
     fn compute_completions_no_duplicates() {
         let completions = completions_at("x := 1.\nx := 2", Position::new(0, 0));
-
         let x_count = completions.iter().filter(|c| c.label == "x").count();
         assert_eq!(x_count, 1);
     }
-
     #[test]
     fn compute_completions_with_invalid_position() {
         // Position beyond end of file
         let completions = completions_at("x := 42", Position::new(100, 100));
-
         // Should return empty vec for out-of-bounds position
         assert!(completions.is_empty());
     }
-
     #[test]
     fn compute_completions_with_block_expressions() {
         let completions = completions_at("block := [:x | x + 1]", Position::new(0, 0));
-
         // Should include both the block variable and parameter
         assert!(completions.iter().any(|c| c.label == "block"));
         assert!(completions.iter().any(|c| c.label == "x"));
     }
-
     #[test]
     fn compute_completions_with_message_sends() {
         let completions = completions_at("obj doSomething", Position::new(0, 0));
-
         // Should include the identifier
         assert!(completions.iter().any(|c| c.label == "obj"));
     }
-
     #[test]
     fn compute_completions_empty_source() {
         let completions = completions_at("", Position::new(0, 0));
-
         // Should still return keywords and common messages
         assert!(!completions.is_empty());
         assert!(completions.iter().any(|c| c.label == "self"));
     }
-
     #[test]
     fn keyword_completions_have_documentation() {
         // Use completions_at to get keyword completions via the full pipeline
         let completions = completions_at("x := 42", Position::new(0, 0));
-
         // All keywords should have documentation
         let keyword_completions: Vec<_> = completions
             .iter()
@@ -1386,16 +1297,13 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn hierarchy_completions_include_object_methods() {
         let completions = completions_at("", Position::new(0, 0));
-
         // Should include Object methods like isNil, class, respondsTo:
         assert!(completions.iter().any(|c| c.label == "isNil"));
         assert!(completions.iter().any(|c| c.label == "class"));
         assert!(completions.iter().any(|c| c.label == "respondsTo:"));
-
         // All method completions should have Function kind
         let method_completions: Vec<_> = completions
             .iter()
@@ -1406,7 +1314,6 @@ mod tests {
             assert!(completion.documentation.is_some());
         }
     }
-
     #[test]
     fn completions_include_inherited_methods_for_class_module() {
         // Parse a module with an Actor subclass
@@ -1416,7 +1323,6 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
-
         // Should include inherited Actor methods (spawn)
         assert!(
             completions.iter().any(|c| c.label == "spawn"),
@@ -1433,7 +1339,6 @@ mod tests {
             "Should include inherited 'class' from ProtoObject"
         );
     }
-
     #[test]
     fn completions_in_instance_method_include_instance_methods() {
         // Position inside the `increment` method body
@@ -1441,7 +1346,6 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Position at the method body (after "=> ")
         let completions = compute_completions(
             &module,
@@ -1451,7 +1355,6 @@ mod tests {
             None,
             None,
         );
-
         // Should include the class's own method
         assert!(
             completions.iter().any(|c| c.label == "increment"),
@@ -1463,7 +1366,6 @@ mod tests {
             "Should include inherited 'isNil' from Object"
         );
     }
-
     #[test]
     fn completions_after_self_dot_include_state_fields() {
         // Cursor right after `self.` — state fields should appear.
@@ -1472,7 +1374,6 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         let completions = compute_completions(
             &module,
             source,
@@ -1481,7 +1382,6 @@ mod tests {
             None,
             None,
         );
-
         // Should include state variable as field completion
         assert!(
             completions
@@ -1494,7 +1394,6 @@ mod tests {
                 .collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn completions_without_self_dot_exclude_state_fields() {
         // Cursor inside method body but NOT after `self.` — state fields should NOT appear
@@ -1502,7 +1401,6 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Position at col 17 — after `self.count := s` (not after self.)
         let completions = compute_completions(
             &module,
@@ -1512,7 +1410,6 @@ mod tests {
             None,
             None,
         );
-
         // Should NOT include bare state variable
         assert!(
             !completions
@@ -1521,14 +1418,12 @@ mod tests {
             "Should NOT include state 'count' as bare Field (only after self.)"
         );
     }
-
     #[test]
     fn completions_in_method_include_local_variables() {
         let source = "Object subclass: Foo\n  test =>\n    first := \"foo\"\n    first ++ \"bar\"\n    b := fi";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Position at end of last line (after "fi")
         let completions = compute_completions(
             &module,
@@ -1538,7 +1433,6 @@ mod tests {
             None,
             None,
         );
-
         // Should include 'first' as a variable from the method body
         assert!(
             completions
@@ -1548,7 +1442,6 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn completions_in_method_include_parameters() {
         let source =
@@ -1556,11 +1449,9 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Position at end of last line (after "ms")
         let completions =
             compute_completions(&module, source, Position::new(3, 6), &hierarchy, None, None);
-
         // Should include 'name' parameter
         assert!(
             completions
@@ -1578,17 +1469,14 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn completions_include_class_names() {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
-
         // Should include user-defined class
         assert!(
             completions
@@ -1604,14 +1492,12 @@ mod tests {
             "Should include builtin class 'Integer'"
         );
     }
-
     #[test]
     fn completions_in_class_method_include_class_methods() {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Position inside the class method body (line 3, after "=> ")
         let completions = compute_completions(
             &module,
@@ -1621,14 +1507,12 @@ mod tests {
             None,
             None,
         );
-
         // Should include the class method itself
         assert!(
             completions.iter().any(|c| c.label == "withInitial:"),
             "Should include class method 'withInitial:'"
         );
     }
-
     #[test]
     fn top_level_completions_include_class_side_methods() {
         // When a class has class-side methods, top-level completions should include them
@@ -1636,13 +1520,11 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Position at top level (line 0 is part of class definition,
         // but completions at any position include all module methods)
         // Use Position(0, 0) which is before class keyword
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
-
         // Should include class-side methods from module classes
         assert!(
             completions.iter().any(|c| c.label == "withInitial:"),
@@ -1654,7 +1536,6 @@ mod tests {
             "Should include instance method 'increment'"
         );
     }
-
     #[test]
     fn completions_filtered_by_receiver_type() {
         // When cursor is after a known-typed expression, completions should be filtered
@@ -1671,7 +1552,6 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn completions_dynamic_type_shows_all_methods() {
         // For untyped variables, should fall back to showing all methods
@@ -1685,16 +1565,13 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     // --- field:/state: class-kind-aware completion tests (BT-1537) ---
-
     #[test]
     fn value_class_body_offers_field_not_state() {
         // Cursor inside a Value subclass body, on the blank line between
         // the class header and the method definition.
         let source = "Value subclass: Point\n  field: x = 0\n\n  getX => self.x";
         let completions = completions_at(source, Position::new(2, 0));
-
         assert!(
             completions.iter().any(|c| c.label == "field:"),
             "Value class body should offer 'field:' completion. Got: {:?}",
@@ -1705,13 +1582,11 @@ mod tests {
             "Value class body should NOT offer 'state:' completion"
         );
     }
-
     #[test]
     fn actor_class_body_offers_state_not_field() {
         // Cursor inside an Actor subclass body, on the blank line.
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let completions = completions_at(source, Position::new(2, 0));
-
         assert!(
             completions.iter().any(|c| c.label == "state:"),
             "Actor class body should offer 'state:' completion. Got: {:?}",
@@ -1722,13 +1597,11 @@ mod tests {
             "Actor class body should NOT offer 'field:' completion"
         );
     }
-
     #[test]
     fn object_class_body_offers_neither_field_nor_state() {
         // Cursor inside an Object subclass body.
         let source = "Object subclass: Helper\n\n  class doStuff => 42";
         let completions = completions_at(source, Position::new(1, 0));
-
         assert!(
             !completions.iter().any(|c| c.label == "field:"),
             "Object class body should NOT offer 'field:' completion"
@@ -1738,13 +1611,11 @@ mod tests {
             "Object class body should NOT offer 'state:' completion"
         );
     }
-
     #[test]
     fn top_level_offers_neither_field_nor_state() {
         // Cursor at top level, not inside any class.
         let source = "x := 42";
         let completions = completions_at(source, Position::new(0, 0));
-
         assert!(
             !completions.iter().any(|c| c.label == "field:"),
             "Top level should NOT offer 'field:' completion"
@@ -1754,12 +1625,10 @@ mod tests {
             "Top level should NOT offer 'state:' completion"
         );
     }
-
     #[test]
     fn field_completion_has_correct_kind_and_docs() {
         let source = "Value subclass: Point\n  field: x = 0\n\n  getX => self.x";
         let completions = completions_at(source, Position::new(2, 0));
-
         let field_completion = completions
             .iter()
             .find(|c| c.label == "field:")
@@ -1768,12 +1637,10 @@ mod tests {
         assert!(field_completion.documentation.is_some());
         assert!(field_completion.detail.is_some());
     }
-
     #[test]
     fn state_completion_has_correct_kind_and_docs() {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let completions = completions_at(source, Position::new(2, 0));
-
         let state_completion = completions
             .iter()
             .find(|c| c.label == "state:")
@@ -1782,7 +1649,6 @@ mod tests {
         assert!(state_completion.documentation.is_some());
         assert!(state_completion.detail.is_some());
     }
-
     #[test]
     fn inherited_value_subclass_offers_field() {
         // A class that indirectly inherits from Value should still get field: completions.
@@ -1790,7 +1656,6 @@ mod tests {
         let source =
             "Value subclass: Base\n  field: x = 0\n\nBase subclass: Child\n\n  getX => self.x";
         let completions = completions_at(source, Position::new(4, 0));
-
         assert!(
             completions.iter().any(|c| c.label == "field:"),
             "Inherited Value subclass body should offer 'field:'. Got: {:?}",
@@ -1801,15 +1666,12 @@ mod tests {
             "Inherited Value subclass body should NOT offer 'state:'"
         );
     }
-
     // --- Erlang module completion tests ---
-
     #[test]
     fn erlang_class_reference_suggests_module_names() {
         // Cursor right after "Erlang " should suggest module names
         let source = "Erlang ";
         let completions = completions_at(source, Position::new(0, 7));
-
         assert!(
             completions.iter().any(|c| c.label == "lists"),
             "Should suggest 'lists' module. Got: {:?}",
@@ -1827,7 +1689,6 @@ mod tests {
             completions.iter().any(|c| c.label == "string"),
             "Should suggest 'string' module"
         );
-
         // All should have Module kind
         for c in &completions {
             assert_eq!(
@@ -1837,13 +1698,11 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn erlang_module_suggests_exports() {
         // Cursor right after "Erlang lists " should suggest list exports
         let source = "Erlang lists ";
         let completions = completions_at(source, Position::new(0, 13));
-
         assert!(
             completions.iter().any(|c| c.label == "reverse:"),
             "Should suggest 'reverse:' from lists. Got: {:?}",
@@ -1861,7 +1720,6 @@ mod tests {
             completions.iter().any(|c| c.label == "foldl:with:with:"),
             "Should suggest 'foldl:with:with:' (foldl/3) from lists"
         );
-
         // All should have Function kind
         for c in &completions {
             assert_eq!(
@@ -1871,12 +1729,10 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn erlang_module_exports_have_detail() {
         let source = "Erlang lists ";
         let completions = completions_at(source, Position::new(0, 13));
-
         let reverse = completions.iter().find(|c| c.label == "reverse:");
         assert!(reverse.is_some(), "Should have reverse: completion");
         let reverse = reverse.unwrap();
@@ -1886,14 +1742,12 @@ mod tests {
             "Detail should show Erlang function signature"
         );
     }
-
     #[test]
     fn erlang_unknown_module_returns_no_exports() {
         // Unknown module should not return export completions,
         // falls back to normal completions
         let source = "Erlang nonexistent_module ";
         let completions = completions_at(source, Position::new(0, 25));
-
         // Should not have any Erlang export completions
         // Instead should have normal completions (keywords, etc.)
         assert!(
@@ -1902,12 +1756,10 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn erlang_maps_module_exports() {
         let source = "Erlang maps ";
         let completions = completions_at(source, Position::new(0, 12));
-
         assert!(
             completions.iter().any(|c| c.label == "get:with:"),
             "Should suggest 'get:with:' (get/2) from maps. Got: {:?}",
@@ -1922,12 +1774,10 @@ mod tests {
             "Should suggest 'new' (new/0) from maps"
         );
     }
-
     #[test]
     fn erlang_math_module_exports() {
         let source = "Erlang math ";
         let completions = completions_at(source, Position::new(0, 12));
-
         assert!(
             completions.iter().any(|c| c.label == "pi"),
             "Should suggest 'pi' (pi/0) from math. Got: {:?}",
@@ -1942,36 +1792,30 @@ mod tests {
             "Should suggest 'sqrt:' (sqrt/1) from math"
         );
     }
-
     #[test]
     fn erlang_completions_deduplicate_overloaded_selectors() {
         // lists has both sort/1 and sort/2 — the selector "sort:" should appear,
         // and "sort:with:" should also appear, but no duplicate "sort:"
         let source = "Erlang lists ";
         let completions = completions_at(source, Position::new(0, 13));
-
         let sort_count = completions.iter().filter(|c| c.label == "sort:").count();
         assert_eq!(sort_count, 1, "sort: should appear exactly once");
     }
-
     #[test]
     fn erlang_completions_in_assignment() {
         // Should work in assignment context too
         let source = "result := Erlang lists ";
         let completions = completions_at(source, Position::new(0, 23));
-
         assert!(
             completions.iter().any(|c| c.label == "reverse:"),
             "Should suggest exports after 'Erlang lists' in assignment. Got: {:?}",
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn erlang_module_completions_have_documentation() {
         let source = "Erlang ";
         let completions = completions_at(source, Position::new(0, 7));
-
         let lists = completions.iter().find(|c| c.label == "lists");
         assert!(lists.is_some());
         assert!(
@@ -1979,7 +1823,6 @@ mod tests {
             "Module completions should have documentation"
         );
     }
-
     #[test]
     fn erlang_completions_show_types_from_native_registry() {
         // ADR 0075: verify typed completions when NativeTypeRegistry is provided
@@ -1987,12 +1830,10 @@ mod tests {
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
         use crate::semantic_analysis::type_checker::{InferredType, TypeProvenance};
-
         let source = "Erlang lists ";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
             "lists",
@@ -2008,12 +1849,10 @@ mod tests {
                 line: None,
             }],
         );
-
         #[expect(clippy::cast_possible_truncation, reason = "test source < 4GB")]
         let position = Position::new(0, source.len() as u32);
         let completions =
             compute_completions(&module, source, position, &hierarchy, None, Some(&registry));
-
         let reverse = completions.iter().find(|c| c.label == "reverse:");
         assert!(reverse.is_some(), "Should find reverse: completion");
         let detail = reverse.unwrap().detail.as_deref().unwrap_or("");
@@ -2022,7 +1861,6 @@ mod tests {
             "Detail should show typed signature from NativeTypeRegistry"
         );
     }
-
     #[test]
     fn detect_erlang_module_context_basic() {
         assert_eq!(detect_erlang_module_context("Erlang lists"), Some("lists"));
@@ -2032,7 +1870,6 @@ mod tests {
             Some("lists")
         );
     }
-
     #[test]
     fn detect_erlang_module_context_no_match() {
         assert_eq!(detect_erlang_module_context("NotErlang lists"), None);
@@ -2040,13 +1877,11 @@ mod tests {
         assert_eq!(detect_erlang_module_context("FooErlang lists"), None);
         assert_eq!(detect_erlang_module_context("Foo_Erlang lists"), None);
     }
-
     // --- Chain resolution tests (BT-1014) ---
     //
     // Verify that completions are type-filtered when the receiver is a chained
     // message send whose return type is known (stdlib annotations from BT-1003,
     // user-defined method annotations, or inferred types from BT-1005).
-
     #[test]
     fn chain_resolution_stdlib_single_send_offers_typed_completions() {
         // `"hello" size ` → cursor after Integer result → should offer Integer methods
@@ -2064,7 +1899,6 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn chain_resolution_stdlib_two_hop_chain_offers_typed_completions() {
         // `"hello" size abs ` → Integer#abs -> Integer → should offer Integer methods again
@@ -2082,7 +1916,6 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn chain_resolution_user_defined_annotated_method() {
         // A user-defined method with an explicit return type annotation:
@@ -2097,7 +1930,6 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn chain_resolution_user_defined_inferred_method() {
         // A user-defined method whose return type is inferrable from its body (BT-1005):
@@ -2111,7 +1943,6 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-
     #[test]
     fn chain_resolution_detail_shows_receiver_class() {
         // Completions after `"hello" size ` should have detail showing "on Integer"
@@ -2126,9 +1957,7 @@ mod tests {
             abs.detail
         );
     }
-
     // --- Actor class vs instance method set tests (BT-1056) ---
-
     #[test]
     fn actor_instance_completions_exclude_spawn_methods() {
         // `c <TAB>` where c is an actor instance should NOT offer spawn/spawnWith: (class-side only)
@@ -2149,7 +1978,6 @@ mod tests {
             "Actor instance should offer 'increment'. Got: {labels:?}"
         );
     }
-
     #[test]
     fn counter_class_reference_completions_include_spawn() {
         // `Counter <TAB>` (ClassReference) should offer spawn/spawnWith:
@@ -2166,7 +1994,6 @@ mod tests {
             "Counter class-side should offer 'spawnWith:'. Got: {labels:?}"
         );
     }
-
     #[test]
     fn counter_class_message_completions_include_spawn() {
         // `Counter class <TAB>` should offer the same class-side methods as `Counter <TAB>`
@@ -2188,7 +2015,6 @@ mod tests {
             "Counter class <TAB> should NOT offer instance method 'increment'. Got: {labels:?}"
         );
     }
-
     #[test]
     fn actor_instance_completions_include_instance_methods() {
         // `c <TAB>` should offer stop/kill/isAlive (Actor instance methods)
@@ -2204,30 +2030,25 @@ mod tests {
             "Actor instance should offer 'isAlive'. Got: {labels:?}"
         );
     }
-
     // --- resolve_expression_type tests (BT-1068) ---
-
     #[test]
     fn resolve_expression_type_string_literal() {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("\"hello\"", &hierarchy);
         assert_eq!(result.as_deref(), Some("String"));
     }
-
     #[test]
     fn resolve_expression_type_integer_literal() {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("42", &hierarchy);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
-
     #[test]
     fn resolve_expression_type_parenthesized() {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("(\"hello\")", &hierarchy);
         assert_eq!(result.as_deref(), Some("String"));
     }
-
     #[test]
     fn resolve_expression_type_binary_send() {
         // "foo" ++ "bar" should resolve to String (String#++: returns String)
@@ -2235,7 +2056,6 @@ mod tests {
         let result = resolve_expression_type("\"foo\" ++ \"bar\"", &hierarchy);
         assert_eq!(result.as_deref(), Some("String"));
     }
-
     #[test]
     fn resolve_expression_type_parenthesized_binary_send() {
         // ("foo" ++ "bar") should resolve to String
@@ -2243,7 +2063,6 @@ mod tests {
         let result = resolve_expression_type("(\"foo\" ++ \"bar\")", &hierarchy);
         assert_eq!(result.as_deref(), Some("String"));
     }
-
     #[test]
     fn resolve_expression_type_chained_sends() {
         // "hello" size — String#size returns Integer
@@ -2251,14 +2070,12 @@ mod tests {
         let result = resolve_expression_type("\"hello\" size", &hierarchy);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
-
     #[test]
     fn resolve_expression_type_empty_source() {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("", &hierarchy);
         assert_eq!(result, None);
     }
-
     #[test]
     fn resolve_expression_type_unknown_variable() {
         // Bare variable with no bindings — type is Dynamic
@@ -2266,9 +2083,7 @@ mod tests {
         let result = resolve_expression_type("x", &hierarchy);
         assert_eq!(result, None);
     }
-
     // --- BT-1070: parenthesised subexpression as receiver ---
-
     #[test]
     fn resolve_expression_type_parenthesized_unary_send() {
         // ("hello" size) — the result of String#size (Integer) wrapped in parens
@@ -2276,7 +2091,6 @@ mod tests {
         let result = resolve_expression_type("(\"hello\" size)", &hierarchy);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
-
     #[test]
     fn resolve_expression_type_parenthesized_unknown_variable() {
         // (myList size) — myList is untyped, graceful fallback
@@ -2284,9 +2098,7 @@ mod tests {
         let result = resolve_expression_type("(myList size)", &hierarchy);
         assert_eq!(result, None);
     }
-
     // --- BT-1072: keyword sends mid-chain ---
-
     #[test]
     fn resolve_expression_type_keyword_send_collect_returns_array() {
         // #[1, 2, 3] collect: [:x | x * 2] — Array(E)#collect: returns Array(R)
@@ -2295,7 +2107,6 @@ mod tests {
         let result = resolve_expression_type("#[1, 2, 3] collect: [:x | x * 2]", &hierarchy);
         assert_eq!(result.as_deref(), Some("Array"));
     }
-
     #[test]
     fn resolve_expression_type_keyword_send_inject_returns_type_param() {
         // #[1, 2, 3] inject: 0 into: [...] — inject:into: returns type param A
@@ -2306,7 +2117,6 @@ mod tests {
             resolve_expression_type("#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]", &hierarchy);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
-
     #[test]
     fn resolve_expression_type_keyword_send_untyped_receiver_returns_none() {
         // myList collect: [...] — myList is untyped (Dynamic), graceful fallback
@@ -2314,9 +2124,7 @@ mod tests {
         let result = resolve_expression_type("myList collect: [:x | x]", &hierarchy);
         assert_eq!(result, None);
     }
-
     // ── delegate completion filtering (BT-1215) ─────────────────────────────
-
     #[test]
     fn delegate_excluded_from_completions_in_non_native_actor() {
         // Inside an instance method of a non-native Actor subclass,
@@ -2339,7 +2147,6 @@ mod tests {
             "delegate should be excluded for non-native actors"
         );
     }
-
     #[test]
     fn delegate_included_in_completions_for_native_actor() {
         // Inside an instance method of a native Actor subclass,
@@ -2362,18 +2169,14 @@ mod tests {
             "delegate should be included for native actors"
         );
     }
-
     // --- ADR 0071 / BT-1703: Cross-package visibility filtering ---
-
     #[test]
     fn internal_class_excluded_from_cross_package_completions() {
         use std::collections::HashMap;
-
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Inject an internal class from package "other_pkg"
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("SecretHelper"),
@@ -2387,6 +2190,7 @@ mod tests {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2394,7 +2198,6 @@ mod tests {
             type_param_bounds: vec![],
             superclass_type_args: vec![],
         }]);
-
         // From a different package: internal class should be filtered out
         let completions = compute_completions(
             &module,
@@ -2409,16 +2212,13 @@ mod tests {
             "Internal class from other package should be excluded"
         );
     }
-
     #[test]
     fn internal_class_visible_in_same_package_completions() {
         use std::collections::HashMap;
-
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("InternalHelper"),
             superclass: Some(EcoString::from("Object")),
@@ -2431,6 +2231,7 @@ mod tests {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2438,7 +2239,6 @@ mod tests {
             type_param_bounds: vec![],
             superclass_type_args: vec![],
         }]);
-
         // From the same package: internal class should be visible
         let completions = compute_completions(
             &module,
@@ -2453,16 +2253,13 @@ mod tests {
             "Internal class from same package should be included"
         );
     }
-
     #[test]
     fn internal_class_visible_when_no_package_context() {
         use std::collections::HashMap;
-
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("InternalHelper"),
             superclass: Some(EcoString::from("Object")),
@@ -2475,6 +2272,7 @@ mod tests {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2482,7 +2280,6 @@ mod tests {
             type_param_bounds: vec![],
             superclass_type_args: vec![],
         }]);
-
         // No package context (REPL/script): internal classes still visible
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
@@ -2491,14 +2288,11 @@ mod tests {
             "Internal class should be visible when no package context"
         );
     }
-
     #[test]
     fn cross_package_internal_method_helper() {
         use crate::ast::MethodKind;
         use std::collections::HashMap;
-
         let mut hierarchy = ClassHierarchy::with_builtins();
-
         // Inject a class with both public and internal methods from "other_pkg"
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("RemoteService"),
@@ -2512,6 +2306,7 @@ mod tests {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo {
                     selector: EcoString::from("publicMethod"),
@@ -2544,43 +2339,36 @@ mod tests {
             type_param_bounds: vec![],
             superclass_type_args: vec![],
         }]);
-
         let public_method = hierarchy
             .find_method("RemoteService", "publicMethod")
             .unwrap();
         let internal_method = hierarchy
             .find_method("RemoteService", "internalHelper")
             .unwrap();
-
         // Public method: never filtered
         assert!(
             !is_cross_package_internal_method(&public_method, &hierarchy, Some("my_pkg")),
             "Public method should not be filtered"
         );
-
         // Internal method from other package: should be filtered
         assert!(
             is_cross_package_internal_method(&internal_method, &hierarchy, Some("my_pkg")),
             "Internal method from other_pkg should be filtered for my_pkg"
         );
-
         // Internal method from same package: should NOT be filtered
         assert!(
             !is_cross_package_internal_method(&internal_method, &hierarchy, Some("other_pkg")),
             "Internal method from same package should not be filtered"
         );
-
         // No package context (REPL): should NOT be filtered
         assert!(
             !is_cross_package_internal_method(&internal_method, &hierarchy, None),
             "Internal method should not be filtered when no package context"
         );
     }
-
     #[test]
     fn cross_package_internal_class_helper() {
         use std::collections::HashMap;
-
         let internal_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("InternalClass"),
             superclass: Some(EcoString::from("Object")),
@@ -2593,6 +2381,7 @@ mod tests {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2600,50 +2389,42 @@ mod tests {
             type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
-
         // Cross-package: should be filtered
         assert!(
             is_cross_package_internal_class(&internal_class, Some("my_pkg")),
             "Internal class from other_pkg should be filtered for my_pkg"
         );
-
         // Same package: should NOT be filtered
         assert!(
             !is_cross_package_internal_class(&internal_class, Some("other_pkg")),
             "Internal class from same package should not be filtered"
         );
-
         // No package context: should NOT be filtered
         assert!(
             !is_cross_package_internal_class(&internal_class, None),
             "Internal class should not be filtered when no package context"
         );
-
         let public_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("PublicClass"),
             is_internal: false,
             package: Some(EcoString::from("other_pkg")),
             ..internal_class.clone()
         };
-
         // Public class: never filtered
         assert!(
             !is_cross_package_internal_class(&public_class, Some("my_pkg")),
             "Public class should never be filtered"
         );
     }
-
     #[test]
     fn internal_method_excluded_from_typed_receiver_completions() {
         use crate::ast::MethodKind;
         use std::collections::HashMap;
-
         // Use source that references RemoteService with a typed variable
         let source = "Object subclass: Client\n  doWork: svc :: RemoteService =>\n    svc pub";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-
         // Inject RemoteService with both public and internal methods
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
             name: EcoString::from("RemoteService"),
@@ -2657,6 +2438,7 @@ mod tests {
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo {
                     selector: EcoString::from("publicMethod"),
@@ -2689,7 +2471,6 @@ mod tests {
             type_param_bounds: vec![],
             superclass_type_args: vec![],
         }]);
-
         // Completions from "my_pkg" — internal method should be excluded
         let completions = compute_completions(
             &module,
@@ -2708,22 +2489,18 @@ mod tests {
             "Internal method from other package should be excluded from typed receiver completions"
         );
     }
-
     // --- is_after_self_dot unit tests ---
-
     #[test]
     fn is_after_self_dot_basic() {
         assert!(is_after_self_dot("self.", 5));
         assert!(is_after_self_dot("x := self.c", 10));
     }
-
     #[test]
     fn is_after_self_dot_rejects_tail_of_identifier() {
         // "doself." should not match — `self` is part of a larger identifier
         assert!(!is_after_self_dot("doself.", 7));
         assert!(!is_after_self_dot("myself.", 7));
     }
-
     #[test]
     fn is_after_self_dot_accepts_after_non_identifier() {
         // After space, paren, operator — `self` is standalone
@@ -2731,7 +2508,6 @@ mod tests {
         assert!(is_after_self_dot("(self.", 6));
         assert!(is_after_self_dot("=self.", 6));
     }
-
     #[test]
     fn is_after_self_dot_with_partial_identifier() {
         // Cursor after `self.co` — should back up over `co` and match `self.`
@@ -2741,11 +2517,9 @@ mod tests {
         // But not for `doself.co`
         assert!(!is_after_self_dot("doself.co", 9));
     }
-
     // -----------------------------------------------------------------------
     // BT-1933: Protocol class object completions
     // -----------------------------------------------------------------------
-
     #[test]
     fn protocol_class_object_completions() {
         // Protocol class objects should offer requiredMethods and conformingClasses.
@@ -2754,7 +2528,6 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.register_protocol_classes(&module);
-
         // Directly test add_receiver_type_completions with a Class receiver
         let context = ClassContext::TopLevel;
         let receiver = ReceiverSide::Class(EcoString::from("Printable"));
@@ -2766,7 +2539,6 @@ mod tests {
             None,
             &mut completions,
         );
-
         assert!(
             result,
             "add_receiver_type_completions should return true for protocol class"
@@ -2781,7 +2553,6 @@ mod tests {
             "Protocol class should offer 'conformingClasses' completion"
         );
     }
-
     #[test]
     fn protocol_class_visible_in_hierarchy() {
         // After register_protocol_classes, the protocol name should appear as a class
@@ -2790,7 +2561,6 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.register_protocol_classes(&module);
-
         assert!(
             hierarchy.has_class("Printable"),
             "Printable should be registered as a class in the hierarchy"
@@ -2801,7 +2571,6 @@ mod tests {
         assert!(class.is_abstract);
         assert_eq!(class.class_methods.len(), 2);
     }
-
     #[test]
     fn protocol_class_does_not_overwrite_real_class() {
         // If a class and protocol share a name, the class wins
@@ -2810,7 +2579,6 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.register_protocol_classes(&module);
-
         let class = hierarchy.get_class("Foo").unwrap();
         assert_eq!(
             class.superclass.as_deref(),
