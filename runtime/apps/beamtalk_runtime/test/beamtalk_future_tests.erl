@@ -749,6 +749,279 @@ callback_crash_log_includes_stacktrace_test() ->
         logger:remove_handler(HandlerId)
     end.
 
+%%% ============================================================================
+%%% is_future/1 tests
+%%% ============================================================================
+
+is_future_with_future_test() ->
+    Future = beamtalk_future:new(),
+    ?assert(beamtalk_future:is_future(Future)).
+
+is_future_with_non_future_test() ->
+    ?assertNot(beamtalk_future:is_future(42)),
+    ?assertNot(beamtalk_future:is_future(hello)),
+    ?assertNot(beamtalk_future:is_future({beamtalk_future, not_a_pid})),
+    ?assertNot(beamtalk_future:is_future({wrong_tag, self()})),
+    ?assertNot(beamtalk_future:is_future(undefined)).
+
+%%% ============================================================================
+%%% maybe_await/1 tests
+%%% ============================================================================
+
+maybe_await_future_test() ->
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, 42),
+    ?assertEqual(42, beamtalk_future:maybe_await(Future)).
+
+maybe_await_non_future_test() ->
+    ?assertEqual(hello, beamtalk_future:maybe_await(hello)),
+    ?assertEqual(42, beamtalk_future:maybe_await(42)),
+    ?assertEqual([1, 2, 3], beamtalk_future:maybe_await([1, 2, 3])).
+
+%%% ============================================================================
+%%% Raw pid API tests
+%%% ============================================================================
+
+resolve_with_raw_pid_test() ->
+    {beamtalk_future, Pid} = beamtalk_future:new(),
+    beamtalk_future:resolve(Pid, raw_value),
+    ?assertEqual(raw_value, beamtalk_future:await(Pid, 1000)).
+
+reject_with_raw_pid_test() ->
+    {beamtalk_future, Pid} = beamtalk_future:new(),
+    beamtalk_future:reject(Pid, raw_error),
+    ?assertThrow({future_rejected, raw_error}, beamtalk_future:await(Pid, 1000)).
+
+when_resolved_with_raw_pid_test() ->
+    {beamtalk_future, Pid} = beamtalk_future:new(),
+    Parent = self(),
+    beamtalk_future:when_resolved(Pid, fun(Value) ->
+        Parent ! {raw_cb, Value}
+    end),
+    beamtalk_future:resolve(Pid, raw_cb_value),
+    receive
+        {raw_cb, Value} -> ?assertEqual(raw_cb_value, Value)
+    after 1000 -> ?assert(false)
+    end.
+
+when_rejected_with_raw_pid_test() ->
+    {beamtalk_future, Pid} = beamtalk_future:new(),
+    Parent = self(),
+    beamtalk_future:when_rejected(Pid, fun(Reason) ->
+        Parent ! {raw_rej_cb, Reason}
+    end),
+    beamtalk_future:reject(Pid, raw_rej_reason),
+    receive
+        {raw_rej_cb, Reason} -> ?assertEqual(raw_rej_reason, Reason)
+    after 1000 -> ?assert(false)
+    end.
+
+%%% ============================================================================
+%%% Await on non-future values (BT-918 compatibility)
+%%% ============================================================================
+
+await_non_future_value_passthrough_test() ->
+    %% BT-918: sync-by-default means await may receive non-future values
+    ?assertEqual(42, beamtalk_future:await(42, 1000)),
+    ?assertEqual(hello, beamtalk_future:await(hello, 500)),
+    ?assertEqual([1, 2], beamtalk_future:await([1, 2], 100)),
+    ?assertEqual(#{a => 1}, beamtalk_future:await(#{a => 1}, 100)).
+
+%%% ============================================================================
+%%% Timeout edge cases
+%%% ============================================================================
+
+await_with_zero_timeout_test() ->
+    %% 0ms timeout should throw immediately if not already resolved
+    Future = beamtalk_future:new(),
+    ?assertThrow(
+        #beamtalk_error{kind = timeout, class = 'Future'},
+        beamtalk_future:await(Future, 0)
+    ).
+
+await_very_short_timeout_already_resolved_test() ->
+    %% Very short timeout on an already-resolved future should return value
+    %% because the resolved state responds immediately to {await, ...}
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, fast),
+    %% Give the future process time to transition to resolved state
+    timer:sleep(20),
+    %% Use 100ms — enough for the resolved process to reply
+    ?assertEqual(fast, beamtalk_future:await(Future, 100)).
+
+timeout_and_resolve_race_test() ->
+    %% Test the race between timeout firing and resolve arriving.
+    %% Run multiple iterations to exercise both orderings.
+    Parent = self(),
+    NumIterations = 20,
+    lists:foreach(
+        fun(_) ->
+            Future = beamtalk_future:new(),
+            spawn(fun() ->
+                %% Resolve at roughly the same time as the timeout
+                timer:sleep(5),
+                beamtalk_future:resolve(Future, raced)
+            end),
+            spawn(fun() ->
+                Result =
+                    try
+                        {ok, beamtalk_future:await(Future, 5)}
+                    catch
+                        throw:#beamtalk_error{kind = timeout} -> {error, timeout}
+                    end,
+                Parent ! {race_result, Result}
+            end)
+        end,
+        lists:seq(1, NumIterations)
+    ),
+    %% All results should be either resolved or timed out — no crashes
+    Results = [
+        receive
+            {race_result, R} -> R
+        after 2000 -> error(test_timeout)
+        end
+     || _ <- lists:seq(1, NumIterations)
+    ],
+    lists:foreach(
+        fun(R) ->
+            ?assert(R =:= {ok, raced} orelse R =:= {error, timeout})
+        end,
+        Results
+    ).
+
+%%% ============================================================================
+%%% Idempotence: double reject
+%%% ============================================================================
+
+double_reject_test() ->
+    Future = beamtalk_future:new(),
+    beamtalk_future:reject(Future, first_error),
+    %% Second reject should be silently ignored
+    beamtalk_future:reject(Future, second_error),
+    ?assertThrow({future_rejected, first_error}, beamtalk_future:await(Future)).
+
+%%% ============================================================================
+%%% Callback ordering: all registered callbacks fire
+%%% ============================================================================
+
+callback_ordering_all_fire_test() ->
+    %% All registered callbacks should fire when the future resolves.
+    %% Since each callback runs in a spawned process, delivery order is
+    %% non-deterministic — we verify all three arrive, not their order.
+    Future = beamtalk_future:new(),
+    Parent = self(),
+
+    beamtalk_future:when_resolved(Future, fun(_) ->
+        Parent ! {cb_order, 1}
+    end),
+    beamtalk_future:when_resolved(Future, fun(_) ->
+        Parent ! {cb_order, 2}
+    end),
+    beamtalk_future:when_resolved(Future, fun(_) ->
+        Parent ! {cb_order, 3}
+    end),
+
+    beamtalk_future:resolve(Future, go),
+
+    %% Collect all callback notifications (order may vary)
+    Received = lists:sort([
+        receive {cb_order, N} -> N after 1000 -> error(timeout) end
+     || _ <- lists:seq(1, 3)
+    ]),
+    ?assertEqual([1, 2, 3], Received).
+
+%%% ============================================================================
+%%% Multiple crashing callbacks don't affect each other
+%%% ============================================================================
+
+multiple_crashing_callbacks_isolation_test() ->
+    Future = beamtalk_future:new(),
+    Parent = self(),
+
+    %% Register alternating crashing and good callbacks
+    beamtalk_future:when_resolved(Future, fun(_) ->
+        error(crash_1)
+    end),
+    beamtalk_future:when_resolved(Future, fun(V) ->
+        Parent ! {good_1, V}
+    end),
+    beamtalk_future:when_resolved(Future, fun(_) ->
+        error(crash_2)
+    end),
+    beamtalk_future:when_resolved(Future, fun(V) ->
+        Parent ! {good_2, V}
+    end),
+
+    beamtalk_future:resolve(Future, 99),
+
+    %% Both good callbacks should fire despite interleaved crashes
+    Results = lists:sort([
+        receive
+            {good_1, V1} -> {good_1, V1};
+            {good_2, V2} -> {good_2, V2}
+        after 1000 -> error(timeout)
+        end
+     || _ <- lists:seq(1, 2)
+    ]),
+    ?assertEqual([{good_1, 99}, {good_2, 99}], Results),
+
+    %% Future should still be alive and functional
+    timer:sleep(50),
+    ?assert(is_process_alive(beamtalk_future:pid(Future))),
+    ?assertEqual(99, beamtalk_future:await(Future)).
+
+%%% ============================================================================
+%%% Multiple callbacks on already-completed future
+%%% ============================================================================
+
+multiple_callbacks_on_already_resolved_test() ->
+    %% Callbacks added after resolve should each fire immediately
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, done),
+    timer:sleep(10),
+
+    Parent = self(),
+    beamtalk_future:when_resolved(Future, fun(V) -> Parent ! {late_1, V} end),
+    beamtalk_future:when_resolved(Future, fun(V) -> Parent ! {late_2, V} end),
+    beamtalk_future:when_resolved(Future, fun(V) -> Parent ! {late_3, V} end),
+
+    Results = lists:sort([
+        receive {late_1, V} -> {late_1, V} after 1000 -> error(timeout) end,
+        receive {late_2, V} -> {late_2, V} after 1000 -> error(timeout) end,
+        receive {late_3, V} -> {late_3, V} after 1000 -> error(timeout) end
+    ]),
+    ?assertEqual([{late_1, done}, {late_2, done}, {late_3, done}], Results).
+
+multiple_callbacks_on_already_rejected_test() ->
+    %% Rejected callbacks added after reject should each fire immediately
+    Future = beamtalk_future:new(),
+    beamtalk_future:reject(Future, oops),
+    timer:sleep(10),
+
+    Parent = self(),
+    beamtalk_future:when_rejected(Future, fun(R) -> Parent ! {late_err_1, R} end),
+    beamtalk_future:when_rejected(Future, fun(R) -> Parent ! {late_err_2, R} end),
+
+    Results = lists:sort([
+        receive {late_err_1, R} -> {late_err_1, R} after 1000 -> error(timeout) end,
+        receive {late_err_2, R} -> {late_err_2, R} after 1000 -> error(timeout) end
+    ]),
+    ?assertEqual([{late_err_1, oops}, {late_err_2, oops}], Results).
+
+%%% ============================================================================
+%%% pid/1 extraction
+%%% ============================================================================
+
+pid_extraction_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)).
+
+%%% ============================================================================
+%%% BT-1822: Stacktrace preservation tests
+%%% ============================================================================
+
 -doc """
 Collect log events until we find one matching the expected message with stacktrace
 """.
