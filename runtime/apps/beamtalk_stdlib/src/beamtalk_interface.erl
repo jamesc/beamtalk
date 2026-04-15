@@ -94,7 +94,7 @@ dispatch(Selector, _Args, _Self) ->
 Return list of all registered classes as class objects.
 Called via `(Erlang beamtalk_interface) allClasses`.
 """.
--spec allClasses() -> [tuple()].
+-spec allClasses() -> [beamtalk_object()].
 allClasses() ->
     [
         begin
@@ -280,9 +280,9 @@ handle_erlang_help(_ModuleArg, _SelectorArg) ->
     ),
     beamtalk_error:raise(Err2).
 
--doc "Look up a class by name.".
+-doc "Look up a class by name and return a wrapped class object or nil.".
 -spec handle_class_named(binary() | atom() | term()) ->
-    tuple() | 'nil' | {error, #beamtalk_error{}}.
+    beamtalk_object() | 'nil' | {error, #beamtalk_error{}}.
 handle_class_named(ClassName) when is_binary(ClassName) ->
     try
         ClassAtom = binary_to_existing_atom(ClassName, utf8),

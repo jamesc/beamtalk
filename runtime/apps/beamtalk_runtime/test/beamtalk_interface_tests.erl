@@ -152,9 +152,9 @@ all_classes_test_() ->
             end},
             {"includes registered test classes", fun() ->
                 Classes = beamtalk_interface:dispatch(allClasses, [], fake_self()),
-                ClassNames = [element(2, C) || C <- Classes],
-                ?assert(lists:member('Object class', ClassNames)),
-                ?assert(lists:member('Counter class', ClassNames))
+                ClassTags = [element(2, C) || C <- Classes],
+                ?assert(lists:member('Object class', ClassTags)),
+                ?assert(lists:member('Counter class', ClassTags))
             end}
         ]
     end}.
