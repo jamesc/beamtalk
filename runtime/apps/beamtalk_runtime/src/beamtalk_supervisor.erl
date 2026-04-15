@@ -49,6 +49,7 @@ functions that call OTP APIs from the caller's process context.
     countChildren/1,
     stop/1,
     build_child_specs/1,
+    spec_to_otp/1,
     is_supervisor/1,
     register_root/1,
     get_root/0,
@@ -778,6 +779,24 @@ spec_to_otp(BtSpec) ->
                         %% Erlang list [ArgsMap] — use it directly as the start_link arg.
                         InitArgs = array:get(2, StartErlArray),
                         {ChildModule, start_link, InitArgs};
+                    'spawnAs:' ->
+                        %% ADR 0079 / BT-1990: SupervisionSpec withName: routes
+                        %% named children through `beamtalk_actor:spawnAs/2,3`
+                        %% so the child registers under `Name` atomically inside
+                        %% gen_server:start_link({local, Name}, ...). The startArgs
+                        %% in `SupervisionSpec childSpec` carry just the Name as
+                        %% `#(name)` — i.e. an Erlang list `[Name]`.
+                        SpawnAsArgs = array:get(2, StartErlArray),
+                        [Name] = SpawnAsArgs,
+                        {beamtalk_actor, 'spawnAs', [Name, ChildModule]};
+                    'spawnWith:as:' ->
+                        %% ADR 0079 / BT-1990: spawn-with-args under a registered
+                        %% name. startArgs are `#(args, name)` → Erlang `[Args, Name]`.
+                        %% Translates to `beamtalk_actor:spawnAs/3` so the child is
+                        %% registered atomically with init args at start time.
+                        SpawnAsArgs2 = array:get(2, StartErlArray),
+                        [InitArgsMap, NameAtom] = SpawnAsArgs2,
+                        {beamtalk_actor, 'spawnAs', [NameAtom, ChildModule, InitArgsMap]};
                     classMethod ->
                         %% BT-1862: Route through the actor's keyword class method.
                         %% StartArgs is #(selector, argsList) — compiled as an
@@ -803,7 +822,8 @@ spec_to_otp(BtSpec) ->
                             iolist_to_binary(
                                 io_lib:format(
                                     "unsupported child start function: ~p "
-                                    "(expected spawn, spawnWith:, or classMethod)",
+                                    "(expected spawn, spawnWith:, spawnAs:, "
+                                    "spawnWith:as:, or classMethod)",
                                     [Other]
                                 )
                             )

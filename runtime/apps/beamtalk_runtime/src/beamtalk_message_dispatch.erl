@@ -136,15 +136,18 @@ send(Receiver, Selector, Args) ->
                             ClassPid = element(4, Receiver),
                             beamtalk_object_class:class_send(ClassPid, Selector, Args);
                         false ->
-                            Pid = element(4, Receiver),
+                            Ref = element(4, Receiver),
                             %% BT-886: Validate PID before dispatching.
                             %% When class registration is incomplete, the actor
                             %% record may contain an invalid PID (e.g., undefined).
-                            case is_pid(Pid) of
+                            %% ADR 0079 / BT-1990: Ref may also be a
+                            %% `{registered, Name}` tuple for name-resolving
+                            %% proxies; sync_send/3 handles both shapes.
+                            case is_actor_ref(Ref) of
                                 true ->
                                     %% BT-918 / ADR 0043: sync-by-default — use gen_server:call
                                     %% so the send returns the value directly, not a Future.
-                                    beamtalk_actor:sync_send(Pid, Selector, Args);
+                                    beamtalk_actor:sync_send(Ref, Selector, Args);
                                 false ->
                                     ClassName = element(2, Receiver),
                                     Error = beamtalk_error:new(
@@ -190,10 +193,10 @@ send(Receiver, Selector, Args, Timeout) ->
                             ClassPid = element(4, Receiver),
                             beamtalk_object_class:class_send(ClassPid, Selector, Args);
                         false ->
-                            Pid = element(4, Receiver),
-                            case is_pid(Pid) of
+                            Ref = element(4, Receiver),
+                            case is_actor_ref(Ref) of
                                 true ->
-                                    beamtalk_actor:sync_send(Pid, Selector, Args, Timeout);
+                                    beamtalk_actor:sync_send(Ref, Selector, Args, Timeout);
                                 false ->
                                     ClassName = element(2, Receiver),
                                     Error = beamtalk_error:new(
@@ -236,10 +239,10 @@ cast(Receiver, Selector, Args) ->
                             %% Class objects cannot receive cast messages
                             ok;
                         false ->
-                            Pid = element(4, Receiver),
-                            case is_pid(Pid) of
+                            Ref = element(4, Receiver),
+                            case is_actor_ref(Ref) of
                                 true ->
-                                    beamtalk_actor:cast_send(Pid, Selector, Args);
+                                    beamtalk_actor:cast_send(Ref, Selector, Args);
                                 false ->
                                     %% Dead actor: cast is fire-and-forget, silently ignore
                                     ok
@@ -261,3 +264,12 @@ is_actor(X) when is_tuple(X) ->
     tuple_size(X) =:= 4 andalso element(1, X) =:= beamtalk_object;
 is_actor(_) ->
     false.
+
+-doc """
+Check whether a value is a valid actor identity slot — either a raw `pid()`
+or a `{registered, Name}` proxy reference (ADR 0079 / BT-1990).
+""".
+-spec is_actor_ref(term()) -> boolean().
+is_actor_ref(Ref) when is_pid(Ref) -> true;
+is_actor_ref({registered, Name}) when is_atom(Name) -> true;
+is_actor_ref(_) -> false.

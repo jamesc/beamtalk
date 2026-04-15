@@ -25,14 +25,26 @@
 %%   call 'erlang':'element'(4, Obj)
 %%
 %% Following LFE Flavors' #flavor-instance{} pattern.
+%% ADR 0079 (BT-1990): The `pid` field carries either:
+%%   - a raw `pid()` for ordinary actor handles, or
+%%   - a `{registered, Name :: atom()}` tuple for name-resolving proxies.
+%% The send-site dispatch in `beamtalk_actor` recognises both shapes; the
+%% latter forces `gen_server:call(Name, ...)` so that the held reference
+%% survives the actor being restarted under its registered name.
 -record(beamtalk_object, {
     % Class name (e.g., 'Counter')
     class :: atom(),
     % Class module (e.g., 'counter')
     class_mod :: atom(),
-    % The actor process
-    pid :: pid()
+    % The actor process or a `{registered, Name}` reference (ADR 0079)
+    pid :: pid() | {registered, atom()}
 }).
+
+%% Helper macro to recognise the name-resolving identity shape (ADR 0079).
+-define(IS_REGISTERED_REF(X),
+    (is_tuple(X) andalso tuple_size(X) =:= 2 andalso element(1, X) =:= registered andalso
+        is_atom(element(2, X)))
+).
 
 %% @doc Structured error record for runtime errors.
 %%

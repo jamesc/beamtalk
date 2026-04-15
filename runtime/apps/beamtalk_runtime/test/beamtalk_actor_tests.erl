@@ -3327,3 +3327,296 @@ cast_send_to_non_actor_pid_ok_test() ->
     after
         exit(FakePid, kill)
     end.
+
+%%% ============================================================================
+%%% BT-1990 / ADR 0079 Phase 3: name-resolving proxy dispatch
+%%%
+%%% These tests exercise the `{registered, Name}` identity slot through the
+%%% send-site (`sync_send/3,4`, `async_send/4`, `cast_send/3`) and through the
+%%% lifecycle FFI shims (`registeredName/1`, `isRegistered/1`, `unregister/1`).
+%%% The supervisor restart-survival end-to-end test lives in
+%%% `beamtalk_supervisor_tests.erl` because it needs an OTP supervisor and a
+%%% `spawnAs` child spec.
+%%% ============================================================================
+
+%% Helper: spawn a counter, register under Name, and return {Pid, Name, Proxy}.
+%% Cleans up the name first so the test is hermetic across reruns.
+bt1990_setup_named_counter(Name, Initial) ->
+    cleanup_name(Name),
+    {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, Initial),
+    Proxy = #beamtalk_object{
+        class = 'Counter',
+        class_mod = test_counter,
+        pid = {registered, Name}
+    },
+    {Pid, Proxy}.
+
+bt1990_proxy_sync_send_resolves_to_current_pid_test() ->
+    %% A name-resolving proxy must route gen_server:call through the
+    %% currently-registered atom — both `whereis(Name)` and the proxy must
+    %% answer the same value before and after a send.
+    Name = bt1990_proxy_sync,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 7),
+    try
+        ?assertEqual(Pid, erlang:whereis(Name)),
+        ?assertEqual(7, beamtalk_message_dispatch:send(Proxy, getValue, [])),
+        beamtalk_message_dispatch:send(Proxy, increment, []),
+        ?assertEqual(8, beamtalk_message_dispatch:send(Proxy, getValue, []))
+    after
+        gen_server:stop(Pid),
+        cleanup_name(Name)
+    end.
+
+bt1990_proxy_pid_based_sends_still_work_test() ->
+    %% The send site must still accept raw pids untouched — extending the
+    %% identity slot to `{registered, _}` cannot regress the pid path.
+    {ok, Counter} = test_counter:start_link(3),
+    try
+        Self = #beamtalk_object{
+            class = 'Counter', class_mod = test_counter, pid = Counter
+        },
+        ?assertEqual(3, beamtalk_message_dispatch:send(Self, getValue, []))
+    after
+        gen_server:stop(Counter)
+    end.
+
+bt1990_proxy_send_to_vanished_name_raises_no_such_process_test() ->
+    %% After the registered actor exits, the next send via the held proxy
+    %% must raise a structured `no_such_process` (not `actor_dead`, which
+    %% applies only to dead-pid sends).
+    Name = bt1990_proxy_vanish,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
+    gen_server:stop(Pid),
+    %% Wait for the registry to release the name.
+    bt1990_wait_until_unregistered(Name, 1000),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_such_process}},
+            beamtalk_message_dispatch:send(Proxy, getValue, [])
+        )
+    after
+        cleanup_name(Name)
+    end.
+
+bt1990_proxy_send_4_to_vanished_name_raises_no_such_process_test() ->
+    %% Mirror of the above through sync_send/4 (custom timeout path).
+    Name = bt1990_proxy_vanish_to,
+    {Pid, _Proxy} = bt1990_setup_named_counter(Name, 0),
+    gen_server:stop(Pid),
+    bt1990_wait_until_unregistered(Name, 1000),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_such_process}},
+            beamtalk_actor:sync_send({registered, Name}, getValue, [], 1000)
+        )
+    after
+        cleanup_name(Name)
+    end.
+
+bt1990_proxy_isAlive_reflects_current_registration_test() ->
+    Name = bt1990_proxy_isalive,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
+    try
+        ?assertEqual(true, beamtalk_message_dispatch:send(Proxy, isAlive, [])),
+        gen_server:stop(Pid),
+        bt1990_wait_until_unregistered(Name, 1000),
+        ?assertEqual(false, beamtalk_message_dispatch:send(Proxy, isAlive, []))
+    after
+        cleanup_name(Name)
+    end.
+
+bt1990_proxy_isRegistered_is_always_true_test() ->
+    %% Per the ADR's method-exposure table: `isRegistered` on a proxy
+    %% answers `true` by construction without resolving the name.
+    Name = bt1990_proxy_is_registered,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
+    try
+        ?assertEqual(true, beamtalk_actor:isRegistered(Proxy)),
+        ?assertEqual(true, beamtalk_message_dispatch:send(Proxy, isRegistered, []))
+    after
+        gen_server:stop(Pid),
+        cleanup_name(Name)
+    end.
+
+bt1990_proxy_registeredName_returns_the_name_test() ->
+    Name = bt1990_proxy_named,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
+    try
+        ?assertEqual(Name, beamtalk_actor:registeredName(Proxy)),
+        ?assertEqual(Name, beamtalk_message_dispatch:send(Proxy, registeredName, []))
+    after
+        gen_server:stop(Pid),
+        cleanup_name(Name)
+    end.
+
+bt1990_async_send_through_proxy_resolves_future_test() ->
+    Name = bt1990_proxy_async,
+    {Pid, _Proxy} = bt1990_setup_named_counter(Name, 11),
+    try
+        Future = beamtalk_future:new(),
+        FuturePid = beamtalk_future:pid(Future),
+        beamtalk_actor:async_send({registered, Name}, getValue, [], FuturePid),
+        ?assertEqual(11, beamtalk_future:await(Future, 2000))
+    after
+        gen_server:stop(Pid),
+        cleanup_name(Name)
+    end.
+
+bt1990_async_send_through_proxy_to_vanished_name_rejects_future_test() ->
+    Name = bt1990_proxy_async_vanish,
+    {Pid, _Proxy} = bt1990_setup_named_counter(Name, 0),
+    gen_server:stop(Pid),
+    bt1990_wait_until_unregistered(Name, 1000),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    try
+        beamtalk_actor:async_send({registered, Name}, getValue, [], FuturePid),
+        %% Future is rejected with a structured no_such_process error;
+        %% beamtalk_future:await throws `{future_rejected, Reason}`.
+        ?assertThrow(
+            {future_rejected, #beamtalk_error{kind = no_such_process}},
+            beamtalk_future:await(Future, 2000)
+        )
+    after
+        cleanup_name(Name)
+    end.
+
+bt1990_cast_send_through_proxy_delivers_test() ->
+    Name = bt1990_proxy_cast,
+    {Pid, _Proxy} = bt1990_setup_named_counter(Name, 0),
+    try
+        beamtalk_actor:cast_send({registered, Name}, increment, []),
+        %% Sync send acts as a barrier ensuring the cast was processed.
+        ?assertEqual(1, beamtalk_actor:sync_send({registered, Name}, getValue, []))
+    after
+        gen_server:stop(Pid),
+        cleanup_name(Name)
+    end.
+
+bt1990_cast_send_through_proxy_to_vanished_name_is_silent_test() ->
+    %% cast_send is fire-and-forget; a vanished name must not raise — the
+    %% cast is dropped, matching the existing `actor dead -> ok` semantics.
+    Name = bt1990_proxy_cast_vanish,
+    {Pid, _Proxy} = bt1990_setup_named_counter(Name, 0),
+    gen_server:stop(Pid),
+    bt1990_wait_until_unregistered(Name, 1000),
+    try
+        ?assertEqual(ok, beamtalk_actor:cast_send({registered, Name}, increment, []))
+    after
+        cleanup_name(Name)
+    end.
+
+bt1990_named_returns_registered_proxy_not_pid_test() ->
+    %% `Actor named:` must return a `{registered, Name}` proxy so that
+    %% subsequent sends survive restarts. Using the pid would make the
+    %% reference stale across restarts.
+    Name = bt1990_named_proxy,
+    cleanup_name(Name),
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
+            {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+            try
+                Self = #beamtalk_object{
+                    class = 'Counter class',
+                    class_mod = counter,
+                    pid = ClassPid
+                },
+                {ok, Proxy} = beamtalk_actor:named(Self, Name),
+                ?assertMatch(
+                    #beamtalk_object{pid = {registered, Name}}, Proxy
+                ),
+                %% Concrete sanity: a method send through the proxy works.
+                ?assertEqual(0, beamtalk_message_dispatch:send(Proxy, getValue, []))
+            after
+                gen_server:stop(Pid),
+                cleanup_name(Name)
+            end
+    end.
+
+bt1990_named_lookup_wrong_class_returns_error_test() ->
+    %% A `Counter named: #foo` lookup against a non-Counter registered
+    %% actor must fail with the structured `wrong_class` error per ADR
+    %% 0079's lookup table — distinct from `name_not_registered`.
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
+            Name = bt1990_named_wrong_class,
+            cleanup_name(Name),
+            %% Register a Beamtalk actor of a *different* class to the same
+            %% name so the marker check fires — we use the test_counter
+            %% module but rebrand its $beamtalk_actor marker via a separate
+            %% process.
+            Foreign = spawn(fun() ->
+                erlang:put('$beamtalk_actor', 'NotACounter'),
+                receive
+                    stop -> ok
+                end
+            end),
+            true = erlang:register(Name, Foreign),
+            try
+                Self = #beamtalk_object{
+                    class = 'Counter class',
+                    class_mod = counter,
+                    pid = ClassPid
+                },
+                Result = beamtalk_actor:named(Self, Name),
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = wrong_class}}, Result
+                )
+            after
+                erlang:unregister(Name),
+                Foreign ! stop
+            end
+    end.
+
+bt1990_proxy_unregister_releases_name_test() ->
+    %% `unregister` on a name-resolving proxy must release the registry
+    %% entry — exercised through the FFI shim, which derives the pid via
+    %% `whereis/1` for the `{registered, _}` identity slot.
+    Name = bt1990_proxy_unreg,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
+    try
+        ?assertEqual(Pid, erlang:whereis(Name)),
+        ok = beamtalk_actor:unregister(Proxy),
+        ?assertEqual(undefined, erlang:whereis(Name))
+    after
+        gen_server:stop(Pid),
+        cleanup_name(Name)
+    end.
+
+bt1990_proxy_unregister_dead_proxy_is_idempotent_test() ->
+    %% A proxy whose name has gone (actor exited) must not raise on
+    %% `unregister` — there is nothing to release.
+    Name = bt1990_proxy_unreg_dead,
+    {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
+    gen_server:stop(Pid),
+    bt1990_wait_until_unregistered(Name, 1000),
+    try
+        ?assertEqual(ok, beamtalk_actor:unregister(Proxy))
+    after
+        cleanup_name(Name)
+    end.
+
+%% Helper: poll erlang:whereis(Name) until it returns undefined or the
+%% deadline expires. Used after gen_server:stop to make name-release
+%% ordering deterministic for the no_such_process tests.
+bt1990_wait_until_unregistered(Name, TimeoutMs) ->
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    bt1990_wait_until_unregistered_loop(Name, Deadline).
+
+bt1990_wait_until_unregistered_loop(Name, Deadline) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            ok;
+        _ ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true ->
+                    error({still_registered, Name});
+                false ->
+                    timer:sleep(5),
+                    bt1990_wait_until_unregistered_loop(Name, Deadline)
+            end
+    end.

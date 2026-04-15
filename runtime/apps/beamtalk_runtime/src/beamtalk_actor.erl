@@ -422,7 +422,29 @@ For all other messages, checks if the actor is alive first:
 - If alive, sends via gen_server:cast (normal async path)
 - If dead, rejects the Future with an `actor_dead` error
 """.
--spec async_send(pid(), atom(), list(), pid()) -> ok.
+-spec async_send(pid() | {registered, atom()}, atom(), list(), pid()) -> ok.
+%% ADR 0079 / BT-1990: name-resolving proxy fan-out. Name-only selectors
+%% answer from the proxy itself; other selectors resolve the name to the
+%% currently-registered pid and re-enter the pid-based clauses below.
+async_send({registered, Name}, isAlive, [], FuturePid) when is_atom(Name) ->
+    Result = erlang:whereis(Name) =/= undefined,
+    beamtalk_future:resolve(FuturePid, Result),
+    ok;
+async_send({registered, _Name}, isRegistered, [], FuturePid) ->
+    beamtalk_future:resolve(FuturePid, true),
+    ok;
+async_send({registered, Name}, registeredName, [], FuturePid) when is_atom(Name) ->
+    beamtalk_future:resolve(FuturePid, Name),
+    ok;
+async_send({registered, Name} = Ref, Selector, Args, FuturePid) when is_atom(Name) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            Error = no_such_process_error(Ref, Selector),
+            beamtalk_future:reject(FuturePid, Error),
+            ok;
+        Pid when is_pid(Pid) ->
+            async_send(Pid, Selector, Args, FuturePid)
+    end;
 async_send(ActorPid, isAlive, [], FuturePid) ->
     %% isAlive is handled locally - no message to the actor
     Result = is_process_alive(ActorPid),
@@ -592,7 +614,15 @@ Checks if the actor is alive before sending. If dead, silently returns ok
 WARNING: Race condition! is_process_alive/1 is a snapshot check.
 The actor could die between the alive check and the gen_server:cast.
 """.
--spec cast_send(pid(), atom(), list()) -> ok.
+-spec cast_send(pid() | {registered, atom()}, atom(), list()) -> ok.
+%% ADR 0079 / BT-1990: name-resolving proxy fan-out for fire-and-forget
+%% sends. If the name is not currently registered, silently drop the cast
+%% (consistent with cast_send's existing `actor dead -> ok` semantics).
+cast_send({registered, Name}, Selector, Args) when is_atom(Name) ->
+    case erlang:whereis(Name) of
+        undefined -> ok;
+        Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args)
+    end;
 cast_send(ActorPid, Selector, Args) ->
     %% BT-1603: Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
     %% Measures dispatch-to-mailbox time for cast sends.
@@ -625,7 +655,23 @@ For all other messages, checks if the actor is alive first:
 - If dead, raises `#beamtalk_error{kind = actor_dead}`
 - If timeout, raises `#beamtalk_error{kind = timeout}`
 """.
--spec sync_send(pid(), atom(), list()) -> term().
+-spec sync_send(pid() | {registered, atom()}, atom(), list()) -> term().
+%% ADR 0079 / BT-1990: name-resolving proxy fan-out. Name-only methods
+%% answer from the proxy itself; other methods resolve to the currently-
+%% registered pid, raising `no_such_process` if the name has vanished.
+sync_send({registered, Name}, isAlive, []) when is_atom(Name) ->
+    erlang:whereis(Name) =/= undefined;
+sync_send({registered, _Name}, isRegistered, []) ->
+    true;
+sync_send({registered, Name}, registeredName, []) when is_atom(Name) ->
+    Name;
+sync_send({registered, Name} = Ref, Selector, Args) when is_atom(Name) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            raise_no_such_process(Ref, Selector);
+        Pid when is_pid(Pid) ->
+            sync_send(Pid, Selector, Args)
+    end;
 sync_send(ActorPid, isAlive, []) ->
     is_process_alive(ActorPid);
 sync_send(ActorPid, stop, []) ->
@@ -829,7 +875,22 @@ Same as sync_send/3 but passes the given Timeout to gen_server:call/3.
 Timeout is a non-negative integer (milliseconds) or the atom `infinity`.
 Used by TimeoutProxy to forward messages with a custom timeout.
 """.
--spec sync_send(pid(), atom(), list(), timeout()) -> term().
+-spec sync_send(pid() | {registered, atom()}, atom(), list(), timeout()) -> term().
+%% ADR 0079 / BT-1990: name-resolving proxy fan-out for the explicit-
+%% timeout path. Mirror sync_send/3's name-only handling and resolution.
+sync_send({registered, Name}, isAlive, [], _Timeout) when is_atom(Name) ->
+    erlang:whereis(Name) =/= undefined;
+sync_send({registered, _Name}, isRegistered, [], _Timeout) ->
+    true;
+sync_send({registered, Name}, registeredName, [], _Timeout) when is_atom(Name) ->
+    Name;
+sync_send({registered, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            raise_no_such_process(Ref, Selector);
+        Pid when is_pid(Pid) ->
+            sync_send(Pid, Selector, Args, Timeout)
+    end;
 sync_send(ActorPid, Selector, Args, Timeout) when
     is_integer(Timeout), Timeout >= 0;
     Timeout =:= infinity
@@ -1041,6 +1102,39 @@ actor_dead_error(Selector) ->
         <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
     ),
     {error, Error}.
+
+-doc """
+ADR 0079 / BT-1990: raise a `no_such_process` error for sends through a
+name-resolving proxy when the registered name no longer points at any
+process. Distinct from `actor_dead`, which fires when a held pid points
+at a dead process — `no_such_process` says the *name* failed to resolve.
+""".
+-spec raise_no_such_process({registered, atom()}, atom()) -> no_return().
+raise_no_such_process({registered, Name}, Selector) ->
+    error(
+        beamtalk_exception_handler:ensure_wrapped(
+            no_such_process_error_record(Name, Selector)
+        )
+    ).
+
+-doc "Construct a structured `no_such_process` error for the given proxy ref.".
+-spec no_such_process_error({registered, atom()}, atom()) -> #beamtalk_error{}.
+no_such_process_error({registered, Name}, Selector) ->
+    no_such_process_error_record(Name, Selector).
+
+-spec no_such_process_error_record(atom(), atom()) -> #beamtalk_error{}.
+no_such_process_error_record(Name, Selector) ->
+    Error = beamtalk_error:new(
+        no_such_process,
+        unknown,
+        Selector,
+        iolist_to_binary(
+            io_lib:format(
+                "No process is currently registered under name '~ts'", [Name]
+            )
+        )
+    ),
+    beamtalk_error:with_details(Error, #{name => Name}).
 
 -doc """
 Wrap a function in telemetry:span/3 if telemetry is available, else run directly.
@@ -2338,11 +2432,18 @@ fluent-chain contract.
 -spec registerAs(#beamtalk_object{}, term()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 registerAs(Self, Name) when is_record(Self, beamtalk_object) ->
-    Pid = Self#beamtalk_object.pid,
     ClassName = Self#beamtalk_object.class,
-    case register_name(Name, Pid) of
-        {ok, _} ->
-            {ok, Self};
+    case proxy_pid(Self, 'registerAs:') of
+        {ok, Pid} ->
+            case register_name(Name, Pid) of
+                {ok, _} ->
+                    {ok, Self};
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{
+                        class = ClassName,
+                        selector = 'registerAs:'
+                    }}
+            end;
         {error, #beamtalk_error{} = Err} ->
             {error, Err#beamtalk_error{
                 class = ClassName,
@@ -2368,7 +2469,39 @@ already unregistered. Only raises on real failures (reserved-name, type error).
 """.
 -spec unregister(#beamtalk_object{}) -> ok.
 unregister(Self) when is_record(Self, beamtalk_object) ->
-    Pid = Self#beamtalk_object.pid,
+    %% ADR 0079 / BT-1990: name-resolving proxies (`pid = {registered, N}`)
+    %% derive the pid via `whereis/1`. If the name has gone, treat as
+    %% idempotent — there is nothing to unregister.
+    Pid =
+        case Self#beamtalk_object.pid of
+            P when is_pid(P) ->
+                P;
+            {registered, Name0} when is_atom(Name0) ->
+                case erlang:whereis(Name0) of
+                    undefined -> dead;
+                    Live when is_pid(Live) -> Live
+                end
+        end,
+    case Pid of
+        dead ->
+            ok;
+        _ ->
+            unregister_resolved(Self, Pid)
+    end;
+unregister(Self) ->
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', unregister),
+            iolist_to_binary(
+                io_lib:format(
+                    "unregister expects an Actor receiver, got ~tp", [Self]
+                )
+            )
+        )
+    ).
+
+-spec unregister_resolved(#beamtalk_object{}, pid()) -> ok.
+unregister_resolved(Self, Pid) ->
     case registered_name_for_pid(Pid) of
         undefined ->
             ok;
@@ -2396,18 +2529,7 @@ unregister(Self) when is_record(Self, beamtalk_object) ->
                     %% Name is gone or held by another pid — nothing to do.
                     ok
             end
-    end;
-unregister(Self) ->
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            beamtalk_error:new(type_error, 'Actor', unregister),
-            iolist_to_binary(
-                io_lib:format(
-                    "unregister expects an Actor receiver, got ~tp", [Self]
-                )
-            )
-        )
-    ).
+    end.
 
 -doc """
 FFI shim for `registeredName -> Symbol | Nil`.
@@ -2417,9 +2539,17 @@ registered name (or has terminated).
 """.
 -spec registeredName(#beamtalk_object{}) -> atom() | nil.
 registeredName(Self) when is_record(Self, beamtalk_object) ->
-    case registered_name_for_pid(Self#beamtalk_object.pid) of
-        undefined -> nil;
-        Name -> Name
+    case Self#beamtalk_object.pid of
+        {registered, Name} when is_atom(Name) ->
+            %% ADR 0079 / BT-1990: name-resolving proxy answers from the
+            %% identity slot directly — survives the registered actor
+            %% being restarted under the same name.
+            Name;
+        Pid when is_pid(Pid) ->
+            case registered_name_for_pid(Pid) of
+                undefined -> nil;
+                Name -> Name
+            end
     end;
 registeredName(_) ->
     nil.
@@ -2429,7 +2559,16 @@ FFI shim for `isRegistered -> Boolean`.
 """.
 -spec isRegistered(#beamtalk_object{}) -> boolean().
 isRegistered(Self) when is_record(Self, beamtalk_object) ->
-    registered_name_for_pid(Self#beamtalk_object.pid) =/= undefined;
+    case Self#beamtalk_object.pid of
+        {registered, _Name} ->
+            %% ADR 0079 / BT-1990: a name-resolving proxy is by
+            %% construction registered. The proxy stays "registered"
+            %% across restarts because the supervisor re-registers
+            %% the name on each restart.
+            true;
+        Pid when is_pid(Pid) ->
+            registered_name_for_pid(Pid) =/= undefined
+    end;
 isRegistered(_) ->
     false.
 
@@ -2484,10 +2623,18 @@ named(Self, Name) when is_atom(Name) ->
                                 true ->
                                     case class_mod_for(ActualClass) of
                                         {ok, ActualModule} ->
+                                            %% ADR 0079 / BT-1990: return a
+                                            %% name-resolving proxy whose
+                                            %% identity slot is `{registered,
+                                            %% Name}`. The send-site re-
+                                            %% resolves the name on every
+                                            %% message, so the reference
+                                            %% survives restarts.
+                                            _ = Pid,
                                             {ok, #beamtalk_object{
                                                 class = ActualClass,
                                                 class_mod = ActualModule,
-                                                pid = Pid
+                                                pid = {registered, Name}
                                             }};
                                         not_found ->
                                             {error,
@@ -2558,10 +2705,15 @@ allRegistered(_Self) ->
                         ClassName ->
                             case class_mod_for(ClassName) of
                                 {ok, Module} ->
+                                    %% ADR 0079 / BT-1990: enumerate as
+                                    %% name-resolving proxies so subsequent
+                                    %% sends survive restarts of the
+                                    %% supervised actor under that name.
+                                    _ = Pid,
                                     {true, #beamtalk_object{
                                         class = ClassName,
                                         class_mod = Module,
-                                        pid = Pid
+                                        pid = {registered, Name}
                                     }};
                                 not_found ->
                                     false
@@ -2599,6 +2751,24 @@ class_self_to_name_and_module(Other) ->
                 )
             )
         )}.
+
+-doc """
+ADR 0079 / BT-1990: derive a current pid from a `#beamtalk_object{}`
+identity slot. Pid identities pass through unchanged; name-resolving
+proxies look up the current pid via `whereis/1`. Returns a structured
+`no_such_process` error when a proxy's name is not currently registered.
+""".
+-spec proxy_pid(#beamtalk_object{}, atom()) ->
+    {ok, pid()} | {error, #beamtalk_error{}}.
+proxy_pid(#beamtalk_object{pid = Pid}, _Selector) when is_pid(Pid) ->
+    {ok, Pid};
+proxy_pid(#beamtalk_object{pid = {registered, Name}}, Selector) when is_atom(Name) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            {error, no_such_process_error_record(Name, Selector)};
+        Pid when is_pid(Pid) ->
+            {ok, Pid}
+    end.
 
 -spec registered_name_for_pid(pid()) -> atom() | undefined.
 registered_name_for_pid(Pid) when is_pid(Pid) ->
