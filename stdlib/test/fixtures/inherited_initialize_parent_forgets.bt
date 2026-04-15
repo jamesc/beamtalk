@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture.
+// Parent actor class whose `initialize` forgets to set its own typed-no-default
+// field. Spawning any subclass should fail with UninitializedStateError
+// because the post-initialize check validates the inherited field too.
+
+typed Actor subclass: InheritedInitializeParentForgets
+  state: missing :: String
+  state: count :: Integer = 0
+
+  initialize -> Integer =>
+    // Deliberately does NOT set self.missing
+    self.count := 1
+
+  getMissing -> String => self.missing
+
+  getCount -> Integer => self.count
