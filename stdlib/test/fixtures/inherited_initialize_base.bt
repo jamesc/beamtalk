@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture.
+// Parent actor class that sets a typed-no-default field in its own
+// `initialize` method. Subclasses that do not override `initialize`
+// should inherit the initialization by virtue of the auto-chain.
+
+typed Actor subclass: InheritedInitializeBase
+  state: label :: String
+  state: count :: Integer = 0
+
+  initialize -> String => self.label := "parent-initialized"
+
+  getLabel -> String => self.label
+
+  getCount -> Integer => self.count
+
+  increment -> Integer =>
+    self.count := self.count + 1
+    self.count

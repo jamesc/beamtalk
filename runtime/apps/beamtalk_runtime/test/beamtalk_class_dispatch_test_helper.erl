@@ -20,7 +20,10 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
 -export([
     class_testSuccess/2,
     class_testClassVar/2,
-    'class_testWith:'/3
+    'class_testWith:'/3,
+    class_testInternalUndef/2,
+    class_testRaise/2,
+    'class_testTwoArgs:and:'/4
 ]).
 
 -doc """
@@ -52,3 +55,34 @@ Exercises the keyword-selector arity path: erlang:apply receives
 -spec 'class_testWith:'(term(), map(), term()) -> term().
 'class_testWith:'(_ClassSelf, _ClassVars, Arg) ->
     {with_arg, Arg}.
+
+-doc """
+Zero-argument class method that calls a non-existent function internally.
+
+Exercises the `false` branch of is_dispatch_undef — undef raised from
+inside the method body (not at the dispatch site).
+""".
+-spec class_testInternalUndef(term(), map()) -> no_return().
+class_testInternalUndef(_ClassSelf, _ClassVars) ->
+    %% Call a function that does not exist in this module — triggers undef
+    %% from inside the method body, not at the dispatch level.
+    beamtalk_class_dispatch_test_helper:nonexistent_internal_function().
+
+-doc """
+Zero-argument class method that raises a runtime error.
+
+Exercises the ErrClass:Error:ErrST catch branch in invoke_class_method.
+""".
+-spec class_testRaise(term(), map()) -> no_return().
+class_testRaise(_ClassSelf, _ClassVars) ->
+    error(test_deliberate_error).
+
+-doc """
+Two-argument keyword class method for arity testing.
+
+Exercises dispatch with multiple keyword arguments:
+erlang:apply receives [ClassSelf, ClassVars, Arg1, Arg2] → function/4.
+""".
+-spec 'class_testTwoArgs:and:'(term(), map(), term(), term()) -> term().
+'class_testTwoArgs:and:'(_ClassSelf, _ClassVars, Arg1, Arg2) ->
+    {two_args, Arg1, Arg2}.

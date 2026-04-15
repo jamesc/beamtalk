@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture (deep hierarchy test).
+// Middle class. Its `initialize` appends "B" after A's has appended "A".
+
+DeepHierarchyA subclass: DeepHierarchyB
+
+  initialize => self.log := self.log ++ "B"

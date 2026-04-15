@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture.
+// Child actor class that defines its own `initialize` which only touches its
+// own typed-no-default field. Parent's `initialize` should run first (via
+// auto-chain), setting `label`, before the child's `initialize` runs and
+// sets `cache`.
+
+typed InheritedInitializeBase subclass: InheritedInitializeChildAdds
+  state: cache :: String
+
+  initialize -> String =>
+    // parent's initialize already ran; self.label is set
+    self.cache := "cache-" ++ self.label
+
+  getCache -> String => self.cache

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture (deep hierarchy test).
+// Leaf class. Final log should be "ABC" after the auto-chain runs.
+
+DeepHierarchyB subclass: DeepHierarchyC
+
+  initialize => self.log := self.log ++ "C"

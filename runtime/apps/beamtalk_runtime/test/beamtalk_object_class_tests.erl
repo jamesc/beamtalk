@@ -123,7 +123,21 @@ teardown(_) ->
             beamtalk_class_LocalCallDnuTestClass,
             beamtalk_class_LocalCallCvarTestClass,
             beamtalk_class_CrashRecoveryTest,
-            beamtalk_class_CrashRecoverySendTest
+            beamtalk_class_CrashRecoverySendTest,
+            beamtalk_class_SealedDefaultTest,
+            beamtalk_class_SealedTrueTest,
+            beamtalk_class_AbstractDefaultTest,
+            beamtalk_class_AbstractTrueTest,
+            beamtalk_class_InternalDefaultTest,
+            beamtalk_class_InternalVisTest,
+            beamtalk_class_DocDefaultTest,
+            beamtalk_class_DocSetGetTest,
+            beamtalk_class_MethodDocTest,
+            beamtalk_class_ClassVarDefaultTest,
+            beamtalk_class_ClassVarSetGetTest,
+            beamtalk_class_ConstructibleDefaultTest,
+            beamtalk_class_HandleInfoTest,
+            beamtalk_class_InstanceMethodsTest
         ]
     ),
     %% Clean up ETS hierarchy table entries
@@ -1793,5 +1807,288 @@ restart_class_no_module_test_() ->
                 {error, {no_module_for_class, 'NonexistentClass'}},
                 beamtalk_class_registry:restart_class('NonexistentClass')
             )
+        ]
+    end}.
+
+%%% ============================================================================
+%%% is_sealed / is_abstract / is_internal Tests
+%%% ============================================================================
+
+is_sealed_default_false_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'SealedDefaultTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assertNot(beamtalk_object_class:is_sealed(Pid))
+            end)
+        ]
+    end}.
+
+is_sealed_true_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'SealedTrueTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{},
+                    meta => #{is_sealed => true}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assert(beamtalk_object_class:is_sealed(Pid))
+            end)
+        ]
+    end}.
+
+is_abstract_default_false_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'AbstractDefaultTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assertNot(beamtalk_object_class:is_abstract(Pid))
+            end)
+        ]
+    end}.
+
+is_abstract_true_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'AbstractTrueTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{},
+                    meta => #{is_abstract => true}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assert(beamtalk_object_class:is_abstract(Pid))
+            end)
+        ]
+    end}.
+
+is_internal_default_false_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'InternalDefaultTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assertNot(beamtalk_object_class:is_internal(Pid))
+            end)
+        ]
+    end}.
+
+is_internal_true_via_visibility_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'InternalVisTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{},
+                    meta => #{visibility => internal}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assert(beamtalk_object_class:is_internal(Pid))
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% Doc Accessor Tests (ADR 0033)
+%%% ============================================================================
+
+get_doc_default_none_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'DocDefaultTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assertEqual(none, gen_server:call(Pid, get_doc))
+            end)
+        ]
+    end}.
+
+set_and_get_doc_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'DocSetGetTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ok = gen_server:call(Pid, {set_doc, <<"A documented class.">>}),
+                ?assertEqual(<<"A documented class.">>, gen_server:call(Pid, get_doc))
+            end)
+        ]
+    end}.
+
+set_method_doc_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'MethodDocTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{
+                        'doSomething' => #{arity => 0, block => fun(_, _) -> ok end}
+                    },
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ok = gen_server:call(Pid, {set_method_doc, 'doSomething', <<"Does something.">>}),
+                %% Verify method doc is embedded in method lookup result
+                Result = gen_server:call(Pid, {method, 'doSomething'}),
+                ?assertEqual(<<"Does something.">>, maps:get('__doc__', Result))
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% Class Variable Tests
+%%% ============================================================================
+
+get_class_var_default_nil_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'ClassVarDefaultTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, someVar}))
+            end)
+        ]
+    end}.
+
+set_and_get_class_var_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'ClassVarSetGetTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                ?assertEqual(42, gen_server:call(Pid, {set_class_var, count, 42})),
+                ?assertEqual(42, gen_server:call(Pid, {get_class_var, count}))
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% is_constructible Tests
+%%% ============================================================================
+
+is_constructible_default_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'ConstructibleDefaultTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                %% Default is_constructible is undefined, resolved lazily
+                Result = beamtalk_object_class:is_constructible(Pid),
+                ?assert(is_boolean(Result))
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% handle_info ignores unknown messages
+%%% ============================================================================
+
+handle_info_returns_noreply_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'HandleInfoTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                %% Send arbitrary info message — should be ignored
+                Pid ! {some_random_message, 42},
+                %% Process should still be alive
+                timer:sleep(50),
+                ?assert(is_process_alive(Pid))
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% get_instance_methods Tests
+%%% ============================================================================
+
+get_instance_methods_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Methods = #{
+                    'increment' => #{arity => 0, block => fun(_, _) -> ok end},
+                    'getValue' => #{arity => 0, block => fun(_, _) -> 0 end}
+                },
+                ClassInfo = #{
+                    name => 'InstanceMethodsTest',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => Methods,
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                {ok, ReturnedMethods} = gen_server:call(Pid, get_instance_methods),
+                ?assertEqual(lists:sort(maps:keys(Methods)), lists:sort(maps:keys(ReturnedMethods)))
+            end)
         ]
     end}.

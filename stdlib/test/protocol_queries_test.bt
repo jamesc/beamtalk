@@ -94,6 +94,6 @@ TestCase subclass: ProtocolQueriesTest
     self assert: Displayable superclass equals: Protocol
 
   testProtocolObjectInAllClasses =>
-    // Protocol objects appear in allClasses (returned as atoms)
+    // Protocol objects appear in allClasses (returned as class objects)
     all := (Erlang beamtalk_interface) allClasses
-    self assert: (all includes: #Displayable) equals: true
+    self assert: (all includes: Displayable) equals: true

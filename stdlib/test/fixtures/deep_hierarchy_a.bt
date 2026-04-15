@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture (deep hierarchy test).
+// Root of a 3-level hierarchy. `initialize` records execution order in a log.
+
+Actor subclass: DeepHierarchyA
+  state: log = ""
+
+  initialize => self.log := self.log ++ "A"
+
+  getLog => self.log

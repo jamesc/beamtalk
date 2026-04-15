@@ -197,3 +197,142 @@ supervisor_stop_stale_handle_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
         beamtalk_message_dispatch:send(Sup, stop, [])
     ).
+
+%% ============================================================================
+%% BT-1970: cast/3 dispatch tests
+%% ============================================================================
+
+cast_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"cast to actor sends message", fun cast_actor_sends_message/0},
+        {"cast to metaclass returns ok", fun cast_metaclass_returns_ok/0},
+        {"cast to class object returns ok", fun cast_class_object_returns_ok/0},
+        {"cast to dead actor returns ok", fun cast_dead_actor_returns_ok/0},
+        {"cast to primitive returns ok", fun cast_primitive_returns_ok/0}
+    ]}.
+
+cast_actor_sends_message() ->
+    %% Cast to a live actor should return ok (fire-and-forget)
+    {ok, Counter} = test_counter:start_link(0),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    Result = beamtalk_message_dispatch:cast(Obj, increment, []),
+    ?assertEqual(ok, Result),
+    gen_server:stop(Counter).
+
+cast_metaclass_returns_ok() ->
+    %% Cast to a Metaclass object is silently ignored
+    MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = self()},
+    ?assertEqual(ok, beamtalk_message_dispatch:cast(MetaObj, anySelector, [])).
+
+cast_class_object_returns_ok() ->
+    %% Cast to a class object is silently ignored
+    ClassPid = beamtalk_class_registry:whereis_class('Object'),
+    ?assert(is_pid(ClassPid)),
+    ClassTag = beamtalk_class_registry:class_object_tag('Object'),
+    ClassMod = beamtalk_object_class:module_name(ClassPid),
+    ClassObj = #beamtalk_object{class = ClassTag, class_mod = ClassMod, pid = ClassPid},
+    ?assertEqual(ok, beamtalk_message_dispatch:cast(ClassObj, name, [])).
+
+cast_dead_actor_returns_ok() ->
+    %% Cast to an actor with invalid pid is silently ignored (fire-and-forget)
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = undefined},
+    ?assertEqual(ok, beamtalk_message_dispatch:cast(Obj, increment, [])).
+
+cast_primitive_returns_ok() ->
+    %% Cast to a primitive value is silently ignored
+    ?assertEqual(ok, beamtalk_message_dispatch:cast(42, '+', [1])),
+    ?assertEqual(ok, beamtalk_message_dispatch:cast("hello", size, [])),
+    ?assertEqual(ok, beamtalk_message_dispatch:cast([1, 2], size, [])).
+
+%% ============================================================================
+%% BT-1970: is_actor/1 edge cases (tested indirectly via send/cast routing)
+%% ============================================================================
+
+is_actor_edge_cases_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"non-tuple receiver dispatches as primitive", fun non_tuple_as_primitive/0},
+        {"wrong-size tuple dispatches as primitive", fun wrong_size_tuple_as_primitive/0},
+        {"wrong-tag tuple dispatches as primitive", fun wrong_tag_tuple_as_primitive/0}
+    ]}.
+
+non_tuple_as_primitive() ->
+    %% Atoms, binaries, pids — all non-tuple values route to primitive dispatch.
+    %% Test with an integer (known to work via beamtalk_primitive).
+    ?assertEqual(5, beamtalk_message_dispatch:send(2, '+', [3])).
+
+wrong_size_tuple_as_primitive() ->
+    %% A 3-element tuple (not 4) should NOT be treated as an actor.
+    %% This goes to beamtalk_primitive:send which handles tuples.
+    Result = beamtalk_message_dispatch:send({a, b, c}, size, []),
+    ?assertEqual(3, Result).
+
+wrong_tag_tuple_as_primitive() ->
+    %% A 4-element tuple with wrong first element is not an actor.
+    Result = beamtalk_message_dispatch:send({not_beamtalk, a, b, c}, size, []),
+    ?assertEqual(4, Result).
+
+%% ============================================================================
+%% BT-1970: send/3 actor with invalid PID
+%% ============================================================================
+
+invalid_pid_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"actor with undefined pid raises actor_dead", fun actor_undefined_pid_raises_error/0}
+    ]}.
+
+actor_undefined_pid_raises_error() ->
+    %% When an actor record has a non-pid value (e.g. undefined), send/3 raises actor_dead.
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = undefined},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
+        beamtalk_message_dispatch:send(Obj, increment, [])
+    ).
+
+%% ============================================================================
+%% BT-1970: send/4 supervisor timeout delegation
+%% ============================================================================
+
+send4_supervisor_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"send/4 supervisor ignores timeout and delegates to send/3",
+            fun send4_supervisor_delegates/0}
+    ]}.
+
+send4_supervisor_delegates() ->
+    %% Supervisors dispatch via hierarchy walk (in-process); timeout is ignored.
+    %% isAlive is handled directly by send/3 before hierarchy walk.
+    SupPid = anon_sup(),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    Result = beamtalk_message_dispatch:send(Sup, isAlive, [], 5000),
+    ?assertEqual(true, Result),
+    gen_server:stop(SupPid).
+
+%% ============================================================================
+%% BT-1970: Metaclass dispatch path
+%% ============================================================================
+
+metaclass_dispatch_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"metaclass dispatches via primitive send", fun metaclass_dispatch_via_primitive/0},
+        {"send/4 metaclass ignores timeout", fun send4_metaclass_ignores_timeout/0}
+    ]}.
+
+metaclass_dispatch_via_primitive() ->
+    %% ADR 0036: Metaclass objects dispatch synchronously via beamtalk_primitive:send.
+    %% Metaclass is a special class tag that bypasses actor gen_server dispatch.
+    %% Use the real Object class pid, tagged as Metaclass so dispatch routes correctly.
+    ClassPid = beamtalk_class_registry:whereis_class('Object'),
+    ?assert(is_pid(ClassPid)),
+    MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = ClassPid},
+    %% Sending 'name' to a Metaclass-tagged object goes through primitive dispatch
+    %% which calls metaclass_send_dispatch and returns the class name as a binary.
+    Result = beamtalk_message_dispatch:send(MetaObj, name, []),
+    ?assertEqual(<<"Object class">>, Result).
+
+send4_metaclass_ignores_timeout() ->
+    %% send/4 with Metaclass receiver falls through to beamtalk_primitive:send
+    ClassPid = beamtalk_class_registry:whereis_class('Object'),
+    ?assert(is_pid(ClassPid)),
+    MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = ClassPid},
+    Result = beamtalk_message_dispatch:send(MetaObj, name, [], 5000),
+    ?assertEqual(<<"Object class">>, Result).

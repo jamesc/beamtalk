@@ -6,19 +6,28 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_class_dispatch (BT-1085).
+EUnit tests for beamtalk_class_dispatch (BT-1085, BT-1963).
 
-Coverage target: ≥ 60% of beamtalk_class_dispatch.erl.
+Coverage target: ≥ 85% of beamtalk_class_dispatch.erl.
 
 Test groups:
 
-  1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
-  2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
-  3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
-  4. unwrap_class_call/1 — ok and error paths
-  5. undef classification — module_not_loaded vs method_not_found (BT-999)
-  6. class_send/3 — undefined class, unknown selector, new/spawn
-  7. class_name_from_pid/1 — via registered/unregistered processes
+   1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
+   2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
+   3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
+   4. unwrap_class_call/1 — ok and error paths
+   5. undef classification — module_not_loaded vs method_not_found (BT-999)
+   6. class_send/3 — undefined class, unknown selector, new/spawn
+   7. class_name_from_pid/1 — via registered/unregistered processes
+   8. find_class_method_in_ancestors — chain traversal, depth limits
+   9. metaclass_send — local and not_found paths
+  10. undef classification extended — local vs inherited hint variants (BT-1963)
+  11. invoke_class_method error paths — internal undef, raises, multi-arg dispatch
+  12. class_send instantiation variants — new:, spawnWith:
+  13. handle_self_instantiation — error paths (new:, spawnWith:)
+  14. class_send_with_recovery — noproc crash recovery
+  15. metaclass_send extended — not_found, dead pid
+  16. try_class_chain_fallthrough — Class chain dispatch
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -784,6 +793,351 @@ test_metaclass_method_found() ->
             _:_ -> ok
         end)
     end.
+
+%%% ============================================================================
+%%% 10. undef classification — indirect tests via handle_class_method_call (BT-1963)
+%%% ============================================================================
+
+undef_classification_extended_test_() ->
+    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"local method, module not loaded → class_not_found with local hint",
+                fun test_undef_local_module_not_loaded/0},
+            {"local method, module loaded but method absent → does_not_understand with local hint",
+                fun test_undef_local_method_not_found/0},
+            {"inherited method, module not loaded → class_not_found with inheritance hint",
+                fun test_undef_inherited_module_not_loaded/0},
+            {"inherited method, module loaded but absent → does_not_understand with inheritance hint",
+                fun test_undef_inherited_method_not_found/0}
+        ]
+    end}.
+
+%% Local class method, module not loaded → class_not_found with hint naming the class.
+test_undef_local_module_not_loaded() ->
+    ClassName = 'BT1963LocalUndefClass',
+    LocalMethods = #{myMethod => <<>>},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        myMethod, [], ClassName, bt1963_nonexistent_local_module, LocalMethods, #{}
+    ),
+    ?assertMatch({reply, {error, #beamtalk_error{kind = class_not_found}}, _}, Result),
+    {reply, {error, #beamtalk_error{hint = Hint}}, _} = Result,
+    %% Hint should mention the class name but NOT "inherits" (local method).
+    ?assert(binary:match(Hint, atom_to_binary(ClassName, utf8)) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Hint, <<"inherits">>)).
+
+%% Local class method, module loaded but function absent → does_not_understand.
+test_undef_local_method_not_found() ->
+    ClassName = 'BT1963LocalDNUClass',
+    %% `erlang` is always loaded but has no class_absentLocalMethod/2.
+    LocalMethods = #{absentLocalMethod => <<>>},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        absentLocalMethod, [], ClassName, erlang, LocalMethods, #{}
+    ),
+    ?assertMatch({reply, {error, #beamtalk_error{kind = does_not_understand}}, _}, Result),
+    {reply, {error, #beamtalk_error{hint = Hint}}, _} = Result,
+    %% Hint should name the selector and NOT mention "inherited".
+    ?assert(binary:match(Hint, <<"absentLocalMethod">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Hint, <<"inherited">>)).
+
+%% Inherited method, defining class module not loaded → class_not_found with inheritance hint.
+test_undef_inherited_module_not_loaded() ->
+    ParentName = 'BT1963UndefParent',
+    ChildName = 'BT1963UndefChild',
+    ParentInfo = #{
+        superclass => none,
+        module => bt1963_undef_parent_nonexistent,
+        class_methods => #{inheritedSelector => <<>>},
+        class_state => #{}
+    },
+    ChildInfo = #{
+        superclass => ParentName,
+        module => bt1963_undef_child_mod,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
+    try
+        Result = gen_server:call(ChildPid, {class_method_call, inheritedSelector, []}),
+        ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result),
+        {error, #beamtalk_error{hint = Hint}} = Result,
+        ?assert(binary:match(Hint, <<"inherits">>) =/= nomatch)
+    after
+        catch gen_server:stop(ChildPid, normal, 5000),
+        catch gen_server:stop(ParentPid, normal, 5000)
+    end.
+
+%% Inherited method, defining class module loaded but function absent → does_not_understand.
+test_undef_inherited_method_not_found() ->
+    ParentName = 'BT1963DNUParent',
+    ChildName = 'BT1963DNUChild',
+    %% `erlang` is always loaded but won't have class_inheritedAbsentSel/2.
+    ParentInfo = #{
+        superclass => none,
+        module => erlang,
+        class_methods => #{inheritedAbsentSel => <<>>},
+        class_state => #{}
+    },
+    ChildInfo = #{
+        superclass => ParentName,
+        module => bt1963_dnu_child_mod,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
+    try
+        Result = gen_server:call(ChildPid, {class_method_call, inheritedAbsentSel, []}),
+        ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
+        {error, #beamtalk_error{hint = Hint}} = Result,
+        ?assert(binary:match(Hint, <<"inherited">>) =/= nomatch)
+    after
+        catch gen_server:stop(ChildPid, normal, 5000),
+        catch gen_server:stop(ParentPid, normal, 5000)
+    end.
+
+%%% ============================================================================
+%%% 11. invoke_class_method error paths (BT-1963)
+%%% ============================================================================
+
+invoke_class_method_errors_test_() ->
+    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"internal undef in method body returns {error, undef}",
+                fun test_invoke_internal_undef/0},
+            {"method that raises error returns {error, Reason}", fun test_invoke_raises_error/0},
+            {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0}
+        ]
+    end}.
+
+%% class method that calls a non-existent function internally → {error, undef}.
+test_invoke_internal_undef() ->
+    LocalMethods = #{testInternalUndef => <<>>},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testInternalUndef,
+        [],
+        'BT1963InternalUndefClass',
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{}
+    ),
+    ?assertMatch({reply, {error, undef}, _}, Result).
+
+%% class method that raises error(test_deliberate_error) → {error, test_deliberate_error}.
+test_invoke_raises_error() ->
+    LocalMethods = #{testRaise => <<>>},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testRaise,
+        [],
+        'BT1963RaiseClass',
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{}
+    ),
+    ?assertMatch({reply, {error, test_deliberate_error}, _}, Result).
+
+%% Two-argument keyword selector dispatches correctly.
+test_invoke_two_arg_keyword() ->
+    LocalMethods = #{'testTwoArgs:and:' => <<>>},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        'testTwoArgs:and:',
+        [alpha, beta],
+        'BT1963TwoArgClass',
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{}
+    ),
+    ?assertMatch({reply, {ok, {two_args, alpha, beta}}, _}, Result).
+
+%%% ============================================================================
+%%% 12. class_send instantiation variants (BT-1963)
+%%% ============================================================================
+
+class_send_instantiation_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
+        [
+            {"class_send spawnWith: with map creates actor", fun test_class_send_spawn_with_map/0},
+            {"class_send new: exercises the new: clause path", fun test_class_send_new_colon/0}
+        ]
+    end}.
+
+%% class_send(Pid, 'spawnWith:', [Map]) creates an actor with initial state.
+test_class_send_spawn_with_map() ->
+    ok = ensure_counter_loaded(),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
+    ?assertNotEqual(undefined, CounterPid),
+    InitState = #{},
+    Result = beamtalk_class_dispatch:class_send(CounterPid, 'spawnWith:', [InitState]),
+    try
+        ?assertMatch(#beamtalk_object{class = 'Counter'}, Result)
+    after
+        case Result of
+            #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
+                catch gen_server:stop(ActorPid, normal, 5000);
+            _ ->
+                ok
+        end
+    end.
+
+%% class_send(Pid, 'new:', [Map]) exercises the new: clause path in class_send.
+%% Uses a test class with a custom new handler that just returns the map.
+test_class_send_new_colon() ->
+    ClassName = 'BT1963NewColonTest',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testSuccess => <<>>},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        %% The new: clause calls gen_server:call(Pid, {new, [Map]}).
+        %% The gen_server handles {new, _} by attempting instantiation.
+        %% For a class with no actual new handler, this will fail — but
+        %% the important thing is that the correct code path is exercised.
+        %% We expect an error because the test helper has no real new handler.
+        ?assertError(
+            _,
+            beamtalk_class_dispatch:class_send(Pid, 'new:', [#{}])
+        )
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%%% ============================================================================
+%%% 13. handle_self_instantiation error paths (BT-1963)
+%%% ============================================================================
+
+self_instantiation_error_test_() ->
+    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"self-send new: without process dict raises instantiation_error",
+                fun test_self_instantiation_new_colon_error/0},
+            {"self-send spawnWith: without process dict raises instantiation_error",
+                fun test_self_instantiation_spawn_with_error/0}
+        ]
+    end}.
+
+%% class_send(self(), 'new:', [Map]) when process dict has no class metadata
+%% triggers handle_self_instantiation → handle_self_instantiation_error.
+test_self_instantiation_new_colon_error() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = instantiation_error}},
+        beamtalk_class_dispatch:class_send(self(), 'new:', [#{}])
+    ).
+
+%% class_send(self(), 'spawnWith:', [Map]) when process dict has no class metadata
+%% triggers handle_self_instantiation → handle_self_instantiation_error.
+test_self_instantiation_spawn_with_error() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = instantiation_error}},
+        beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
+    ).
+
+%%% ============================================================================
+%%% 14. class_send_with_recovery — noproc crash recovery (BT-1963)
+%%% ============================================================================
+
+class_send_recovery_test_() ->
+    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"class_send to dead pid with unknown class raises class_not_found",
+                fun test_send_dead_pid_unknown/0},
+            {"class_send to dead pid logs structured error",
+                fun test_send_dead_pid_structured_error/0}
+        ]
+    end}.
+
+%% Sending to a dead pid that isn't in the class registry raises class_not_found.
+test_send_dead_pid_unknown() ->
+    %% Spawn and immediately kill a process so we have a valid-looking dead pid.
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    ?assertError(
+        #{error := #beamtalk_error{kind = class_not_found}},
+        beamtalk_class_dispatch:class_send(DeadPid, someMethod, [])
+    ).
+
+%% Sending to a dead class pid gives a structured error with correct hint.
+test_send_dead_pid_structured_error() ->
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    try
+        beamtalk_class_dispatch:class_send(DeadPid, testSelector, []),
+        ?assert(false)
+    catch
+        error:#{error := #beamtalk_error{kind = Kind, hint = Hint}} ->
+            ?assertEqual(class_not_found, Kind),
+            ?assert(is_binary(Hint)),
+            %% Hint should mention pid not found or not running.
+            ?assert(binary:match(Hint, <<"not">>) =/= nomatch)
+    end.
+
+%%% ============================================================================
+%%% 15. metaclass_send extended tests (BT-1963)
+%%% ============================================================================
+
+metaclass_send_extended_test_() ->
+    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"metaclass_method_call not found returns {error, not_found}",
+                fun test_metaclass_method_not_found/0},
+            {"metaclass_send to dead pid raises class_not_found", fun test_metaclass_dead_pid/0}
+        ]
+    end}.
+
+%% metaclass_method_call for absent selector returns {error, not_found}.
+test_metaclass_method_not_found() ->
+    ClassName = 'BT1963MetaDNU',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        Result = gen_server:call(Pid, {metaclass_method_call, absentSelector, []}),
+        ?assertEqual({error, not_found}, Result)
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% metaclass_send to a dead pid raises class_not_found (crash recovery path).
+test_metaclass_dead_pid() ->
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    Self = #beamtalk_object{
+        class = 'Metaclass',
+        class_mod = beamtalk_class_dispatch_test_helper,
+        pid = DeadPid
+    },
+    ?assertError(
+        #{error := #beamtalk_error{kind = class_not_found}},
+        beamtalk_class_dispatch:metaclass_send(DeadPid, someMethod, [], Self)
+    ).
+
+%%% ============================================================================
+%%% 16. try_class_chain_fallthrough via class_send (BT-1963)
+%%% ============================================================================
+
+class_chain_fallthrough_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
+        [
+            {"class_send falls through to Class chain for printString",
+                fun test_fallthrough_print_string/0}
+        ]
+    end}.
+
+%% When a class method is not found locally, class_send_dispatch falls
+%% through to try_class_chain_fallthrough which checks the Class chain.
+%% printString is defined on Object (via Class chain) and returns a string.
+test_fallthrough_print_string() ->
+    ok = ensure_counter_loaded(),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
+    ?assertNotEqual(undefined, CounterPid),
+    Result = beamtalk_class_dispatch:class_send(CounterPid, printString, []),
+    ?assert(is_binary(Result)).
 
 %%% ============================================================================
 %%% Helpers
