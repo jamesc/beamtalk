@@ -716,36 +716,40 @@ register_class_load_callback_test_() ->
 
             %% BT-1982: maybe_stop_builder/1 stops an external builder pid
             %% synchronously — covers the gen_server:stop branch (lines 436-439).
+            %% Trap exits so a linked ClassPid crash from the fake builder's
+            %% stop-timeout does not kill the test process.
             ?_test(begin
-                %% Spawn a gen_server-like process that will just exit on stop.
-                BuilderPid = spawn(fun() ->
-                    receive
-                        {'$gen_call', _, _} -> ok;
-                        _ -> ok
-                    after 5000 -> ok
-                    end
+                Parent = self(),
+                Pid = spawn(fun() ->
+                    process_flag(trap_exit, true),
+                    BuilderPid = spawn(fun() ->
+                        receive
+                            {'$gen_call', _, _} -> ok;
+                            _ -> ok
+                        after 5000 -> ok
+                        end
+                    end),
+                    State = #{
+                        className => 'BT1982StopsBuilder',
+                        superclassRef => 'Object',
+                        fieldSpecs => #{},
+                        methodSpecs => #{},
+                        builderPid => BuilderPid
+                    },
+                    {ok, ClassPid} = beamtalk_class_builder:register(State),
+                    Alive = is_process_alive(ClassPid),
+                    catch gen_server:stop(ClassPid, normal, 5000),
+                    case is_process_alive(BuilderPid) of
+                        true -> exit(BuilderPid, kill);
+                        false -> ok
+                    end,
+                    Parent ! {result, Alive}
                 end),
-                State = #{
-                    className => 'BT1982StopsBuilder',
-                    superclassRef => 'Object',
-                    fieldSpecs => #{},
-                    methodSpecs => #{},
-                    builderPid => BuilderPid
-                },
-                {ok, ClassPid} = beamtalk_class_builder:register(State),
-                ?assert(is_process_alive(ClassPid)),
-                %% BuilderPid might be stopped via gen_server:stop (which might
-                %% timeout since it's not a real gen_server) or killed — either
-                %% exercises the code path. Catch timeouts from the fake builder.
-                try
-                    gen_server:stop(ClassPid, normal, 5000)
-                catch
-                    exit:_ -> ok
-                end,
-                %% Cleanup builder
-                case is_process_alive(BuilderPid) of
-                    true -> exit(BuilderPid, kill);
-                    false -> ok
+                receive
+                    {result, A} -> ?assert(A)
+                after 15000 ->
+                    exit(Pid, kill),
+                    ?assert(false)
                 end
             end),
 
