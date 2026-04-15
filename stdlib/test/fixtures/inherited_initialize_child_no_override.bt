@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1951 / ADR 0078 — Phase 1 fixture.
+// Child actor class with no `initialize` of its own. The auto-chain should
+// still run the parent's `initialize`, setting `label` to
+// "parent-initialized".
+
+InheritedInitializeBase subclass: InheritedInitializeChildNoOverride
+  state: extra :: Integer = 0
+
+  getExtra -> Integer => self.extra

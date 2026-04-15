@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-1951 / ADR 0078 Phase 1:
+//   - handle_continue walks the class hierarchy and dispatches
+//     `initialize` parent-first.
+//   - Post-initialize check validates inherited typed-no-default fields.
+//
+// Fixtures:
+//   fixtures/inherited_initialize_base.bt
+//   fixtures/inherited_initialize_child_no_override.bt
+//   fixtures/inherited_initialize_child_adds.bt
+//   fixtures/inherited_initialize_parent_forgets.bt
+//   fixtures/inherited_initialize_parent_forgets_child.bt
+//   fixtures/deep_hierarchy_a.bt
+//   fixtures/deep_hierarchy_b.bt
+//   fixtures/deep_hierarchy_c.bt
+
+TestCase subclass: InheritedInitializeTest
+
+  // === Parent sets typed-no-default, child has no initialize ===
+  testChildWithNoInitializeInheritsParentInitialize =>
+    a := InheritedInitializeChildNoOverride spawn
+    self assert: a getLabel equals: "parent-initialized"
+
+  testChildWithNoInitializeInheritsParentCount =>
+    a := InheritedInitializeChildNoOverride spawn
+    self assert: a getCount equals: 0
+
+  testChildWithNoInitializeCanUseOwnState =>
+    a := InheritedInitializeChildNoOverride spawn
+    self assert: a getExtra equals: 0
+
+  // === Parent sets typed-no-default, child adds its own initialize ===
+  testChildWithInitializeSeesParentState =>
+    a := InheritedInitializeChildAdds spawn
+    // child's initialize reads self.label set by parent's initialize
+    self assert: a getCache equals: "cache-parent-initialized"
+
+  testChildWithInitializeKeepsParentLabel =>
+    a := InheritedInitializeChildAdds spawn
+    self assert: a getLabel equals: "parent-initialized"
+
+  // === Parent forgets its own typed-no-default field ===
+  testParentForgetsOwnFieldRaisesError =>
+    self should: [
+      InheritedInitializeParentForgets spawn
+    ] raise: #instantiation_error
+
+  testForgottenFieldErrorMentionsFieldName =>
+    hint := [
+      InheritedInitializeParentForgets spawn
+    ] on: Exception do: [:e | e hint]
+    self assert: (hint includesSubstring: "missing")
+
+  testForgottenFieldErrorNamesOwningClass =>
+    hint := [
+      InheritedInitializeParentForgets spawn
+    ] on: Exception do: [:e | e hint]
+    // Diagnostic must name the class that declared the field.
+    self assert: (hint includesSubstring: "InheritedInitializeParentForgets")
+
+  // NOTE: A subclass inheriting a typed-no-default field from a cross-file
+  // parent whose `initialize` forgets to set that field is a known Phase 1
+  // limitation — the child's codegen cannot see the parent's AST to collect
+  // the inherited field into its own post-initialize check. The auto-chain
+  // itself still runs the parent's initialize (cross-file aware via
+  // ClassHierarchy); only the inherited field validation is limited.
+  // See ADR 0078 — a follow-up can embed default-value metadata on
+  // `ClassInfo` to lift this restriction.
+
+  // === Deep hierarchy — initialize runs parent-first across 3 levels ===
+  testDeepHierarchyRunsAllInitializersInOrder =>
+    c := DeepHierarchyC spawn
+    self assert: c getLog equals: "ABC"

@@ -564,6 +564,11 @@ pub fn generate_module_with_warnings(
     generator.direct_call_eligible =
         CoreErlangGenerator::compute_direct_call_eligible(&hierarchy, &generator);
 
+    // BT-1951: Stash the hierarchy for use by actor callback generation
+    // (auto-chained initialize dispatch in handle_continue and inherited
+    // typed-no-default field validation).
+    generator.class_hierarchy = Some(hierarchy.clone());
+
     // BT-213: Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
@@ -1107,6 +1112,13 @@ pub(crate) struct CoreErlangGenerator {
     class_context: Option<ClassContext>,
     /// BT-1461: Value-type-specific codegen state. `Some` when compiling value types.
     value_type_context: Option<ValueTypeContext>,
+    /// BT-1951: Snapshot of the class hierarchy for this generation (ADR 0078).
+    ///
+    /// Populated by `generate_module_with_warnings` before codegen begins. Used by
+    /// actor `handle_continue` generation to walk the superclass chain and emit
+    /// parent-first `initialize` dispatches, and by the post-initialize validation
+    /// check to collect inherited typed-no-default fields.
+    pub(super) class_hierarchy: Option<crate::semantic_analysis::class_hierarchy::ClassHierarchy>,
 }
 
 impl CoreErlangGenerator {
@@ -1142,6 +1154,7 @@ impl CoreErlangGenerator {
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),
+            class_hierarchy: None,
         }
     }
 

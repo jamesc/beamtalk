@@ -90,30 +90,8 @@ module 'cascade_complex' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
 'handle_continue'/2 = fun (Continue, State) ->
     case Continue of
         <'initialize'> when 'true' ->
-            let _OldState = call 'erlang':'get'('$bt_actor_state') in
-            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
-            let _InitDispatchResult = call 'cascade_complex':'safe_dispatch'('initialize', [], State) in
-            let _RestoreOk = case _OldState of
-                <'undefined'> when 'true' ->
-                    call 'erlang':'erase'('$bt_actor_state')
-                <_Prev> when 'true' ->
-                    call 'erlang':'put'('$bt_actor_state', _Prev)
-            end in
-            let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
-            case _InitDispatchResult of
-                <{'reply', _InitResult, InitNewState}> when 'true' ->
-                    {'noreply', InitNewState}
-                <{'error', {InitType, InitReason, InitStacktrace}, InitErrState}> when 'true' ->
-                    let InitErrorMsg = call 'beamtalk_error':'format_safe'({InitType, InitReason}, InitStacktrace) in
-                    let InitClassName = call 'cascade_complex':'class_name'() in
-                    let _ = call 'logger':'error'(InitErrorMsg, ~{'class' => InitClassName, 'reason' => {InitType, InitReason}, 'stacktrace' => InitStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in
-                    {'stop', {InitType, InitReason, InitStacktrace}, InitErrState}
-                <{'error', InitError, InitErrState2}> when 'true' ->
-                    let InitErrorMsg2 = call 'beamtalk_error':'format_safe'(InitError) in
-                    let InitClassName2 = call 'cascade_complex':'class_name'() in
-                    let _ = call 'logger':'error'(InitErrorMsg2, ~{'class' => InitClassName2, 'reason' => InitError, 'domain' => ['beamtalk'|['runtime'|[]]]}~) in
-                    {'stop', InitError, InitErrState2}
-            end
+            let InitNewState = State in
+            {'noreply', InitNewState}
         <_> when 'true' -> {'noreply', State}
     end
 
