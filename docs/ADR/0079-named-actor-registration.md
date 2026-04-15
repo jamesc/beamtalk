@@ -118,6 +118,34 @@ engine runWorkflow: w2    // re-resolves #workflowEngine, sends to the NEW pid
 
 If the name is not currently registered at send time, the send raises a `#beamtalk_error{kind: #no_such_process, name: ...}` — the same shape as other structured runtime errors.
 
+### Proxy semantics
+
+**Typing is transparent.** A proxy returned from `Counter named: #c` is typed as `Counter` — `Self` has resolved to the concrete class. Users write `Counter` methods on it; the typechecker treats it as any other `Counter` reference:
+
+```beamtalk
+c := (Counter named: #counter) unwrap
+c class           // => Counter
+c isKindOf: Actor // => true
+c increment       // dispatches like any Counter method
+```
+
+**Runtime representation is an implementation detail.** Internally the `beamtalk_object` tagged record can carry either a pid or a `{registered, Name}` reference in its identity slot. The dispatch layer (`beamtalk_actor`) inspects that slot and routes calls via `gen_server:call(Pid, ...)` or `gen_server:call(Name, ...)`. OTP's `gen_server` natively accepts a registered atom as the server ref, so the name-dispatch path is almost free — one `case` in the send site, no extra resolution step.
+
+**Method exposure.** All methods of the underlying class are available. Lifecycle methods split:
+
+| Method | Proxy behavior |
+|---|---|
+| User-defined methods | `gen_server:call({local, Name}, ...)` — resolves to current pid per send |
+| `pid` | Resolves name→pid at call time; returns current pid |
+| `isAlive` | `whereis(Name) =/= undefined` |
+| `registeredName` | Returns the name from the proxy directly |
+| `isRegistered` | Always `true` (by construction of the proxy) |
+| `stop` / `kill` | Resolve name→pid, then `gen_server:stop` / `exit(Pid, kill)` |
+| `monitor` / `onExit:` | Monitor the *current* pid. **Does not re-arm across restarts** — monitors are pid-level by design. A future "watch a name" API can be added separately. |
+| `unregister` | Unregisters the name. After this, further sends raise `#no_such_process`; the proxy is effectively dead. |
+
+**Equality.** Two proxies with the same name are equal. Two proxies with different names are not. A proxy and a direct pid reference are **not equal**, even if they currently resolve to the same pid — the identity shape is different (name-based vs pid-based) and preserving "a restart-survivable reference" as a distinct identity is the point.
+
 **Supervisor integration:**
 ```beamtalk
 Supervisor subclass: ExduraSupervisor
