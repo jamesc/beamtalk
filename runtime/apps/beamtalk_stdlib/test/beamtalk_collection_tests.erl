@@ -14,6 +14,26 @@ Tests inject_into/3 and to_list/1 for list inputs.
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
+%%% Test Fixtures (BT-1983)
+%%% ============================================================================
+
+%% Load stdlib so non-list Collection classes (e.g. Interval) can dispatch do:.
+stdlib_setup() ->
+    case whereis(pg) of
+        undefined -> pg:start_link();
+        _ -> ok
+    end,
+    beamtalk_extensions:init(),
+    case whereis(beamtalk_bootstrap) of
+        undefined -> {ok, _} = beamtalk_bootstrap:start_link();
+        _ -> ok
+    end,
+    beamtalk_stdlib:init(),
+    ok.
+
+stdlib_teardown(_) -> ok.
+
+%%% ============================================================================
 %%% inject_into/3
 %%% ============================================================================
 
@@ -84,3 +104,39 @@ inject_into_count_test() ->
     %% Count elements
     Result = beamtalk_collection:inject_into([x, y, z], 0, fun(Acc, _E) -> Acc + 1 end),
     ?assertEqual(3, Result).
+
+%%% ============================================================================
+%%% to_list/1 — non-list collection path (BT-1983)
+%%% ============================================================================
+%%%
+%%% These tests exercise the non-list branch of to_list/1, which dispatches
+%%% `do:` on the receiver via beamtalk_primitive:send/3. Requires stdlib to
+%%% be loaded so that Interval (a Collection subclass) can respond to do:.
+
+to_list_non_list_test_() ->
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
+        {"to_list on Interval yields integers in range", fun to_list_interval_test/0},
+        {"to_list on empty Interval yields empty list", fun to_list_empty_interval_test/0},
+        {"inject_into on Interval sums the range", fun inject_into_interval_test/0}
+    ]}.
+
+%% Build an Interval via direct map construction (matches stdlib/src/Interval.bt).
+make_interval(From, To) ->
+    #{'$beamtalk_class' => 'Interval', from => From, to => To, step => 1}.
+
+to_list_interval_test() ->
+    Interval = make_interval(1, 5),
+    Result = beamtalk_collection:to_list(Interval),
+    ?assertEqual([1, 2, 3, 4, 5], Result).
+
+to_list_empty_interval_test() ->
+    %% from > to with step 1 → empty
+    Interval = make_interval(5, 1),
+    Result = beamtalk_collection:to_list(Interval),
+    ?assertEqual([], Result).
+
+inject_into_interval_test() ->
+    Interval = make_interval(1, 10),
+    %% Sum 1..10 = 55
+    Sum = beamtalk_collection:inject_into(Interval, 0, fun(Acc, E) -> Acc + E end),
+    ?assertEqual(55, Sum).

@@ -2010,3 +2010,343 @@ open_do_handle_lines_success_test() ->
             R
         )
     end).
+
+%%% ============================================================================
+%%% BT-1983 — additional error path coverage
+%%% ============================================================================
+
+%% Attempting to read/write a directory (as if it were a file) exercises
+%% the catch-all io_error branches: file:read_file/write_file/open on a
+%% directory returns {error, eisdir} (not enoent, not eacces).
+
+readAll_eisdir_test() ->
+    Dir = "_bt_eunit_readAll_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'readAll:'(list_to_binary(Dir)),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+readBinary_eisdir_test() ->
+    Dir = "_bt_eunit_readBinary_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'readBinary:'(list_to_binary(Dir)),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+writeAll_eisdir_test() ->
+    Dir = "_bt_eunit_writeAll_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'writeAll:contents:'(list_to_binary(Dir), <<"x">>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+writeBinary_eisdir_test() ->
+    Dir = "_bt_eunit_writeBinary_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'writeBinary:contents:'(list_to_binary(Dir), <<"x">>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+appendBinary_eisdir_test() ->
+    Dir = "_bt_eunit_appendBinary_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'appendBinary:contents:'(list_to_binary(Dir), <<"x">>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+lines_eisdir_test() ->
+    Dir = "_bt_eunit_lines_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'lines:'(list_to_binary(Dir)),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+open_do_eisdir_test() ->
+    Dir = "_bt_eunit_open_eisdir",
+    try
+        ok = filelib:ensure_path(Dir),
+        R = beamtalk_file:'open:do:'(
+            list_to_binary(Dir), fun(_) -> error(callback_should_not_run) end
+        ),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}}
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+%%% ----------------------------------------------------------------------------
+%%% mkdir / mkdirAll / listDirectory / delete / deleteAll / rename catch-alls
+%%% ----------------------------------------------------------------------------
+
+mkdir_already_exists_as_file_test() ->
+    %% mkdir on a path that exists as a regular file → {error, eexist}
+    %% (covers the eexist branch, which is distinct from directory_not_found)
+    FileName = "_bt_eunit_mkdir_eexist.txt",
+    try
+        ok = file:write_file(FileName, <<"x">>),
+        R = beamtalk_file:'mkdir:'(list_to_binary(FileName)),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _, error := #beamtalk_error{kind = already_exists}
+                }
+            },
+            R
+        )
+    after
+        file:delete(FileName)
+    end.
+
+mkdirAll_parent_is_file_test() ->
+    %% mkdirAll when a path component is a regular file → io_error
+    Parent = "_bt_eunit_mkdirAll_parent_file.txt",
+    try
+        ok = file:write_file(Parent, <<"x">>),
+        R = beamtalk_file:'mkdirAll:'(list_to_binary(Parent ++ "/child")),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{}}
+            },
+            R
+        )
+    after
+        file:delete(Parent)
+    end.
+
+listDirectory_missing_dir_test() ->
+    R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_missing">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _, error := #beamtalk_error{kind = directory_not_found}
+            }
+        },
+        R
+    ).
+
+listDirectory_upfront_file_check_test() ->
+    %% listDirectory on a regular file → not_a_directory (upfront check)
+    FileName = "_bt_eunit_listdir_file.txt",
+    try
+        ok = file:write_file(FileName, <<"x">>),
+        R = beamtalk_file:'listDirectory:'(list_to_binary(FileName)),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _, error := #beamtalk_error{kind = not_a_directory}
+                }
+            },
+            R
+        )
+    after
+        file:delete(FileName)
+    end.
+
+rename_to_destination_is_directory_test() ->
+    %% rename a file to a target that is an existing, non-empty directory
+    Src = "_bt_eunit_rename_src_file.txt",
+    Dst = "_bt_eunit_rename_dst_dir",
+    DstChild = Dst ++ "/child.txt",
+    try
+        ok = file:write_file(Src, <<"x">>),
+        ok = filelib:ensure_path(Dst),
+        ok = file:write_file(DstChild, <<"y">>),
+        R = beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst)),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{}}
+            },
+            R
+        )
+    after
+        file:delete(Src),
+        file:del_dir_r(Dst)
+    end.
+
+%%% ----------------------------------------------------------------------------
+%%% strip_newline edge cases — exercised through lines:/1
+%%% ----------------------------------------------------------------------------
+
+lines_empty_trailing_newline_only_test() ->
+    with_temp_file("_bt_eunit_lines_empty_newline.txt", <<"\n">>, fun() ->
+        R = beamtalk_file:'lines:'(<<"_bt_eunit_lines_empty_newline.txt">>),
+        ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
+        #{okValue := Stream} = R,
+        Lines = beamtalk_stream:as_list(Stream),
+        %% Expect a single empty line
+        ?assertEqual([<<>>], Lines)
+    end).
+
+lines_bare_cr_in_middle_test() ->
+    %% A bare \r inside a line is preserved (only trailing \r\n is stripped)
+    with_temp_file("_bt_eunit_lines_bare_cr.txt", <<"ab\rcd\nef\n">>, fun() ->
+        R = beamtalk_file:'lines:'(<<"_bt_eunit_lines_bare_cr.txt">>),
+        #{okValue := Stream} = R,
+        Lines = beamtalk_stream:as_list(Stream),
+        ?assertEqual([<<"ab\rcd">>, <<"ef">>], Lines)
+    end).
+
+%%% ----------------------------------------------------------------------------
+%%% tempDirectory: exercise the os:getenv fallback branches
+%%% ----------------------------------------------------------------------------
+
+temp_directory_respects_TMPDIR_test() ->
+    %% Set TMPDIR to a known value and verify it is returned.
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "/custom/tmp/path"),
+        ?assertEqual(<<"/custom/tmp/path">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
+temp_directory_falls_back_to_TMP_test() ->
+    %% Unset TMPDIR, set TMP, expect TMP's value.
+    OrigTmpdir = os:getenv("TMPDIR"),
+    OrigTmp = os:getenv("TMP"),
+    try
+        os:unsetenv("TMPDIR"),
+        os:putenv("TMP", "/tmp-fallback"),
+        ?assertEqual(<<"/tmp-fallback">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmp of
+            false -> os:unsetenv("TMP");
+            V -> os:putenv("TMP", V)
+        end,
+        case OrigTmpdir of
+            false -> ok;
+            V2 -> os:putenv("TMPDIR", V2)
+        end
+    end.
+
+temp_directory_falls_back_to_TEMP_test() ->
+    %% Unset TMPDIR and TMP, set TEMP.
+    OrigTmpdir = os:getenv("TMPDIR"),
+    OrigTmp = os:getenv("TMP"),
+    OrigTemp = os:getenv("TEMP"),
+    try
+        os:unsetenv("TMPDIR"),
+        os:unsetenv("TMP"),
+        os:putenv("TEMP", "/temp-fallback"),
+        ?assertEqual(<<"/temp-fallback">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTemp of
+            false -> os:unsetenv("TEMP");
+            V -> os:putenv("TEMP", V)
+        end,
+        case OrigTmp of
+            false -> ok;
+            V2 -> os:putenv("TMP", V2)
+        end,
+        case OrigTmpdir of
+            false -> ok;
+            V3 -> os:putenv("TMPDIR", V3)
+        end
+    end.
+
+temp_directory_platform_default_test() ->
+    %% Unset all three env vars; the function must still return a platform-
+    %% appropriate default ("/tmp" on Unix, "C:\\Windows\\Temp" on Windows).
+    OrigTmpdir = os:getenv("TMPDIR"),
+    OrigTmp = os:getenv("TMP"),
+    OrigTemp = os:getenv("TEMP"),
+    try
+        os:unsetenv("TMPDIR"),
+        os:unsetenv("TMP"),
+        os:unsetenv("TEMP"),
+        Result = beamtalk_file:'tempDirectory'(),
+        ?assert(is_binary(Result)),
+        ?assert(byte_size(Result) > 0)
+    after
+        case OrigTmpdir of
+            false -> ok;
+            V1 -> os:putenv("TMPDIR", V1)
+        end,
+        case OrigTmp of
+            false -> ok;
+            V2 -> os:putenv("TMP", V2)
+        end,
+        case OrigTemp of
+            false -> ok;
+            V3 -> os:putenv("TEMP", V3)
+        end
+    end.

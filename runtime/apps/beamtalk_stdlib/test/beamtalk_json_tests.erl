@@ -269,3 +269,131 @@ generate_alias_test() ->
 pretty_print_alias_test() ->
     Result = beamtalk_json:prettyPrint(42),
     ?assert(is_binary(Result)).
+
+%%% ============================================================================
+%%% Additional coverage — prettify/4 edge cases (BT-1983)
+%%% ============================================================================
+
+pretty_print_empty_object_test() ->
+    %% Covers the empty-object branch (L233-234): the pretty-printer skips
+    %% inserting a newline after the opening brace when it sees `}` next.
+    Result = beamtalk_json:'prettyPrint:'(#{}),
+    ?assertEqual(<<"{\n}">>, Result),
+    %% Should still decode back to an empty map
+    ?assertEqual(#{}, json:decode(Result)).
+
+pretty_print_empty_array_test() ->
+    %% Covers the empty-array branch (L241-242).
+    Result = beamtalk_json:'prettyPrint:'([]),
+    ?assertEqual(<<"[\n]">>, Result),
+    ?assertEqual([], json:decode(Result)).
+
+pretty_print_nested_empty_collections_test() ->
+    %% Empty inside non-empty container
+    Result = beamtalk_json:'prettyPrint:'(#{<<"a">> => #{}, <<"b">> => []}),
+    ?assert(is_binary(Result)),
+    Decoded = json:decode(Result),
+    ?assertEqual(#{}, maps:get(<<"a">>, Decoded)),
+    ?assertEqual([], maps:get(<<"b">>, Decoded)).
+
+pretty_print_escaped_backslash_test() ->
+    %% Covers the in-string escape branch (L224-225): prettify sees \" inside string
+    %% The encoded JSON contains \\" sequences (backslash + quote) inside string literals.
+    Result = beamtalk_json:'prettyPrint:'(<<"quote\"backslash\\end">>),
+    ?assert(is_binary(Result)),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"quote\"backslash\\end">>, Decoded).
+
+prettify_term_empty_object_test() ->
+    %% Direct exercise of prettify_term helper with empty map.
+    %% Same behaviour as prettyPrint:/1 — newline before the closing brace.
+    ?assertEqual(<<"{\n}">>, beamtalk_json:prettify_term(#{})).
+
+%%% ============================================================================
+%%% Additional coverage — parse error catch-all (BT-1983)
+%%% ============================================================================
+
+parse_unexpected_sequence_test() ->
+    %% Lone garbage tokens raise {unexpected_sequence, _} from json:decode
+    R = beamtalk_json:'parse:'(<<"xyz">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
+        },
+        R
+    ).
+
+parse_trailing_garbage_test() ->
+    R = beamtalk_json:'parse:'(<<"{\"a\":1}junk">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
+        },
+        R
+    ).
+
+%%% ============================================================================
+%%% Additional coverage — generate/prettyPrint error paths (BT-1983)
+%%% ============================================================================
+
+generate_nested_unsupported_type_test() ->
+    %% Covers prepare_for_encode raising inside the recursive list walk,
+    %% hitting the #beamtalk_error{} re-raise branch in generate:/1 (L95-96).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
+        beamtalk_json:'generate:'([1, {oops, bad}, 3])
+    ).
+
+generate_unsupported_in_map_test() ->
+    %% Tuple as map value triggers prepare_for_encode error from inside map walk
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
+        beamtalk_json:'generate:'(#{<<"k">> => {oops, bad}})
+    ).
+
+pretty_print_nested_unsupported_type_test() ->
+    %% Covers the #beamtalk_error{} re-raise branch in prettyPrint:/1 (L117-118).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
+        beamtalk_json:'prettyPrint:'([1, {oops, bad}, 3])
+    ).
+
+%%% ============================================================================
+%%% Additional coverage — large / deeply nested structures (BT-1983)
+%%% ============================================================================
+
+parse_deeply_nested_array_test() ->
+    %% Build [[[[[[[[[[42]]]]]]]]]] and round-trip it.
+    Depth = 20,
+    Json = iolist_to_binary([
+        binary:copy(<<"[">>, Depth),
+        <<"42">>,
+        binary:copy(<<"]">>, Depth)
+    ]),
+    R = beamtalk_json:'parse:'(Json),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
+    #{okValue := Decoded} = R,
+    %% Unwrap back to integer
+    Unwrap = fun
+        U(X) when is_list(X) -> U(hd(X));
+        U(N) -> N
+    end,
+    ?assertEqual(42, Unwrap(Decoded)).
+
+generate_deeply_nested_map_test() ->
+    %% Build {"k": {"k": ... {"k": 1}}} at depth 10
+    Depth = 10,
+    Nested = lists:foldl(
+        fun(_, Acc) -> #{<<"k">> => Acc} end,
+        1,
+        lists:seq(1, Depth)
+    ),
+    Json = beamtalk_json:'generate:'(Nested),
+    ?assert(is_binary(Json)),
+    %% Round-trip
+    #{okValue := Decoded} = beamtalk_json:'parse:'(Json),
+    ?assertEqual(Nested, Decoded).
