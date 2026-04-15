@@ -446,3 +446,110 @@ start_link_returns_pid_test() ->
     after
         process_flag(trap_exit, OldTrap)
     end.
+
+%%% ============================================================================
+%%% stdlib_loop/0 Tests (BT-1983)
+%%% ============================================================================
+
+start_link_stays_alive_on_message_test_() ->
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
+        fun start_link_handles_unknown_message_test/0
+    ]}.
+
+start_link_handles_unknown_message_test() ->
+    %% The idle loop drains arbitrary messages and keeps running.
+    OldTrap = process_flag(trap_exit, true),
+    try
+        {ok, Pid} = beamtalk_stdlib:start_link(),
+        %% Send an arbitrary message — the loop should consume it and continue.
+        Pid ! {arbitrary, message, 123},
+        Pid ! another_message,
+        %% Yield so the loop has a chance to process the messages.
+        timer:sleep(50),
+        ?assert(is_process_alive(Pid)),
+        exit(Pid, shutdown),
+        receive
+            {'EXIT', Pid, _} -> ok
+        after 1000 -> ok
+        end
+    after
+        process_flag(trap_exit, OldTrap)
+    end.
+
+%%% ============================================================================
+%%% load_protocol_modules/0 Tests (BT-1983)
+%%% ============================================================================
+
+load_protocol_modules_test_() ->
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
+        fun load_protocol_modules_idempotent_test/0,
+        fun load_protocol_modules_missing_module_test/0,
+        fun load_protocol_modules_unset_env_test/0
+    ]}.
+
+load_protocol_modules_idempotent_test() ->
+    %% Calling load_protocol_modules/0 after stdlib init should be a no-op
+    %% that successfully re-loads the already-loaded protocol modules.
+    ?assertEqual(ok, beamtalk_stdlib:load_protocol_modules()).
+
+load_protocol_modules_missing_module_test() ->
+    %% Inject a non-existent module name and verify the warning path runs
+    %% without crashing the loader.
+    Original = application:get_env(beamtalk_stdlib, protocol_modules),
+    try
+        application:set_env(
+            beamtalk_stdlib, protocol_modules, [nonexistent_bt_module_xyz]
+        ),
+        ?assertEqual(ok, beamtalk_stdlib:load_protocol_modules())
+    after
+        case Original of
+            {ok, Value} -> application:set_env(beamtalk_stdlib, protocol_modules, Value);
+            undefined -> application:unset_env(beamtalk_stdlib, protocol_modules)
+        end
+    end.
+
+load_protocol_modules_unset_env_test() ->
+    %% Temporarily unset protocol_modules env — should return ok without crashing.
+    Original = application:get_env(beamtalk_stdlib, protocol_modules),
+    try
+        application:unset_env(beamtalk_stdlib, protocol_modules),
+        ?assertEqual(ok, beamtalk_stdlib:load_protocol_modules())
+    after
+        case Original of
+            {ok, Value} -> application:set_env(beamtalk_stdlib, protocol_modules, Value);
+            undefined -> ok
+        end
+    end.
+
+%%% ============================================================================
+%%% discover_and_load_fallback/1 Tests (BT-1983)
+%%% ============================================================================
+
+discover_and_load_fallback_missing_dir_test() ->
+    %% Non-existent directory should log a warning but not crash.
+    ?assertEqual(
+        ok, beamtalk_stdlib:discover_and_load_fallback("_bt_nonexistent_ebin_dir_for_test")
+    ).
+
+discover_and_load_fallback_empty_dir_test() ->
+    %% Create an empty temp directory — should list it successfully with no modules.
+    TmpDir = filename:join(
+        "_bt_eunit_stdlib_fallback", integer_to_list(erlang:unique_integer([positive]))
+    ),
+    try
+        ok = filelib:ensure_path(TmpDir),
+        ?assertEqual(ok, beamtalk_stdlib:discover_and_load_fallback(TmpDir))
+    after
+        file:del_dir_r("_bt_eunit_stdlib_fallback")
+    end.
+
+discover_and_load_fallback_with_beam_files_test() ->
+    %% Directory with a valid .beam file (use the stdlib ebin itself).
+    EbinDir = beamtalk_stdlib:find_stdlib_ebin(),
+    case filelib:is_dir(EbinDir) of
+        true ->
+            ?assertEqual(ok, beamtalk_stdlib:discover_and_load_fallback(EbinDir));
+        false ->
+            %% Stdlib not built — skip
+            ok
+    end.

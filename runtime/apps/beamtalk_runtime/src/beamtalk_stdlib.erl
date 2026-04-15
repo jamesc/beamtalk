@@ -46,8 +46,15 @@ No Erlang code changes needed.
 -export([topo_sort/1]).
 
 -ifdef(TEST).
-%% Export internal helpers for EUnit coverage (BT-1975)
--export([format_bt_module/1, class_entry_module/1, find_stdlib_ebin/0]).
+%% Export internal helpers for EUnit coverage (BT-1975, BT-1983)
+-export([
+    format_bt_module/1,
+    class_entry_module/1,
+    find_stdlib_ebin/0,
+    discover_and_load_fallback/1,
+    load_protocol_modules/0,
+    stdlib_loop/0
+]).
 -endif.
 
 -doc """
