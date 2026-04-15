@@ -72,6 +72,11 @@ module 'control_flow_mutations' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
 
 
 'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'control_flow_mutations')
+    end in
     let DefaultState = ~{
         '__class_mod__' => 'control_flow_mutations'
         , 'count' => 0

@@ -73,6 +73,11 @@ module 'typed_class_warnings' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 
 
 'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'typed_class_warnings')
+    end in
     let DefaultState = ~{
         '__class_mod__' => 'typed_class_warnings'
         , 'value' => 0

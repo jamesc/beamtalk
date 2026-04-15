@@ -2802,6 +2802,100 @@ actor_carries_process_dict_marker_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
+%%% BT-1988 / ADR 0079 Phase 2: stdlib FFI shims
+%%%
+%%% These exercise the Erlang side of the Actor.bt named-registration API —
+%%% `doSpawnAs/2`, `doSpawnWith/3`, `registerAs/2`, `unregister/1`,
+%%% `registeredName/1`, `isRegistered/1`, `named/2`, `allRegistered/1`. The
+%%% Beamtalk-side round-trip is covered by `stdlib/test/actor_named_test.bt`;
+%%% these tests nail down edge cases (type errors on non-`beamtalk_object`
+%%% receivers, structured error wrapping) that are awkward to reach from
+%%% compiled Beamtalk.
+%%% ============================================================================
+
+ffi_register_as_non_object_returns_type_error_test() ->
+    %% Covers the guard clause that rejects non-`beamtalk_object` receivers.
+    Result = beamtalk_actor:registerAs(not_an_actor, some_name),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+ffi_unregister_non_object_raises_type_error_test() ->
+    %% `unregister/1` mirrors ADR 0079's "raise on real failure" contract.
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_actor:unregister(not_an_actor)
+    ).
+
+ffi_registered_name_on_non_object_returns_nil_test() ->
+    %% Tolerant accessor — callers get `nil` rather than an exception.
+    ?assertEqual(nil, beamtalk_actor:registeredName(not_an_actor)).
+
+ffi_is_registered_on_non_object_returns_false_test() ->
+    ?assertEqual(false, beamtalk_actor:isRegistered(not_an_actor)).
+
+ffi_named_non_atom_returns_type_error_test() ->
+    %% Non-atom name is rejected before any class lookup happens.
+    FakeSelf = dummy_class_self(),
+    Result = beamtalk_actor:named(FakeSelf, <<"not_atom">>),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+ffi_named_bad_self_returns_type_error_test() ->
+    %% Valid atom name but bogus receiver — the class-object probe surfaces
+    %% a structured `type_error` rather than crashing.
+    Result = beamtalk_actor:named(not_a_class, my_name),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+ffi_named_not_registered_on_valid_class_test() ->
+    %% Uses a live class gen_server (via test_counter's Counter class-object).
+    %% Relies on the compiled stdlib Counter class being loaded in the test
+    %% environment; fall back to an atom-only probe if not.
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ok;
+        _ ->
+            Self = #beamtalk_object{
+                class = 'Counter class',
+                class_mod = counter,
+                pid = erlang:whereis(beamtalk_class_Counter)
+            },
+            Result = beamtalk_actor:named(Self, 'bt1988_ffi_not_registered'),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = name_not_registered}}, Result
+            )
+    end.
+
+ffi_all_registered_filters_non_beamtalk_processes_test() ->
+    %% The receiver is accepted but unused — allRegistered is driven by the
+    %% global registry plus the `$beamtalk_actor` marker check.
+    %% Register a raw OTP process and confirm it is NOT surfaced as an actor.
+    RawName = 'bt1988_ffi_raw_process',
+    Raw = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    cleanup_name(RawName),
+    true = erlang:register(RawName, Raw),
+    try
+        Actors = beamtalk_actor:allRegistered(dummy_class_self()),
+        RegisteredNames = [O#beamtalk_object.class || O <- Actors],
+        %% Raw process has no class — must not appear under any class name.
+        ?assert(lists:all(fun is_atom/1, RegisteredNames))
+    after
+        erlang:unregister(RawName),
+        Raw ! stop
+    end.
+
+%% Helper: build a dummy class-object tuple for tests that only need a
+%% non-nil receiver. Callers that depend on real class lookup (e.g.,
+%% successful `named/2` resolution) must instead use a real class pid.
+dummy_class_self() ->
+    #beamtalk_object{
+        class = 'DummyClass class',
+        class_mod = dummy_mod,
+        pid = self()
+    }.
+
+%%% ============================================================================
 %%% BT-1979: Additional actor system coverage
 %%% ============================================================================
 

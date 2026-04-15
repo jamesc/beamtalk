@@ -1,0 +1,155 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Actor named-registration API (BT-1988 / ADR 0079 Phase 2).
+//
+// Fixtures: stdlib/test/fixtures/named_actor_fixtures.bt
+
+TestCase subclass: ActorNamedTest
+
+  // === Class side: spawnAs: ===
+  testSpawnAsSuccess =>
+    name := #bt1988_spawnas_success
+    result := NamedCounter spawnAs: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor registeredName equals: name
+    self assert: actor isRegistered
+    self assert: actor increment equals: 1
+    actor stop
+
+  testSpawnAsDuplicateRegistration =>
+    name := #bt1988_spawnas_dup
+    first := (NamedCounter spawnAs: name) unwrap
+    second := NamedCounter spawnAs: name
+    self assert: second isError
+    self assert: second error kind equals: #name_registered
+    first stop
+
+  testSpawnAsReservedName =>
+    result := NamedCounter spawnAs: #logger
+    self assert: result isError
+    self assert: result error kind equals: #reserved_name
+
+  // === Class side: spawnWith:as: ===
+  testSpawnWithAsSuccess =>
+    name := #bt1988_spawnwithas_success
+    result := NamedCounter spawnWith: #{#value => 10} as: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor getValue equals: 10
+    self assert: actor registeredName equals: name
+    actor stop
+
+  // === Instance side: registerAs: ===
+  testRegisterAsSuccess =>
+    name := #bt1988_registeras_success
+    actor := NamedCounter spawn
+    result := actor registerAs: name
+    self assert: result isOk
+    // Fluent chain: ok-branch carries the receiver
+    self assert: result unwrap registeredName equals: name
+    self assert: actor isRegistered
+    actor stop
+
+  testRegisterAsDuplicate =>
+    name := #bt1988_registeras_dup
+    first := (NamedCounter spawnAs: name) unwrap
+    other := NamedCounter spawn
+    result := other registerAs: name
+    self assert: result isError
+    self assert: result error kind equals: #name_registered
+    other stop
+    first stop
+
+  // === Instance side: unregister (idempotent) ===
+  testUnregisterIdempotent =>
+    name := #bt1988_unregister_idem
+    actor := (NamedCounter spawnAs: name) unwrap
+    self assert: actor unregister equals: #ok
+    // Second unregister is a no-op, not an error
+    self assert: actor unregister equals: #ok
+    self deny: actor isRegistered
+    actor stop
+
+  testUnregisterOnUnregisteredActor =>
+    // Unregister on an actor that never had a name is a no-op
+    actor := NamedCounter spawn
+    self assert: actor unregister equals: #ok
+    actor stop
+
+  // === registeredName / isRegistered ===
+  testRegisteredNameOnUnregistered =>
+    actor := NamedCounter spawn
+    self assert: actor registeredName equals: nil
+    self deny: actor isRegistered
+    actor stop
+
+  testRegisteredNameOnRegistered =>
+    name := #bt1988_regname_ok
+    actor := (NamedCounter spawnAs: name) unwrap
+    self assert: actor registeredName equals: name
+    self assert: actor isRegistered
+    actor stop
+
+  // === Class side: named: ===
+  testNamedSuccess =>
+    name := #bt1988_named_success
+    registered := (NamedCounter spawnAs: name) unwrap
+    registered increment
+    lookup := NamedCounter named: name
+    self assert: lookup isOk
+    resolved := lookup unwrap
+    self assert: resolved getValue equals: 1
+    registered stop
+
+  testNamedNotRegistered =>
+    result := NamedCounter named: #bt1988_named_missing
+    self assert: result isError
+    self assert: result error kind equals: #name_not_registered
+
+  testNamedWrongClass =>
+    name := #bt1988_named_wrongclass
+    actor := (NamedGreeter spawnAs: name) unwrap
+    result := NamedCounter named: name
+    self assert: result isError
+    self assert: result error kind equals: #wrong_class
+    actor stop
+
+  testNamedOnActorBaseClassAcceptsAnySubclass =>
+    // `Actor named:` is the base / untyped form — any registered actor matches
+    name := #bt1988_named_base
+    greeter := (NamedGreeter spawnAs: name) unwrap
+    result := Actor named: name
+    self assert: result isOk
+    greeter stop
+
+  // === Class side: allRegistered ===
+  testAllRegisteredRoundTrip =>
+    name := #bt1988_allregistered_roundtrip
+    actor := (NamedCounter spawnAs: name) unwrap
+    registered := Actor allRegistered
+    names := registered collect: [:a | a registeredName]
+    self assert: (names includes: name)
+    actor stop
+
+  testAllRegisteredExcludesRawOtpProcesses =>
+    // `kernel_sup`, `logger`, etc. are raw OTP-registered names. They must
+    // not appear in `Actor allRegistered` — the marker filter excludes them.
+    registered := Actor allRegistered
+    names := registered collect: [:a | a registeredName]
+    self deny: (names includes: #logger)
+    self deny: (names includes: #kernel_sup)
+
+  // === Subclass marker preservation (BT-1988 regression guard) ===
+  testSubclassMarkerWinsOverParent =>
+    // InheritingCounter subclasses Counter (both are Actor subclasses). The
+    // compiled init/1 for a subclass calls the parent's init as a state helper;
+    // the `$beamtalk_actor` marker must carry the LEAF class name so
+    // `Counter named:` (parent) and `InheritingCounter named:` (child) both
+    // resolve correctly.
+    name := #bt1988_subclass_marker
+    actor := (InheritingCounter spawnAs: name) unwrap
+    self assert: (InheritingCounter named: name) isOk
+    self assert: (Counter named: name) isOk
+    actor stop

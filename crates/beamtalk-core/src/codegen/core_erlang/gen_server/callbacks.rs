@@ -174,6 +174,13 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
+                        // BT-1988 / ADR 0079: set the `$beamtalk_actor` marker
+                        // so `class named:` / `allRegistered` can filter this
+                        // process as a Beamtalk actor. Guarded by
+                        // `__skip_initialize__` so parent helpers don't overwrite
+                        // the leaf class's marker.
+                        Self::beamtalk_actor_marker_doc(&class_name),
+                        line(),
                         "%% Call parent init to get inherited state fields",
                         line(),
                         // BT-1417: Pass __skip_initialize__ to parent so it
@@ -252,6 +259,13 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
+                        // BT-1988 / ADR 0079: set the `$beamtalk_actor` marker
+                        // so `class named:` / `allRegistered` can filter this
+                        // process as a Beamtalk actor. Guarded by
+                        // `__skip_initialize__` so parent helpers don't overwrite
+                        // the leaf class's marker.
+                        Self::beamtalk_actor_marker_doc(&class_name),
+                        line(),
                         "let DefaultState = ~{",
                         nest(
                             INDENT,
@@ -279,6 +293,43 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         }
+    }
+
+    /// BT-1988 / ADR 0079: Generate the `$beamtalk_actor` process-dictionary
+    /// marker call. Every Beamtalk actor init/1 sets this so `all_registered/0`,
+    /// `class named:`, and future tooling can distinguish compiled Beamtalk
+    /// actors from raw OTP processes via `erlang:process_info(Pid, dictionary)`.
+    ///
+    /// Guarded by `__skip_initialize__` so that when a subclass's init/1 calls
+    /// the parent as a state-building helper, the parent does not overwrite
+    /// the subclass's marker — the leaf class name is what downstream lookups
+    /// need.
+    fn beamtalk_actor_marker_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            "let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'true'> when 'true' -> 'skipped'",
+                    line(),
+                    "<'false'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            docvec![
+                                "call 'erlang':'put'('$beamtalk_actor', '",
+                                Document::String(class_name.to_owned()),
+                                "')",
+                            ],
+                        ]
+                    ),
+                ]
+            ),
+            line(),
+            "end in",
+        ]
     }
 
     /// BT-1638: Generate the lifecycle start telemetry call for init/1.

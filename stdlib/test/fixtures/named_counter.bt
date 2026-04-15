@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for named-actor registration tests (BT-1988 / ADR 0079).
+
+Actor subclass: NamedCounter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+
+  getValue => self.value

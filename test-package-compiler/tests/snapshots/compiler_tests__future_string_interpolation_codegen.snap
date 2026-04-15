@@ -72,6 +72,11 @@ module 'future_string_interpolation' ['start_link'/1, 'start_link'/2, 'init'/1, 
 
 
 'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'future_string_interpolation')
+    end in
     let DefaultState = ~{
         '__class_mod__' => 'future_string_interpolation'
         , 'name' => #{#<65>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#
