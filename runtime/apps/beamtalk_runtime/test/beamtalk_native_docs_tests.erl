@@ -323,6 +323,140 @@ lookup_returns_binary_doc_test() ->
     ?assert(is_binary(Examples)).
 
 %%% ============================================================================
+%%% format_function_doc — `none`-doc coverage
+%%%
+%%% When a function has `none` as its doc entry (exists but undocumented),
+%%% lookup/3 must still return an empty doc with the signature filled in.
+%%% We build a fake .beam containing a crafted docs_v1 chunk with a
+%%% `none`-doc entry to exercise this explicit branch.
+%%% ============================================================================
+
+lookup_function_with_none_doc_returns_empty_doc_and_signature_test() ->
+    FDocs = [
+        {{function, bar, 0}, [], [<<"bar() -> ok.">>], none, #{}}
+    ],
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, FDocs},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        Result = beamtalk_native_docs:lookup(Module, bar, 0),
+        ?assertMatch(#{doc := <<>>, sig := <<"bar() -> ok.">>, examples := <<>>}, Result)
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
+%%% extract_lang_doc — non-English fallback
+%%%
+%%% When the doc map has no "en" key, extract_lang_doc falls back to the
+%%% first available language. We craft a DE-only doc to hit this branch.
+%%% ============================================================================
+
+lookup_falls_back_to_non_english_doc_test() ->
+    FDocs = [
+        {{function, baz, 0}, [], [<<"baz() -> ok.">>], #{<<"de">> => <<"Hallo Welt">>}, #{}}
+    ],
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, FDocs},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        #{doc := Doc} = beamtalk_native_docs:lookup(Module, baz, 0),
+        ?assertEqual(<<"Hallo Welt">>, Doc)
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+lookup_with_empty_doc_map_returns_empty_doc_test() ->
+    %% Doc map present but empty — extract_lang_doc returns <<>>
+    FDocs = [
+        {{function, qux, 0}, [], [<<"qux() -> ok.">>], #{}, #{}}
+    ],
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, FDocs},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        Result = beamtalk_native_docs:lookup(Module, qux, 0),
+        ?assertMatch(#{doc := <<>>, sig := <<"qux() -> ok.">>}, Result)
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
+%%% format_signatures edge cases
+%%% ============================================================================
+
+lookup_with_empty_signature_list_test() ->
+    %% format_signatures([]) -> <<>>
+    FDocs = [
+        {{function, nosig, 0}, [], [], #{<<"en">> => <<"hi">>}, #{}}
+    ],
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, FDocs},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        Result = beamtalk_native_docs:lookup(Module, nosig, 0),
+        ?assertMatch(#{sig := <<>>, doc := <<"hi">>}, Result)
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+lookup_with_multiple_signatures_test() ->
+    %% format_signatures/1 joins multiple sigs with newlines
+    FDocs = [
+        {{function, msig, 0}, [], [<<"msig() -> ok.">>, <<"msig() -> error.">>],
+            #{<<"en">> => <<"multi sig">>}, #{}}
+    ],
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, FDocs},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        #{sig := Sig} = beamtalk_native_docs:lookup(Module, msig, 0),
+        %% Both signatures should appear, separated by a newline
+        ?assertNotEqual(nomatch, binary:match(Sig, <<"msig() -> ok.">>)),
+        ?assertNotEqual(nomatch, binary:match(Sig, <<"msig() -> error.">>)),
+        ?assertNotEqual(nomatch, binary:match(Sig, <<"\n">>))
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
+%%% extract_module_doc — none/empty branches
+%%% ============================================================================
+
+module_doc_with_none_moduledoc_test() ->
+    %% Build a chunk where the module-level doc is the atom `none`.
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, none, #{}, []},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        ?assertEqual(
+            {error, no_docs},
+            beamtalk_native_docs:module_doc(Module)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+module_doc_with_empty_doc_map_test() ->
+    %% Doc map present but empty — extract returns {error, no_docs}
+    DocsChunk = {docs_v1, [], erlang, <<"text/markdown">>, #{}, #{}, []},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        ?assertEqual(
+            {error, no_docs},
+            beamtalk_native_docs:module_doc(Module)
+        )
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+module_doc_falls_back_to_non_english_test() ->
+    %% Only a German entry — module_doc should return it as a fallback
+    DocsChunk =
+        {docs_v1, [], erlang, <<"text/markdown">>, #{<<"de">> => <<"Modul-Doku">>}, #{}, []},
+    {BeamPath, Module} = create_beam_with_docs_chunk(DocsChunk),
+    try
+        Result = beamtalk_native_docs:module_doc(Module),
+        ?assertMatch(#{doc := <<"Modul-Doku">>}, Result)
+    after
+        cleanup_fake_beam(BeamPath, Module)
+    end.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
