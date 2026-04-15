@@ -55,7 +55,27 @@ instantiation_test_() ->
             {"Dictionary (value type) is registered as constructible",
                 fun test_dictionary_registered_constructible/0},
             %% abstract_class_error tests
-            {"abstract_class_error returns structured error", fun test_abstract_error_structure/0}
+            {"abstract_class_error returns structured error", fun test_abstract_error_structure/0},
+            {"abstract_class_error with spawnWith: selector", fun test_abstract_error_spawn_with/0},
+            {"abstract_class_error with new selector", fun test_abstract_error_new/0},
+            %% class_self_new tests (BT-893)
+            {"class_self_new succeeds for constructible class", fun test_class_self_new_success/0},
+            {"class_self_new raises for non-constructible class",
+                fun test_class_self_new_non_constructible/0},
+            %% class_self_spawn tests (BT-893)
+            {"class_self_spawn succeeds for non-abstract actor",
+                fun test_class_self_spawn_success/0},
+            {"class_self_spawn/4 raises for abstract class", fun test_class_self_spawn_abstract/0},
+            {"class_self_spawn/4 normalizes non-boolean IsAbstract",
+                fun test_class_self_spawn_normalize_abstract/0},
+            %% compute_is_constructible edge cases
+            {"module without new/0 is not constructible", fun test_compute_no_new_export/0},
+            %% handle_new with undefined IsConstructible
+            {"handle_new computes constructibility when undefined",
+                fun test_handle_new_undefined_constructible/0},
+            %% handle_spawn with abstract and spawnWith:
+            {"spawn abstract with spawnWith: returns instantiation_error",
+                fun test_spawn_abstract_spawn_with/0}
         ]
     end}.
 
@@ -222,6 +242,128 @@ test_abstract_error_structure() ->
         Error
     ),
     ?assert(is_binary(Error#beamtalk_error.hint)).
+
+%%====================================================================
+%% abstract_class_error with different selectors
+%%====================================================================
+
+test_abstract_error_spawn_with() ->
+    Error = beamtalk_class_instantiation:abstract_class_error('MyActor', 'spawnWith:'),
+    ?assertMatch(
+        #beamtalk_error{
+            kind = instantiation_error,
+            class = 'MyActor',
+            selector = 'spawnWith:'
+        },
+        Error
+    ),
+    ?assert(is_binary(Error#beamtalk_error.hint)).
+
+test_abstract_error_new() ->
+    Error = beamtalk_class_instantiation:abstract_class_error('Shape', new),
+    ?assertMatch(
+        #beamtalk_error{
+            kind = instantiation_error,
+            class = 'Shape',
+            selector = new
+        },
+        Error
+    ).
+
+%%====================================================================
+%% class_self_new tests (BT-893)
+%%====================================================================
+
+test_class_self_new_success() ->
+    %% Dictionary is constructible via new/0
+    code:ensure_loaded('bt@stdlib@dictionary'),
+    Result = beamtalk_class_instantiation:class_self_new(
+        'Dictionary', 'bt@stdlib@dictionary', []
+    ),
+    %% Should return the new instance directly (not wrapped in {ok, ...})
+    ?assert(is_map(Result)).
+
+test_class_self_new_non_constructible() ->
+    %% Integer's new/0 raises, so class_self_new should raise error
+    code:ensure_loaded(beamtalk_integer),
+    ?assertError(
+        _,
+        beamtalk_class_instantiation:class_self_new('Integer', beamtalk_integer, [])
+    ).
+
+%%====================================================================
+%% class_self_spawn tests (BT-893)
+%%====================================================================
+
+test_class_self_spawn_success() ->
+    ok = ensure_counter_loaded(),
+    Result = beamtalk_class_instantiation:class_self_spawn(
+        'Counter', 'bt@counter', []
+    ),
+    ?assertMatch(#beamtalk_object{class = 'Counter'}, Result),
+    gen_server:stop(Result#beamtalk_object.pid).
+
+test_class_self_spawn_abstract() ->
+    %% With IsAbstract=true, should raise instantiation_error
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
+        beamtalk_class_instantiation:class_self_spawn(
+            'AbstractThing', some_mod, true, []
+        )
+    ).
+
+test_class_self_spawn_normalize_abstract() ->
+    %% undefined (from erlang:get) should be treated as false (non-abstract)
+    ok = ensure_counter_loaded(),
+    Result = beamtalk_class_instantiation:class_self_spawn(
+        'Counter', 'bt@counter', undefined, []
+    ),
+    ?assertMatch(#beamtalk_object{class = 'Counter'}, Result),
+    gen_server:stop(Result#beamtalk_object.pid).
+
+%%====================================================================
+%% compute_is_constructible edge cases
+%%====================================================================
+
+test_compute_no_new_export() ->
+    %% A module that doesn't export new/0 should not be constructible
+    %% Use the erlang module itself as it has no new/0
+    ?assertEqual(
+        false,
+        beamtalk_class_instantiation:compute_is_constructible(erlang, false)
+    ).
+
+%%====================================================================
+%% handle_new with undefined IsConstructible
+%%====================================================================
+
+test_handle_new_undefined_constructible() ->
+    %% When IsConstructible is undefined, handle_new should compute it
+    code:ensure_loaded('bt@stdlib@dictionary'),
+    Result = beamtalk_class_instantiation:handle_new(
+        [], 'Dictionary', 'bt@stdlib@dictionary', undefined
+    ),
+    ?assertMatch({ok, _, true}, Result),
+    {ok, Obj, _} = Result,
+    cleanup_if_process(Obj).
+
+%%====================================================================
+%% handle_spawn edge cases
+%%====================================================================
+
+test_spawn_abstract_spawn_with() ->
+    %% Abstract class with args should return error with spawnWith: selector
+    Result = beamtalk_class_instantiation:handle_spawn(
+        [#{value => 1}], 'AbstractThing', undefined, true
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = instantiation_error,
+            class = 'AbstractThing',
+            selector = 'spawnWith:'
+        }},
+        Result
+    ).
 
 %%====================================================================
 %% Helpers
