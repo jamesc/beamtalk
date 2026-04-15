@@ -187,6 +187,18 @@ handle_getValue([], State) ->
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
+%% Named registration (ADR 0079, BT-1987)
+-export([
+    is_beamtalk_actor/1,
+    register_name/2,
+    unregister_name/1,
+    whereis_name/1,
+    all_registered/0,
+    'spawnAs'/2,
+    'spawnAs'/3,
+    reserved_name/1
+]).
+
 %% Lifecycle telemetry (BT-1638: called from compiled actor init/terminate)
 -export([maybe_execute_telemetry/3]).
 
@@ -1296,6 +1308,11 @@ init(State) when is_map(State) ->
         {ok, Class} when is_atom(Class) ->
             case maps:is_key('__methods__', State) of
                 true ->
+                    %% BT-1987 / ADR 0079: process-dict marker identifies
+                    %% every Beamtalk actor process so tooling and
+                    %% `all_registered/0` can filter them out of the
+                    %% flat OTP registry without needing a separate table.
+                    erlang:put('$beamtalk_actor', Class),
                     StateKeys = [
                         K
                      || K <- maps:keys(State),
@@ -1942,3 +1959,298 @@ object_fallback(Selector, Args, Self, State, ClassName) ->
         Result ->
             Result
     end.
+
+%%% =====================================================================
+%%% Named Actor Registration (ADR 0079, BT-1987)
+%%% =====================================================================
+%%%
+%%% These intrinsics wire Beamtalk actors into OTP's local process
+%%% registry (`erlang:register/2`). The `'$beamtalk_actor'` process
+%%% dictionary marker set in `init/1` lets us distinguish Beamtalk
+%%% actors from raw OTP processes when filtering `erlang:registered/0`.
+%%%
+%%% Errors use `#beamtalk_error{}` with kinds `name_registered`,
+%%% `type_error`, and `reserved_name` — these are translated to
+%%% `Result error: ...` at the stdlib boundary per ADR 0060/0076.
+
+-doc """
+Check whether a pid is a Beamtalk actor process.
+
+Returns `true` if the process has the `'$beamtalk_actor'` marker
+set in its process dictionary (set by `init/1` for every Beamtalk
+actor). Returns `false` for raw OTP processes (including kernel
+processes, gen_servers not built on beamtalk_actor, etc.) and for
+dead processes.
+""".
+-spec is_beamtalk_actor(pid()) -> boolean().
+is_beamtalk_actor(Pid) when is_pid(Pid) ->
+    case erlang:process_info(Pid, dictionary) of
+        {dictionary, Dict} when is_list(Dict) ->
+            lists:keymember('$beamtalk_actor', 1, Dict);
+        undefined ->
+            %% Process is dead
+            false
+    end;
+is_beamtalk_actor(_) ->
+    false.
+
+-doc """
+Register a pid under a name in the local atom registry.
+
+Returns `{ok, Name}` on success or `{error, #beamtalk_error{}}` on
+failure with `kind` one of:
+  - `type_error` — `Name` is not an atom or `Pid` is not a pid
+  - `reserved_name` — `Name` is in the reserved-name blocklist
+  - `name_registered` — another process is already registered
+    under `Name` (maps to `erlang:register/2` badarg when taken).
+""".
+-spec register_name(atom(), pid()) -> {ok, atom()} | {error, #beamtalk_error{}}.
+register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
+    case reserved_name(Name) of
+        true ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(reserved_name, 'Actor', registerAs),
+                    iolist_to_binary(
+                        io_lib:format(
+                            "Cannot register actor under reserved name '~ts'", [Name]
+                        )
+                    )
+                )};
+        false ->
+            try erlang:register(Name, Pid) of
+                true -> {ok, Name}
+            catch
+                error:badarg ->
+                    {error,
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(name_registered, 'Actor', registerAs),
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "Name '~ts' is already registered", [Name]
+                                )
+                            )
+                        )}
+            end
+    end;
+register_name(Name, Pid) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', registerAs),
+            iolist_to_binary(
+                io_lib:format(
+                    "register_name/2 expects (atom, pid), got (~tp, ~tp)", [Name, Pid]
+                )
+            )
+        )}.
+
+-doc """
+Unregister a name previously registered via `register_name/2`.
+
+Returns `ok` on success or `{error, #beamtalk_error{}}` if `Name`
+is not currently registered. Idempotent-friendly callers should
+check `whereis_name/1` first if they want "unregister-if-present"
+semantics.
+""".
+-spec unregister_name(atom()) -> ok | {error, #beamtalk_error{}}.
+unregister_name(Name) when is_atom(Name) ->
+    try erlang:unregister(Name) of
+        true -> ok
+    catch
+        error:badarg ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(name_registered, 'Actor', unregister),
+                    iolist_to_binary(
+                        io_lib:format(
+                            "Name '~ts' is not registered", [Name]
+                        )
+                    )
+                )}
+    end;
+unregister_name(Name) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', unregister),
+            iolist_to_binary(
+                io_lib:format(
+                    "unregister_name/1 expects atom, got ~tp", [Name]
+                )
+            )
+        )}.
+
+-doc """
+Look up the pid registered under `Name`.
+
+Returns `{ok, Pid}` if a process is registered, or `undefined` if
+no process is registered under that name. Non-atom input returns
+`{error, #beamtalk_error{kind = type_error}}`.
+""".
+-spec whereis_name(atom()) -> {ok, pid()} | undefined | {error, #beamtalk_error{}}.
+whereis_name(Name) when is_atom(Name) ->
+    case erlang:whereis(Name) of
+        undefined -> undefined;
+        Pid when is_pid(Pid) -> {ok, Pid}
+    end;
+whereis_name(Name) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', whereisName),
+            iolist_to_binary(
+                io_lib:format(
+                    "whereis_name/1 expects atom, got ~tp", [Name]
+                )
+            )
+        )}.
+
+-doc """
+List all names currently registered to Beamtalk actors.
+
+Filters `erlang:registered/0` down to processes that carry the
+`'$beamtalk_actor'` process-dictionary marker, so kernel processes,
+gen_servers outside the Beamtalk runtime, and other raw OTP
+processes are excluded.
+""".
+-spec all_registered() -> [atom()].
+all_registered() ->
+    [
+        Name
+     || Name <- erlang:registered(),
+        case erlang:whereis(Name) of
+            undefined -> false;
+            Pid -> is_beamtalk_actor(Pid)
+        end
+    ].
+
+-doc """
+Spawn an actor under a registered name (arity 2).
+
+Equivalent to `start_link({local, Name}, Module, [])`. Returns
+`{ok, Pid}` on success or `{error, #beamtalk_error{}}` on
+name-related failures. Other errors (crash in init, etc.) pass
+through from `gen_server:start_link/4` as `{error, Reason}`.
+""".
+-spec 'spawnAs'(atom(), module()) -> {ok, pid()} | {error, term()}.
+'spawnAs'(Name, Module) ->
+    'spawnAs'(Name, Module, []).
+
+-doc """
+Spawn an actor under a registered name (arity 3).
+
+Thin delegate to `start_link({local, Name}, Module, Args)` that
+enforces the reserved-name blocklist and the atom type-check
+*before* the process is spawned. On `{already_started, _}` or
+`badarg` from the registry, returns a structured `#beamtalk_error{}`
+with kind `name_registered` so the stdlib boundary can translate
+to `Result error: ...`.
+""".
+-spec 'spawnAs'(atom(), module(), term()) -> {ok, pid()} | {error, term()}.
+'spawnAs'(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
+    case reserved_name(Name) of
+        true ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(reserved_name, 'Actor', spawnAs),
+                    iolist_to_binary(
+                        io_lib:format(
+                            "Cannot spawn actor under reserved name '~ts'", [Name]
+                        )
+                    )
+                )};
+        false ->
+            case gen_server:start_link({local, Name}, Module, Args, []) of
+                {ok, Pid} ->
+                    {ok, Pid};
+                {error, {already_started, _Other}} ->
+                    {error,
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(name_registered, 'Actor', spawnAs),
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "Name '~ts' is already registered", [Name]
+                                )
+                            )
+                        )};
+                {error, Reason} ->
+                    {error, Reason};
+                ignore ->
+                    {error, ignore}
+            end
+    end;
+'spawnAs'(Name, Module, _Args) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', spawnAs),
+            iolist_to_binary(
+                io_lib:format(
+                    "spawnAs expects (atom, module), got (~tp, ~tp)", [Name, Module]
+                )
+            )
+        )}.
+
+-doc """
+Check whether `Name` is on the reserved-name blocklist.
+
+Reserved names are:
+  - OTP kernel / stdlib registered process names that a user atom
+    collision with would be catastrophic (application_controller,
+    code_server, erl_prim_loader, erl_signal_server, error_logger,
+    erts_code_purger, file_server_2, global_group, global_group_check,
+    global_name_server, inet_db, init, kernel_refc, kernel_safe_sup,
+    kernel_sup, logger, logger_handler_watcher, logger_proxy,
+    logger_std_h_default, logger_sup, net_kernel, net_sup, rex,
+    socket_registry, standard_error, standard_error_sup,
+    standard_error_writer, user, user_drv, user_drv_reader,
+    user_drv_writer).
+  - Any atom whose textual form is prefixed `beamtalk_` — reserved
+    for internal runtime / supervision use.
+
+See ADR 0079 ("Reserved-name policy") for rationale.
+""".
+-spec reserved_name(atom()) -> boolean().
+reserved_name(Name) when is_atom(Name) ->
+    case is_kernel_reserved(Name) of
+        true ->
+            true;
+        false ->
+            NameStr = atom_to_list(Name),
+            lists:prefix("beamtalk_", NameStr)
+    end;
+reserved_name(_) ->
+    false.
+
+%% Static blocklist of OTP kernel / stdlib registered names.
+%% Kept as a function (not a macro) so dialyzer sees the pattern match.
+-spec is_kernel_reserved(atom()) -> boolean().
+is_kernel_reserved(application_controller) -> true;
+is_kernel_reserved(code_server) -> true;
+is_kernel_reserved(erl_prim_loader) -> true;
+is_kernel_reserved(erl_signal_server) -> true;
+is_kernel_reserved(error_logger) -> true;
+is_kernel_reserved(erts_code_purger) -> true;
+is_kernel_reserved(file_server_2) -> true;
+is_kernel_reserved(global_group) -> true;
+is_kernel_reserved(global_group_check) -> true;
+is_kernel_reserved(global_name_server) -> true;
+is_kernel_reserved(inet_db) -> true;
+is_kernel_reserved(init) -> true;
+is_kernel_reserved(kernel_refc) -> true;
+is_kernel_reserved(kernel_safe_sup) -> true;
+is_kernel_reserved(kernel_sup) -> true;
+is_kernel_reserved(logger) -> true;
+is_kernel_reserved(logger_handler_watcher) -> true;
+is_kernel_reserved(logger_proxy) -> true;
+is_kernel_reserved(logger_std_h_default) -> true;
+is_kernel_reserved(logger_sup) -> true;
+is_kernel_reserved(net_kernel) -> true;
+is_kernel_reserved(net_sup) -> true;
+is_kernel_reserved(rex) -> true;
+is_kernel_reserved(socket_registry) -> true;
+is_kernel_reserved(standard_error) -> true;
+is_kernel_reserved(standard_error_sup) -> true;
+is_kernel_reserved(standard_error_writer) -> true;
+is_kernel_reserved(user) -> true;
+is_kernel_reserved(user_drv) -> true;
+is_kernel_reserved(user_drv_reader) -> true;
+is_kernel_reserved(user_drv_writer) -> true;
+is_kernel_reserved(_) -> false.
