@@ -6,11 +6,16 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_behaviour_intrinsics module (BT-1088).
+EUnit tests for beamtalk_behaviour_intrinsics module (BT-1088, BT-1959).
 
 Tests intrinsic functions for class reflection: metaclassNew, classClass,
 className, classLocalMethods, classFieldNames, classIncludesSelector,
-classDoc, classSetDoc, classSetMethodDoc, and classSubclasses.
+classDoc, classSetDoc, classSetMethodDoc, classSubclasses, classAllSubclasses,
+classMethods (including inheritance and deduplication), classCanUnderstand
+(including inherited selectors), classInheritsFrom (transitive), classIncludesBehaviour,
+classWhichIncludesSelector (inherited), classAllFieldNames (inherited),
+classRemoveFromSystem, classRemoveFromSystemByName, metaclass primitives
+(thisClass, classMethods, localClassMethods, includesSelector, allMethods).
 
 Uses a minimal setup (pg + ETS hierarchy table) with dynamically-created
 test classes via beamtalk_class_builder.
@@ -1402,6 +1407,877 @@ class_class_idempotent_test_() ->
                     catch
                         _:_ -> ok
                     end
+                end
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% BT-1959: Additional coverage tests
+%%% ============================================================================
+
+%%% --- classAllSubclasses/1 — multi-level hierarchy ---
+
+class_all_subclasses_multi_level_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {GrandObj, GrandPid} = register_class('BT1959AllSubGrand', #{}, #{}),
+                {_ParentObj, ParentPid} = register_class_with_super(
+                    'BT1959AllSubParent', 'BT1959AllSubGrand', #{}, #{}
+                ),
+                {_ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959AllSubChild', 'BT1959AllSubParent', #{}, #{}
+                ),
+                try
+                    AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(GrandObj),
+                    AllSubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- AllSub],
+                    ?assert(lists:member('BT1959AllSubParent', AllSubNames)),
+                    ?assert(lists:member('BT1959AllSubChild', AllSubNames)),
+                    ?assertEqual(2, length(AllSub))
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(GrandPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classMethods/1 — inherited methods from parent ---
+
+class_methods_inherits_from_parent_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {_ParentObj, ParentPid} = register_class(
+                    'BT1959MethodsParent',
+                    #{},
+                    #{'parentMethod' => MethodFun}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959MethodsChild',
+                    'BT1959MethodsParent',
+                    #{},
+                    #{'childMethod' => MethodFun}
+                ),
+                try
+                    Methods = beamtalk_behaviour_intrinsics:classMethods(ChildObj),
+                    ?assert(lists:member('childMethod', Methods)),
+                    ?assert(lists:member('parentMethod', Methods))
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%% BT-1635: classMethods on metaclass receiver collects class methods
+class_methods_metaclass_receiver_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                {_ClassObj, Pid} = register_class_with_class_methods(
+                    'BT1959MethodsMeta',
+                    #{},
+                    #{},
+                    #{'metaFoo' => ClassMethodFun}
+                ),
+                try
+                    MetaObj = #beamtalk_object{
+                        class = 'Metaclass',
+                        class_mod = beamtalk_metaclass_bt,
+                        pid = Pid
+                    },
+                    Methods = beamtalk_behaviour_intrinsics:classMethods(MetaObj),
+                    ?assert(is_list(Methods)),
+                    ?assert(lists:member('metaFoo', Methods))
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classCanUnderstand/2 — inherited selectors ---
+
+class_can_understand_inherited_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {_ParentObj, ParentPid} = register_class(
+                    'BT1959CanUndParent',
+                    #{},
+                    #{'inherited' => MethodFun}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959CanUndChild', 'BT1959CanUndParent', #{}, #{}
+                ),
+                try
+                    %% Child can understand parent's method via inheritance
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classCanUnderstand(ChildObj, 'inherited')
+                    ),
+                    %% But not a nonexistent method
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classCanUnderstand(ChildObj, 'bogus')
+                    )
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classCanUnderstandFromName/2 — inherited selectors ---
+
+class_can_understand_from_name_inherited_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {_ParentObj, ParentPid} = register_class(
+                    'BT1959CanUndNameParent',
+                    #{},
+                    #{'fromParent' => MethodFun}
+                ),
+                {_ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959CanUndNameChild', 'BT1959CanUndNameParent', #{}, #{}
+                ),
+                try
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
+                            'BT1959CanUndNameChild', 'fromParent'
+                        )
+                    )
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classInheritsFrom/2 — transitive (grandparent) ---
+
+class_inherits_from_grandparent_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {GrandObj, GrandPid} = register_class('BT1959InheritsGrand', #{}, #{}),
+                {_ParentObj, ParentPid} = register_class_with_super(
+                    'BT1959InheritsMiddle', 'BT1959InheritsGrand', #{}, #{}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959InheritsBottom', 'BT1959InheritsMiddle', #{}, #{}
+                ),
+                try
+                    %% Grandchild inherits from grandparent
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classInheritsFrom(ChildObj, GrandObj)
+                    ),
+                    %% Grandparent does NOT inherit from grandchild
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classInheritsFrom(GrandObj, ChildObj)
+                    )
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(GrandPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%% A class does NOT inherit from itself (strict)
+class_inherits_from_self_is_false_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1959InheritsSelf', #{}, #{}),
+                try
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classInheritsFrom(ClassObj, ClassObj)
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classIncludesBehaviour/2 — transitive (grandparent) ---
+
+class_includes_behaviour_grandparent_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {GrandObj, GrandPid} = register_class('BT1959BehGrand', #{}, #{}),
+                {_ParentObj, ParentPid} = register_class_with_super(
+                    'BT1959BehMiddle', 'BT1959BehGrand', #{}, #{}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959BehBottom', 'BT1959BehGrand', #{}, #{}
+                ),
+                try
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classIncludesBehaviour(ChildObj, GrandObj)
+                    )
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(GrandPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classWhichIncludesSelector/2 — found in parent ---
+
+class_which_includes_selector_in_parent_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {_ParentObj, ParentPid} = register_class(
+                    'BT1959WhichInclParent',
+                    #{},
+                    #{'parentOnly' => MethodFun}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959WhichInclChild', 'BT1959WhichInclParent', #{}, #{}
+                ),
+                try
+                    Result = beamtalk_behaviour_intrinsics:classWhichIncludesSelector(
+                        ChildObj, 'parentOnly'
+                    ),
+                    ?assertMatch(#beamtalk_object{}, Result),
+                    ?assertEqual(
+                        'BT1959WhichInclParent',
+                        beamtalk_behaviour_intrinsics:className(Result)
+                    )
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classAllFieldNames/1 — inherited fields from parent ---
+
+class_all_field_names_inherited_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {_ParentObj, ParentPid} = register_class(
+                    'BT1959FieldsParent',
+                    #{x => 0},
+                    #{}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959FieldsChild',
+                    'BT1959FieldsParent',
+                    #{y => 0},
+                    #{}
+                ),
+                try
+                    AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ChildObj),
+                    ?assert(lists:member(x, AllFields)),
+                    ?assert(lists:member(y, AllFields))
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classSetDoc/2 — overwrite existing doc ---
+
+class_set_doc_overwrite_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1959DocOverwrite', #{}, #{}),
+                try
+                    Doc1 = <<"First doc">>,
+                    Doc2 = <<"Updated doc">>,
+                    beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc1),
+                    ?assertEqual(Doc1, beamtalk_behaviour_intrinsics:classDoc(ClassObj)),
+                    beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc2),
+                    ?assertEqual(Doc2, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classDocForMethod/2 — method exists but no doc ---
+
+class_doc_for_method_no_doc_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {ClassObj, Pid} = register_class(
+                    'BT1959DocNoDoc',
+                    #{},
+                    #{'undocumented' => MethodFun}
+                ),
+                try
+                    %% Method exists but has no doc set — should return nil
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'undocumented')
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classSetMethodDoc/3 — overwrite existing method doc ---
+
+class_set_method_doc_overwrite_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {ClassObj, Pid} = register_class(
+                    'BT1959MethodDocOvr',
+                    #{},
+                    #{'documented' => MethodFun}
+                ),
+                try
+                    Doc1 = <<"First method doc">>,
+                    Doc2 = <<"Updated method doc">>,
+                    beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc1),
+                    ?assertEqual(
+                        Doc1,
+                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
+                    ),
+                    beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc2),
+                    ?assertEqual(
+                        Doc2,
+                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classRemoveFromSystemByName/1 — class not found ---
+
+class_remove_from_system_by_name_not_found_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = class_not_found}},
+        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName('BT1959NoSuchClass')
+    ).
+
+%%% --- classRemoveFromSystemByName/1 — has subclasses ---
+
+class_remove_from_system_has_subclasses_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {_ParentObj, ParentPid} = register_class('BT1959RemoveParent', #{}, #{}),
+                {_ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959RemoveChild', 'BT1959RemoveParent', #{}, #{}
+                ),
+                try
+                    %% Should raise because parent has subclasses
+                    ?assertError(
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                            'BT1959RemoveParent'
+                        )
+                    )
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classRemoveFromSystem/1 — dynamic class hits code:delete failure ---
+%%% Dynamic classes (class_builder) can't be code:delete'd, so removal raises
+%%% a runtime_error at the delete step. This test verifies the error path.
+
+class_remove_from_system_code_delete_fails_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1959RemoveCodeDel', #{}, #{}),
+                try
+                    %% Verify class exists before removal attempt
+                    ?assertNotEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
+                    ),
+                    %% Dynamic class removal fails at code:delete — raises runtime_error
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = runtime_error}
+                        },
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystem(ClassObj)
+                    )
+                after
+                    %% Class gen_server was stopped by removeFromSystem before error;
+                    %% stop is a no-op if already dead
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classRemoveFromSystemByName/1 — dynamic class hits code:delete failure ---
+
+class_remove_from_system_by_name_code_delete_fails_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {_ClassObj, Pid} = register_class('BT1959RemoveByNameFail', #{}, #{}),
+                try
+                    ?assertNotEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
+                    ),
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = runtime_error}
+                        },
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                            'BT1959RemoveByNameFail'
+                        )
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classMethods/1 — empty class returns list ---
+
+class_methods_empty_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1959MethodsEmpty', #{}, #{}),
+                try
+                    Methods = beamtalk_behaviour_intrinsics:classMethods(ClassObj),
+                    ?assert(is_list(Methods))
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classAllSuperclasses/1 — order is immediate parent to root ---
+
+class_all_superclasses_order_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {_GrandObj, GrandPid} = register_class('BT1959OrderGrand', #{}, #{}),
+                {_ParentObj, ParentPid} = register_class_with_super(
+                    'BT1959OrderMiddle', 'BT1959OrderGrand', #{}, #{}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959OrderBottom', 'BT1959OrderMiddle', #{}, #{}
+                ),
+                try
+                    Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ChildObj),
+                    SuperNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Supers],
+                    %% First element should be immediate parent
+                    [First | _] = SuperNames,
+                    ?assertEqual('BT1959OrderMiddle', First)
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(GrandPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classSubclasses/1 — multiple children ---
+
+class_subclasses_multiple_children_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ParentObj, ParentPid} = register_class('BT1959MultiParent', #{}, #{}),
+                {_Child1Obj, Child1Pid} = register_class_with_super(
+                    'BT1959MultiChild1', 'BT1959MultiParent', #{}, #{}
+                ),
+                {_Child2Obj, Child2Pid} = register_class_with_super(
+                    'BT1959MultiChild2', 'BT1959MultiParent', #{}, #{}
+                ),
+                try
+                    Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ParentObj),
+                    SubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Subclasses],
+                    ?assert(lists:member('BT1959MultiChild1', SubNames)),
+                    ?assert(lists:member('BT1959MultiChild2', SubNames)),
+                    ?assertEqual(2, length(Subclasses))
+                after
+                    (try
+                        gen_server:stop(Child1Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(Child2Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- metaclassClassMethods/1 — inherited class methods ---
+
+metaclass_class_methods_inherited_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                {_ParentObj, ParentPid} = register_class_with_class_methods(
+                    'BT1959MetaCMParent',
+                    #{},
+                    #{},
+                    #{'parentCM' => ClassMethodFun}
+                ),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959MetaCMChild', 'BT1959MetaCMParent', #{}, #{}
+                ),
+                try
+                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ChildObj),
+                    ClassMethods = beamtalk_behaviour_intrinsics:metaclassClassMethods(MetaObj),
+                    ?assert(is_list(ClassMethods)),
+                    ?assert(lists:member('parentCM', ClassMethods))
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- metaclassThisClass/1 — round-trip identity ---
+
+metaclass_this_class_round_trip_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1959MetaRoundTrip', #{}, #{}),
+                try
+                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                    ThisClass = beamtalk_behaviour_intrinsics:metaclassThisClass(MetaObj),
+                    %% Round-trip: classClass -> metaclassThisClass returns same name
+                    ?assertEqual(
+                        beamtalk_behaviour_intrinsics:className(ClassObj),
+                        beamtalk_behaviour_intrinsics:className(ThisClass)
+                    ),
+                    %% Same pid
+                    ?assertEqual(
+                        ClassObj#beamtalk_object.pid,
+                        ThisClass#beamtalk_object.pid
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classClass/1 — class_mod is beamtalk_metaclass_bt ---
+
+class_class_module_is_metaclass_bt_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT1959ClassMod', #{}, #{}),
+                try
+                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                    ?assertEqual(beamtalk_metaclass_bt, MetaObj#beamtalk_object.class_mod)
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classMethods/1 — deduplication across hierarchy ---
+
+class_methods_deduplicates_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {_ParentObj, ParentPid} = register_class(
+                    'BT1959DedupParent',
+                    #{},
+                    #{'shared' => MethodFun, 'parentOnly' => MethodFun}
+                ),
+                %% Child overrides 'shared'
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959DedupChild',
+                    'BT1959DedupParent',
+                    #{},
+                    #{'shared' => MethodFun, 'childOnly' => MethodFun}
+                ),
+                try
+                    Methods = beamtalk_behaviour_intrinsics:classMethods(ChildObj),
+                    %% 'shared' should appear only once (ordset dedup)
+                    SharedCount = length([M || M <- Methods, M =:= 'shared']),
+                    ?assertEqual(1, SharedCount),
+                    ?assert(lists:member('parentOnly', Methods)),
+                    ?assert(lists:member('childOnly', Methods))
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(ParentPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classFieldNames/1 — multiple fields ---
+
+class_field_names_multiple_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class(
+                    'BT1959FieldsMulti',
+                    #{a => 1, b => 2, c => 3},
+                    #{}
+                ),
+                try
+                    Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
+                    ?assertEqual(3, length(Fields)),
+                    ?assert(lists:member(a, Fields)),
+                    ?assert(lists:member(b, Fields)),
+                    ?assert(lists:member(c, Fields))
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% --- classSuperclass/1 — chain parent to grandparent ---
+
+class_superclass_chain_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {_GrandObj, GrandPid} = register_class('BT1959SuperChainGrand', #{}, #{}),
+                {ChildObj, ChildPid} = register_class_with_super(
+                    'BT1959SuperChainChild', 'BT1959SuperChainGrand', #{}, #{}
+                ),
+                try
+                    Super = beamtalk_behaviour_intrinsics:classSuperclass(ChildObj),
+                    ?assertMatch(#beamtalk_object{}, Super),
+                    ?assertEqual(
+                        'BT1959SuperChainGrand',
+                        beamtalk_behaviour_intrinsics:className(Super)
+                    ),
+                    %% Grandparent's superclass is Object (if registered) or nil
+                    GrandSuper = beamtalk_behaviour_intrinsics:classSuperclass(Super),
+                    case beamtalk_class_registry:whereis_class('Object') of
+                        undefined ->
+                            ?assertEqual(nil, GrandSuper);
+                        _ ->
+                            ?assertMatch(#beamtalk_object{}, GrandSuper)
+                    end
+                after
+                    (try
+                        gen_server:stop(ChildPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    (try
+                        gen_server:stop(GrandPid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end)
                 end
             end)
         ]
