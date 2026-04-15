@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Parent actor that declares a typed-no-default field but its initialize
+// fails to set it. Spawning should raise an InstantiationError mentioning
+// the parent class name.
+
+typed Actor subclass: E2EInitInheritForgets
+  state: missing :: String
+  state: count :: Integer = 0
+
+  initialize -> Integer => self.count := 1
+
+  getCount -> Integer => self.count
