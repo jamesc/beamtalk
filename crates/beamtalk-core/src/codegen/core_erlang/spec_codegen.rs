@@ -81,8 +81,10 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
                 ", {'atom', 0, 'false'}]}"
             ]
         }
-        // Self resolves to the receiver class at call sites; in specs, treat as any()
-        TypeAnnotation::SelfType { .. } => Document::Str("{'type', 0, 'any', []}"),
+        // Self/Self class resolve to the receiver class at call sites; in specs, treat as any()
+        TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. } => {
+            Document::Str("{'type', 0, 'any', []}")
+        }
     }
 }
 

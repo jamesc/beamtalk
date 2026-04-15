@@ -567,6 +567,7 @@ impl CoreErlangGenerator {
                 format!("{} | False", Self::type_annotation_display(inner))
             }
             TypeAnnotation::SelfType { .. } => "Self".to_string(),
+            TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
         }
     }
 
