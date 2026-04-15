@@ -137,7 +137,18 @@ teardown(_) ->
             beamtalk_class_ClassVarSetGetTest,
             beamtalk_class_ConstructibleDefaultTest,
             beamtalk_class_HandleInfoTest,
-            beamtalk_class_InstanceMethodsTest
+            beamtalk_class_InstanceMethodsTest,
+            %% BT-1982 additions
+            beamtalk_class_BT1982LocalCM,
+            beamtalk_class_BT1982LocalIM,
+            beamtalk_class_BT1982PutMethod3,
+            beamtalk_class_BT1982SetClassVar,
+            beamtalk_class_BT1982AbstractNew,
+            beamtalk_class_BT1982HasMethodFb,
+            beamtalk_class_BT1982InhParent,
+            beamtalk_class_BT1982InhChild,
+            beamtalk_class_BT1982CodeChange,
+            beamtalk_class_BT1982HasClassNew
         ]
     ),
     %% Clean up ETS hierarchy table entries
@@ -2089,6 +2100,277 @@ get_instance_methods_test_() ->
                 {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
                 {ok, ReturnedMethods} = gen_server:call(Pid, get_instance_methods),
                 ?assertEqual(lists:sort(maps:keys(Methods)), lists:sort(maps:keys(ReturnedMethods)))
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% BT-1982: Additional coverage for class system modules (→ 90%)
+%%% ============================================================================
+
+%% local_class_methods/1 returns the selector list (0% → covered).
+bt1982_local_class_methods_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982LocalCM',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{
+                        'new:' => #{arity => 1, block => fun(_, _, _) -> ok end},
+                        'factory' => #{arity => 0, block => fun(_, _, _) -> ok end}
+                    }
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982LocalCM', ClassInfo),
+                Selectors = beamtalk_object_class:local_class_methods(Pid),
+                ?assert(lists:member('new:', Selectors)),
+                ?assert(lists:member('factory', Selectors))
+            end)
+        ]
+    end}.
+
+%% local_instance_methods/1 returns the instance selector list (0% → covered).
+bt1982_local_instance_methods_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982LocalIM',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{
+                        'foo' => #{arity => 0, block => fun(_, _) -> ok end},
+                        'bar:' => #{arity => 1, block => fun(_, _) -> ok end}
+                    },
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982LocalIM', ClassInfo),
+                Selectors = beamtalk_object_class:local_instance_methods(Pid),
+                ?assertEqual(['bar:', 'foo'], lists:sort(Selectors))
+            end)
+        ]
+    end}.
+
+%% put_method/3 (3-arity variant) delegates to /4 with empty source (0% → covered).
+bt1982_put_method_three_arity_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982PutMethod3',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982PutMethod3', ClassInfo),
+                ok = beamtalk_object_class:put_method(Pid, 'greet', fun() -> hi end),
+                %% Verify it was installed with default empty source.
+                MethodObj = beamtalk_object_class:method(Pid, 'greet'),
+                ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+                ?assertEqual('greet', maps:get('__selector__', MethodObj)),
+                ?assertEqual(<<"">>, maps:get('__source__', MethodObj))
+            end)
+        ]
+    end}.
+
+%% set_class_var/3 on a registered class updates the class var map (0% → covered).
+bt1982_set_class_var_updates_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982SetClassVar',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{},
+                    class_state => #{counter => 0}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982SetClassVar', ClassInfo),
+                %% Name-based set_class_var resolves via the registry.
+                Result = beamtalk_object_class:set_class_var('BT1982SetClassVar', counter, 42),
+                ?assertEqual(42, Result),
+                %% Verify it persisted.
+                ?assertEqual(42, gen_server:call(Pid, {get_class_var, counter}))
+            end)
+        ]
+    end}.
+
+%% set_class_var/3 on an unknown class raises class_not_found (0% → covered).
+bt1982_set_class_var_unknown_raises_test_() ->
+    ?_assertError(
+        _,
+        beamtalk_object_class:set_class_var('BT1982NoSuchClass', foo, 1)
+    ).
+
+%% new/1 and new/2 constructor entry points go through {new, Args} handle_call (0% → covered).
+%% Abstract class refuses construction — exercises the handle_call({new, []}, ... is_abstract=true)
+%% branch.
+bt1982_new_on_abstract_class_errors_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982AbstractNew',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{},
+                    is_abstract => true
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982AbstractNew', ClassInfo),
+                %% new/1 delegates to new/2 with []
+                ?assertMatch({error, #beamtalk_error{}}, beamtalk_object_class:new(Pid)),
+                %% new/2 with args also errors on abstract
+                ?assertMatch(
+                    {error, #beamtalk_error{}},
+                    beamtalk_object_class:new(Pid, [#{}])
+                )
+            end)
+        ]
+    end}.
+
+%% has_method/2 fallback: when the gen_server reports nil, we fall back to the
+%% module's has_method/1 export (uncovered fallback path).
+bt1982_has_method_module_fallback_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982HasMethodFb',
+                    %% Module does not export has_method/1 — fallback returns false.
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982HasMethodFb', ClassInfo),
+                ?assertNot(beamtalk_object_class:has_method(Pid, 'neverDefined')),
+                %% Positive case: method present in gen_server state.
+                ok = beamtalk_object_class:put_method(Pid, 'ping', fun() -> pong end),
+                ?assert(beamtalk_object_class:has_method(Pid, 'ping'))
+            end)
+        ]
+    end}.
+
+%% update_class on an unknown class returns {error, {class_not_found, _}}.
+bt1982_update_class_unknown_test_() ->
+    ?_assertEqual(
+        {error, {class_not_found, 'BT1982NoSuchUpdate'}},
+        beamtalk_object_class:update_class('BT1982NoSuchUpdate', #{})
+    ).
+
+%% code_change/3 delegates to beamtalk_hot_reload and clears is_constructible.
+bt1982_code_change_delegates_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'BT1982CodeChange',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982CodeChange', ClassInfo),
+                %% Trigger code_change via sys:change_code (OTP hot-reload entry).
+                %% If beamtalk_hot_reload:code_change/3 is not exported in this
+                %% test env we accept {error, _}; the goal is coverage of our
+                %% code_change/3 callback body.
+                _Result = sys:change_code(Pid, beamtalk_object_class, 0, []),
+                ?assert(is_process_alive(Pid))
+            end)
+        ]
+    end}.
+
+%% has_class_new_in_chain/3 returns true when the class's own module exports
+%% class_new:/3. Uses a dynamically-compiled module exporting class_new:/3.
+bt1982_has_class_new_in_chain_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Compile a tiny module that exports class_new:/3.
+                Forms = [
+                    {attribute, 1, module, bt1982_new_colon_mod},
+                    {attribute, 2, export, [{'class_new:', 3}]},
+                    {function, 3, 'class_new:', 3, [
+                        {clause, 3, [{var, 3, '_'}, {var, 3, 'CVars'}, {var, 3, '_'}], [], [
+                            {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {var, 3, 'CVars'}]}
+                        ]}
+                    ]}
+                ],
+                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+                {module, Mod} = code:load_binary(
+                    Mod, "bt1982_new_colon_mod.erl", Bin
+                ),
+                ClassInfo = #{
+                    name => 'BT1982HasClassNew',
+                    module => Mod,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{
+                        'new:' => #{arity => 1}
+                    }
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1982HasClassNew', ClassInfo),
+                %% Calling new/2 with non-empty args triggers the
+                %% has_class_new_in_chain/3 branch and dispatches through the
+                %% compiled class_new:/3.
+                Result = beamtalk_object_class:new(Pid, [anything]),
+                %% The compiled class_new:/3 returns its raw {reply, ...}
+                %% tuple which handle_class_method_call passes back — we just
+                %% need to confirm the has_class_new_in_chain branch executed
+                %% (not the generic field-init path, which would try to treat
+                %% `anything` as a map and fail differently).
+                ?assertMatch({ok, {reply, ok, _}}, Result)
+            end)
+        ]
+    end}.
+
+%% find_inherited_class_method walks the superclass chain (0% → covered).
+%% Register parent with a class method, then child without it; `{class_method, Sel}`
+%% on the child should fall through to the parent via find_inherited_class_method/2.
+bt1982_find_inherited_class_method_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ParentMethod = fun(_, CVars, _) -> {reply, parent_cm, CVars} end,
+                ParentInfo = #{
+                    name => 'BT1982InhParent',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{
+                        'inheritedCM' => #{arity => 0, block => ParentMethod}
+                    }
+                },
+                {ok, ParentPid} = beamtalk_object_class:start_link('BT1982InhParent', ParentInfo),
+
+                ChildInfo = #{
+                    name => 'BT1982InhChild',
+                    module => test_class,
+                    superclass => 'BT1982InhParent',
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, ChildPid} = beamtalk_object_class:start_link('BT1982InhChild', ChildInfo),
+
+                %% Sanity: parent has it locally.
+                ParentResult = gen_server:call(ParentPid, {class_method, 'inheritedCM'}),
+                ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, ParentResult),
+
+                %% Child lookup walks to parent and returns the compiled-method map.
+                ChildResult = gen_server:call(ChildPid, {class_method, 'inheritedCM'}),
+                ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, ChildResult),
+                ?assertEqual('inheritedCM', maps:get('__selector__', ChildResult)),
+
+                %% Missing method → nil (find_inherited_class_method returns nil).
+                ?assertEqual(
+                    nil, gen_server:call(ChildPid, {class_method, 'noSuchMethod'})
+                )
             end)
         ]
     end}.

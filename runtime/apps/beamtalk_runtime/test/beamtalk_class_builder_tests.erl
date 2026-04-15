@@ -680,6 +680,107 @@ register_class_load_callback_test_() ->
                 end,
 
                 gen_server:stop(ClassPid, normal, 5000)
+            end),
+
+            %% BT-1982: Register passing a #beamtalk_object{} record as
+            %% superclassRef — exercises the object-clause of
+            %% resolve_superclass_name/1 and validate_superclass_not_sealed/1.
+            ?_test(begin
+                %% First register a parent class.
+                ParentState = #{
+                    className => 'BT1982ObjSuperParent',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                {ok, ParentPid} = beamtalk_class_builder:register(ParentState),
+                ParentModule = beamtalk_object_class:module_name(ParentPid),
+                ParentObj = #beamtalk_object{
+                    class = 'BT1982ObjSuperParent class',
+                    class_mod = ParentModule,
+                    pid = ParentPid
+                },
+                ChildState = #{
+                    className => 'BT1982ObjSuperChild',
+                    superclassRef => ParentObj,
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                {ok, ChildPid} = beamtalk_class_builder:register(ChildState),
+                ?assertEqual(
+                    'BT1982ObjSuperParent', beamtalk_object_class:superclass(ChildPid)
+                ),
+                gen_server:stop(ChildPid, normal, 5000),
+                gen_server:stop(ParentPid, normal, 5000)
+            end),
+
+            %% BT-1982: the maybe_stop_builder/1 branch (class_builder lines
+            %% 436-439) is not directly unit-testable because stopping a fake
+            %% non-gen_server builderPid forces the class_builder's terminate
+            %% callback to block for the full stop-timeout and then propagate
+            %% an exit through the link, which exceeds EUnit's per-test budget.
+            %% Coverage of this branch would require a real gen_server stand-in
+            %% wired into the class_builder lifecycle (out of scope here).
+
+            %% BT-1982: build_method_map/1 skips entries with unexpected shapes
+            %% (neither function nor map) — covers the catch-all fold branch.
+            ?_test(begin
+                State = #{
+                    className => 'BT1982BuildMapWeird',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{
+                        %% Both valid and invalid entries — the invalid one hits
+                        %% the fold catch-all (line 407).
+                        'good' => #{arity => 0},
+                        'bad' => weird_atom
+                    }
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                Methods = beamtalk_object_class:methods(ClassPid),
+                ?assert(lists:member('good', Methods)),
+                ?assertNot(lists:member('bad', Methods)),
+                gen_server:stop(ClassPid, normal, 5000)
+            end),
+
+            %% BT-1982: Callback module that exists but raises a non-undef error
+            %% exercises the generic `Kind:Reason:Stacktrace` branch of
+            %% notify_class_loaded/1. We dynamically compile a tiny module whose
+            %% on_class_loaded/1 raises.
+            ?_test(begin
+                OldVal = application:get_env(beamtalk_runtime, class_load_callback),
+                Forms = [
+                    {attribute, 1, module, bt1982_callback_raiser},
+                    {attribute, 2, export, [{on_class_loaded, 1}]},
+                    {function, 3, on_class_loaded, 1, [
+                        {clause, 3, [{var, 3, '_'}], [], [
+                            {call, 3, {atom, 3, error}, [{atom, 3, deliberate_failure}]}
+                        ]}
+                    ]}
+                ],
+                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+                {module, Mod} = code:load_binary(
+                    Mod, "bt1982_callback_raiser.erl", Bin
+                ),
+                application:set_env(
+                    beamtalk_runtime, class_load_callback, Mod
+                ),
+                State = #{
+                    className => 'BT1982CallbackRaises',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                %% Registration still succeeds — the generic catch-all eats the error.
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ClassPid)),
+
+                %% Restore original env
+                case OldVal of
+                    undefined -> application:unset_env(beamtalk_runtime, class_load_callback);
+                    {ok, V} -> application:set_env(beamtalk_runtime, class_load_callback, V)
+                end,
+                gen_server:stop(ClassPid, normal, 5000)
             end)
         ]
     end}.
