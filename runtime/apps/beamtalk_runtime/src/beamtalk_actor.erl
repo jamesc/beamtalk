@@ -334,8 +334,31 @@ functions stay simple.
 """.
 -spec safe_spawn(module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn(Module, InitArgs) ->
+    safe_spawn_internal(undefined, Module, InitArgs).
+
+-doc """
+BT-1987: Spawn a named actor with trap_exit + initialize synchronization.
+
+Same contract as `safe_spawn/2` but registers the actor under `Name`
+via `gen_server:start_link({local, Name}, ...)`. Reuses the same
+initialize-synchronization machinery so callers see `{ok, Pid}` only
+after `handle_continue(initialize, _)` has completed.
+""".
+-spec safe_spawn_named(atom(), module(), map()) -> {ok, pid()} | {error, term()}.
+safe_spawn_named(Name, Module, InitArgs) when is_atom(Name) ->
+    safe_spawn_internal({local, Name}, Module, InitArgs).
+
+-spec safe_spawn_internal(undefined | {local, atom()}, module(), term()) ->
+    {ok, pid()} | {error, term()}.
+safe_spawn_internal(ServerName, Module, InitArgs) ->
     OldTrap = erlang:process_flag(trap_exit, true),
-    Result = gen_server:start_link(Module, InitArgs, []),
+    Result =
+        case ServerName of
+            undefined ->
+                gen_server:start_link(Module, InitArgs, []);
+            {local, _} = SN ->
+                gen_server:start_link(SN, Module, InitArgs, [])
+        end,
     case Result of
         {ok, Pid} ->
             case await_initialize(Pid) of
@@ -1982,7 +2005,7 @@ actor). Returns `false` for raw OTP processes (including kernel
 processes, gen_servers not built on beamtalk_actor, etc.) and for
 dead processes.
 """.
--spec is_beamtalk_actor(pid()) -> boolean().
+-spec is_beamtalk_actor(term()) -> boolean().
 is_beamtalk_actor(Pid) when is_pid(Pid) ->
     case erlang:process_info(Pid, dictionary) of
         {dictionary, Dict} when is_list(Dict) ->
@@ -1999,12 +2022,20 @@ Register a pid under a name in the local atom registry.
 
 Returns `{ok, Name}` on success or `{error, #beamtalk_error{}}` on
 failure with `kind` one of:
-  - `type_error` — `Name` is not an atom or `Pid` is not a pid
+  - `type_error` — `Name` is not an atom or `Pid` is not a pid, or
+    the `Pid` is not registerable (dead, remote, or already has a
+    registered name).
   - `reserved_name` — `Name` is in the reserved-name blocklist
   - `name_registered` — another process is already registered
-    under `Name` (maps to `erlang:register/2` badarg when taken).
+    under `Name`.
+
+Note: `erlang:register/2` raises `badarg` for multiple reasons —
+duplicate name, dead pid, remote pid, pid already registered
+under another name. We disambiguate by checking
+`erlang:whereis(Name)` after `badarg`: if taken, it's a duplicate
+name; otherwise the Pid itself is unregisterable.
 """.
--spec register_name(atom(), pid()) -> {ok, atom()} | {error, #beamtalk_error{}}.
+-spec register_name(term(), term()) -> {ok, atom()} | {error, #beamtalk_error{}}.
 register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
     case reserved_name(Name) of
         true ->
@@ -2022,15 +2053,35 @@ register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
                 true -> {ok, Name}
             catch
                 error:badarg ->
-                    {error,
-                        beamtalk_error:with_hint(
-                            beamtalk_error:new(name_registered, 'Actor', registerAs),
-                            iolist_to_binary(
-                                io_lib:format(
-                                    "Name '~ts' is already registered", [Name]
-                                )
-                            )
-                        )}
+                    case erlang:whereis(Name) =/= undefined of
+                        true ->
+                            {error,
+                                beamtalk_error:with_hint(
+                                    beamtalk_error:new(
+                                        name_registered, 'Actor', registerAs
+                                    ),
+                                    iolist_to_binary(
+                                        io_lib:format(
+                                            "Name '~ts' is already registered", [Name]
+                                        )
+                                    )
+                                )};
+                        false ->
+                            {error,
+                                beamtalk_error:with_hint(
+                                    beamtalk_error:new(
+                                        type_error, 'Actor', registerAs
+                                    ),
+                                    iolist_to_binary(
+                                        io_lib:format(
+                                            "Pid ~tp is not registerable "
+                                            "(dead, remote, or already "
+                                            "registered under another name)",
+                                            [Pid]
+                                        )
+                                    )
+                                )}
+                    end
             end
     end;
 register_name(Name, Pid) ->
@@ -2052,21 +2103,36 @@ is not currently registered. Idempotent-friendly callers should
 check `whereis_name/1` first if they want "unregister-if-present"
 semantics.
 """.
--spec unregister_name(atom()) -> ok | {error, #beamtalk_error{}}.
+-spec unregister_name(term()) -> ok | {error, #beamtalk_error{}}.
 unregister_name(Name) when is_atom(Name) ->
-    try erlang:unregister(Name) of
-        true -> ok
-    catch
-        error:badarg ->
+    case reserved_name(Name) of
+        true ->
             {error,
                 beamtalk_error:with_hint(
-                    beamtalk_error:new(name_registered, 'Actor', unregister),
+                    beamtalk_error:new(reserved_name, 'Actor', unregister),
                     iolist_to_binary(
                         io_lib:format(
-                            "Name '~ts' is not registered", [Name]
+                            "Cannot unregister reserved name '~ts'", [Name]
                         )
                     )
-                )}
+                )};
+        false ->
+            try erlang:unregister(Name) of
+                true -> ok
+            catch
+                error:badarg ->
+                    {error,
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(
+                                name_registered, 'Actor', unregister
+                            ),
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "Name '~ts' is not registered", [Name]
+                                )
+                            )
+                        )}
+            end
     end;
 unregister_name(Name) ->
     {error,
@@ -2086,7 +2152,7 @@ Returns `{ok, Pid}` if a process is registered, or `undefined` if
 no process is registered under that name. Non-atom input returns
 `{error, #beamtalk_error{kind = type_error}}`.
 """.
--spec whereis_name(atom()) -> {ok, pid()} | undefined | {error, #beamtalk_error{}}.
+-spec whereis_name(term()) -> {ok, pid()} | undefined | {error, #beamtalk_error{}}.
 whereis_name(Name) when is_atom(Name) ->
     case erlang:whereis(Name) of
         undefined -> undefined;
@@ -2130,21 +2196,22 @@ Equivalent to `start_link({local, Name}, Module, [])`. Returns
 name-related failures. Other errors (crash in init, etc.) pass
 through from `gen_server:start_link/4` as `{error, Reason}`.
 """.
--spec 'spawnAs'(atom(), module()) -> {ok, pid()} | {error, term()}.
+-spec 'spawnAs'(term(), term()) -> {ok, pid()} | {error, term()}.
 'spawnAs'(Name, Module) ->
     'spawnAs'(Name, Module, []).
 
 -doc """
 Spawn an actor under a registered name (arity 3).
 
-Thin delegate to `start_link({local, Name}, Module, Args)` that
-enforces the reserved-name blocklist and the atom type-check
-*before* the process is spawned. On `{already_started, _}` or
+Delegates to `safe_spawn_named/3` (which wraps
+`gen_server:start_link({local, Name}, ...)` with trap_exit and
+`initialize` synchronization) after enforcing the reserved-name
+blocklist and the atom type-check. On `{already_started, _}` or
 `badarg` from the registry, returns a structured `#beamtalk_error{}`
 with kind `name_registered` so the stdlib boundary can translate
 to `Result error: ...`.
 """.
--spec 'spawnAs'(atom(), module(), term()) -> {ok, pid()} | {error, term()}.
+-spec 'spawnAs'(term(), term(), term()) -> {ok, pid()} | {error, term()}.
 'spawnAs'(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
     case reserved_name(Name) of
         true ->
@@ -2158,32 +2225,41 @@ to `Result error: ...`.
                     )
                 )};
         false ->
-            case gen_server:start_link({local, Name}, Module, Args, []) of
+            try safe_spawn_named(Name, Module, Args) of
                 {ok, Pid} ->
                     {ok, Pid};
                 {error, {already_started, _Other}} ->
-                    {error,
-                        beamtalk_error:with_hint(
-                            beamtalk_error:new(name_registered, 'Actor', spawnAs),
-                            iolist_to_binary(
-                                io_lib:format(
-                                    "Name '~ts' is already registered", [Name]
-                                )
-                            )
-                        )};
+                    name_registered_error(Name);
                 {error, Reason} ->
-                    {error, Reason};
-                ignore ->
-                    {error, ignore}
+                    {error, Reason}
+            catch
+                %% gen_server:start_link can raise badarg from the local
+                %% registry (e.g., name already taken at the moment of
+                %% registration). Translate to the structured error.
+                error:badarg ->
+                    name_registered_error(Name)
             end
     end;
-'spawnAs'(Name, Module, _Args) ->
+'spawnAs'(Name, Module, Args) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', spawnAs),
             iolist_to_binary(
                 io_lib:format(
-                    "spawnAs expects (atom, module), got (~tp, ~tp)", [Name, Module]
+                    "spawnAs/3 expects (atom, module, term), got (~tp, ~tp, ~tp)",
+                    [Name, Module, Args]
+                )
+            )
+        )}.
+
+-spec name_registered_error(atom()) -> {error, #beamtalk_error{}}.
+name_registered_error(Name) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(name_registered, 'Actor', spawnAs),
+            iolist_to_binary(
+                io_lib:format(
+                    "Name '~ts' is already registered", [Name]
                 )
             )
         )}.

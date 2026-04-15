@@ -2535,8 +2535,12 @@ is_beamtalk_actor_false_for_raw_process_test() ->
     receive
         ready -> ok
     end,
-    ?assertNot(beamtalk_actor:is_beamtalk_actor(Pid)),
-    Pid ! stop.
+    try
+        ?assertNot(beamtalk_actor:is_beamtalk_actor(Pid))
+    after
+        %% Ensure the spawned process is reaped even if the assertion fails.
+        exit(Pid, kill)
+    end.
 
 is_beamtalk_actor_false_for_kernel_process_test() ->
     %% `init` is always running and is not a beamtalk actor.
@@ -2632,6 +2636,37 @@ unregister_name_not_registered_test() ->
 unregister_name_non_atom_test() ->
     Result = beamtalk_actor:unregister_name(<<"bin">>),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+unregister_name_reserved_test() ->
+    %% unregister_name/1 must reject reserved names before touching the
+    %% registry — otherwise `unregister_name(logger)` would silently
+    %% deregister the OTP logger process.
+    R1 = beamtalk_actor:unregister_name(logger),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
+    R2 = beamtalk_actor:unregister_name(kernel_sup),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2),
+    R3 = beamtalk_actor:unregister_name(beamtalk_something),
+    ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R3),
+    %% OTP logger must still be registered after the attempt.
+    ?assertNotEqual(undefined, erlang:whereis(logger)).
+
+register_name_dead_pid_test() ->
+    %% A `badarg` from erlang:register/2 can mean "dead pid", not just
+    %% "name already taken". The non-duplicate branch must surface as a
+    %% type_error with a useful hint rather than name_registered.
+    Name = 'bt1987_register_dead_pid',
+    cleanup_name(Name),
+    DeadPid = spawn(fun() -> ok end),
+    MRef = erlang:monitor(process, DeadPid),
+    receive
+        {'DOWN', MRef, process, DeadPid, _} -> ok
+    after 1000 ->
+        ?assert(false)
+    end,
+    Result = beamtalk_actor:register_name(Name, DeadPid),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result),
+    %% And no ghost registration was left behind.
+    ?assertEqual(undefined, erlang:whereis(Name)).
 
 whereis_name_undefined_test() ->
     ?assertEqual(undefined, beamtalk_actor:whereis_name('bt1987_nonexistent_name')).
