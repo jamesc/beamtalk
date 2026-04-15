@@ -23,7 +23,8 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
     'class_testWith:'/3,
     class_testInternalUndef/2,
     class_testRaise/2,
-    'class_testTwoArgs:and:'/4
+    'class_testTwoArgs:and:'/4,
+    class_testSupervisorNew/2
 ]).
 
 -doc """
@@ -86,3 +87,18 @@ erlang:apply receives [ClassSelf, ClassVars, Arg1, Arg2] → function/4.
 -spec 'class_testTwoArgs:and:'(term(), map(), term(), term()) -> term().
 'class_testTwoArgs:and:'(_ClassSelf, _ClassVars, Arg1, Arg2) ->
     {two_args, Arg1, Arg2}.
+
+-doc """
+Zero-argument class method that returns a `beamtalk_supervisor_new` tuple.
+
+BT-1981: Exercises the supervisor_new rewrap path in class_send_dispatch
+where a freshly-started supervisor tuple is converted to the standard
+supervisor tag after running the initialize: lifecycle hook.
+""".
+-spec class_testSupervisorNew(term(), map()) -> tuple().
+class_testSupervisorNew(_ClassSelf, _ClassVars) ->
+    %% Use self() as the supervisor pid; beamtalk_supervisor:run_initialize
+    %% will attempt to dispatch initialize: on it which will no-op on the
+    %% absence of an initialize: method. We just care that the rewrap branch
+    %% runs; we accept any outcome from run_initialize here.
+    {beamtalk_supervisor_new, 'BT1981SupTestClass', bt1981_sup_mod, self()}.
