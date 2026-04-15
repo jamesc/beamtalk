@@ -219,7 +219,7 @@ Counter respondsTo: #size
 // => false
 
 // Two system singletons provide rich introspection:
-Beamtalk allClasses        // All registered class names
+Beamtalk allClasses        // All registered classes (class objects)
 Beamtalk help: Counter     // Formatted documentation
 Workspace actors           // All live actors in the workspace
 Workspace actorsOf: Counter // All Counter instances
