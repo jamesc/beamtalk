@@ -14,6 +14,18 @@ Tests:
   - sealed superclass rejected (stdlibMode bypasses this for stdlib loading, BT-791)
   - bad name error: className is not an atom (nil or non-atom)
   - bootstrap assertion: Class respondsTo: #classBuilder
+  - BT-1967: missing className key defaults to nil error
+  - BT-1967: missing superclassRef key defaults to nil error
+  - BT-1967: integer className rejected
+  - BT-1967: non-map methodSpecs rejected
+  - BT-1967: builder pid stopped after successful registration
+  - BT-1967: builder pid = self() skips stop
+  - BT-1967: compiled class metadata passthrough
+  - BT-1967: method specs with compiled method info map
+  - BT-1967: sealed and abstract modifiers applied
+  - BT-1967: hot reload updates methods
+  - BT-1967: superclass resolution via pid reference
+  - BT-1967: class_load_callback notification
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -321,3 +333,353 @@ classbuilder_registered_in_bootstrap_test_() ->
                 end)
             ]
         end}.
+
+%%====================================================================
+%% BT-1967: Missing keys default to nil → error
+%%====================================================================
+
+register_missing_classname_key_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% className key absent entirely — defaults to nil via maps:get/3
+                State = #{
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                Result = beamtalk_class_builder:register(State),
+                ?assertMatch({error, #beamtalk_error{kind = missing_parameter}}, Result)
+            end)
+        ]
+    end}.
+
+register_missing_superclass_key_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% superclassRef key absent entirely — defaults to nil
+                State = #{
+                    className => 'BT1967NoSuperKey',
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                Result = beamtalk_class_builder:register(State),
+                ?assertMatch({error, #beamtalk_error{kind = no_superclass}}, Result)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Integer className rejected
+%%====================================================================
+
+register_integer_classname_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 42,
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                Result = beamtalk_class_builder:register(State),
+                ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Non-map methodSpecs rejected
+%%====================================================================
+
+register_bad_method_specs_type_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 'BT1967BadMethodSpecs',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => not_a_map
+                },
+                Result = beamtalk_class_builder:register(State),
+                ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Builder pid stopped after successful registration
+%%====================================================================
+
+register_stops_builder_pid_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Spawn a dummy gen_server to act as the builder pid
+                {ok, BuilderPid} = gen_server:start(
+                    {local, bt1967_dummy_builder},
+                    beamtalk_test_gen_server,
+                    [],
+                    []
+                ),
+                ?assert(is_process_alive(BuilderPid)),
+
+                State = #{
+                    className => 'BT1967BuilderStop',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{},
+                    builderPid => BuilderPid
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ClassPid)),
+
+                %% Builder should have been stopped
+                timer:sleep(100),
+                ?assertNot(is_process_alive(BuilderPid)),
+
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Builder pid = self skips stop (no deadlock)
+%%====================================================================
+
+register_builder_pid_self_noop_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% When builderPid is self(), the stop should be skipped
+                %% (can't stop yourself synchronously).
+                %% We pass self() as the builderPid and verify we're still alive after.
+                State = #{
+                    className => 'BT1967SelfBuilder',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{},
+                    builderPid => self()
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ClassPid)),
+                ?assert(is_process_alive(self())),
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Compiled class metadata passthrough
+%%====================================================================
+
+register_compiled_class_metadata_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 'BT1967CompiledMeta',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{x => 0},
+                    methodSpecs => #{},
+                    moduleName => 'bt1967_compiled_meta_bt',
+                    classMethods => #{'factory' => #{arity => 0}},
+                    classDoc => <<"A test class for metadata passthrough">>,
+                    methodDocs => #{'x' => <<"accessor for x">>}
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ClassPid)),
+
+                %% Verify module name was passed through
+                ?assertEqual(
+                    'bt1967_compiled_meta_bt',
+                    beamtalk_object_class:module_name(ClassPid)
+                ),
+
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Method specs with compiled method info (map form)
+%%====================================================================
+
+register_compiled_method_specs_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Method specs as maps (compiled method references) rather than funs
+                State = #{
+                    className => 'BT1967CompiledMethods',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{
+                        'getValue' => #{arity => 0},
+                        'setValue:' => #{arity => 1}
+                    }
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ClassPid)),
+                ?assert(beamtalk_object_class:has_method(ClassPid, 'getValue')),
+                ?assert(beamtalk_object_class:has_method(ClassPid, 'setValue:')),
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Sealed and abstract modifiers applied
+%%====================================================================
+
+register_sealed_modifier_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 'BT1967SealedClass',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{},
+                    modifiers => [sealed]
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(beamtalk_object_class:is_sealed(ClassPid)),
+                ?assertNot(beamtalk_object_class:is_abstract(ClassPid)),
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+register_abstract_modifier_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 'BT1967AbstractClass',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{},
+                    modifiers => [abstract]
+                },
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(beamtalk_object_class:is_abstract(ClassPid)),
+                ?assertNot(beamtalk_object_class:is_sealed(ClassPid)),
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Hot reload updates methods
+%%====================================================================
+
+register_hot_reload_updates_methods_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Initial registration with one method
+                State1 = #{
+                    className => 'BT1967HotReloadMethods',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{'alpha' => #{arity => 0}}
+                },
+                {ok, _Pid1} = beamtalk_class_builder:register(State1),
+                Pid = beamtalk_class_registry:whereis_class('BT1967HotReloadMethods'),
+                ?assert(beamtalk_object_class:has_method(Pid, 'alpha')),
+
+                %% Hot reload with different method
+                State2 = #{
+                    className => 'BT1967HotReloadMethods',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{'beta' => #{arity => 0}}
+                },
+                {ok, _Pid2} = beamtalk_class_builder:register(State2),
+                ReloadPid = beamtalk_class_registry:whereis_class('BT1967HotReloadMethods'),
+                ?assert(beamtalk_object_class:has_method(ReloadPid, 'beta')),
+
+                gen_server:stop(ReloadPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: Superclass resolution via pid reference
+%%====================================================================
+
+register_superclass_as_pid_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Register a parent class first
+                ParentInfo = #{
+                    name => 'BT1967Parent',
+                    superclass => 'Object',
+                    module => beamtalk_class_builder_bt,
+                    fields => [],
+                    class_methods => #{},
+                    instance_methods => #{},
+                    is_sealed => false
+                },
+                {ok, ParentPid} = beamtalk_object_class:start('BT1967Parent', ParentInfo),
+
+                %% Register child using pid as superclass reference
+                State = #{
+                    className => 'BT1967Child',
+                    superclassRef => ParentPid,
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                {ok, ChildPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ChildPid)),
+
+                %% Superclass should resolve to the parent's name
+                ?assertEqual('BT1967Parent', beamtalk_object_class:superclass(ChildPid)),
+
+                gen_server:stop(ChildPid, normal, 5000),
+                gen_server:stop(ParentPid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-1967: class_load_callback notification
+%%====================================================================
+
+register_class_load_callback_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Register a nonexistent callback module in application env.
+                %% The undef error should be caught gracefully by notify_class_loaded/1.
+                OldVal = application:get_env(beamtalk_runtime, class_load_callback),
+                application:set_env(
+                    beamtalk_runtime,
+                    class_load_callback,
+                    beamtalk_test_class_load_callback
+                ),
+                State = #{
+                    className => 'BT1967CallbackTest',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                %% Registration should succeed even if callback module doesn't exist
+                {ok, ClassPid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(ClassPid)),
+
+                %% Restore original env
+                case OldVal of
+                    undefined -> application:unset_env(beamtalk_runtime, class_load_callback);
+                    {ok, V} -> application:set_env(beamtalk_runtime, class_load_callback, V)
+                end,
+
+                gen_server:stop(ClassPid, normal, 5000)
+            end)
+        ]
+    end}.
