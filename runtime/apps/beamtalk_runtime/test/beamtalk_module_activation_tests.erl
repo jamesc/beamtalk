@@ -313,8 +313,11 @@ find_modules_skips_invalid_names_test() ->
 
 activate_ebin_nonexistent_dir_test() ->
     %% Non-existent directory should return {ok, []} with no crash
-    NonExistent = filename:join(get_tmp_base(), "nonexistent_ebin_" ++
-        integer_to_list(erlang:unique_integer([positive]))),
+    NonExistent = filename:join(
+        get_tmp_base(),
+        "nonexistent_ebin_" ++
+            integer_to_list(erlang:unique_integer([positive]))
+    ),
     ?assertEqual({ok, []}, beamtalk_module_activation:activate_ebin(NonExistent)).
 
 activate_ebin_empty_dir_test() ->
