@@ -98,7 +98,20 @@ dispatch_test_() ->
             {"lookup returns error for dead class process", fun test_dead_class_process/0},
             {"super at Object for unknown method", fun test_super_object_unknown/0},
             {"lookup with class_not_found in superclass chain",
-                fun test_lookup_missing_superclass_in_chain/0}
+                fun test_lookup_missing_superclass_in_chain/0},
+            %% BT-1512: Extension state threading tests (previously unwired)
+            {"arity-3 extension threads state correctly", fun test_extension_state_threading/0},
+            {"arity-2 value-type extension via runtime dispatch",
+                fun test_value_type_extension_via_runtime_dispatch/0},
+            %% BT-1970: Additional coverage tests
+            {"extension with bad arity raises error", fun test_extension_bad_arity/0},
+            {"non-actor Self uses normal dispatch for displayString",
+                fun test_non_actor_self_displaystring/0},
+            {"lookup zero-arity method succeeds", fun test_lookup_zero_arity_method/0},
+            {"responds_to walks full hierarchy depth", fun test_responds_to_deep_chain/0},
+            {"lookup succeeds with extensions table present",
+                fun test_lookup_with_extensions_table/0},
+            {"super from class with no superclass returns DNU", fun test_super_no_superclass/0}
         ]
     end}.
 
@@ -930,4 +943,114 @@ test_actor_instance_bypass_throwing_module() ->
         gen_server:stop(Pid),
         code:purge(bt_test_actor_dispatch_throws_stub),
         code:delete(bt_test_actor_dispatch_throws_stub)
+    end.
+
+%%% ============================================================================
+%%% BT-1970: Additional coverage tests
+%%% ============================================================================
+
+%% Test: extension with bad arity raises {bad_extension_arity, N}
+test_extension_bad_arity() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    %% Register an extension with arity 1 (neither 2 nor 3)
+    BadFun = fun(_OnlyOneArg) -> bad end,
+    ok = beamtalk_extensions:register('Counter', badArityExt, BadFun, test_owner),
+
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+
+    try
+        ?assertError(
+            {bad_extension_arity, 1},
+            beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter')
+        )
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Counter', badArityExt})
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% Test: is_actor_instance returns false for non-actor values.
+%% When Self is not a #beamtalk_object{}, displayString goes through normal dispatch.
+test_non_actor_self_displaystring() ->
+    ok = ensure_counter_loaded(),
+
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+
+    %% Non-actor Self: displayString goes through compiled Counter dispatch,
+    %% not the beamtalk_object_ops bypass path.
+    Result = beamtalk_dispatch:lookup('displayString', [], Self, State, 'Counter'),
+    ?assertMatch({reply, _, _}, Result).
+
+%% Test: lookup with zero-arity method succeeds
+test_lookup_zero_arity_method() ->
+    ok = ensure_counter_loaded(),
+
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        'value' => 5
+    },
+    Self = make_ref(),
+
+    Result = beamtalk_dispatch:lookup('getValue', [], Self, State, 'Counter'),
+    ?assertMatch({reply, _, _}, Result).
+
+%% Test: responds_to walks full hierarchy depth correctly
+test_responds_to_deep_chain() ->
+    ok = ensure_counter_loaded(),
+
+    %% Counter -> Actor -> Object. 'class' is in Object.
+    ?assert(beamtalk_dispatch:responds_to(class, 'Counter')),
+
+    %% Counter defines increment locally
+    ?assert(beamtalk_dispatch:responds_to(increment, 'Counter')),
+
+    %% A method that doesn't exist anywhere
+    ?assertNot(beamtalk_dispatch:responds_to(totallyFakeDeepMethod, 'Counter')).
+
+%% Test: lookup succeeds when extensions ETS table is present but has no match.
+%% Exercises the check_extension -> not_found -> lookup_in_class_chain path.
+test_lookup_with_extensions_table() ->
+    ok = beamtalk_extensions:init(),
+    ok = ensure_counter_loaded(),
+
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+
+    %% increment is a local Counter method, should be found regardless of extensions
+    Result = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
+    ?assertMatch({reply, _, _}, Result).
+
+%% Test: super from a class with no superclass returns DNU (not crash)
+test_super_no_superclass() ->
+    {ok, Pid} = beamtalk_object_class:start_link('RootTestClass', #{
+        superclass => none,
+        instance_methods => #{
+            localOnly => #{block => fun(_S, [], St) -> {reply, ok, St} end, arity => 0}
+        },
+        instance_variables => []
+    }),
+
+    State = #{'$beamtalk_class' => 'RootTestClass'},
+    Self = make_ref(),
+
+    try
+        Result = beamtalk_dispatch:super(localOnly, [], Self, State, 'RootTestClass'),
+        ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result)
+    after
+        gen_server:stop(Pid)
     end.
