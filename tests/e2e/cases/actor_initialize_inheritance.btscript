@@ -64,11 +64,16 @@ deep getLog
 // => ABC
 
 // ===========================================================================
-// UNINITIALIZED INHERITED FIELD RAISES InstantiationError
+// UNINITIALIZED INHERITED FIELD RAISES UninitializedStateError
 // ===========================================================================
 
 // Parent declares `state: missing :: String` but its `initialize` forgets
-// to set it. Spawning must raise an InstantiationError naming the offending
-// class.
+// to set it. Spawning the parent surfaces the post-initialize check
+// attributing the failure to the declaring class.
 E2EInitInheritForgets spawn
-// => ERROR: E2EInitInheritForgets
+// => ERROR: UninitializedStateError in E2EInitInheritForgets
+
+// NOTE: Spawning a cross-file subclass of E2EInitInheritForgets currently
+// does NOT raise — Phase 1 cannot see an ancestor's AST to collect its
+// inherited typed-no-default fields into the subclass's post-init check.
+// See BT-1976 for the cross-file follow-up.
