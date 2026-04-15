@@ -124,3 +124,110 @@ start_actor_function_exported_test() ->
 start_link_function_exported_test() ->
     %% Verify start_link/0 is exported
     ?assert(erlang:function_exported(beamtalk_actor_sup, start_link, 0)).
+
+%%% ============================================================================
+%%% BT-1979: Child start/stop lifecycle coverage
+%%% ============================================================================
+
+start_actor_success_starts_child_test() ->
+    %% Start the supervisor, then spawn a child actor through start_actor/3
+    {ok, SupPid} = beamtalk_actor_sup:start_link(),
+    try
+        %% test_counter:init/1 expects an initial value; start_link_supervised/3
+        %% forwards Args to the actor module's init/1.
+        Result = beamtalk_actor_sup:start_actor(test_counter, start_link, [42]),
+        ?assertMatch({ok, _}, Result),
+        {ok, ChildPid} = Result,
+        ?assert(is_process_alive(ChildPid)),
+        %% Supervisor should now report one active child
+        Counts = supervisor:count_children(SupPid),
+        ?assertEqual(1, proplists:get_value(active, Counts)),
+        %% The child should be functional — sync call should return the seed
+        ?assertEqual(42, gen_server:call(ChildPid, {getValue, []}))
+    after
+        exit(SupPid, normal),
+        timer:sleep(10)
+    end.
+
+start_actor_error_path_logs_and_returns_test() ->
+    %% When the module doesn't exist, start_link_supervised/3 -> start_link/3
+    %% will fail and supervisor:start_child returns {error, Reason}. This
+    %% exercises the {error, Reason} branch of start_actor/3 (including its
+    %% ?LOG_ERROR line).
+    {ok, SupPid} = beamtalk_actor_sup:start_link(),
+    try
+        Result = beamtalk_actor_sup:start_actor(nonexistent_module, start_link, [0]),
+        ?assertMatch({error, _}, Result)
+    after
+        exit(SupPid, normal),
+        timer:sleep(10)
+    end.
+
+start_link_logs_success_test() ->
+    %% Covers the {ok, Pid} log path in start_link/0 (the case where
+    %% supervisor:start_link returns ok). The previous tests all start the
+    %% supervisor too but we assert on the behaviour end-to-end.
+    {ok, Pid} = beamtalk_actor_sup:start_link(),
+    ?assert(is_process_alive(Pid)),
+    %% Registered under the module name
+    ?assertEqual(Pid, whereis(beamtalk_actor_sup)),
+    exit(Pid, normal),
+    timer:sleep(10),
+    ?assertEqual(undefined, whereis(beamtalk_actor_sup)).
+
+start_actor_multiple_children_test() ->
+    %% Exercise starting several children under the supervisor
+    {ok, SupPid} = beamtalk_actor_sup:start_link(),
+    try
+        {ok, C1} = beamtalk_actor_sup:start_actor(test_counter, start_link, [1]),
+        {ok, C2} = beamtalk_actor_sup:start_actor(test_counter, start_link, [2]),
+        {ok, C3} = beamtalk_actor_sup:start_actor(test_counter, start_link, [3]),
+        ?assert(is_process_alive(C1)),
+        ?assert(is_process_alive(C2)),
+        ?assert(is_process_alive(C3)),
+        Counts = supervisor:count_children(SupPid),
+        ?assertEqual(3, proplists:get_value(active, Counts)),
+        ?assertEqual(3, proplists:get_value(workers, Counts)),
+        %% Values should be distinct (seeded per start)
+        ?assertEqual(1, gen_server:call(C1, {getValue, []})),
+        ?assertEqual(2, gen_server:call(C2, {getValue, []})),
+        ?assertEqual(3, gen_server:call(C3, {getValue, []}))
+    after
+        exit(SupPid, normal),
+        timer:sleep(10)
+    end.
+
+start_link_already_started_returns_error_test() ->
+    %% Covers the non-{ok,Pid} branch at line 33-34 in start_link/0 (the
+    %% `_ -> ok` clause in the log case). When the supervisor is already
+    %% registered, a second start_link returns {error, {already_started, Pid}}.
+    {ok, FirstPid} = beamtalk_actor_sup:start_link(),
+    try
+        Result = beamtalk_actor_sup:start_link(),
+        ?assertMatch({error, {already_started, _}}, Result)
+    after
+        exit(FirstPid, normal),
+        timer:sleep(10)
+    end.
+
+temporary_child_not_restarted_on_crash_test() ->
+    %% Verifies the `temporary` restart strategy: crashed actors are NOT
+    %% automatically restarted by the supervisor.
+    {ok, SupPid} = beamtalk_actor_sup:start_link(),
+    try
+        {ok, ChildPid} = beamtalk_actor_sup:start_actor(test_counter, start_link, [7]),
+        %% Monitor and kill the child
+        Ref = erlang:monitor(process, ChildPid),
+        exit(ChildPid, kill),
+        receive
+            {'DOWN', Ref, process, ChildPid, _} -> ok
+        after 1000 ->
+            ?assert(false)
+        end,
+        %% After crash, active count should be 0 (temporary child not restarted)
+        Counts = supervisor:count_children(SupPid),
+        ?assertEqual(0, proplists:get_value(active, Counts))
+    after
+        exit(SupPid, normal),
+        timer:sleep(10)
+    end.
