@@ -16,6 +16,7 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec restart equals: #temporary
     self assert: spec args equals: nil
     self assert: spec shutdown equals: nil
+    self assert: spec name equals: nil
 
   testKeywordConstructor =>
     spec := SupervisionSpec
@@ -25,12 +26,14 @@ TestCase subclass: SupervisionSpecValueTest
       args: nil
       shutdown: nil
       classMethod: nil
+      name: nil
     self assert: spec id equals: #db
     self assert: spec actorClass equals: Counter
     self assert: spec restart equals: #permanent
     self assert: spec args equals: nil
     self assert: spec shutdown equals: nil
     self assert: spec classMethod equals: nil
+    self assert: spec name equals: nil
 
   testWithSetterReturnsFreshCopy =>
     spec := SupervisionSpec new
@@ -165,3 +168,101 @@ TestCase subclass: SupervisionSpecValueTest
     spec := (SupervisionSpec new withActorClass: Supervisor) withShutdown: 10000
     child := spec childSpec
     self assert: (child at: #shutdown) equals: 10000
+
+  // === withName: fluent override (BT-1989, ADR 0079) ===
+  testWithNameSetterReturnsFreshCopy =>
+    spec := SupervisionSpec new withActorClass: Counter
+    spec2 := spec withName: #myCounter
+    // Original unchanged
+    self assert: spec name equals: nil
+    // New instance updated
+    self assert: spec2 name equals: #myCounter
+
+  testWithNameWithRestart =>
+    spec := SupervisionSpec new withName: #primary withRestart: #permanent
+    self assert: spec name equals: #primary
+    self assert: spec restart equals: #permanent
+
+  testWithNameWithArgs =>
+    args := #{#role => #primary}
+    spec := SupervisionSpec new withName: #db withArgs: args
+    self assert: spec name equals: #db
+    self assert: spec args equals: args
+
+  testWithNameWithRestartWithArgs =>
+    args := #{#role => #replica}
+    spec := SupervisionSpec new
+      withName: #replica
+      withRestart: #transient
+      withArgs: args
+    self assert: spec name equals: #replica
+    self assert: spec restart equals: #transient
+    self assert: spec args equals: args
+
+  testFluentRoundTripViaSupervisionSpec =>
+    // ADR 0079 usage: ActorClass supervisionSpec withName: ... withRestart: ...
+    spec := Counter supervisionSpec withName: #counter withRestart: #permanent
+    self assert: spec actorClass equals: Counter
+    self assert: spec name equals: #counter
+    self assert: spec restart equals: #permanent
+
+  // === childSpec when name is nil — existing behavior unchanged ===
+  testChildSpecWithoutNameUsesSpawn =>
+    spec := SupervisionSpec new withActorClass: Counter
+    child := spec childSpec
+    start := child at: #start
+    // Without a name, startFn is #spawn (no args)
+    self assert: (start at: 2) equals: #spawn
+    self assert: (start at: 3) equals: #()
+
+  testChildSpecWithoutNameWithArgsUsesSpawnWith =>
+    args := #{#value => 10}
+    spec := (SupervisionSpec new withActorClass: Counter) withArgs: args
+    child := spec childSpec
+    start := child at: #start
+    self assert: (start at: 2) equals: #spawnWith:
+    self assert: (start at: 3) equals: #(args)
+
+  // === childSpec when name is set (ADR 0079) ===
+  testChildSpecWithNameNoArgsUsesSpawnAs =>
+    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter
+    child := spec childSpec
+    start := child at: #start
+    // With a name and nil args, startFn is #spawnAs: and startArgs carries the name
+    self assert: (start at: 2) equals: #spawnAs:
+    self assert: (start at: 3) equals: #(#myCounter)
+
+  testChildSpecWithNameAndArgsUsesSpawnWithAs =>
+    args := #{#value => 10}
+    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter withArgs: args
+    child := spec childSpec
+    start := child at: #start
+    // With a name and args, startFn is #spawnWith:as: and startArgs carries both
+    self assert: (start at: 2) equals: #spawnWith:as:
+    self assert: (start at: 3) equals: #(args, #myCounter)
+
+  testChildSpecWithNamePreservesActorClass =>
+    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter
+    child := spec childSpec
+    start := child at: #start
+    self assert: (start at: 1) equals: Counter
+
+  testChildSpecWithNamePreservesRestart =>
+    // Setting a name does not alter restart/shutdown/type
+    spec := Counter supervisionSpec withName: #counter withRestart: #permanent
+    child := spec childSpec
+    self assert: (child at: #restart) equals: #permanent
+    self assert: (child at: #shutdown) equals: 5000
+    self assert: (child at: #type) equals: #worker
+
+  testChildSpecDefaultIdUnaffectedByName =>
+    // id still defaults to the class name when only name is set
+    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter
+    child := spec childSpec
+    self assert: (child at: #id) equals: #Counter
+
+  testChildSpecNameAndClassMethodConflictRaisesError =>
+    // name and classMethod are mutually exclusive — childSpec raises
+    spec := (SupervisionSpec new withActorClass: Counter) withName: #counter
+    spec2 := spec withClassMethod: #start:
+    self should: [spec2 childSpec] raise: #user_error

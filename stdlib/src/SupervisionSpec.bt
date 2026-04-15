@@ -9,9 +9,9 @@
 /// you need per-child overrides for id, restart policy, or startup args.
 ///
 /// The auto-generated API (from `field:` declarations) includes:
-/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`, `classMethod`
-/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`, `withClassMethod:`
-/// - Keyword constructor: `id:actorClass:restart:args:shutdown:classMethod:`
+/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`, `classMethod`, `name`
+/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`, `withClassMethod:`, `withName:`
+/// - Keyword constructor: `id:actorClass:restart:args:shutdown:classMethod:name:`
 ///
 /// See ADR 0059 for the full design.
 ///
@@ -67,9 +67,17 @@ typed Value subclass: SupervisionSpec
   ///     withArgs: #(config, client)
   /// ```
   field: classMethod :: Symbol | Nil = nil
+  /// Registered name for the supervised actor.
+  ///
+  /// When set, the supervisor starts the child via `{local, Name}` registration
+  /// (OTP idiom) so the name is re-established on every restart. The `childSpec`
+  /// startFn becomes `#spawnAs:` (when args is nil) or `#spawnWith:as:` (when
+  /// args is present). When nil (default), existing `#spawn` / `#spawnWith:`
+  /// behavior is unchanged — naming is purely additive. See ADR 0079.
+  field: name :: Symbol | Nil = nil
 
   // === Multi-keyword fluent overrides ===
-  // (Single-field variants withId:, withRestart:, withArgs: are auto-generated.)
+  // (Single-field variants withId:, withRestart:, withArgs:, withName: are auto-generated.)
 
   /// Return a new spec with id and restart overridden.
   withId: anId :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
@@ -83,9 +91,21 @@ typed Value subclass: SupervisionSpec
   withId: anId :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withId: anId) withRestart: policy) withArgs: someArgs
 
+  /// Return a new spec with name and restart overridden.
+  withName: aName :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
+    (self withName: aName) withRestart: policy
+
+  /// Return a new spec with name and args overridden.
+  withName: aName :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
+    (self withName: aName) withArgs: someArgs
+
+  /// Return a new spec with name, restart, and args all overridden.
+  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
+    ((self withName: aName) withRestart: policy) withArgs: someArgs
+
   // === Display ===
 
-  /// Human-readable description showing the actor class, id, and restart policy.
+  /// Human-readable description showing the actor class, id, name, and restart policy.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -99,9 +119,13 @@ typed Value subclass: SupervisionSpec
     idPart := self id isNil ifTrue: [
       ""
     ] ifFalse: [", id: " ++ self id displayString]
+    namePart := self name isNil ifTrue: [
+      ""
+    ] ifFalse: [", name: " ++ self name displayString]
     "SupervisionSpec("
       ++ cls
       ++ idPart
+      ++ namePart
       ++ ", restart: "
       ++ self restart displayString
       ++ ")"
@@ -124,9 +148,21 @@ typed Value subclass: SupervisionSpec
       self error: "SupervisionSpec>>childSpec: actorClass must not be nil"
     ]
     childId := self id isNil ifTrue: [self actorClass name] ifFalse: [self id]
-    startFn := self classMethod isNil ifTrue: [
-      self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
-    ] ifFalse: [#classMethod]
+    // Validate: name and classMethod cannot both be set — the two startFn modes are
+    // mutually exclusive for now. Named classMethod starts are a future extension.
+    (self name isNil not and: [self classMethod isNil not])
+      ifTrue: [
+        self error: "SupervisionSpec>>childSpec: name and classMethod cannot both be set"
+      ]
+    startFn := self classMethod isNil
+      ifTrue: [
+        self name isNil ifTrue: [
+          self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
+        ] ifFalse: [
+          self args isNil ifTrue: [#spawnAs:] ifFalse: [#spawnWith:as:]
+        ]
+      ]
+      ifFalse: [#classMethod]
     // Validate: when classMethod is set, args must be nil or a List — not a Dictionary
     (self classMethod isNil not and: [
       self args isNil not and: [self args isKindOf: Dictionary]
@@ -135,7 +171,15 @@ typed Value subclass: SupervisionSpec
         self error: "SupervisionSpec>>childSpec: when classMethod is set, args must be a List #(...), not a Dictionary"
       ]
     startArgs := self classMethod isNil
-      ifTrue: [self args isNil ifTrue: [#()] ifFalse: [#(self args)]]
+      ifTrue: [
+        self name isNil ifTrue: [
+          self args isNil ifTrue: [#()] ifFalse: [#(self args)]
+        ] ifFalse: [
+          self args isNil ifTrue: [
+            #(self name)
+          ] ifFalse: [#(self args, self name)]
+        ]
+      ]
       ifFalse: [
         effectiveArgs := self args isNil ifTrue: [#()] ifFalse: [self args]
         #(self classMethod, effectiveArgs)
