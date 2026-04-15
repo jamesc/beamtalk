@@ -67,7 +67,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := (Counter spawnWith: #{#count => 10} as: #counter) unwrap
   /// ```
-  class sealed spawnWith: initArgs :: Object as: name :: Symbol -> Result(Self, Error) =>
+  class sealed spawnWith: initArgs as: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_actor)
       doSpawnWith: self
       args: initArgs
@@ -175,7 +175,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// (counter registerAs: #c) onSuccess: [:c | c increment]
   /// ```
-  registerAs: name :: Symbol -> Result(Self, Error) =>
+  sealed registerAs: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_actor) registerAs: self as: name
 
   /// Unregister this actor's name, if any. Idempotent.
@@ -204,8 +204,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter registeredName   // => #counter (or nil)
   /// ```
-  sealed registeredName -> Object =>
-    (Erlang beamtalk_actor) registeredName: self
+  sealed registeredName => (Erlang beamtalk_actor) registeredName: self
 
   /// Whether this actor currently has a registered name.
   ///

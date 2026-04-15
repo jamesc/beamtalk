@@ -2287,10 +2287,10 @@ into a `#beamtalk_object{}` carrying the receiver class.
 -spec doSpawnAs(#beamtalk_object{}, term()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 doSpawnAs(Self, Name) ->
-    doSpawnWith(Self, #{}, Name).
+    do_spawn_with_selector(Self, #{}, Name, 'spawnAs:').
 
 -doc """
-FFI shim for `class spawnWith: initArgs :: Object as: name :: Symbol -> Result(Self, Error)`.
+FFI shim for `class spawnWith: initArgs as: name :: Symbol -> Result(Self, Error)`.
 
 Atomically spawns an actor registered under `Name`. Returns a tagged
 `{ok, ActorObject} | {error, #beamtalk_error{}}` tuple.
@@ -2298,6 +2298,15 @@ Atomically spawns an actor registered under `Name`. Returns a tagged
 -spec doSpawnWith(#beamtalk_object{}, term(), term()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 doSpawnWith(Self, InitArgs, Name) ->
+    do_spawn_with_selector(Self, InitArgs, Name, 'spawnWith:as:').
+
+%% Shared implementation for doSpawnAs/2 and doSpawnWith/3. The `Selector`
+%% parameter controls which public-facing Beamtalk selector is threaded into
+%% returned structured errors so error messages match the method the user
+%% called.
+-spec do_spawn_with_selector(#beamtalk_object{}, term(), term(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
     case class_self_to_name_and_module(Self) of
         {ok, ClassName, Module} ->
             case 'spawnAs'(Name, Module, InitArgs) of
@@ -2310,13 +2319,13 @@ doSpawnWith(Self, InitArgs, Name) ->
                 {error, #beamtalk_error{} = Err} ->
                     {error, Err#beamtalk_error{
                         class = ClassName,
-                        selector = 'spawnAs:'
+                        selector = Selector
                     }};
                 {error, Reason} ->
-                    {error, generic_spawn_error(ClassName, 'spawnAs:', Reason)}
+                    {error, generic_spawn_error(ClassName, Selector, Reason)}
             end;
         {error, #beamtalk_error{} = Err} ->
-            {error, beamtalk_error:with_selector(Err, 'spawnAs:')}
+            {error, beamtalk_error:with_selector(Err, Selector)}
     end.
 
 -doc """
@@ -2343,7 +2352,7 @@ registerAs(Self, Name) when is_record(Self, beamtalk_object) ->
 registerAs(Self, _Name) ->
     {error,
         beamtalk_error:with_hint(
-            beamtalk_error:new(type_error, 'Actor', registerAs),
+            beamtalk_error:new(type_error, 'Actor', 'registerAs:'),
             iolist_to_binary(
                 io_lib:format(
                     "registerAs: expects an Actor receiver, got ~tp", [Self]
@@ -2364,17 +2373,28 @@ unregister(Self) when is_record(Self, beamtalk_object) ->
         undefined ->
             ok;
         Name ->
-            case unregister_name(Name) of
-                ok ->
-                    ok;
-                {error, #beamtalk_error{kind = name_registered}} ->
-                    %% Raced with another unregister — still idempotent.
-                    ok;
-                {error, #beamtalk_error{} = Err0} ->
-                    Err1 = beamtalk_error:with_selector(Err0, unregister),
-                    beamtalk_error:raise(
-                        Err1#beamtalk_error{class = Self#beamtalk_object.class}
-                    )
+            %% TOCTOU guard: between `registered_name_for_pid/1` above and
+            %% `unregister_name/1` below, another process can claim the freed
+            %% name. Only unregister when the registry still points at our
+            %% pid; otherwise treat as idempotent (someone else beat us to it,
+            %% possibly with a replacement actor of the same name).
+            case erlang:whereis(Name) of
+                Pid ->
+                    case unregister_name(Name) of
+                        ok ->
+                            ok;
+                        {error, #beamtalk_error{kind = name_registered}} ->
+                            %% Raced with another unregister — still idempotent.
+                            ok;
+                        {error, #beamtalk_error{} = Err0} ->
+                            Err1 = beamtalk_error:with_selector(Err0, unregister),
+                            beamtalk_error:raise(
+                                Err1#beamtalk_error{class = Self#beamtalk_object.class}
+                            )
+                    end;
+                _Other ->
+                    %% Name is gone or held by another pid — nothing to do.
+                    ok
             end
     end;
 unregister(Self) ->
@@ -2518,7 +2538,7 @@ named(_Self, Name) ->
         )}.
 
 -doc """
-FFI shim for `class allRegistered -> Array(Actor)`.
+FFI shim for `class allRegistered -> List(Actor)`.
 
 Returns a list of `#beamtalk_object{}` proxies for every currently-registered
 Beamtalk actor (those carrying the `'$beamtalk_actor'` marker). Kernel

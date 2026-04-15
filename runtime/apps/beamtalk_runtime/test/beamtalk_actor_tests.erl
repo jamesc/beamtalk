@@ -2825,6 +2825,50 @@ ffi_unregister_non_object_raises_type_error_test() ->
         beamtalk_actor:unregister(not_an_actor)
     ).
 
+ffi_unregister_does_not_touch_replacement_test() ->
+    %% TOCTOU guard: if the original owner's name is released and another
+    %% process registers under the same name between `registered_name_for_pid/1`
+    %% and `unregister_name/1`, `unregister/1` must not deregister the
+    %% replacement. We simulate the race by externally unregistering the
+    %% original then registering a fresh pid under the same name, then calling
+    %% `unregister/1` on the original actor — the replacement must remain.
+    Name = 'bt1988_ffi_unregister_toctou',
+    cleanup_name(Name),
+    {ok, Original} = test_counter:start_link(0),
+    try
+        %% Step 1: original actor claims the name, just as spawnAs: would.
+        {ok, Name} = beamtalk_actor:register_name(Name, Original),
+        OriginalObj = #beamtalk_object{
+            class = 'Counter',
+            class_mod = test_counter,
+            pid = Original
+        },
+
+        %% Step 2: simulate the race — external unregister then a replacement
+        %% pid claims the freed name.
+        ok = beamtalk_actor:unregister_name(Name),
+        Replacement = spawn(fun() ->
+            receive
+                stop -> ok
+            end
+        end),
+        true = erlang:register(Name, Replacement),
+
+        try
+            %% Step 3: original caller requests unregister — must be a no-op
+            %% because the registry no longer points at its pid.
+            ?assertEqual(ok, beamtalk_actor:unregister(OriginalObj)),
+
+            %% Step 4: replacement must still be registered under `Name`.
+            ?assertEqual(Replacement, erlang:whereis(Name))
+        after
+            catch erlang:unregister(Name),
+            Replacement ! stop
+        end
+    after
+        gen_server:stop(Original)
+    end.
+
 ffi_registered_name_on_non_object_returns_nil_test() ->
     %% Tolerant accessor — callers get `nil` rather than an exception.
     ?assertEqual(nil, beamtalk_actor:registeredName(not_an_actor)).
@@ -2847,15 +2891,18 @@ ffi_named_bad_self_returns_type_error_test() ->
 ffi_named_not_registered_on_valid_class_test() ->
     %% Uses a live class gen_server (via test_counter's Counter class-object).
     %% Relies on the compiled stdlib Counter class being loaded in the test
-    %% environment; fall back to an atom-only probe if not.
+    %% environment; skip with an explicit assertion otherwise.
     case erlang:whereis(beamtalk_class_Counter) of
         undefined ->
-            ok;
-        _ ->
+            %% No Counter class loaded — assert the precondition explicitly so
+            %% the test makes its skip-behaviour visible rather than silently
+            %% passing.
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
             Self = #beamtalk_object{
                 class = 'Counter class',
                 class_mod = counter,
-                pid = erlang:whereis(beamtalk_class_Counter)
+                pid = ClassPid
             },
             Result = beamtalk_actor:named(Self, 'bt1988_ffi_not_registered'),
             ?assertMatch(
@@ -2878,8 +2925,12 @@ ffi_all_registered_filters_non_beamtalk_processes_test() ->
     try
         Actors = beamtalk_actor:allRegistered(dummy_class_self()),
         RegisteredNames = [O#beamtalk_object.class || O <- Actors],
-        %% Raw process has no class — must not appear under any class name.
-        ?assert(lists:all(fun is_atom/1, RegisteredNames))
+        ReturnedPids = [O#beamtalk_object.pid || O <- Actors],
+        %% Every returned class must be an atom (sanity check).
+        ?assert(lists:all(fun is_atom/1, RegisteredNames)),
+        %% The raw OTP-registered pid carries no `$beamtalk_actor` marker and
+        %% must be filtered out — it must not appear in the returned proxies.
+        ?assertNot(lists:member(Raw, ReturnedPids))
     after
         erlang:unregister(RawName),
         Raw ! stop

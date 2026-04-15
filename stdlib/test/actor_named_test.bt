@@ -3,7 +3,7 @@
 
 // Tests for Actor named-registration API (BT-1988 / ADR 0079 Phase 2).
 //
-// Fixtures: stdlib/test/fixtures/named_actor_fixtures.bt
+// Fixtures: stdlib/test/fixtures/named_counter.bt, named_greeter.bt
 
 TestCase subclass: ActorNamedTest
 
