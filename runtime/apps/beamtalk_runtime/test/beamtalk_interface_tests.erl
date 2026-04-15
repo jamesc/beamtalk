@@ -143,14 +143,18 @@ all_classes_test_() ->
                 ?assert(is_list(Result)),
                 ?assert(length(Result) > 0)
             end},
-            {"all entries are atoms", fun() ->
+            {"all entries are beamtalk_object tuples", fun() ->
                 Classes = beamtalk_interface:dispatch(allClasses, [], fake_self()),
-                lists:foreach(fun(C) -> ?assert(is_atom(C)) end, Classes)
+                lists:foreach(
+                    fun(C) -> ?assertMatch({beamtalk_object, _, _, _}, C) end,
+                    Classes
+                )
             end},
             {"includes registered test classes", fun() ->
                 Classes = beamtalk_interface:dispatch(allClasses, [], fake_self()),
-                ?assert(lists:member('Object', Classes)),
-                ?assert(lists:member('Counter', Classes))
+                ClassTags = [element(2, C) || C <- Classes],
+                ?assert(lists:member('Object class', ClassTags)),
+                ?assert(lists:member('Counter class', ClassTags))
             end}
         ]
     end}.

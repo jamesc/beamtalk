@@ -532,7 +532,7 @@ Two global singleton objects provide introspection and project operations. These
 | Method | Description |
 |--------|-------------|
 | `version` | Beamtalk version string |
-| `allClasses` | All registered class names (always up-to-date) |
+| `allClasses` | All registered classes as class objects |
 | `classNamed: #Counter` | Look up a class by name |
 | `globals` | Snapshot of system namespace as a Dictionary |
 | `help: Counter` | Formatted class documentation |

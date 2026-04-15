@@ -33,18 +33,22 @@ v isEmpty
 // BEAMTALK ALLCLASSES
 // ===========================================================================
 
-// allClasses returns a list of class name symbols (atoms)
-classNames := Beamtalk allClasses
+// allClasses returns a list of class objects
+classes := Beamtalk allClasses
 // => _
 
-// allClasses includes names of known stdlib classes
-classNames includes: #Integer
+// allClasses includes known stdlib classes (as class objects)
+classes includes: Integer
 // => true
 
-classNames includes: #String
+classes includes: String
 // => true
 
-classNames includes: #Actor
+classes includes: Actor
+// => true
+
+// class objects in allClasses respond to name
+classes first respondsTo: #name
 // => true
 
 // ===========================================================================
