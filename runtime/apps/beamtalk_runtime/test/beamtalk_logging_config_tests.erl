@@ -551,14 +551,20 @@ loggerInfo_no_active_targets_shows_none() ->
 
 disableDebug_actor_not_in_table_succeeds() ->
     beamtalk_logging_config:disableAllDebug(),
-    Pid = spawn(fun() -> receive stop -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
     ActorRef = #beamtalk_object{class = 'NeverEnabled', class_mod = never_enabled, pid = Pid},
     ?assertEqual(nil, beamtalk_logging_config:disableDebug(ActorRef)),
     Pid ! stop.
 
 disableDebug_class_not_in_table_succeeds() ->
     beamtalk_logging_config:disableAllDebug(),
-    ClassRef = #beamtalk_object{class = 'NeverEnabled class', class_mod = never_enabled, pid = self()},
+    ClassRef = #beamtalk_object{
+        class = 'NeverEnabled class', class_mod = never_enabled, pid = self()
+    },
     ?assertEqual(nil, beamtalk_logging_config:disableDebug(ClassRef)).
 
 %%====================================================================
