@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Child actor with NO initialize of its own — inherits parent's initialize.
+// Verifies BT-1951/ADR 0078 auto-chain runs the parent's initialize even when
+// the child omits one.
+
+E2EInitInheritBase subclass: E2EInitInheritChildNoInit
+  state: extra :: Integer = 0
+
+  getExtra -> Integer => self.extra

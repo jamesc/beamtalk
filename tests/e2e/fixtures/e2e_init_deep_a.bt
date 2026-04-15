@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Level 1 of a 3-level hierarchy used to verify auto-chained initialize order.
+
+Actor subclass: E2EInitDeepA
+  state: log = ""
+
+  initialize => self.log := self.log ++ "A"
+
+  getLog => self.log

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Child actor whose initialize reads a typed-no-default field set by the
+// parent's auto-chained initialize.
+
+typed E2EInitInheritBase subclass: E2EInitInheritChildUses
+  state: cache :: String
+
+  initialize -> String => self.cache := "cache-" ++ self.label
+
+  getCache -> String => self.cache
