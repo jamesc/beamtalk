@@ -3394,14 +3394,19 @@ fn test_self_class_type_name() {
 }
 
 #[test]
-fn test_self_class_resolves_to_metaclass() {
-    // BT-1952: A method returning `-> Self class` should resolve to Metaclass at call sites,
-    // allowing class-specific method sends on the result.
+fn test_self_class_no_false_dnu_warnings() {
+    // BT-1952: A method returning `-> Self class` should parse correctly and
+    // not produce false DNU warnings for class-side method sends on the result.
     let source = "
 Value subclass: Counter
   classState: instanceCount = 0
   class instanceCount => self.instanceCount
   getMyClass -> Self class => self class
+
+Value subclass: User
+  test =>
+    c := Counter new
+    c getMyClass instanceCount
 ";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
@@ -3411,7 +3416,8 @@ Value subclass: Counter
         .unwrap();
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
-    // Verify `-> Self class` parses correctly
+
+    // Verify `-> Self class` parses as SelfClass variant
     let counter = &module.classes[0];
     let get_class_method = counter
         .methods
@@ -3422,6 +3428,18 @@ Value subclass: Counter
     assert!(
         matches!(ret_ty, TypeAnnotation::SelfClass { .. }),
         "Return type should be SelfClass, got: {ret_ty:?}"
+    );
+
+    // Verify no DNU warnings — `getMyClass` returns Dynamic (Self class),
+    // so `instanceCount` send should not produce a false warning
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings, got: {dnu_warnings:?}"
     );
 }
 

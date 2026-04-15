@@ -974,9 +974,12 @@ impl TypeChecker {
                         };
                     }
 
-                    // BT-1952: `Self class` resolves to Metaclass (the metaclass of the receiver)
+                    // BT-1952: `Self class` — the method returns a class object.
+                    // Resolve to Dynamic so existing patterns like `x class = Integer`
+                    // continue to work (class objects respond to all Object messages
+                    // at runtime, but the type hierarchy doesn't model `=` as a method).
                     if ret_ty.as_str() == "Self class" {
-                        return InferredType::known("Metaclass");
+                        return InferredType::Dynamic(DynamicReason::Unknown);
                     }
 
                     // BT-1945: `Never` resolves to the bottom type (divergent methods)
@@ -1380,8 +1383,9 @@ impl TypeChecker {
                             // Self resolves to the concrete member type (with type args)
                             return_types.push(member.clone());
                         } else if ret_ty.as_str() == "Self class" {
-                            // BT-1952: Self class resolves to Metaclass
-                            return_types.push(InferredType::known("Metaclass"));
+                            // BT-1952: Self class — resolve to Dynamic (class objects
+                            // respond to all Object messages at runtime)
+                            return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
                         } else if ret_ty.as_str() == "Never" {
                             // BT-1945: Bottom type for divergent methods
                             return_types.push(InferredType::Never);
