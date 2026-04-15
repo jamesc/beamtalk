@@ -23,6 +23,89 @@ at_if_absent_missing_test() ->
 at_if_absent_empty_map_test() ->
     ?assertEqual(42, beamtalk_map:at_if_absent(#{}, x, fun() -> 42 end)).
 
+at_if_absent_block_not_called_when_present_test() ->
+    %% Block should NOT be called when key is present
+    ?assertEqual(
+        1,
+        beamtalk_map:at_if_absent(#{a => 1}, a, fun() -> error(should_not_be_called) end)
+    ).
+
+%%% ============================================================================
+%%% do/2
+%%% ============================================================================
+
+do_iterates_values_test() ->
+    Self = self(),
+    beamtalk_map:do(#{a => 1, b => 2}, fun(V) -> Self ! {value, V} end),
+    Values = collect_messages([]),
+    ?assertEqual(lists:sort([1, 2]), lists:sort(Values)).
+
+do_empty_map_test() ->
+    ?assertEqual(nil, beamtalk_map:do(#{}, fun(_V) -> ok end)).
+
+do_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_map:do(#{a => 1}, fun(_V) -> ok end)).
+
+%%% ============================================================================
+%%% do_with_key/2
+%%% ============================================================================
+
+do_with_key_iterates_pairs_test() ->
+    Self = self(),
+    beamtalk_map:do_with_key(#{a => 1, b => 2}, fun(K, V) -> Self ! {pair, K, V} end),
+    Pairs = collect_pair_messages([]),
+    ?assertEqual(lists:sort([{a, 1}, {b, 2}]), lists:sort(Pairs)).
+
+do_with_key_empty_map_test() ->
+    ?assertEqual(nil, beamtalk_map:do_with_key(#{}, fun(_K, _V) -> ok end)).
+
+do_with_key_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_map:do_with_key(#{x => y}, fun(_K, _V) -> ok end)).
+
+%%% ============================================================================
+%%% includes/2
+%%% ============================================================================
+
+includes_present_value_test() ->
+    ?assert(beamtalk_map:includes(#{a => 1, b => 2}, 1)).
+
+includes_absent_value_test() ->
+    ?assertNot(beamtalk_map:includes(#{a => 1, b => 2}, 3)).
+
+includes_empty_map_test() ->
+    ?assertNot(beamtalk_map:includes(#{}, anything)).
+
+includes_checks_values_not_keys_test() ->
+    %% includes/2 checks values, not keys
+    ?assertNot(beamtalk_map:includes(#{a => 1}, a)),
+    ?assert(beamtalk_map:includes(#{a => 1}, 1)).
+
+%%% ============================================================================
+%%% print_string/1
+%%% ============================================================================
+
+print_string_empty_map_test() ->
+    ?assertEqual(<<"#{}">>, beamtalk_map:print_string(#{})).
+
+print_string_single_entry_test() ->
+    Result = beamtalk_map:print_string(#{1 => 2}),
+    ?assertEqual(<<"#{1 => 2}">>, Result).
+
+print_string_strips_beamtalk_class_tag_test() ->
+    %% $beamtalk_class tag should be stripped from output
+    Result = beamtalk_map:print_string(#{'$beamtalk_class' => 'Dictionary', a => 1}),
+    %% Should only show the 'a => 1' pair, not $beamtalk_class
+    ?assertNotEqual(nomatch, binary:match(Result, <<"a">>)),
+    ?assertEqual(nomatch, binary:match(Result, <<"$beamtalk_class">>)).
+
+print_string_sorted_keys_test() ->
+    %% Keys should be sorted for deterministic output
+    Result = beamtalk_map:print_string(#{b => 2, a => 1}),
+    %% 'a' should appear before 'b'
+    {PosA, _} = binary:match(Result, <<"a">>),
+    {PosB, _} = binary:match(Result, <<"b">>),
+    ?assert(PosA < PosB).
+
 %%% ============================================================================
 %%% Compiled bt@stdlib@dictionary dispatch/3
 %%% ============================================================================
@@ -145,3 +228,19 @@ primitive_send_at_put_test() ->
 primitive_send_includes_key_test() ->
     ?assertEqual(true, beamtalk_primitive:send(#{a => 1}, 'includesKey:', [a])),
     ?assertEqual(false, beamtalk_primitive:send(#{a => 1}, 'includesKey:', [b])).
+
+%%% ============================================================================
+%%% Helpers
+%%% ============================================================================
+
+collect_messages(Acc) ->
+    receive
+        {value, V} -> collect_messages([V | Acc])
+    after 100 -> lists:reverse(Acc)
+    end.
+
+collect_pair_messages(Acc) ->
+    receive
+        {pair, K, V} -> collect_pair_messages([{K, V} | Acc])
+    after 100 -> lists:reverse(Acc)
+    end.
