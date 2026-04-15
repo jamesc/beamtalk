@@ -147,11 +147,11 @@ Supervisor subclass: ExduraSupervisor
 | Send to proxy whose name is not currently registered (e.g., target died after lookup) | Raises `#beamtalk_error{kind: #no_such_process, name: ...}` |
 | `unregister` on unregistered actor | `#ok` (idempotent, raises only on type error) |
 
-Lookup returns `nil` rather than raising, matching `whereis/1` semantics — callers often want to branch on presence. Sending to a proxy whose name has since vanished is distinct and *does* raise, because the caller has committed to a send.
+Lookup returns `Result(Self, Error)` rather than raising — callers branch explicitly on presence and type compatibility (`Ok(actor)` / `Error(#name_not_registered)` / `Error(#wrong_class)`). Sending to a proxy whose name has since vanished (the process died between lookup and send) is distinct and *does* raise, because the caller has already committed to a send.
 
 **Reserved names** — the following OTP-kernel atoms are blocked at registration time, regardless of whether the corresponding process is currently running:
 
-```
+```text
 application_controller, code_server, error_logger, file_server_2,
 global_name_server, init, inet_db, kernel_safe_sup, kernel_sup,
 logger, net_kernel, rex, standard_error, standard_error_sup,
@@ -162,7 +162,7 @@ Plus any atom prefixed with `beamtalk_` (reserves the namespace for runtime infr
 
 ### REPL session
 
-```
+```text
 > c := (Counter spawnAs: #counter) unwrap
  => an Actor(Counter)
 > c registeredName
@@ -352,7 +352,7 @@ Make `Actor` references internally subscribe to exit signals and transparently u
 ### Negative
 - Introduces a flat per-node atom namespace — collisions must be managed by convention.
 - **Atom exhaustion is a theoretical risk** if users register dynamically-generated names (e.g., `#user_42`, `#req_abc123`). Compile-time symbol literals do consume atom-table entries when the module loads, but the set is bounded by program size — registering `Counter spawnAs: #counter` adds no *new* atoms beyond what the compiler already emitted for the literal. The realistic exhaustion path is a user reaching for `String asSymbol` or `(Erlang erlang) binary_to_atom:` in a per-tenant/per-request loop, where each call mints a previously-unseen atom. Documentation should steer users toward bounded, statically-known names and recommend `{via, Module, Term}`-backed registries for genuinely unbounded keys — exactly the use case the deferred future-ADR will address.
-- `Actor named:` returning `nil` for lookup miss invites a small class of bugs where callers forget to check. Mitigated by proxy send raising a structured error rather than silently dropping.
+- `T named:` returning `Result(Self, Error)` requires callers to handle `Error(#name_not_registered)` / `Error(#wrong_class)` explicitly (via `onSuccess:/onError:` or `unwrap`). This is deliberately more ceremony than a raw pid/nil pair — the type system catches forgotten checks — but can feel noisy at the REPL. Mitigated by `unwrap` for "I expect this to succeed" and by `Actor allRegistered` for discovery flows.
 - Reserved-name blacklist requires ongoing curation as the stdlib and OTP grow.
 - Proxy handles add a small runtime indirection per send (one extra `whereis` lookup). Negligible in practice but not zero.
 - **Test isolation.** Two test cases registering the same name will conflict if run concurrently in the same node. Interim guidance: tests should suffix names with a per-test discriminator (e.g., `#counter_<testId>`), being mindful that atom-suffixed names participate in the atom-exhaustion concern above — bound the suffix space (test method name, not an unbounded counter). A first-class `unique:` test helper is deferred to a follow-up; the right shape will become clear once we observe stdlib + Exdura usage patterns.
@@ -409,7 +409,7 @@ This ADR establishes `Result(Actor, Error)` as the return shape for boundary ope
 
 A follow-up ADR ("Migrate Supervisor Lifecycle to Result") should do the whole class together with a coordinated migration plan for existing user code (Exdura, symphony, etc., which all call `supervise`). This ADR provides the precedent.
 
-Lookup methods (`Supervisor which:`, `Supervisor current`, `Actor named:`) deliberately stay nil-on-miss — that matches OTP's `whereis` and is the right shape for queries.
+`Actor named:` / `T named:` returns `Result(Self, Error)` (per this ADR's main contract). The Supervisor lookup methods (`Supervisor which:`, `Supervisor current`) stay nil-on-miss for now — their migration is part of the Supervisor lifecycle follow-up ADR, which can decide coherently across the whole class.
 
 Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) deliberately stay raise-on-real-failure with idempotent success — let-it-crash applies to teardown of own resources.
 
