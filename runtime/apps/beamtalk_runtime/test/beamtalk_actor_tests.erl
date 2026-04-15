@@ -2266,16 +2266,24 @@ handle_cast_fire_and_forget_with_propagated_context_test() ->
 safe_spawn_error_from_start_link_test() ->
     %% safe_spawn returns {error, Reason} when gen_server:start_link fails
     %% Use a module that doesn't exist to trigger an error
-    Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
-    ?assertMatch({error, _}, Result).
+    %% Suppress the expected crash report to avoid EUnit cancellation.
+    logger:set_primary_config(level, none),
+    try
+        Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
+        ?assertMatch({error, _}, Result)
+    after
+        logger:set_primary_config(level, all)
+    end.
 
 safe_spawn_restores_trap_exit_on_error_test() ->
     %% safe_spawn restores the original trap_exit flag even on error
     OldTrap = process_flag(trap_exit, false),
+    logger:set_primary_config(level, none),
     try
         _Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
         ?assertEqual(false, process_flag(trap_exit, false))
     after
+        logger:set_primary_config(level, all),
         process_flag(trap_exit, OldTrap)
     end.
 
@@ -2421,7 +2429,8 @@ code_change_preserves_state_unit_test() ->
 
 sync_send_to_shutdown_actor_raises_actor_dead_test() ->
     %% When an actor stops with shutdown reason during a call, we get actor_dead
-    {ok, Counter} = test_counter:start_link(0),
+    %% Use start (not start_link) so the test process isn't killed by the shutdown EXIT.
+    {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, shutdown, 1000),
     timer:sleep(10),
     ?assertError(

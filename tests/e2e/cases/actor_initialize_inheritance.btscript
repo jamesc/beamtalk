@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for auto-chained actor initialize (ADR 0078 / BT-1956).
+//
+// Verifies through the full REPL spawn → handle_continue → message-send cycle
+// that the auto-chained `initialize` semantics implemented in BT-1951 work
+// end-to-end. BUnit coverage lives in stdlib/test/inherited_initialize_test.bt;
+// this file exercises the same scenarios across REPL turns with workspace
+// variable persistence.
+
+// @load tests/e2e/fixtures/e2e_init_inherit_base.bt
+// @load tests/e2e/fixtures/e2e_init_inherit_child_no_init.bt
+// @load tests/e2e/fixtures/e2e_init_inherit_child_uses.bt
+// @load tests/e2e/fixtures/e2e_init_deep_a.bt
+// @load tests/e2e/fixtures/e2e_init_deep_b.bt
+// @load tests/e2e/fixtures/e2e_init_deep_c.bt
+// @load tests/e2e/fixtures/e2e_init_inherit_forgets.bt
+
+// ===========================================================================
+// CHILD WITH NO INITIALIZE INHERITS PARENT'S
+// ===========================================================================
+
+// Child declares no `initialize`; spawning still runs the parent's
+// `initialize` so `label` is set.
+noInit := E2EInitInheritChildNoInit spawn
+// => #Actor<E2EInitInheritChildNoInit,_>
+
+noInit getLabel
+// => parent-initialized
+
+// Parent's other defaulted field is also reachable.
+noInit getCount
+// => 0
+
+// Child's own state still defaults correctly.
+noInit getExtra
+// => 0
+
+// ===========================================================================
+// CHILD INITIALIZE READS PARENT-INITIALIZED FIELD
+// ===========================================================================
+
+// Child's `initialize` reads `self.label` which is set by the parent's
+// auto-chained `initialize` (parent runs first).
+uses := E2EInitInheritChildUses spawn
+// => #Actor<E2EInitInheritChildUses,_>
+
+uses getLabel
+// => parent-initialized
+
+uses getCache
+// => cache-parent-initialized
+
+// ===========================================================================
+// 3-LEVEL HIERARCHY — ALL INITIALIZERS RUN PARENT-FIRST
+// ===========================================================================
+
+// Spawning the leaf class runs A → B → C in order, each appending to `log`.
+deep := E2EInitDeepC spawn
+// => #Actor<E2EInitDeepC,_>
+
+deep getLog
+// => ABC
+
+// ===========================================================================
+// UNINITIALIZED INHERITED FIELD RAISES UninitializedStateError
+// ===========================================================================
+
+// Parent declares `state: missing :: String` but its `initialize` forgets
+// to set it. Spawning the parent surfaces the post-initialize check
+// attributing the failure to the declaring class.
+E2EInitInheritForgets spawn
+// => ERROR: UninitializedStateError in E2EInitInheritForgets
+
+// NOTE: Spawning a cross-file subclass of E2EInitInheritForgets currently
+// does NOT raise — Phase 1 cannot see an ancestor's AST to collect its
+// inherited typed-no-default fields into the subclass's post-init check.
+// See BT-1976 for the cross-file follow-up.

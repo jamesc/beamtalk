@@ -498,6 +498,12 @@ fn analyse_full_with_natives(
     validators::check_redundant_assignment(module, &mut result.diagnostics);
     // BT-955: Warn on literal boolean conditions (always true / always false)
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
+    // BT-1955: Warn on redundant `super initialize` in Actor initialize methods (ADR 0078 Phase 2)
+    validators::check_redundant_super_initialize(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // BT-1052: Error on -> Nil return type on Value instance methods
     validators::check_value_nil_return(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-1218: Validate supervisionPolicy overrides + warn for children without explicit policy
