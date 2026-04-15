@@ -63,7 +63,22 @@ logging_config_test_() ->
             fun disableDebug_not_enabled_domain_succeeds/0,
             fun logLevel_all_valid_levels_accepted/0,
             fun ensure_table_idempotent/0,
-            fun loggerInfo_includes_level_and_format/0
+            fun loggerInfo_includes_level_and_format/0,
+            fun enableDebug_supervisor_succeeds/0,
+            fun disableDebug_supervisor_removes/0,
+            fun logLevel_set_updates_file_handler/0,
+            fun logFormat_set_without_handler_succeeds/0,
+            fun loggerInfo_with_file_handler_shows_path/0,
+            fun loggerInfo_without_handler_shows_standard_io/0,
+            fun loggerInfo_with_subsystem_shows_modules/0,
+            fun loggerInfo_with_domain_target_shows_domain/0,
+            fun loggerInfo_no_active_targets_shows_none/0,
+            fun disableDebug_actor_not_in_table_succeeds/0,
+            fun disableDebug_class_not_in_table_succeeds/0,
+            fun disableAllDebug_clears_domain_targets/0,
+            fun enableDebug_compiler_succeeds/0,
+            fun enableDebug_workspace_succeeds/0,
+            fun enableDebug_stdlib_succeeds/0
         ]}.
 
 %%====================================================================
@@ -443,6 +458,151 @@ mcp_signal_file_with_workspace_test_() ->
         end}.
 
 %%====================================================================
+%% Supervisor progress tests
+%%====================================================================
+
+enableDebug_supervisor_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(supervisor)),
+    Active = beamtalk_logging_config:activeDebugTargets(),
+    ?assert(lists:member(supervisor, Active)),
+    beamtalk_logging_config:disableDebug(supervisor).
+
+disableDebug_supervisor_removes() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(supervisor),
+    ?assert(lists:member(supervisor, beamtalk_logging_config:activeDebugTargets())),
+    beamtalk_logging_config:disableDebug(supervisor),
+    ?assertNot(lists:member(supervisor, beamtalk_logging_config:activeDebugTargets())).
+
+%%====================================================================
+%% Log level with file handler tests
+%%====================================================================
+
+logLevel_set_updates_file_handler() ->
+    install_test_file_handler(),
+    OrigLevel = beamtalk_logging_config:logLevel(),
+    ?assertEqual(nil, beamtalk_logging_config:logLevel(debug)),
+    %% The file handler level should also have been updated
+    {ok, #{level := HandlerLevel}} = logger:get_handler_config(beamtalk_file_log),
+    ?assertEqual(debug, HandlerLevel),
+    beamtalk_logging_config:logLevel(OrigLevel),
+    remove_test_file_handler().
+
+%%====================================================================
+%% Format switching without handler tests
+%%====================================================================
+
+logFormat_set_without_handler_succeeds() ->
+    %% Without a beamtalk_file_log handler, setting format should succeed silently
+    _ = logger:remove_handler(beamtalk_file_log),
+    ?assertEqual(nil, beamtalk_logging_config:logFormat(json)),
+    ?assertEqual(nil, beamtalk_logging_config:logFormat(text)).
+
+%%====================================================================
+%% find_log_file coverage tests
+%%====================================================================
+
+loggerInfo_with_file_handler_shows_path() ->
+    install_test_file_handler_with_file(),
+    Info = beamtalk_logging_config:loggerInfo(),
+    ?assert(is_binary(Info)),
+    %% Should contain a real file path (not standard_io)
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Log file:">>)),
+    ?assertEqual(nomatch, binary:match(Info, <<"(standard_io)">>)),
+    %% The path should contain our test log file pattern
+    ?assertNotEqual(nomatch, binary:match(Info, <<"test_log_">>)),
+    remove_test_file_handler().
+
+loggerInfo_without_handler_shows_standard_io() ->
+    _ = logger:remove_handler(beamtalk_file_log),
+    Info = beamtalk_logging_config:loggerInfo(),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"(standard_io)">>)).
+
+%%====================================================================
+%% format_debug_target coverage
+%%====================================================================
+
+loggerInfo_with_subsystem_shows_modules() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(compiler),
+    Info = beamtalk_logging_config:loggerInfo(),
+    %% Should list compiler modules
+    ?assertNotEqual(nomatch, binary:match(Info, <<"compiler">>)),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"beamtalk_compiler_server">>)),
+    beamtalk_logging_config:disableAllDebug().
+
+loggerInfo_with_domain_target_shows_domain() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(runtime),
+    Info = beamtalk_logging_config:loggerInfo(),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"runtime">>)),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"domain=">>)),
+    beamtalk_logging_config:disableAllDebug().
+
+loggerInfo_no_active_targets_shows_none() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Info = beamtalk_logging_config:loggerInfo(),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"(none)">>)).
+
+%%====================================================================
+%% disableDebug no-op paths
+%%====================================================================
+
+disableDebug_actor_not_in_table_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'NeverEnabled', class_mod = never_enabled, pid = Pid},
+    ?assertEqual(nil, beamtalk_logging_config:disableDebug(ActorRef)),
+    Pid ! stop.
+
+disableDebug_class_not_in_table_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ClassRef = #beamtalk_object{
+        class = 'NeverEnabled class', class_mod = never_enabled, pid = self()
+    },
+    ?assertEqual(nil, beamtalk_logging_config:disableDebug(ClassRef)).
+
+%%====================================================================
+%% disableAllDebug with mixed targets including domain
+%%====================================================================
+
+disableAllDebug_clears_domain_targets() ->
+    beamtalk_logging_config:disableAllDebug(),
+    beamtalk_logging_config:enableDebug(runtime),
+    beamtalk_logging_config:enableDebug(user),
+    beamtalk_logging_config:enableDebug(actor),
+    ?assert(length(beamtalk_logging_config:activeDebugTargets()) >= 3),
+    ?assertEqual(nil, beamtalk_logging_config:disableAllDebug()),
+    ?assertEqual([], beamtalk_logging_config:activeDebugTargets()).
+
+%%====================================================================
+%% subsystem_modules coverage
+%%====================================================================
+
+enableDebug_compiler_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(compiler)),
+    ?assert(lists:member(compiler, beamtalk_logging_config:activeDebugTargets())),
+    beamtalk_logging_config:disableDebug(compiler).
+
+enableDebug_workspace_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(workspace)),
+    ?assert(lists:member(workspace, beamtalk_logging_config:activeDebugTargets())),
+    beamtalk_logging_config:disableDebug(workspace).
+
+enableDebug_stdlib_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(stdlib)),
+    ?assert(lists:member(stdlib, beamtalk_logging_config:activeDebugTargets())),
+    beamtalk_logging_config:disableDebug(stdlib).
+
+%%====================================================================
 %% Test helpers
 %%====================================================================
 
@@ -451,6 +611,24 @@ install_test_file_handler() ->
     _ = logger:remove_handler(beamtalk_file_log),
     logger:add_handler(beamtalk_file_log, logger_std_h, #{
         config => #{type => standard_io},
+        level => debug,
+        formatter =>
+            {logger_formatter, #{
+                template => [time, " [", level, "] ", msg, "\n"],
+                single_line => true
+            }}
+    }).
+
+-doc "Install a file-based handler for find_log_file tests.".
+install_test_file_handler_with_file() ->
+    _ = logger:remove_handler(beamtalk_file_log),
+    TmpFile = filename:join(
+        filename:basedir(user_cache, "beamtalk"),
+        "test_log_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".log"
+    ),
+    ok = filelib:ensure_dir(TmpFile),
+    logger:add_handler(beamtalk_file_log, logger_std_h, #{
+        config => #{file => TmpFile},
         level => debug,
         formatter =>
             {logger_formatter, #{
