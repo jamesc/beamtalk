@@ -11,8 +11,9 @@
 //! - Empty method bodies (BT-859)
 //! - Effect-free statements (BT-951)
 
-use crate::ast::{Expression, Identifier, Module};
-use crate::ast_walker::walk_module;
+use crate::ast::{Expression, Identifier, MessageSelector, Module};
+use crate::ast_walker::{walk_expression, walk_module};
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 // ── BT-950: Redundant assignment ─────────────────────────────────────────────
@@ -401,6 +402,111 @@ pub(crate) fn check_effect_free_statements(
 // BT-1476 validator removed: all control-flow selectors and Tier 2 blocks
 // now have state threading. The dead_block_assignment lint (lint/) remains
 // for `beamtalk lint` usage with @expect dead_assignment suppression.
+
+// ── BT-1955: Redundant `super initialize` in Actor initialize methods ─────────
+
+/// BT-1955: Warn when an `initialize` method on an Actor subclass contains
+/// an explicit `super initialize` send.
+///
+/// ADR 0078 Phase 2: with auto-chained `initialize` (BT-1951), parent
+/// `initialize` methods run automatically before the child's. An explicit
+/// `super initialize` in the body causes the parent's `initialize` to run
+/// twice — once from the auto-chain, once from the explicit send.
+///
+/// The warning fires only for:
+/// - Methods whose selector is the unary `initialize`
+/// - That are instance methods on an Actor subclass (auto-chain only happens
+///   in `handle_continue` for actors; non-actor classes still need explicit
+///   `super` calls if they want parent behavior).
+///
+/// The warning does NOT fire for:
+/// - `super` sends to other selectors (e.g. `super foo`)
+/// - `super initialize` outside of an `initialize` method
+/// - Class-side `class initialize: ...` keyword methods (different selector)
+pub(crate) fn check_redundant_super_initialize(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if !hierarchy.is_actor_subclass(class_name) {
+            continue;
+        }
+        for method in &class.methods {
+            if !is_unary_initialize(&method.selector) {
+                continue;
+            }
+            check_method_body_for_super_initialize(&method.body, diagnostics);
+        }
+    }
+    // Also check standalone (Tonel-style) method definitions.
+    for standalone in &module.method_definitions {
+        let class_name = standalone.class_name.name.as_str();
+        if !hierarchy.is_actor_subclass(class_name) {
+            continue;
+        }
+        if !is_unary_initialize(&standalone.method.selector) {
+            continue;
+        }
+        check_method_body_for_super_initialize(&standalone.method.body, diagnostics);
+    }
+}
+
+/// Returns `true` if the selector is the unary `initialize` message.
+fn is_unary_initialize(selector: &MessageSelector) -> bool {
+    matches!(selector, MessageSelector::Unary(name) if name.as_str() == "initialize")
+}
+
+/// Walks every expression in the body of an `initialize` method and emits a
+/// warning for each `super initialize` send found (including those nested
+/// inside blocks, conditionals, etc.).
+fn check_method_body_for_super_initialize(
+    body: &[crate::ast::ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in body {
+        walk_expression(&stmt.expression, &mut |expr| {
+            match expr {
+                Expression::MessageSend {
+                    receiver,
+                    selector,
+                    span,
+                    ..
+                } if matches!(receiver.as_ref(), Expression::Super(_))
+                    && is_unary_initialize(selector) =>
+                {
+                    diagnostics.push(redundant_super_initialize_diagnostic(*span));
+                }
+                // Also detect `super initialize` as a cascade message, e.g.
+                // `super initialize; foo` — the cascade's receiver is Super,
+                // and each message in the cascade dispatches to that receiver.
+                Expression::Cascade {
+                    receiver, messages, ..
+                } if matches!(receiver.as_ref(), Expression::Super(_)) => {
+                    for msg in messages {
+                        if is_unary_initialize(&msg.selector) {
+                            diagnostics.push(redundant_super_initialize_diagnostic(msg.span));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
+}
+
+/// Builds the BT-1955 diagnostic for a redundant `super initialize` send.
+fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
+    Diagnostic::warning(
+        "explicit `super initialize` is unnecessary — \
+         parent initializers run automatically"
+            .to_string(),
+        span,
+    )
+    .with_hint("Remove this line — Beamtalk auto-chains initialize up the hierarchy")
+    .with_category(DiagnosticCategory::Lint)
+}
 
 #[cfg(test)]
 mod tests {
@@ -938,6 +1044,152 @@ mod tests {
                 .iter()
                 .all(|d| d.message.contains("always `true`")),
             "Expected all messages to say 'always `true`', got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-1955: Redundant `super initialize` tests ───────────────────────────
+
+    /// Helper: build module + class hierarchy from source for BT-1955 tests.
+    fn build_module_and_hierarchy(src: &str) -> (crate::ast::Module, ClassHierarchy) {
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        // Filter out lint-severity diagnostics (e.g. redundant `.`); only error
+        // out on hard parse failures.
+        let hard_errs: Vec<_> = parse_diags
+            .iter()
+            .filter(|d| d.severity != Severity::Lint)
+            .collect();
+        assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
+        let (hierarchy, _diags) = ClassHierarchy::build(&module);
+        (module, hierarchy.expect("hierarchy build failed"))
+    }
+
+    /// `super initialize` inside an Actor subclass `initialize` method warns.
+    #[test]
+    fn super_initialize_in_actor_initialize_warns() {
+        let src = "Actor subclass: MyActor\n  initialize =>\n    super initialize.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("super initialize"),
+            "Expected 'super initialize' in message, got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("auto-chains")),
+            "Expected hint about auto-chaining, got: {:?}",
+            diagnostics[0].hint
+        );
+    }
+
+    /// `super foo` (different selector) inside `initialize` does NOT warn.
+    #[test]
+    fn super_other_selector_in_initialize_no_warn() {
+        let src = "Actor subclass: MyActor\n  initialize =>\n    super foo.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for `super foo`, got: {diagnostics:?}"
+        );
+    }
+
+    /// `super initialize` outside an `initialize` method does NOT warn.
+    #[test]
+    fn super_initialize_outside_initialize_no_warn() {
+        let src = "Actor subclass: MyActor\n  start =>\n    super initialize.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for `super initialize` in non-initialize method, got: {diagnostics:?}"
+        );
+    }
+
+    /// `super initialize` inside a non-actor class does NOT warn (no auto-chain).
+    #[test]
+    fn super_initialize_in_non_actor_no_warn() {
+        let src = "Object subclass: MyObj\n  initialize =>\n    super initialize.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-actor class, got: {diagnostics:?}"
+        );
+    }
+
+    /// `super initialize` nested inside a block (e.g. `[super initialize] value`)
+    /// inside an Actor `initialize` method also warns.
+    #[test]
+    fn super_initialize_nested_in_block_warns() {
+        let src =
+            "Actor subclass: MyActor\n  initialize =>\n    [super initialize] value.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for nested super initialize, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone (Tonel-style) method definitions are also checked.
+    #[test]
+    fn super_initialize_in_standalone_method_warns() {
+        let src = "Actor subclass: MyActor\n  value => 1\nMyActor >> initialize =>\n    super initialize.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        assert_eq!(module.method_definitions.len(), 1);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning in standalone method, got: {diagnostics:?}"
+        );
+    }
+
+    /// `super initialize; foo` (cascade) — the `initialize` cascade message
+    /// also warns.
+    #[test]
+    fn super_initialize_in_cascade_warns() {
+        let src = "Actor subclass: MyActor\n  initialize =>\n    super initialize; foo";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for cascade starting with super initialize, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// Class-side `class initialize: ...` (keyword) does NOT trigger the warning,
+    /// because the unary `initialize` selector is required.
+    #[test]
+    fn class_keyword_initialize_no_warn() {
+        let src =
+            "Actor subclass: MyActor\n  class initialize: x =>\n    super initialize.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_redundant_super_initialize(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for class-side keyword initialize, got: {diagnostics:?}"
         );
     }
 }
