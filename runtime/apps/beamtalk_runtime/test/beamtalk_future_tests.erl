@@ -925,7 +925,10 @@ callback_ordering_all_fire_test() ->
 
     %% Collect all callback notifications (order may vary)
     Received = lists:sort([
-        receive {cb_order, N} -> N after 1000 -> error(timeout) end
+        receive
+            {cb_order, N} -> N
+        after 1000 -> error(timeout)
+        end
      || _ <- lists:seq(1, 3)
     ]),
     ?assertEqual([1, 2, 3], Received).
@@ -986,9 +989,18 @@ multiple_callbacks_on_already_resolved_test() ->
     beamtalk_future:when_resolved(Future, fun(V) -> Parent ! {late_3, V} end),
 
     Results = lists:sort([
-        receive {late_1, V} -> {late_1, V} after 1000 -> error(timeout) end,
-        receive {late_2, V} -> {late_2, V} after 1000 -> error(timeout) end,
-        receive {late_3, V} -> {late_3, V} after 1000 -> error(timeout) end
+        receive
+            {late_1, V} -> {late_1, V}
+        after 1000 -> error(timeout)
+        end,
+        receive
+            {late_2, V} -> {late_2, V}
+        after 1000 -> error(timeout)
+        end,
+        receive
+            {late_3, V} -> {late_3, V}
+        after 1000 -> error(timeout)
+        end
     ]),
     ?assertEqual([{late_1, done}, {late_2, done}, {late_3, done}], Results).
 
@@ -1003,8 +1015,14 @@ multiple_callbacks_on_already_rejected_test() ->
     beamtalk_future:when_rejected(Future, fun(R) -> Parent ! {late_err_2, R} end),
 
     Results = lists:sort([
-        receive {late_err_1, R} -> {late_err_1, R} after 1000 -> error(timeout) end,
-        receive {late_err_2, R} -> {late_err_2, R} after 1000 -> error(timeout) end
+        receive
+            {late_err_1, R} -> {late_err_1, R}
+        after 1000 -> error(timeout)
+        end,
+        receive
+            {late_err_2, R} -> {late_err_2, R}
+        after 1000 -> error(timeout)
+        end
     ]),
     ?assertEqual([{late_err_1, oops}, {late_err_2, oops}], Results).
 
