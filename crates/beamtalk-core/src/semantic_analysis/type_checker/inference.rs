@@ -1006,9 +1006,19 @@ impl TypeChecker {
                         &method.defined_in,
                     );
 
-                    // Apply generic substitution if we have type args or method-local params
-                    if !subst.is_empty() || !method_subst.is_empty() {
-                        return Self::substitute_return_type(ret_ty, &subst, &method_subst);
+                    // Apply generic substitution if we have type args, method-local
+                    // params, or the return type mentions `Self` nested inside a
+                    // generic/union (BT-1986). For the last case, even if no
+                    // param substitutions apply, we still need to rewrite `Self`
+                    // to the receiver class so callers see the narrowed type.
+                    let has_nested_self = Self::return_type_mentions_nested_self(ret_ty);
+                    if !subst.is_empty() || !method_subst.is_empty() || has_nested_self {
+                        return Self::substitute_return_type_with_self(
+                            ret_ty,
+                            &subst,
+                            &method_subst,
+                            Some(class_name.as_str()),
+                        );
                     }
 
                     // BT-1834: If the return type is an unresolved type param
@@ -1401,11 +1411,16 @@ impl TypeChecker {
                                 type_args,
                                 &method.defined_in,
                             );
-                            if !subst.is_empty() {
-                                return_types.push(Self::substitute_return_type(
+                            // BT-1986: also substitute nested `Self` (inside a
+                            // generic) to the concrete member class, even when
+                            // the substitution map is empty.
+                            let has_nested_self = Self::return_type_mentions_nested_self(ret_ty);
+                            if !subst.is_empty() || has_nested_self {
+                                return_types.push(Self::substitute_return_type_with_self(
                                     ret_ty,
                                     &subst,
                                     &HashMap::new(),
+                                    Some(member_name.as_str()),
                                 ));
                             } else if super::is_generic_type_param(ret_ty)
                                 && !hierarchy.has_class(ret_ty)
@@ -2329,11 +2344,36 @@ impl TypeChecker {
     /// Substitute type parameters in a return type string using the substitution map.
     ///
     /// Handles simple cases like `T` → `Integer` and generic return types like
-    /// `Result(R, E)` where each parameter is individually substituted.
+    /// `Result(R, E)` where each parameter is individually substituted. Kept
+    /// as a thin wrapper over [`substitute_return_type_with_self`] for call
+    /// sites and tests that do not thread a receiver class through.
+    #[cfg(test)]
     fn substitute_return_type(
         ret_ty: &str,
         subst: &HashMap<EcoString, InferredType>,
         method_local_subst: &HashMap<EcoString, InferredType>,
+    ) -> InferredType {
+        Self::substitute_return_type_with_self(ret_ty, subst, method_local_subst, None)
+    }
+
+    /// Like [`substitute_return_type`], but also substitutes `Self` when it
+    /// appears as a (possibly nested) type reference (BT-1986).
+    ///
+    /// Bare `-> Self` returns are handled specially at the call site to keep
+    /// the receiver's type arguments attached. This path is for the nested
+    /// case — e.g. `-> Result(Self, Error)` on ADR 0079's
+    /// `class named: -> Result(Self, Error)`, where `Self` must resolve to
+    /// the static receiver class (`Counter` in `Counter named: #c`).
+    ///
+    /// `self_class = None` preserves the previous behaviour (nested `Self`
+    /// passes through as a class-named `Known("Self")`, which is wrong but
+    /// matches historic behaviour for call sites that don't know the
+    /// receiver).
+    fn substitute_return_type_with_self(
+        ret_ty: &str,
+        subst: &HashMap<EcoString, InferredType>,
+        method_local_subst: &HashMap<EcoString, InferredType>,
+        self_class: Option<&str>,
     ) -> InferredType {
         let ret_eco: EcoString = ret_ty.into();
 
@@ -2347,20 +2387,40 @@ impl TypeChecker {
             return resolved.clone();
         }
 
-        // BT-1836: Handle union return types like "E | Nil" — substitute each member
-        if ret_ty.contains(" | ") {
-            let members: Vec<InferredType> = ret_ty
-                .split(" | ")
-                .map(|m| Self::substitute_return_type(m.trim(), subst, method_local_subst))
-                .collect();
-            // If all members resolved to the same type, collapse
-            if members.len() == 1 {
-                return members.into_iter().next().unwrap();
+        // BT-1986: `Self` as a nested type reference resolves to the
+        // receiver class. The top-level bare-`Self` case is still handled
+        // by the caller (to preserve the full `Known { class_name, type_args }`
+        // with the receiver's own type args); this branch only fires when
+        // `Self` appears inside a generic or union.
+        if ret_ty == "Self" {
+            if let Some(cls) = self_class {
+                return InferredType::known(EcoString::from(cls));
             }
-            return InferredType::Union {
-                members,
-                provenance: super::TypeProvenance::Substituted(Span::default()),
-            };
+        }
+
+        // BT-1836: Handle union return types like "E | Nil" — substitute each member.
+        // Use paren-aware splitting so `Result(Self | Nil, Error)` is NOT split at
+        // the inner `|`. Only treat as a union if there are >1 top-level members;
+        // otherwise fall through to the generic parsing path below.
+        if ret_ty.contains('|') {
+            let parts = Self::split_union_respecting_parens(ret_ty);
+            if parts.len() > 1 {
+                let members: Vec<InferredType> = parts
+                    .into_iter()
+                    .map(|m| {
+                        Self::substitute_return_type_with_self(
+                            m,
+                            subst,
+                            method_local_subst,
+                            self_class,
+                        )
+                    })
+                    .collect();
+                return InferredType::Union {
+                    members,
+                    provenance: super::TypeProvenance::Substituted(Span::default()),
+                };
+            }
         }
 
         // Check for generic return type like "Result(R, E)"
@@ -2376,8 +2436,13 @@ impl TypeChecker {
                 } else if let Some(resolved) = subst.get(&p_eco) {
                     resolved_args.push(resolved.clone());
                 } else {
-                    // Recursively substitute nested generics
-                    resolved_args.push(Self::substitute_return_type(p, subst, method_local_subst));
+                    // Recursively substitute nested generics (and nested Self).
+                    resolved_args.push(Self::substitute_return_type_with_self(
+                        p,
+                        subst,
+                        method_local_subst,
+                        self_class,
+                    ));
                 }
             }
             return InferredType::Known {
@@ -2446,6 +2511,17 @@ impl TypeChecker {
             result.push(last);
         }
         result
+    }
+
+    /// BT-1986: Does the return type mention `Self` *nested* inside a
+    /// generic or union, as opposed to a bare `Self` / `Self class` /
+    /// `Self?` at the top level?
+    ///
+    /// The bare-top-level cases are handled by dedicated code paths
+    /// that preserve the receiver's type args; this predicate identifies
+    /// the "needs recursive substitution" case.
+    fn return_type_mentions_nested_self(ret_ty: &EcoString) -> bool {
+        ret_ty.contains("Self") && ret_ty.as_str() != "Self" && ret_ty.as_str() != "Self class"
     }
 
     /// Infer method-local type parameters from call-site arguments.
