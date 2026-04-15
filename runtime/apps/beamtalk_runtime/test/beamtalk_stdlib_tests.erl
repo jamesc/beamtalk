@@ -48,7 +48,8 @@ stdlib_test_() ->
         {"Integer class has correct superclass", fun integer_superclass_test/0},
         {"Integer class has expected methods", fun integer_methods_test/0},
         %% Beamtalk class method tests
-        {"Beamtalk allClasses returns all class names", fun beamtalk_all_classes_test/0},
+        {"Beamtalk allClasses returns all classes as class objects",
+            fun beamtalk_all_classes_test/0},
         {"Beamtalk classNamed: finds existing class", fun beamtalk_class_named_found_test/0},
         {"Beamtalk classNamed: returns nil for missing class",
             fun beamtalk_class_named_not_found_test/0},
@@ -173,22 +174,29 @@ beamtalk_all_classes_test() ->
     %% Call Beamtalk allClasses via dispatch
     Classes = beamtalk_stdlib:dispatch(allClasses, [], 'Beamtalk'),
 
-    %% Should return a list of atoms (class names)
+    %% Should return a list of class objects (beamtalk_object tuples)
     ?assert(is_list(Classes)),
     % At least bootstrap + stdlib classes
     ?assert(length(Classes) >= 10),
 
-    %% All stdlib classes should be present
-    ?assert(lists:member('Integer', Classes)),
-    ?assert(lists:member('String', Classes)),
-    ?assert(lists:member('True', Classes)),
-    ?assert(lists:member('False', Classes)),
-    ?assert(lists:member('Block', Classes)),
-    ?assert(lists:member('BeamtalkInterface', Classes)),
-    ?assert(lists:member('TranscriptStream', Classes)),
-    ?assert(lists:member('ProtoObject', Classes)),
-    ?assert(lists:member('Object', Classes)),
-    ?assert(lists:member('Actor', Classes)).
+    %% All entries should be beamtalk_object tuples
+    lists:foreach(
+        fun(C) -> ?assertMatch({beamtalk_object, _, _, _}, C) end,
+        Classes
+    ),
+
+    %% Extract class tags for membership checks
+    ClassTags = [element(2, C) || C <- Classes],
+    ?assert(lists:member('Integer class', ClassTags)),
+    ?assert(lists:member('String class', ClassTags)),
+    ?assert(lists:member('True class', ClassTags)),
+    ?assert(lists:member('False class', ClassTags)),
+    ?assert(lists:member('Block class', ClassTags)),
+    ?assert(lists:member('BeamtalkInterface class', ClassTags)),
+    ?assert(lists:member('TranscriptStream class', ClassTags)),
+    ?assert(lists:member('ProtoObject class', ClassTags)),
+    ?assert(lists:member('Object class', ClassTags)),
+    ?assert(lists:member('Actor class', ClassTags)).
 
 beamtalk_class_named_found_test() ->
     %% Look up an existing class
