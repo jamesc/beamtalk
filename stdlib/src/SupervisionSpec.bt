@@ -83,6 +83,10 @@ typed Value subclass: SupervisionSpec
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs:, withName: are auto-generated.)
+  //
+  // someArgs is annotated `:: Object` because SupervisionSpec is a typed class
+  // (missing annotations escalate to CI errors), but the value is forwarded as-is
+  // to the actor's init/1 — any payload shape the actor accepts is valid.
 
   /// Return a new spec with id and restart overridden.
   withId: anId :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
