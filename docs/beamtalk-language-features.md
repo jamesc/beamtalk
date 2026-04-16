@@ -185,6 +185,8 @@ Actor subclass: ResourceActor
 
 Both hooks are optional — actors without them work normally.
 
+**Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
+
 ### Three Class Kinds (ADR 0067)
 
 Beamtalk has three class kinds with distinct data keywords and construction protocols:
@@ -840,6 +842,15 @@ collect: block :: Block -> Self =>
 // At call sites, Self resolves to the static receiver type:
 // (List new collect: [:each | each])  — inferred return type: List
 // (Set new collect: [:each | each])   — inferred return type: Set
+
+// Self also substitutes inside nested generic return types
+class named: name :: Symbol -> Result(Self, Error) => ...
+// (Counter named: #c) — inferred return type: Result(Counter, Error)
+
+// Self class — the receiver's metaclass (return position only)
+class -> Self class => @primitive "class"
+// (Counter new) class — inferred type: Counter's metaclass, so
+// `self class instanceCount` type-checks against class-side methods
 ```
 
 ### Current Semantics
@@ -1790,6 +1801,14 @@ Use `withShutdown:` to set a graceful shutdown timeout (in milliseconds) for chi
 HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
 ```
 
+Use `withName:` (and the `withName:withRestart:` / `withName:withArgs:` / `withName:withRestart:withArgs:` combinators) to have the supervisor register the child atomically under a Symbol name on each restart. Named specs emit a `#spawnAs:` / `#spawnWith:as:` startFn so re-registration happens in the same OTP call that starts the process — held `Actor named:` references survive restarts (see [ADR 0079](ADR/0079-named-actor-registration.md) and the Actor Named Registration section below). `name` and `classMethod` cannot be combined on the same spec.
+
+```beamtalk
+Supervisor subclass: WebApp
+  class children =>
+    #((Counter supervisionSpec withName: #counter withRestart: #permanent))
+```
+
 ### Dynamic Supervisor
 
 Subclass `DynamicSupervisor` to manage pools of actors started at runtime. Override `class childClass` to declare which actor class the pool manages.
@@ -1847,6 +1866,47 @@ root which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>
 | `which: Class` | find child by module in `which_children` result |
 | `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors) |
 | `stop` | `gen_server:stop/1` |
+
+### Actor Named Registration (ADR 0079)
+
+Actors can be registered under a Symbol name so they can be looked up without passing a reference around, and so supervised restarts stay addressable. Named lookups are **class-checked** — `Counter named: #counter` only returns the registered process if it is a `Counter` (or subclass).
+
+```beamtalk
+// Atomic spawn + register — prefer this when the name is known up front
+c := (Counter spawnAs: #counter) unwrap
+c := (Counter spawnWith: #{#count => 10} as: #counter) unwrap
+
+// Register an already-spawned actor (not atomic w.r.t. spawn)
+(c registerAs: #counter) onSuccess: [:c | c increment]
+
+// Typed lookup — Result(Self, Error), so `Counter named:` narrows to Counter
+engine := (WorkflowEngine named: #engine) unwrap
+(Logger named: #counter)   // => Result error: (beamtalk_error wrong_class)
+
+// Instance queries
+c registeredName    // => #counter  (or nil if unnamed)
+c isRegistered      // => true
+
+// Idempotent release
+c unregister        // => #ok
+
+// Discover all currently-registered Beamtalk actors
+Actor allRegistered       // => #(an Actor(Counter), an Actor(Logger))
+```
+
+**Restart survival.** When a named actor is started under a supervisor (via `SupervisionSpec withName:`), the runtime dispatches sends through the registered name, not the snapshot pid. Held `Counter named: #counter` references continue to work after a supervisor restart because the name is re-registered atomically in the restarted process's `gen_server:start_link({local, Name}, ...)` call.
+
+Errors are surfaced as `Result` values (or raised as `#beamtalk_error{}` on direct send):
+
+| Kind | When |
+|------|------|
+| `name_registered` | another process is already registered under the name |
+| `name_not_registered` | `named:` lookup found nothing |
+| `wrong_class` | `named:` lookup found a process of a different class |
+| `reserved_name` | name is in the OTP kernel / stdlib blocklist |
+| `no_such_process` | send through a `{registered, Name}` proxy whose name has vanished |
+
+See [ADR 0079](ADR/0079-named-actor-registration.md) for the full design and exposure table.
 
 ---
 
