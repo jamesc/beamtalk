@@ -85,7 +85,8 @@ abstract Object subclass: Supervisor
   /// shaped value; call `unwrap` at the FFI boundary so the user-facing
   /// signature remains `Supervisor` until the full migration in Phase 1
   /// (BT-P1-startLink).
-  class supervise -> Supervisor => ((Erlang beamtalk_supervisor) startLink: self) unwrap
+  class supervise -> Supervisor =>
+    ((Erlang beamtalk_supervisor) startLink: self) unwrap
 
   /// Return the running supervisor instance, or nil if not started.
   class current => (Erlang beamtalk_supervisor) current: self

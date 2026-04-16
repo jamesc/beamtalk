@@ -1149,8 +1149,7 @@ startLink_success_returns_ok_new_tuple_test() ->
     try
         Result = beamtalk_supervisor:startLink(Self),
         ?assertMatch(
-            {ok,
-                {beamtalk_supervisor_new, 'BT1994StartOK', beamtalk_supervisor_test_helper, _}},
+            {ok, {beamtalk_supervisor_new, 'BT1994StartOK', beamtalk_supervisor_test_helper, _}},
             Result
         ),
         {ok, Inner} = Result,
@@ -1174,9 +1173,7 @@ startLink_already_started_returns_ok_existing_tuple_test() ->
     try
         Result = beamtalk_supervisor:startLink(Self),
         ?assertMatch(
-            {ok,
-                {beamtalk_supervisor, 'BT1994AlreadyStarted', beamtalk_supervisor_test_helper,
-                    _}},
+            {ok, {beamtalk_supervisor, 'BT1994AlreadyStarted', beamtalk_supervisor_test_helper, _}},
             Result
         ),
         {ok, Inner} = Result,
