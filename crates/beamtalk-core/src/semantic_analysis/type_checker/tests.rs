@@ -3652,6 +3652,102 @@ Value subclass: Driver
     }
 }
 
+// ---- Class-level type parameter in generic return type (BT-1995, Phase 0b of ADR 0080) ----
+
+/// BT-1995: Verify that a class-level type parameter `C` substitutes correctly
+/// inside a generic return type (e.g. `Result(C, Error)`) on a subclass that
+/// binds `C` to a concrete type via `superclass_type_args`.
+///
+/// This is ADR 0080's Phase 0b probe: `DynamicSupervisor(C)` declares
+/// `startChild -> Result(C, Error)`, and a subclass `WorkerPool` extending
+/// `DynamicSupervisor(Counter)` must see `pool startChild` narrow to
+/// `Result(Counter, Error)`. BT-1992 threaded the receiver's type arguments
+/// through `Self` substitution; this test probes the analogous path for a
+/// class-level parameter (`C`), which flows through
+/// `build_inherited_substitution_map` rather than via `Self`.
+#[test]
+fn test_class_type_param_in_generic_return_narrows_to_concrete() {
+    let source = "
+abstract Object subclass: FakeDynamicSupervisor(C)
+  probeC -> Result(C, Error) => Result ok: nil
+
+FakeDynamicSupervisor(Counter) subclass: FakeWorkerPool
+
+Value subclass: Counter
+  getValue -> Integer => 0
+
+Value subclass: Driver
+  probe =>
+    pool := FakeWorkerPool
+    pool probeC
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe")
+        .expect("probe method");
+    let expr = &probe
+        .body
+        .last()
+        .expect("probe has at least one statement")
+        .expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    // `pool` is a FakeWorkerPool instance (no receiver type args; the
+    // binding of C flows from superclass_type_args on FakeWorkerPool).
+    env.set("pool", InferredType::known("FakeWorkerPool"));
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(
+                class_name.as_str(),
+                "Result",
+                "Expected outer type Result, got {class_name}"
+            );
+            assert_eq!(
+                type_args.len(),
+                2,
+                "Expected Result to have 2 type args, got {type_args:?}"
+            );
+            let first = type_args
+                .first()
+                .expect("Result should have at least one type arg");
+            assert_eq!(
+                first.as_known().map(EcoString::to_string).as_deref(),
+                Some("Counter"),
+                "Expected C to be substituted to Counter via superclass_type_args, \
+                 got {first:?} (full type: {ty:?})"
+            );
+            assert_eq!(
+                type_args[1].as_known().map(EcoString::to_string).as_deref(),
+                Some("Error"),
+                "Expected second type arg to remain Error, got {:?}",
+                type_args[1]
+            );
+        }
+        other => panic!("Expected Known(Result, [Counter, Error]), got {other:?}"),
+    }
+}
+
 // ── infer_method_return_types / take_method_return_types tests (BT-1042) ─────
 
 fn make_class_with_methods(name: &str, instance_methods: Vec<MethodDefinition>) -> ClassDefinition {
