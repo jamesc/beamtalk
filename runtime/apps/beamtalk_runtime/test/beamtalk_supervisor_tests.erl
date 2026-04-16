@@ -1136,18 +1136,24 @@ make_fake_class_self(ClassName, Module) ->
 atom_to_list_class_tag(ClassName) ->
     list_to_atom(atom_to_list(ClassName) ++ " class").
 
-startLink_success_returns_new_tuple_test() ->
-    %% BT-1980: startLink returns {beamtalk_supervisor_new, ...} on first start.
+startLink_success_returns_ok_new_tuple_test() ->
+    %% BT-1994 (ADR 0080 Phase 0a, option 2): startLink returns
+    %% {ok, {beamtalk_supervisor_new, ...}} on first start. The inner
+    %% `_new` tag signals the post-dispatch hook in beamtalk_class_dispatch
+    %% that this is a fresh start; the hook rewrites the inner tag and
+    %% runs initialize: in the caller's process after the FFI Result
+    %% coercion has wrapped this return.
     beamtalk_supervisor_test_helper:set_mode(ok, undefined),
     {FakeClassPid, Self} =
-        make_fake_class_self('BT1980StartOK', beamtalk_supervisor_test_helper),
+        make_fake_class_self('BT1994StartOK', beamtalk_supervisor_test_helper),
     try
         Result = beamtalk_supervisor:startLink(Self),
         ?assertMatch(
-            {beamtalk_supervisor_new, 'BT1980StartOK', beamtalk_supervisor_test_helper, _},
+            {ok, {beamtalk_supervisor_new, 'BT1994StartOK', beamtalk_supervisor_test_helper, _}},
             Result
         ),
-        SupPid = element(4, Result),
+        {ok, Inner} = Result,
+        SupPid = element(4, Inner),
         ?assert(is_pid(SupPid)),
         ?assert(is_process_alive(SupPid)),
         gen_server:stop(SupPid)
@@ -1156,35 +1162,42 @@ startLink_success_returns_new_tuple_test() ->
         beamtalk_supervisor_test_helper:reset()
     end.
 
-startLink_already_started_returns_existing_tuple_test() ->
-    %% BT-1980: startLink returns {beamtalk_supervisor, ...} when start_link
-    %% reports {error, {already_started, Pid}}.
+startLink_already_started_returns_ok_existing_tuple_test() ->
+    %% BT-1994 (ADR 0080 Phase 0a, option 2): startLink returns
+    %% {ok, {beamtalk_supervisor, ...}} when start_link reports
+    %% {error, {already_started, Pid}}. The inner tag is NOT `_new`, so
+    %% the post-dispatch hook does not re-run initialize: on this path.
     beamtalk_supervisor_test_helper:set_mode(already_started, undefined),
     {FakeClassPid, Self} =
-        make_fake_class_self('BT1980AlreadyStarted', beamtalk_supervisor_test_helper),
+        make_fake_class_self('BT1994AlreadyStarted', beamtalk_supervisor_test_helper),
     try
         Result = beamtalk_supervisor:startLink(Self),
         ?assertMatch(
-            {beamtalk_supervisor, 'BT1980AlreadyStarted', beamtalk_supervisor_test_helper, _},
+            {ok, {beamtalk_supervisor, 'BT1994AlreadyStarted', beamtalk_supervisor_test_helper, _}},
             Result
         ),
-        SupPid = element(4, Result),
+        {ok, Inner} = Result,
+        SupPid = element(4, Inner),
         gen_server:stop(SupPid)
     after
         FakeClassPid ! stop,
         beamtalk_supervisor_test_helper:reset()
     end.
 
-startLink_error_raises_runtime_error_test() ->
-    %% BT-1980: startLink converts {error, Reason} into a structured runtime_error.
+startLink_error_returns_supervisor_start_failed_test() ->
+    %% BT-1994 (ADR 0080 Phase 0a, option 2): startLink returns
+    %% {error, #beamtalk_error{kind = supervisor_start_failed, ...}}
+    %% instead of raising. FFI coercion converts this to a Result error
+    %% tagged map on the Beamtalk side.
     beamtalk_supervisor_test_helper:set_mode(error, {foo, bar}),
     {FakeClassPid, Self} =
-        make_fake_class_self('BT1980StartErr', beamtalk_supervisor_test_helper),
+        make_fake_class_self('BT1994StartErr', beamtalk_supervisor_test_helper),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
-            beamtalk_supervisor:startLink(Self)
-        )
+        Result = beamtalk_supervisor:startLink(Self),
+        ?assertMatch({error, #beamtalk_error{kind = supervisor_start_failed}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT1994StartErr', BtError#beamtalk_error.class),
+        ?assertEqual(supervise, BtError#beamtalk_error.selector)
     after
         FakeClassPid ! stop,
         beamtalk_supervisor_test_helper:reset()

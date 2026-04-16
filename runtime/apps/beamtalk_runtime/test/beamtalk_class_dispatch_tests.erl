@@ -1485,8 +1485,13 @@ test_self_instantiation_spawn_branch() ->
     end.
 
 %% class_send_dispatch supervisor_new rewrap branch — when a user class
-%% method returns a {beamtalk_supervisor_new, ...} tuple, class_send_dispatch
-%% runs the initialize: lifecycle hook and rewrites the tag.
+%% method returns a Result tagged map wrapping a
+%% {beamtalk_supervisor_new, ...} tuple, class_send_dispatch runs the
+%% initialize: lifecycle hook and rewrites the inner tag.
+%%
+%% BT-1994 (ADR 0080 Phase 0a, option 2): the hook now pattern-matches
+%% the Result tagged map produced by FFI coercion on the class method
+%% body's return, not the bare `_new` tuple.
 class_send_supervisor_new_rewrap_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
         [
@@ -1500,17 +1505,30 @@ test_class_send_supervisor_new_rewrap() ->
     ClassInfo = #{
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSupervisorNew => <<>>},
+        class_methods => #{testSupervisorNew => <<>>, 'initialize:' => <<>>},
         class_state => #{}
     },
+    erase(bt1994_initialize_called),
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     try
-        %% run_initialize may raise if self() isn't a proper supervisor, but
-        %% we accept either the rewrapped tuple or a raised exception — in
-        %% both cases line 114-117 (the rewrap case clause) executes.
-        _ = (catch beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, [])),
-        ok
+        %% The class method returns a Result tagged map wrapping the
+        %% _new tuple (option-2 shape). With the helper module providing
+        %% class_initialize:/3, run_initialize resolves the method directly
+        %% (no hierarchy walk needed) and the hook completes the rewrite.
+        Outcome = beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, []),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                isOk := true,
+                okValue :=
+                    {beamtalk_supervisor, 'BT1981SupNewClass', beamtalk_class_dispatch_test_helper,
+                        _}
+            },
+            Outcome
+        ),
+        ?assertEqual(true, get(bt1994_initialize_called))
     after
+        erase(bt1994_initialize_called),
         (try
             gen_server:stop(Pid, normal, 5000)
         catch
