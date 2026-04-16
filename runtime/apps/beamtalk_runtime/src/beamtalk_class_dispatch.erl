@@ -24,6 +24,7 @@ Extracted from beamtalk_object_class.erl (BT-704).
 
 -export([
     class_send/3,
+    class_self_dispatch/2,
     metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
@@ -87,6 +88,57 @@ class_send(ClassPid, Selector, Args) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
         class_send_dispatch(P, Selector, Args)
     end).
+
+-doc """
+BT-2003: Dispatch a class-name self-send from inside a class method.
+
+When a class method in `Foo` contains `Foo inheritedSelector: ...`, the codegen
+cannot emit a direct call to `bt@foo` because inherited class methods live in
+the ancestor's generated module (e.g. `bt@actor` for `spawnWith:as:`). Routing
+through `class_send` would deadlock since the caller is already executing inside
+`Foo`'s gen_server handle_call.
+
+This helper reads the current class name/module from the process dictionary
+(set during `beamtalk_object_class:init/1`), walks the superclass chain to
+locate the defining module, and applies the method directly. Passes an empty
+class-vars map — inherited class methods that walk through here are almost
+always sealed FFI shims (the named-actor API) which do not read or mutate the
+caller's class variables.
+""".
+-spec class_self_dispatch(atom(), list()) -> term().
+class_self_dispatch(Selector, Args) ->
+    case {get(beamtalk_class_name), get(beamtalk_class_module)} of
+        {undefined, _} ->
+            raise_self_dispatch_dnu(unknown, Selector);
+        {_, undefined} ->
+            raise_self_dispatch_dnu(get(beamtalk_class_name), Selector);
+        {ClassName, Module} ->
+            case find_class_method_in_chain(Selector, ClassName) of
+                {ok, _DefClass, DefModule} ->
+                    ClassSelf = #beamtalk_object{
+                        class = beamtalk_class_registry:class_object_tag(ClassName),
+                        class_mod = Module,
+                        pid = self()
+                    },
+                    FunName = class_method_fun_name(Selector),
+                    case erlang:apply(DefModule, FunName, [ClassSelf, #{} | Args]) of
+                        {class_var_result, Result, _NewClassVars} -> Result;
+                        Result -> Result
+                    end;
+                not_found ->
+                    raise_self_dispatch_dnu(ClassName, Selector)
+            end
+    end.
+
+-spec raise_self_dispatch_dnu(atom(), atom()) -> no_return().
+raise_self_dispatch_dnu(ClassName, Selector) ->
+    Error = beamtalk_error:new(
+        does_not_understand,
+        ClassName,
+        Selector,
+        <<"Class does not understand this message">>
+    ),
+    beamtalk_error:raise(Error).
 
 -doc "Dispatch a class method call (the main logic for the catch-all clause).".
 -spec class_send_dispatch(pid(), selector(), list()) -> term().
@@ -333,7 +385,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             {reply, {error, Error}, ClassVars};
                         false ->
                             %% undef was raised inside the method body, not at dispatch.
-                            ?LOG_DEBUG(
+                            ?LOG_ERROR(
                                 "Class method ~p:~p raised undef internally",
                                 [ClassName, Selector],
                                 #{
@@ -346,7 +398,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             {reply, {error, undef}, ClassVars}
                     end;
                 ErrClass:Error:ErrST ->
-                    ?LOG_DEBUG(
+                    ?LOG_ERROR(
                         "Class method ~p:~p failed",
                         [ClassName, Selector],
                         #{
