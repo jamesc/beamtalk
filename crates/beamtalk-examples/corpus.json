@@ -610,7 +610,7 @@
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n3 + 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
+      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1857,7 +1857,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-89",
-      "title": "Worked Example — Migrating from Supervisor which: (beamtalk-language-features)",
+      "title": "Before named registration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "ExduraSupervisor",
@@ -1903,7 +1903,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-90",
-      "title": "Worked Example — Migrating from Supervisor which: (beamtalk-language-features)",
+      "title": "After named registration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "ExduraSupervisor",
