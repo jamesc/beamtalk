@@ -1,7 +1,10 @@
 # ADR 0080: Migrate Supervisor Lifecycle to Result
 
 ## Status
-Proposed (2026-04-16)
+Accepted (2026-04-16). Phase 0a probe (BT-1994) empirically selected
+**Option 2** (hook extension) over Option 3 (synchronous helper
+process); see §Phase 0a Probe Outcome below and §Phase 1 for the
+updated prescription.
 
 ## Context
 
@@ -330,6 +333,41 @@ Three candidate resolutions, each with real tradeoffs:
 
 Probe 0a compares the runtime-bearing approaches (options (2) and (3)) empirically on the `Supervisor>>supervise` / `startLink/1` path — the only path that triggers the `beamtalk_supervisor_new` post-dispatch hook. The probe commit implements each option and verifies, on a fresh start, that (a) the `_new` tag is rewritten to `{beamtalk_supervisor, ...}`, (b) `class initialize:` runs exactly once, and (c) the e2e supervisor test suite stays green. The chosen option is the one that achieves the above with the least collateral code. Option (1) can be evaluated separately for Error-side ergonomics on instance methods (`startChild`, `terminateChild:`) where no post-dispatch hook is in play.
 
+#### Phase 0a Probe Outcome (BT-1994, 2026-04-16)
+
+**Result: Option (2) wins. Option (3) is disqualified by a deadlock that surfaces whenever `initialize:` sends a method-dispatching message to the just-started supervisor.**
+
+Both options were implemented on separate branches (`BT-1994-probe-option-2`, `BT-1994-probe-option-3`) with identical test coverage: EUnit for runtime-level behaviour, BUnit for stdlib wiring, and the e2e supervisor suite for end-to-end correctness. Both probes used a stdlib shim — `class supervise => ((Erlang beamtalk_supervisor) startLink: self) unwrap` — so the user-facing signature stayed `Supervisor` / `Self`, keeping existing callers working without Phase 1 stdlib migration.
+
+| Property | Option 2 (hook extension) | Option 3 (helper process) |
+|---|---|---|
+| EUnit (`beamtalk_supervisor_tests`) | 69/69 ✅ | 72/72 ✅ |
+| EUnit (`beamtalk_class_dispatch_tests`) | 80/80 ✅ | 80/80 (hook removed, so rewrap test subsumed) |
+| BUnit (full suite, 199 files) | 1860/1860 ✅ | — (blocked by e2e deadlock, not rerun) |
+| E2E (1118 cases) | 1118/1118 ✅ | **67 failures** — `supervisor_initialize.btscript` deadlocks |
+| `initialize:` runs in caller's process | Yes (ADR 0059 / BT-1285 invariant preserved) | No (helper process) |
+| Collateral code (runtime) | +60 LOC (hook matches two shapes) | +120 LOC (helper, monitor, timeout, teardown) |
+| Semantic risk | Low — hook change is additive, idempotent, and pattern-local | High — helper trades a known invariant for a known-concern one |
+
+**Option 3 failure mode (empirical).** When `initialize:` on `E2EInitSupervisor` calls `sup which: E2EInitChildA`, and when `initialize:` on `E2EInitDynSupervisor` calls `sup startChild`, the e2e harness hit `exit:{timeout, {gen_server, call, [ClassPid, {method, startChild}]}}`. Trace:
+
+1. REPL sends `E2EInitDynSupervisor supervise` → `class_send_dispatch` issues `gen_server:call(ClassPid, {class_method_call, supervise, []})`.
+2. The class gen_server runs the method body, which invokes `startLink/1` **inside the class gen_server's `handle_call`**.
+3. Option 3's `startLink/1` spawns a helper process and waits for it before returning — still blocking the class gen_server's `handle_call`.
+4. The helper runs `initialize:`, whose body sends `sup startChild`.
+5. `beamtalk_message_dispatch:send({beamtalk_supervisor, ...}, startChild, [])` → `beamtalk_dispatch:lookup` → `beamtalk_object_class:has_method(ClassPid, startChild)` → `gen_server:call(ClassPid, {method, startChild})`.
+6. `ClassPid` is the class gen_server from step (2), which is **still blocked** waiting for startLink/1 (step 3) to return. Deadlock.
+
+This is precisely the concern the ADR raised in Phase 0a ("downstream implications on `which:` and recursive-send deadlock avoidance are unknown; probably needs its own mini-ADR"). The probe confirms the concern is not hypothetical: it is triggered by the existing e2e fixtures. A redesign that fully decouples the helper from the class gen_server's `handle_call` would require making `supervise` asynchronous — a far larger API change than Option 2 — or routing method resolution through an out-of-band channel that bypasses `ClassPid` entirely (untested, adds a second concurrency protocol). Neither is justified when Option 2 succeeds cleanly.
+
+**Option 2 behaviour (empirical).** Hook at `beamtalk_class_dispatch:class_send_dispatch/3` now matches two shapes on the class gen_server's `{ok, Result}` reply:
+- Bare `{beamtalk_supervisor_new, ClassName, Module, Pid}` — the shape after `supervise`'s `unwrap` extracts the `okValue` from the FFI-wrapped Result, i.e. the pre-Phase-1 path exercised today.
+- `Result` tagged map `#{'$beamtalk_class' => 'Result', isOk => true, okValue => {beamtalk_supervisor_new, ...}}` — the shape that will arrive once Phase 1 removes the `.unwrap` from the stdlib and `supervise` returns `Result(Supervisor, Error)` directly.
+
+Both branches rewrite the inner tag to `{beamtalk_supervisor, ...}`, call `beamtalk_supervisor:run_initialize/1` **in the caller's process** (preserving the ADR 0059 / BT-1285 guarantee), and return the normalised shape (bare tuple or re-wrapped Result map, matching what they received). Idempotent `{beamtalk_supervisor, ...}` returns and `{error, ...}` branches flow through unchanged — no initialize re-run.
+
+The dual-shape match means Phase 1's migration to `supervise -> Result(Supervisor, Error)` will not require another hook change: both the pre-Phase-1 shim (`unwrap` in stdlib) and the post-Phase-1 typed signature (no `unwrap`, callers handle the Result) produce shapes the hook already handles.
+
 **Probe 0b — `Result(C, Error)` type substitution for `DynamicSupervisor(C)`.**
 
 ADR 0079 / BT-1986 probed that `Result(Self, Error)` works in generic position. ADR 0080 proposes `Result(C, Error)` where `C` is the `DynamicSupervisor`'s parametric type argument (ADR 0068). BT-1992 ("Thread receiver type arguments through Self substitution") should cover this, but `C` is not `Self` — it's a class-level type parameter. Probe 0b writes a minimal stdlib method `class foo -> Result(C, Error)` on `DynamicSupervisor` and a concrete subclass test, verifying the typechecker narrows `C` correctly at call sites. If it does not, a targeted typechecker extension is in scope (matching ADR 0079's scope for `Self`).
@@ -338,12 +376,14 @@ Both probes are small (<1 day each) and their outcomes determine the exact shape
 
 ### Phase 1: Runtime — return Result-shaped values where direct coercion is safe
 - **`runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl`:**
-  - `startLink/1` — implementation driven by Probe 0a. If option 2 wins, `startLink/1` returns `{ok, SupTuple}` / `{error, BtError}` and the class_dispatch hook is extended to inspect the Result tagged map. If option 3 wins, `startLink/1` runs `run_initialize/1` synchronously (via helper process) before returning `{ok, {beamtalk_supervisor, ...}}`. Option 1 alone is insufficient (see Phase 0a) and will only be adopted bundled with (2).
+  - `startLink/1` — **Option 2 from Phase 0a (BT-1994):** returns `{ok, {beamtalk_supervisor_new, ClassName, Module, Pid}}` on a fresh start, `{ok, {beamtalk_supervisor, ...}}` on the idempotent `{already_started, Pid}` branch, and `{error, #beamtalk_error{kind = supervisor_start_failed, ...}}` on start failure. The inner `_new` tag signals the post-dispatch hook in `beamtalk_class_dispatch`. FFI coercion wraps the outer tuple as a `Result` tagged map for the class method body's return.
   - `startChild/1`, `startChild/2` — instance methods (no post-dispatch hook). On `{error, Reason}`, return `{error, BtError}` with `reason = child_start_failed`. On `{ok, Pid}`, return `{ok, wrap_child(...)}`. FFI coercion handles both.
   - `terminateChild/2` (both arities) — on `{error, not_found}`, return `{ok, nil}` (idempotent); on other `{error, Reason}`, return `{error, BtError}` with `reason = terminate_failed`. **Behavior change on static path:** `terminateChild/2` at lines 276-292 currently raises *all* `{error, Reason}` uniformly — it does not special-case `not_found`. The migration adds the `not_found` → `Ok(nil)` branch to the static path, matching the existing dynamic-path special-case at lines 304-311. Any caller relying on the static path raising for a missing child loses that signal. Audit in Phase 2.
   - `with_live_supervisor/3` — return `{error, BtError}` with `reason = stale_handle` instead of raising. Inner funs must now return `{ok, Value}` on success so FFI coercion sees a consistent shape.
-- **EUnit tests:** `beamtalk_supervisor_tests.erl` — cover each Result variant end-to-end, including the `{already_started, Pid}` → `Ok` path, the `not_found` → `Ok(nil)` idempotent path on BOTH static and dynamic supervisors, `stale_handle` defensive coverage, and an explicit test that `class initialize:` still runs on fresh start after the Phase 0a resolution.
-- **Effort:** S-M, sensitive to Probe 0a outcome.
+- **`runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl`:**
+  - `class_send_dispatch/3` — extend the BT-1542 post-dispatch hook to pattern-match both the bare `{beamtalk_supervisor_new, ...}` tuple (pre-Phase-1 shim path via `.unwrap` in the stdlib) **and** a `Result` tagged map wrapping that tuple (post-Phase-1 path, where stdlib returns `Result(Supervisor, Error)` without unwrapping). On the Result-map match, rewrite `okValue` to `{beamtalk_supervisor, ...}` and return the re-wrapped Result; on the bare-tuple match, rewrite and return the bare tuple. `class initialize:` always runs **in the caller's process**, preserving the ADR 0059 / BT-1285 guarantee.
+- **EUnit tests:** `beamtalk_supervisor_tests.erl` — cover each Result variant end-to-end, including the `{already_started, Pid}` → `Ok` path, the `not_found` → `Ok(nil)` idempotent path on BOTH static and dynamic supervisors, `stale_handle` defensive coverage, and an explicit test that `class initialize:` still runs on fresh start after the Phase 0a resolution. `beamtalk_class_dispatch_tests.erl` — extend the existing `class_send_supervisor_new_rewrap_test_` to drive the Result-tagged-map branch via `beamtalk_result:from_tagged_tuple({ok, ...})` in the test helper.
+- **Effort:** S-M. Phase 0a probe landed (BT-1994); the path is now unambiguous.
 
 ### Phase 2: Stdlib signature migration
 - **`stdlib/src/Supervisor.bt`:** update `class supervise` return type to `Result(Supervisor, Error)`; update `terminate:` return type to `Result(Nil, Error)`. No body changes (FFI call already returns the Result per Phase 1).
