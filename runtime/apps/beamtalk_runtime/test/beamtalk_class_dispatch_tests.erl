@@ -1505,44 +1505,30 @@ test_class_send_supervisor_new_rewrap() ->
     ClassInfo = #{
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSupervisorNew => <<>>},
+        class_methods => #{testSupervisorNew => <<>>, 'initialize:' => <<>>},
         class_state => #{}
     },
+    erase(bt1994_initialize_called),
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     try
         %% The class method returns a Result tagged map wrapping the
-        %% _new tuple (option-2 shape). run_initialize may raise if
-        %% self() isn't a proper supervisor, but we accept either a
-        %% successful rewrap or a raised exception — both paths exercise
-        %% the Result-map case clause in the hook.
-        Outcome = (catch beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, [])),
-        case Outcome of
+        %% _new tuple (option-2 shape). With the helper module providing
+        %% class_initialize:/3, run_initialize resolves the method directly
+        %% (no hierarchy walk needed) and the hook completes the rewrite.
+        Outcome = beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, []),
+        ?assertMatch(
             #{
                 '$beamtalk_class' := 'Result',
                 isOk := true,
-                okValue := {beamtalk_supervisor, 'BT1981SupTestClass', bt1981_sup_mod, _}
-            } ->
-                %% Happy case: hook matched the Result tagged map, ran
-                %% run_initialize successfully (only possible when the
-                %% hierarchy walk finds a class_initialize: — not expected
-                %% for this minimal helper, but tolerated if it ever
-                %% becomes reachable), and rewrote the inner _new tag.
-                ok;
-            {'EXIT', {{supervisor_init_method_not_found, 'class_initialize:'}, _}} ->
-                %% Expected for this minimal helper: run_initialize walks
-                %% the hierarchy looking for class_initialize: and raises
-                %% this error when none is found. The hook still executed
-                %% — that's what the test verifies.
-                ok;
-            {'EXIT', {{#{error := #beamtalk_error{}}, _}, _}} ->
-                %% run_initialize propagated a real structured error —
-                %% still means the hook matched and executed run_initialize.
-                ok;
-            Other ->
-                ct:pal("Unexpected outcome from hook test: ~p", [Other]),
-                ?assert(false)
-        end
+                okValue :=
+                    {beamtalk_supervisor, 'BT1981SupNewClass', beamtalk_class_dispatch_test_helper,
+                        _}
+            },
+            Outcome
+        ),
+        ?assertEqual(true, get(bt1994_initialize_called))
     after
+        erase(bt1994_initialize_called),
         (try
             gen_server:stop(Pid, normal, 5000)
         catch

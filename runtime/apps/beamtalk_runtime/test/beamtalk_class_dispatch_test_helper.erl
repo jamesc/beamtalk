@@ -24,7 +24,8 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
     class_testInternalUndef/2,
     class_testRaise/2,
     'class_testTwoArgs:and:'/4,
-    class_testSupervisorNew/2
+    class_testSupervisorNew/2,
+    'class_initialize:'/3
 ]).
 
 -doc """
@@ -102,10 +103,21 @@ tagged map.
 """.
 -spec class_testSupervisorNew(term(), map()) -> map().
 class_testSupervisorNew(_ClassSelf, _ClassVars) ->
-    %% Use self() as the supervisor pid; beamtalk_supervisor:run_initialize
-    %% will attempt to dispatch initialize: on it which will no-op on the
-    %% absence of an initialize: method. We just care that the rewrap branch
-    %% runs; we accept any outcome from run_initialize here.
+    %% Inner tuple uses the helper module so run_initialize finds the
+    %% `class_initialize:/3` defined below directly (no hierarchy walk),
+    %% letting the test assert the happy-path rewrite deterministically.
     beamtalk_result:from_tagged_tuple(
-        {ok, {beamtalk_supervisor_new, 'BT1981SupTestClass', bt1981_sup_mod, self()}}
+        {ok, {beamtalk_supervisor_new, 'BT1981SupNewClass', ?MODULE, self()}}
     ).
+
+-doc """
+Synchronous `class_initialize:` target for the supervisor-new rewrap test.
+
+Records that it ran in the process dictionary so the test can assert the
+post-dispatch hook actually invoked `run_initialize/1` (rather than only
+that the hook pattern-matched the Result tagged map).
+""".
+-spec 'class_initialize:'(term(), map(), term()) -> term().
+'class_initialize:'(_ClassSelf, _ClassVars, _SupTuple) ->
+    put(bt1994_initialize_called, true),
+    nil.

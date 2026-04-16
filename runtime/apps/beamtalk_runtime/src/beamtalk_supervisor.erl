@@ -86,11 +86,20 @@ the idempotent `{already_started, Pid}` branch, and
 `Result` tagged map for the class method body's return.
 
 The `beamtalk_supervisor_new` inner tag signals a fresh start to the
-post-dispatch hook in `beamtalk_class_dispatch:class_send_dispatch/3`,
-which pattern-matches the Result tagged map, rewrites the inner tag to
+post-dispatch hook in `beamtalk_class_dispatch:class_send_dispatch/3`.
+The hook matches two shapes:
+
+  * the bare `{beamtalk_supervisor_new, ...}` tuple, seen when the
+    stdlib `supervise` method calls `.unwrap` on the FFI-coerced
+    Result (the current Phase 0a shim), and
+  * a Result tagged map wrapping `{beamtalk_supervisor_new, ...}`,
+    seen after the Phase 1 stdlib migration when callers handle the
+    Result themselves.
+
+In both cases the hook rewrites the inner tag to
 `{beamtalk_supervisor, ...}`, runs `class initialize:` in the caller's
-process (preserving the BT-1285 / ADR 0059 guarantee), and re-wraps the
-result in `Result ok:`.
+process (preserving the BT-1285 / ADR 0059 guarantee), and returns the
+rewritten shape (bare tuple or re-wrapped Result) to the caller.
 """.
 -spec startLink(beamtalk_object()) ->
     {ok, {beamtalk_supervisor_new | beamtalk_supervisor, atom(), module(), pid()}}
