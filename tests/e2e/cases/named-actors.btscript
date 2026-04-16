@@ -283,3 +283,6 @@ sup stop
 
 g stop
 // => ok
+
+anon stop
+// => ok

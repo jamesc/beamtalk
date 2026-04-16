@@ -2712,7 +2712,7 @@ spawnAs_success_test() ->
         cleanup_name(Name)
     end.
 
-spawnAs_arity_2_uses_empty_args_test() ->
+spawnAs_arity_2_uses_empty_map_test() ->
     %% Arity-2 delegates to arity-3 with `#{}` (the Beamtalk empty-state
     %% map) — matching `doSpawnAs/2` and the shape the compiler-generated
     %% `init/1` expects. We verify via reserved-name rejection which runs

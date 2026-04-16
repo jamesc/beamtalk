@@ -1863,7 +1863,7 @@ Under the hood this maps directly to OTP's process registry (`erlang:register/2`
 | `Class spawnAs: name` | class-side | `Result(Self, Error)` | Atomic spawn + register. Equivalent to `gen_server:start_link({local, Name}, ...)` — the name is registered during process startup. |
 | `Class spawnWith: initArgs as: name` | class-side | `Result(Self, Error)` | Same as `spawnAs:` but with initialization arguments. |
 | `Class named: name` | class-side | `Result(Self, Error)` | Look up a registered actor. `Self` resolves to the receiver class at the call site, so `Counter named:` returns a `Counter`. |
-| `Actor allRegistered` | class-side | `Array(Actor)` | Enumerates currently-registered Beamtalk actors. Excludes raw OTP-registered processes (`kernel_sup`, `logger`, …). |
+| `Actor allRegistered` | class-side | `List(Actor)` | Enumerates currently-registered Beamtalk actors. Excludes raw OTP-registered processes (`kernel_sup`, `logger`, …). |
 | `actor registerAs: name` | instance | `Result(Self, Error)` | Register an already-spawned actor. Non-atomic — prefer `spawnAs:` when the name is known up front. |
 | `actor unregister` | instance | `Symbol` | `#ok`. Idempotent — unregistering an unregistered actor is not an error. |
 | `actor registeredName` | instance | `Symbol` or `nil` | Currently-registered name, or `nil`. |

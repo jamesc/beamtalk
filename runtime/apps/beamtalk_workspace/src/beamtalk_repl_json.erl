@@ -360,7 +360,11 @@ term_to_json(Value) when is_tuple(Value) ->
                                 PidStr = pid_to_list(Pid),
                                 list_to_binary(
                                     lists:sublist(PidStr, 2, length(PidStr) - 2)
-                                )
+                                );
+                            _ ->
+                                %% Defensive catch-all: never crash the REPL
+                                %% formatter on a malformed identity slot.
+                                iolist_to_binary(io_lib:format("~tp", [Pid]))
                         end,
                     iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
             end;
