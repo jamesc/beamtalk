@@ -415,7 +415,7 @@ Point superclass       // => Value
 counter increment
 
 // Binary message (standard math precedence: 2 + 3 * 4 = 14)
-3 + 4
+2 + 3 * 4
 
 // Keyword message
 dict at: #name put: "hello"
@@ -1892,7 +1892,9 @@ The asymmetry is deliberate: `named:` returns a Result because name-absence is a
 
 ### Worked Example — Migrating from `Supervisor which:`
 
-Before — the pre-ADR pattern uses a supervisor-local lookup (`which:`) and an `initialize:` hook to re-wire dependencies after each restart:
+#### Before named registration
+
+The pre-ADR pattern uses a supervisor-local lookup (`which:`) and an `initialize:` hook to re-wire dependencies after each restart:
 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
@@ -1912,7 +1914,9 @@ typed Supervisor subclass: ExduraSupervisor
     nil
 ```
 
-After — naming each child eliminates the `initialize:` hook, and the supervisor strategy is freed from the rewire-on-restart constraint:
+#### After named registration
+
+Naming each child eliminates the `initialize:` hook, and the supervisor strategy is freed from the rewire-on-restart constraint:
 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
