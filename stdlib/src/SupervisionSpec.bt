@@ -101,11 +101,11 @@ typed Value subclass: SupervisionSpec
     (self withName: aName) withRestart: policy
 
   /// Return a new spec with name and args overridden.
-  withName: aName :: Symbol withArgs: someArgs -> SupervisionSpec =>
+  withName: aName :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     (self withName: aName) withArgs: someArgs
 
   /// Return a new spec with name, restart, and args all overridden.
-  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs -> SupervisionSpec =>
+  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withName: aName) withRestart: policy) withArgs: someArgs
 
   // === Display ===

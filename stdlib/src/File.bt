@@ -40,7 +40,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File readAll: "test.txt"  // => Result ok: "file contents..."
   /// ```
-  class sealed readAll: path :: String -> Result =>
+  class sealed readAll: path :: String -> Result(String, Error) =>
     (Erlang beamtalk_file) readAll: path
 
   /// Write text to a file, creating or overwriting it (class method).
@@ -51,7 +51,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File writeAll: "output.txt" contents: "hello"
   /// ```
-  class sealed writeAll: path :: String contents: text :: String -> Result =>
+  class sealed writeAll: path :: String contents: text :: String -> Result(Nil, Error) =>
     (Erlang beamtalk_file) writeAll: path contents: text
 
   /// Read the entire contents of a file as raw binary (class method).
@@ -63,7 +63,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File readBinary: "image.png"  // => Result ok: <<...>>
   /// ```
-  class sealed readBinary: path :: String -> Result =>
+  class sealed readBinary: path :: String -> Result(Binary, Error) =>
     (Erlang beamtalk_file) readBinary: path
 
   /// Write binary data to a file, creating or overwriting it (class method).
@@ -74,7 +74,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File writeBinary: "output.bin" contents: data
   /// ```
-  class sealed writeBinary: path :: String contents: binary :: Binary -> Result =>
+  class sealed writeBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
     (Erlang beamtalk_file) writeBinary: path contents: binary
 
   /// Append binary data to a file, creating it if needed (class method).
@@ -85,7 +85,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File appendBinary: "log.bin" contents: data
   /// ```
-  class sealed appendBinary: path :: String contents: binary :: Binary -> Result =>
+  class sealed appendBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
     (Erlang beamtalk_file) appendBinary: path contents: binary
 
   /// Return a lazy Stream of lines from a file (class method).
@@ -103,7 +103,7 @@ typed Object subclass: File
   /// (File lines: "data.csv") unwrap take: 5
   /// (File lines: "log.txt") unwrap select: [:l | l includesSubstring: "ERROR"]
   /// ```
-  class sealed lines: path :: String -> Result =>
+  class sealed lines: path :: String -> Result(Stream(String), Error) =>
     (Erlang beamtalk_file) lines: path
 
   /// Block-scoped file handle with automatic cleanup (class method).
@@ -124,7 +124,7 @@ typed Object subclass: File
   ///   handle lines take: 10
   /// ]) unwrap
   /// ```
-  class sealed open: path :: String do: block :: Block -> Result =>
+  class sealed open: path :: String do: block :: Block(FileHandle, R) -> Result(R, Error) =>
     (Erlang beamtalk_file) open: path do: block
 
   /// Get the last modification time of a file (class method).
@@ -136,7 +136,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File lastModified: "test.txt"  // => Result ok: a DateTime(...)
   /// ```
-  class sealed lastModified: path :: String -> Result =>
+  class sealed lastModified: path :: String -> Result(DateTime, Error) =>
     (Erlang beamtalk_file) lastModified: path
 
   /// Test if a path refers to a directory (class method).
@@ -165,7 +165,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File mkdir: "target/mydir"
   /// ```
-  class sealed mkdir: path :: String -> Result =>
+  class sealed mkdir: path :: String -> Result(Nil, Error) =>
     (Erlang beamtalk_file) mkdir: path
 
   /// Create a directory and all missing parent directories (class method).
@@ -176,7 +176,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File mkdirAll: "target/a/b/c"
   /// ```
-  class sealed mkdirAll: path :: String -> Result =>
+  class sealed mkdirAll: path :: String -> Result(Nil, Error) =>
     (Erlang beamtalk_file) mkdirAll: path
 
   /// List entries in a directory as a List of Strings (class method).
@@ -187,7 +187,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File listDirectory: "target"
   /// ```
-  class sealed listDirectory: path :: String -> Result =>
+  class sealed listDirectory: path :: String -> Result(List(String), Error) =>
     (Erlang beamtalk_file) listDirectory: path
 
   /// Delete a file or empty directory (class method).
@@ -198,7 +198,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File delete: "target/old.txt"
   /// ```
-  class sealed delete: path :: String -> Result =>
+  class sealed delete: path :: String -> Result(Nil, Error) =>
     (Erlang beamtalk_file) delete: path
 
   /// Recursively delete a directory tree (class method).
@@ -209,7 +209,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File deleteAll: "target/old-workspace"
   /// ```
-  class sealed deleteAll: path :: String -> Result =>
+  class sealed deleteAll: path :: String -> Result(Nil, Error) =>
     (Erlang beamtalk_file) deleteAll: path
 
   /// Rename or move a file or directory (class method).
@@ -220,7 +220,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File rename: "old.txt" to: "new.txt"
   /// ```
-  class sealed rename: from :: String to: to :: String -> Result =>
+  class sealed rename: from :: String to: to :: String -> Result(Nil, Error) =>
     (Erlang beamtalk_file) rename: from to: to
 
   /// Resolve a relative path to its absolute path (class method).
@@ -231,7 +231,7 @@ typed Object subclass: File
   /// ```beamtalk
   /// File absolutePath: "target/test.txt"
   /// ```
-  class sealed absolutePath: path :: String -> Result =>
+  class sealed absolutePath: path :: String -> Result(String, Error) =>
     (Erlang beamtalk_file) absolutePath: path
 
   /// Return the current working directory (class method).
