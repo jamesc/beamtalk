@@ -808,6 +808,19 @@ term_to_json_beamtalk_object_tuple_test() ->
     ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
     exit(Pid, kill).
 
+term_to_json_beamtalk_object_registered_proxy_test() ->
+    %% ADR 0079 / BT-1991: name-resolving proxies carry `{registered, Name}`
+    %% in the identity slot instead of a pid. The formatter must not call
+    %% `pid_to_list/1` on the tuple (which would crash and tear down the
+    %% REPL WebSocket). Instead, render the name so the proxy is
+    %% operator-legible in REPL output.
+    Result = beamtalk_repl_json:term_to_json(
+        {beamtalk_object, 'Counter', counter, {registered, my_counter}}
+    ),
+    ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"registered,my_counter">>) =/= nomatch).
+
 term_to_json_supervisor_tuple_test() ->
     %% ADR 0059: Supervisor instances display as #Supervisor<Class,pid>.
     Pid = spawn(fun() ->

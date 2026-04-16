@@ -24,6 +24,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
 - [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
+- [Named Actor Registration (ADR 0079)](#named-actor-registration-adr-0079)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
@@ -416,7 +417,7 @@ Point superclass       // => Value
 counter increment
 
 // Binary message (standard math precedence: 2 + 3 * 4 = 14)
-3 + 4
+2 + 3 * 4
 
 // Keyword message
 dict at: #name put: "hello"
@@ -1906,6 +1907,134 @@ Errors are surfaced as `Result` values (or raised as `#beamtalk_error{}` on dire
 | `no_such_process` | send through a `{registered, Name}` proxy whose name has vanished |
 
 See [ADR 0079](ADR/0079-named-actor-registration.md) for the full design and exposure table.
+
+---
+
+## Named Actor Registration (ADR 0079)
+
+Named actor registration gives a process a **stable identity** (a `Symbol`) that survives supervised restarts. A name-resolving proxy re-resolves the name on every message send, so a held reference keeps working even when the underlying actor is restarted with a fresh pid.
+
+Under the hood this maps directly to OTP's process registry (`erlang:register/2`, `gen_server:start_link({local, Name}, ...)`), so registered Beamtalk actors show up in `observer`, `recon`, and `erlang:registered/0` with the names you chose.
+
+### API Surface
+
+| Method | Kind | Returns | Semantics |
+|--------|------|---------|-----------|
+| `Class spawnAs: name` | class-side | `Result(Self, Error)` | Atomic spawn + register. Equivalent to `gen_server:start_link({local, Name}, ...)` — the name is registered during process startup. |
+| `Class spawnWith: initArgs as: name` | class-side | `Result(Self, Error)` | Same as `spawnAs:` but with initialization arguments. |
+| `Class named: name` | class-side | `Result(Self, Error)` | Look up a registered actor. `Self` resolves to the receiver class at the call site, so `Counter named:` returns a `Counter`. |
+| `Actor allRegistered` | class-side | `List(Actor)` | Enumerates currently-registered Beamtalk actors. Excludes raw OTP-registered processes (`kernel_sup`, `logger`, …). |
+| `actor registerAs: name` | instance | `Result(Self, Error)` | Register an already-spawned actor. Non-atomic — prefer `spawnAs:` when the name is known up front. |
+| `actor unregister` | instance | `Symbol` | `#ok`. Idempotent — unregistering an unregistered actor is not an error. |
+| `actor registeredName` | instance | `Symbol` or `nil` | Currently-registered name, or `nil`. |
+| `actor isRegistered` | instance | `Boolean` | Whether the actor currently has a registered name. |
+
+Supervised children gain naming through `SupervisionSpec withName:`, which tells the runtime to start the child with `{local, Name}` registration so the name is re-established every time the supervisor restarts the child:
+
+```beamtalk
+EventStore supervisionSpec withName: #eventStore withRestart: #permanent
+```
+
+### Errors
+
+Registration returns `Result(Self, Error)` rather than raising — callers branch explicitly on outcome:
+
+| Condition | Result |
+|-----------|--------|
+| `spawnAs:` / `registerAs:` — duplicate registration | `Result error: (beamtalk_error name_registered)` |
+| `spawnAs:` / `registerAs:` — name is in the reserved list | `Result error: (beamtalk_error reserved_name)` |
+| `spawnAs:` / `registerAs:` — non-Symbol name | `Result error: (beamtalk_error type_error)` |
+| `Class named:` — no actor registered under this name | `Result error: (beamtalk_error name_not_registered)` |
+| `Class named:` — name is registered but the actor is not a `Class` or subclass | `Result error: (beamtalk_error wrong_class)` |
+| Send to a proxy whose name is *not currently registered* (the target died or was unregistered after lookup) | Raises `beamtalk_error no_such_process` |
+
+The asymmetry is deliberate: `named:` returns a Result because name-absence is an expected outcome the caller must branch on; sending to a vanished proxy raises because the caller has already committed to a send.
+
+### Worked Example — Migrating from `Supervisor which:`
+
+#### Before named registration
+
+The pre-ADR pattern uses a supervisor-local lookup (`which:`) and an `initialize:` hook to re-wire dependencies after each restart:
+
+```beamtalk
+typed Supervisor subclass: ExduraSupervisor
+  class strategy -> Symbol => #restForOne
+  class children -> List(SupervisionSpec) =>
+    storeSpec := EventStore supervisionSpec withRestart: #permanent
+    poolSpec := ActivityWorkerPool supervisionSpec withRestart: #permanent
+    engineSpec := WorkflowEngine supervisionSpec withRestart: #permanent
+    #(storeSpec, poolSpec, engineSpec)
+
+  // Re-runs after every restart to rebuild cached pids.
+  class initialize: sup :: Supervisor -> Nil =>
+    store := sup which: EventStore
+    pool := sup which: ActivityWorkerPool
+    engine := sup which: WorkflowEngine
+    engine initWithStore: store pool: pool
+    nil
+```
+
+#### After named registration
+
+Naming each child eliminates the `initialize:` hook, and the supervisor strategy is freed from the rewire-on-restart constraint:
+
+```beamtalk
+typed Supervisor subclass: ExduraSupervisor
+  class strategy -> Symbol => #oneForOne
+  class children -> List(SupervisionSpec) => #(
+    EventStore supervisionSpec withName: #eventStore withRestart: #permanent,
+    ActivityWorkerPool supervisionSpec withName: #workerPool withRestart: #permanent,
+    WorkflowEngine supervisionSpec withName: #workflowEngine withRestart: #permanent
+  )
+  // No initialize: hook — WorkflowEngine looks up its dependencies by name.
+```
+
+`WorkflowEngine` now calls `(Actor named: #eventStore) unwrap` at use-time — automatically picking up the current pid across restarts — and cross-tree consumers (HTTP handlers, REPL workspaces, tests) can reach supervised actors directly without routing through the supervisor.
+
+### Proxy Semantics
+
+`Class named:` returns a lightweight **name-resolving proxy**. The proxy does not cache a pid; each message send re-resolves the name via the Erlang runtime. This is the key restart-survival property:
+
+```beamtalk
+engine := (WorkflowEngine named: #workflowEngine) unwrap
+engine runWorkflow: w1    // resolves #workflowEngine, sends to that pid
+// (#workflowEngine crashes; the supervisor restarts it under the same name)
+engine runWorkflow: w2    // re-resolves #workflowEngine, sends to the NEW pid
+```
+
+A few caveats the proxy intentionally does *not* paper over:
+
+- **`monitor:` and `onExit:` are pid-level** — they watch the *current* pid, not the name. A monitor does not re-arm when the supervisor restarts the process under the same name. A future "watch a name" API can be added separately; for now, prefer `isAlive` polling via the proxy when you need restart-aware liveness.
+- **Equality is identity-shape-based.** Two proxies with the same name are equal. A proxy and a direct-pid reference are **not equal**, even if they currently resolve to the same pid — the whole point of a name proxy is to be a *different kind of reference*.
+- **`unregister` makes the proxy dead.** After unregistering, further sends through a proxy raise `#no_such_process` even if the underlying actor is still running. Re-register under a new name if you want to keep routing messages through a name-resolving proxy.
+
+### Reserved Names
+
+A static blocklist of OTP-kernel atoms is rejected at registration time, regardless of whether the corresponding process is currently running. Attempting `spawnAs: #logger` or `spawnAs: #kernel_sup` returns `Result error: (beamtalk_error reserved_name)`.
+
+The reserved set covers:
+
+- OTP kernel and stdlib processes: `application_controller`, `code_server`, `erl_prim_loader`, `erl_signal_server`, `error_logger`, `erts_code_purger`, `file_server_2`, `global_group`, `global_name_server`, `inet_db`, `init`, `kernel_refc`, `kernel_safe_sup`, `kernel_sup`, `logger`, `logger_handler_watcher`, `logger_proxy`, `logger_std_h_default`, `logger_sup`, `net_kernel`, `net_sup`, `rex`, `socket_registry`, `standard_error`, `standard_error_sup`, `standard_error_writer`, `user`, `user_drv`, `user_drv_reader`, `user_drv_writer`.
+- Any atom prefixed with `beamtalk_` (reserves the namespace for runtime infrastructure).
+
+See `beamtalk_actor:reserved_name/1` in the runtime for the authoritative list and the policy rationale (ADR 0079 §Errors).
+
+### Scope
+
+This release covers **local (per-node)** registration. Cluster-wide (`#global`) and pluggable (`{via, Module, Term}`) scopes are deferred to a future ADR — the API is designed to admit them additively via a `scope:` keyword. Users who need cluster registration today can call the Erlang `global` module via FFI.
+
+### BEAM Mapping
+
+| Beamtalk | BEAM |
+|----------|------|
+| `Class spawnAs: #foo` | `gen_server:start_link({local, foo}, Module, #{})` |
+| `Class spawnWith: args as: #foo` | `gen_server:start_link({local, foo}, Module, args)` |
+| `actor registerAs: #foo` | `erlang:register(foo, Pid)` |
+| `actor unregister` | Beamtalk-wrapped idempotent `erlang:unregister(foo)` — Beamtalk catches the `badarg` raw Erlang raises when the name is absent and returns `ok`, so repeated/unnecessary unregisters are safe |
+| `Class named: #foo` | `erlang:whereis(foo)` + Beamtalk class check via `'$beamtalk_actor'` process-dict marker |
+| `Actor allRegistered` | `erlang:registered/0` filtered by the process-dict marker |
+| Proxy send (`proxy foo`) | `gen_server:call(foo, ...)` — name-resolved per send |
+| `SupervisionSpec withName:` | Child MFA uses `{beamtalk_actor, spawnAs, [Name, Module, ...]}` so the supervisor re-registers the name on every restart |
 
 ---
 

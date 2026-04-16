@@ -2712,11 +2712,11 @@ spawnAs_success_test() ->
         cleanup_name(Name)
     end.
 
-spawnAs_arity_2_uses_empty_args_test() ->
-    %% test_counter requires an initial value (treats atom() as numeric),
-    %% so use a spawn-capable module with [] args. Minimal check: arity-2
-    %% is a delegate to arity-3 with [] and does not crash on the shape.
-    %% We verify via reserved-name rejection which runs before start_link.
+spawnAs_arity_2_uses_empty_map_test() ->
+    %% Arity-2 delegates to arity-3 with `#{}` (the Beamtalk empty-state
+    %% map) — matching `doSpawnAs/2` and the shape the compiler-generated
+    %% `init/1` expects. We verify via reserved-name rejection which runs
+    %% before start_link, so this test doesn't depend on the init path.
     Result = beamtalk_actor:'spawnAs'(logger, test_counter),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, Result).
 

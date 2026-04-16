@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: Supervisor that registers its Counter child under the
+// name `#bt1991SupCounter` with a permanent restart policy. Used to
+// verify that a name-resolving proxy (`Actor named:`) transparently
+// survives supervised restarts (BT-1991 / ADR 0079).
+
+Supervisor subclass: E2ENamedSupervisor
+
+  class children -> List =>
+    spec := Counter supervisionSpec withName: #bt1991SupCounter withRestart: #permanent
+    #(spec)

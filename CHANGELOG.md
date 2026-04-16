@@ -2,38 +2,26 @@
 
 ## Unreleased
 
-### Language
-
-- **`Self class` metatype return type** — class-side methods can declare `-> Self class`; resolves to the receiver's metaclass at call sites so `self class` narrows correctly through subclasses ([BT-1952](https://linear.app/beamtalk/issue/BT-1952))
-- **Auto-chained actor `initialize`** — `Actor` subclasses inherit parent `initialize` methods automatically; the hierarchy is walked parent-first before the child's own `initialize` runs. State threads through so each child sees the parent's mutations. Writing an explicit `super initialize` is now a compiler warning ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md); [BT-1951](https://linear.app/beamtalk/issue/BT-1951), [BT-1955](https://linear.app/beamtalk/issue/BT-1955))
-- **Post-initialize field check spans the full hierarchy** — typed-no-default `state:` fields declared on any ancestor (including cross-file parents) are validated after `initialize` runs; the diagnostic names the owning class ([BT-1951](https://linear.app/beamtalk/issue/BT-1951), [BT-1976](https://linear.app/beamtalk/issue/BT-1976))
-
 ### Standard Library
 
-- **Actor named registration** — new sealed API on `Actor`: class-side `spawnAs:`, `spawnWith:as:`, `named:`, `allRegistered`; instance-side `registerAs:`, `unregister`, `registeredName`, `isRegistered`. `named:` returns `Result(Self, Error)` so subclass lookups narrow (`Counter named: #c` → `Result(Counter, Error)`). See [ADR 0079](docs/ADR/0079-named-actor-registration.md) ([BT-1988](https://linear.app/beamtalk/issue/BT-1988))
-- **`SupervisionSpec withName:` combinators** — new `name :: Symbol | Nil` field plus `withName:`, `withName:withRestart:`, `withName:withArgs:`, and `withName:withRestart:withArgs:` fluent builders; named specs emit `#spawnAs:` / `#spawnWith:as:` startFns so supervised actors re-register atomically on each restart. `name` and `classMethod` are mutually exclusive ([BT-1989](https://linear.app/beamtalk/issue/BT-1989))
-- **`Beamtalk allClasses` returns class objects** — previously returned Symbol class names; now returns the class objects directly so callers can send messages (`superclass`, `methods`, `respondsTo:`) without a `classNamed:` lookup ([BT-1953](https://linear.app/beamtalk/issue/BT-1953))
-
-### Compiler
-
-- **`Self` substitutes inside generic return types** — `-> Result(Self, Error)` and similar nested positions now narrow to the static receiver class; previously left as a bogus `Known("Self")` ([BT-1986](https://linear.app/beamtalk/issue/BT-1986))
-- **Warning: redundant `super initialize` in Actor `initialize`** — paired with auto-chaining; emitted only for unary `super initialize` sends inside Actor `initialize` methods (including nested in blocks and cascades) ([BT-1955](https://linear.app/beamtalk/issue/BT-1955))
+- **Named actor registration** ([ADR 0079](docs/ADR/0079-named-actor-registration.md)) — actors can now be registered under a `Symbol` name and looked up from anywhere via a name-resolving proxy that survives supervised restarts (BT-1985 epic, BT-1986..BT-1991):
+  - `Class spawnAs: name` / `Class spawnWith: args as: name` — atomic spawn + register, returns `Result(Self, Error)`.
+  - `Class named: name` — typed lookup returning `Result(Self, Error)`; `Self` resolves to the receiver class at the call site.
+  - `actor registerAs: name` / `actor unregister` / `actor registeredName` / `actor isRegistered` — post-spawn registration API.
+  - `Actor allRegistered` — enumerate Beamtalk-registered actors (excludes raw OTP kernel processes via the `$beamtalk_actor` process-dict marker).
+  - `SupervisionSpec withName:` — declaratively name a supervised child so the supervisor re-registers the name on every restart.
 
 ### Runtime
 
-- **Named-registration intrinsics** — `beamtalk_actor:spawnAs/2,3`, `registerAs/2`, `unregister/1`, `registeredName/1`, `isRegistered/1`, `named/2`, `allRegistered/1` FFI shims; compiled actors write a `'$beamtalk_actor' => ClassName` process-dictionary marker in `init/1` so `Actor allRegistered` can distinguish Beamtalk actors from plain Erlang-registered processes ([BT-1987](https://linear.app/beamtalk/issue/BT-1987))
-- **Name-resolving proxy dispatch** — `#beamtalk_object{}` carries `{registered, Name}` alongside raw pids; sends route via `gen_server:call(Name, ...)` so held references survive supervisor restarts. Supervisor child specs translate `#spawnAs:` / `#spawnWith:as:` into `beamtalk_actor:spawnAs` MFAs so restarts re-register atomically. Sends to a vanished name raise `#beamtalk_error{kind = no_such_process}` (distinct from the `actor_dead` raised for stale pids) ([BT-1990](https://linear.app/beamtalk/issue/BT-1990))
+- **Named-registration intrinsics and supervisor wiring** — `beamtalk_actor:spawnAs/2,3`, `registerAs/2`, `unregister/1`, `named/2`, `allRegistered/1`, name-resolving `{registered, Name}` proxy dispatch, and supervisor routing of `SupervisionSpec withName:` through `beamtalk_actor:spawnAs/2,3` so supervised restarts re-register atomically (BT-1987, BT-1988, BT-1990).
+- Reserved-name blocklist at registration time for OTP kernel/stdlib atoms and the `beamtalk_` prefix; returns `Result error: (beamtalk_error reserved_name)`.
+- Fix `spawnAs/2` defaulting to `[]` instead of `#{}`, which crashed supervised named children in `init/1` with `{badmap, []}` (BT-1991).
+- Fix REPL JSON formatter crashing when displaying a name-resolving proxy: `#beamtalk_object{pid = {registered, Name}}` now renders as `#Actor<Class,registered,Name>` instead of calling `pid_to_list/1` on a non-pid term (BT-1991).
 
 ### Documentation
 
-- [ADR 0079: Named Actor Registration](docs/ADR/0079-named-actor-registration.md) ([#2010](https://github.com/jamesc/beamtalk/pull/2010))
-
-### Internal
-
-- Test-coverage ramp-up: `beamtalk_actor`, `beamtalk_supervisor`, `beamtalk_behaviour_intrinsics`, `beamtalk_primitive`, `beamtalk_message_dispatch`, `beamtalk_dispatch`, `beamtalk_class_dispatch`, `beamtalk_class_builder`, `beamtalk_file`, `beamtalk_json`, `beamtalk_json_formatter`, `beamtalk_hot_reload`, `beamtalk_class_instantiation`, `beamtalk_stream`, `beamtalk_future`, `beamtalk_module_activation`, `beamtalk_logging_config`, class/protocol registry, object ops, reflection, native docs, file/JSON/stdlib/collection paths, and the actor system supervisor (85%+, several at 90%) ([BT-1958](https://linear.app/beamtalk/issue/BT-1958)–[BT-1984](https://linear.app/beamtalk/issue/BT-1984))
-- E2E test for auto-chained actor initialization ([BT-1956](https://linear.app/beamtalk/issue/BT-1956))
-- Suppress expected crash reports in `safe_spawn` and `gen_server` error tests ([#2005](https://github.com/jamesc/beamtalk/pull/2005), [#2009](https://github.com/jamesc/beamtalk/pull/2009))
-- Bump `actions/github-script` from 8 to 9 ([#1987](https://github.com/jamesc/beamtalk/pull/1987))
+- ADR 0079: Named Actor Registration.
+- Language features: new "Named Actor Registration" chapter covering the API surface, proxy semantics caveats (monitors don't re-arm across restarts; equality rules; unregister makes proxy dead), reserved-name policy, BEAM mapping, and a before/after migration example from `Supervisor which:` + `initialize:` to named registration (BT-1991).
 
 ## 0.3.1 — 2026-03-26
 
