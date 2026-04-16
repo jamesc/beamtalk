@@ -1523,8 +1523,10 @@ test_class_send_supervisor_new_rewrap() ->
                 okValue := {beamtalk_supervisor, 'BT1981SupTestClass', bt1981_sup_mod, _}
             } ->
                 %% Happy case: hook matched the Result tagged map, ran
-                %% run_initialize (no-op since the hierarchy walk found a
-                %% class_initialize:), and rewrote inner _new tag.
+                %% run_initialize successfully (only possible when the
+                %% hierarchy walk finds a class_initialize: — not expected
+                %% for this minimal helper, but tolerated if it ever
+                %% becomes reachable), and rewrote the inner _new tag.
                 ok;
             {'EXIT', {{supervisor_init_method_not_found, 'class_initialize:'}, _}} ->
                 %% Expected for this minimal helper: run_initialize walks

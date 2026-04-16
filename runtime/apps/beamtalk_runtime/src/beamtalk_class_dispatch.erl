@@ -129,6 +129,16 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %%       unwraps and callers handle the Result themselves.
             %% Idempotent `{beamtalk_supervisor, ...}` returns and error
             %% branches flow through unchanged (no initialize: re-run).
+            %%
+            %% ARCHITECTURAL NOTE: shape (b) couples this generic dispatch
+            %% layer to the Beamtalk `Result` internal tagged-map
+            %% representation (`$beamtalk_class`, `isOk`, `okValue`). ADR
+            %% 0080 §Phase 0a explicitly accepts this tradeoff: the
+            %% alternative (option 3: helper process) was shown to
+            %% deadlock on existing e2e fixtures during the BT-1994 probe.
+            %% If Result's internal representation changes, update both
+            %% `beamtalk_result:from_tagged_tuple/1` and this match
+            %% together — they are the only two sites that encode the shape.
             case Result of
                 {beamtalk_supervisor_new, CN, Mod, Pid} ->
                     SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
