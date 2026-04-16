@@ -1013,11 +1013,14 @@ impl TypeChecker {
                     // to the receiver class so callers see the narrowed type.
                     let has_nested_self = Self::return_type_mentions_nested_self(ret_ty);
                     if !subst.is_empty() || !method_subst.is_empty() || has_nested_self {
+                        // BT-1992: Thread the full receiver type (with type args)
+                        // so nested `Self` in generics like `Result(Self, Error)`
+                        // resolves to e.g. `Box(Integer)` not bare `Box`.
                         return Self::substitute_return_type_with_self(
                             ret_ty,
                             &subst,
                             &method_subst,
-                            Some(class_name.as_str()),
+                            Some(&receiver_ty),
                         );
                     }
 
@@ -1411,16 +1414,17 @@ impl TypeChecker {
                                 type_args,
                                 &method.defined_in,
                             );
-                            // BT-1986: also substitute nested `Self` (inside a
-                            // generic) to the concrete member class, even when
-                            // the substitution map is empty.
+                            // BT-1986 / BT-1992: also substitute nested `Self`
+                            // (inside a generic) to the concrete member type
+                            // (with type args), even when the substitution map
+                            // is empty.
                             let has_nested_self = Self::return_type_mentions_nested_self(ret_ty);
                             if !subst.is_empty() || has_nested_self {
                                 return_types.push(Self::substitute_return_type_with_self(
                                     ret_ty,
                                     &subst,
                                     &HashMap::new(),
-                                    Some(member_name.as_str()),
+                                    Some(member),
                                 ));
                             } else if super::is_generic_type_param(ret_ty)
                                 && !hierarchy.has_class(ret_ty)
@@ -2365,7 +2369,12 @@ impl TypeChecker {
     /// `class named: -> Result(Self, Error)`, where `Self` must resolve to
     /// the static receiver class (`Counter` in `Counter named: #c`).
     ///
-    /// `self_class = None` preserves the previous behaviour (nested `Self`
+    /// BT-1992: `self_type` carries the full receiver `InferredType` (including
+    /// type arguments for parameterised receivers like `Box(Integer)`), so that
+    /// `Self` inside a generic return like `Result(Self, Error)` resolves to
+    /// `Box(Integer)` rather than bare `Box`.
+    ///
+    /// `self_type = None` preserves the previous behaviour (nested `Self`
     /// passes through as a class-named `Known("Self")`, which is wrong but
     /// matches historic behaviour for call sites that don't know the
     /// receiver).
@@ -2373,7 +2382,7 @@ impl TypeChecker {
         ret_ty: &str,
         subst: &HashMap<EcoString, InferredType>,
         method_local_subst: &HashMap<EcoString, InferredType>,
-        self_class: Option<&str>,
+        self_type: Option<&InferredType>,
     ) -> InferredType {
         let ret_eco: EcoString = ret_ty.into();
 
@@ -2387,14 +2396,14 @@ impl TypeChecker {
             return resolved.clone();
         }
 
-        // BT-1986: `Self` as a nested type reference resolves to the
-        // receiver class. The top-level bare-`Self` case is still handled
-        // by the caller (to preserve the full `Known { class_name, type_args }`
-        // with the receiver's own type args); this branch only fires when
-        // `Self` appears inside a generic or union.
+        // BT-1986 / BT-1992: `Self` as a nested type reference resolves to
+        // the full receiver type (including type args for parameterised
+        // receivers). The top-level bare-`Self` case is still handled by
+        // the caller; this branch only fires when `Self` appears inside a
+        // generic or union.
         if ret_ty == "Self" {
-            if let Some(cls) = self_class {
-                return InferredType::known(EcoString::from(cls));
+            if let Some(ty) = self_type {
+                return ty.clone();
             }
         }
 
@@ -2412,7 +2421,7 @@ impl TypeChecker {
                             m,
                             subst,
                             method_local_subst,
-                            self_class,
+                            self_type,
                         )
                     })
                     .collect();
@@ -2441,7 +2450,7 @@ impl TypeChecker {
                         p,
                         subst,
                         method_local_subst,
-                        self_class,
+                        self_type,
                     ));
                 }
             }
@@ -2645,6 +2654,7 @@ mod tests {
         Block, BlockParameter, ExpectCategory, Expression, ExpressionStatement, Identifier,
         KeywordPart, Literal, MessageSelector, ParameterDefinition, TypeAnnotation,
     };
+    use crate::semantic_analysis::TypeProvenance;
     use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, MethodInfo};
     use crate::source_analysis::Span;
     use ecow::EcoString;
@@ -3387,6 +3397,115 @@ mod tests {
                 assert_eq!(type_args.len(), 1);
                 // R not in subst → Dynamic (BT-1834)
                 assert_eq!(type_args[0], InferredType::Dynamic(DynamicReason::Unknown));
+            }
+            other => panic!("Expected Known, got {other:?}"),
+        }
+    }
+
+    // ---- substitute_return_type_with_self (BT-1992) ----
+
+    #[test]
+    fn substitute_self_in_generic_uses_full_receiver_type() {
+        // BT-1992: `Result(Self, Error)` on a parameterised receiver `Box(Integer)`
+        // should produce `Result(Box(Integer), Error)`, not `Result(Box, Error)`.
+        let receiver_ty = InferredType::Known {
+            class_name: EcoString::from("Box"),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let result = TypeChecker::substitute_return_type_with_self(
+            "Result(Self, Error)",
+            &HashMap::new(),
+            &HashMap::new(),
+            Some(&receiver_ty),
+        );
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                // Self should resolve to full Box(Integer), not bare Box
+                assert_eq!(type_args[0], receiver_ty);
+                assert_eq!(type_args[1], InferredType::known("Error"));
+            }
+            other => panic!("Expected Known, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_self_in_generic_non_parameterised_receiver() {
+        // Non-parameterised receiver: `Result(Self, Error)` on `Counter`
+        // should produce `Result(Counter, Error)`.
+        let receiver_ty = InferredType::known("Counter");
+        let result = TypeChecker::substitute_return_type_with_self(
+            "Result(Self, Error)",
+            &HashMap::new(),
+            &HashMap::new(),
+            Some(&receiver_ty),
+        );
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(type_args[0], InferredType::known("Counter"));
+                assert_eq!(type_args[1], InferredType::known("Error"));
+            }
+            other => panic!("Expected Known, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_self_in_union_uses_full_receiver_type() {
+        // BT-1992: `Self | Error` on `Box(Integer)` should produce
+        // `Box(Integer) | Error`.
+        let receiver_ty = InferredType::Known {
+            class_name: EcoString::from("Box"),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let result = TypeChecker::substitute_return_type_with_self(
+            "Self | Error",
+            &HashMap::new(),
+            &HashMap::new(),
+            Some(&receiver_ty),
+        );
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&receiver_ty));
+                assert!(members.contains(&InferredType::known("Error")));
+            }
+            other => panic!("Expected Union, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_self_none_passes_through() {
+        // When self_type is None, `Self` should pass through as Known("Self")
+        // (backward-compatible behaviour).
+        let result = TypeChecker::substitute_return_type_with_self(
+            "Result(Self, Error)",
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(type_args[0], InferredType::known("Self"));
+                assert_eq!(type_args[1], InferredType::known("Error"));
             }
             other => panic!("Expected Known, got {other:?}"),
         }
