@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Standard Library
+
+- **Named actor registration** ([ADR 0079](docs/ADR/0079-named-actor-registration.md)) — actors can now be registered under a `Symbol` name and looked up from anywhere via a name-resolving proxy that survives supervised restarts (BT-1985 epic, BT-1986..BT-1991):
+  - `Class spawnAs: name` / `Class spawnWith: args as: name` — atomic spawn + register, returns `Result(Self, Error)`.
+  - `Class named: name` — typed lookup returning `Result(Self, Error)`; `Self` resolves to the receiver class at the call site.
+  - `actor registerAs: name` / `actor unregister` / `actor registeredName` / `actor isRegistered` — post-spawn registration API.
+  - `Actor allRegistered` — enumerate Beamtalk-registered actors (excludes raw OTP kernel processes via the `$beamtalk_actor` process-dict marker).
+  - `SupervisionSpec withName:` — declaratively name a supervised child so the supervisor re-registers the name on every restart.
+
+### Runtime
+
+- **Named-registration intrinsics and supervisor wiring** — `beamtalk_actor:spawnAs/2,3`, `registerAs/2`, `unregister/1`, `named/2`, `allRegistered/1`, name-resolving `{registered, Name}` proxy dispatch, and supervisor routing of `SupervisionSpec withName:` through `beamtalk_actor:spawnAs/2,3` so supervised restarts re-register atomically (BT-1987, BT-1988, BT-1990).
+- Reserved-name blocklist at registration time for OTP kernel/stdlib atoms and the `beamtalk_` prefix; raises `Result error: (beamtalk_error reserved_name)`.
+- Fix `spawnAs/2` defaulting to `[]` instead of `#{}`, which crashed supervised named children in `init/1` with `{badmap, []}` (BT-1991).
+- Fix REPL JSON formatter crashing when displaying a name-resolving proxy: `#beamtalk_object{pid = {registered, Name}}` now renders as `#Actor<Class,registered,Name>` instead of calling `pid_to_list/1` on a non-pid term (BT-1991).
+
+### Documentation
+
+- ADR 0079: Named Actor Registration.
+- Language features: new "Named Actor Registration" chapter covering the API surface, proxy semantics caveats (monitors don't re-arm across restarts; equality rules; unregister makes proxy dead), reserved-name policy, BEAM mapping, and a before/after migration example from `Supervisor which:` + `initialize:` to named registration (BT-1991).
+
 ## 0.3.1 — 2026-03-26
 
 ### Language
