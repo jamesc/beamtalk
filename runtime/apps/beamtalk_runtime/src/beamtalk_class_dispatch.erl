@@ -105,16 +105,43 @@ class_send_dispatch(ClassPid, Selector, Args) ->
         end,
     case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
         {ok, Result} ->
-            %% BT-1542: Run the initialize: lifecycle hook in the caller's process
-            %% after a supervise call returns a freshly-started supervisor tuple.
-            %% startLink/1 returns {beamtalk_supervisor_new, ...} for fresh starts
-            %% and {beamtalk_supervisor, ...} for already_started (idempotent).
-            %% We convert the _new tag to the standard tag after running initialize:.
+            %% BT-1542 + BT-1994 (ADR 0080 Phase 0a, option 2): run the
+            %% initialize: lifecycle hook in the caller's process after a
+            %% supervise call returns a freshly-started supervisor tuple.
+            %%
+            %% After Phase 0a option 2, `beamtalk_supervisor:startLink/1`
+            %% returns Result-shaped values:
+            %%   {ok, {beamtalk_supervisor_new, ...}}   (fresh start)
+            %%   {ok, {beamtalk_supervisor, ...}}       (already_started)
+            %%   {error, #beamtalk_error{}}             (failure)
+            %% which FFI coercion wraps into a `Result` tagged map. The
+            %% stdlib `supervise` method currently calls `.unwrap` on that
+            %% Result (preserving the pre-migration user-facing `Supervisor`
+            %% type until the full Phase 1 stdlib migration lands), so by
+            %% the time the class method body returns, the Result has been
+            %% unwrapped to the bare inner tuple.
+            %%
+            %% We therefore match TWO shapes:
+            %%   (a) the bare `{beamtalk_supervisor_new, ...}` tuple — the
+            %%       unwrapped case, and the historical BT-1542 case;
+            %%   (b) a Result tagged map wrapping the _new inner tuple —
+            %%       the post-Phase-1 case where `supervise` no longer
+            %%       unwraps and callers handle the Result themselves.
+            %% Idempotent `{beamtalk_supervisor, ...}` returns and error
+            %% branches flow through unchanged (no initialize: re-run).
             case Result of
                 {beamtalk_supervisor_new, CN, Mod, Pid} ->
                     SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
                     beamtalk_supervisor:run_initialize(SupTuple),
                     SupTuple;
+                #{
+                    '$beamtalk_class' := 'Result',
+                    isOk := true,
+                    okValue := {beamtalk_supervisor_new, CN, Mod, Pid}
+                } = ResultMap ->
+                    SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
+                    beamtalk_supervisor:run_initialize(SupTuple),
+                    ResultMap#{okValue := SupTuple};
                 _ ->
                     Result
             end;

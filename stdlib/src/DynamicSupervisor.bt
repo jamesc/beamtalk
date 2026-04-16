@@ -67,7 +67,12 @@ abstract Object subclass: DynamicSupervisor(C)
   // === Class-side lifecycle ===
 
   /// Start this dynamic supervisor (or return the already-running instance).
-  class supervise -> Self => (Erlang beamtalk_supervisor) startLink: self
+  ///
+  /// BT-1994 / ADR 0080 Phase 0a probe: `startLink/1` returns a Result-
+  /// shaped value; call `unwrap` at the FFI boundary so the user-facing
+  /// signature remains `Self` until the full migration in Phase 1
+  /// (BT-P1-startLink).
+  class supervise -> Self => ((Erlang beamtalk_supervisor) startLink: self) unwrap
 
   /// Return the running supervisor instance, or nil if not started.
   class current => (Erlang beamtalk_supervisor) current: self
