@@ -446,6 +446,27 @@ Separately:
 - **`wasFreshlyStarted` accessor or `onFreshStart:` block form** on the supervisor returned by `supervise`, if post-migration usage shows callers consistently reach for the distinction. Not needed for the ADR; flagged here for decision-context continuity.
 - **Linter for pre-migration callsites** — warns on `sup := Class supervise` (no `unwrap`/`value`/`ifOk:`/etc.) during the transition window. Built once, decommissioned once external projects migrate.
 
+## Implementation Tracking
+
+**Epic:** [BT-1993](https://linear.app/beamtalk/issue/BT-1993) — Epic: Migrate Supervisor Lifecycle to Result (ADR 0080)
+**Status:** Planned
+
+| # | Issue | Phase | Summary |
+|---|---|---|---|
+| 1 | [BT-1994](https://linear.app/beamtalk/issue/BT-1994) | 0 | Probe FFI coercion vs `beamtalk_supervisor_new` post-dispatch hook |
+| 2 | [BT-1995](https://linear.app/beamtalk/issue/BT-1995) | 0 | Probe `Result(C, Error)` typechecker substitution for `DynamicSupervisor(C)` |
+| 3 | [BT-1996](https://linear.app/beamtalk/issue/BT-1996) | 1 | Runtime: migrate `startLink/1` to Result-shaped return |
+| 4 | [BT-1997](https://linear.app/beamtalk/issue/BT-1997) | 1 | Runtime: migrate `startChild/1,2` and `with_live_supervisor/3` |
+| 5 | [BT-1998](https://linear.app/beamtalk/issue/BT-1998) | 1 | Runtime: migrate `terminateChild/2` (both arities) with idempotent `not_found` on static path |
+| 6 | [BT-1999](https://linear.app/beamtalk/issue/BT-1999) | 2 | Stdlib: update `Supervisor.bt` / `DynamicSupervisor.bt` return types and migrate BUnit tests |
+| 7 | [BT-2000](https://linear.app/beamtalk/issue/BT-2000) | 3 | E2E + examples: migrate supervisor btscripts and `examples/otp-tree` |
+| 8 | [BT-2001](https://linear.app/beamtalk/issue/BT-2001) | 3 | Docs: language-features supervision chapter + CHANGELOG + ADR status flip to Accepted |
+
+**Critical path:** BT-1994 → BT-1996 → BT-1999 → BT-2000 → BT-2001.
+**Parallelisable:** BT-1994, BT-1995, BT-1997, BT-1998 in parallel at the start; BT-1995 also blocks BT-1999.
+
+ADR status flip from `Proposed` to `Accepted` happens as part of BT-1994 (Probe 0a), after the hook-vs-coercion approach is chosen and §Phase 1 is finalized with the empirical outcome.
+
 ## References
 - Related issues: [BT-1977](https://linear.app/beamtalk/issue/BT-1977) — this ADR's driving issue
 - Related ADRs:
