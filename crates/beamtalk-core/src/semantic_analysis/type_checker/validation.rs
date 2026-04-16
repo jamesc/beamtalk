@@ -482,13 +482,26 @@ impl TypeChecker {
         if expected.as_str() == "Class" && hierarchy.has_class(actual) {
             return true;
         }
+        // BT-2002: Strip type arguments before the hierarchy lookup so generic
+        // annotations like `Block(T, R)` or `Array(Integer)` resolve to their
+        // base class. Without stripping, `hierarchy.has_class("Block(T, R)")`
+        // is false and the conservative "unknown → compatible" escape hatch
+        // below suppresses warnings for non-Block arguments to `Block(T, R)`
+        // parameters.
+        let expected_base: EcoString = expected
+            .find('(')
+            .map_or_else(|| expected.clone(), |open| expected[..open].into());
+
+        if actual == &expected_base {
+            return true;
+        }
         // If either type isn't known to the hierarchy, don't warn (conservative)
-        if !hierarchy.has_class(actual) || !hierarchy.has_class(expected) {
+        if !hierarchy.has_class(actual) || !hierarchy.has_class(&expected_base) {
             return true;
         }
         // Walk superclass chain: if expected is an ancestor of actual, it's compatible
         let chain = hierarchy.superclass_chain(actual);
-        chain.iter().any(|ancestor| ancestor == expected)
+        chain.iter().any(|ancestor| ancestor == &expected_base)
     }
 
     /// Check argument types against declared parameter types for a message send.
