@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture for named-registration tests (BT-1991 / ADR 0079).
+// Used alongside Counter to exercise the `wrong_class` branch of
+// `T named:` when a name is registered to an actor of a different class.
+
+Actor subclass: E2ENamedGreeter
+
+  greet: who :: String -> String => "Hello, " ++ who

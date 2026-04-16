@@ -2307,7 +2307,12 @@ through from `gen_server:start_link/4` as `{error, Reason}`.
 """.
 -spec 'spawnAs'(term(), term()) -> {ok, pid()} | {error, term()}.
 'spawnAs'(Name, Module) ->
-    'spawnAs'(Name, Module, []).
+    %% Beamtalk `init/1` expects a state map (possibly empty) — matching the
+    %% shape used everywhere else in the runtime (`doSpawnAs/2` passes `#{}`,
+    %% the `spawn`/`spawnWith:` callers pass state maps). Defaulting to the
+    %% empty list here would crash supervised named starts in `init/1` with
+    %% `{badmap, []}`. Keep the default aligned with the rest of the runtime.
+    'spawnAs'(Name, Module, #{}).
 
 -doc """
 Spawn an actor under a registered name (arity 3).

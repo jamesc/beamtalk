@@ -347,8 +347,25 @@ term_to_json(Value) when is_tuple(Value) ->
                     beamtalk_runtime_api:class_display_name(Class);
                 false ->
                     ClassBin = atom_to_binary(Class, utf8),
-                    PidStr = pid_to_list(Pid),
-                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+                    %% ADR 0079: name-resolving proxies carry `{registered, Name}`
+                    %% in the identity slot instead of a pid. Show the name so the
+                    %% proxy is operator-legible in REPL output.
+                    Inner =
+                        case Pid of
+                            {registered, Name} when is_atom(Name) ->
+                                iolist_to_binary([
+                                    <<"registered,">>, atom_to_binary(Name, utf8)
+                                ]);
+                            _ when is_pid(Pid) ->
+                                PidStr = pid_to_list(Pid),
+                                list_to_binary(
+                                    lists:sublist(PidStr, 2, length(PidStr) - 2)
+                                );
+                            _ ->
+                                %% Defensive catch-all: never crash the REPL
+                                %% formatter on a malformed identity slot.
+                                iolist_to_binary(io_lib:format("~tp", [Pid]))
+                        end,
                     iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
             end;
         {future_timeout, {beamtalk_future, Pid}} when is_pid(Pid) ->

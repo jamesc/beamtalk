@@ -1,0 +1,290 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for named actor registration (BT-1991 / ADR 0079).
+//
+// These tests require E2E because named registration involves live OTP
+// processes, the Erlang process registry, and supervisor-driven restart
+// behaviour — BUnit runs compiled code but cannot reliably drive the
+// spawn → register → crash → restart lifecycle with workspace variable
+// persistence across REPL turns.
+//
+// Per project policy (see feedback_epic_repl_validation), user-facing
+// features must have at least one e2e btscript covering the whole
+// end-to-end flow — EUnit and BUnit alone are insufficient.
+//
+// ADR: docs/ADR/0079-named-actor-registration.md
+
+// @load tests/e2e/fixtures/counter.bt
+// @load tests/e2e/fixtures/e2e_named_greeter.bt
+// @load tests/e2e/fixtures/e2e_named_supervisor.bt
+
+// ===========================================================================
+// spawnAs: — atomic register-at-spawn
+// ===========================================================================
+
+// spawnAs: returns Result ok: actor when the name is free
+res1 := Counter spawnAs: #bt1991Counter
+// => _
+
+res1 isOk
+// => true
+
+c := res1 unwrap
+// => #Actor<Counter,_>
+
+c registeredName
+// => bt1991Counter
+
+c isRegistered
+// => true
+
+// The registered actor receives messages like any Counter
+c increment
+// => 1
+
+c getValue
+// => 1
+
+// ===========================================================================
+// Actor named: — look up a registered actor
+// ===========================================================================
+
+// Base/untyped lookup via Actor returns the same actor as a proxy
+lookup := Actor named: #bt1991Counter
+// => _
+
+lookup isOk
+// => true
+
+// Typed lookup via the concrete class — resolves `Self` to Counter
+counterLookup := Counter named: #bt1991Counter
+// => _
+
+counterLookup isOk
+// => true
+
+// The proxy re-resolves the name on every send, so it sees current state
+proxy := counterLookup unwrap
+// => #Actor<Counter,_>
+
+proxy getValue
+// => 1
+
+// Sends through the proxy are reflected in the originally-held reference
+proxy increment
+// => 2
+
+c getValue
+// => 2
+
+// ===========================================================================
+// spawnAs: — duplicate name returns Result error
+// ===========================================================================
+
+// Re-registering the same name fails with #name_registered
+dup := Counter spawnAs: #bt1991Counter
+// => _
+
+dup isError
+// => true
+
+dup error kind
+// => name_registered
+
+// ===========================================================================
+// named: — wrong-class lookup returns Result error
+// ===========================================================================
+
+// Register a greeter under a different name
+g := (E2ENamedGreeter spawnAs: #bt1991Greeter) unwrap
+// => #Actor<E2ENamedGreeter,_>
+
+// Looking up the greeter name through Counter (wrong class) fails
+wrong := Counter named: #bt1991Greeter
+// => _
+
+wrong isError
+// => true
+
+wrong error kind
+// => wrong_class
+
+// ===========================================================================
+// named: — missing name returns Result error
+// ===========================================================================
+
+missing := Counter named: #bt1991NotRegistered
+// => _
+
+missing isError
+// => true
+
+missing error kind
+// => name_not_registered
+
+// ===========================================================================
+// registerAs: — post-spawn registration on an existing actor
+// ===========================================================================
+
+anon := Counter spawn
+// => #Actor<Counter,_>
+
+// A freshly-spawned actor has no name until registerAs: sets one.
+anon registeredName
+// => nil
+
+anon isRegistered
+// => false
+
+regRes := anon registerAs: #bt1991Registered
+// => _
+
+regRes isOk
+// => true
+
+anon registeredName
+// => bt1991Registered
+
+anon isRegistered
+// => true
+
+// The registered actor is now discoverable by name
+(Counter named: #bt1991Registered) isOk
+// => true
+
+// ===========================================================================
+// Actor allRegistered — enumerates Beamtalk actors, excludes OTP kernel
+// ===========================================================================
+
+registered := Actor allRegistered
+// => _
+
+names := registered collect: [:a | a registeredName]
+// => _
+
+// The three actors we've registered so far are all present
+names includes: #bt1991Counter
+// => true
+
+names includes: #bt1991Greeter
+// => true
+
+names includes: #bt1991Registered
+// => true
+
+// OTP-kernel registered names are *not* Beamtalk actors and must be
+// excluded from allRegistered — the filter keys on the process-dict marker.
+names includes: #logger
+// => false
+
+names includes: #kernel_sup
+// => false
+
+names includes: #code_server
+// => false
+
+// ===========================================================================
+// unregister — subsequent sends raise #no_such_process
+// ===========================================================================
+
+anon unregister
+// => ok
+
+anon isRegistered
+// => false
+
+// After unregister, lookup by the old name fails
+(Counter named: #bt1991Registered) isError
+// => true
+
+// Sending through a stale name proxy raises no_such_process. Look up a
+// proxy *before* unregistering a second actor, then unregister and send.
+temp := (Counter spawnAs: #bt1991Temp) unwrap
+// => #Actor<Counter,_>
+
+tempProxy := (Counter named: #bt1991Temp) unwrap
+// => #Actor<Counter,_>
+
+temp unregister
+// => ok
+
+// The proxy now refers to a vanished name — any send raises.
+tempProxy getValue
+// => ERROR: no_such_process
+
+// Tidy up the underlying actor (still alive; only the name is gone).
+temp stop
+// => ok
+
+// ===========================================================================
+// Supervised + named: restart survival
+// ===========================================================================
+
+// Free the top-level Counter name so the supervisor can register its
+// own child (even though it uses a different name, this keeps the test
+// hygienic if it re-runs in the same REPL).
+c stop
+// => ok
+
+sup := E2ENamedSupervisor supervise
+// => #Supervisor<E2ENamedSupervisor,_>
+
+// The supervisor started its Counter child and registered the name.
+sup count
+// => 1
+
+(Counter named: #bt1991SupCounter) isOk
+// => true
+
+// Acquire a name-resolving proxy from *outside* the supervision tree —
+// this is the primary cross-tree access motivation from ADR 0079.
+supProxy := (Counter named: #bt1991SupCounter) unwrap
+// => #Actor<Counter,_>
+
+supProxy increment
+// => 1
+
+supProxy increment
+// => 2
+
+supProxy getValue
+// => 2
+
+// Kill the supervised child. The supervisor restarts it under the same
+// name (permanent restart + spawnAs: driven by withName:).
+supProxy kill
+// => ok
+
+// Poll until the supervisor has restarted the child and re-registered the
+// name. Bounded at ~1s (50 iterations x 20ms) to fail fast rather than hang
+// on wall-clock time.
+attempts := 0. [(Counter named: #bt1991SupCounter) isError and: [attempts < 50]] whileTrue: [Timer sleep: 20. attempts := attempts + 1]. attempts < 50
+// => true
+
+// The proxy does NOT cache the pid — it re-resolves the name per send.
+// After restart, state is reset (new process), but the proxy transparently
+// points at the fresh pid.
+supProxy getValue
+// => 0
+
+supProxy increment
+// => 1
+
+// Clean up the supervisor (stops the child and releases the name).
+sup stop
+// => nil
+
+// After stop, the name is no longer registered.
+(Counter named: #bt1991SupCounter) isError
+// => true
+
+// ===========================================================================
+// Cleanup remaining actors
+// ===========================================================================
+
+g stop
+// => ok
+
+anon stop
+// => ok
