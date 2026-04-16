@@ -76,10 +76,34 @@ Start (or return) the running supervisor for the given class.
 Called from `class supervise` on Supervisor and DynamicSupervisor subclasses.
 Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 
-Returns `{beamtalk_supervisor, ClassName, Module, Pid}`.
-Idempotent: if the supervisor is already running, returns the existing instance.
+## Return shape (ADR 0080 Phase 0a — Option 2 probe, BT-1994)
+
+Returns `{ok, {beamtalk_supervisor_new, ClassName, Module, Pid}}` on a
+fresh start, `{ok, {beamtalk_supervisor, ClassName, Module, Pid}}` on
+the idempotent `{already_started, Pid}` branch, and
+`{error, #beamtalk_error{}}` on start failure. FFI coercion in
+`beamtalk_erlang_proxy:coerce_ffi_result/2` wraps this into a Beamtalk
+`Result` tagged map for the class method body's return.
+
+The `beamtalk_supervisor_new` inner tag signals a fresh start to the
+post-dispatch hook in `beamtalk_class_dispatch:class_send_dispatch/3`.
+The hook matches two shapes:
+
+  * the bare `{beamtalk_supervisor_new, ...}` tuple, seen when the
+    stdlib `supervise` method calls `.unwrap` on the FFI-coerced
+    Result (the current Phase 0a shim), and
+  * a Result tagged map wrapping `{beamtalk_supervisor_new, ...}`,
+    seen after the Phase 1 stdlib migration when callers handle the
+    Result themselves.
+
+In both cases the hook rewrites the inner tag to
+`{beamtalk_supervisor, ...}`, runs `class initialize:` in the caller's
+process (preserving the BT-1285 / ADR 0059 guarantee), and returns the
+rewritten shape (bare tuple or re-wrapped Result) to the caller.
 """.
--spec startLink(beamtalk_object()) -> term().
+-spec startLink(beamtalk_object()) ->
+    {ok, {beamtalk_supervisor_new | beamtalk_supervisor, atom(), module(), pid()}}
+    | {error, beamtalk_error:t()}.
 startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -89,12 +113,16 @@ startLink(Self) ->
             ?LOG_INFO("Supervisor started", #{
                 supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
             }),
-            %% BT-1542: Use beamtalk_supervisor_new tag to signal to the post-dispatch
-            %% hook in beamtalk_class_dispatch that this is a fresh start. The hook
-            %% converts it to beamtalk_supervisor after running initialize:.
-            {beamtalk_supervisor_new, ClassName, Module, Pid};
+            %% BT-1542 + BT-1994 (ADR 0080 Phase 0a, option 2): use the
+            %% beamtalk_supervisor_new tag to signal to the post-dispatch
+            %% hook in beamtalk_class_dispatch that this is a fresh start.
+            %% The hook unpacks the Result tagged map produced by FFI
+            %% coercion, rewrites the inner tag to beamtalk_supervisor,
+            %% runs initialize: in the caller's process, and rewraps.
+            {ok, {beamtalk_supervisor_new, ClassName, Module, Pid}};
         {error, {already_started, Pid}} ->
-            {beamtalk_supervisor, ClassName, Module, Pid};
+            %% Idempotent branch: no initialize: re-run.
+            {ok, {beamtalk_supervisor, ClassName, Module, Pid}};
         {error, Reason} ->
             ?LOG_ERROR("Supervisor start failed", #{
                 supervisor => ClassName,
@@ -103,12 +131,12 @@ startLink(Self) ->
                 domain => [beamtalk, runtime]
             }),
             Error = beamtalk_error:new(
-                runtime_error,
+                supervisor_start_failed,
                 ClassName,
                 supervise,
                 iolist_to_binary(io_lib:format("supervisor start_link failed: ~p", [Reason]))
             ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error))
+            {error, Error}
     end.
 
 -doc """
