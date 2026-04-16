@@ -103,6 +103,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Accepted | 2026-04-05 |
 | [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Accepted | 2026-04-12 |
 | [0079](0079-named-actor-registration.md) | Named Actor Registration | Accepted | 2026-04-15 |
+| [0080](0080-supervisor-lifecycle-result.md) | Migrate Supervisor Lifecycle to Result | Proposed | 2026-04-16 |
 
 ## Creating New ADRs
 
