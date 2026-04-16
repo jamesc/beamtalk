@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2004: Regression tests for `self spawnAs:` / `self spawnWith:as:` inside
+// a class factory method. Before the fix, codegen routed these selectors
+// through the generic class-method fallthrough which emitted
+// `call 'CURRENT_MODULE':'spawnAs' / 'spawnWithas'` — neither function
+// exists, so calls crashed at runtime with `undef`.
+
+TestCase subclass: SelfSpawnNamedTest
+
+  testSelfSpawnAsRegistersName =>
+    name := #bt2004_self_spawnas_success
+    result := NamedFactoryActor startAs: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor registeredName equals: name
+    self assert: actor isRegistered
+    actor stop
+
+  testSelfSpawnWithAsRegistersName =>
+    name := #bt2004_self_spawnwithas_success
+    result := NamedFactoryActor startWith: #{#value => 7} as: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor getValue equals: 7
+    self assert: actor registeredName equals: name
+    actor stop
+
+  testSelfSpawnWithAsDuplicateReturnsError =>
+    name := #bt2004_self_spawnwithas_dup
+    first := (NamedFactoryActor startWith: #{#value => 1} as: name) unwrap
+    second := NamedFactoryActor startWith: #{#value => 2} as: name
+    self assert: second isError
+    self assert: second error kind equals: #name_registered
+    first stop
+
+  testSelfSpawnAsDuplicateReturnsError =>
+    name := #bt2004_self_spawnas_dup
+    first := (NamedFactoryActor startAs: name) unwrap
+    second := NamedFactoryActor startAs: name
+    self assert: second isError
+    self assert: second error kind equals: #name_registered
+    first stop
+
+  testSelfSpawnAsReservedNameReturnsError =>
+    result := NamedFactoryActor startAs: #logger
+    self assert: result isError
+    self assert: result error kind equals: #reserved_name
