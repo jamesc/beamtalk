@@ -43,7 +43,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent := (Subprocess open: "ls" args: #("-la")) unwrap
   /// ```
-  class open: command :: String args: args :: List(String) -> Result(Subprocess, Error) =>
+  class open: command :: String args: args :: List(String) -> Result(Subprocess, Exception) =>
     Result tryDo: [self spawnWith: #{#executable => command, #args => args}]
 
   /// Convenience factory — open a subprocess with command, args, and working directory.
@@ -52,7 +52,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent := (Subprocess open: "ls" args: #("-la") dir: #"/tmp") unwrap
   /// ```
-  class open: command :: String args: args :: List(String) dir: dir :: String -> Result(Subprocess, Error) =>
+  class open: command :: String args: args :: List(String) dir: dir :: String -> Result(Subprocess, Exception) =>
     Result tryDo: [
       self spawnWith: #{#executable => command, #args => args, #dir => dir}
     ]
@@ -63,7 +63,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// ```beamtalk
   /// agent := (Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp") unwrap
   /// ```
-  class open: command :: String args: args :: List(String) env: env :: Dictionary dir: dir :: String -> Result(Subprocess, Error) =>
+  class open: command :: String args: args :: List(String) env: env :: Dictionary dir: dir :: String -> Result(Subprocess, Exception) =>
     Result
       tryDo: [
         self spawnWith: #{
