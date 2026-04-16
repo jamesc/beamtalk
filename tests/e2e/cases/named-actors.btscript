@@ -256,9 +256,11 @@ supProxy getValue
 supProxy kill
 // => ok
 
-// Give OTP a moment to restart the child and re-register the name.
-Timer sleep: 200
-// => nil
+// Poll until the supervisor has restarted the child and re-registered the
+// name. Bounded at ~1s (50 iterations x 20ms) to fail fast rather than hang
+// on wall-clock time.
+attempts := 0. [(Counter named: #bt1991SupCounter) isError and: [attempts < 50]] whileTrue: [Timer sleep: 20. attempts := attempts + 1]. attempts < 50
+// => true
 
 // The proxy does NOT cache the pid — it re-resolves the name per send.
 // After restart, state is reset (new process), but the proxy transparently

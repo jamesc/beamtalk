@@ -1897,7 +1897,7 @@ Before — the pre-ADR pattern uses a supervisor-local lookup (`which:`) and an 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
   class strategy -> Symbol => #restForOne
-  class children -> List(Actor) =>
+  class children -> List(SupervisionSpec) =>
     storeSpec := EventStore supervisionSpec withRestart: #permanent
     poolSpec := ActivityWorkerPool supervisionSpec withRestart: #permanent
     engineSpec := WorkflowEngine supervisionSpec withRestart: #permanent
@@ -1917,7 +1917,7 @@ After — naming each child eliminates the `initialize:` hook, and the superviso
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
   class strategy -> Symbol => #oneForOne
-  class children -> List(Actor) => #(
+  class children -> List(SupervisionSpec) => #(
     EventStore supervisionSpec withName: #eventStore withRestart: #permanent,
     ActivityWorkerPool supervisionSpec withName: #workerPool withRestart: #permanent,
     WorkflowEngine supervisionSpec withName: #workflowEngine withRestart: #permanent
@@ -1966,7 +1966,7 @@ This release covers **local (per-node)** registration. Cluster-wide (`#global`) 
 | `Class spawnAs: #foo` | `gen_server:start_link({local, foo}, Module, #{})` |
 | `Class spawnWith: args as: #foo` | `gen_server:start_link({local, foo}, Module, args)` |
 | `actor registerAs: #foo` | `erlang:register(foo, Pid)` |
-| `actor unregister` | `erlang:unregister(foo)` (idempotent) |
+| `actor unregister` | Beamtalk-wrapped idempotent `erlang:unregister(foo)` — Beamtalk catches the `badarg` raw Erlang raises when the name is absent and returns `ok`, so repeated/unnecessary unregisters are safe |
 | `Class named: #foo` | `erlang:whereis(foo)` + Beamtalk class check via `'$beamtalk_actor'` process-dict marker |
 | `Actor allRegistered` | `erlang:registered/0` filtered by the process-dict marker |
 | Proxy send (`proxy foo`) | `gen_server:call(foo, ...)` — name-resolved per send |
