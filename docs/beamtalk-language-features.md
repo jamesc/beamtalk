@@ -847,6 +847,10 @@ collect: block :: Block -> Self =>
 class named: name :: Symbol -> Result(Self, Error) => ...
 // (Counter named: #c) — inferred return type: Result(Counter, Error)
 
+// On parameterised receivers, Self preserves type arguments:
+// (Box(Integer) new) someMethod — where someMethod -> Result(Self, Error)
+//   inferred return type: Result(Box(Integer), Error)
+
 // Self class — the receiver's metaclass (return position only)
 class -> Self class => @primitive "class"
 // (Counter new) class — inferred type: Counter's metaclass, so
