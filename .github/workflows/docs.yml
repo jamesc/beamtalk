@@ -83,7 +83,7 @@ jobs:
         run: echo "www.beamtalk.dev" > _site/CNAME
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
 
   deploy:
     needs: build
