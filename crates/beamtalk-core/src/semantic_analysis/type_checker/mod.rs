@@ -32,6 +32,7 @@ pub mod native_types;
 mod protocol;
 #[cfg(test)]
 mod tests;
+mod type_resolver;
 mod types;
 mod validation;
 
