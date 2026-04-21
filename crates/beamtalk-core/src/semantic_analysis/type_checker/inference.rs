@@ -478,14 +478,23 @@ impl TypeChecker {
                     // Dynamic RHS (the primary use case for annotations) is accepted silently.
                     // Never RHS (diverging expressions like `self error:`) is compatible
                     // with any declared type (bottom of the type lattice).
+                    // A narrowing assignment (declared type is a subtype of RHS type, e.g.
+                    // `Dictionary := <Object>`) is the type-erasure escape hatch the annotation
+                    // is designed for — the user is asserting the runtime type is more specific.
                     if let Some(inferred_name) = inferred_ty.display_name() {
                         if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
                             if let Some(declared_name) = declared.display_name() {
-                                if !Self::is_assignable_to(
+                                let rhs_assignable_to_declared = Self::is_assignable_to(
                                     &inferred_name,
                                     &declared_name,
                                     hierarchy,
-                                ) {
+                                );
+                                let declared_assignable_to_rhs = Self::is_assignable_to(
+                                    &declared_name,
+                                    &inferred_name,
+                                    hierarchy,
+                                );
+                                if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
                                     self.diagnostics.push(
                                         Diagnostic::warning(
                                             format!(
