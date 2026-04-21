@@ -117,7 +117,8 @@ all_benchmarks() ->
     bench_overhead_comparison(),
     bench_overhead_comparison_hires(),
     bench_block_threading(),
-    bench_method_threading().
+    bench_method_threading(),
+    bench_class_self_dispatch().
 
 %% --- 1. Raw message send/receive (baseline) ---
 
@@ -982,3 +983,123 @@ method_bench(Fun) ->
         T * 1000 div ?METHOD_BATCH
     end, lists:seq(1, ?METHOD_ITERATIONS)),
     stats(BatchTimings).
+
+%%====================================================================
+%% BT-2007: Class-method self-dispatch benchmarks
+%%====================================================================
+
+%% Quantifies the cost introduced by routing inherited class-method
+%% self-sends through beamtalk_class_dispatch:class_self_dispatch/4.
+%%
+%% Two codegen paths compared:
+%%   1. Direct-apply (baseline): what codegen emits for a *local* class
+%%      method self-send — a single `call '<mod>':'class_<sel>'(
+%%      ClassSelf, ClassVars, Args...)`. This is also the terminal step
+%%      of the helper, so the delta isolates the helper's setup work.
+%%   2. class_self_dispatch/4: the new BT-2007 path used for *inherited*
+%%      class-method self-sends. Walks the superclass chain via ETS +
+%%      two gen_server:calls per level (one for get_local_class_methods,
+%%      one for module_name), constructs ClassSelf, then applies.
+%%
+%% Uses the stdlib `Dictionary` class inheriting `class withAll:` from
+%% `Collection` — a real two-level chain registered at startup by the
+%% compiled stdlib on_load hooks, so no extra setup is needed. Skips
+%% gracefully if either class is missing on a stripped-down runtime.
+bench_class_self_dispatch() ->
+    ParentMod  = 'bt@stdlib@collection',
+    ChildClass = 'Dictionary',
+    Selector   = 'withAll:',
+    FunName    = beamtalk_class_dispatch:class_method_fun_name(Selector),
+    case {beamtalk_class_registry:whereis_class('Collection'),
+          beamtalk_class_registry:whereis_class(ChildClass),
+          erlang:function_exported(ParentMod, FunName, 3)} of
+        {undefined, _, _} ->
+            io:format(standard_error,
+                "PERF: class_self_dispatch SKIP (Collection not registered)~n", []);
+        {_, undefined, _} ->
+            io:format(standard_error,
+                "PERF: class_self_dispatch SKIP (~p not registered)~n", [ChildClass]);
+        {_, _, false} ->
+            io:format(standard_error,
+                "PERF: class_self_dispatch SKIP (~p:~p/3 not exported)~n",
+                [ParentMod, FunName]);
+        _ ->
+            run_class_self_dispatch_bench(ChildClass, Selector, ParentMod, FunName)
+    end.
+
+run_class_self_dispatch_bench(ChildClass, Selector, ParentMod, FunName) ->
+    %% Construct the same ClassSelf the helper would build on the inherited
+    %% path — `class_mod` is the defining module (Collection), which matches
+    %% the helper at beamtalk_class_dispatch:class_self_dispatch/4 and the
+    %% gen_server path at invoke_class_method/7.
+    Tag = beamtalk_class_registry:class_object_tag(ChildClass),
+    ClassSelf = #beamtalk_object{class = Tag, class_mod = ParentMod, pid = self()},
+    ClassVars = #{},
+    %% Collection>>class withAll: takes a list and builds an instance.
+    %% Empty list is the cheapest argument — keeps the benchmark focused
+    %% on dispatch cost rather than constructor work.
+    Args = [[]],
+
+    %% Probe both paths once before measuring. If either raises (e.g. the
+    %% stdlib method body depends on class-var state we didn't set up, or
+    %% the child isn't wired into the hierarchy yet), log a SKIP with the
+    %% reason and bail — the benchmark is descriptive, not a correctness gate.
+    case probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args) of
+        ok ->
+            run_class_self_dispatch_measure(
+                ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args
+            );
+        {skip, Why} ->
+            io:format(standard_error, "PERF: class_self_dispatch SKIP (~s)~n", [Why])
+    end.
+
+probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args) ->
+    DirectOk =
+        try erlang:apply(ParentMod, FunName, [ClassSelf, ClassVars | Args]) of
+            _ -> ok
+        catch
+            C1:E1 ->
+                {skip,
+                 io_lib:format("direct apply ~p:~p raised ~p:~p", [ParentMod, FunName, C1, E1])}
+        end,
+    case DirectOk of
+        ok ->
+            try beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, ClassVars, Args) of
+                _ -> ok
+            catch
+                C2:E2 ->
+                    {skip,
+                     io_lib:format("helper ~p/~p raised ~p:~p", [ChildClass, Selector, C2, E2])}
+            end;
+        SkipDirect ->
+            SkipDirect
+    end.
+
+run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args) ->
+    %% Direct apply (simulates local class-method self-send terminal step).
+    DirectNs = method_bench(fun() ->
+        erlang:apply(ParentMod, FunName, [ClassSelf, ClassVars | Args])
+    end),
+
+    %% Via helper (simulates BT-2007 inherited self-dispatch path).
+    HelperNs = method_bench(fun() ->
+        beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, ClassVars, Args)
+    end),
+
+    report_ns("class_self_dispatch/direct_apply", DirectNs, ?METHOD_ITERATIONS),
+    report_ns("class_self_dispatch/via_helper", HelperNs, ?METHOD_ITERATIONS),
+
+    DirectMedian = maps:get(median, DirectNs),
+    HelperMedian = maps:get(median, HelperNs),
+    Overhead = HelperMedian / max(DirectMedian, 1),
+    AbsOverheadNs = HelperMedian - DirectMedian,
+
+    io:format(standard_error,
+        "PERF: class_self_dispatch/helper_overhead ~.2fx vs direct_apply (~bns absolute)~n",
+        [Overhead, AbsOverheadNs]),
+
+    %% Sanity bounds — these document the expected cost of the chain walk
+    %% (2 gen_server:calls per ancestor + ETS lookups). Tuned loose so CI
+    %% noise doesn't flake; tighten once we have historical data.
+    ?assert(HelperMedian < 500_000),  %% helper < 500us per call
+    ?assert(DirectMedian < 10_000).   %% direct apply < 10us per call

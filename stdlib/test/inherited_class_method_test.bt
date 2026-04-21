@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2007: Inherited class-method self-dispatch.
+//
+// Before BT-2007, these all compiled to a direct call to the child's
+// module (bt@inheritedchild) for a function only exported by the parent's
+// module (bt@inheritedparent), crashing with `undef` at runtime. The fix
+// routes them through beamtalk_class_dispatch:class_self_dispatch/4.
+//
+// Covers:
+//   - inherited unary class method dispatched via `self` and via an
+//     explicit parent class name
+//   - inherited keyword class method (same two dispatch shapes)
+//   - inherited keyword class method that reads and mutates class vars,
+//     including two chained calls in one class-method body (threads
+//     ClassVars through the `class_var_result` unwrap between calls)
+//
+// See fixtures/inherited_class_method*.bt for the two-level hierarchy.
+
+TestCase subclass: InheritedClassMethodTest
+
+  setUp =>
+    // Classes use per-class ClassVars storage, so reset both explicitly.
+    InheritedParent resetCounter
+    // The child duplicates `classState: counter = 0`; reset the child's
+    // own counter by going through a bumpBy with a zero offset after
+    // reading the current value — simpler to just let each bump* test
+    // run in a fresh module state. setUp runs before each test so the
+    // parent's side is reset here; the child's counter is re-bumped
+    // from whatever value it had at the end of the previous test, so
+    // each bump* test asserts deltas, not absolutes.
+    self
+
+  testInheritedUnaryViaSelf =>
+    self assert: InheritedChild tagViaSelf equals: #parent
+
+  testInheritedUnaryViaExplicitParent =>
+    self assert: InheritedChild tagViaParent equals: #parent
+
+  testInheritedKeywordViaSelf =>
+    self assert: (InheritedChild doubleViaSelf: 7) equals: 14
+
+  testInheritedKeywordViaExplicitParent =>
+    self assert: (InheritedChild doubleViaParent: 7) equals: 14
+
+  testInheritedClassVarMutationPersists =>
+    // The inherited `bumpBy:` method reads and writes `self.counter` on
+    // the child's ClassVars. The helper must thread the caller's
+    // ClassVars in and the `class_var_result` wrapper out — otherwise
+    // writes are silently dropped.
+    before := InheritedChild bumpSelfBy: 0
+    r1 := InheritedChild bumpSelfBy: 5
+    self assert: (r1 - before) equals: 5
+    r2 := InheritedChild bumpSelfBy: 3
+    self assert: (r2 - before) equals: 8
+
+  testChainedInheritedCallsInOneMethodBody =>
+    // Two inherited self-sends in one class method body — if class_var
+    // threading between them is broken, the second sees the pre-first
+    // value and the result is n, not 2n.
+    before := InheritedChild bumpSelfBy: 0
+    final := InheritedChild bumpTwice: 4
+    self assert: (final - before) equals: 8

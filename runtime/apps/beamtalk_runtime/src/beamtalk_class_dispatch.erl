@@ -24,6 +24,7 @@ Extracted from beamtalk_object_class.erl (BT-704).
 
 -export([
     class_send/3,
+    class_self_dispatch/4,
     metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
@@ -87,6 +88,56 @@ class_send(ClassPid, Selector, Args) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
         class_send_dispatch(P, Selector, Args)
     end).
+
+-doc """
+BT-2007: Dispatch an inherited class method from inside a class method body.
+
+Codegen emits a call to this helper for every class-method self-send
+whose selector is not a local class method, a slot constructor, an
+instantiation intrinsic, or one of the auto-generated 0-arity exports.
+Walks the superclass chain via `find_class_method_in_chain/2`, then
+applies `DefiningModule:class_<Selector>(ClassSelf, ClassVars, Args...)`
+directly in the caller's process — mirroring the gen_server path's
+`invoke_class_method/7` minus the `{reply, ...}` wrapping and the
+`test_spawn` branch (which only fires for `TestCase>>runAll` / `run:`
+dispatched from an external caller, not from inside a class method).
+
+`ClassSelf#beamtalk_object.class_mod` is set to the *defining* module
+so Newspeak-style self-sends inside the inherited method resolve against
+the class that actually contains the code (same rule as the gen_server
+path at line 316).
+
+Returns `{class_var_result, Result, NewClassVars}` when the inherited
+method mutated class vars, or the plain `Result` otherwise — the shape
+codegen already unwraps for local class-method self-sends. Raises
+structured `does_not_understand` if no ancestor defines the selector.
+""".
+-spec class_self_dispatch(class_name(), selector(), map(), list()) ->
+    {class_var_result, term(), map()} | term() | no_return().
+class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
+    case find_class_method_in_chain(Selector, ClassName) of
+        {ok, _DefiningClass, DefiningModule} ->
+            ClassSelf = #beamtalk_object{
+                class = beamtalk_class_registry:class_object_tag(ClassName),
+                class_mod = DefiningModule,
+                pid = self()
+            },
+            FunName = class_method_fun_name(Selector),
+            erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]);
+        not_found ->
+            raise_class_self_dnu(ClassName, Selector)
+    end.
+
+-spec raise_class_self_dnu(class_name(), selector()) -> no_return().
+raise_class_self_dnu(ClassName, Selector) ->
+    Hint = iolist_to_binary(
+        io_lib:format(
+            "Class '~s' has no class method '~s' and no ancestor defines it",
+            [ClassName, Selector]
+        )
+    ),
+    Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
+    beamtalk_error:raise(Error).
 
 -doc "Dispatch a class method call (the main logic for the catch-all clause).".
 -spec class_send_dispatch(pid(), selector(), list()) -> term().

@@ -296,6 +296,82 @@ impl CoreErlangGenerator {
         doc
     }
 
+    /// BT-412/BT-2007: Wrap a class-method call that may return either a
+    /// plain value or a `{'class_var_result', Result, NewClassVars}` tuple,
+    /// threading the new class-var binding and exposing the unwrapped result.
+    ///
+    /// Emits (preamble elided):
+    ///
+    /// ```erlang
+    /// let _CMR       = <call_doc> in
+    /// let ClassVarsN = case _CMR of
+    ///                    <{'class_var_result', _MR, _CV}> when 'true' -> _CV
+    ///                    <_PCV>                            when 'true' -> ClassVars<current>
+    ///                  end in
+    /// let _Unwrapped = case _CMR of
+    ///                    <{'class_var_result', _WR, _}>    when 'true' -> _WR
+    ///                    <_PR>                             when 'true' -> _PR
+    ///                  end in
+    /// ```
+    ///
+    /// Leaves the let-scope open (caller provides the continuation expression)
+    /// and records `_Unwrapped` as `last_open_scope_result` so enclosing
+    /// contexts can reference it. Shared by the local-class-method branch
+    /// (branch 1) and the BT-2007 inherited-dispatch branch in
+    /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
+    pub(super) fn emit_class_var_result_unwrap(
+        &mut self,
+        args_preamble: Document<'static>,
+        call_doc: Document<'static>,
+    ) -> Document<'static> {
+        let call_result = self.fresh_temp_var("CMR");
+        let cv = self.current_class_var();
+        let new_cv = self.next_class_var();
+        let inner_cv = self.fresh_temp_var("CV");
+        let inner_res = self.fresh_temp_var("MR");
+        let plain_cv = self.fresh_temp_var("PCV");
+        let result = self.fresh_temp_var("Unwrapped");
+        let wrapped_res = self.fresh_temp_var("WR");
+        let plain_res = self.fresh_temp_var("PR");
+
+        let doc = docvec![
+            args_preamble,
+            "let ",
+            Document::String(call_result.clone()),
+            " = ",
+            call_doc,
+            " in let ",
+            Document::String(new_cv),
+            " = case ",
+            Document::String(call_result.clone()),
+            " of <{'class_var_result', ",
+            Document::String(inner_res),
+            ", ",
+            Document::String(inner_cv.clone()),
+            "}> when 'true' -> ",
+            Document::String(inner_cv),
+            " <",
+            Document::String(plain_cv),
+            "> when 'true' -> ",
+            Document::String(cv),
+            " end in let ",
+            Document::String(result.clone()),
+            " = case ",
+            Document::String(call_result),
+            " of <{'class_var_result', ",
+            Document::String(wrapped_res.clone()),
+            ", _}> when 'true' -> ",
+            Document::String(wrapped_res),
+            " <",
+            Document::String(plain_res.clone()),
+            "> when 'true' -> ",
+            Document::String(plain_res),
+            " end in ",
+        ];
+        self.last_open_scope_result = Some(result);
+        doc
+    }
+
     /// Generates code for a message send.
     ///
     /// This is the **main entry point** for message compilation. It dispatches
@@ -942,7 +1018,7 @@ impl CoreErlangGenerator {
     /// Used by both `self` sends and explicit class name sends (BT-773) within
     /// class methods. Generates direct module function calls to avoid deadlock
     /// since class methods execute inside a `gen_server:call` handler.
-    #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003) share args-capture scaffolding.
+    #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003/BT-2007) share args-capture scaffolding.
     fn generate_class_method_self_send(
         &mut self,
         selector: &MessageSelector,
@@ -952,7 +1028,6 @@ impl CoreErlangGenerator {
 
         if self.class_method_selectors().contains(&selector_atom) {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
-            let call_result = self.fresh_temp_var("CMR");
             let module = self.module_name.clone();
             // BT-1937: Hoist any open let-chains from sub-expression class
             // method self-sends in the args. The preamble must be emitted
@@ -965,35 +1040,19 @@ impl CoreErlangGenerator {
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
 
-            let new_cv = self.next_class_var();
-            let inner_cv = self.fresh_temp_var("CV");
-            let inner_res = self.fresh_temp_var("MR");
-            let plain_cv = self.fresh_temp_var("PCV");
-            let result = self.fresh_temp_var("Unwrapped");
-            let wrapped_res = self.fresh_temp_var("WR");
-            let plain_res = self.fresh_temp_var("PR");
-
-            let doc = docvec![
-                args_preamble,
-                Document::String(format!(
-                    "let {call_result} = call '{module}':'class_{selector_atom}'(ClassSelf, {cv}"
-                )),
+            let call_doc = docvec![
+                "call '",
+                Document::Eco(module),
+                "':'class_",
+                Document::String(selector_atom),
+                "'(ClassSelf, ",
+                Document::String(cv),
                 comma,
                 args_doc,
-                Document::String(format!(
-                    ") in \
-                     let {new_cv} = case {call_result} of \
-                     <{{'class_var_result', {inner_res}, {inner_cv}}}> when 'true' -> {inner_cv} \
-                     <{plain_cv}> when 'true' -> {cv} \
-                     end in \
-                     let {result} = case {call_result} of \
-                     <{{'class_var_result', {wrapped_res}, _}}> when 'true' -> {wrapped_res} \
-                     <{plain_res}> when 'true' -> {plain_res} \
-                     end in "
-                ))
+                ")"
             ];
+            let doc = self.emit_class_var_result_unwrap(args_preamble, call_doc);
             // NOTE: scope is OPEN — caller provides continuation
-            self.last_open_scope_result = Some(result);
             return Ok(doc);
         }
         // BT-996: Auto-generated keyword constructor for Value subclass: classes.
@@ -1037,22 +1096,48 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // Other built-in exports (superclass, methods, etc.)
-        // BT-1937: Hoist preambles from sub-expression class var mutations.
-        let module = self.module_name.clone();
-        let fun_name = selector_atom.replace(':', "");
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        // BT-2007: Inherited class method — walk the hierarchy at runtime and
+        // apply the defining module's class_<sel>(ClassSelf, ClassVars, Args...).
+        // Auto-generated 0-arity exports on every class module (superclass/0,
+        // methods/0, class_name/0) stay on the direct-call path because the
+        // chain walker only looks at user-defined class_methods. Anything else
+        // that falls through here — inherited or missing — routes through
+        // class_self_dispatch/4, which raises a structured does_not_understand
+        // error for genuine DNU.
+        if is_class_auto_export_selector(&selector_atom, arguments.len()) {
+            // BT-1937: Hoist preambles from sub-expression class var mutations.
+            let module = self.module_name.clone();
+            let fun_name = selector_atom.replace(':', "");
+            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
 
+            let call_doc = docvec![
+                "call '",
+                Document::Eco(module),
+                "':'",
+                Document::String(fun_name),
+                "'(",
+                args_doc,
+                ")"
+            ];
+            return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"));
+        }
+
+        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let cv = self.current_class_var();
         let call_doc = docvec![
-            "call '",
-            Document::Eco(module),
-            "':'",
-            Document::String(fun_name),
-            "'(",
+            "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
+            "call 'erlang':'get'('beamtalk_class_name'), '",
+            Document::String(selector_atom),
+            "', ",
+            Document::String(cv),
+            ", [",
             args_doc,
-            ")"
+            "])"
         ];
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"))
+        let doc = self.emit_class_var_result_unwrap(args_preamble, call_doc);
+        // NOTE: scope is OPEN — caller provides continuation (matches the
+        // local-class-method branch above; `last_open_scope_result` is set).
+        Ok(doc)
     }
 
     /// Lowers instantiation-like selectors (`new`, `spawn`, `spawnAs:`, ...) into
@@ -2652,6 +2737,27 @@ impl CoreErlangGenerator {
 // is_bt_stdlib_class, is_erlang_stdlib_module) were removed in BT-411.
 // Class dispatch now goes through runtime class_send/3 instead of
 // compile-time module name resolution.
+
+/// BT-2007: Class-module auto-exports reachable via `self <sel>` from inside
+/// a class method.
+///
+/// Every compiled class module carries a small set of 0-arity functions
+/// generated by codegen (not user-defined), used for reflection:
+/// `superclass/0`, `methods/0`, `class_name/0`. These are not installed in
+/// `class_method_selectors` and the runtime chain walker does not index them
+/// (it reads only user-defined `class_methods` on each ancestor `gen_server`).
+/// When the user writes `self superclass` etc. inside a class method, the
+/// self-send must compile to a direct module call — the BT-2007 runtime
+/// helper would raise `does_not_understand` for them.
+///
+/// Kept deliberately narrow; any auto-export added later that is reachable
+/// via plain self-send needs to be added here. Unknown selectors take the
+/// inherited-dispatch path instead, which raises structured DNU on miss —
+/// strictly better than the previous behaviour (which emitted a direct call
+/// to a non-existent function and crashed with `undef` at runtime).
+pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -> bool {
+    arity == 0 && matches!(selector_atom, "superclass" | "methods" | "class_name")
+}
 
 #[cfg(test)]
 mod tests {
