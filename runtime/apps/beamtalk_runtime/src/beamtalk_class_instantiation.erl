@@ -31,6 +31,8 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     class_self_new/3,
     class_self_spawn/3,
     class_self_spawn/4,
+    class_self_spawn_as/4,
+    class_self_spawn_with/5,
     ensure_is_constructible/3,
     compute_is_constructible/2,
     abstract_class_error/2
@@ -196,6 +198,77 @@ class_self_spawn(ClassName, Module, IsAbstract0, Args) ->
             Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
             error(Wrapped)
     end.
+
+-doc """
+Spawn a named actor from within a class method (bypasses gen_server).
+
+BT-2004: When a class method calls `self spawnAs: name`, the codegen routes
+here so that ClassName/Module come from the process dictionary rather than a
+gen_server:call on the current class — which would deadlock.
+
+Returns a Beamtalk `Result` directly (matching `Actor>>spawnAs:` which has
+return type `Result(Self, Error)`) so `unwrap` / `onError:` chaining works
+the same as for external `ClassName spawnAs:` calls.
+""".
+-spec class_self_spawn_as(class_name(), atom(), boolean() | term(), term()) ->
+    beamtalk_result:t().
+class_self_spawn_as(ClassName, Module, IsAbstract0, Name) ->
+    do_class_self_named_spawn(ClassName, Module, IsAbstract0, #{}, Name, 'spawnAs:').
+
+-doc """
+Spawn a named actor with init args from within a class method.
+
+BT-2004: `self spawnWith: InitArgs as: Name` equivalent. See
+`class_self_spawn_as/4` for the deadlock-avoidance rationale.
+""".
+-spec class_self_spawn_with(class_name(), atom(), boolean() | term(), term(), term()) ->
+    beamtalk_result:t().
+class_self_spawn_with(ClassName, Module, IsAbstract0, InitArgs, Name) ->
+    do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, 'spawnWith:as:').
+
+-spec do_class_self_named_spawn(
+    class_name(), atom(), boolean() | term(), term(), term(), atom()
+) -> beamtalk_result:t().
+do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Selector) ->
+    IsAbstract = IsAbstract0 =:= true,
+    case IsAbstract of
+        true ->
+            beamtalk_result:from_tagged_tuple(
+                {error, abstract_class_error(ClassName, Selector)}
+            );
+        false ->
+            case beamtalk_actor:'spawnAs'(Name, Module, InitArgs) of
+                {ok, Pid} ->
+                    beamtalk_result:from_tagged_tuple(
+                        {ok, #beamtalk_object{
+                            class = ClassName,
+                            class_mod = Module,
+                            pid = Pid
+                        }}
+                    );
+                {error, #beamtalk_error{} = Err} ->
+                    beamtalk_result:from_tagged_tuple(
+                        {error, Err#beamtalk_error{
+                            class = ClassName,
+                            selector = Selector
+                        }}
+                    );
+                {error, Reason} ->
+                    beamtalk_result:from_tagged_tuple(
+                        {error, generic_spawn_error(ClassName, Selector, Reason)}
+                    )
+            end
+    end.
+
+-spec generic_spawn_error(atom(), atom(), term()) -> #beamtalk_error{}.
+generic_spawn_error(ClassName, Selector, Reason) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:with_selector(
+            beamtalk_error:new(instantiation_error, ClassName),
+            Selector
+        ),
+        iolist_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
+    ).
 
 %%====================================================================
 %% Constructibility

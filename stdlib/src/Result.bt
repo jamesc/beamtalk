@@ -51,7 +51,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result ok: "hello"     // => Result ok: "hello"
   /// Result ok: nil         // => Result ok: nil
   /// ```
-  class ok: value :: Object -> Result => (Erlang beamtalk_result) ok: value
+  class ok: value :: T -> Result(T, E) => (Erlang beamtalk_result) ok: value
 
   /// Create a failed Result wrapping an error reason (class method).
   ///
@@ -65,7 +65,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result error: Error new    // => Result error: <Error>
   /// ```
   /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
-  class error: reason :: Object -> Result =>
+  class error: reason :: E -> Result(T, E) =>
     (Erlang beamtalk_result) makeError: reason
 
   /// Evaluate a block and return a Result (class method).
@@ -80,7 +80,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result tryDo: [Exception signal: "oops"]   // => Result error: <Exception>
   /// Result tryDo: [(File readAll: "missing.txt") unwrap] // => Result error: <Exception>
   /// ```
-  class sealed tryDo: block :: Block -> Result =>
+  class sealed tryDo: block :: Block(T) -> Result(T, Exception) =>
     (Erlang beamtalk_result) tryDo: block
 
   /// Convert an Erlang-style tagged tuple to a Result (class method).
@@ -93,7 +93,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result fromTuple: (Tuple withAll: #(#ok, 42))       // => Result ok: 42
   /// Result fromTuple: (Tuple withAll: #(#error, #oops)) // => Result error: ...
   /// ```
-  class fromTuple: tuple :: Tuple -> Result =>
+  class fromTuple: tuple :: Tuple -> Result(T, E) =>
     (Erlang beamtalk_result) fromTuple: tuple
 
   // ===== Instance Methods — Querying =====

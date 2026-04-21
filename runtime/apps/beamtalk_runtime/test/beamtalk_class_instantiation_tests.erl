@@ -75,7 +75,20 @@ instantiation_test_() ->
                 fun test_handle_new_undefined_constructible/0},
             %% handle_spawn with abstract and spawnWith:
             {"spawn abstract with spawnWith: returns instantiation_error",
-                fun test_spawn_abstract_spawn_with/0}
+                fun test_spawn_abstract_spawn_with/0},
+            %% class_self_spawn_as / class_self_spawn_with tests (BT-2004)
+            {"class_self_spawn_as returns Result ok wrapping named actor",
+                fun test_class_self_spawn_as_success/0},
+            {"class_self_spawn_as returns Result error for reserved name",
+                fun test_class_self_spawn_as_reserved/0},
+            {"class_self_spawn_as returns Result error for abstract class",
+                fun test_class_self_spawn_as_abstract/0},
+            {"class_self_spawn_with returns Result ok with init args applied",
+                fun test_class_self_spawn_with_success/0},
+            {"class_self_spawn_with returns Result error on duplicate name",
+                fun test_class_self_spawn_with_duplicate/0},
+            {"class_self_spawn_with returns Result error for abstract class",
+                fun test_class_self_spawn_with_abstract/0}
         ]
     end}.
 
@@ -366,6 +379,115 @@ test_spawn_abstract_spawn_with() ->
     ).
 
 %%====================================================================
+%% class_self_spawn_as / class_self_spawn_with tests (BT-2004)
+%%====================================================================
+
+test_class_self_spawn_as_success() ->
+    ok = ensure_counter_loaded(),
+    Name = bt2004_self_spawnas_ok,
+    unregister_if_present(Name),
+    Result = beamtalk_class_instantiation:class_self_spawn_as(
+        'Counter', 'bt@counter', false, Name
+    ),
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := #beamtalk_object{}},
+        Result
+    ),
+    #{'okValue' := Obj} = Result,
+    ?assert(erlang:whereis(Name) =/= undefined),
+    gen_server:stop(Obj#beamtalk_object.pid).
+
+test_class_self_spawn_as_reserved() ->
+    ok = ensure_counter_loaded(),
+    Result = beamtalk_class_instantiation:class_self_spawn_as(
+        'Counter', 'bt@counter', false, logger
+    ),
+    ?assertMatch(
+        #{
+            'isOk' := false,
+            'errReason' := #{error := #beamtalk_error{kind = reserved_name}}
+        },
+        Result
+    ).
+
+test_class_self_spawn_as_abstract() ->
+    Result = beamtalk_class_instantiation:class_self_spawn_as(
+        'AbstractThing', some_mod, true, my_name
+    ),
+    ?assertMatch(
+        #{
+            'isOk' := false,
+            'errReason' :=
+                #{
+                    error := #beamtalk_error{
+                        kind = instantiation_error,
+                        class = 'AbstractThing',
+                        selector = 'spawnAs:'
+                    }
+                }
+        },
+        Result
+    ).
+
+test_class_self_spawn_with_success() ->
+    ok = ensure_counter_loaded(),
+    Name = bt2004_self_spawnwith_ok,
+    unregister_if_present(Name),
+    Result = beamtalk_class_instantiation:class_self_spawn_with(
+        'Counter', 'bt@counter', false, #{}, Name
+    ),
+    ?assertMatch(
+        #{'isOk' := true, 'okValue' := #beamtalk_object{}},
+        Result
+    ),
+    #{'okValue' := Obj} = Result,
+    gen_server:stop(Obj#beamtalk_object.pid).
+
+test_class_self_spawn_with_duplicate() ->
+    ok = ensure_counter_loaded(),
+    Name = bt2004_self_spawnwith_dup,
+    unregister_if_present(Name),
+    #{'okValue' := First} = beamtalk_class_instantiation:class_self_spawn_with(
+        'Counter', 'bt@counter', false, #{}, Name
+    ),
+    Second = beamtalk_class_instantiation:class_self_spawn_with(
+        'Counter', 'bt@counter', false, #{}, Name
+    ),
+    ?assertMatch(
+        #{
+            'isOk' := false,
+            'errReason' :=
+                #{
+                    error := #beamtalk_error{
+                        kind = name_registered,
+                        selector = 'spawnWith:as:'
+                    }
+                }
+        },
+        Second
+    ),
+    gen_server:stop(First#beamtalk_object.pid).
+
+test_class_self_spawn_with_abstract() ->
+    Result = beamtalk_class_instantiation:class_self_spawn_with(
+        'AbstractThing', some_mod, true, #{}, my_name
+    ),
+    ?assertMatch(
+        #{
+            'isOk' := false,
+            'errReason' :=
+                #{
+                    error := #beamtalk_error{
+                        kind = instantiation_error,
+                        class = 'AbstractThing',
+                        selector = 'spawnWith:as:'
+                    }
+                }
+        },
+        Result
+    ).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -393,3 +515,16 @@ cleanup_if_process(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
     gen_server:stop(Pid);
 cleanup_if_process(_) ->
     ok.
+
+%% Ensure a name-registered process from a prior run is cleared before a
+%% test re-registers the same name. safe_spawn_named raises when the name
+%% is already taken, which the tests exercise intentionally in the
+%% duplicate-registration case — but the happy-path tests need a clean
+%% starting point.
+unregister_if_present(Name) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            ok;
+        Pid when is_pid(Pid) ->
+            gen_server:stop(Pid)
+    end.

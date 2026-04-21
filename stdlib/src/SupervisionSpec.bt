@@ -83,6 +83,10 @@ typed Value subclass: SupervisionSpec
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs:, withName: are auto-generated.)
+  //
+  // someArgs is annotated `:: Object` because SupervisionSpec is a typed class
+  // (missing annotations escalate to CI errors), but the value is forwarded as-is
+  // to the actor's init/1 — any payload shape the actor accepts is valid.
 
   /// Return a new spec with id and restart overridden.
   withId: anId :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
@@ -101,11 +105,11 @@ typed Value subclass: SupervisionSpec
     (self withName: aName) withRestart: policy
 
   /// Return a new spec with name and args overridden.
-  withName: aName :: Symbol withArgs: someArgs -> SupervisionSpec =>
+  withName: aName :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     (self withName: aName) withArgs: someArgs
 
   /// Return a new spec with name, restart, and args all overridden.
-  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs -> SupervisionSpec =>
+  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withName: aName) withRestart: policy) withArgs: someArgs
 
   // === Display ===

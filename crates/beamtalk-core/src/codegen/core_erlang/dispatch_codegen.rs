@@ -1029,17 +1029,40 @@ impl CoreErlangGenerator {
             return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "Slot"));
         }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
-        // gen_server to avoid deadlock — route through class_self_new/class_self_spawn.
-        //
-        // BT-908: Use the process dictionary instead of hardcoded class name/module so that
-        // inherited class factory methods (e.g. `wrap:` from a parent) create an instance of
-        // the CALLING class, not the DEFINING class. The class gen_server process sets
-        // `beamtalk_class_name`, `beamtalk_class_module`, and `beamtalk_class_is_abstract` in
-        // its process dictionary during init (beamtalk_object_class:init/1). When a subclass
-        // inherits a factory method and invokes it, the subclass gen_server process is running,
-        // so the process dictionary reflects the subclass, not the parent.
+        // gen_server to avoid deadlock — route through class_self_new/class_self_spawn
+        // (and BT-2004's class_self_spawn_as/class_self_spawn_with for the named-
+        // registration variants).
+        if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
+            return Ok(doc);
+        }
+
+        // Other built-in exports (superclass, methods, etc.)
+        // BT-1937: Hoist preambles from sub-expression class var mutations.
         let module = self.module_name.clone();
-        match selector_atom.as_str() {
+        let fun_name = selector_atom.replace(':', "");
+        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+
+        let call_doc = docvec![
+            Document::String(format!("call '{module}':'{fun_name}'(")),
+            args_doc,
+            ")"
+        ];
+        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"))
+    }
+
+    /// Lowers instantiation-like selectors (`new`, `spawn`, `spawnAs:`, ...) into
+    /// direct calls on `beamtalk_class_instantiation`, bypassing the class
+    /// `gen_server` to avoid deadlock from within a class method.
+    ///
+    /// BT-908: ClassName/Module/IsAbstract are read from the process dictionary
+    /// rather than baked in at compile time so inherited factory methods create
+    /// an instance of the CALLING class (the running class `gen_server` process).
+    fn try_instantiation_intrinsic(
+        &mut self,
+        selector_atom: &str,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        match selector_atom {
             "new" | "new:" => {
                 // BT-1937: Hoist preambles from sub-expression class var mutations.
                 let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
@@ -1050,10 +1073,13 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "NewRes"));
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    args_preamble,
+                    call_doc,
+                    "NewRes",
+                )))
             }
             "spawn" | "spawnWith:" => {
-                // BT-1937: Hoist preambles from sub-expression class var mutations.
                 let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_spawn'(",
@@ -1063,26 +1089,50 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                return Ok(self.finalize_dispatch_with_preamble(
+                Ok(Some(self.finalize_dispatch_with_preamble(
                     args_preamble,
                     call_doc,
                     "SpawnRes",
-                ));
+                )))
             }
-            _ => {}
+            // BT-2004: Named-registration spawn variants inherited from Actor.
+            // Without these arms, the fallthrough in the caller emits
+            // `call 'CURRENT_MODULE':'spawnAs' / 'spawnWithas'` — neither function
+            // exists, so calls crash at runtime with `undef`.
+            "spawnAs:" => Ok(Some(self.generate_class_self_named_spawn(
+                "class_self_spawn_as",
+                "SpawnAsRes",
+                arguments,
+            )?)),
+            "spawnWith:as:" => Ok(Some(self.generate_class_self_named_spawn(
+                "class_self_spawn_with",
+                "SpawnWithAsRes",
+                arguments,
+            )?)),
+            _ => Ok(None),
         }
+    }
 
-        // Other built-in exports (superclass, methods, etc.)
-        // BT-1937: Hoist preambles from sub-expression class var mutations.
-        let fun_name = selector_atom.replace(':', "");
+    /// BT-2004: Shared emitter for `self spawnAs:` and `self spawnWith:as:` in
+    /// class-method context. Emits a call to `beamtalk_class_instantiation`'s
+    /// Result-returning helper with ClassName/Module/IsAbstract pulled from the
+    /// process dictionary, followed by the Beamtalk-level arguments.
+    fn generate_class_self_named_spawn(
+        &mut self,
+        helper: &'static str,
+        result_prefix: &'static str,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
-
         let call_doc = docvec![
-            Document::String(format!("call '{module}':'{fun_name}'(")),
+            Document::String(format!("call 'beamtalk_class_instantiation':'{helper}'(")),
+            "call 'erlang':'get'('beamtalk_class_name'), ",
+            "call 'erlang':'get'('beamtalk_class_module'), ",
+            "call 'erlang':'get'('beamtalk_class_is_abstract'), ",
             args_doc,
             ")"
         ];
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"))
+        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, result_prefix))
     }
 
     /// Generates synchronous self-dispatch for actor self-sends (BT-330).

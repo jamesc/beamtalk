@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2004: Test fixture — actor with class factory methods that call
+// `self spawnAs:` / `self spawnWith:as:` to register the spawned process
+// under a symbolic name. Before BT-2004 these forms either silently dropped
+// the name argument or crashed at runtime with `undef` because codegen
+// generated a call to a non-existent module function.
+
+Actor subclass: NamedFactoryActor
+  state: value = 0
+
+  class startAs: name :: Symbol -> Result(NamedFactoryActor, Error) =>
+    self spawnAs: name
+
+  class startWith: initArgs :: Dictionary as: name :: Symbol -> Result(NamedFactoryActor, Error) =>
+    self spawnWith: initArgs as: name
+
+  getValue => self.value
