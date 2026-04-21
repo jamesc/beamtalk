@@ -2104,6 +2104,131 @@ fn test_keyword_arg_type_match_no_warning() {
 }
 
 #[test]
+fn test_parametric_block_arg_type_mismatch_warns() {
+    // BT-2002: A non-Block argument to a `Block(T, R)` parameter should still
+    // produce a type warning. Previously the hierarchy lookup on the raw
+    // annotation string (e.g. "Block(Integer, R)") missed the base class and
+    // the conservative "unknown → compatible" escape hatch suppressed the
+    // warning.
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Repro"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("run:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("block"),
+                TypeAnnotation::Generic {
+                    base: ident("Block"),
+                    parameters: vec![
+                        TypeAnnotation::Simple(ident("Integer")),
+                        TypeAnnotation::Simple(ident("R")),
+                    ],
+                    span: span(),
+                },
+            )],
+            vec![bare(int_lit(0))],
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(
+        vec![
+            assign(
+                "r",
+                msg_send(
+                    class_ref("Repro"),
+                    MessageSelector::Unary("new".into()),
+                    vec![],
+                ),
+            ),
+            msg_send(
+                var("r"),
+                MessageSelector::Keyword(vec![KeywordPart::new("run:", span())]),
+                vec![str_lit("not a block")],
+            ),
+        ],
+        vec![class_def],
+    );
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let arg_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("expects Block(Integer, R)") && d.message.contains("got String")
+        })
+        .collect();
+    assert_eq!(
+        arg_warnings.len(),
+        1,
+        "should warn when String is passed to a Block(Integer, R) parameter, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn test_parametric_block_arg_type_match_no_warning() {
+    // BT-2002: A Block argument to a `Block(T, R)` parameter should not warn.
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Repro"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("run:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("block"),
+                TypeAnnotation::Generic {
+                    base: ident("Block"),
+                    parameters: vec![
+                        TypeAnnotation::Simple(ident("Integer")),
+                        TypeAnnotation::Simple(ident("R")),
+                    ],
+                    span: span(),
+                },
+            )],
+            vec![bare(int_lit(0))],
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(
+        vec![
+            assign(
+                "r",
+                msg_send(
+                    class_ref("Repro"),
+                    MessageSelector::Unary("new".into()),
+                    vec![],
+                ),
+            ),
+            msg_send(
+                var("r"),
+                MessageSelector::Keyword(vec![KeywordPart::new("run:", span())]),
+                vec![block_expr(vec![int_lit(0)])],
+            ),
+        ],
+        vec![class_def],
+    );
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let arg_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects Block"))
+        .collect();
+    assert!(
+        arg_warnings.is_empty(),
+        "a Block arg for a Block(Integer, R) param should not warn, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
 fn test_override_incompatible_param_type_warns() {
     // Parent: deposit: amount: Number
     // Child: deposit: amount: String (incompatible)
@@ -2203,6 +2328,67 @@ fn test_override_compatible_param_type_no_warning() {
     assert!(
         override_warnings.is_empty(),
         "compatible override should not warn"
+    );
+}
+
+#[test]
+fn test_override_parametric_incompatible_param_type_warns() {
+    // BT-2002: Child overrides parent with a parameterized type annotation
+    // (`Array(Integer)`) that is not compatible with the parent's type
+    // (`Number`). Previously `is_type_compatible` only normalized the
+    // expected side, so `hierarchy.has_class("Array(Integer)")` on the
+    // actual side hit the conservative "unknown → compatible" escape hatch
+    // and the override warning was silently suppressed.
+    let parent = ClassDefinition::with_modifiers(
+        ident("Base"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("amount"),
+                TypeAnnotation::Simple(ident("Number")),
+            )],
+            vec![bare(int_lit(0))],
+            span(),
+        )],
+        span(),
+    );
+    let child = ClassDefinition::with_modifiers(
+        ident("Derived"),
+        Some(ident("Base")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("amount"),
+                TypeAnnotation::Generic {
+                    base: ident("Array"),
+                    parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+                    span: span(),
+                },
+            )],
+            vec![bare(int_lit(0))],
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![parent, child]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let override_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("incompatible with parent"))
+        .collect();
+    assert_eq!(
+        override_warnings.len(),
+        1,
+        "should warn about incompatible parametric override param type, got: {:?}",
+        checker.diagnostics()
     );
 }
 
