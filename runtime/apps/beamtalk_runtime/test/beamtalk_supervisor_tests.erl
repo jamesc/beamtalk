@@ -1824,12 +1824,17 @@ startChild_arity2_error_returns_child_start_failed_test() ->
 with_live_supervisor_passes_through_ok_test() ->
     %% BT-1997: when the inner fun returns {ok, V}, with_live_supervisor
     %% returns it unchanged.
-    Result = beamtalk_supervisor:whichChildren(
-        make_supervisor_tuple('BT1997Pass', test_pass_mod, start_anon_supervisor())
-    ),
-    ?assertMatch({ok, _}, Result),
-    {ok, Ids} = Result,
-    ?assertEqual([], Ids).
+    SupPid = start_anon_supervisor(),
+    try
+        Result = beamtalk_supervisor:whichChildren(
+            make_supervisor_tuple('BT1997Pass', test_pass_mod, SupPid)
+        ),
+        ?assertMatch({ok, _}, Result),
+        {ok, Ids} = Result,
+        ?assertEqual([], Ids)
+    after
+        gen_server:stop(SupPid)
+    end.
 
 with_live_supervisor_passes_through_error_test() ->
     %% BT-1997: when supervisor:start_child returns {error, Reason}, the

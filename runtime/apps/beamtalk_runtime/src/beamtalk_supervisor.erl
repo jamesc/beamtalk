@@ -103,7 +103,7 @@ rewritten shape (bare tuple or re-wrapped Result) to the caller.
 """.
 -spec startLink(beamtalk_object()) ->
     {ok, {beamtalk_supervisor_new | beamtalk_supervisor, atom(), module(), pid()}}
-    | {error, beamtalk_error:t()}.
+    | {error, #beamtalk_error{}}.
 startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -228,7 +228,7 @@ default, or custom ids when `withId:` was used in `SupervisionSpec`).
 Dead or restarting children are excluded. Returns `{error, BtError}` with
 `kind = stale_handle` when the supervisor process is dead (BT-1997).
 """.
--spec whichChildren(term()) -> {ok, [atom()]} | {error, beamtalk_error:t()}.
+-spec whichChildren(term()) -> {ok, [atom()]} | {error, #beamtalk_error{}}.
 whichChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -256,7 +256,7 @@ running child matches. Returns `{error, BtError}` with `kind = stale_handle`
 when the supervisor process is dead (BT-1997).
 """.
 -spec whichChild(term(), Class :: beamtalk_object()) ->
-    {ok, tuple() | nil} | {error, beamtalk_error:t()}.
+    {ok, tuple() | nil} | {error, #beamtalk_error{}}.
 whichChild(Self, ClassArg) ->
     SupPid = element(4, Self),
     ClassName = element(2, Self),
@@ -373,7 +373,7 @@ supervisor handle returns `{error, #beamtalk_error{kind = stale_handle}}`.
 FFI coercion in `beamtalk_erlang_proxy:coerce_ffi_result/2` wraps the
 tagged tuple into a Beamtalk `Result` for the stdlib method body.
 """.
--spec startChild(term()) -> {ok, tuple()} | {error, beamtalk_error:t()}.
+-spec startChild(term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
 startChild(Self) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
@@ -428,7 +428,7 @@ On `supervisor:start_child/2` failure returns
 returns `{error, #beamtalk_error{kind = stale_handle}}`. FFI coercion
 wraps this into a Beamtalk `Result` for the stdlib method body.
 """.
--spec startChild(term(), term()) -> {ok, tuple()} | {error, beamtalk_error:t()}.
+-spec startChild(term(), term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
 startChild(Self, Args) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
@@ -477,7 +477,7 @@ Uses `supervisor:count_children/1` which returns a proplist with
 Returns `{ok, Count}` on success; `{error, BtError}` with
 `kind = stale_handle` when the supervisor process is dead (BT-1997).
 """.
--spec countChildren(term()) -> {ok, non_neg_integer()} | {error, beamtalk_error:t()}.
+-spec countChildren(term()) -> {ok, non_neg_integer()} | {error, #beamtalk_error{}}.
 countChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -495,7 +495,7 @@ Uses gen_server:stop/1 since supervisors are OTP gen_servers.
 Returns `{ok, nil}` on success; `{error, BtError}` with `kind = stale_handle`
 when the supervisor process is already dead (BT-1997).
 """.
--spec stop(term()) -> {ok, nil} | {error, beamtalk_error:t()}.
+-spec stop(term()) -> {ok, nil} | {error, #beamtalk_error{}}.
 stop(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -913,12 +913,15 @@ wrap_child(ChildClass, ChildModule, ChildPid) ->
 
 -doc """
 Execute Fun(), catching raw OTP process exits that indicate a stale
-supervisor handle ({noproc, _} when the process is dead) and translating
-them to `{error, #beamtalk_error{kind = stale_handle}}` instead of
-letting the raw exit leak across the public API boundary.
+supervisor handle (the target process is dead) and translating them to
+`{error, #beamtalk_error{kind = stale_handle}}` instead of letting the raw
+exit leak across the public API boundary.
 
-Both `supervisor:*` and `gen_server:stop` raise `exit:{noproc, MFA}` when
-the target process is not alive.
+Two distinct exit shapes are handled:
+
+* `supervisor:*` calls route through `gen_server:call`, which exits with
+  `{noproc, MFA}` (tuple) when the target process is not alive.
+* `gen_server:stop/1` exits with the bare atom `noproc` (no MFA wrapper).
 
 ## Inner fun contract (BT-1997)
 
@@ -933,7 +936,7 @@ migrates in the sibling BT-1998 issue; until then its Fun still calls
 `error/1` on failure, which passes through the try/catch here unchanged.)
 """.
 -spec with_live_supervisor(atom(), atom(), fun(() -> term())) ->
-    term() | {error, beamtalk_error:t()}.
+    term() | {error, #beamtalk_error{}}.
 with_live_supervisor(ClassName, Selector, Fun) ->
     try
         Fun()
