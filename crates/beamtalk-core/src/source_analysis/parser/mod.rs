@@ -496,7 +496,7 @@ fn is_diagnostic_error(msg: &str) -> bool {
 }
 
 /// The semantic category of a diagnostic, used by `@expect` for suppression.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DiagnosticCategory {
     /// Does-not-understand (DNU) hint.
     Dnu,

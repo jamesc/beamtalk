@@ -207,6 +207,8 @@ struct BuildPassesResult {
     hierarchy: ClassHierarchyContext,
     /// Native compilation result, if native Erlang sources were compiled.
     native_result: Option<Rebar3Result>,
+    /// BT-2014: Diagnostic summary aggregated from all compiled files.
+    diagnostic_summary: beamtalk_core::source_analysis::DiagnosticSummary,
 }
 
 /// Build beamtalk source files.
@@ -222,6 +224,15 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     let env = setup_build_environment(path)?;
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
+
+    // BT-2014: Print diagnostic summary at end of successful build.
+    // Suppressed when --no-warnings is set (suppress_warnings), matching
+    // the behaviour of individual warning suppression during compilation.
+    if !options.suppress_warnings && !passes.diagnostic_summary.is_empty() {
+        eprintln!();
+        eprintln!("{}", passes.diagnostic_summary);
+    }
+
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
     Ok(())
@@ -728,6 +739,9 @@ fn execute_build_passes(
         strict_deps,
         native_type_registry,
     };
+    // BT-2014: Collect diagnostics from all compiled files for the summary.
+    let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+
     for (file, module_name, core_file) in &file_module_pairs {
         module_names.push(module_name.clone());
 
@@ -737,7 +751,8 @@ fn execute_build_passes(
         }
 
         let cached = cached_asts.remove(file);
-        compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
+        let file_diags = compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
+        all_build_diags.extend(file_diags);
         core_files.push(core_file.clone());
     }
 
@@ -749,11 +764,17 @@ fn execute_build_passes(
         file_module_pairs.len(),
     )?;
 
+    let diagnostic_summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
+        &all_build_diags,
+        changes.changed_files.len(),
+    );
+
     Ok(BuildPassesResult {
         module_names,
         file_module_pairs,
         hierarchy: compile_ctx.hierarchy,
         native_result,
+        diagnostic_summary,
     })
 }
 
@@ -1402,10 +1423,10 @@ fn compile_file(
     options: &beamtalk_core::CompilerOptions,
     ctx: &CompileContext<'_>,
     cached_ast: Option<CachedAst>,
-) -> Result<()> {
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
     debug!("Compiling {path}");
 
-    compile_source_with_bindings(
+    let diags = compile_source_with_bindings(
         path,
         module_name,
         core_file,
@@ -1417,7 +1438,7 @@ fn compile_file(
 
     debug!("Generated Core Erlang: {core_file}");
 
-    Ok(())
+    Ok(diags)
 }
 
 /// Cached AST from Pass 1 — holds the source text, parsed `Module`, and any
