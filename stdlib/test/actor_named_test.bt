@@ -141,6 +141,31 @@ TestCase subclass: ActorNamedTest
     self deny: (names includes: #logger)
     self deny: (names includes: #kernel_sup)
 
+  // === Same-class factory dispatch (BT-2003 regression guard) ===
+  // Before BT-2003, `ClassName spawnWith: x as: #name` inside its own class
+  // method compiled to `bt@foo:spawnWithas/2` (colons dropped, function
+  // missing) and crashed with `undef`. The two factory helpers below exercise
+  // both keyword variants (`spawnWith:as:` and `spawnAs:`) from a same-class
+  // class-method body.
+  testSameClassSpawnWithAsFromClassMethod =>
+    name := #bt2003_sameclass_spawnwithas
+    result := NamedFactoryBT2003 startWith: 7 as: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor getCount equals: 7
+    self assert: actor registeredName equals: name
+    self assert: (NamedFactoryBT2003 named: name) isOk
+    actor stop
+
+  testSameClassSpawnAsFromClassMethod =>
+    name := #bt2003_sameclass_spawnas
+    result := NamedFactoryBT2003 startAs: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor registeredName equals: name
+    self assert: (NamedFactoryBT2003 named: name) isOk
+    actor stop
+
   // === Subclass marker preservation (BT-1988 regression guard) ===
   testSubclassMarkerWinsOverParent =>
     // InheritingCounter subclasses Counter (both are Actor subclasses). The

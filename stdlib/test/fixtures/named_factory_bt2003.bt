@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2003: Fixture exercising `ClassName spawnWith: x as: #name` from inside
+// the class's own class method. Before BT-2003 this compiled to
+// `bt@named_factory_bt2003:spawnWithas/2` — the colons were stripped and the
+// function didn't exist, so the call crashed with `undef` at runtime.
+//
+// The factory class methods below must dispatch through the inherited
+// `Actor spawnWith:as:` / `spawnAs:` chain successfully.
+//
+// Note: the class lives as `NamedFactoryBT2003` (digit suffix, not prefix) so
+// the snake-case module conversion produces `named_factory_bt2003`, matching
+// the fixture filename and letting codegen's `current_class` lookup succeed
+// (which is what sets the `$beamtalk_actor` marker to the class name).
+
+Actor subclass: NamedFactoryBT2003
+  state: count :: Integer = 0
+
+  // Same-class `spawnWith:as:` from inside a class method — the BT-2003 repro.
+  class startWith: initial :: Integer as: name :: Symbol -> Result(NamedFactoryBT2003, Error) =>
+    NamedFactoryBT2003 spawnWith: #{#count => initial} as: name
+
+  // Same-class `spawnAs:` from inside a class method.
+  class startAs: name :: Symbol -> Result(NamedFactoryBT2003, Error) =>
+    NamedFactoryBT2003 spawnAs: name
+
+  increment => self.count := self.count + 1
+
+  getCount => self.count
