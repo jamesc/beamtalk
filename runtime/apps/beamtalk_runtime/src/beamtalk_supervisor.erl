@@ -883,11 +883,17 @@ wrap_child(ChildClass, ChildModule, ChildPid) ->
 -doc """
 Execute Fun(), catching raw OTP process exits that indicate a stale
 supervisor handle ({noproc, _} when the process is dead) and converting
-them to a structured runtime_error instead of letting the raw exit leak
+them to a structured stale_handle error instead of letting the raw exit leak
 across the public API boundary.
 
 Both `supervisor:*` and `gen_server:stop` raise `exit:{noproc, MFA}` when
 the target process is not alive.
+
+ADR 0080 Phase 1 (BT-1996): error kind changed from `runtime_error` to
+`stale_handle` so callers can distinguish stale-handle failures from other
+runtime errors. The error is still raised (not returned) because instance
+methods (`startChild`, `terminateChild:`, etc.) are not yet migrated to
+Result-shaped returns — that happens in Phase 2 (stdlib migration).
 """.
 -spec with_live_supervisor(atom(), atom(), fun(() -> term())) -> term().
 with_live_supervisor(ClassName, Selector, Fun) ->
@@ -903,7 +909,7 @@ with_live_supervisor(ClassName, Selector, Fun) ->
                 domain => [beamtalk, runtime]
             }),
             Error = beamtalk_error:new(
-                runtime_error,
+                stale_handle,
                 ClassName,
                 Selector,
                 <<"supervisor is not running — the handle is stale">>
@@ -917,7 +923,7 @@ with_live_supervisor(ClassName, Selector, Fun) ->
                 domain => [beamtalk, runtime]
             }),
             Error = beamtalk_error:new(
-                runtime_error,
+                stale_handle,
                 ClassName,
                 Selector,
                 <<"supervisor is not running — the handle is stale">>

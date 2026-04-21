@@ -25,6 +25,8 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
     class_testRaise/2,
     'class_testTwoArgs:and:'/4,
     class_testSupervisorNew/2,
+    class_testAlreadyStarted/2,
+    class_testSupError/2,
     'class_initialize:'/3
 ]).
 
@@ -109,6 +111,41 @@ class_testSupervisorNew(_ClassSelf, _ClassVars) ->
     beamtalk_result:from_tagged_tuple(
         {ok, {beamtalk_supervisor_new, 'BT1981SupNewClass', ?MODULE, self()}}
     ).
+
+-doc """
+Zero-argument class method that returns a Result-wrapped
+`beamtalk_supervisor` tuple (the already_started / idempotent path).
+
+BT-1996 (ADR 0080 Phase 1): exercises the class_send_dispatch hook's
+pass-through behaviour for already-normalised supervisor tuples. The
+hook must NOT call run_initialize on this path — only the `_new` tag
+triggers initialization.
+""".
+-spec class_testAlreadyStarted(term(), map()) -> map().
+class_testAlreadyStarted(_ClassSelf, _ClassVars) ->
+    %% Use the ClassName from the class_send caller — it will match
+    %% whatever ClassName beamtalk_object_class was started with.
+    ClassName = get(beamtalk_class_name),
+    beamtalk_result:from_tagged_tuple(
+        {ok, {beamtalk_supervisor, ClassName, ?MODULE, self()}}
+    ).
+
+-doc """
+Zero-argument class method that returns a Result error tagged map.
+
+BT-1996 (ADR 0080 Phase 1): exercises the class_send_dispatch hook's
+pass-through behaviour for error Results. The hook must NOT call
+run_initialize on error paths.
+""".
+-spec class_testSupError(term(), map()) -> map().
+class_testSupError(_ClassSelf, _ClassVars) ->
+    BtError = beamtalk_error:new(
+        supervisor_start_failed,
+        'TestClass',
+        supervise,
+        <<"test error">>
+    ),
+    beamtalk_result:from_tagged_tuple({error, BtError}).
 
 -doc """
 Synchronous `class_initialize:` target for the supervisor-new rewrap test.
