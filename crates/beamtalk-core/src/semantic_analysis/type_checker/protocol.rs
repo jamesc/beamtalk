@@ -395,7 +395,11 @@ impl TypeChecker {
 
         let declared_type = type_annotation.type_name();
         let mut env = TypeEnv::new();
-        env.set("self", InferredType::known(class.name.name.clone()));
+        // BT-2021: preserve type_args for self in generic classes
+        env.set(
+            "self",
+            Self::self_type_for_class(hierarchy, &class.name.name),
+        );
         let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
 
         let InferredType::Known {

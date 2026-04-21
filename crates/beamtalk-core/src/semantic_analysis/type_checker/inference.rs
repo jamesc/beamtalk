@@ -96,7 +96,10 @@ impl TypeChecker {
 
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
-                method_env.set("self", InferredType::known(class.name.name.clone()));
+                method_env.set(
+                    "self",
+                    Self::self_type_for_class(hierarchy, &class.name.name),
+                );
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -131,7 +134,10 @@ impl TypeChecker {
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
                 method_env.in_class_method = true;
-                method_env.set("self", InferredType::known(class.name.name.clone()));
+                method_env.set(
+                    "self",
+                    Self::self_type_for_class(hierarchy, &class.name.name),
+                );
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -185,7 +191,7 @@ impl TypeChecker {
 
             let mut method_env = TypeEnv::new();
             method_env.in_class_method = standalone.is_class_method;
-            method_env.set("self", InferredType::known(class_name.clone()));
+            method_env.set("self", Self::self_type_for_class(hierarchy, class_name));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
             let body_type = self.infer_stmts(
                 &standalone.method.body,
@@ -717,12 +723,38 @@ impl TypeChecker {
             }
 
             // Super — resolve to parent class type for method validation
+            // BT-2021: preserve type_args through the superclass mapping so that
+            // a child class calling `super method` where the parent returns T gets
+            // the correct substitution (e.g. Array(Integer) super → Collection(Integer)).
             Expression::Super(_) => {
-                // Look up current class from 'self' type, then find parent
-                if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
+                if let Some(InferredType::Known {
+                    class_name,
+                    type_args: self_type_args,
+                    ..
+                }) = env.get("self")
+                {
                     if let Some(class_info) = hierarchy.get_class(&class_name) {
                         if let Some(ref parent) = class_info.superclass {
-                            InferredType::known(parent.clone())
+                            // Try to map type_args through superclass_type_args.
+                            // This handles both:
+                            // - Generic self (MyArray(E) → Collection(E)): ParamRef mapping
+                            // - Concrete subclass (IntList → Collection(Integer)): Concrete mapping
+                            let parent_args =
+                                Self::map_superclass_type_args(class_info, &self_type_args);
+                            if parent_args.is_empty() {
+                                // No superclass_type_args mapping — fall back to
+                                // self_type_for_class to get symbolic placeholders
+                                // if the parent is itself generic, or a bare name otherwise.
+                                Self::self_type_for_class(hierarchy, parent)
+                            } else {
+                                InferredType::Known {
+                                    class_name: parent.clone(),
+                                    type_args: parent_args,
+                                    provenance: super::TypeProvenance::Inferred(
+                                        crate::source_analysis::Span::default(),
+                                    ),
+                                }
+                            }
                         } else {
                             InferredType::Dynamic(DynamicReason::Unknown)
                         }
@@ -1023,10 +1055,13 @@ impl TypeChecker {
                         };
                     }
 
-                    // BT-1952: `Self class` — the method returns a class object.
-                    // Resolve to Dynamic so existing patterns like `x class = Integer`
-                    // continue to work (class objects respond to all Object messages
-                    // at runtime, but the type hierarchy doesn't model `=` as a method).
+                    // BT-1952 / BT-2021: `Self class` — the method returns a class object.
+                    // We return Dynamic because class objects respond to different messages
+                    // than instances (e.g. `x class = Integer` uses `=` which isn't modeled
+                    // on instance types). However, we preserve type_args as a hint on the
+                    // class_name so that factory patterns like `x class new: ...` on a
+                    // generic receiver can resolve when class method lookup falls through
+                    // to the hierarchy.
                     if ret_ty.as_str() == "Self class" {
                         return InferredType::Dynamic(DynamicReason::Unknown);
                     }
@@ -2251,6 +2286,77 @@ impl TypeChecker {
                 }
             }
         }
+    }
+
+    /// Create an `InferredType::Known` for `self` that preserves the enclosing
+    /// class's generic type parameters as symbolic placeholders.
+    ///
+    /// For a non-generic class like `Counter`, returns `Known("Counter", [])`.
+    /// For a generic class like `Result(T, E)`, returns
+    /// `Known("Result", [Known("T", []), Known("E", [])])`.
+    ///
+    /// This ensures that self-sends of methods whose return types reference
+    /// type parameters (e.g. `self value -> T`) can resolve `T` through the
+    /// substitution map instead of falling back to `Dynamic`.
+    ///
+    /// **References:** BT-2021
+    pub(super) fn self_type_for_class(
+        hierarchy: &ClassHierarchy,
+        class_name: &str,
+    ) -> InferredType {
+        if let Some(class_info) = hierarchy.get_class(class_name) {
+            if !class_info.type_params.is_empty() {
+                let symbolic_args: Vec<InferredType> = class_info
+                    .type_params
+                    .iter()
+                    .map(|tp| InferredType::known(tp.clone()))
+                    .collect();
+                return InferredType::Known {
+                    class_name: class_name.into(),
+                    type_args: symbolic_args,
+                    provenance: super::TypeProvenance::Inferred(
+                        crate::source_analysis::Span::default(),
+                    ),
+                };
+            }
+        }
+        InferredType::known(class_name)
+    }
+
+    /// Map a class's `type_args` through its `superclass_type_args` mapping to
+    /// produce the parent class's `type_args`.
+    ///
+    /// For `Array(E)` with `superclass_type_args: [ParamRef(0)]` and
+    /// `self_type_args: [Known("E")]`, this returns `[Known("E")]` — the
+    /// parent `Collection(E)` gets the same symbolic arg.
+    ///
+    /// For concrete mappings like `IntArray extends Collection(Integer)`,
+    /// `superclass_type_args: [Concrete("Integer")]` produces `[Known("Integer")]`.
+    ///
+    /// Returns empty if the class has no `superclass_type_args` mapping.
+    ///
+    /// **References:** BT-2021
+    fn map_superclass_type_args(
+        class_info: &crate::semantic_analysis::class_hierarchy::ClassInfo,
+        self_type_args: &[InferredType],
+    ) -> Vec<InferredType> {
+        use crate::semantic_analysis::class_hierarchy::SuperclassTypeArg;
+
+        if class_info.superclass_type_args.is_empty() {
+            return vec![];
+        }
+
+        class_info
+            .superclass_type_args
+            .iter()
+            .map(|sta| match sta {
+                SuperclassTypeArg::ParamRef { param_index } => self_type_args
+                    .get(*param_index)
+                    .cloned()
+                    .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown)),
+                SuperclassTypeArg::Concrete { type_name } => InferredType::known(type_name.clone()),
+            })
+            .collect()
     }
 
     /// Build a substitution map from a class's type parameters and concrete type arguments.

@@ -12313,3 +12313,328 @@ fn annotated_assignment_compatible_type_no_warning() {
         "Integer assigned to Number should not warn, got: {type_warnings:?}"
     );
 }
+
+// ---- BT-2021: Receiver type_args preserved for self/super in generic classes ----
+
+/// BT-2021 sub-bug A: `self` in a generic class preserves type_args.
+///
+/// Inside `Container(T)`, `self getValue` should infer as `T` (a symbolic
+/// type parameter), not `Dynamic`. Verifies that `self` is stored as
+/// `Known("Container", [Known("T")])` so `build_substitution_map` can
+/// resolve `T` from the method's return type.
+#[test]
+fn test_self_type_args_preserved_in_generic_class() {
+    let source = "
+Value subclass: Container(T)
+  state: item :: T
+
+  getValue -> T => item
+
+  getValueViaSelfsend -> T =>
+    self getValue
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let container = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Container")
+        .expect("Container class");
+    let method = container
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "getValueViaSelfsend")
+        .expect("getValueViaSelfsend method");
+    let expr = &method
+        .body
+        .last()
+        .expect("method has at least one statement")
+        .expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // Set self with symbolic type_args as the fix does
+    env.set(
+        "self",
+        TypeChecker::self_type_for_class(&hierarchy, "Container"),
+    );
+    TypeChecker::set_param_types(&mut env, &method.parameters);
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    // `self getValue` should return T (the symbolic type param)
+    match &ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(
+                class_name.as_str(),
+                "T",
+                "Expected self getValue to return T, got {class_name}"
+            );
+            assert!(
+                type_args.is_empty(),
+                "T should have no nested type_args, got {type_args:?}"
+            );
+        }
+        other => panic!("Expected Known(T, []), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug A: `self` in a multi-param generic class resolves all params.
+///
+/// Inside `Result(T, E)`, `self value` should return `T` and `self error`
+/// should return `E`, not Dynamic for either.
+#[test]
+fn test_self_type_args_preserved_multi_param_generic() {
+    let source = "
+Value subclass: MyResult(T, E)
+  state: val :: T
+  state: err :: E
+
+  value -> T => val
+  error -> E => err
+
+  getValueViaSelf -> T =>
+    self value
+
+  getErrorViaSelf -> E =>
+    self error
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let result_cls = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "MyResult")
+        .expect("MyResult class");
+
+    // Test getValueViaSelf
+    let get_val = result_cls
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "getValueViaSelf")
+        .expect("getValueViaSelf method");
+    let expr_val = &get_val
+        .body
+        .last()
+        .expect("method has at least one statement")
+        .expression;
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        TypeChecker::self_type_for_class(&hierarchy, "MyResult"),
+    );
+    TypeChecker::set_param_types(&mut env, &get_val.parameters);
+    let ty_val = checker.infer_expr(expr_val, &hierarchy, &mut env, false);
+    assert_eq!(
+        ty_val.as_known().map(EcoString::to_string).as_deref(),
+        Some("T"),
+        "self value should return T, got {ty_val:?}"
+    );
+
+    // Test getErrorViaSelf
+    let get_err = result_cls
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "getErrorViaSelf")
+        .expect("getErrorViaSelf method");
+    let expr_err = &get_err
+        .body
+        .last()
+        .expect("method has at least one statement")
+        .expression;
+    let mut checker2 = TypeChecker::new();
+    let mut env2 = TypeEnv::new();
+    env2.set(
+        "self",
+        TypeChecker::self_type_for_class(&hierarchy, "MyResult"),
+    );
+    TypeChecker::set_param_types(&mut env2, &get_err.parameters);
+    let ty_err = checker2.infer_expr(expr_err, &hierarchy, &mut env2, false);
+    assert_eq!(
+        ty_err.as_known().map(EcoString::to_string).as_deref(),
+        Some("E"),
+        "self error should return E, got {ty_err:?}"
+    );
+}
+
+/// BT-2021 sub-bug B: `super` sends preserve type_args through superclass mapping
+/// with concrete type args.
+///
+/// A subclass method calling `super first` on a parent `Collection(E)` with
+/// `first -> E` should get the concrete type from the subclass, not Dynamic.
+/// Uses `Collection(Integer) subclass: IntList` to provide concrete mapping.
+#[test]
+fn test_super_type_args_preserved_through_superclass_mapping() {
+    let source = "
+abstract Object subclass: Collection(E)
+  first -> E => nil
+
+Collection(Integer) subclass: IntList
+  useSuper =>
+    super first
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let intlist = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "IntList")
+        .expect("IntList class");
+    let method = intlist
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "useSuper")
+        .expect("useSuper method");
+    let expr = &method
+        .body
+        .last()
+        .expect("method has at least one statement")
+        .expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        TypeChecker::self_type_for_class(&hierarchy, "IntList"),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    // `super first` should resolve E to Integer through the superclass_type_args
+    // mapping: IntList → Collection(Integer) → first -> E → E=Integer
+    assert_eq!(
+        ty.as_known().map(EcoString::to_string).as_deref(),
+        Some("Integer"),
+        "super first should resolve E to Integer via superclass_type_args, got {ty:?}"
+    );
+}
+
+/// BT-2021 sub-bug B: `super` with symbolic (ParamRef) type_args propagates correctly.
+///
+/// When `Array(E)` extends `Collection(E)` with `ParamRef(0)` mapping,
+/// `super first` inside Array should return `E` (symbolic), not Dynamic.
+#[test]
+fn test_super_type_args_symbolic_param_ref() {
+    let source = "
+abstract Object subclass: Collection(E)
+  first -> E => nil
+
+Collection(E) subclass: MyArray(E)
+  useSuper -> E =>
+    super first
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let myarray = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "MyArray")
+        .expect("MyArray class");
+    let method = myarray
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "useSuper")
+        .expect("useSuper method");
+    let expr = &method
+        .body
+        .last()
+        .expect("method has at least one statement")
+        .expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // MyArray(E) — self should have symbolic E type arg
+    env.set(
+        "self",
+        TypeChecker::self_type_for_class(&hierarchy, "MyArray"),
+    );
+    TypeChecker::set_param_types(&mut env, &method.parameters);
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    // `super first` should resolve E → E (symbolic stays symbolic through ParamRef)
+    assert_eq!(
+        ty.as_known().map(EcoString::to_string).as_deref(),
+        Some("E"),
+        "super first should return symbolic E via ParamRef mapping, got {ty:?}"
+    );
+}
+
+/// BT-2021: Non-generic class `self` should still work correctly.
+///
+/// Verifies that the fix doesn't regress non-generic classes where
+/// `self` should have no type_args.
+#[test]
+fn test_self_type_for_class_non_generic() {
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
+    let ty = TypeChecker::self_type_for_class(&hierarchy, "Integer");
+    match &ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "Integer");
+            assert!(
+                type_args.is_empty(),
+                "Non-generic class should have empty type_args, got {type_args:?}"
+            );
+        }
+        other => panic!("Expected Known(Integer, []), got {other:?}"),
+    }
+}
+
+/// BT-2021: `self_type_for_class` for a generic builtin (e.g. Result) should
+/// include symbolic type_args.
+#[test]
+fn test_self_type_for_class_generic_builtin() {
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
+    let ty = TypeChecker::self_type_for_class(&hierarchy, "Result");
+    match &ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            assert_eq!(class_name.as_str(), "Result");
+            assert_eq!(
+                type_args.len(),
+                2,
+                "Result should have 2 symbolic type_args (T, E), got {type_args:?}"
+            );
+            assert_eq!(
+                type_args[0].as_known().map(EcoString::to_string).as_deref(),
+                Some("T"),
+                "First type arg should be T"
+            );
+            assert_eq!(
+                type_args[1].as_known().map(EcoString::to_string).as_deref(),
+                Some("E"),
+                "Second type arg should be E"
+            );
+        }
+        other => panic!("Expected Known(Result, [T, E]), got {other:?}"),
+    }
+}
