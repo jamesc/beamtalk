@@ -27,3 +27,14 @@ InheritedParent subclass: InheritedChild
   class bumpTwice: n =>
     self bumpBy: n
     self bumpBy: n
+
+  // BT-2007 PR review: a self-send of a selector that doesn't exist on
+  // any class in the chain must raise a structured
+  // does_not_understand error, not `badarg` from io_lib:format
+  // (atom-format regression) and not a raw `undef` (pre-BT-2007 behavior).
+  // @expect dnu silences the typechecker warning for the intentionally-
+  // missing selector that the paired test (inherited_class_method_test.bt)
+  // exercises via `should: [...] raise: #does_not_understand`.
+  class callNonExistent =>
+    @expect dnu
+    self thisSelectorDoesNotExistAnywhere

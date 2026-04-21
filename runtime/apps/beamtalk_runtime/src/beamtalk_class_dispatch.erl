@@ -116,24 +116,69 @@ structured `does_not_understand` if no ancestor defines the selector.
     {class_var_result, term(), map()} | term() | no_return().
 class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
     case find_class_method_in_chain(Selector, ClassName) of
-        {ok, _DefiningClass, DefiningModule} ->
-            ClassSelf = #beamtalk_object{
-                class = beamtalk_class_registry:class_object_tag(ClassName),
-                class_mod = DefiningModule,
-                pid = self()
-            },
-            FunName = class_method_fun_name(Selector),
-            erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]);
+        {ok, DefiningClass, DefiningModule} ->
+            %% Route through the same internal helper the gen_server path uses
+            %% (`invoke_class_method/7`), so both paths share error classification
+            %% and the TestCase `test_spawn` guard. Unwrap to raw — codegen's
+            %% class_var_result pattern match handles the tuple shape — and raise
+            %% structured errors on dispatch/body failures so callers see proper
+            %% `#beamtalk_error{}` instead of a bare `undef`.
+            case
+                apply_class_method_in_context(
+                    Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
+                )
+            of
+                {ok, Raw} ->
+                    Raw;
+                {error, #beamtalk_error{} = Error} ->
+                    beamtalk_error:raise(Error);
+                {error, undef_in_body} ->
+                    %% Preserve the `error:undef` contract for callers that rely on
+                    %% it (e.g. user code catching `error:undef` from a method body).
+                    erlang:error(undef);
+                {error, {raised, ErrClass, Error, ST}} ->
+                    erlang:raise(ErrClass, Error, ST);
+                test_spawn ->
+                    %% `TestCase>>runAll` / `run:` self-sent from inside another
+                    %% class method would run the test suite inline in the class
+                    %% gen_server process — the exact deadlock the `test_spawn`
+                    %% escape hatch was added to avoid (BT-440). Surface a
+                    %% structured error instead of blocking; callers should invoke
+                    %% test runners from outside the class body.
+                    raise_test_spawn_self_dispatch_unsupported(ClassName, Selector)
+            end;
         not_found ->
             raise_class_self_dnu(ClassName, Selector)
     end.
 
--spec raise_class_self_dnu(class_name(), selector()) -> no_return().
-raise_class_self_dnu(ClassName, Selector) ->
+-spec raise_test_spawn_self_dispatch_unsupported(class_name(), selector()) -> no_return().
+raise_test_spawn_self_dispatch_unsupported(ClassName, Selector) ->
+    %% Atom-safe formatting — see note on raise_class_self_dnu/2.
     Hint = iolist_to_binary(
         io_lib:format(
-            "Class '~s' has no class method '~s' and no ancestor defines it",
-            [ClassName, Selector]
+            "Inherited test-execution selector '~ts' cannot be self-sent from "
+            "inside a class method on '~ts' — it would deadlock the class "
+            "gen_server. Call `~ts ~ts` from outside the class body instead.",
+            [
+                atom_to_list(Selector),
+                atom_to_list(ClassName),
+                atom_to_list(ClassName),
+                atom_to_list(Selector)
+            ]
+        )
+    ),
+    Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
+    beamtalk_error:raise(Error).
+
+-spec raise_class_self_dnu(class_name(), selector()) -> no_return().
+raise_class_self_dnu(ClassName, Selector) ->
+    %% ClassName and Selector are atoms; use ~ts (unicode string) with
+    %% atom_to_list/1 rather than ~s, which expects an iolist and raises
+    %% badarg on atoms — that would mask the intended does_not_understand.
+    Hint = iolist_to_binary(
+        io_lib:format(
+            "Class '~ts' has no class method '~ts' and no ancestor defines it",
+            [atom_to_list(ClassName), atom_to_list(Selector)]
         )
     ),
     Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
@@ -355,84 +400,75 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
 ) ->
     {reply, term(), map()} | test_spawn.
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
+    %% BT-2007: shares apply_class_method_in_context/6 with class_self_dispatch/4
+    %% so both dispatch paths see identical error classification, class-var
+    %% threading, and the BT-440 test_spawn escape hatch. This function
+    %% adapts the shared outcome to the gen_server `{reply, _, State}` shape.
+    case
+        apply_class_method_in_context(
+            Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
+        )
+    of
+        test_spawn ->
+            test_spawn;
+        {ok, {class_var_result, Result, NewClassVars}} ->
+            {reply, {ok, Result}, NewClassVars};
+        {ok, Result} ->
+            {reply, {ok, Result}, ClassVars};
+        {error, #beamtalk_error{} = Error} ->
+            {reply, {error, Error}, ClassVars};
+        {error, undef_in_body} ->
+            {reply, {error, undef}, ClassVars};
+        {error, {raised, _ErrClass, Error, _ST}} ->
+            {reply, {error, Error}, ClassVars}
+    end.
+
+-type class_method_outcome() ::
+    test_spawn
+    | {ok, term()}
+    | {error, #beamtalk_error{}}
+    | {error, undef_in_body}
+    | {error, {raised, atom(), term(), list()}}.
+
+-doc """
+BT-2007: Shared core of class-method dispatch.
+
+Handles the TestCase `test_spawn` guard, constructs `ClassSelf` with
+`class_mod = DefiningModule`, applies the method, and classifies any
+errors into the structured variants in `class_method_outcome()`. Both
+`invoke_class_method/7` (gen_server path) and `class_self_dispatch/4`
+(self-send path) adapt the outcome to their own caller shapes.
+
+Does not wrap `{ok, Raw}` — callers pattern-match the raw return to
+decide whether it's a plain value or `{class_var_result, R, NewCV}`.
+Stacktraces are preserved in the `{raised, ...}` variant so callers
+that need to re-raise (e.g. self-dispatch) get the original trace.
+""".
+-spec apply_class_method_in_context(
+    selector(), list(), class_name(), class_name(), atom(), map()
+) -> class_method_outcome().
+apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars) ->
     %% BT-440: For test execution (runAll, run:) inherited from TestCase,
-    %% return a spawn request so the gen_server can handle noreply.
+    %% return a spawn request so the caller (gen_server) can handle noreply.
+    %% The self-dispatch caller translates this to a structured error.
     case is_test_execution_selector(Selector) andalso DefiningClass =:= 'TestCase' of
         true ->
             test_spawn;
         false ->
-            %% Build class self object for `self` reference in class methods
             ClassSelf = #beamtalk_object{
                 class = beamtalk_class_registry:class_object_tag(ClassName),
                 class_mod = DefiningModule,
                 pid = self()
             },
             FunName = class_method_fun_name(Selector),
-            %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
+            %% BT-412: Pass class variables; the caller pattern-matches
+            %% `{class_var_result, Result, NewClassVars}` vs plain return.
             try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
-                {class_var_result, Result, NewClassVars} ->
-                    {reply, {ok, Result}, NewClassVars};
-                Result ->
-                    {reply, {ok, Result}, ClassVars}
+                Raw ->
+                    {ok, Raw}
             catch
                 error:undef:ST ->
-                    case is_dispatch_undef(DefiningModule, FunName, ST) of
-                        {true, module_not_loaded} ->
-                            Hint =
-                                case ClassName =:= DefiningClass of
-                                    true ->
-                                        iolist_to_binary(
-                                            io_lib:format(
-                                                "Class '~s' is not registered - the module '~s' may have failed to load",
-                                                [ClassName, DefiningModule]
-                                            )
-                                        );
-                                    false ->
-                                        iolist_to_binary(
-                                            io_lib:format(
-                                                "Class '~s' inherits this method from '~s' - that class's module '~s' may have failed to load",
-                                                [ClassName, DefiningClass, DefiningModule]
-                                            )
-                                        )
-                                end,
-                            Error = beamtalk_error:new(class_not_found, ClassName, Selector, Hint),
-                            {reply, {error, Error}, ClassVars};
-                        {true, method_not_found} ->
-                            Hint =
-                                case ClassName =:= DefiningClass of
-                                    true ->
-                                        iolist_to_binary(
-                                            io_lib:format(
-                                                "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
-                                                [Selector, ClassName]
-                                            )
-                                        );
-                                    false ->
-                                        iolist_to_binary(
-                                            io_lib:format(
-                                                "Class method '~s' inherited from '~s' not found on '~s' (arity mismatch or undefined selector)",
-                                                [Selector, DefiningClass, ClassName]
-                                            )
-                                        )
-                                end,
-                            Error = beamtalk_error:new(
-                                does_not_understand, ClassName, Selector, Hint
-                            ),
-                            {reply, {error, Error}, ClassVars};
-                        false ->
-                            %% undef was raised inside the method body, not at dispatch.
-                            ?LOG_ERROR(
-                                "Class method ~p:~p raised undef internally",
-                                [ClassName, Selector],
-                                #{
-                                    class => ClassName,
-                                    selector => Selector,
-                                    stacktrace => ST,
-                                    domain => [beamtalk, runtime]
-                                }
-                            ),
-                            {reply, {error, undef}, ClassVars}
-                    end;
+                    classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
                 ErrClass:Error:ErrST ->
                     ?LOG_ERROR(
                         "Class method ~p:~p failed",
@@ -445,8 +481,71 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             domain => [beamtalk, runtime]
                         }
                     ),
-                    {reply, {error, Error}, ClassVars}
+                    {error, {raised, ErrClass, Error, ErrST}}
             end
+    end.
+
+-spec classify_undef(class_name(), class_name(), atom(), selector(), atom(), list()) ->
+    {error, #beamtalk_error{}} | {error, undef_in_body}.
+classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST) ->
+    case is_dispatch_undef(DefiningModule, FunName, ST) of
+        {true, module_not_loaded} ->
+            Hint = module_not_loaded_hint(ClassName, DefiningClass, DefiningModule),
+            {error, beamtalk_error:new(class_not_found, ClassName, Selector, Hint)};
+        {true, method_not_found} ->
+            Hint = method_not_found_hint(ClassName, DefiningClass, Selector),
+            {error, beamtalk_error:new(does_not_understand, ClassName, Selector, Hint)};
+        false ->
+            %% undef was raised inside the method body, not at dispatch.
+            ?LOG_ERROR(
+                "Class method ~p:~p raised undef internally",
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    stacktrace => ST,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {error, undef_in_body}
+    end.
+
+-spec module_not_loaded_hint(class_name(), class_name(), atom()) -> binary().
+module_not_loaded_hint(ClassName, DefiningClass, DefiningModule) ->
+    case ClassName =:= DefiningClass of
+        true ->
+            iolist_to_binary(
+                io_lib:format(
+                    "Class '~s' is not registered - the module '~s' may have failed to load",
+                    [ClassName, DefiningModule]
+                )
+            );
+        false ->
+            iolist_to_binary(
+                io_lib:format(
+                    "Class '~s' inherits this method from '~s' - that class's module '~s' may have failed to load",
+                    [ClassName, DefiningClass, DefiningModule]
+                )
+            )
+    end.
+
+-spec method_not_found_hint(class_name(), class_name(), selector()) -> binary().
+method_not_found_hint(ClassName, DefiningClass, Selector) ->
+    case ClassName =:= DefiningClass of
+        true ->
+            iolist_to_binary(
+                io_lib:format(
+                    "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
+                    [Selector, ClassName]
+                )
+            );
+        false ->
+            iolist_to_binary(
+                io_lib:format(
+                    "Class method '~s' inherited from '~s' not found on '~s' (arity mismatch or undefined selector)",
+                    [Selector, DefiningClass, ClassName]
+                )
+            )
     end.
 
 -doc """
