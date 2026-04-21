@@ -1504,7 +1504,7 @@ Object subclass: Foo
     }
 
     #[test]
-    fn expect_type_inside_nested_block_works() {
+    fn expect_dnu_inside_nested_block_works() {
         // @expect dnu inside a nested block (block-inside-block) should work.
         let source = "\
 Object subclass: Foo
