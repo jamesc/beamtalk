@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2007: Parent fixture for inherited class-method self-dispatch tests.
+//
+// See fixtures/inherited_class_method_child.bt for the subclass whose
+// class methods call these inherited class methods via both `self` and
+// the explicit parent class name. See test/inherited_class_method_test.bt
+// for the regression tests that exercise the fix.
+//
+// `classState: counter` is declared on both parent and child so each
+// class's gen_server has `counter` in its local ClassVars map — the
+// existing runtime is per-class, not hierarchy-wide, and both the
+// gen_server dispatch path and the BT-2007 self-dispatch helper pass the
+// *caller's* ClassVars into the inherited function body.
+
+Value subclass: InheritedParent
+  field: x = 0
+  classState: counter = 0
+
+  class parentTag => #parent
+
+  class stamp: v => v * 2
+
+  class bumpBy: n =>
+    self.counter := self.counter + n
+    self.counter
+
+  class counter => self.counter
+
+  class resetCounter => self.counter := 0
+
+  x => self.x

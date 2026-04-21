@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2007: Subclass fixture for inherited class-method self-dispatch tests.
+// See fixtures/inherited_class_method.bt for the parent.
+
+InheritedParent subclass: InheritedChild
+  classState: counter = 0
+
+  // inherited unary class method via `self`
+  class tagViaSelf => self parentTag
+
+  // inherited unary class method via explicit parent class name
+  class tagViaParent => InheritedParent parentTag
+
+  // inherited keyword class method via `self`
+  class doubleViaSelf: v => self stamp: v
+
+  // inherited keyword class method via explicit parent class name
+  class doubleViaParent: v => InheritedParent stamp: v
+
+  // inherited keyword method that mutates a (duplicate-declared) class var
+  class bumpSelfBy: n => self bumpBy: n
+
+  // chain two inherited calls in one class method body — each call must
+  // see the ClassVars mutation from the previous one
+  class bumpTwice: n =>
+    self bumpBy: n
+    self bumpBy: n
+
+  // BT-2007 PR review: a self-send of a selector that doesn't exist on
+  // any class in the chain must raise a structured
+  // does_not_understand error, not `badarg` from io_lib:format
+  // (atom-format regression) and not a raw `undef` (pre-BT-2007 behavior).
+  // @expect dnu silences the typechecker warning for the intentionally-
+  // missing selector that the paired test (inherited_class_method_test.bt)
+  // exercises via `should: [...] raise: #does_not_understand`.
+  class callNonExistent =>
+    @expect dnu
+    self thisSelectorDoesNotExistAnywhere
