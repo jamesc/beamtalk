@@ -9,5 +9,5 @@ DynamicSupervisor(Counter) subclass: E2EInitDynSupervisor
   class childClass => Counter
 
   class initialize: sup =>
-    sup startChild
-    sup startChild
+    sup startChild unwrap
+    sup startChild unwrap

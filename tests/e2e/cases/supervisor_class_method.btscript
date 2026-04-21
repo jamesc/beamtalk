@@ -17,7 +17,7 @@
 // ===========================================================================
 
 // Start the supervisor which routes through the class method
-cmSup := E2EClassMethodSupervisor supervise
+cmSup := (E2EClassMethodSupervisor supervise) unwrap
 // => #Supervisor<E2EClassMethodSupervisor,_>
 
 // The supervisor has one child

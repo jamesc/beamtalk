@@ -56,7 +56,7 @@ c2 getValue
 
 // @load tests/e2e/fixtures/e2e_initialize_supervisor.bt
 
-initSup := E2EInitializeSupervisor supervise
+initSup := (E2EInitializeSupervisor supervise) unwrap
 // => #Supervisor<E2EInitializeSupervisor,_>
 
 initSup count

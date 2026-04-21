@@ -227,7 +227,7 @@ temp stop
 c stop
 // => ok
 
-sup := E2ENamedSupervisor supervise
+sup := (E2ENamedSupervisor supervise) unwrap
 // => #Supervisor<E2ENamedSupervisor,_>
 
 // The supervisor started its Counter child and registered the name.

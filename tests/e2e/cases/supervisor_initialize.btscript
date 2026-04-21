@@ -19,7 +19,7 @@
 // ===========================================================================
 
 // supervise starts all children, then runs initialize:
-sup := E2EInitSupervisor supervise
+sup := (E2EInitSupervisor supervise) unwrap
 // => #Supervisor<E2EInitSupervisor,_>
 
 // Both children are alive
@@ -41,7 +41,7 @@ childB getValue
 // => 0
 
 // Idempotent supervise does NOT re-run initialize:
-sup2 := E2EInitSupervisor supervise
+sup2 := (E2EInitSupervisor supervise) unwrap
 // => #Supervisor<E2EInitSupervisor,_>
 
 // setValue: 42 was called once during the first supervise; a second supervise
@@ -58,7 +58,7 @@ sup stop
 // ===========================================================================
 
 // supervise starts, then initialize: pre-populates with 2 children
-pool := E2EInitDynSupervisor supervise
+pool := (E2EInitDynSupervisor supervise) unwrap
 // => #DynamicSupervisor<E2EInitDynSupervisor,_>
 
 // initialize: called startChild twice
@@ -66,7 +66,7 @@ pool count
 // => 2
 
 // Idempotent supervise does NOT re-run initialize: (would add 2 more children)
-pool2 := E2EInitDynSupervisor supervise
+pool2 := (E2EInitDynSupervisor supervise) unwrap
 // => #DynamicSupervisor<E2EInitDynSupervisor,_>
 
 pool2 count
@@ -80,7 +80,7 @@ pool stop
 // ===========================================================================
 
 // E2EAppSupervisor has no initialize: override — default no-op
-app := E2EAppSupervisor supervise
+app := (E2EAppSupervisor supervise) unwrap
 // => #Supervisor<E2EAppSupervisor,_>
 
 app count
