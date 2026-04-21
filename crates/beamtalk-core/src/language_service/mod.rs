@@ -907,12 +907,20 @@ impl LanguageService for SimpleLanguageService {
     fn diagnostics(&self, file: &Utf8PathBuf) -> Vec<Diagnostic> {
         self.get_file(file)
             .map(|data| {
-                // ADR 0075 Phase 4: Pass NativeTypeRegistry so FFI type warnings
-                // surface in the editor as diagnostics.
-                crate::queries::diagnostic_provider::compute_diagnostics_with_native_types(
+                // BT-2009: Use the unified diagnostic pipeline so that LSP
+                // diagnostics match CLI diagnostics. Cross-file classes from
+                // the ProjectIndex are passed so type checking, @expect
+                // directives, and all post-analysis passes run identically.
+                let cross_file_classes = self.project_index.cross_file_class_infos_for(file);
+                let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
+                    cross_file_classes,
+                    native_type_registry: self.native_types.clone(),
+                    ..Default::default()
+                };
+                crate::queries::diagnostic_provider::compute_project_diagnostics(
                     &data.module,
                     data.diagnostics.clone(),
-                    self.native_types.clone(),
+                    &ctx,
                 )
             })
             .unwrap_or_default()

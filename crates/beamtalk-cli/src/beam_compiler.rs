@@ -850,90 +850,27 @@ pub(crate) fn compile_source_with_bindings(
         );
     diagnostics.extend(primitive_diags);
 
-    // Run semantic analysis (BT-401: sealed enforcement, undefined vars, etc.)
-    // Also includes single-class-per-file validation (BT-349)
-    // BT-791: Pass options so stdlib_mode gates sealed-superclass exemptions.
-    // BT-1523: Inject cross-file class metadata so the type checker can resolve
-    // methods from parent classes defined in other files. Filter out classes
-    // from the current file to avoid duplicates (they'll be added by build()).
+    // BT-2009: Unified post-analysis diagnostic pipeline.
+    // Semantic analysis + all post-analysis passes + @expect suppression are now
+    // handled by a single function shared between CLI and LSP.
     let cross_file_classes =
         beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
             &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols(
+    let diag_ctx = beamtalk_core::queries::diagnostic_provider::ProjectDiagnosticContext {
+        options: options.clone(),
+        cross_file_classes: cross_file_classes.clone(),
+        pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
+        native_type_registry: ctx.native_type_registry.clone(),
+        dep_registry: ctx.dep_registry,
+        strict_deps: ctx.strict_deps,
+    };
+    diagnostics = beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics(
         &module,
-        options,
-        cross_file_classes.clone(),
-        ctx.hierarchy.pre_loaded_protocols.clone(),
-        ctx.native_type_registry.clone(),
+        diagnostics,
+        &diag_ctx,
     );
-    diagnostics.extend(analysis_result.diagnostics);
-
-    // BT-1732: Enrich unresolved class warnings with dependency package hints.
-    // When a class is unresolved but exists in a declared dependency's class_module_index,
-    // update the hint to suggest the dependency package.
-    if let Some(registry) = ctx.dep_registry {
-        for diag in &mut diagnostics {
-            if diag.category
-                == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass)
-            {
-                // Extract class name from message "Unresolved class `ClassName`"
-                if let Some(class_name) = diag
-                    .message
-                    .strip_prefix("Unresolved class `")
-                    .and_then(|s| s.strip_suffix('`'))
-                {
-                    if let Some(exports) = registry.lookup(class_name) {
-                        if let Some(export) = exports.first() {
-                            diag.hint = Some(
-                                format!(
-                                    "Did you mean `{class_name}` from dependency '{}'? \
-                                     Ensure the dependency is declared in beamtalk.toml.",
-                                    export.package
-                                )
-                                .into(),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // BT-738: Warn when user code shadows a stdlib class name.
-    // Only applies to non-stdlib compilation (stdlib defines these names legitimately).
-    if !options.stdlib_mode {
-        let mut stdlib_shadow_diags = Vec::new();
-        beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
-            &module,
-            &mut stdlib_shadow_diags,
-        );
-        diagnostics.extend(stdlib_shadow_diags);
-    }
-
-    // BT-1653 / ADR 0070 Phase 3: Cross-package class collision detection.
-    // When dependencies are loaded, check for ambiguous unqualified class
-    // references and stdlib name reservation violations.
-    if let Some(registry) = ctx.dep_registry {
-        beamtalk_core::semantic_analysis::check_collision_at_use_sites(
-            &module,
-            registry,
-            &mut diagnostics,
-        );
-
-        // BT-1654 / ADR 0070 Phase 3: Warn on transitive dependency usage.
-        // When strict-deps is true, this promotes the warning to an error.
-        beamtalk_core::semantic_analysis::check_transitive_dep_usage(
-            &module,
-            registry,
-            ctx.strict_deps,
-            &mut diagnostics,
-        );
-    }
-
-    // BT-782: Apply @expect directives to suppress matching diagnostics.
-    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
 
     // Check for errors (and optionally treat warnings/hints as errors).
     // Deprecation-category warnings (BT-1529) and structural validation warnings

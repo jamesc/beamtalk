@@ -200,6 +200,32 @@ impl ProjectIndex {
         self.file_classes.get(file).map(Vec::as_slice)
     }
 
+    /// Returns cross-file `ClassInfo` entries for diagnostic computation (BT-2009).
+    ///
+    /// Returns all `ClassInfo` entries from the merged hierarchy that were NOT
+    /// contributed by the given `file`. This is the LSP equivalent of the CLI's
+    /// `ClassHierarchy::cross_file_class_infos` filtering.
+    #[must_use]
+    pub fn cross_file_class_infos_for(
+        &self,
+        file: &Utf8PathBuf,
+    ) -> Vec<crate::semantic_analysis::class_hierarchy::ClassInfo> {
+        let current_file_classes: std::collections::HashSet<&EcoString> = self
+            .file_classes
+            .get(file)
+            .map(|names| names.iter().collect())
+            .unwrap_or_default();
+
+        self.merged_hierarchy
+            .classes()
+            .iter()
+            .filter(|(name, _)| {
+                !ClassHierarchy::is_builtin_class(name) && !current_file_classes.contains(name)
+            })
+            .map(|(_, info)| info.clone())
+            .collect()
+    }
+
     /// Returns the package name for a file, if determinable.
     ///
     /// Uses the file-local hierarchy (not the merged hierarchy) so that
