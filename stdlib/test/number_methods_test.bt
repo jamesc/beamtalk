@@ -29,6 +29,32 @@ TestCase subclass: NumberMethodsTest
     self assert: -3.14 ceiling equals: -3
     self assert: -3.75 floor equals: -4
 
+  testIntegerRoundedIsIdentity =>
+    self assert: 42 rounded equals: 42
+    self assert: -7 rounded equals: -7
+    self assert: 0 rounded equals: 0
+
+  testIntegerCeilingIsIdentity =>
+    self assert: 42 ceiling equals: 42
+    self assert: -7 ceiling equals: -7
+    self assert: 0 ceiling equals: 0
+
+  testIntegerFloorIsIdentity =>
+    self assert: 42 floor equals: 42
+    self assert: -7 floor equals: -7
+    self assert: 0 floor equals: 0
+
+  testIntegerTruncatedIsIdentity =>
+    self assert: 42 truncated equals: 42
+    self assert: -7 truncated equals: -7
+    self assert: 0 truncated equals: 0
+
+  testIntegerRespondsToRoundingMethods =>
+    self assert: (42 respondsTo: #ceiling)
+    self assert: (42 respondsTo: #floor)
+    self assert: (42 respondsTo: #rounded)
+    self assert: (42 respondsTo: #truncated)
+
   testFloatIsZero =>
     self assert: 0.0 isZero
     self deny: 3.14 isZero
