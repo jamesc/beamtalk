@@ -196,6 +196,13 @@ The class pid is the same as the described class (virtual tag approach, ADR 0013
 Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
 """.
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
+%% BT-2005: `self class <msg>` inside a class method routes here with
+%% Pid =:= self() (the class gen_server calling itself). A plain
+%% gen_server:call on the instantiation selectors would deadlock; short-circuit
+%% the spawn/new family via the process-dictionary-backed helpers used by
+%% BT-893 / BT-2004, and raise a clear error for everything else.
+metaclass_send(Pid, Selector, Args, _Self) when Pid =:= self() ->
+    handle_metaclass_self_call(Selector, Args);
 metaclass_send(Pid, Selector, Args, Self) ->
     %% BT-1768: Wrap in crash recovery, same as class_send.
     %% Update Self's pid on recovery so downstream dispatch uses the new process.
@@ -676,6 +683,77 @@ handle_self_instantiation(Type, Selector, Args) ->
             end;
         {_, _, _} ->
             %% Corrupt/invalid is_abstract metadata — fail fast with structured error.
+            handle_self_instantiation_error(Selector)
+    end.
+
+-doc """
+Handle `self class <selector>` self-calls from within a class method (BT-2005).
+
+The class gen_server cannot `gen_server:call(self(), ...)` — the metaclass
+dispatch path would deadlock. Short-circuit the spawn/new family to the same
+helpers used by BT-893 (`self new`) and BT-2004 (`self spawnAs:`), and raise a
+clear, structured error for any other selector so callers see a useful
+diagnostic rather than an opaque `calling_self` timeout.
+""".
+-spec handle_metaclass_self_call(selector(), list()) -> term().
+handle_metaclass_self_call('new', []) ->
+    handle_self_instantiation(new, 'new', []);
+handle_metaclass_self_call('new:', [Map]) ->
+    handle_self_instantiation(new, 'new:', [Map]);
+handle_metaclass_self_call(spawn, []) ->
+    handle_self_instantiation(spawn, spawn, []);
+handle_metaclass_self_call('spawnWith:', [Map]) ->
+    handle_self_instantiation(spawn, 'spawnWith:', [Map]);
+handle_metaclass_self_call('spawnAs:', [Name]) ->
+    handle_metaclass_self_named_spawn('spawnAs:', #{}, Name);
+handle_metaclass_self_call('spawnWith:as:', [InitArgs, Name]) ->
+    handle_metaclass_self_named_spawn('spawnWith:as:', InitArgs, Name);
+handle_metaclass_self_call(Selector, _Args) ->
+    ClassName =
+        case get(beamtalk_class_name) of
+            undefined -> class_name_from_pid(self());
+            CN -> CN
+        end,
+    Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
+    Error1 = beamtalk_error:with_hint(
+        Error0,
+        iolist_to_binary(
+            io_lib:format(
+                "'self class ~ts' inside a class method of '~ts' would deadlock "
+                "(gen_server:call to self). Only spawn/new selectors can be "
+                "short-circuited from the class process. Send this message "
+                "from outside the class, or use `self ~ts` directly if the "
+                "method is defined on the instance side.",
+                [Selector, ClassName, Selector]
+            )
+        )
+    ),
+    beamtalk_error:raise(Error1).
+
+-doc """
+Perform a named spawn directly from within a class method (BT-2005 / BT-2004).
+
+Mirrors `handle_self_instantiation/3` but routes to `class_self_spawn_as` /
+`class_self_spawn_with`, which return a Beamtalk `Result` rather than raising.
+""".
+-spec handle_metaclass_self_named_spawn('spawnAs:' | 'spawnWith:as:', term(), term()) -> term().
+handle_metaclass_self_named_spawn(Selector, InitArgs, Name) ->
+    ClassName = get(beamtalk_class_name),
+    Module = get(beamtalk_class_module),
+    IsAbstract0 = get(beamtalk_class_is_abstract),
+    case {ClassName, Module, IsAbstract0} of
+        {CN, Mod, IsAbstract} when
+            is_atom(CN), is_atom(Mod), is_boolean(IsAbstract), CN =/= undefined
+        ->
+            case Selector of
+                'spawnAs:' ->
+                    beamtalk_class_instantiation:class_self_spawn_as(CN, Mod, IsAbstract, Name);
+                'spawnWith:as:' ->
+                    beamtalk_class_instantiation:class_self_spawn_with(
+                        CN, Mod, IsAbstract, InitArgs, Name
+                    )
+            end;
+        _ ->
             handle_self_instantiation_error(Selector)
     end.
 

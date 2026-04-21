@@ -1210,6 +1210,41 @@ class_send_self_instantiation_spawn_with_test() ->
         beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
     ).
 
+%% BT-2005: `self class <selector>` inside a class method routes through
+%% metaclass_send with Pid =:= self(). The previous implementation issued a
+%% `gen_server:call(self(), {metaclass_method_call, ...})` and deadlocked with
+%% `{calling_self, ...}`. The self-call branch now short-circuits spawn/new
+%% selectors to the process-dictionary-backed helpers and raises a structured
+%% dispatch_error for anything else.
+metaclass_send_self_call_spawn_missing_metadata_test() ->
+    Self = #beamtalk_object{
+        class = 'Metaclass', class_mod = undefined, pid = self()
+    },
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
+        beamtalk_class_dispatch:metaclass_send(self(), 'spawnWith:', [#{}], Self)
+    ).
+
+metaclass_send_self_call_spawn_with_as_missing_metadata_test() ->
+    Self = #beamtalk_object{
+        class = 'Metaclass', class_mod = undefined, pid = self()
+    },
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
+        beamtalk_class_dispatch:metaclass_send(
+            self(), 'spawnWith:as:', [#{}, anyName], Self
+        )
+    ).
+
+metaclass_send_self_call_unknown_selector_raises_dispatch_error_test() ->
+    Self = #beamtalk_object{
+        class = 'Metaclass', class_mod = undefined, pid = self()
+    },
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = dispatch_error}},
+        beamtalk_class_dispatch:metaclass_send(self(), someUserSelector, [], Self)
+    ).
+
 %% is_test_execution_selector branches — exhaustively cover each test selector.
 is_test_execution_selector_exhaustive_test() ->
     ?assert(beamtalk_class_dispatch:is_test_execution_selector(runAll)),
