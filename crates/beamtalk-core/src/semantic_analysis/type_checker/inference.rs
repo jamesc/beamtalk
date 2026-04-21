@@ -1176,7 +1176,76 @@ impl TypeChecker {
         // Check argument types positionally against declared params
         self.check_ffi_argument_types(module_name, &function_name, &sig, arg_types, span);
 
-        sig.return_type
+        // BT-2023(C): Thread call-site type args through FFI return types.
+        // When the return type is a bare Known type (no type args) and a param
+        // shares the same base class, flow the call-site argument's type args
+        // to the return. E.g., `lists:reverse(List(String))` → `List(String)`.
+        Self::substitute_ffi_return_type(&sig, arg_types)
+    }
+
+    /// BT-2023(C): Substitute FFI return type with call-site type args.
+    ///
+    /// When an FFI signature has a bare return type (e.g., `List`) that matches
+    /// a param type, and the call-site argument carries type args (e.g.,
+    /// `List(String)`), flow those type args to the return type.
+    ///
+    /// This enables `(Erlang lists) reverse: xs` where `xs :: List(String)`
+    /// to return `List(String)` instead of bare `List`.
+    fn substitute_ffi_return_type(
+        sig: &crate::semantic_analysis::type_checker::native_type_registry::FunctionSignature,
+        arg_types: &[InferredType],
+    ) -> InferredType {
+        // Only apply when the return type is a bare Known type without type args
+        let InferredType::Known {
+            class_name: ret_class,
+            type_args: ret_args,
+            ..
+        } = &sig.return_type
+        else {
+            return sig.return_type.clone();
+        };
+
+        if !ret_args.is_empty() {
+            // Return type already has type args — use as-is
+            return sig.return_type.clone();
+        }
+
+        // Look for a param whose base type matches the return type.
+        // If found and the call-site arg has type args, use those.
+        for (i, param) in sig.params.iter().enumerate() {
+            let InferredType::Known {
+                class_name: param_class,
+                type_args: param_args,
+                ..
+            } = &param.type_
+            else {
+                continue;
+            };
+
+            // Only match if param is also bare (same polymorphic pattern)
+            if param_class != ret_class || !param_args.is_empty() {
+                continue;
+            }
+
+            // Found a matching bare param — check the call-site arg
+            if let Some(InferredType::Known {
+                class_name: arg_class,
+                type_args: arg_type_args,
+                provenance,
+                ..
+            }) = arg_types.get(i)
+            {
+                if arg_class == ret_class && !arg_type_args.is_empty() {
+                    return InferredType::Known {
+                        class_name: ret_class.clone(),
+                        type_args: arg_type_args.clone(),
+                        provenance: *provenance,
+                    };
+                }
+            }
+        }
+
+        sig.return_type.clone()
     }
 
     /// Extracts the Erlang function name and arity from a selector and arguments.
@@ -2095,6 +2164,9 @@ impl TypeChecker {
     /// Resolve a type parameter string through class-level and method-local
     /// substitution maps. Returns the resolved type, or `Dynamic` if
     /// the parameter cannot be resolved.
+    ///
+    /// BT-2023(B): Handles nested generic types like `List(E)` or
+    /// `Dictionary(K, List(V))` by recursing into inner type parameters.
     fn resolve_type_param(
         param: &str,
         class_subst: &HashMap<EcoString, InferredType>,
@@ -2114,6 +2186,27 @@ impl TypeChecker {
         if hierarchy.has_class(&eco) {
             return InferredType::known(eco);
         }
+
+        // BT-2023(B): Handle nested generic types like `List(E)`,
+        // `Dictionary(K, V)`, `Block(List(E), List(R))`.
+        // Parse the parametric form and recursively resolve each inner param.
+        if let Some(open) = param.find('(') {
+            if param.ends_with(')') {
+                let base = &param[..open];
+                let inner = &param[open + 1..param.len() - 1];
+                let params = Self::split_type_params(inner);
+                let resolved_args: Vec<InferredType> = params
+                    .iter()
+                    .map(|p| Self::resolve_type_param(p, class_subst, method_subst, hierarchy))
+                    .collect();
+                return InferredType::Known {
+                    class_name: base.into(),
+                    type_args: resolved_args,
+                    provenance: super::TypeProvenance::Substituted(Span::default()),
+                };
+            }
+        }
+
         // Unresolved type param — stay Dynamic
         InferredType::Dynamic(DynamicReason::UnannotatedParam)
     }
@@ -2582,12 +2675,40 @@ impl TypeChecker {
         ret_ty.contains("Self") && ret_ty.as_str() != "Self" && ret_ty.as_str() != "Self class"
     }
 
+    /// BT-2023(A): Extract the single non-Nil Known member from a union type.
+    ///
+    /// For nullable unions like `List(String) | Nil`, returns
+    /// `Some(&Known { class_name: "List", type_args: [String], .. })`.
+    /// Returns `None` if the union has zero or more than one non-Nil Known member
+    /// (e.g., `String | Integer | Nil` has two non-Nil members).
+    fn extract_non_nil_known(members: &[InferredType]) -> Option<&InferredType> {
+        let non_nil: Vec<&InferredType> = members
+            .iter()
+            .filter(|m| {
+                !matches!(m, InferredType::Known { class_name, .. }
+                    if class_name == "Nil" || class_name == "UndefinedObject")
+            })
+            .collect();
+        if non_nil.len() == 1 {
+            // Only return if the single non-nil member is a Known type
+            match non_nil[0] {
+                InferredType::Known { .. } => Some(non_nil[0]),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     /// Infer method-local type parameters from call-site arguments.
     ///
     /// Extracts type params from ANY parametric parameter type — e.g., `Block(T, R)`,
     /// `Result(T, E)`, `Array(T)`, `Dictionary(K, V)`. For each declared type parameter
     /// in the param type, if it is method-local (not a class-level type param and not a
     /// known class name), it is matched positionally against the argument's actual `type_args`.
+    ///
+    /// BT-2023(A): Also handles nullable union arguments like `List(String) | Nil` by
+    /// extracting the non-Nil Known member for unification.
     fn infer_method_local_params(
         method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
         arg_types: &[InferredType],
@@ -2614,13 +2735,22 @@ impl TypeChecker {
                 continue;
             };
 
+            // BT-2023(A): Normalise the argument type for unification.
+            // For nullable unions like `List(String) | Nil`, extract the
+            // non-Nil Known member so the unifier can match against it.
+            let effective_arg = if let InferredType::Union { members, .. } = arg_ty {
+                Self::extract_non_nil_known(members).unwrap_or(arg_ty)
+            } else {
+                arg_ty
+            };
+
             // BT-1834: Handle plain (non-parametric) type param parameters.
             // e.g., `inject: initial :: A` — if A is method-local, map it to the arg type.
             if super::is_generic_type_param(param_type) {
                 let param_eco: EcoString = param_type.clone();
                 if !class_type_params.contains(&param_eco) && !hierarchy.has_class(&param_eco) {
-                    if let InferredType::Known { .. } = arg_ty {
-                        method_subst.insert(param_eco, arg_ty.clone());
+                    if let InferredType::Known { .. } = effective_arg {
+                        method_subst.insert(param_eco, effective_arg.clone());
                     }
                 }
             }
@@ -2633,11 +2763,12 @@ impl TypeChecker {
                     let declared_params = Self::split_type_params(inner);
 
                     // Match against the argument's actual type if it's a Known type
+                    // BT-2023(A): effective_arg is already unwrapped from nullable unions
                     if let InferredType::Known {
                         class_name: arg_class,
                         type_args,
                         ..
-                    } = arg_ty
+                    } = effective_arg
                     {
                         // Verify the base class matches (e.g., Block == Block, Result == Result)
                         if arg_class.as_str() == declared_base && !type_args.is_empty() {
@@ -4474,6 +4605,427 @@ mod tests {
                 assert_eq!(members[1], InferredType::known("Nil"));
             }
             other => panic!("Expected Union(Behaviour, Nil), got {other:?}"),
+        }
+    }
+
+    // ---- BT-2023(A): Nullable-union argument unification ----
+
+    #[test]
+    fn infer_method_local_params_nullable_list_union() {
+        // BT-2023(A): List(String) | Nil argument against List(T) param should infer T=String
+        let method = method_info("process:", vec![Some("List(T)")], Some("T"));
+        let arg = InferredType::Union {
+            members: vec![
+                InferredType::Known {
+                    class_name: "List".into(),
+                    type_args: vec![InferredType::known("String")],
+                    provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+                },
+                InferredType::known("Nil"),
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[arg],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result.get("T"),
+            Some(&InferredType::known("String")),
+            "T should be inferred from the non-Nil member of the union"
+        );
+    }
+
+    #[test]
+    fn infer_method_local_params_nullable_dictionary_union() {
+        // BT-2023(A): Dictionary(K, V) | Nil → K=String, V=Integer
+        let method = method_info("lookup:", vec![Some("Dictionary(K, V)")], Some("V"));
+        let arg = InferredType::Union {
+            members: vec![
+                InferredType::known("Nil"),
+                InferredType::Known {
+                    class_name: "Dictionary".into(),
+                    type_args: vec![
+                        InferredType::known("String"),
+                        InferredType::known("Integer"),
+                    ],
+                    provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+                },
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[arg],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(result.get("K"), Some(&InferredType::known("String")));
+        assert_eq!(result.get("V"), Some(&InferredType::known("Integer")));
+    }
+
+    #[test]
+    fn infer_method_local_params_nullable_set_union() {
+        // BT-2023(A): Set(T) | Nil → T=String (UndefinedObject as nil-like)
+        let method = method_info("process:", vec![Some("Set(T)")], Some("T"));
+        let arg = InferredType::Union {
+            members: vec![
+                InferredType::Known {
+                    class_name: "Set".into(),
+                    type_args: vec![InferredType::known("String")],
+                    provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+                },
+                InferredType::known("UndefinedObject"),
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[arg],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result.get("T"),
+            Some(&InferredType::known("String")),
+            "T should be inferred even when Nil member is UndefinedObject"
+        );
+    }
+
+    #[test]
+    fn infer_method_local_params_nullable_plain_type_param() {
+        // BT-2023(A): Plain type param A with a nullable union argument
+        // `inject: initial :: A` where arg is `Integer | Nil` → A = Integer
+        let method = method_info("inject:", vec![Some("A")], Some("A"));
+        let arg = InferredType::Union {
+            members: vec![InferredType::known("Integer"), InferredType::known("Nil")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[arg],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result.get("A"),
+            Some(&InferredType::known("Integer")),
+            "Plain type param should unify with non-Nil member of union"
+        );
+    }
+
+    #[test]
+    fn infer_method_local_params_multi_member_union_no_inference() {
+        // BT-2023(A): Union with multiple non-Nil members should not infer
+        // (ambiguous — String | Integer | Nil has two non-Nil members)
+        let method = method_info("process:", vec![Some("List(T)")], Some("T"));
+        let arg = InferredType::Union {
+            members: vec![
+                InferredType::Known {
+                    class_name: "List".into(),
+                    type_args: vec![InferredType::known("String")],
+                    provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+                },
+                InferredType::known("Integer"),
+                InferredType::known("Nil"),
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[arg],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert!(
+            result.is_empty(),
+            "Ambiguous multi-member union should not infer type params"
+        );
+    }
+
+    // ---- BT-2023(B): Nested-generic block param resolution ----
+
+    #[test]
+    fn resolve_type_param_nested_list_e() {
+        // BT-2023(B): resolve_type_param("List(E)") with E=String → List(String)
+        let mut class_subst = HashMap::new();
+        class_subst.insert(EcoString::from("E"), InferredType::known("String"));
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result =
+            TypeChecker::resolve_type_param("List(E)", &class_subst, &HashMap::new(), &hierarchy);
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "List");
+                assert_eq!(type_args.len(), 1);
+                assert_eq!(type_args[0], InferredType::known("String"));
+            }
+            other => panic!("Expected Known List(String), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_type_param_nested_dictionary_k_list_v() {
+        // BT-2023(B): Two levels of nesting — Dictionary(K, List(V))
+        // with K=String, V=Integer → Dictionary(String, List(Integer))
+        let mut method_subst = HashMap::new();
+        method_subst.insert(EcoString::from("K"), InferredType::known("String"));
+        method_subst.insert(EcoString::from("V"), InferredType::known("Integer"));
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::resolve_type_param(
+            "Dictionary(K, List(V))",
+            &HashMap::new(),
+            &method_subst,
+            &hierarchy,
+        );
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Dictionary");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(type_args[0], InferredType::known("String"));
+                match &type_args[1] {
+                    InferredType::Known {
+                        class_name,
+                        type_args,
+                        ..
+                    } => {
+                        assert_eq!(class_name.as_str(), "List");
+                        assert_eq!(type_args.len(), 1);
+                        assert_eq!(type_args[0], InferredType::known("Integer"));
+                    }
+                    other => panic!("Expected Known List(Integer), got {other:?}"),
+                }
+            }
+            other => panic!("Expected Known Dictionary(String, List(Integer)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_type_param_bare_still_works() {
+        // BT-2023(B): Bare type params still resolve correctly (regression)
+        let mut method_subst = HashMap::new();
+        method_subst.insert(EcoString::from("E"), InferredType::known("String"));
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result =
+            TypeChecker::resolve_type_param("E", &HashMap::new(), &method_subst, &hierarchy);
+        assert_eq!(result, InferredType::known("String"));
+    }
+
+    #[test]
+    fn resolve_type_param_known_class_still_works() {
+        // BT-2023(B): Known class names still resolve correctly (regression)
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = TypeChecker::resolve_type_param(
+            "Integer",
+            &HashMap::new(),
+            &HashMap::new(),
+            &hierarchy,
+        );
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    // ---- BT-2023(C): FFI polymorphic return type substitution ----
+
+    #[test]
+    fn ffi_return_type_flows_list_type_args() {
+        // BT-2023(C): lists:reverse(List(String)) → List(String), not bare List
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, ParamType,
+        };
+        let sig = FunctionSignature {
+            name: "reverse".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: Some("list".into()),
+                type_: InferredType::known("List"),
+            }],
+            return_type: InferredType::known("List"),
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+            line: None,
+        };
+        let arg = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::known("String")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let result = TypeChecker::substitute_ffi_return_type(&sig, &[arg]);
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "List");
+                assert_eq!(type_args.len(), 1);
+                assert_eq!(type_args[0], InferredType::known("String"));
+            }
+            other => panic!("Expected Known List(String), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ffi_return_type_bare_arg_passthrough() {
+        // BT-2023(C): If the call-site arg is bare List (no type args), return bare List
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, ParamType,
+        };
+        let sig = FunctionSignature {
+            name: "reverse".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: Some("list".into()),
+                type_: InferredType::known("List"),
+            }],
+            return_type: InferredType::known("List"),
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+            line: None,
+        };
+        let arg = InferredType::known("List"); // bare, no type args
+        let result = TypeChecker::substitute_ffi_return_type(&sig, &[arg]);
+        assert_eq!(result, InferredType::known("List"));
+    }
+
+    #[test]
+    fn ffi_return_type_different_types_no_flow() {
+        // BT-2023(C): If return type doesn't match param type, no substitution
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, ParamType,
+        };
+        let sig = FunctionSignature {
+            name: "length".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: Some("list".into()),
+                type_: InferredType::known("List"),
+            }],
+            return_type: InferredType::known("Integer"),
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+            line: None,
+        };
+        let arg = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::known("String")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let result = TypeChecker::substitute_ffi_return_type(&sig, &[arg]);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn ffi_return_type_already_has_type_args() {
+        // BT-2023(C): If return type already has type args, don't override
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, ParamType,
+        };
+        let sig = FunctionSignature {
+            name: "values".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: Some("map".into()),
+                type_: InferredType::known("Dictionary"),
+            }],
+            return_type: InferredType::Known {
+                class_name: "List".into(),
+                type_args: vec![InferredType::known("Object")],
+                provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+            },
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+            line: None,
+        };
+        let arg = InferredType::Known {
+            class_name: "Dictionary".into(),
+            type_args: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let result = TypeChecker::substitute_ffi_return_type(&sig, &[arg]);
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "List");
+                assert_eq!(type_args.len(), 1);
+                assert_eq!(type_args[0], InferredType::known("Object"));
+            }
+            other => panic!("Expected Known List(Object), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ffi_return_type_map_level_flow() {
+        // BT-2023(C): maps:merge(Dictionary(String, Integer), ...) → Dictionary(String, Integer)
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, ParamType,
+        };
+        let sig = FunctionSignature {
+            name: "merge".to_string(),
+            arity: 2,
+            params: vec![
+                ParamType {
+                    keyword: Some("map1".into()),
+                    type_: InferredType::known("Dictionary"),
+                },
+                ParamType {
+                    keyword: Some("map2".into()),
+                    type_: InferredType::known("Dictionary"),
+                },
+            ],
+            return_type: InferredType::known("Dictionary"),
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+            line: None,
+        };
+        let arg1 = InferredType::Known {
+            class_name: "Dictionary".into(),
+            type_args: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let arg2 = InferredType::Known {
+            class_name: "Dictionary".into(),
+            type_args: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let result = TypeChecker::substitute_ffi_return_type(&sig, &[arg1, arg2]);
+        match result {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Dictionary");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(type_args[0], InferredType::known("String"));
+                assert_eq!(type_args[1], InferredType::known("Integer"));
+            }
+            other => panic!("Expected Known Dictionary(String, Integer), got {other:?}"),
         }
     }
 }
