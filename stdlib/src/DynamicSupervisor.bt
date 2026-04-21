@@ -97,8 +97,13 @@ abstract Object subclass: DynamicSupervisor(C)
     ((Erlang beamtalk_supervisor) startChild: self with: args) unwrap
 
   /// Terminate the given child process.
+  ///
+  /// BT-1998 / ADR 0080 Phase 1: `terminateChild/2` returns a Result-
+  /// shaped value; call `unwrap` at the FFI boundary so the user-facing
+  /// signature remains `Nil` until the stdlib signature migration in
+  /// Phase 2 (BT-1999).
   terminateChild: child :: C -> Nil =>
-    (Erlang beamtalk_supervisor) terminateChild: self child: child
+    ((Erlang beamtalk_supervisor) terminateChild: self child: child) unwrap
 
   /// Return the count of currently-running children.
   ///

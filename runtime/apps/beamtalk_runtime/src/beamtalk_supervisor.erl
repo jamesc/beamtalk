@@ -284,77 +284,122 @@ whichChild(Self, ClassArg) ->
 Terminate a supervised child.
 
 For Supervisor (static): Arg is a class object — terminates child by its
-class name, which is the OTP child id. Returns nil.
+class name, which is the OTP child id.
 
 For DynamicSupervisor (dynamic): Arg is an actor or supervisor instance —
-terminates child by its process pid (simple_one_for_one semantics). Returns nil.
+terminates child by its process pid (simple_one_for_one semantics).
 
-Raises a runtime_error if the child is not found or cannot be terminated.
+## Return shape (ADR 0080 Phase 1 — BT-1998)
+
+Returns `{ok, nil}` on success. Returns `{ok, nil}` on
+`{error, not_found}` (idempotent: "child is already gone" is the
+goal state, so treating it as success lets callers write safe cleanup
+code without swallowing unrelated failures). Returns
+`{error, #beamtalk_error{kind = terminate_failed, ...}}` on any other
+`{error, Reason}` from `supervisor:terminate_child/2`, and
+`{error, #beamtalk_error{kind = stale_handle, ...}}` when the supervisor
+process is not alive.
+
+**Behavior change on the static path:** previously, the static path
+raised on every `{error, Reason}` — including `{error, not_found}`.
+It now returns `{ok, nil}` on `not_found`, aligning with the dynamic
+path's existing `not_found` → success branch (which pre-dates this PR
+and returned bare `nil`; after this migration both paths now return
+`{ok, nil}`). Any caller that relied on the static path raising for a
+missing child loses that signal — by design (see ADR 0080 §Decision,
+"idempotent-startup convention").
+
+FFI coercion in `beamtalk_erlang_proxy:coerce_ffi_result/2` wraps this
+into a Beamtalk `Result` tagged map for the class method body's return.
 """.
 %% Canonical specs for the two BT selectors that map to this function:
-%%   Supervisor:        terminate: aClass  → terminateChild: self class: aClass
+%%   Supervisor:        terminate: aClass     → terminateChild: self class: aClass
 %%   DynamicSupervisor: terminateChild: child → terminateChild: self child: child
--spec 'terminateChild:class:'(term(), Class :: beamtalk_object()) -> nil.
+-spec 'terminateChild:class:'(term(), Class :: beamtalk_object()) ->
+    {ok, nil} | {error, #beamtalk_error{}}.
 'terminateChild:class:'(Self, Class) -> terminateChild(Self, Class).
--spec 'terminateChild:child:'(term(), Child :: term()) -> nil.
+-spec 'terminateChild:child:'(term(), Child :: term()) ->
+    {ok, nil} | {error, #beamtalk_error{}}.
 'terminateChild:child:'(Self, Child) -> terminateChild(Self, Child).
--spec terminateChild(term(), term()) -> nil.
+-spec terminateChild(term(), term()) -> {ok, nil} | {error, #beamtalk_error{}}.
 terminateChild(Self, Arg) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
-    with_live_supervisor(SupClass, 'terminateChild:', fun() ->
+    try
         case beamtalk_class_registry:is_class_object(Arg) of
             true ->
                 %% Supervisor case: terminate by class name (the default child id)
                 ChildClassPid = element(4, Arg),
                 ChildId = beamtalk_object_class:class_name(ChildClassPid),
-                case supervisor:terminate_child(SupPid, ChildId) of
-                    ok ->
-                        ?LOG_INFO("Supervisor child terminated", #{
-                            supervisor => SupClass,
-                            child => ChildId,
-                            domain => [beamtalk, runtime]
-                        }),
-                        nil;
-                    {error, Reason} ->
-                        Error = beamtalk_error:new(
-                            runtime_error,
-                            SupClass,
-                            'terminateChild:',
-                            iolist_to_binary(io_lib:format("~p", [Reason]))
-                        ),
-                        error(beamtalk_exception_handler:ensure_wrapped(Error))
-                end;
+                handle_terminate_child_result(
+                    SupClass,
+                    #{child => ChildId},
+                    supervisor:terminate_child(SupPid, ChildId)
+                );
             false ->
                 %% DynamicSupervisor case: terminate by child process pid
                 ChildPid = element(4, Arg),
-                case supervisor:terminate_child(SupPid, ChildPid) of
-                    ok ->
-                        ?LOG_INFO("DynamicSupervisor child terminated", #{
-                            supervisor => SupClass,
-                            child_pid => ChildPid,
-                            domain => [beamtalk, runtime]
-                        }),
-                        nil;
-                    {error, not_found} ->
-                        Error = beamtalk_error:new(
-                            runtime_error,
-                            SupClass,
-                            'terminateChild:',
-                            <<"Child not found — it may have already terminated">>
-                        ),
-                        error(beamtalk_exception_handler:ensure_wrapped(Error));
-                    {error, Reason} ->
-                        Error = beamtalk_error:new(
-                            runtime_error,
-                            SupClass,
-                            'terminateChild:',
-                            iolist_to_binary(io_lib:format("~p", [Reason]))
-                        ),
-                        error(beamtalk_exception_handler:ensure_wrapped(Error))
-                end
+                handle_terminate_child_result(
+                    SupClass,
+                    #{child_pid => ChildPid},
+                    supervisor:terminate_child(SupPid, ChildPid)
+                )
         end
-    end).
+    catch
+        exit:{noproc, _} ->
+            %% supervisor:terminate_child uses gen_server:call internally,
+            %% which exits with {noproc, MFA} when the supervisor pid is dead.
+            terminate_child_stale_handle(SupClass);
+        exit:noproc ->
+            %% Defensive: gen_server:stop/1 exits with the bare atom noproc.
+            %% supervisor:terminate_child should not reach this path, but
+            %% matching it mirrors with_live_supervisor/3 for safety.
+            terminate_child_stale_handle(SupClass)
+    end.
+
+-spec terminate_child_stale_handle(atom()) -> {error, #beamtalk_error{}}.
+terminate_child_stale_handle(SupClass) ->
+    ?LOG_WARNING("Supervisor stale handle", #{
+        supervisor => SupClass,
+        selector => 'terminateChild:',
+        domain => [beamtalk, runtime]
+    }),
+    {error,
+        beamtalk_error:new(
+            stale_handle,
+            SupClass,
+            'terminateChild:',
+            <<"supervisor is not running — the handle is stale">>
+        )}.
+
+%% Shared outcome dispatcher for both static and dynamic terminateChild paths.
+%% `ok` → {ok, nil}; `{error, not_found}` → {ok, nil} (idempotent);
+%% other `{error, Reason}` → {error, #beamtalk_error{kind = terminate_failed}}.
+-spec handle_terminate_child_result(
+    atom(), map(), ok | {error, not_found} | {error, term()}
+) ->
+    {ok, nil} | {error, #beamtalk_error{}}.
+handle_terminate_child_result(SupClass, LogCtx, ok) ->
+    ?LOG_INFO(
+        "Supervisor child terminated",
+        (LogCtx)#{supervisor => SupClass, domain => [beamtalk, runtime]}
+    ),
+    {ok, nil};
+handle_terminate_child_result(SupClass, LogCtx, {error, not_found}) ->
+    %% ADR 0080 Phase 1: idempotent — "child already gone" is success.
+    ?LOG_DEBUG(
+        "Supervisor child already terminated",
+        (LogCtx)#{supervisor => SupClass, domain => [beamtalk, runtime]}
+    ),
+    {ok, nil};
+handle_terminate_child_result(SupClass, _LogCtx, {error, Reason}) ->
+    {error,
+        beamtalk_error:new(
+            terminate_failed,
+            SupClass,
+            'terminateChild:',
+            iolist_to_binary(io_lib:format("~p", [Reason]))
+        )}.
 
 -doc """
 Start a new child with default args under a DynamicSupervisor.
