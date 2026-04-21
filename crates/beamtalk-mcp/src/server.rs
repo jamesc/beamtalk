@@ -515,6 +515,16 @@ pub struct PackageClassesParams {
     pub package: String,
 }
 
+/// Parameters for the `diagnostic_summary` MCP tool (BT-2014).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DiagnosticSummaryParams {
+    /// Path to a `.bt` source file or directory. Defaults to the current directory.
+    #[schemars(
+        description = "Path to a .bt source file or directory. Defaults to the current package root."
+    )]
+    pub path: Option<String>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -1241,6 +1251,33 @@ impl BeamtalkMcp {
         Ok(call_result)
     }
 
+    /// Return aggregated diagnostic counts for a Beamtalk package without per-diagnostic detail.
+    #[tool(
+        description = "Return a diagnostic summary (counts by category and severity) for a Beamtalk package or file. \
+                        Also includes type-coverage statistics. Use this to monitor typing progress \
+                        without parsing full lint output. Works offline — no REPL connection needed."
+    )]
+    async fn diagnostic_summary(
+        &self,
+        Parameters(params): Parameters<DiagnosticSummaryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("diagnostic_summary");
+        let path = params.path.unwrap_or_else(|| ".".to_string());
+        tracing::debug!(tool = "diagnostic_summary", path = %path, "tool invoked");
+
+        let result = tokio::task::spawn_blocking(move || compute_diagnostic_summary(&path))
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
+        let structured = serde_json::to_value(&result).ok();
+        let mut call_result = CallToolResult::default();
+        call_result.content = vec![Content::text(text)];
+        call_result.structured_content = structured;
+        timer.mark_ok();
+        Ok(call_result)
+    }
+
     /// Search the bundled example corpus for Beamtalk code examples.
     #[tool(
         description = "Search for Beamtalk code examples by keyword or topic. Returns matching examples with source code, explanation, and tags. Use this to find idiomatic patterns, syntax examples, and working code before writing .bt files. Works offline — no REPL connection needed."
@@ -1754,6 +1791,129 @@ fn offset_to_line(source: &str, offset: usize) -> u32 {
     line
 }
 
+/// BT-2014: Compute a diagnostic summary (counts + type coverage) for a path.
+///
+/// Runs the same two-pass parse + semantic-analysis pipeline as `beamtalk lint`,
+/// aggregates all diagnostics via the shared `DiagnosticSummary` type, and
+/// additionally computes type-coverage statistics. Returns a JSON-serializable
+/// value suitable for direct MCP tool output.
+fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
+    use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
+    use beamtalk_core::source_analysis::{DiagnosticSummary, category_name};
+
+    let Ok(source_files) = resolve_source_files(path) else {
+        return serde_json::json!({
+            "error": format!("No .bt source files found in '{path}'"),
+            "files_checked": 0,
+            "total": 0,
+        });
+    };
+
+    // Pass 1: Parse all files and extract class metadata.
+    let mut all_class_infos = Vec::new();
+    let mut parsed_files = Vec::new();
+
+    for file in &source_files {
+        let Ok(source) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        let file_str = file.to_string_lossy().into_owned();
+        let tokens = lex_with_eof(&source);
+        let (module, parse_diags) = parse(tokens);
+        all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
+        parsed_files.push((file_str, source, module, parse_diags));
+    }
+
+    // Pass 2: Analyse each file and collect diagnostics + coverage.
+    let mut all_diags = Vec::new();
+    let mut coverage = CoverageReport {
+        classes: Vec::new(),
+        dynamic_entries: Vec::new(),
+        total_expressions: 0,
+        typed_expressions: 0,
+    };
+
+    for (file_str, _source, module, parse_diags) in &parsed_files {
+        let cross_file_classes = ClassHierarchy::cross_file_class_infos(&all_class_infos, module);
+
+        // Collect lint-level diagnostics.
+        let mut file_diags: Vec<_> = parse_diags
+            .iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .cloned()
+            .collect();
+        file_diags.extend(beamtalk_core::lint::run_lint_passes(module));
+
+        // Semantic analysis.
+        let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+            module,
+            &beamtalk_core::CompilerOptions::default(),
+            cross_file_classes,
+        );
+        file_diags.extend(
+            analysis_result
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.category.is_some()),
+        );
+
+        // Apply @expect directives.
+        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(
+            module,
+            &mut file_diags,
+        );
+
+        all_diags.extend(file_diags);
+
+        // Type coverage.
+        let type_map = infer_types(module, &analysis_result.class_hierarchy);
+        let file_report = CoverageReport::from_module(module, &type_map, file_str, false);
+        coverage.merge(file_report);
+    }
+
+    let files_checked = source_files.len();
+    let summary = DiagnosticSummary::from_diagnostics(&all_diags, files_checked);
+    let totals = summary.totals_by_severity();
+
+    let mut by_category = serde_json::Map::new();
+    for (cat, counts) in &summary.by_category {
+        by_category.insert(
+            category_name(*cat).to_string(),
+            serde_json::json!({
+                "error": counts.error,
+                "warning": counts.warning,
+                "lint": counts.lint,
+                "hint": counts.hint,
+                "total": counts.total(),
+            }),
+        );
+    }
+
+    let dynamic_pct = if coverage.total_expressions > 0 {
+        let typed_pct = coverage.coverage_percent();
+        ((100.0 - typed_pct) * 10.0).round() / 10.0
+    } else {
+        0.0
+    };
+
+    serde_json::json!({
+        "files_checked": files_checked,
+        "totals_by_severity": {
+            "error": totals.error,
+            "warning": totals.warning,
+            "lint": totals.lint,
+            "hint": totals.hint,
+        },
+        "totals_by_category": by_category,
+        "total": summary.total(),
+        "type_coverage": {
+            "typed": coverage.typed_expressions,
+            "total": coverage.total_expressions,
+            "dynamic_percent": dynamic_pct,
+        },
+    })
+}
+
 /// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
 /// containing a single error diagnostic explaining why no files could be found.
 ///
@@ -1899,6 +2059,7 @@ impl ServerHandler for BeamtalkMcp {
                  'inspect' to examine actor state, \
                  'reload_class' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
+                 'diagnostic_summary' for aggregated diagnostic counts and type-coverage stats (works offline, no REPL needed), \
                  'search_classes' to discover Beamtalk classes by keyword or concept (works offline, no REPL needed), \
                  'search_examples' to find Beamtalk code examples by keyword (works offline, no REPL needed), \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
@@ -2376,5 +2537,43 @@ mod tests {
             tool_names.contains(&"package_classes"),
             "package_classes should be in tool list, found: {tool_names:?}"
         );
+    }
+
+    // --- diagnostic_summary (BT-2014) ---
+
+    #[test]
+    fn diagnostic_summary_tool_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"diagnostic_summary"),
+            "diagnostic_summary should be in tool list, found: {tool_names:?}"
+        );
+    }
+
+    #[test]
+    fn compute_diagnostic_summary_nonexistent_path() {
+        let result = compute_diagnostic_summary("/nonexistent/path/that/does/not/exist");
+        assert_eq!(result["files_checked"], 0);
+        assert_eq!(result["total"], 0);
+        assert!(result["error"].is_string());
+    }
+
+    #[test]
+    fn compute_diagnostic_summary_clean_file() {
+        // A well-formed source file should produce a summary with files_checked=1.
+        let tmp =
+            std::env::temp_dir().join(format!("beamtalk-mcp-summary-{}.bt", std::process::id()));
+        std::fs::write(&tmp, "Object subclass: Clean\n  class hello => 42\n").unwrap();
+        let result = compute_diagnostic_summary(tmp.to_str().unwrap());
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(result["files_checked"], 1);
+        // Total may include some diagnostics from semantic analysis depending
+        // on the class environment, but files_checked must be correct.
+        assert!(result["total"].is_number());
+        assert!(result["type_coverage"]["typed"].is_number());
+        assert!(result["type_coverage"]["total"].is_number());
+        assert!(result["type_coverage"]["dynamic_percent"].is_number());
     }
 }

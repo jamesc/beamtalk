@@ -121,6 +121,8 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
 
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
+    let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+    let mut json_diags: Vec<serde_json::Value> = Vec::new();
 
     for (file, source, module, parse_diags) in parsed_files {
         let cross_file_classes =
@@ -159,7 +161,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                         "hint": diag.hint.as_deref(),
                         "notes": notes,
                     });
-                    println!("{json}");
+                    json_diags.push(json);
                 }
             }
         }
@@ -171,13 +173,40 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .iter()
             .filter(|d| d.severity == Severity::Lint)
             .count();
+
+        // Collect diagnostics for the summary.
+        all_diags.extend(lint_diags);
     }
 
     // Lint native .erl files (BT-1909).
     total_lint_count += lint_erl_files(&erl_files, format)?;
 
+    // BT-2014: Build and print diagnostic summary.
+    let files_checked = source_files.len() + erl_files.len();
+    let summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
+        &all_diags,
+        files_checked,
+    );
+
+    match format {
+        OutputFormat::Text => {
+            if !summary.is_empty() {
+                eprintln!();
+                eprintln!("{summary}");
+            }
+        }
+        OutputFormat::Json => {
+            // Emit per-diagnostic JSON lines first.
+            for json in &json_diags {
+                println!("{json}");
+            }
+            // Emit the summary as a final JSON object.
+            let summary_json = diagnostic_summary_to_json(&summary);
+            println!("{summary_json}");
+        }
+    }
+
     if total_lint_count > 0 {
-        let files_checked = source_files.len() + erl_files.len();
         let plural = if total_lint_count == 1 { "" } else { "s" };
         miette::bail!(
             "{total_lint_count} lint diagnostic{plural} found in {files_checked} file(s)"
@@ -341,6 +370,42 @@ impl std::str::FromStr for OutputFormat {
     }
 }
 
+/// Convert a `DiagnosticSummary` into a `serde_json::Value` for the `--format json`
+/// output and the MCP `diagnostic_summary` tool (BT-2014).
+pub(crate) fn diagnostic_summary_to_json(
+    summary: &beamtalk_core::source_analysis::DiagnosticSummary,
+) -> serde_json::Value {
+    use beamtalk_core::source_analysis::category_name;
+
+    let totals = summary.totals_by_severity();
+    let mut by_category = serde_json::Map::new();
+    for (cat, counts) in &summary.by_category {
+        by_category.insert(
+            category_name(*cat).to_string(),
+            serde_json::json!({
+                "error": counts.error,
+                "warning": counts.warning,
+                "lint": counts.lint,
+                "hint": counts.hint,
+                "total": counts.total(),
+            }),
+        );
+    }
+
+    serde_json::json!({
+        "type": "summary",
+        "files_checked": summary.files_checked,
+        "totals_by_severity": {
+            "error": totals.error,
+            "warning": totals.warning,
+            "lint": totals.lint,
+            "hint": totals.hint,
+        },
+        "totals_by_category": by_category,
+        "total": summary.total(),
+    })
+}
+
 /// Convenience wrapper for tests: parse source and collect lint diagnostics.
 #[cfg(test)]
 fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
@@ -502,6 +567,63 @@ mod tests {
         assert!(
             stale,
             "@expect all should be stale without cross-file class info, got: {diags:?}"
+        );
+    }
+
+    /// BT-2014: Verify that `DiagnosticSummary` text and JSON representations
+    /// report the same counts for the same set of diagnostics.
+    #[test]
+    #[allow(clippy::cast_possible_truncation)]
+    fn summary_text_and_json_match() {
+        let source = r#"Object subclass: SummaryTest
+
+  class demo =>
+    s := "hello"
+    val := s sqrt
+    val
+"#;
+        let diags = collect_lint_diagnostics(source);
+        let summary =
+            beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(&diags, 1);
+
+        // Text representation
+        let text = summary.to_string();
+
+        // JSON representation
+        let json = diagnostic_summary_to_json(&summary);
+
+        // The JSON total must match the summary total.
+        assert_eq!(
+            json["total"].as_u64().unwrap() as usize,
+            summary.total(),
+            "JSON total must match DiagnosticSummary::total()"
+        );
+
+        // files_checked must match.
+        assert_eq!(
+            json["files_checked"].as_u64().unwrap() as usize,
+            summary.files_checked,
+            "JSON files_checked must match"
+        );
+
+        // Totals by severity must match.
+        let totals = summary.totals_by_severity();
+        let sev = &json["totals_by_severity"];
+        assert_eq!(sev["error"].as_u64().unwrap() as usize, totals.error);
+        assert_eq!(sev["warning"].as_u64().unwrap() as usize, totals.warning);
+        assert_eq!(sev["lint"].as_u64().unwrap() as usize, totals.lint);
+        assert_eq!(sev["hint"].as_u64().unwrap() as usize, totals.hint);
+
+        // The text must contain "Diagnostic summary (1 file):" header.
+        assert!(
+            text.contains("Diagnostic summary (1 file):"),
+            "Text should contain file count header, got: {text}"
+        );
+
+        // The text must contain the total.
+        assert!(
+            text.contains(&format!("Total{:>15}", summary.total())),
+            "Text should contain total count, got: {text}"
         );
     }
 }

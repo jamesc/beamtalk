@@ -84,6 +84,22 @@ Beamtalk uses mtime-based change detection to avoid redundant work:
 - **Force rebuild** — `beamtalk build --force` ignores all caches and recompiles everything. Useful after toolchain upgrades or when build artifacts may be stale (e.g. switching git branches or worktrees).
 - **Orphan detection** — `.beam` files with no corresponding `.bt` source are reported as warnings (the source may have been deleted or renamed).
 
+### Diagnostic Summary (BT-2014)
+
+At the end of a successful build, `beamtalk build` prints a summary of non-error diagnostics grouped by category and severity. This lets you track typing progress at a glance:
+
+```
+Diagnostic summary (42 files):
+  Type              12 warning
+  Dnu                3 warning
+  UnresolvedClass    1 error
+  Total             16  (1 error, 15 warning)
+```
+
+The summary is suppressed when `--no-warnings` is passed.
+
+`beamtalk lint` prints the same summary at end of run. In `--format json` mode, a `summary` JSON object is emitted as the last line with `totals_by_severity`, `totals_by_category`, `files_checked`, and `total` fields for CI diffing.
+
 ### Build Artifact Layout (`BuildLayout`)
 
 All build output goes under `_build/` in the project root. The `BuildLayout` struct centralises path construction so all commands (build, test, run, repl, deps) use consistent locations.
@@ -734,6 +750,7 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `get-traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
 | `export-traces` | Export trace events to a JSON file |
 | `actor-stats` | Get aggregate per-actor, per-method statistics (call counts, durations, error rates) |
+| `diagnostic_summary` | Aggregated diagnostic counts by category/severity plus type-coverage stats (offline) |
 
 All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)).
 

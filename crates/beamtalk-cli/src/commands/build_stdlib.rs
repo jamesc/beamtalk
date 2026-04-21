@@ -418,6 +418,7 @@ fn compile_stdlib_file(
     ctx: &CompileContext<'_>,
 ) -> Result<()> {
     compile_source_with_bindings(path, module_name, core_file, options, bindings, ctx, None)
+        .map(|_diags| ())
 }
 
 /// Class modifier flags from class hierarchy analysis.
