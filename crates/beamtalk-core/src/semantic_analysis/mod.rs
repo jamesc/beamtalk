@@ -462,9 +462,10 @@ fn analyse_full_with_natives(
             .into_iter()
             .filter(|p| !current_names.contains(&p.name))
             .collect();
-        result
+        let collision_diags = result
             .protocol_registry
-            .add_pre_loaded(cross_file_protocols);
+            .add_pre_loaded(cross_file_protocols, &result.class_hierarchy);
+        result.diagnostics.extend(collision_diags);
     }
     if !module.protocols.is_empty() {
         let proto_diags = result

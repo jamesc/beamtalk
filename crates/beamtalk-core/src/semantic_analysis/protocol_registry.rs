@@ -68,7 +68,7 @@ pub struct ProtocolInfo {
 
 impl ProtocolInfo {
     /// Build a `ProtocolInfo` from a parsed `ProtocolDefinition` AST node.
-    pub fn from_definition(def: &ProtocolDefinition) -> Self {
+    fn from_definition(def: &ProtocolDefinition) -> Self {
         let make_req = |sig: &crate::ast::ProtocolMethodSignature| ProtocolMethodRequirement {
             selector: sig.selector.name(),
             arity: sig.selector.arity(),
@@ -242,10 +242,39 @@ impl ProtocolRegistry {
     /// the unresolved-class validator and type checker recognise fixture-only
     /// protocol names when analysing the test module. Skips entries whose
     /// names are already registered (current-module definitions win).
-    pub fn add_pre_loaded(&mut self, protocols: Vec<ProtocolInfo>) {
+    ///
+    /// Returns diagnostics for namespace collisions — pre-loaded protocol
+    /// names that match a class in the current hierarchy. Colliding entries
+    /// are skipped so resolution cannot pick them up (classes win over
+    /// cross-file protocols that shadow them).
+    pub fn add_pre_loaded(
+        &mut self,
+        protocols: Vec<ProtocolInfo>,
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
         for info in protocols {
+            if hierarchy.has_class(&info.name) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Pre-loaded protocol `{}` collides with class of the same name — \
+                             protocols and classes share a namespace",
+                            info.name
+                        ),
+                        info.span,
+                    )
+                    .with_hint(format!(
+                        "Rename the protocol in its defining file to avoid conflicting with class `{}`",
+                        info.name
+                    ))
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
             self.protocols.entry(info.name.clone()).or_insert(info);
         }
+        diagnostics
     }
 
     /// Registers protocols from a parsed module.
@@ -1089,5 +1118,50 @@ mod tests {
         assert_eq!(class_sels.len(), 2);
         assert!(class_sels.iter().any(|s| s.as_str() == "create"));
         assert!(class_sels.iter().any(|s| s.as_str() == "createWith:"));
+    }
+
+    // ---- BT-2006: Pre-loaded protocol namespace collision ----
+
+    #[test]
+    fn add_pre_loaded_accepts_non_colliding_protocol() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+
+        let protocol = ProtocolInfo {
+            name: "Tickable".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            span: span(),
+        };
+
+        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
+        assert!(diags.is_empty());
+        assert!(registry.has_protocol("Tickable"));
+    }
+
+    #[test]
+    fn add_pre_loaded_reports_collision_with_class() {
+        // `Integer` is a built-in class — a pre-loaded protocol of the same
+        // name must be rejected and must not shadow the class in resolution.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+
+        let protocol = ProtocolInfo {
+            name: "Integer".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            span: span(),
+        };
+
+        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("collides with class"));
+        assert!(!registry.has_protocol("Integer"));
     }
 }

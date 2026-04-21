@@ -237,15 +237,23 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 
 /// Build class → module name and class → superclass indexes from fixture files.
 ///
-/// Parses each fixture file to extract class names and superclass relationships,
-/// then maps each class name to its module name (e.g. `"Env"` → `"bt@env"` for
-/// `fixtures/scheme/env.bt`) and to its superclass name (e.g. `"ValueSubCircle"`
-/// → `"ValueBaseShape"`).
+/// Parses each fixture file to extract class names, superclass relationships,
+/// and protocol definitions. Returns:
 ///
-/// Both indexes are merged into the pipeline before fixture compilation so that
-/// cross-file references and class hierarchy resolution work correctly — in
-/// particular, Value sub-subclasses are recognized as value types rather than
-/// defaulting to actor codegen (BT-1564).
+/// 1. A module index mapping each class name to its module name (e.g. `"Env"`
+///    → `"bt@env"` for `fixtures/scheme/env.bt`).
+/// 2. A superclass index mapping each class name to its superclass (e.g.
+///    `"ValueSubCircle"` → `"ValueBaseShape"`).
+/// 3. A `Vec<ClassInfo>` of full class metadata for validator/type-checker
+///    resolution.
+/// 4. A `Vec<ProtocolInfo>` of fixture-defined protocols (BT-2006) so the
+///    unresolved-class validator recognises their names when analysing test
+///    modules that reference them.
+///
+/// All four outputs are merged into the pipeline before fixture compilation so
+/// that cross-file references and class hierarchy resolution work correctly —
+/// in particular, Value sub-subclasses are recognized as value types rather
+/// than defaulting to actor codegen (BT-1564).
 #[allow(clippy::type_complexity)]
 fn build_fixture_class_indexes(
     fixture_files: &[Utf8PathBuf],
@@ -2175,14 +2183,17 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
+        // BT-2006: fixture also declares a protocol so we can assert the
+        // returned `protocol_infos` carries it through.
         fs::write(
             dir.join("counter.bt"),
-            "Object subclass: Counter\n  count => 0\n",
+            "Protocol define: Tickable\n  tick -> Integer\n\n\
+             Object subclass: Counter\n  count => 0\n",
         )
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, superclass_index, _class_infos, _protocol_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("Counter").map(String::as_str),
@@ -2191,6 +2202,10 @@ mod tests {
         assert_eq!(
             superclass_index.get("Counter").map(String::as_str),
             Some("Object")
+        );
+        assert!(
+            protocol_infos.iter().any(|p| p.name == "Tickable"),
+            "expected fixture-defined protocol `Tickable` to be extracted"
         );
     }
 
@@ -2208,7 +2223,7 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so env.bt → bt@env
         let files = vec![subdir.join("env.bt")];
-        let (module_index, superclass_index, _class_infos, _protocol_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),
@@ -2217,6 +2232,10 @@ mod tests {
         assert_eq!(
             superclass_index.get("SchemeEnv").map(String::as_str),
             Some("Object")
+        );
+        assert!(
+            protocol_infos.is_empty(),
+            "fixture has no protocols — extracted list should be empty"
         );
     }
 
