@@ -205,6 +205,49 @@ pub(in crate::semantic_analysis) fn is_unresolved_type_param(name: &str) -> bool
     is_generic_type_param(name)
 }
 
+/// Split a stored-string type name into `(base, args_slice)`.
+///
+/// Given `"Array(Integer)"` returns `("Array", Some("Integer"))`.
+/// Given `"Result(Integer, Error)"` returns `("Result", Some("Integer, Error"))`.
+/// Given `"Integer"` (no parentheses) returns `("Integer", None)`.
+/// Given `"Array(Integer)extra"` (not terminated by `)`) falls back to
+/// `("Array(Integer)extra", None)` — the caller should treat the string as an
+/// opaque class name.
+///
+/// Used by the string-form parsers (`resolve_type_name_string`,
+/// `substitute_return_type_with_self`, `parse_generic_type_string`, etc.) in
+/// place of manual `.find('(')` slicing. Centralising this keeps the
+/// parenthesis-parsing logic in one place and lets the
+/// `no .find('(')` grep check stay clean.
+///
+/// **References:** BT-2025.
+#[must_use]
+pub(in crate::semantic_analysis) fn split_generic_base<'a>(
+    type_name: &'a str,
+) -> (&'a str, Option<&'a str>) {
+    match type_name.split_once('(') {
+        Some((base, rest)) if rest.ends_with(')') => {
+            let args = &rest[..rest.len() - 1];
+            (base, Some(args))
+        }
+        _ => (type_name, None),
+    }
+}
+
+/// Extract the base class-name portion of a stored-string type name.
+///
+/// `"Array(Integer)"` → `"Array"`. `"Integer"` → `"Integer"`.
+///
+/// Convenience wrapper around [`split_generic_base`] for callers that only
+/// need the base name and discard the args slice. Used in `validation.rs`
+/// where only the base name participates in the comparison
+/// (`is_assignable_to`, protocol-conformance checks). Callers that also need
+/// the args should use [`split_generic_base`] directly to avoid re-parsing.
+#[must_use]
+pub(in crate::semantic_analysis) fn base_name_of_string(type_name: &str) -> &str {
+    split_generic_base(type_name).0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,5 +661,43 @@ mod tests {
             assert_eq!(arg_name, param);
             assert!(inner_args.is_empty());
         }
+    }
+
+    // ---- split_generic_base / base_name_of_string ----
+
+    #[test]
+    fn split_generic_base_plain_name() {
+        assert_eq!(split_generic_base("Integer"), ("Integer", None));
+    }
+
+    #[test]
+    fn split_generic_base_single_arg() {
+        assert_eq!(
+            split_generic_base("Array(Integer)"),
+            ("Array", Some("Integer"))
+        );
+    }
+
+    #[test]
+    fn split_generic_base_multiple_args() {
+        assert_eq!(
+            split_generic_base("Result(Integer, Error)"),
+            ("Result", Some("Integer, Error"))
+        );
+    }
+
+    #[test]
+    fn split_generic_base_unterminated_treats_as_opaque() {
+        // No closing `)` — treat the whole string as an opaque class name.
+        assert_eq!(
+            split_generic_base("Array(Integer"),
+            ("Array(Integer", None)
+        );
+    }
+
+    #[test]
+    fn base_name_of_string_discards_args() {
+        assert_eq!(base_name_of_string("Dictionary(K, V)"), "Dictionary");
+        assert_eq!(base_name_of_string("Integer"), "Integer");
     }
 }

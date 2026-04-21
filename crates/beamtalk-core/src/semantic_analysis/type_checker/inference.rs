@@ -319,24 +319,22 @@ impl TypeChecker {
             }
             // Single element — the `|` was inside parens, fall through
         }
-        if let Some(open) = type_name.find('(') {
-            // Parametric type: e.g., "List(String)", "Dictionary(String, Integer)"
-            if type_name.ends_with(')') {
-                let base = Self::resolve_type_keyword(&EcoString::from(&type_name[..open]));
-                let inner = &type_name[open + 1..type_name.len() - 1];
-                let type_args: Vec<InferredType> = Self::split_type_params(inner)
-                    .into_iter()
-                    .map(|p| Self::resolve_type_name_string(&EcoString::from(p)))
-                    .collect();
-                InferredType::Known {
-                    class_name: base,
-                    type_args,
-                    provenance: super::TypeProvenance::Declared(
-                        crate::source_analysis::Span::default(),
-                    ),
-                }
-            } else {
-                InferredType::known(Self::resolve_type_keyword(type_name))
+        // Parametric type: e.g., "List(String)", "Dictionary(String, Integer)".
+        // BT-2025: Parenthesis-aware split lives in the centralised resolver
+        // helper so the `no .find('(')` grep check stays clean here.
+        let (base_str, args_slice) = super::type_resolver::split_generic_base(type_name);
+        if let Some(inner) = args_slice {
+            let base = Self::resolve_type_keyword(&EcoString::from(base_str));
+            let type_args: Vec<InferredType> = Self::split_type_params(inner)
+                .into_iter()
+                .map(|p| Self::resolve_type_name_string(&EcoString::from(p)))
+                .collect();
+            InferredType::Known {
+                class_name: base,
+                type_args,
+                provenance: super::TypeProvenance::Declared(
+                    crate::source_analysis::Span::default(),
+                ),
             }
         } else {
             InferredType::known(Self::resolve_type_keyword(type_name))
@@ -1072,9 +1070,13 @@ impl TypeChecker {
                     // behaviour here. The fix lives in the follow-up PRs
                     // (BT-2018..BT-2023); this commit only introduces the
                     // resolver framework, it does not flip behaviour at the
-                    // call sites. See the parent epic BT-2024.
-                    if let Some(open) = ret_ty.find('(') {
-                        return InferredType::known(EcoString::from(&ret_ty[..open]));
+                    // call sites. See the parent epic BT-2024. The
+                    // `base_name_of_string` helper keeps the
+                    // `no .find('(')` grep clean without altering the
+                    // (deliberately preserved) type-args-dropping behaviour.
+                    let base = super::type_resolver::base_name_of_string(ret_ty);
+                    if base.len() < ret_ty.len() {
+                        return InferredType::known(EcoString::from(base));
                     }
                     return InferredType::known(ret_ty.clone());
                 }
@@ -1470,11 +1472,19 @@ impl TypeChecker {
                                 && !hierarchy.has_class(ret_ty)
                             {
                                 return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
-                            } else if let Some(open) = ret_ty.find('(') {
-                                return_types
-                                    .push(InferredType::known(EcoString::from(&ret_ty[..open])));
                             } else {
-                                return_types.push(InferredType::known(ret_ty.clone()));
+                                // BT-1576 / BT-2025: preserve the existing
+                                // (type_args-dropping) behaviour but route
+                                // through the `base_name_of_string` helper
+                                // to satisfy the `no .find('(')` grep check.
+                                let base =
+                                    super::type_resolver::base_name_of_string(ret_ty);
+                                if base.len() < ret_ty.len() {
+                                    return_types
+                                        .push(InferredType::known(EcoString::from(base)));
+                                } else {
+                                    return_types.push(InferredType::known(ret_ty.clone()));
+                                }
                             }
                         }
                     } else {
@@ -2472,10 +2482,10 @@ impl TypeChecker {
             }
         }
 
-        // Check for generic return type like "Result(R, E)"
-        if let Some(open) = ret_ty.find('(') {
-            let base = &ret_ty[..open];
-            let inner = &ret_ty[open + 1..ret_ty.len() - 1]; // strip parens
+        // Check for generic return type like "Result(R, E)".
+        // BT-2025: Parenthesis-aware split via the centralised helper.
+        let (base, args_slice) = super::type_resolver::split_generic_base(ret_ty);
+        if let Some(inner) = args_slice {
             let params = Self::split_type_params(inner);
             let mut resolved_args = Vec::new();
             for p in &params {
@@ -2616,33 +2626,32 @@ impl TypeChecker {
                 }
             }
 
-            // Handle any parametric type: TypeName(A, B, ...) parameter types
-            if let Some(open) = param_type.find('(') {
-                if param_type.ends_with(')') {
-                    let declared_base = &param_type[..open];
-                    let inner = &param_type[open + 1..param_type.len() - 1];
-                    let declared_params = Self::split_type_params(inner);
+            // Handle any parametric type: TypeName(A, B, ...) parameter types.
+            // BT-2025: Parenthesis-aware split via the centralised helper.
+            let (declared_base, declared_args_slice) =
+                super::type_resolver::split_generic_base(param_type);
+            if let Some(inner) = declared_args_slice {
+                let declared_params = Self::split_type_params(inner);
 
-                    // Match against the argument's actual type if it's a Known type
-                    if let InferredType::Known {
-                        class_name: arg_class,
-                        type_args,
-                        ..
-                    } = arg_ty
-                    {
-                        // Verify the base class matches (e.g., Block == Block, Result == Result)
-                        if arg_class.as_str() == declared_base && !type_args.is_empty() {
-                            // Zip declared params with actual type args positionally
-                            for (declared, actual) in declared_params.iter().zip(type_args.iter()) {
-                                let decl_eco: EcoString = (*declared).into();
-                                // Only infer if this is a method-local type param
-                                // (single uppercase letter, not a class-level param, not a known class)
-                                if super::is_generic_type_param(&decl_eco)
-                                    && !class_type_params.contains(&decl_eco)
-                                    && !hierarchy.has_class(&decl_eco)
-                                {
-                                    method_subst.insert(decl_eco, actual.clone());
-                                }
+                // Match against the argument's actual type if it's a Known type
+                if let InferredType::Known {
+                    class_name: arg_class,
+                    type_args,
+                    ..
+                } = arg_ty
+                {
+                    // Verify the base class matches (e.g., Block == Block, Result == Result)
+                    if arg_class.as_str() == declared_base && !type_args.is_empty() {
+                        // Zip declared params with actual type args positionally
+                        for (declared, actual) in declared_params.iter().zip(type_args.iter()) {
+                            let decl_eco: EcoString = (*declared).into();
+                            // Only infer if this is a method-local type param
+                            // (single uppercase letter, not a class-level param, not a known class)
+                            if super::is_generic_type_param(&decl_eco)
+                                && !class_type_params.contains(&decl_eco)
+                                && !hierarchy.has_class(&decl_eco)
+                            {
+                                method_subst.insert(decl_eco, actual.clone());
                             }
                         }
                     }

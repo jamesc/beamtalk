@@ -155,9 +155,9 @@ impl TypeChecker {
                         // resolves to the static receiver class. This powers
                         // ADR 0079's typed-lookup API where `Counter named: #c`
                         // should infer as `Result(Counter, Error)`.
-                        if let Some(open) = ret_ty.find('(') {
-                            let base = &ret_ty[..open];
-                            let inner = &ret_ty[open + 1..ret_ty.len() - 1];
+                        let (base, args_slice) =
+                            super::type_resolver::split_generic_base(ret_ty);
+                        if let Some(inner) = args_slice {
                             let params = super::TypeChecker::split_type_params(inner);
                             let resolved_args: Vec<super::InferredType> = params
                                 .iter()
@@ -1097,17 +1097,11 @@ impl TypeChecker {
             });
         }
         // For generic declared types like "Result(Integer, Error)", extract
-        // the base type name and compare structurally.
-        let declared_base = if let Some(open) = declared_type.find('(') {
-            &declared_type[..open]
-        } else {
-            declared_type.as_str()
-        };
-        let value_base = if let Some(open) = value_type.find('(') {
-            &value_type[..open]
-        } else {
-            value_type.as_str()
-        };
+        // the base type name and compare structurally. BT-2025: go through
+        // the centralised `base_name_of_string` helper so the grep for
+        // ad-hoc `.find('(')` slicing stays clean.
+        let declared_base = super::type_resolver::base_name_of_string(declared_type);
+        let value_base = super::type_resolver::base_name_of_string(value_type);
         if value_base == declared_base {
             return true;
         }
@@ -1174,11 +1168,7 @@ impl TypeChecker {
                 // Protocol types are NOT classes in the hierarchy, so is_type_compatible
                 // would return true (conservative unknown-type fallback), masking real errors.
                 if Self::is_protocol_type(decl_arg, hierarchy, protocol_registry) {
-                    let base_protocol = if let Some(open) = decl_arg.find('(') {
-                        &decl_arg[..open]
-                    } else {
-                        decl_arg.as_str()
-                    };
+                    let base_protocol = super::type_resolver::base_name_of_string(decl_arg);
                     if protocol_registry
                         .check_conformance(&val_eco, base_protocol, hierarchy)
                         .is_ok()
@@ -1215,14 +1205,11 @@ impl TypeChecker {
     /// does not produce such deeply nested multi-parameter generic annotations in
     /// string form.
     pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
-        if let Some(open) = type_str.find('(') {
-            let base = type_str[..open].to_string();
-            let args_str = &type_str[open + 1..type_str.len() - 1]; // strip parens
-            let args: Vec<String> = args_str.split(',').map(|s| s.trim().to_string()).collect();
-            (base, args)
-        } else {
-            (type_str.to_string(), vec![])
-        }
+        let (base, args_slice) = super::type_resolver::split_generic_base(type_str);
+        let args: Vec<String> = args_slice
+            .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+            .unwrap_or_default();
+        (base.to_string(), args)
     }
 
     /// Resolves type-position keywords to their class names (static version).
@@ -1321,11 +1308,7 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) {
         // Extract base protocol name for generic protocols (e.g., "Enumerable(T)" → "Enumerable")
-        let base_protocol = if let Some(open) = expected_protocol.find('(') {
-            &expected_protocol[..open]
-        } else {
-            expected_protocol
-        };
+        let base_protocol = super::type_resolver::base_name_of_string(expected_protocol);
 
         match arg_type {
             InferredType::Known { class_name, .. } => {
@@ -1431,11 +1414,7 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) -> bool {
         // Extract base name for generic types
-        let base_name = if let Some(open) = type_name.find('(') {
-            &type_name[..open]
-        } else {
-            type_name
-        };
+        let base_name = super::type_resolver::base_name_of_string(type_name);
 
         // A protocol type is one that's in the registry and NOT a class name
         protocol_registry.has_protocol(base_name) && !hierarchy.has_class(base_name)
