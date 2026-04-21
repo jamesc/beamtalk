@@ -170,6 +170,54 @@ sealed typed Number subclass: Integer
   /// ```
   abs -> Integer => (self < 0) ifTrue: [self negated] ifFalse: [self]
 
+  /// Round to the nearest integer. Identity for Integer.
+  ///
+  /// Provided so numeric code can call `rounded` on any `Number` without
+  /// branching on `Integer` vs `Float`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 rounded       // => 42
+  /// -7 rounded       // => -7
+  /// ```
+  rounded -> Integer => self
+
+  /// Smallest integer greater than or equal to the receiver. Identity for Integer.
+  ///
+  /// Provided so numeric code can call `ceiling` on any `Number` without
+  /// branching on `Integer` vs `Float`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 ceiling       // => 42
+  /// -7 ceiling       // => -7
+  /// ```
+  ceiling -> Integer => self
+
+  /// Largest integer less than or equal to the receiver. Identity for Integer.
+  ///
+  /// Provided so numeric code can call `floor` on any `Number` without
+  /// branching on `Integer` vs `Float`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 floor         // => 42
+  /// -7 floor         // => -7
+  /// ```
+  floor -> Integer => self
+
+  /// Truncate toward zero. Identity for Integer.
+  ///
+  /// Provided so numeric code can call `truncated` on any `Number` without
+  /// branching on `Integer` vs `Float`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 truncated     // => 42
+  /// -7 truncated     // => -7
+  /// ```
+  truncated -> Integer => self
+
   /// Test if the receiver is even.
   ///
   /// ## Examples
