@@ -96,7 +96,10 @@ impl TypeChecker {
 
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
-                method_env.set("self", InferredType::known(class.name.name.clone()));
+                method_env.set(
+                    "self",
+                    super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
+                );
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -131,7 +134,10 @@ impl TypeChecker {
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
                 method_env.in_class_method = true;
-                method_env.set("self", InferredType::known(class.name.name.clone()));
+                method_env.set(
+                    "self",
+                    super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
+                );
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -185,7 +191,10 @@ impl TypeChecker {
 
             let mut method_env = TypeEnv::new();
             method_env.in_class_method = standalone.is_class_method;
-            method_env.set("self", InferredType::known(class_name.clone()));
+            method_env.set(
+                "self",
+                super::type_resolver::receiver_type_for_class(class_name, hierarchy),
+            );
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
             let body_type = self.infer_stmts(
                 &standalone.method.body,
@@ -255,49 +264,16 @@ impl TypeChecker {
 
     /// Resolves a [`TypeAnnotation`] to an [`InferredType`].
     ///
-    /// Handles all annotation variants:
-    /// - `Simple` → `Known { class_name, .. }` with keyword resolution (`nil` → `UndefinedObject`, etc.)
-    /// - `Generic` → `Known { class_name: base, type_args: [resolved...] }`
-    /// - `Union` → `Union(resolved_members)`
-    /// - `FalseOr` → `Union([inner, False])`
-    /// - `SelfType` → `Dynamic` (resolved at call site, not here)
-    /// - `Singleton` → `Known("#name")` (singleton type, compatible with Symbol)
+    /// Thin wrapper around
+    /// [`super::type_resolver::resolve_type_annotation`] that supplies an
+    /// empty substitution map. Call sites that need method-local /
+    /// class-level type-parameter substitution should call the resolver
+    /// function directly with a populated [`super::type_resolver::SubstitutionMap`].
+    ///
+    /// **References:** BT-2025 — centralised parametric type resolution.
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
-        match ann {
-            TypeAnnotation::Simple(type_id) => {
-                if type_id.name.as_str() == "Never" {
-                    return InferredType::Never;
-                }
-                let name = Self::resolve_type_keyword(&type_id.name);
-                InferredType::known(name)
-            }
-            TypeAnnotation::Generic {
-                base, parameters, ..
-            } => {
-                let type_args: Vec<InferredType> = parameters
-                    .iter()
-                    .map(Self::resolve_type_annotation)
-                    .collect();
-                InferredType::Known {
-                    class_name: base.name.clone(),
-                    type_args,
-                    provenance: super::TypeProvenance::Declared(ann.span()),
-                }
-            }
-            TypeAnnotation::Union { types, .. } => {
-                let members: Vec<InferredType> =
-                    types.iter().map(Self::resolve_type_annotation).collect();
-                InferredType::union_of(&members)
-            }
-            TypeAnnotation::FalseOr { inner, .. } => {
-                let inner_ty = Self::resolve_type_annotation(inner);
-                InferredType::union_of(&[inner_ty, InferredType::known("False")])
-            }
-            TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. } => {
-                InferredType::Dynamic(DynamicReason::Unknown)
-            }
-            TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
-        }
+        let subst = super::type_resolver::SubstitutionMap::new();
+        super::type_resolver::resolve_type_annotation(ann, &subst)
     }
 
     /// Resolves type-position keywords to their class names.
@@ -306,6 +282,10 @@ impl TypeChecker {
     /// - `false` → `False`
     /// - `true` → `True`
     /// - Everything else passes through unchanged.
+    ///
+    /// Used by [`resolve_type_name_string`] which parses string-form type
+    /// names (from `ClassHierarchy::state_field_type`). The annotation-based
+    /// resolver lives in [`super::type_resolver`].
     fn resolve_type_keyword(name: &EcoString) -> EcoString {
         match name.as_str() {
             "nil" => "UndefinedObject".into(),
@@ -716,13 +696,17 @@ impl TypeChecker {
                 InferredType::known("String")
             }
 
-            // Super — resolve to parent class type for method validation
+            // Super — resolve to parent class type for method validation.
+            //
+            // BT-2025: Uses the central `receiver_type_for_class` helper so
+            // the parent receiver threads its declared type parameters (if
+            // any). Downstream substitution can then rewrite them to the
+            // concrete bindings inherited from the current receiver.
             Expression::Super(_) => {
-                // Look up current class from 'self' type, then find parent
                 if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
                     if let Some(class_info) = hierarchy.get_class(&class_name) {
                         if let Some(ref parent) = class_info.superclass {
-                            InferredType::known(parent.clone())
+                            super::type_resolver::receiver_type_for_class(parent, hierarchy)
                         } else {
                             InferredType::Dynamic(DynamicReason::Unknown)
                         }
@@ -1081,7 +1065,14 @@ impl TypeChecker {
                     }
 
                     // BT-1576: If the return type is a generic like "Array(R)",
-                    // extract the base class name so completion/chain resolution works.
+                    // extract the base class name so completion/chain
+                    // resolution works.
+                    //
+                    // BT-2025 preserves current (buggy — type_args dropped)
+                    // behaviour here. The fix lives in the follow-up PRs
+                    // (BT-2018..BT-2023); this commit only introduces the
+                    // resolver framework, it does not flip behaviour at the
+                    // call sites. See the parent epic BT-2024.
                     if let Some(open) = ret_ty.find('(') {
                         return InferredType::known(EcoString::from(&ret_ty[..open]));
                     }

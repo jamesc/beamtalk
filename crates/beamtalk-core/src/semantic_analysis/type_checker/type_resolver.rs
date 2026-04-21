@@ -30,6 +30,12 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 
 use super::{DynamicReason, InferredType, TypeProvenance, is_generic_type_param};
 
+// `ClassHierarchy` is threaded through [`receiver_type_for_class`] so the
+// helper can read the target class's declared type parameters. A future
+// evolution of the resolver may also consult the hierarchy for type-alias
+// resolution or existence checks during annotation resolution — at present
+// only the receiver helper needs it.
+
 /// Substitution map from a generic type parameter name to its concrete
 /// [`InferredType`].
 ///
@@ -67,16 +73,13 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 /// * [`TypeAnnotation::Singleton`] — `#name` becomes `Known("#name", [])`,
 ///   matching the existing singleton-as-Symbol-subtype convention.
 ///
-/// The `_hierarchy` parameter is reserved for future uses (e.g. resolving type
-/// aliases or verifying that a named class exists before emitting it). The
-/// current resolver does not consult the hierarchy during resolution — the
-/// "does this class exist?" check happens elsewhere, *after* the annotation is
-/// resolved. Keeping the parameter in the signature lets call sites thread the
-/// hierarchy without a second breaking change later.
+/// The class hierarchy is *not* consulted during annotation resolution —
+/// "does this class exist?" is a call-site decision that happens *after* the
+/// annotation resolves, not during. A future evolution may thread one in for
+/// type-alias resolution; no current caller needs it.
 pub(in crate::semantic_analysis) fn resolve_type_annotation(
     ann: &TypeAnnotation,
     subst: &SubstitutionMap,
-    _hierarchy: &ClassHierarchy,
 ) -> InferredType {
     match ann {
         TypeAnnotation::Simple(type_id) => {
@@ -102,7 +105,7 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         } => {
             let type_args: Vec<InferredType> = parameters
                 .iter()
-                .map(|p| resolve_type_annotation(p, subst, _hierarchy))
+                .map(|p| resolve_type_annotation(p, subst))
                 .collect();
             InferredType::Known {
                 class_name: base.name.clone(),
@@ -113,12 +116,12 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         TypeAnnotation::Union { types, .. } => {
             let members: Vec<InferredType> = types
                 .iter()
-                .map(|t| resolve_type_annotation(t, subst, _hierarchy))
+                .map(|t| resolve_type_annotation(t, subst))
                 .collect();
             InferredType::union_of(&members)
         }
         TypeAnnotation::FalseOr { inner, .. } => {
-            let inner_ty = resolve_type_annotation(inner, subst, _hierarchy);
+            let inner_ty = resolve_type_annotation(inner, subst);
             InferredType::union_of(&[inner_ty, InferredType::known("False")])
         }
         TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. } => {
@@ -238,14 +241,14 @@ mod tests {
     #[test]
     fn simple_class_name_resolves_to_known() {
         let ann = TypeAnnotation::Simple(ident("Integer"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert_eq!(result, InferredType::known("Integer"));
     }
 
     #[test]
     fn simple_nil_keyword_resolves_to_undefined_object() {
         let ann = TypeAnnotation::Simple(ident("nil"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert_eq!(result, InferredType::known("UndefinedObject"));
     }
 
@@ -254,11 +257,11 @@ mod tests {
         let true_ann = TypeAnnotation::Simple(ident("true"));
         let false_ann = TypeAnnotation::Simple(ident("false"));
         assert_eq!(
-            resolve_type_annotation(&true_ann, &empty_subst(), &builtin_hierarchy()),
+            resolve_type_annotation(&true_ann, &empty_subst()),
             InferredType::known("True")
         );
         assert_eq!(
-            resolve_type_annotation(&false_ann, &empty_subst(), &builtin_hierarchy()),
+            resolve_type_annotation(&false_ann, &empty_subst()),
             InferredType::known("False")
         );
     }
@@ -266,7 +269,7 @@ mod tests {
     #[test]
     fn simple_never_keyword_resolves_to_never() {
         let ann = TypeAnnotation::Simple(ident("Never"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert_eq!(result, InferredType::Never);
     }
 
@@ -277,7 +280,7 @@ mod tests {
         let ann = TypeAnnotation::Simple(ident("T"));
         let mut subst = SubstitutionMap::new();
         subst.insert("T".into(), InferredType::known("Integer"));
-        let result = resolve_type_annotation(&ann, &subst, &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &subst);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
@@ -287,7 +290,7 @@ mod tests {
         // downstream code (e.g. `is_generic_type_param`-aware call sites) can
         // decide whether to fall back to Dynamic.
         let ann = TypeAnnotation::Simple(ident("T"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert_eq!(result, InferredType::known("T"));
     }
 
@@ -303,7 +306,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         match result {
             InferredType::Known {
                 class_name,
@@ -335,7 +338,7 @@ mod tests {
             parameters: vec![inner],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         let InferredType::Known {
             class_name,
             type_args,
@@ -374,7 +377,7 @@ mod tests {
         let mut subst = SubstitutionMap::new();
         subst.insert("T".into(), InferredType::known("Integer"));
         subst.insert("E".into(), InferredType::known("String"));
-        let result = resolve_type_annotation(&ann, &subst, &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &subst);
         let InferredType::Known {
             class_name,
             type_args,
@@ -400,7 +403,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union");
         };
@@ -426,7 +429,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union");
         };
@@ -450,7 +453,7 @@ mod tests {
             inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union, got {result:?}");
         };
@@ -464,14 +467,14 @@ mod tests {
     #[test]
     fn self_type_resolves_to_dynamic() {
         let ann = TypeAnnotation::SelfType { span: span() };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
     #[test]
     fn self_class_resolves_to_dynamic() {
         let ann = TypeAnnotation::SelfClass { span: span() };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
@@ -483,7 +486,7 @@ mod tests {
             name: "ok".into(),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), &builtin_hierarchy());
+        let result = resolve_type_annotation(&ann, &empty_subst());
         assert_eq!(result, InferredType::known("#ok"));
     }
 
