@@ -20,7 +20,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
-use ecow::{EcoString, eco_format};
+use ecow::EcoString;
 
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -658,20 +658,24 @@ impl TypeChecker {
             return; // Dynamic or Union body — can't reliably check
         };
 
-        // For `-> Self`, the expected type is the class itself
-        // For `-> Generic(...)`, extract the base type name for compatibility checking
-        // For `-> Union` / `-> FalseOr`, resolve via resolve_type_annotation
+        // Resolve the declared return type. The `-> Self` case needs the
+        // static receiver class (which the plain annotation resolver does not
+        // thread), so handle it specially via `receiver_type_for_class`.
+        // `-> Self class` returns a class object — existing body-type
+        // comparison cannot meaningfully validate this, so skip (BT-1952).
+        //
+        // BT-2025: All other arms — including `Generic` — go through the
+        // central `resolve_type_annotation` resolver. Previously the Generic
+        // arm dropped `type_args` via `InferredType::known(base.name)`;
+        // behaviour is preserved here because the downstream
+        // `is_type_compatible(actual_ty, expected_ty, ...)` comparison looks
+        // only at the `class_name`, never at the type args.
         let expected = match declared {
-            TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
-            TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
-            // BT-1952: Self class returns a class object, not an instance.
-            // Skip return-body validation since we can't meaningfully compare.
-            TypeAnnotation::SelfClass { .. } => return,
-            TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
-            TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
-                Self::resolve_type_annotation(declared)
+            TypeAnnotation::SelfType { .. } => {
+                super::type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
-            TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
+            TypeAnnotation::SelfClass { .. } => return,
+            _ => Self::resolve_type_annotation(declared),
         };
 
         match &expected {
