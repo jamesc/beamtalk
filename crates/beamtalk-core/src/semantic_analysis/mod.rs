@@ -281,6 +281,34 @@ pub fn analyse_with_natives(
         options.stdlib_mode,
         options.skip_module_expression_lint,
         pre_loaded_classes,
+        vec![],
+        None,
+        options.current_package.as_deref(),
+        native_type_registry,
+    )
+}
+
+/// Analyse a module with compiler options, pre-loaded classes, pre-loaded
+/// protocols, and native type registry.
+///
+/// BT-2006: Mirrors `analyse_with_natives` but also accepts protocol
+/// definitions extracted from other source files (e.g. `BUnit` fixtures) so
+/// the unresolved-class validator and type checker recognise fixture-only
+/// protocol names when analysing a downstream module.
+pub fn analyse_with_natives_and_protocols(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+) -> AnalysisResult {
+    analyse_full_with_natives(
+        module,
+        &[],
+        options.stdlib_mode,
+        options.skip_module_expression_lint,
+        pre_loaded_classes,
+        pre_loaded_protocols,
         None,
         options.current_package.as_deref(),
         native_type_registry,
@@ -348,6 +376,7 @@ fn analyse_full(
         stdlib_mode,
         skip_module_expression_lint,
         pre_loaded_classes,
+        vec![],
         known_packages,
         current_package,
         None,
@@ -366,6 +395,7 @@ fn analyse_full_with_natives(
     stdlib_mode: bool,
     skip_module_expression_lint: bool,
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
     known_packages: Option<std::collections::HashSet<String>>,
     current_package: Option<&str>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
@@ -416,6 +446,26 @@ fn analyse_full_with_natives(
     // Register protocol definitions from the module into the protocol registry.
     // Must happen after the class hierarchy is fully built (for namespace collision
     // checks) and before type checking (so protocol names resolve in type annotations).
+    //
+    // BT-2006: Seed the registry with pre-loaded protocols (e.g. BUnit fixture
+    // protocols) *before* registering the current module's protocols so that
+    // fixture protocol names are visible to `extending:` resolution and the
+    // unresolved-class validator. Skip pre-loaded entries whose names also
+    // appear in the current module — this mirrors `cross_file_class_infos`
+    // and prevents spurious "Duplicate protocol definition" errors when a
+    // fixture file is itself being compiled (its own protocols are already
+    // present in the pre_loaded slice).
+    if !pre_loaded_protocols.is_empty() {
+        let current_names: std::collections::HashSet<&EcoString> =
+            module.protocols.iter().map(|p| &p.name.name).collect();
+        let cross_file_protocols: Vec<_> = pre_loaded_protocols
+            .into_iter()
+            .filter(|p| !current_names.contains(&p.name))
+            .collect();
+        result
+            .protocol_registry
+            .add_pre_loaded(cross_file_protocols);
+    }
     if !module.protocols.is_empty() {
         let proto_diags = result
             .protocol_registry

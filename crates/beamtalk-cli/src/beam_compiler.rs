@@ -684,6 +684,12 @@ pub struct ClassHierarchyContext {
     /// Injected into the type checker's hierarchy during Pass 2 so cross-file
     /// method resolution works without reading BEAM files.
     pub pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Full `ProtocolInfo` entries from other source files in the compilation
+    /// unit (e.g. `BUnit` fixtures). Seeded into the protocol registry during
+    /// semantic analysis so the unresolved-class validator and type checker
+    /// recognise protocol names defined outside the current module (BT-2006).
+    pub pre_loaded_protocols:
+        Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
 }
 
 /// Compilation context bundling hierarchy data with dependency resolution settings.
@@ -855,10 +861,11 @@ pub(crate) fn compile_source_with_bindings(
             &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols(
         &module,
         options,
         cross_file_classes.clone(),
+        ctx.hierarchy.pre_loaded_protocols.clone(),
         ctx.native_type_registry.clone(),
     );
     diagnostics.extend(analysis_result.diagnostics);
@@ -1012,6 +1019,7 @@ pub(crate) fn compile_source_with_bindings(
         class_module_index: ctx.hierarchy.class_module_index.clone(),
         class_superclass_index: ctx.hierarchy.class_superclass_index.clone(),
         pre_loaded_classes: cross_file_classes,
+        pre_loaded_protocols: Vec::new(),
     };
     write_core_erlang_with_bindings(
         &module,

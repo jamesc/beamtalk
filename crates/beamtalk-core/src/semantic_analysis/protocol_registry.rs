@@ -68,7 +68,7 @@ pub struct ProtocolInfo {
 
 impl ProtocolInfo {
     /// Build a `ProtocolInfo` from a parsed `ProtocolDefinition` AST node.
-    fn from_definition(def: &ProtocolDefinition) -> Self {
+    pub fn from_definition(def: &ProtocolDefinition) -> Self {
         let make_req = |sig: &crate::ast::ProtocolMethodSignature| ProtocolMethodRequirement {
             selector: sig.selector.name(),
             arity: sig.selector.arity(),
@@ -217,6 +217,34 @@ impl ProtocolRegistry {
     pub fn new() -> Self {
         Self {
             protocols: HashMap::new(),
+        }
+    }
+
+    /// Extract `ProtocolInfo` entries from a parsed module without registering them.
+    ///
+    /// BT-2006: Mirrors `ClassHierarchy::extract_class_infos` — used by the
+    /// `BUnit` test pipeline (and any other caller that pre-scans fixture
+    /// files) to collect protocol metadata ahead of compiling a downstream
+    /// module that references those protocol names.
+    #[must_use]
+    pub fn extract_protocol_infos(module: &Module) -> Vec<ProtocolInfo> {
+        module
+            .protocols
+            .iter()
+            .map(ProtocolInfo::from_definition)
+            .collect()
+    }
+
+    /// Seed the registry with protocols pre-compiled from other source files.
+    ///
+    /// BT-2006: The `BUnit` compile path parses fixture files, extracts their
+    /// `ProtocolInfo`s via `extract_protocol_infos`, and injects them here so
+    /// the unresolved-class validator and type checker recognise fixture-only
+    /// protocol names when analysing the test module. Skips entries whose
+    /// names are already registered (current-module definitions win).
+    pub fn add_pre_loaded(&mut self, protocols: Vec<ProtocolInfo>) {
+        for info in protocols {
+            self.protocols.entry(info.name.clone()).or_insert(info);
         }
     }
 

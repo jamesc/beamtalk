@@ -3846,3 +3846,76 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
         "Non-class bindings should not trigger shadow warnings, got: {shadow_warnings:?}"
     );
 }
+
+// BT-2006: Fixture-sourced protocol names must resolve in downstream modules.
+//
+// The BUnit test pipeline compiles fixture files, extracts their ProtocolInfo,
+// and threads them through as `pre_loaded_protocols`. This test verifies that a
+// module referencing a protocol name supplied via that slot (and NOT defined in
+// the module itself) does not trigger an `Unresolved class` warning.
+#[test]
+fn fixture_sourced_protocol_name_is_not_unresolved() {
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use crate::semantic_analysis::protocol_registry::ProtocolInfo;
+    use crate::source_analysis::DiagnosticCategory;
+
+    // Module body references `Displayable` as a class reference, mirroring
+    // `Displayable requiredMethods` in `protocol_queries_test.bt`.
+    let src = "Displayable requiredMethods.";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    // Provide at least one pre-loaded class so `has_cross_file_classes` is
+    // true and the unresolved-class validator actually runs. Without this
+    // sentinel, the check is suppressed and the test would pass vacuously.
+    let dummy_class = ClassInfo {
+        name: EcoString::from("DummyClass"),
+        superclass: Some(EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+
+    let fixture_protocol = ProtocolInfo {
+        name: EcoString::from("Displayable"),
+        type_params: vec![],
+        type_param_bounds: vec![],
+        extending: None,
+        methods: vec![],
+        class_methods: vec![],
+        span: Span::default(),
+    };
+
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_protocols(
+        &module,
+        &options,
+        vec![dummy_class],
+        vec![fixture_protocol],
+        None,
+    );
+
+    let unresolved: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::UnresolvedClass))
+        .collect();
+
+    assert!(
+        unresolved.is_empty(),
+        "Fixture-sourced protocol name should not trigger unresolved-class warnings, got: {unresolved:?}"
+    );
+}
