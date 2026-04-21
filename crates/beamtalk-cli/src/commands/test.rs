@@ -237,15 +237,23 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 
 /// Build class → module name and class → superclass indexes from fixture files.
 ///
-/// Parses each fixture file to extract class names and superclass relationships,
-/// then maps each class name to its module name (e.g. `"Env"` → `"bt@env"` for
-/// `fixtures/scheme/env.bt`) and to its superclass name (e.g. `"ValueSubCircle"`
-/// → `"ValueBaseShape"`).
+/// Parses each fixture file to extract class names, superclass relationships,
+/// and protocol definitions. Returns:
 ///
-/// Both indexes are merged into the pipeline before fixture compilation so that
-/// cross-file references and class hierarchy resolution work correctly — in
-/// particular, Value sub-subclasses are recognized as value types rather than
-/// defaulting to actor codegen (BT-1564).
+/// 1. A module index mapping each class name to its module name (e.g. `"Env"`
+///    → `"bt@env"` for `fixtures/scheme/env.bt`).
+/// 2. A superclass index mapping each class name to its superclass (e.g.
+///    `"ValueSubCircle"` → `"ValueBaseShape"`).
+/// 3. A `Vec<ClassInfo>` of full class metadata for validator/type-checker
+///    resolution.
+/// 4. A `Vec<ProtocolInfo>` of fixture-defined protocols (BT-2006) so the
+///    unresolved-class validator recognises their names when analysing test
+///    modules that reference them.
+///
+/// All four outputs are merged into the pipeline before fixture compilation so
+/// that cross-file references and class hierarchy resolution work correctly —
+/// in particular, Value sub-subclasses are recognized as value types rather
+/// than defaulting to actor codegen (BT-1564).
 #[allow(clippy::type_complexity)]
 fn build_fixture_class_indexes(
     fixture_files: &[Utf8PathBuf],
@@ -253,10 +261,12 @@ fn build_fixture_class_indexes(
     HashMap<String, String>,
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
     let mut class_infos = Vec::new();
+    let mut protocol_infos = Vec::new();
 
     for file in fixture_files {
         let module_name = fixture_module_name(file)?;
@@ -270,6 +280,14 @@ fn build_fixture_class_indexes(
         class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
+        // BT-2006: Extract ProtocolInfo so fixture-defined protocol names are
+        // recognised by the unresolved-class validator when compiling test files.
+        protocol_infos.extend(
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+                &module,
+            ),
+        );
+
         for class in &module.classes {
             let class_name = class.name.name.to_string();
             module_index.insert(class_name.clone(), module_name.clone());
@@ -280,7 +298,7 @@ fn build_fixture_class_indexes(
         }
     }
 
-    Ok((module_index, superclass_index, class_infos))
+    Ok((module_index, superclass_index, class_infos, protocol_infos))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -780,6 +798,9 @@ struct TestPipeline {
     class_superclass_index: HashMap<String, String>,
     /// BT-1559: Cross-file class metadata for type checker hierarchy resolution.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// BT-2006: Fixture-defined protocols so the unresolved-class validator
+    /// and type checker recognise protocol names declared in `fixtures/*.bt`.
+    fixture_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Fixture class-name to module-name index.
     fixture_class_index: HashMap<String, String>,
     /// Module names of pre-compiled fixtures (from `fixtures/` directory).
@@ -1033,6 +1054,7 @@ fn initialize_pipeline(
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        fixture_protocol_infos: Vec::new(),
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
         all_fixture_modules: Vec::new(),
@@ -1066,13 +1088,17 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     // where cross-package and cross-fixture references are allowed.
     // BT-1564: Also build a fixture superclass index so the class hierarchy
     // resolves correctly for Value sub-subclasses defined across fixture files.
-    let (fixture_class_index, fixture_superclass_index, fixture_class_infos) =
-        if fixtures_dir.is_dir() {
-            let fixture_files = find_test_files(&fixtures_dir)?;
-            build_fixture_class_indexes(&fixture_files)?
-        } else {
-            (HashMap::new(), HashMap::new(), Vec::new())
-        };
+    let (
+        fixture_class_index,
+        fixture_superclass_index,
+        fixture_class_infos,
+        fixture_protocol_infos,
+    ) = if fixtures_dir.is_dir() {
+        let fixture_files = find_test_files(&fixtures_dir)?;
+        build_fixture_class_indexes(&fixture_files)?
+    } else {
+        (HashMap::new(), HashMap::new(), Vec::new(), Vec::new())
+    };
     pipeline
         .class_module_index
         .extend(fixture_class_index.clone());
@@ -1084,11 +1110,17 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     // name collision between abstract_shape.bt and class_method_self_new.bt was
     // resolved by renaming abstract_shape's class to AbstractShape.
     pipeline.all_class_infos.extend(fixture_class_infos);
+    // BT-2006: Fixture-defined protocols need to flow through to each test
+    // file's compilation so their names resolve in the unresolved-class validator.
+    pipeline
+        .fixture_protocol_infos
+        .extend(fixture_protocol_infos);
 
     let fixture_hierarchy = ClassHierarchyContext {
         class_module_index: pipeline.class_module_index.clone(),
         class_superclass_index: pipeline.class_superclass_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
+        pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
     };
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
@@ -1202,6 +1234,7 @@ fn compile_single_test_file(
         class_module_index: file_class_index.clone(),
         class_superclass_index: file_super_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
+        pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
     };
 
     // Handle deprecated @load directives as fallback.
@@ -2150,14 +2183,17 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
+        // BT-2006: fixture also declares a protocol so we can assert the
+        // returned `protocol_infos` carries it through.
         fs::write(
             dir.join("counter.bt"),
-            "Object subclass: Counter\n  count => 0\n",
+            "Protocol define: Tickable\n  tick -> Integer\n\n\
+             Object subclass: Counter\n  count => 0\n",
         )
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, superclass_index, _class_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("Counter").map(String::as_str),
@@ -2166,6 +2202,10 @@ mod tests {
         assert_eq!(
             superclass_index.get("Counter").map(String::as_str),
             Some("Object")
+        );
+        assert!(
+            protocol_infos.iter().any(|p| p.name == "Tickable"),
+            "expected fixture-defined protocol `Tickable` to be extracted"
         );
     }
 
@@ -2183,7 +2223,7 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so env.bt → bt@env
         let files = vec![subdir.join("env.bt")];
-        let (module_index, superclass_index, _class_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),
@@ -2192,6 +2232,10 @@ mod tests {
         assert_eq!(
             superclass_index.get("SchemeEnv").map(String::as_str),
             Some("Object")
+        );
+        assert!(
+            protocol_infos.is_empty(),
+            "fixture has no protocols — extracted list should be empty"
         );
     }
 

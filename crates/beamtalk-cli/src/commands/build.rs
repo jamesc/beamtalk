@@ -722,6 +722,7 @@ fn execute_build_passes(
             class_module_index: index.class_module_index.clone(),
             class_superclass_index: index.class_superclass_index.clone(),
             pre_loaded_classes: index.all_class_infos.clone(),
+            pre_loaded_protocols: Vec::new(),
         },
         dep_registry: registry_ref,
         strict_deps,
@@ -2848,6 +2849,7 @@ mod tests {
                     class_module_index: class_module_index.clone(),
                     class_superclass_index: class_superclass_index.clone(),
                     pre_loaded_classes: all_class_infos.clone(),
+                    pre_loaded_protocols: Vec::new(),
                 },
                 ..CompileContext::default()
             },
@@ -2933,6 +2935,7 @@ mod tests {
                     class_module_index: class_module_index.clone(),
                     class_superclass_index: class_superclass_index.clone(),
                     pre_loaded_classes: all_class_infos.clone(),
+                    pre_loaded_protocols: Vec::new(),
                 },
                 ..CompileContext::default()
             },

@@ -416,6 +416,7 @@ fn compile_dependency_with_context(
             class_module_index: class_module_index.clone(),
             class_superclass_index: class_superclass_index.clone(),
             pre_loaded_classes: all_class_infos.clone(),
+            pre_loaded_protocols: Vec::new(),
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
