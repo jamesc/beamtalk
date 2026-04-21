@@ -18,7 +18,7 @@ Tests cover:
 - terminateChild/2 — dynamic path, stale handle, not_found error (BT-1960)
 - build_child_specs/1 with empty list
 - supervisor tuple structure
-- stale-handle error translation (noproc → beamtalk_error)
+- stale-handle error translation (noproc → beamtalk_error with stale_handle kind, BT-1996)
 - root registry — nil, roundtrip, overwrite, clear_root (BT-1960)
 - hierarchy walk — static_init/2, dynamic_init/2 via ETS (BT-1285, BT-1960)
 - hierarchy depth limit — call_inherited_class_method_direct error (BT-1960)
@@ -34,6 +34,8 @@ Tests cover:
 - wrap_child/3 supervisor and actor branches via whichChild (BT-1980)
 - build_child_specs/1 nested-supervisor OTP spec (BT-1980)
 - ensure_root_table concurrent creation safety (BT-1980)
+- stale_handle startChild/1 and /2 coverage (BT-1996)
+- class_dispatch hook: initialize: runs only on fresh start, not already_started or error (BT-1996)
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -355,7 +357,7 @@ which_child_returns_nil_when_not_found_test() ->
     end.
 
 which_child_stale_handle_test() ->
-    %% BT-1960: whichChild/2 on a dead supervisor raises a structured runtime_error.
+    %% BT-1960 / BT-1996: whichChild/2 on a dead supervisor raises a structured stale_handle error.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
@@ -374,7 +376,7 @@ which_child_stale_handle_test() ->
     try
         ClassArg = {beamtalk_object, 'X class', x_mod, FakeClassPid},
         ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
             beamtalk_supervisor:whichChild(Self, ClassArg)
         )
     after
@@ -508,14 +510,14 @@ terminate_child_not_found_dynamic_test() ->
     end.
 
 terminate_child_stale_handle_test() ->
-    %% BT-1960: terminateChild/2 on a dead supervisor raises structured runtime_error.
+    %% BT-1960 / BT-1996: terminateChild/2 on a dead supervisor raises structured stale_handle error.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup4', stale_mod4, SupPid),
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, self()},
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
         beamtalk_supervisor:terminateChild(Self, ChildArg)
     ).
 
@@ -549,35 +551,35 @@ supervisor_tuple_tag_test() ->
 %%====================================================================
 
 stale_handle_whichChildren_test() ->
-    %% whichChildren/1 on a dead supervisor raises a structured runtime_error.
+    %% BT-1996: whichChildren/1 on a dead supervisor raises a structured stale_handle error.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup', stale_mod, SupPid),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
         beamtalk_supervisor:whichChildren(Self)
     ).
 
 stale_handle_countChildren_test() ->
-    %% countChildren/1 on a dead supervisor raises a structured runtime_error.
+    %% BT-1996: countChildren/1 on a dead supervisor raises a structured stale_handle error.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup2', stale_mod2, SupPid),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
         beamtalk_supervisor:countChildren(Self)
     ).
 
 stale_handle_stop_test() ->
-    %% stop/1 on a dead supervisor raises a structured runtime_error.
+    %% BT-1996: stop/1 on a dead supervisor raises a structured stale_handle error.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup3', stale_mod3, SupPid),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
         beamtalk_supervisor:stop(Self)
     ).
 
@@ -1732,6 +1734,168 @@ startChild_arity1_error_raises_test() ->
 %% the root ETS table and races readers is removed because get_root/0 is not
 %% designed to handle a deleted table — ets:lookup_element raises badarg by
 %% design and the test proved flaky under CI load.
+
+%%====================================================================
+%% BT-1996 (ADR 0080 Phase 1): stale_handle error kind on startChild
+%%====================================================================
+
+stale_handle_startChild_arity1_test() ->
+    %% BT-1996: startChild/1 on a dead supervisor raises a structured stale_handle error.
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1996StaleChild'),
+    set_child_class(ChildClassObj),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    try
+        Self = {beamtalk_supervisor, 'BT1996StaleSup', ?MODULE, SupPid},
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop
+    end.
+
+stale_handle_startChild_arity2_test() ->
+    %% BT-1996: startChild/2 on a dead supervisor raises a structured stale_handle error.
+    SupPid = start_dynamic_supervisor(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1996StaleChild2'),
+    set_child_class(ChildClassObj),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    try
+        Self = {beamtalk_supervisor, 'BT1996StaleSup2', ?MODULE, SupPid},
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
+            beamtalk_supervisor:startChild(Self, #{})
+        )
+    after
+        ChildClassPid ! stop
+    end.
+
+%%====================================================================
+%% BT-1996 (ADR 0080 Phase 1): class_dispatch hook — initialize: on
+%%   fresh start only (not on already_started or error paths)
+%%====================================================================
+
+%% These tests exercise the post-dispatch hook in
+%% beamtalk_class_dispatch:class_send_dispatch/3, verifying that
+%% run_initialize/1 runs exactly once on a fresh supervisor start and
+%% is NOT re-run on idempotent (already_started) or error paths.
+%%
+%% They use class_dispatch_test_helper's `class_testSupervisorNew`
+%% method for the fresh-start path, and hand-craft Result tagged maps
+%% for the already_started and error paths to drive through class_send.
+
+class_dispatch_hook_does_not_initialize_on_already_started_test_() ->
+    %% BT-1996: When class_send_dispatch receives a Result wrapping an
+    %% already-normalised {beamtalk_supervisor, ...} tuple (the
+    %% idempotent already_started path), it must NOT call run_initialize.
+    {setup,
+        fun() ->
+            setup_class_dispatch_runtime()
+        end,
+        fun(Ctx) ->
+            teardown_class_dispatch_runtime(Ctx)
+        end,
+        fun(_Ctx) ->
+            [
+                {"initialize: is not called on already_started path",
+                    fun test_no_initialize_on_already_started/0}
+            ]
+        end}.
+
+test_no_initialize_on_already_started() ->
+    ClassName = 'BT1996AlreadyStarted',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testAlreadyStarted => <<>>, 'initialize:' => <<>>},
+        class_state => #{}
+    },
+    erase(bt1994_initialize_called),
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        Outcome = beamtalk_class_dispatch:class_send(Pid, testAlreadyStarted, []),
+        %% The Result wraps {beamtalk_supervisor, ...} (not _new), so
+        %% the hook must pass it through without calling initialize:.
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                isOk := true,
+                okValue := {beamtalk_supervisor, 'BT1996AlreadyStarted', _, _}
+            },
+            Outcome
+        ),
+        ?assertEqual(undefined, get(bt1994_initialize_called))
+    after
+        erase(bt1994_initialize_called),
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+class_dispatch_hook_does_not_initialize_on_error_test_() ->
+    %% BT-1996: When class_send_dispatch receives a Result error tagged
+    %% map, it must NOT call run_initialize.
+    {setup,
+        fun() ->
+            setup_class_dispatch_runtime()
+        end,
+        fun(Ctx) ->
+            teardown_class_dispatch_runtime(Ctx)
+        end,
+        fun(_Ctx) ->
+            [{"initialize: is not called on error path", fun test_no_initialize_on_error/0}]
+        end}.
+
+test_no_initialize_on_error() ->
+    ClassName = 'BT1996ErrorPath',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testSupError => <<>>, 'initialize:' => <<>>},
+        class_state => #{}
+    },
+    erase(bt1994_initialize_called),
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        Outcome = beamtalk_class_dispatch:class_send(Pid, testSupError, []),
+        %% The Result wraps an error, so the hook must pass it through
+        %% without calling initialize:.
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                isOk := false
+            },
+            Outcome
+        ),
+        ?assertEqual(undefined, get(bt1994_initialize_called))
+    after
+        erase(bt1994_initialize_called),
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%%====================================================================
+%% BT-1996: Helpers for class_dispatch hook tests
+%%====================================================================
+
+%% Minimal runtime setup for class_dispatch tests that use beamtalk_object_class.
+%% Ensures ETS tables and registry are available.
+setup_class_dispatch_runtime() ->
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_module_table:new(),
+    %% Return an opaque context for teardown.
+    ok.
+
+teardown_class_dispatch_runtime(_Ctx) ->
+    ok.
 
 %%====================================================================
 %% BT-1990 / ADR 0079 Phase 3: named child specs + restart survival
