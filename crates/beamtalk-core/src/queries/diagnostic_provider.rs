@@ -32,6 +32,120 @@ use crate::semantic_analysis;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
+/// Project-level context for the unified diagnostic pipeline (BT-2009).
+///
+/// Bundles all optional inputs that vary between the CLI compiler and the LSP.
+/// Both callers construct a `ProjectDiagnosticContext` and pass it to
+/// [`compute_project_diagnostics`], ensuring the same post-analysis passes
+/// run in both environments.
+///
+/// Fields that the LSP cannot supply (e.g. `dep_registry` in standalone mode)
+/// are `Option` / default and the pipeline skips the corresponding pass.
+#[derive(Debug, Default)]
+pub struct ProjectDiagnosticContext<'a> {
+    /// Compiler options (`stdlib_mode`, `warnings_as_errors`, etc.).
+    pub options: crate::CompilerOptions,
+    /// Cross-file class metadata from other compilation units.
+    /// Injected into the class hierarchy before type checking so that
+    /// cross-file method resolution works.
+    pub cross_file_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Pre-loaded protocol definitions from other source files.
+    pub pre_loaded_protocols: Vec<crate::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Native type registry for FFI call inference (ADR 0075).
+    pub native_type_registry:
+        Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
+    /// Optional dependency registry for cross-package collision detection.
+    pub dep_registry: Option<&'a crate::semantic_analysis::DependencyRegistry>,
+    /// Whether to promote transitive dependency usage warnings to errors.
+    pub strict_deps: bool,
+}
+
+/// Unified post-analysis diagnostic pipeline (BT-2009).
+///
+/// Runs semantic analysis followed by all post-analysis passes (stdlib name
+/// shadowing, collision detection, transitive dep usage, unresolved-class
+/// hint enrichment) and finally applies `@expect` directives. Both the CLI
+/// compiler and the LSP diagnostic provider call this function so that
+/// diagnostics are consistent across environments.
+///
+/// # Arguments
+///
+/// * `module` - The parsed AST
+/// * `parse_diagnostics` - Diagnostics from the parser
+/// * `ctx` - Project-level context bundling all optional inputs
+///
+/// # Returns
+///
+/// A list of all diagnostics (errors and warnings) after `@expect` suppression.
+#[must_use]
+pub fn compute_project_diagnostics(
+    module: &Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    ctx: &ProjectDiagnosticContext<'_>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = parse_diagnostics;
+
+    // Run semantic analysis with the richest available entry point.
+    let analysis_result = crate::semantic_analysis::analyse_with_natives_and_protocols(
+        module,
+        &ctx.options,
+        ctx.cross_file_classes.clone(),
+        ctx.pre_loaded_protocols.clone(),
+        ctx.native_type_registry.clone(),
+    );
+    diagnostics.extend(analysis_result.diagnostics);
+
+    // BT-1732: Enrich unresolved class warnings with dependency package hints.
+    if let Some(registry) = ctx.dep_registry {
+        for diag in &mut diagnostics {
+            if diag.category == Some(DiagnosticCategory::UnresolvedClass) {
+                if let Some(class_name) = diag
+                    .message
+                    .strip_prefix("Unresolved class `")
+                    .and_then(|s| s.strip_suffix('`'))
+                {
+                    if let Some(exports) = registry.lookup(class_name) {
+                        if let Some(export) = exports.first() {
+                            diag.hint = Some(
+                                format!(
+                                    "Did you mean `{class_name}` from dependency '{}'? \
+                                     Ensure the dependency is declared in beamtalk.toml.",
+                                    export.package
+                                )
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // BT-738: Warn when user code shadows a stdlib class name.
+    if !ctx.options.stdlib_mode {
+        let mut stdlib_shadow_diags = Vec::new();
+        crate::semantic_analysis::check_stdlib_name_shadowing(module, &mut stdlib_shadow_diags);
+        diagnostics.extend(stdlib_shadow_diags);
+    }
+
+    // BT-1653 / ADR 0070 Phase 3: Cross-package class collision detection
+    // and BT-1654: transitive dependency usage warnings.
+    if let Some(registry) = ctx.dep_registry {
+        crate::semantic_analysis::check_collision_at_use_sites(module, registry, &mut diagnostics);
+        crate::semantic_analysis::check_transitive_dep_usage(
+            module,
+            registry,
+            ctx.strict_deps,
+            &mut diagnostics,
+        );
+    }
+
+    // BT-782: Apply @expect directives to suppress matching diagnostics.
+    apply_expect_directives(module, &mut diagnostics);
+
+    diagnostics
+}
+
 /// Computes diagnostics for a module.
 ///
 /// This runs both parse-time and semantic analysis diagnostics.
@@ -1590,6 +1704,168 @@ Object subclass: Foo
         assert!(
             !dnu,
             "@expect dnu at module level should still suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-2009: Unified pipeline consistency ──────────────────────────────────
+
+    #[test]
+    fn project_diagnostics_matches_legacy_path() {
+        // BT-2009: The unified `compute_project_diagnostics` must produce the
+        // same diagnostics as the old `compute_diagnostics_with_native_types`
+        // when given equivalent inputs (no cross-file classes, no dep registry).
+        let source = "42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        // Old path
+        let old_diags = compute_diagnostics_with_native_types(&module, parse_diags.clone(), None);
+
+        // New unified path with default context (no project-level inputs)
+        let ctx = ProjectDiagnosticContext::default();
+        let new_diags = compute_project_diagnostics(&module, parse_diags, &ctx);
+
+        // Both should contain a DNU hint
+        let old_dnu = old_diags
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        let new_dnu = new_diags
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert_eq!(
+            old_dnu, new_dnu,
+            "Old and new pipelines should agree on DNU diagnostics"
+        );
+
+        // Same number of diagnostics
+        assert_eq!(
+            old_diags.len(),
+            new_diags.len(),
+            "Old path produced {} diagnostics, new path produced {}: \nold: {old_diags:?}\nnew: {new_diags:?}",
+            old_diags.len(),
+            new_diags.len(),
+        );
+    }
+
+    #[test]
+    fn project_diagnostics_expect_type_in_typed_class() {
+        // BT-2009: This is the exact case that previously diverged between CLI
+        // and LSP. In a typed class, calling a method with no return annotation
+        // triggers "expression inferred as Dynamic". `@expect type` must
+        // suppress that warning in both pipelines.
+        let source = "\
+typed Object subclass: Callee
+  helper => 42
+
+typed Object subclass: Caller
+  @expect type
+  run => Callee new helper
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        let ctx = ProjectDiagnosticContext::default();
+        let diagnostics = compute_project_diagnostics(&module, parse_diags, &ctx);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect type should not be stale in unified pipeline \
+             (BT-2009 divergence case), got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn project_diagnostics_with_cross_file_classes() {
+        // BT-2009: When cross-file class metadata is provided, the unified
+        // pipeline should use it for type checking. This verifies the
+        // cross-file classes are actually threaded through to semantic analysis.
+
+        // Parse a "helper" module to extract its ClassInfo
+        let helper_source = "\
+Object subclass: Helper
+  greet => 42
+";
+        let helper_tokens = lex_with_eof(helper_source);
+        let (helper_module, _) = parse(helper_tokens);
+        let helper_infos =
+            crate::semantic_analysis::ClassHierarchy::extract_class_infos(&helper_module);
+
+        // Parse a "user" module that references the helper class.
+        // With cross-file classes, the type checker knows about Helper
+        // and can verify `greet` exists, so no DNU hint is produced.
+        let user_source = "Helper new greet";
+        let user_tokens = lex_with_eof(user_source);
+        let (user_module, parse_diags) = parse(user_tokens);
+
+        // With cross-file classes: Helper is known, `greet` resolves cleanly.
+        let ctx = ProjectDiagnosticContext {
+            cross_file_classes: helper_infos,
+            ..Default::default()
+        };
+        let diagnostics = compute_project_diagnostics(&user_module, parse_diags, &ctx);
+
+        // `greet` should NOT produce a DNU hint when Helper is in the hierarchy.
+        let dnu_greet = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand") && d.message.contains("greet"));
+        assert!(
+            !dnu_greet,
+            "With cross-file classes, 'greet' should be resolved, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn project_diagnostics_stdlib_shadowing_in_non_stdlib_mode() {
+        // BT-2009: The unified pipeline should run stdlib name shadowing
+        // checks when stdlib_mode is false.
+        let source = "Object subclass: Integer\n  foo => 42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        let ctx = ProjectDiagnosticContext {
+            options: crate::CompilerOptions {
+                stdlib_mode: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let diagnostics = compute_project_diagnostics(&module, parse_diags, &ctx);
+
+        let has_shadow = diagnostics
+            .iter()
+            .any(|d| d.message.contains("conflicts with a stdlib class"));
+        assert!(
+            has_shadow,
+            "Should warn about shadowing stdlib class name 'Integer', got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn project_diagnostics_no_stdlib_shadowing_in_stdlib_mode() {
+        // BT-2009: The unified pipeline should NOT run stdlib name shadowing
+        // checks when stdlib_mode is true.
+        let source = "Object subclass: Integer\n  foo => 42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        let ctx = ProjectDiagnosticContext {
+            options: crate::CompilerOptions {
+                stdlib_mode: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let diagnostics = compute_project_diagnostics(&module, parse_diags, &ctx);
+
+        let has_shadow = diagnostics
+            .iter()
+            .any(|d| d.message.contains("conflicts with a stdlib class"));
+        assert!(
+            !has_shadow,
+            "Should NOT warn about shadowing in stdlib_mode, got: {diagnostics:?}"
         );
     }
 }
