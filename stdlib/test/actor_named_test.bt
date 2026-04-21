@@ -149,21 +149,21 @@ TestCase subclass: ActorNamedTest
   // class-method body.
   testSameClassSpawnWithAsFromClassMethod =>
     name := #bt2003_sameclass_spawnwithas
-    result := BT2003NamedFactory startWith: 7 as: name
+    result := NamedFactoryBT2003 startWith: 7 as: name
     self assert: result isOk
     actor := result unwrap
     self assert: actor getCount equals: 7
     self assert: actor registeredName equals: name
-    self assert: (BT2003NamedFactory named: name) isOk
+    self assert: (NamedFactoryBT2003 named: name) isOk
     actor stop
 
   testSameClassSpawnAsFromClassMethod =>
     name := #bt2003_sameclass_spawnas
-    result := BT2003NamedFactory startAs: name
+    result := NamedFactoryBT2003 startAs: name
     self assert: result isOk
     actor := result unwrap
     self assert: actor registeredName equals: name
-    self assert: (BT2003NamedFactory named: name) isOk
+    self assert: (NamedFactoryBT2003 named: name) isOk
     actor stop
 
   // === Subclass marker preservation (BT-1988 regression guard) ===
