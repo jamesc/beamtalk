@@ -112,13 +112,21 @@ impl Parser {
             if matches!(expr, Expression::Identifier(_)) {
                 return self.parse_annotated_assignment(expr);
             }
-            // Non-identifier with `::` — emit a targeted diagnostic
+            // Non-identifier with `::` — consume the annotation to avoid token desync
             let span = self.current_token().span();
             self.diagnostics.push(Diagnostic::error(
                 "Type annotations on destructuring assignments are not yet supported",
                 span,
             ));
-            // Fall through to normal expression handling
+            self.advance(); // consume `::`
+            let _ = self.parse_type_annotation();
+            if self.match_token(&TokenKind::Assign) {
+                let _ = self.parse_cascade();
+            }
+            return Expression::Error {
+                message: "Type annotations on non-identifier assignments are not supported".into(),
+                span,
+            };
         }
 
         // Check for assignment operator

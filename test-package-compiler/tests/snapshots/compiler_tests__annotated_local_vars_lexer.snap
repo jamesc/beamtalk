@@ -5,7 +5,7 @@ expression: output
 Token { kind: Identifier("Value"), span: Span { start: 172, end: 177 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-2012: Local variable type annotations"), Whitespace("\n"), LineComment("// Tests parsing of `identifier :: Type := expr` syntax."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Keyword("subclass:"), span: Span { start: 178, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("Snapshot"), span: Span { start: 188, end: 196 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Keyword("state:"), span: Span { start: 199, end: 205 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("field:"), span: Span { start: 199, end: 205 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("eventId"), span: Span { start: 206, end: 213 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: DoubleColon, span: Span { start: 214, end: 216 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("Integer"), span: Span { start: 217, end: 224 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }

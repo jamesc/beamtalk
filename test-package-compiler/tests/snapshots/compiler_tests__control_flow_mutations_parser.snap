@@ -3175,64 +3175,14 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found state:",
-                    span: Span {
-                        start: 3334,
-                        end: 3340,
-                    },
-                },
-                selector: Unary(
-                    "result",
-                ),
-                arguments: [],
-                is_cast: false,
+            expression: Error {
+                message: "Type annotations on non-identifier assignments are not supported",
                 span: Span {
-                    start: 3334,
-                    end: 3347,
+                    start: 3348,
+                    end: 3350,
                 },
             },
             preceding_blank_line: true,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found ::",
-                    span: Span {
-                        start: 3348,
-                        end: 3350,
-                    },
-                },
-                selector: Unary(
-                    "Integer",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 3348,
-                    end: 3358,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found =",
-                span: Span {
-                    start: 3359,
-                    end: 3360,
-                },
-            },
-            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -3534,8 +3484,6 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 3259, end: 3260 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint), notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3334, end: 3340 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Type annotations on destructuring assignments are not yet supported", span: Span { start: 3348, end: 3350 }, hint: None, category: None, notes: [] }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ::", span: Span { start: 3348, end: 3350 }, hint: None, category: None, notes: [] }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3359, end: 3360 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3362, end: 3363 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3365, end: 3366 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3551, end: 3552 }, hint: None, category: None, notes: [] }

@@ -5,7 +5,7 @@
 // Tests parsing of `identifier :: Type := expr` syntax.
 
 Value subclass: Snapshot
-  state: eventId :: Integer = 0
+  field: eventId :: Integer = 0
 
   eventId -> Integer => self.eventId
 

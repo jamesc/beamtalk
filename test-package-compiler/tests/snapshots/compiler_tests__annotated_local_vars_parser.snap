@@ -60,7 +60,7 @@ Module {
                             },
                         ),
                     ),
-                    declared_keyword: State,
+                    declared_keyword: Field,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [],
