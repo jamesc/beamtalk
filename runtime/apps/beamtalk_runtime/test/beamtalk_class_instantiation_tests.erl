@@ -394,7 +394,7 @@ test_class_self_spawn_as_success() ->
         Result
     ),
     #{'okValue' := Obj} = Result,
-    ?assertEqual(Name, erlang:whereis(Name) =/= undefined andalso Name),
+    ?assert(erlang:whereis(Name) =/= undefined),
     gen_server:stop(Obj#beamtalk_object.pid).
 
 test_class_self_spawn_as_reserved() ->

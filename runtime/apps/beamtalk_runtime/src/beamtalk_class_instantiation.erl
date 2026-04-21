@@ -254,9 +254,21 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
                         }}
                     );
                 {error, Reason} ->
-                    beamtalk_result:from_tagged_tuple({error, Reason})
+                    beamtalk_result:from_tagged_tuple(
+                        {error, generic_spawn_error(ClassName, Selector, Reason)}
+                    )
             end
     end.
+
+-spec generic_spawn_error(atom(), atom(), term()) -> #beamtalk_error{}.
+generic_spawn_error(ClassName, Selector, Reason) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:with_selector(
+            beamtalk_error:new(instantiation_error, ClassName),
+            Selector
+        ),
+        iolist_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
+    ).
 
 %%====================================================================
 %% Constructibility
