@@ -16,7 +16,7 @@
 /// Supervisor subclass: WebApp
 ///   class children => #(DatabasePool HTTPRouter MetricsCollector)
 ///
-/// app := WebApp supervise
+/// app := (WebApp supervise) unwrap
 /// app count   // => 3
 /// ```
 ///
@@ -81,12 +81,12 @@ abstract Object subclass: Supervisor
   /// Registers the supervisor under its class name. Subsequent calls to
   /// `supervise` or `current` return the running instance.
   ///
-  /// BT-1994 / ADR 0080 Phase 0a probe: `startLink/1` returns a Result-
-  /// shaped value; call `unwrap` at the FFI boundary so the user-facing
-  /// signature remains `Supervisor` until the full migration in Phase 1
-  /// (BT-P1-startLink).
-  class supervise -> Supervisor =>
-    ((Erlang beamtalk_supervisor) startLink: self) unwrap
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Supervisor, Error)`. Use
+  /// `unwrap` for boot-style "crash on failure" call sites, or
+  /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
+  /// as `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  class supervise -> Result(Supervisor, Error) =>
+    (Erlang beamtalk_supervisor) startLink: self
 
   /// Return the running supervisor instance, or nil if not started.
   class current => (Erlang beamtalk_supervisor) current: self
@@ -111,12 +111,12 @@ abstract Object subclass: Supervisor
 
   /// Terminate the running child process for the given class.
   ///
-  /// BT-1998 / ADR 0080 Phase 1: `terminateChild/2` returns a Result-
-  /// shaped value; call `unwrap` at the FFI boundary so the user-facing
-  /// signature remains `Nil` until the stdlib signature migration in
-  /// Phase 2 (BT-1999).
-  terminate: aClass -> Nil =>
-    ((Erlang beamtalk_supervisor) terminateChild: self class: aClass) unwrap
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Nil, Error)`. Idempotent
+  /// on `not_found` — terminating an already-gone child returns `Result ok: nil`.
+  /// Genuine failures surface as
+  /// `Result error: #beamtalk_error{kind = terminate_failed}`.
+  terminate: aClass -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) terminateChild: self class: aClass
 
   /// Return the count of currently-running children.
   ///

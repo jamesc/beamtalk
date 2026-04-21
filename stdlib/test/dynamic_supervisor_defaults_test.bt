@@ -29,8 +29,8 @@ TestCase subclass: DynamicSupervisorDefaultsTest
 
   // === Type parameter C narrows startChild return type ===
   testStartChildReturnsTypedChild =>
-    pool := TestDynamicSupervisorCustom supervise
-    child := pool startChild
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    child := pool startChild unwrap
     // If C=Counter resolves, child is typed as Counter and getValue compiles.
     // Without the type parameter this would fail: "Object does not understand 'getValue'"
     self assert: child getValue equals: 0
