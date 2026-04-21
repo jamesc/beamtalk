@@ -487,21 +487,28 @@ impl TypeChecker {
         // base class. Without stripping, `hierarchy.has_class("Block(T, R)")`
         // is false and the conservative "unknown → compatible" escape hatch
         // below suppresses warnings for non-Block arguments to `Block(T, R)`
-        // parameters.
-        let expected_base: EcoString = expected
-            .find('(')
-            .map_or_else(|| expected.clone(), |open| expected[..open].into());
+        // parameters. Both sides must be normalized so override checks
+        // (`check_override_param_compatibility`), which pass annotation
+        // strings as `actual`, also resolve to the base class.
+        let actual_base = actual
+            .split_once('(')
+            .map_or(actual.as_str(), |(base, _)| base);
+        let expected_base = expected
+            .split_once('(')
+            .map_or(expected.as_str(), |(base, _)| base);
 
-        if actual == &expected_base {
+        if actual_base == expected_base {
             return true;
         }
         // If either type isn't known to the hierarchy, don't warn (conservative)
-        if !hierarchy.has_class(actual) || !hierarchy.has_class(&expected_base) {
+        if !hierarchy.has_class(actual_base) || !hierarchy.has_class(expected_base) {
             return true;
         }
         // Walk superclass chain: if expected is an ancestor of actual, it's compatible
-        let chain = hierarchy.superclass_chain(actual);
-        chain.iter().any(|ancestor| ancestor == &expected_base)
+        let chain = hierarchy.superclass_chain(actual_base);
+        chain
+            .iter()
+            .any(|ancestor| ancestor.as_str() == expected_base)
     }
 
     /// Check argument types against declared parameter types for a message send.

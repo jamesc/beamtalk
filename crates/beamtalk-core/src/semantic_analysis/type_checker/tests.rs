@@ -2332,6 +2332,67 @@ fn test_override_compatible_param_type_no_warning() {
 }
 
 #[test]
+fn test_override_parametric_incompatible_param_type_warns() {
+    // BT-2002: Child overrides parent with a parameterized type annotation
+    // (`Array(Integer)`) that is not compatible with the parent's type
+    // (`Number`). Previously `is_type_compatible` only normalized the
+    // expected side, so `hierarchy.has_class("Array(Integer)")` on the
+    // actual side hit the conservative "unknown → compatible" escape hatch
+    // and the override warning was silently suppressed.
+    let parent = ClassDefinition::with_modifiers(
+        ident("Base"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("amount"),
+                TypeAnnotation::Simple(ident("Number")),
+            )],
+            vec![bare(int_lit(0))],
+            span(),
+        )],
+        span(),
+    );
+    let child = ClassDefinition::with_modifiers(
+        ident("Derived"),
+        Some(ident("Base")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("amount"),
+                TypeAnnotation::Generic {
+                    base: ident("Array"),
+                    parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+                    span: span(),
+                },
+            )],
+            vec![bare(int_lit(0))],
+            span(),
+        )],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![parent, child]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let override_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("incompatible with parent"))
+        .collect();
+    assert_eq!(
+        override_warnings.len(),
+        1,
+        "should warn about incompatible parametric override param type, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
 fn test_all_type_warnings_are_severity_warning() {
     // Verify all diagnostics from type checking are Severity::Warning
     let class_def = ClassDefinition::with_modifiers(
