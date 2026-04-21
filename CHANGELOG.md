@@ -11,17 +11,27 @@
   - `Actor allRegistered` — enumerate Beamtalk-registered actors (excludes raw OTP kernel processes via the `$beamtalk_actor` process-dict marker).
   - `SupervisionSpec withName:` — declaratively name a supervised child so the supervisor re-registers the name on every restart.
 
+### Compiler
+
+- Fix `Self` type substitution in generic return types on parameterised receivers — e.g., `Result(Self, Error)` on `Box(Integer)` now correctly resolves to `Result(Box(Integer), Error)` instead of bare `Result(Box, Error)` (BT-1992).
+
 ### Runtime
 
 - **Named-registration intrinsics and supervisor wiring** — `beamtalk_actor:'spawnAs'/2,3`, `registerAs/2`, `unregister/1`, `named/2`, `allRegistered/1`, name-resolving `{registered, Name}` proxy dispatch, and supervisor routing of `SupervisionSpec withName:` through `beamtalk_actor:'spawnAs'/2,3` so supervised restarts re-register atomically (BT-1987, BT-1988, BT-1990).
 - Reserved-name blocklist at registration time for OTP kernel/stdlib atoms and the `beamtalk_` prefix; returns `Result error: (beamtalk_error reserved_name)`.
 - Fix `'spawnAs'/2` defaulting to `[]` instead of `#{}`, which crashed supervised named children in `init/1` with `{badmap, []}` (BT-1991).
 - Fix REPL JSON formatter crashing when displaying a name-resolving proxy: `#beamtalk_object{pid = {registered, Name}}` now renders as `#Actor<Class,registered,Name>` instead of calling `pid_to_list/1` on a non-pid term (BT-1991).
+- Supervisor `startLink` returns Result-shaped values internally (`{ok, ...}` / `{error, #beamtalk_error{kind = supervisor_start_failed}}`); `class supervise` unwraps to preserve the existing user-facing `Supervisor` return type — preparatory infrastructure for [ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md) Phase 1 (BT-1994).
 
 ### Documentation
 
 - ADR 0079: Named Actor Registration.
 - Language features: new "Named Actor Registration" chapter covering the API surface, proxy semantics caveats (monitors don't re-arm across restarts; equality rules; unregister makes proxy dead), reserved-name policy, BEAM mapping, and a before/after migration example from `Supervisor which:` + `initialize:` to named registration (BT-1991).
+
+### Internal
+
+- ADR 0080: Migrate Supervisor Lifecycle to Result — proposed and accepted with Phase 0 probe outcomes (BT-1977, BT-1994, BT-1995).
+- Typechecker probe confirms class-level type parameter substitution through `Result(C, Error)` works without extension (BT-1995).
 
 ## 0.3.1 — 2026-03-26
 
