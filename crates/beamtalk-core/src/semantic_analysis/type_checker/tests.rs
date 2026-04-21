@@ -12193,6 +12193,74 @@ fn annotated_assignment_dynamic_rhs_no_warning() {
 }
 
 #[test]
+fn annotated_assignment_narrowing_from_object_no_warning() {
+    // `x :: Dictionary := <Object>` is the primary type-erasure use case:
+    // callees like `Binary deserialize:` return Object, and the annotation is
+    // the user's explicit assertion that the runtime type is more specific.
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // Seed someVar with inferred type Object in the env
+    env.set("someVar", InferredType::known("Object"));
+
+    let expr = Expression::Assignment {
+        target: Box::new(var("x")),
+        value: Box::new(Expression::Identifier(Identifier::new("someVar", span()))),
+        type_annotation: Some(TypeAnnotation::simple("Dictionary", span())),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Narrowing from Object to Dictionary should not warn, got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn annotated_assignment_narrowing_to_parametric_type_no_warning() {
+    // `dict :: Dictionary(Symbol, String) := <Object>` — narrowing to a
+    // parametric type should also be silently accepted.
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    env.set("someVar", InferredType::known("Object"));
+
+    let dict_ann = TypeAnnotation::Generic {
+        base: Identifier::new("Dictionary", span()),
+        parameters: vec![
+            TypeAnnotation::simple("Symbol", span()),
+            TypeAnnotation::simple("String", span()),
+        ],
+        span: span(),
+    };
+    let expr = Expression::Assignment {
+        target: Box::new(var("dict")),
+        value: Box::new(Expression::Identifier(Identifier::new("someVar", span()))),
+        type_annotation: Some(dict_ann),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Narrowing Object to Dictionary(Symbol, String) should not warn, got: {type_warnings:?}"
+    );
+}
+
+#[test]
 fn annotated_assignment_mismatch_warns() {
     // Known incompatible type should emit a warning
     let mut checker = TypeChecker::new();
