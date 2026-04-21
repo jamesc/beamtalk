@@ -1040,33 +1040,18 @@ impl CoreErlangGenerator {
         // Other built-in exports (superclass, methods, etc.)
         // BT-1937: Hoist preambles from sub-expression class var mutations.
         let module = self.module_name.clone();
+        let fun_name = selector_atom.replace(':', "");
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
 
-        // BT-2003: Keyword selectors (containing `:`) are almost always inherited
-        // class methods — the local ones were already handled by the
-        // `class_method_selectors` check above. Route them through the runtime
-        // self-dispatch helper which walks the superclass chain and applies the
-        // method directly, avoiding both the deadlocking gen_server self-call and
-        // the missing-function panic caused by a naive `replace(':', "")` mangling.
-        //
-        // Unary selectors fall through to a direct module call — that path is
-        // used by built-in exports like `superclass/0` and `class_name/0` that
-        // every class module actually generates.
-        let call_doc = if selector_atom.contains(':') {
-            docvec![
-                Document::String(format!(
-                    "call 'beamtalk_class_dispatch':'class_self_dispatch'('{selector_atom}', ["
-                )),
-                args_doc,
-                "])"
-            ]
-        } else {
-            docvec![
-                Document::String(format!("call '{module}':'{selector_atom}'(")),
-                args_doc,
-                ")"
-            ]
-        };
+        let call_doc = docvec![
+            "call '",
+            Document::Eco(module),
+            "':'",
+            Document::String(fun_name),
+            "'(",
+            args_doc,
+            ")"
+        ];
         Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"))
     }
 
