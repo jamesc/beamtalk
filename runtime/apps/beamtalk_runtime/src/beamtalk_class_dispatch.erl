@@ -743,7 +743,11 @@ handle_metaclass_self_named_spawn(Selector, InitArgs, Name) ->
     IsAbstract0 = get(beamtalk_class_is_abstract),
     case {ClassName, Module, IsAbstract0} of
         {CN, Mod, IsAbstract} when
-            is_atom(CN), is_atom(Mod), is_boolean(IsAbstract), CN =/= undefined
+            is_atom(CN),
+            is_atom(Mod),
+            is_boolean(IsAbstract),
+            CN =/= undefined,
+            Mod =/= undefined
         ->
             case Selector of
                 'spawnAs:' ->

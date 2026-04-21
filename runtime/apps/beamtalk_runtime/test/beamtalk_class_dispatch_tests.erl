@@ -1245,6 +1245,33 @@ metaclass_send_self_call_unknown_selector_raises_dispatch_error_test() ->
         beamtalk_class_dispatch:metaclass_send(self(), someUserSelector, [], Self)
     ).
 
+%% BT-2005 review: guard in handle_metaclass_self_named_spawn/3 must reject
+%% `Module = undefined` explicitly — `is_atom(undefined)` returns true, so a
+%% process dictionary with the name/is_abstract keys set but the module key
+%% missing would otherwise slip through into `class_self_spawn_*` and crash.
+metaclass_send_self_call_named_spawn_missing_module_metadata_test() ->
+    Self = #beamtalk_object{
+        class = 'Metaclass', class_mod = undefined, pid = self()
+    },
+    OldName = put(beamtalk_class_name, 'BT2005GuardTestClass'),
+    OldModule = erase(beamtalk_class_module),
+    OldAbs = put(beamtalk_class_is_abstract, false),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
+            beamtalk_class_dispatch:metaclass_send(
+                self(), 'spawnWith:as:', [#{}, anyName], Self
+            )
+        )
+    after
+        restore_pd_key(beamtalk_class_name, OldName),
+        restore_pd_key(beamtalk_class_module, OldModule),
+        restore_pd_key(beamtalk_class_is_abstract, OldAbs)
+    end.
+
+restore_pd_key(Key, undefined) -> erase(Key);
+restore_pd_key(Key, Value) -> put(Key, Value).
+
 %% is_test_execution_selector branches — exhaustively cover each test selector.
 is_test_execution_selector_exhaustive_test() ->
     ?assert(beamtalk_class_dispatch:is_test_execution_selector(runAll)),
