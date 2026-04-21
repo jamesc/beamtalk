@@ -18,7 +18,7 @@ Tests cover:
 - terminateChild/2 — dynamic path, stale handle, not_found error (BT-1960)
 - build_child_specs/1 with empty list
 - supervisor tuple structure
-- stale-handle error translation (noproc → beamtalk_error with stale_handle kind, BT-1996)
+- stale-handle error translation (noproc → beamtalk_error with stale_handle kind, BT-1996/BT-1997)
 - root registry — nil, roundtrip, overwrite, clear_root (BT-1960)
 - hierarchy walk — static_init/2, dynamic_init/2 via ETS (BT-1285, BT-1960)
 - hierarchy depth limit — call_inherited_class_method_direct error (BT-1960)
@@ -34,7 +34,9 @@ Tests cover:
 - wrap_child/3 supervisor and actor branches via whichChild (BT-1980)
 - build_child_specs/1 nested-supervisor OTP spec (BT-1980)
 - ensure_root_table concurrent creation safety (BT-1980)
-- stale_handle startChild/1 and /2 coverage (BT-1996)
+- stale_handle startChild/1 and /2 coverage (BT-1997)
+- startChild/1,2 returns {ok, ...} / {error, #beamtalk_error{}} (BT-1997)
+- with_live_supervisor/3 returns {error, ...} on stale handle (BT-1997)
 - class_dispatch hook: initialize: runs only on fresh start, not already_started or error (BT-1996)
 """.
 -include_lib("eunit/include/eunit.hrl").
@@ -293,32 +295,32 @@ current_returns_supervisor_tuple_when_running_test() ->
 %%====================================================================
 
 which_children_empty_test() ->
-    %% A supervisor with no children returns [].
+    %% BT-1997: whichChildren/1 returns {ok, []} on empty supervisor.
     SupPid = start_anon_supervisor(),
     try
         Self = make_supervisor_tuple('TestSup', test_module, SupPid),
-        ?assertEqual([], beamtalk_supervisor:whichChildren(Self))
+        ?assertEqual({ok, []}, beamtalk_supervisor:whichChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
 
 which_children_running_child_test() ->
-    %% A supervisor with one running child returns its id.
+    %% BT-1997: whichChildren/1 returns {ok, [Id]} on single running child.
     SupPid = start_anon_supervisor_with_worker(worker_id),
     try
         Self = make_supervisor_tuple('TestSup2', test_module2, SupPid),
-        Ids = beamtalk_supervisor:whichChildren(Self),
-        ?assertEqual([worker_id], Ids)
+        Result = beamtalk_supervisor:whichChildren(Self),
+        ?assertEqual({ok, [worker_id]}, Result)
     after
         gen_server:stop(SupPid)
     end.
 
 which_children_multiple_children_test() ->
-    %% BT-1960: A supervisor with multiple children returns all their ids.
+    %% BT-1960 / BT-1997: whichChildren returns {ok, [Id]} with all child ids.
     SupPid = start_anon_supervisor_with_workers([child_a, child_b, child_c]),
     try
         Self = make_supervisor_tuple('TestSupMulti', test_mod_multi, SupPid),
-        Ids = beamtalk_supervisor:whichChildren(Self),
+        {ok, Ids} = beamtalk_supervisor:whichChildren(Self),
         ?assertEqual(3, length(Ids)),
         ?assert(lists:member(child_a, Ids)),
         ?assert(lists:member(child_b, Ids)),
@@ -332,7 +334,7 @@ which_children_multiple_children_test() ->
 %%====================================================================
 
 which_child_returns_nil_when_not_found_test() ->
-    %% BT-1960: whichChild/2 returns nil when the child class module is not running.
+    %% BT-1960 / BT-1997: whichChild/2 returns {ok, nil} when no child matches.
     SupPid = start_anon_supervisor(),
     try
         Self = make_supervisor_tuple('TestSupWC', test_mod_wc, SupPid),
@@ -350,14 +352,15 @@ which_child_returns_nil_when_not_found_test() ->
         end),
         ClassArg = {beamtalk_object, 'MissingClass class', missing_mod, FakeClassPid},
         Result = beamtalk_supervisor:whichChild(Self, ClassArg),
-        ?assertEqual(nil, Result),
+        ?assertEqual({ok, nil}, Result),
         FakeClassPid ! stop
     after
         gen_server:stop(SupPid)
     end.
 
 which_child_stale_handle_test() ->
-    %% BT-1960 / BT-1996: whichChild/2 on a dead supervisor raises a structured stale_handle error.
+    %% BT-1960 / BT-1997: whichChild/2 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
@@ -375,10 +378,8 @@ which_child_stale_handle_test() ->
     end),
     try
         ClassArg = {beamtalk_object, 'X class', x_mod, FakeClassPid},
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-            beamtalk_supervisor:whichChild(Self, ClassArg)
-        )
+        Result = beamtalk_supervisor:whichChild(Self, ClassArg),
+        ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result)
     after
         FakeClassPid ! stop
     end.
@@ -388,45 +389,47 @@ which_child_stale_handle_test() ->
 %%====================================================================
 
 count_children_empty_test() ->
+    %% BT-1997: countChildren/1 returns {ok, Count}.
     SupPid = start_anon_supervisor(),
     try
         Self = make_supervisor_tuple('TestSup3', test_module3, SupPid),
-        ?assertEqual(0, beamtalk_supervisor:countChildren(Self))
+        ?assertEqual({ok, 0}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
 
 count_children_with_child_test() ->
+    %% BT-1997: countChildren/1 returns {ok, 1} with a running child.
     SupPid = start_anon_supervisor_with_worker(count_child_id),
     try
         Self = make_supervisor_tuple('TestSup4', test_module4, SupPid),
-        ?assertEqual(1, beamtalk_supervisor:countChildren(Self))
+        ?assertEqual({ok, 1}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
 
 count_children_multiple_test() ->
-    %% BT-1960: countChildren with multiple children returns the correct count.
+    %% BT-1960 / BT-1997: countChildren returns {ok, N} with multiple children.
     SupPid = start_anon_supervisor_with_workers([count_a, count_b]),
     try
         Self = make_supervisor_tuple('TestSupCount2', test_mod_cnt2, SupPid),
-        ?assertEqual(2, beamtalk_supervisor:countChildren(Self))
+        ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
 
 count_children_dynamic_supervisor_test() ->
-    %% BT-1960: countChildren on a dynamic supervisor with no children returns 0.
+    %% BT-1960 / BT-1997: dynamic supervisor with no children → {ok, 0}.
     SupPid = start_dynamic_supervisor(),
     try
         Self = make_supervisor_tuple('TestDynCount', test_dyn_cnt, SupPid),
-        ?assertEqual(0, beamtalk_supervisor:countChildren(Self))
+        ?assertEqual({ok, 0}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
 
 count_children_dynamic_supervisor_with_children_test() ->
-    %% BT-1960: countChildren on a dynamic supervisor after adding children.
+    %% BT-1960 / BT-1997: dynamic supervisor count after adding children.
     SupPid = start_dynamic_supervisor(),
     try
         Self = make_supervisor_tuple('TestDynCount2', test_dyn_cnt2, SupPid),
@@ -441,7 +444,7 @@ count_children_dynamic_supervisor_with_children_test() ->
             {worker_ready, _} -> ok
         after 1000 -> error(timeout)
         end,
-        ?assertEqual(2, beamtalk_supervisor:countChildren(Self))
+        ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
@@ -450,11 +453,12 @@ count_children_dynamic_supervisor_with_children_test() ->
 %% Tests: stop/1
 %%====================================================================
 
-stop_returns_nil_test() ->
+stop_returns_ok_nil_test() ->
+    %% BT-1997: stop/1 returns {ok, nil} on a live supervisor.
     SupPid = start_anon_supervisor(),
     Self = make_supervisor_tuple('TestSup5', test_module5, SupPid),
     Result = beamtalk_supervisor:stop(Self),
-    ?assertEqual(nil, Result),
+    ?assertEqual({ok, nil}, Result),
     %% Give the process a moment to shut down
     timer:sleep(50),
     ?assertEqual(false, is_process_alive(SupPid)).
@@ -510,16 +514,19 @@ terminate_child_not_found_dynamic_test() ->
     end.
 
 terminate_child_stale_handle_test() ->
-    %% BT-1960 / BT-1996: terminateChild/2 on a dead supervisor raises structured stale_handle error.
+    %% BT-1960 / BT-1997: terminateChild/2 on a dead supervisor now returns
+    %% {error, #beamtalk_error{kind = stale_handle}} because
+    %% with_live_supervisor/3 was migrated to Result-shaped returns in
+    %% BT-1997. The sibling BT-1998 migrates the remaining terminateChild
+    %% success/non-not_found error branches to Result; until then the happy
+    %% path still returns the raw `nil` value.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup4', stale_mod4, SupPid),
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, self()},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-        beamtalk_supervisor:terminateChild(Self, ChildArg)
-    ).
+    Result = beamtalk_supervisor:terminateChild(Self, ChildArg),
+    ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result).
 
 %%====================================================================
 %% Tests: build_child_specs/1
@@ -551,37 +558,43 @@ supervisor_tuple_tag_test() ->
 %%====================================================================
 
 stale_handle_whichChildren_test() ->
-    %% BT-1996: whichChildren/1 on a dead supervisor raises a structured stale_handle error.
+    %% BT-1997: whichChildren/1 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup', stale_mod, SupPid),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-        beamtalk_supervisor:whichChildren(Self)
-    ).
+    Result = beamtalk_supervisor:whichChildren(Self),
+    ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
+    {error, BtError} = Result,
+    ?assertEqual('StaleSup', BtError#beamtalk_error.class),
+    ?assertEqual(children, BtError#beamtalk_error.selector).
 
 stale_handle_countChildren_test() ->
-    %% BT-1996: countChildren/1 on a dead supervisor raises a structured stale_handle error.
+    %% BT-1997: countChildren/1 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup2', stale_mod2, SupPid),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-        beamtalk_supervisor:countChildren(Self)
-    ).
+    Result = beamtalk_supervisor:countChildren(Self),
+    ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
+    {error, BtError} = Result,
+    ?assertEqual(count, BtError#beamtalk_error.selector).
 
 stale_handle_stop_test() ->
-    %% BT-1996: stop/1 on a dead supervisor raises a structured stale_handle error.
+    %% BT-1997: stop/1 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle}}. gen_server:stop/1 raises
+    %% `exit:noproc` (bare atom) rather than `exit:{noproc, MFA}`, so this
+    %% also exercises the second clause of with_live_supervisor/3.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup3', stale_mod3, SupPid),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-        beamtalk_supervisor:stop(Self)
-    ).
+    Result = beamtalk_supervisor:stop(Self),
+    ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
+    {error, BtError} = Result,
+    ?assertEqual(stop, BtError#beamtalk_error.selector).
 
 root_registry_returns_nil_when_empty_test() ->
     %% get_root/0 returns nil when no root has been registered.
@@ -1335,16 +1348,18 @@ set_child_class(Obj) ->
     ok.
 
 startChild_arity1_success_test() ->
-    %% BT-1980: startChild/1 success path wraps the new child pid as a
-    %% {beamtalk_object, ...} tuple for non-supervisor children.
+    %% BT-1980 / BT-1997: startChild/1 success path returns
+    %% {ok, {beamtalk_object, ChildClass, Module, Pid}} for non-supervisor
+    %% children.
     SupPid = start_dynamic_supervisor_with_nullary_child(),
     {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1980DynWorker'),
     set_child_class(ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1980DynSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self),
-        ?assertMatch({beamtalk_object, 'BT1980DynWorker', ?MODULE, _}, Result),
-        ChildPid = element(4, Result),
+        ?assertMatch({ok, {beamtalk_object, 'BT1980DynWorker', ?MODULE, _}}, Result),
+        {ok, Child} = Result,
+        ChildPid = element(4, Child),
         ?assert(is_process_alive(ChildPid))
     after
         ChildClassPid ! stop,
@@ -1352,11 +1367,10 @@ startChild_arity1_success_test() ->
     end.
 
 startChild_arity2_success_test() ->
-    %% BT-1980: startChild/2 appends [Args] to the simple_one_for_one template.
-    %% The template MFA is {?MODULE, start_worker, []}; with Args=self()
-    %% the OTP supervisor calls start_worker(self()), which is the arity-1
-    %% start_worker defined above, returning {ok, Pid}. Verify the wrapped
-    %% result is a beamtalk_object tuple.
+    %% BT-1980 / BT-1997: startChild/2 appends [Args] to the simple_one_for_one
+    %% template. The template MFA is {?MODULE, start_worker, []}; with
+    %% Args=self() OTP supervisor calls start_worker(self()) (arity-1), which
+    %% returns {ok, Pid}. Verify the wrapped result is {ok, {beamtalk_object, …}}.
     SupPid = start_dynamic_supervisor_for_startchild(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1980DynArgs'),
@@ -1369,7 +1383,7 @@ startChild_arity2_success_test() ->
             {worker_ready, _} -> ok
         after 1000 -> error(no_worker_ready)
         end,
-        ?assertMatch({beamtalk_object, 'BT1980DynArgs', ?MODULE, _}, Result)
+        ?assertMatch({ok, {beamtalk_object, 'BT1980DynArgs', ?MODULE, _}}, Result)
     after
         ChildClassPid ! stop,
         gen_server:stop(SupPid)
@@ -1555,7 +1569,7 @@ wrap_child_actor_returns_beamtalk_object_test() ->
         Self = make_supervisor_tuple('BT1980WrapSup', bt1980_wrap_sup_mod, SupPid),
         ClassArg = {beamtalk_object, 'BT1980NonSupChild class', ?MODULE, FakeClassPid},
         Result = beamtalk_supervisor:whichChild(Self, ClassArg),
-        ?assertMatch({beamtalk_object, 'BT1980NonSupChild', ?MODULE, _}, Result)
+        ?assertMatch({ok, {beamtalk_object, 'BT1980NonSupChild', ?MODULE, _}}, Result)
     after
         FakeClassPid ! stop,
         gen_server:stop(SupPid)
@@ -1598,7 +1612,7 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
         Self = make_supervisor_tuple('BT1980WrapSup2', sup2_mod, SupPid),
         ClassArg = {beamtalk_object, 'BT1980WrapSupChildCls class', ?MODULE, FakeClassPid},
         Result = beamtalk_supervisor:whichChild(Self, ClassArg),
-        ?assertMatch({beamtalk_supervisor, 'BT1980WrapSupChildCls', ?MODULE, _}, Result)
+        ?assertMatch({ok, {beamtalk_supervisor, 'BT1980WrapSupChildCls', ?MODULE, _}}, Result)
     after
         FakeClassPid ! stop,
         gen_server:stop(SupPid),
@@ -1702,24 +1716,135 @@ terminateChild_child_alias_delegates_test() ->
     end.
 
 %%====================================================================
-%% BT-1980: startChild/1 error path — {error, Reason}
+%% BT-1980 / BT-1997: startChild/1 error path — returns Result error
 %%====================================================================
 
-startChild_arity1_error_raises_test() ->
-    %% BT-1980: When supervisor:start_child returns {error, _}, startChild/1
-    %% raises a structured runtime_error. We use start_dynamic_supervisor/0
-    %% whose template is {?MODULE, start_worker, []} — calling start_worker/0
-    %% does not exist, so OTP returns {error, ...}.
+startChild_arity1_error_returns_child_start_failed_test() ->
+    %% BT-1997: When supervisor:start_child returns {error, _}, startChild/1
+    %% returns {error, #beamtalk_error{kind = child_start_failed}} instead of
+    %% raising. We use start_dynamic_supervisor/0 whose template is
+    %% {?MODULE, start_worker, []} — calling start_worker/0 does not exist,
+    %% so OTP returns {error, ...}.
     SupPid = start_dynamic_supervisor(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1980DynErr'),
     set_child_class(ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1980DynErrSup', ?MODULE, SupPid},
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
-            beamtalk_supervisor:startChild(Self)
-        )
+        Result = beamtalk_supervisor:startChild(Self),
+        ?assertMatch({error, #beamtalk_error{kind = child_start_failed}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT1980DynErrSup', BtError#beamtalk_error.class),
+        ?assertEqual(startChild, BtError#beamtalk_error.selector)
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1997: startChild/1,2 stale-handle Result error
+%%====================================================================
+
+startChild_arity1_stale_handle_test() ->
+    %% BT-1997: startChild/1 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle}} via with_live_supervisor/3.
+    SupPid = start_dynamic_supervisor(),
+    {ChildClassPid, ChildClassObj} =
+        make_child_class_for_startchild('BT1997StaleStart'),
+    set_child_class(ChildClassObj),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    try
+        Self = {beamtalk_supervisor, 'BT1997StaleStartSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self),
+        ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT1997StaleStartSup', BtError#beamtalk_error.class),
+        ?assertEqual(startChild, BtError#beamtalk_error.selector)
+    after
+        ChildClassPid ! stop
+    end.
+
+startChild_arity2_stale_handle_test() ->
+    %% BT-1997: startChild/2 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle}}.
+    SupPid = start_dynamic_supervisor(),
+    {ChildClassPid, ChildClassObj} =
+        make_child_class_for_startchild('BT1997StaleStart2'),
+    set_child_class(ChildClassObj),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    try
+        Self = {beamtalk_supervisor, 'BT1997StaleStart2Sup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self, self()),
+        ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT1997StaleStart2Sup', BtError#beamtalk_error.class),
+        ?assertEqual('startChild:', BtError#beamtalk_error.selector)
+    after
+        ChildClassPid ! stop
+    end.
+
+startChild_arity2_error_returns_child_start_failed_test() ->
+    %% BT-1997: startChild/2 propagates an OTP start failure as
+    %% {error, #beamtalk_error{kind = child_start_failed}}. We build a
+    %% simple_one_for_one supervisor whose template is
+    %% {?MODULE, start_worker, []} (arity-0 does not exist — only
+    %% start_worker/1 is defined). Supplying Args = self() would call
+    %% start_worker(self()) and succeed, so we instead use a template with
+    %% a function that does not exist in the test module.
+    ChildSpec = #{
+        id => bt1997_missing_start,
+        start => {?MODULE, this_function_does_not_exist, []},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => []
+    },
+    {ok, SupPid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec}),
+    {ChildClassPid, ChildClassObj} =
+        make_child_class_for_startchild('BT1997ChildErr'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT1997ChildErrSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self, self()),
+        ?assertMatch({error, #beamtalk_error{kind = child_start_failed}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT1997ChildErrSup', BtError#beamtalk_error.class),
+        ?assertEqual('startChild:', BtError#beamtalk_error.selector)
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1997: with_live_supervisor/3 contract — inner fun Result passthrough
+%%====================================================================
+
+with_live_supervisor_passes_through_ok_test() ->
+    %% BT-1997: when the inner fun returns {ok, V}, with_live_supervisor
+    %% returns it unchanged.
+    Result = beamtalk_supervisor:whichChildren(
+        make_supervisor_tuple('BT1997Pass', test_pass_mod, start_anon_supervisor())
+    ),
+    ?assertMatch({ok, _}, Result),
+    {ok, Ids} = Result,
+    ?assertEqual([], Ids).
+
+with_live_supervisor_passes_through_error_test() ->
+    %% BT-1997: when supervisor:start_child returns {error, Reason}, the
+    %% inner fun builds {error, BtError} and with_live_supervisor returns it
+    %% unchanged (no wrapping, no double-tagging).
+    SupPid = start_dynamic_supervisor(),
+    {ChildClassPid, ChildClassObj} =
+        make_child_class_for_startchild('BT1997Pass2'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT1997Pass2Sup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self),
+        %% Unwrap one layer — should be a {error, BtError} tagged tuple,
+        %% not a doubly-wrapped {error, {error, ...}} or similar.
+        ?assertMatch({error, #beamtalk_error{}}, Result)
     after
         ChildClassPid ! stop,
         gen_server:stop(SupPid)
@@ -1734,44 +1859,6 @@ startChild_arity1_error_raises_test() ->
 %% the root ETS table and races readers is removed because get_root/0 is not
 %% designed to handle a deleted table — ets:lookup_element raises badarg by
 %% design and the test proved flaky under CI load.
-
-%%====================================================================
-%% BT-1996 (ADR 0080 Phase 1): stale_handle error kind on startChild
-%%====================================================================
-
-stale_handle_startChild_arity1_test() ->
-    %% BT-1996: startChild/1 on a dead supervisor raises a structured stale_handle error.
-    SupPid = start_dynamic_supervisor_with_nullary_child(),
-    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1996StaleChild'),
-    set_child_class(ChildClassObj),
-    gen_server:stop(SupPid),
-    timer:sleep(20),
-    try
-        Self = {beamtalk_supervisor, 'BT1996StaleSup', ?MODULE, SupPid},
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-            beamtalk_supervisor:startChild(Self)
-        )
-    after
-        ChildClassPid ! stop
-    end.
-
-stale_handle_startChild_arity2_test() ->
-    %% BT-1996: startChild/2 on a dead supervisor raises a structured stale_handle error.
-    SupPid = start_dynamic_supervisor(),
-    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1996StaleChild2'),
-    set_child_class(ChildClassObj),
-    gen_server:stop(SupPid),
-    timer:sleep(20),
-    try
-        Self = {beamtalk_supervisor, 'BT1996StaleSup2', ?MODULE, SupPid},
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-            beamtalk_supervisor:startChild(Self, #{})
-        )
-    after
-        ChildClassPid ! stop
-    end.
 
 %%====================================================================
 %% BT-1996 (ADR 0080 Phase 1): class_dispatch hook — initialize: on

@@ -81,18 +81,35 @@ abstract Object subclass: DynamicSupervisor(C)
   // === Instance-side child management ===
 
   /// Start a new child with default args.
-  startChild -> C => (Erlang beamtalk_supervisor) startChild: self
+  ///
+  /// BT-1997 / ADR 0080 Phase 1: `startChild/1` returns a Result-shaped
+  /// value; call `unwrap` at the FFI boundary so the user-facing signature
+  /// stays `C` until Phase 2 (BT-P2-stdlib) migrates the stdlib signature
+  /// to `Result(C, Error)`.
+  startChild -> C => ((Erlang beamtalk_supervisor) startChild: self) unwrap
 
   /// Start a new child with the given initialization args.
+  ///
+  /// BT-1997 / ADR 0080 Phase 1: `startChild/2` returns a Result-shaped
+  /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
+  /// user-facing signature.
   startChild: args -> C =>
-    (Erlang beamtalk_supervisor) startChild: self with: args
+    ((Erlang beamtalk_supervisor) startChild: self with: args) unwrap
 
   /// Terminate the given child process.
   terminateChild: child :: C -> Nil =>
     (Erlang beamtalk_supervisor) terminateChild: self child: child
 
   /// Return the count of currently-running children.
-  count -> Integer => (Erlang beamtalk_supervisor) countChildren: self
+  ///
+  /// BT-1997 / ADR 0080 Phase 1: `countChildren/1` returns a Result-shaped
+  /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
+  /// user-facing signature.
+  count -> Integer => ((Erlang beamtalk_supervisor) countChildren: self) unwrap
 
   /// Stop this supervisor and all its children.
-  stop -> Nil => (Erlang beamtalk_supervisor) stop: self
+  ///
+  /// BT-1997 / ADR 0080 Phase 1: `stop/1` returns a Result-shaped value;
+  /// call `unwrap` at the FFI boundary to preserve the pre-migration
+  /// user-facing signature.
+  stop -> Nil => ((Erlang beamtalk_supervisor) stop: self) unwrap
