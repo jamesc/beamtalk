@@ -305,6 +305,7 @@ Module {
                         end: 383,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 368,
                     end: 383,

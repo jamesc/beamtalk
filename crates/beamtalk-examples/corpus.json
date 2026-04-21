@@ -1323,6 +1323,21 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-40",
+      "title": "Type Inference Through Generics (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "r :: Result(Integer, Error) := computeSomething\nr unwrap          // Return type T -> Integer\nr map: [:v | v asString]   // Block param T -> Integer, return Result(String, Error)\nr error           // Return type E -> Error",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-41",
       "title": "Type Inference Through Generics (beamtalk-language-features)",
       "category": "language-reference",
@@ -1472,6 +1487,21 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-56",
+      "title": "Union Types (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// All members must respond to the message\nx :: Integer | String := getValue\nx asString             // Both Integer and String have asString\nx size                 // Warning: Integer does not respond to 'size'\nx + 1                  // Warning: String does not respond to '+'",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-6",
       "title": "Object's Three Roles (beamtalk-language-features)",
       "category": "language-reference",
@@ -1493,6 +1523,24 @@
         "supervision"
       ],
       "source": "// FFI namespace — wraps Erlang modules as class methods\nObject subclass: Json\n  class parse: str => // ... Erlang FFI\n  class stringify: obj => // ... Erlang FFI\n\n// Abstract extension point — designed for subclassing\nabstract Object subclass: Supervisor\n  class children => self subclassResponsibility",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-60",
+      "title": "Union + Narrowing Compose (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "branch",
+        "conditional",
+        "if",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "name :: String | nil := dictionary at: \"name\"\nname isNil ifTrue: [^\"unknown\"]\nname size              // name is narrowed to String — nil eliminated by early return",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -20187,6 +20235,37 @@
       ],
       "source": "// E2E tests for list literal syntax #(1, 2, 3) (ADR 0012, BT-402)\n\nTestCase subclass: ListLiteralsTest\n\n  testEmptyList =>\n    self assert: #() equals: #()\n    self assert: #() size equals: 0\n    self assert: #() isEmpty\n\n  testSingleElementList =>\n    self assert: #(256) equals: #(256)\n    self assert: #(256) size equals: 1\n    self deny: #(256) isEmpty\n\n  testMultipleElementList =>\n    self assert: #(1, 2, 3) equals: #(1, 2, 3)\n    self assert: #(1, 2, 3) size equals: 3\n\n  testNestedLists =>\n    self assert: #(#(1, 2), #(3, 4)) equals: #(#(1, 2), #(3, 4))\n\n  testListMethods =>\n    self assert: #(1, 2, 3) first equals: 1\n    self assert: #(1, 2, 3) rest equals: #(2, 3)\n\n  // Trailing commas are accepted by the parser and normalized away (formatter removes them)\n  testTrailingComma => self assert: #(10, 20, 30) equals: #(10, 20, 30)\n\n  testListWithExpressionsParenthesizedForBinaryOps =>\n    self assert: #((1 + 2), (3 * 4)) equals: #(3, 12)\n\n  testNewFromList =>\n    self assert: (List new: #(1, 2, 3)) equals: #(1, 2, 3)\n    self assert: (List new: #()) equals: #()\n\n  testSetNewFromList => self assert: (Set new: #(1, 2, 2, 3)) size equals: 3\n\n  testTupleNewFromList => self assert: (Tuple new: #(1, 2, 3)) size equals: 3",
       "explanation": "E2E tests for list literal syntax #(1, 2, 3) (ADR 0012, BT-402)"
+    },
+    {
+      "id": "stdlib-test-local-type-annotation-test",
+      "title": "LocalTypeAnnotationTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "LocalTypeAnnotationTest",
+        "TestCase",
+        "append",
+        "assign",
+        "assignment",
+        "concat",
+        "concatenate",
+        "extends",
+        "inherit",
+        "inheritance",
+        "local_type_annotation_test",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string join",
+        "subclassing",
+        "testAnnotationDoesNotChangeRuntime",
+        "testAnnotationInBlock",
+        "testParametricAnnotation",
+        "testSimpleAnnotation",
+        "testUnionAnnotation"
+      ],
+      "source": "// BT-2012: Local variable type annotation tests.\n// Verifies that `name :: Type := expr` parses and runs correctly,\n// and that the annotation is erased in codegen (no runtime effect).\n\nTestCase subclass: LocalTypeAnnotationTest\n\n  testSimpleAnnotation =>\n    // Type annotation on a simple local variable\n    x :: Integer := 42\n    self assert: x equals: 42\n\n  testAnnotationDoesNotChangeRuntime =>\n    // The annotation is erased at runtime — value is whatever the RHS produces\n    x :: Integer := 10 + 5\n    self assert: x equals: 15\n\n  testAnnotationInBlock =>\n    // Type annotation inside a block body\n    result := [\n      name :: String := \"hello\"\n      name ++ \" world\"\n    ] value\n    self assert: result equals: \"hello world\"\n\n  testParametricAnnotation =>\n    // Parametric type annotation (Result(Integer, Error))\n    // No @expect type needed — the annotation provides the type info\n    r :: Result(Integer, Error) := Result ok: 42\n    self assert: (r isOk) equals: true\n\n  testUnionAnnotation =>\n    // Union type annotation (String | nil)\n    // No @expect type needed — the annotation provides the type info\n    name :: String | nil := nil\n    self assert: name equals: nil",
+      "explanation": "BT-2012: Local variable type annotation tests. Verifies that `name :: Type := expr` parses and runs correctly, and that the annotation is erased in codegen (no runtime effect)."
     },
     {
       "id": "stdlib-test-logger-test",

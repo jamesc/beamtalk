@@ -885,7 +885,7 @@ impl Parser {
     }
 
     /// Parses a type annotation, including union types (`Integer | String`).
-    fn parse_type_annotation(&mut self) -> TypeAnnotation {
+    pub(super) fn parse_type_annotation(&mut self) -> TypeAnnotation {
         let first = self.parse_single_type_annotation();
 
         // Check for union type: `Type | Type | ...`

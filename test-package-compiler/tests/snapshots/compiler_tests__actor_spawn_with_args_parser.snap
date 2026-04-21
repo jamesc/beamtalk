@@ -123,6 +123,7 @@ Module {
                         end: 377,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 367,
                     end: 377,
@@ -220,6 +221,7 @@ Module {
                                             end: 420,
                                         },
                                     },
+                                    type_annotation: None,
                                     span: Span {
                                         start: 392,
                                         end: 420,
@@ -234,6 +236,7 @@ Module {
                         },
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 378,
                     end: 421,
@@ -301,6 +304,7 @@ Module {
                         end: 489,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 464,
                     end: 489,

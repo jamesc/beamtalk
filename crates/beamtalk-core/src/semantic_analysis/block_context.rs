@@ -382,6 +382,7 @@ mod tests {
                 Span::new(0, 7),
             ))),
             value: Box::new(block_expr),
+            type_annotation: None,
             span: Span::new(0, 20),
         };
 

@@ -55,6 +55,7 @@
 //!                 is_cast: false,
 //!                 span: Span::new(5, 10),
 //!             }),
+//!             type_annotation: None,
 //!             span: Span::new(0, 10),
 //!         })
 //!     ],
@@ -733,6 +734,7 @@ mod tests {
                 is_cast: false,
                 span: Span::new(14, 28),
             }),
+            type_annotation: None,
             span: Span::new(0, 28),
         })];
         let method = MethodDefinition::new(selector, Vec::new(), body, Span::new(0, 28));
@@ -820,6 +822,7 @@ mod tests {
                     is_cast: false,
                     span: Span::new(64, 78),
                 }),
+                type_annotation: None,
                 span: Span::new(50, 78),
             })],
             Span::new(45, 78),

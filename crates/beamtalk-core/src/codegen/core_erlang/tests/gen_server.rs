@@ -141,6 +141,7 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
     let assignment = Expression::Assignment {
         target: Box::new(count_id),
         value: Box::new(add),
+        type_annotation: None,
         span: Span::new(0, 20),
     };
     let body = Expression::Block(Block {
@@ -212,6 +213,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
     let assignment = Expression::Assignment {
         target: Box::new(total_id),
         value: Box::new(add),
+        type_annotation: None,
         span: Span::new(0, 20),
     };
     let body = Expression::Block(Block {
@@ -298,6 +300,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
     let assignment = Expression::Assignment {
         target: Box::new(x_id),
         value: Box::new(add),
+        type_annotation: None,
         span: Span::new(0, 15),
     };
     let body = Expression::Block(Block {
@@ -521,6 +524,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
     let assign_x = Expression::Assignment {
         target: Box::new(x_id.clone()),
         value: Box::new(one),
+        type_annotation: None,
         span,
     };
 
@@ -537,6 +541,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
     let loop_assign = Expression::Assignment {
         target: Box::new(x_id2),
         value: Box::new(add),
+        type_annotation: None,
         span,
     };
     let loop_body = Expression::Block(Block {
@@ -603,6 +608,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
     let assign_x = Expression::Assignment {
         target: Box::new(x_id),
         value: Box::new(zero),
+        type_annotation: None,
         span,
     };
 
@@ -633,6 +639,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
     let loop_assign = Expression::Assignment {
         target: Box::new(Expression::Identifier(Identifier::new("x", span))),
         value: Box::new(add),
+        type_annotation: None,
         span,
     };
     let loop_body = Expression::Block(Block {
@@ -694,6 +701,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
     let assign_x = Expression::Assignment {
         target: Box::new(x_id),
         value: Box::new(one),
+        type_annotation: None,
         span,
     };
 
@@ -710,6 +718,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
     let loop_assign = Expression::Assignment {
         target: Box::new(x_id2),
         value: Box::new(add),
+        type_annotation: None,
         span,
     };
     let loop_body = Expression::Block(Block {
@@ -778,6 +787,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
     let assignment = Expression::Assignment {
         target: Box::new(x_id),
         value: Box::new(add),
+        type_annotation: None,
         span,
     };
     let body = Expression::Block(Block {
@@ -844,6 +854,7 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
     let assign_x = Expression::Assignment {
         target: Box::new(x_id),
         value: Box::new(zero),
+        type_annotation: None,
         span,
     };
 
@@ -860,6 +871,7 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
     let loop_assign = Expression::Assignment {
         target: Box::new(x_id2),
         value: Box::new(add),
+        type_annotation: None,
         span,
     };
     let loop_body = Expression::Block(Block {
@@ -2715,6 +2727,7 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
         Expression::Assignment {
             target: Box::new(x_id),
             value: Box::new(add),
+            type_annotation: None,
             span,
         }
     };
@@ -2840,6 +2853,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
     let assign = Expression::Assignment {
         target: Box::new(count_id()),
         value: Box::new(add_expr),
+        type_annotation: None,
         span: s,
     };
 
@@ -2857,6 +2871,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
     let init_count = Expression::Assignment {
         target: Box::new(count_id()),
         value: Box::new(Expression::Literal(Literal::Integer(0), s)),
+        type_annotation: None,
         span: s,
     };
 

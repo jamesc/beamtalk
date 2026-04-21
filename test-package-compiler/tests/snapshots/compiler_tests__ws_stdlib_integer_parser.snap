@@ -90,6 +90,7 @@ Module {
                         end: 145,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 133,
                     end: 145,
@@ -142,6 +143,7 @@ Module {
                         end: 166,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 146,
                     end: 166,
@@ -194,6 +196,7 @@ Module {
                         end: 183,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 167,
                     end: 183,
@@ -246,6 +249,7 @@ Module {
                         end: 202,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 184,
                     end: 202,
@@ -297,6 +301,7 @@ Module {
                         end: 247,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 235,
                     end: 247,
@@ -349,6 +354,7 @@ Module {
                         end: 272,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 253,
                     end: 272,
@@ -411,6 +417,7 @@ Module {
                         end: 303,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 288,
                     end: 303,
@@ -463,6 +470,7 @@ Module {
                         end: 323,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 304,
                     end: 323,
@@ -494,6 +502,7 @@ Module {
                         end: 336,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 324,
                     end: 336,

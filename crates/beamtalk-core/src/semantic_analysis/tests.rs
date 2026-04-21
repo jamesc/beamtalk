@@ -147,6 +147,7 @@ fn test_analyse_block_with_capture() {
             crate::ast::Literal::Integer(0),
             test_span(),
         )),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -182,6 +183,7 @@ fn test_analyse_block_with_local_mutation() {
             bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new("temp", test_span()))),
                 value: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+                type_annotation: None,
                 span: test_span(),
             }),
             bare(Expression::Identifier(Identifier::new("temp", test_span()))),
@@ -215,6 +217,7 @@ fn test_analyse_block_with_captured_mutation() {
             crate::ast::Literal::Integer(0),
             test_span(),
         )),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -226,6 +229,7 @@ fn test_analyse_block_with_captured_mutation() {
                 test_span(),
             ))),
             value: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            type_annotation: None,
             span: test_span(),
         })],
         Span::new(10, 20),
@@ -259,6 +263,7 @@ fn test_analyse_control_flow_block_context() {
                 crate::ast::Literal::Integer(1),
                 test_span(),
             )),
+            type_annotation: None,
             span: test_span(),
         })],
         Span::new(20, 30),
@@ -309,6 +314,7 @@ fn test_block_assigned_to_variable_gets_stored_context() {
             Span::new(0, 7),
         ))),
         value: Box::new(Expression::Block(block)),
+        type_annotation: None,
         span: Span::new(0, 25),
     };
 
@@ -795,6 +801,7 @@ fn test_field_assignment_in_stored_block_emits_error() {
             span: test_span(),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -811,6 +818,7 @@ fn test_field_assignment_in_stored_block_emits_error() {
             test_span(),
         ))),
         value: Box::new(block),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -843,6 +851,7 @@ fn test_field_assignment_in_passed_block_no_error() {
             span: test_span(),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -892,6 +901,7 @@ fn test_captured_variable_mutation_in_stored_block_no_warning() {
             test_span(),
         ))),
         value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -910,6 +920,7 @@ fn test_captured_variable_mutation_in_stored_block_no_warning() {
             is_cast: false,
             span: test_span(),
         }),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -926,6 +937,7 @@ fn test_captured_variable_mutation_in_stored_block_no_warning() {
             test_span(),
         ))),
         value: Box::new(block),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -951,6 +963,7 @@ fn test_field_assignment_in_control_flow_block_no_diagnostic() {
             span: test_span(),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -995,6 +1008,7 @@ fn test_local_variable_mutation_in_stored_block_no_diagnostic() {
     let x_def = Expression::Assignment {
         target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
         value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -1007,6 +1021,7 @@ fn test_local_variable_mutation_in_stored_block_no_diagnostic() {
             is_cast: false,
             span: test_span(),
         }),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -1023,6 +1038,7 @@ fn test_local_variable_mutation_in_stored_block_no_diagnostic() {
             test_span(),
         ))),
         value: Box::new(block),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -1080,6 +1096,7 @@ fn test_analyse_with_known_vars_handles_reassignment() {
             is_cast: false,
             span: test_span(),
         }),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -1675,6 +1692,7 @@ fn test_unused_variable_in_method_warns() {
                         Span::new(10, 11),
                     ))),
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                    type_annotation: None,
                     span: test_span(),
                 }),
                 bare(Expression::FieldAccess {
@@ -1749,6 +1767,7 @@ fn test_used_variable_no_warning() {
                 bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                    type_annotation: None,
                     span: test_span(),
                 }),
                 bare(Expression::Identifier(Identifier::new("x", test_span()))),
@@ -1811,6 +1830,7 @@ fn test_underscore_prefixed_variable_no_warning() {
             body: vec![bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new("_x", test_span()))),
                 value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                type_annotation: None,
                 span: test_span(),
             })],
             return_type: None,
@@ -2210,6 +2230,7 @@ fn test_unused_variable_in_class_method_warns() {
                         Span::new(10, 14),
                     ))),
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                    type_annotation: None,
                     span: test_span(),
                 }),
                 bare(Expression::Identifier(Identifier::new("nil", test_span()))),
@@ -2406,6 +2427,7 @@ fn test_unused_variable_in_nested_block_warns() {
                         Span::new(10, 16),
                     ))),
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                    type_annotation: None,
                     span: test_span(),
                 })],
                 test_span(),
@@ -2475,6 +2497,7 @@ fn test_variable_used_via_closure_no_warning() {
                         Span::new(10, 11),
                     ))),
                     value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
+                    type_annotation: None,
                     span: test_span(),
                 }),
                 bare(Expression::Block(Block::new(
@@ -3145,6 +3168,7 @@ fn test_block_match_pattern_var_not_treated_as_capture() {
     let outer_x = Expression::Assignment {
         target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
         value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 
@@ -3199,6 +3223,7 @@ fn test_block_match_captures_real_outer_variable() {
     let outer_y = Expression::Assignment {
         target: Box::new(Expression::Identifier(Identifier::new("y", test_span()))),
         value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+        type_annotation: None,
         span: test_span(),
     };
 

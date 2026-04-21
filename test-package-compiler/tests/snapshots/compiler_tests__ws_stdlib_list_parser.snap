@@ -87,6 +87,7 @@ Module {
                         },
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 126,
                     end: 138,

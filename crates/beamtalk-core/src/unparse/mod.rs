@@ -853,12 +853,24 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             unparse_message_send(receiver, selector, arguments, *is_cast)
         }
         Expression::Block(block) => unparse_block(block),
-        Expression::Assignment { target, value, .. } => {
-            docvec![
-                unparse_expression(target),
-                " := ",
-                unparse_expression(value)
-            ]
+        Expression::Assignment {
+            target,
+            value,
+            type_annotation,
+            ..
+        } => {
+            let target_doc = unparse_expression(target);
+            if let Some(ann) = type_annotation {
+                docvec![
+                    target_doc,
+                    " :: ",
+                    unparse_type_annotation(ann),
+                    " := ",
+                    unparse_expression(value)
+                ]
+            } else {
+                docvec![target_doc, " := ", unparse_expression(value)]
+            }
         }
         Expression::Return { value, .. } => {
             docvec!["^", unparse_expression(value)]
@@ -1989,9 +2001,65 @@ mod tests {
         let expr = Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new("x", span()))),
             value: Box::new(Expression::Literal(Literal::Integer(5), span())),
+            type_annotation: None,
             span: span(),
         };
         assert_eq!(unparse_expression(&expr).to_pretty_string(), "x := 5");
+    }
+
+    #[test]
+    fn annotated_assignment_expression() {
+        let expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("x", span()))),
+            value: Box::new(Expression::Literal(Literal::Integer(5), span())),
+            type_annotation: Some(TypeAnnotation::simple("Integer", span())),
+            span: span(),
+        };
+        assert_eq!(
+            unparse_expression(&expr).to_pretty_string(),
+            "x :: Integer := 5"
+        );
+    }
+
+    #[test]
+    fn annotated_assignment_union_type() {
+        let expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("name", span()))),
+            value: Box::new(Expression::Identifier(Identifier::new("val", span()))),
+            type_annotation: Some(TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("String", span()),
+                    TypeAnnotation::simple("nil", span()),
+                ],
+                span(),
+            )),
+            span: span(),
+        };
+        assert_eq!(
+            unparse_expression(&expr).to_pretty_string(),
+            "name :: String | nil := val"
+        );
+    }
+
+    #[test]
+    fn annotated_assignment_generic_type() {
+        let expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("r", span()))),
+            value: Box::new(Expression::Identifier(Identifier::new("compute", span()))),
+            type_annotation: Some(TypeAnnotation::generic(
+                Identifier::new("Result", span()),
+                vec![
+                    TypeAnnotation::simple("Integer", span()),
+                    TypeAnnotation::simple("Error", span()),
+                ],
+                span(),
+            )),
+            span: span(),
+        };
+        assert_eq!(
+            unparse_expression(&expr).to_pretty_string(),
+            "r :: Result(Integer, Error) := compute"
+        );
     }
 
     // --- Return ---

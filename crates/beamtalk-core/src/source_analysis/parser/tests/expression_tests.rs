@@ -1324,3 +1324,122 @@ fn mixed_state_and_field_declarations() {
         DeclaredKeyword::Field
     );
 }
+
+// --- Type-annotated local variable assignment tests (BT-2012) ---
+
+#[test]
+fn parse_annotated_assignment_simple_type() {
+    let module = parse_ok("x :: Integer := 42");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::Assignment {
+            target,
+            value,
+            type_annotation,
+            ..
+        } => {
+            assert!(matches!(**target, Expression::Identifier(ref id) if id.name == "x"));
+            assert!(matches!(
+                **value,
+                Expression::Literal(Literal::Integer(42), _)
+            ));
+            let ann = type_annotation
+                .as_ref()
+                .expect("Expected type annotation on assignment");
+            assert!(
+                matches!(ann, TypeAnnotation::Simple(id) if id.name == "Integer"),
+                "Expected Simple(Integer), got {ann:?}"
+            );
+        }
+        other => panic!("Expected annotated assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_annotated_assignment_parametric_type() {
+    let module = parse_ok("r :: Result(Integer, Error) := computeSomething");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::Assignment {
+            type_annotation, ..
+        } => {
+            let ann = type_annotation.as_ref().expect("Expected type annotation");
+            match ann {
+                TypeAnnotation::Generic {
+                    base, parameters, ..
+                } => {
+                    assert_eq!(base.name.as_str(), "Result");
+                    assert_eq!(parameters.len(), 2);
+                }
+                other => panic!("Expected Generic, got {other:?}"),
+            }
+        }
+        other => panic!("Expected assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_annotated_assignment_union_type() {
+    let module = parse_ok("x :: Integer | String := getValue");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::Assignment {
+            type_annotation, ..
+        } => {
+            let ann = type_annotation.as_ref().expect("Expected type annotation");
+            match ann {
+                TypeAnnotation::Union { types, .. } => {
+                    assert_eq!(types.len(), 2);
+                }
+                other => panic!("Expected Union, got {other:?}"),
+            }
+        }
+        other => panic!("Expected assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_annotated_assignment_nil_union() {
+    let module = parse_ok("name :: String | nil := dictionary at: \"name\"");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::Assignment {
+            type_annotation, ..
+        } => {
+            let ann = type_annotation.as_ref().expect("Expected type annotation");
+            assert!(matches!(ann, TypeAnnotation::Union { types, .. } if types.len() == 2));
+        }
+        other => panic!("Expected assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_plain_assignment_has_no_annotation() {
+    let module = parse_ok("x := 42");
+    match &module.expressions[0].expression {
+        Expression::Assignment {
+            type_annotation, ..
+        } => {
+            assert!(
+                type_annotation.is_none(),
+                "Plain assignment should have no type annotation"
+            );
+        }
+        other => panic!("Expected assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_annotated_assignment_missing_assign_op() {
+    // `x :: Integer` without `:=` should emit error
+    let diagnostics = parse_err("x :: Integer");
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected diagnostic for missing ':='"
+    );
+    // Verify the diagnostic mentions ':='
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains(":=")),
+        "Expected diagnostic about missing ':=', got: {diagnostics:?}"
+    );
+}

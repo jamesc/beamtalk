@@ -93,6 +93,8 @@ impl Parser {
     }
 
     /// Parses an assignment or regular expression.
+    ///
+    /// Supports optional type annotations: `x :: Type := expr`.
     fn parse_assignment(&mut self) -> Expression {
         // Tuple destructuring: `{a, b} := expr`
         // Tuples are not valid expressions, so we intercept `{` here before
@@ -102,6 +104,22 @@ impl Parser {
         }
 
         let expr = self.parse_cascade();
+
+        // Check for type-annotated assignment: `identifier :: Type := expr`
+        if matches!(self.current_kind(), TokenKind::DoubleColon) {
+            // Only identifiers may carry a local type annotation.
+            // Destructuring (`{a, b} :: Type := ...`) is not supported yet.
+            if matches!(expr, Expression::Identifier(_)) {
+                return self.parse_annotated_assignment(expr);
+            }
+            // Non-identifier with `::` — emit a targeted diagnostic
+            let span = self.current_token().span();
+            self.diagnostics.push(Diagnostic::error(
+                "Type annotations on destructuring assignments are not yet supported",
+                span,
+            ));
+            // Fall through to normal expression handling
+        }
 
         // Check for assignment operator
         if self.match_token(&TokenKind::Assign) {
@@ -284,6 +302,44 @@ impl Parser {
         Expression::Assignment {
             target: Box::new(expr),
             value,
+            type_annotation: None,
+            span,
+        }
+    }
+
+    /// Parses a type-annotated assignment: `identifier :: Type := expr`.
+    ///
+    /// Called when the current token is `::` and the LHS is an identifier.
+    /// Consumes the `::`, parses the type annotation, expects `:=`, then
+    /// parses the RHS value.
+    fn parse_annotated_assignment(&mut self, target: Expression) -> Expression {
+        let start = target.span();
+        self.advance(); // consume `::`
+        let annotation = self.parse_type_annotation();
+
+        if !self.match_token(&TokenKind::Assign) {
+            let span = self.current_token().span();
+            self.diagnostics.push(Diagnostic::error(
+                "Expected ':=' after type annotation in assignment",
+                span,
+            ));
+            return Expression::Error {
+                message: "Expected ':=' after type annotation".into(),
+                span: start.merge(span),
+            };
+        }
+
+        // Guard recursive call against stack overflow
+        if let Err(error) = self.enter_nesting(start) {
+            return error;
+        }
+        let value = Box::new(self.parse_assignment());
+        self.leave_nesting();
+        let span = start.merge(value.span());
+        Expression::Assignment {
+            target: Box::new(target),
+            value,
+            type_annotation: Some(annotation),
             span,
         }
     }
@@ -1168,6 +1224,7 @@ impl Parser {
                     Expression::Assignment {
                         target: Box::new(expr),
                         value,
+                        type_annotation: None,
                         span,
                     }
                 } else {

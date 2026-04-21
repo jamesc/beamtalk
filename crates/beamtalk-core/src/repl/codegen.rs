@@ -917,6 +917,7 @@ mod tests {
         Expression::Assignment {
             target: Box::new(ident_expr(name)),
             value: Box::new(value),
+            type_annotation: None,
             span: span(),
         }
     }

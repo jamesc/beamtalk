@@ -127,6 +127,7 @@ impl Analyser {
                 target,
                 value,
                 span,
+                ..
             } => {
                 // Track mutation
                 if let Identifier(id) = target.as_ref() {

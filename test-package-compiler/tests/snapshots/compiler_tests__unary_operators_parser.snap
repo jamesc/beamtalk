@@ -108,6 +108,7 @@ Module {
                         end: 291,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 268,
                     end: 291,
@@ -176,6 +177,7 @@ Module {
                         end: 377,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 356,
                     end: 377,
@@ -228,6 +230,7 @@ Module {
                         end: 455,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 436,
                     end: 455,
@@ -270,6 +273,7 @@ Module {
                         end: 476,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 456,
                     end: 476,
@@ -322,6 +326,7 @@ Module {
                         end: 517,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 496,
                     end: 517,
@@ -364,6 +369,7 @@ Module {
                         end: 537,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 518,
                     end: 537,
@@ -425,6 +431,7 @@ Module {
                         end: 613,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 594,
                     end: 613,
@@ -467,6 +474,7 @@ Module {
                         end: 635,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 614,
                     end: 635,
@@ -539,6 +547,7 @@ Module {
                         end: 728,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 704,
                     end: 728,
@@ -580,6 +589,7 @@ Module {
                         end: 788,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 776,
                     end: 788,
@@ -709,6 +719,7 @@ Module {
                         end: 846,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 789,
                     end: 846,
@@ -787,6 +798,7 @@ Module {
                         },
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 878,
                     end: 908,
