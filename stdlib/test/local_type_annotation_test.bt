@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2012: Local variable type annotation tests.
+// Verifies that `name :: Type := expr` parses and runs correctly,
+// and that the annotation is erased in codegen (no runtime effect).
+
+TestCase subclass: LocalTypeAnnotationTest
+
+  testSimpleAnnotation =>
+    // Type annotation on a simple local variable
+    x :: Integer := 42
+    self assert: x equals: 42
+
+  testAnnotationDoesNotChangeRuntime =>
+    // The annotation is erased at runtime — value is whatever the RHS produces
+    x :: Integer := 10 + 5
+    self assert: x equals: 15
+
+  testAnnotationInBlock =>
+    // Type annotation inside a block body
+    result := [
+      name :: String := "hello"
+      name ++ " world"
+    ] value
+    self assert: result equals: "hello world"
+
+  testParametricAnnotation =>
+    // Parametric type annotation (Result(Integer, Error))
+    // No @expect type needed — the annotation provides the type info
+    r :: Result(Integer, Error) := Result ok: 42
+    self assert: (r isOk) equals: true
+
+  testUnionAnnotation =>
+    // Union type annotation (String | nil)
+    // No @expect type needed — the annotation provides the type info
+    name :: String | nil := nil
+    self assert: name equals: nil

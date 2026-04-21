@@ -90,6 +90,7 @@ fn assign(name: &str, value: Expression) -> Expression {
     Expression::Assignment {
         target: Box::new(var(name)),
         value: Box::new(value),
+        type_annotation: None,
         span: span(),
     }
 }
@@ -2444,6 +2445,7 @@ fn field_assign(field_name: &str, value: Expression) -> Expression {
     Expression::Assignment {
         target: Box::new(field_access(field_name)),
         value: Box::new(value),
+        type_annotation: None,
         span: span(),
     }
 }
@@ -5777,6 +5779,7 @@ fn constructor_inference_flows_to_instance_sends() {
             MessageSelector::Keyword(vec![KeywordPart::new("ok:", span())]),
             vec![int_lit(42)],
         )),
+        type_annotation: None,
         span: span(),
     };
     checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
@@ -5817,6 +5820,7 @@ fn constructor_inference_error_flows_to_error_accessor() {
                 span(),
             )],
         )),
+        type_annotation: None,
         span: span(),
     };
     checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
@@ -12139,4 +12143,105 @@ fn resolve_type_annotation_never() {
     let ann = TypeAnnotation::Simple(ident("Never"));
     let result = TypeChecker::resolve_type_annotation(&ann);
     assert_eq!(result, InferredType::Never);
+}
+
+// --- Local variable type annotation tests (BT-2012) ---
+
+#[test]
+fn annotated_assignment_uses_declared_type() {
+    // `x :: Integer := expr` should bind x as Integer, not Dynamic
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let expr = Expression::Assignment {
+        target: Box::new(var("x")),
+        value: Box::new(Expression::Identifier(Identifier::new("someVar", span()))),
+        type_annotation: Some(TypeAnnotation::simple("Integer", span())),
+        span: span(),
+    };
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    assert_eq!(ty, InferredType::known("Integer"));
+    assert_eq!(env.get("x"), Some(InferredType::known("Integer")));
+}
+
+#[test]
+fn annotated_assignment_dynamic_rhs_no_warning() {
+    // Dynamic RHS (the primary use case) should be accepted silently
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // someVar is unknown → Dynamic
+    let expr = Expression::Assignment {
+        target: Box::new(var("x")),
+        value: Box::new(Expression::Identifier(Identifier::new("someVar", span()))),
+        type_annotation: Some(TypeAnnotation::simple("String", span())),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Dynamic RHS should not produce type mismatch, got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn annotated_assignment_mismatch_warns() {
+    // Known incompatible type should emit a warning
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // RHS is Integer literal, declared as String → should warn
+    let expr = Expression::Assignment {
+        target: Box::new(var("x")),
+        value: Box::new(int_lit(42)),
+        type_annotation: Some(TypeAnnotation::simple("String", span())),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        !type_warnings.is_empty(),
+        "Integer assigned to String annotation should produce a type mismatch warning"
+    );
+}
+
+#[test]
+fn annotated_assignment_compatible_type_no_warning() {
+    // Compatible subtype should not warn
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // RHS is Integer literal, declared as Number (Integer's superclass) → no warning
+    let expr = Expression::Assignment {
+        target: Box::new(var("x")),
+        value: Box::new(int_lit(42)),
+        type_annotation: Some(TypeAnnotation::simple("Number", span())),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Integer assigned to Number should not warn, got: {type_warnings:?}"
+    );
 }

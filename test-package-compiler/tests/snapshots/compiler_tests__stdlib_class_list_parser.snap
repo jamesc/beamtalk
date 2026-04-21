@@ -1644,6 +1644,7 @@ Module {
                                                                 end: 1531,
                                                             },
                                                         },
+                                                        type_annotation: None,
                                                         span: Span {
                                                             start: 1518,
                                                             end: 1531,
@@ -1937,6 +1938,7 @@ Module {
                                                                 end: 1722,
                                                             },
                                                         },
+                                                        type_annotation: None,
                                                         span: Span {
                                                             start: 1709,
                                                             end: 1722,

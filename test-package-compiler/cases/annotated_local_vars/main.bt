@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2012: Local variable type annotations
+// Tests parsing of `identifier :: Type := expr` syntax.
+
+Value subclass: Snapshot
+  field: eventId :: Integer = 0
+
+  eventId -> Integer => self.eventId
+
+Value subclass: AnnotatedLocalVarDemo
+
+  // Simple type annotation
+  simpleAnnotation =>
+    x :: Integer := 42
+    x + 1
+
+  // Parametric type annotation
+  parametricAnnotation =>
+    r :: Result(Integer, Error) := Result ok: 42
+    r
+
+  // Union type annotation
+  unionAnnotation =>
+    name :: String | nil := nil
+    name

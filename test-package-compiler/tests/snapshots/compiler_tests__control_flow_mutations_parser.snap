@@ -105,6 +105,7 @@ Module {
                         end: 386,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 376,
                     end: 386,
@@ -227,6 +228,7 @@ Module {
                                                 end: 430,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 412,
                                             end: 430,
@@ -293,6 +295,7 @@ Module {
                         end: 497,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 485,
                     end: 497,
@@ -422,6 +425,7 @@ Module {
                                                 end: 545,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 525,
                                             end: 545,
@@ -488,6 +492,7 @@ Module {
                         end: 623,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 615,
                     end: 623,
@@ -519,6 +524,7 @@ Module {
                         end: 637,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 625,
                     end: 637,
@@ -550,6 +556,7 @@ Module {
                         end: 645,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 639,
                     end: 645,
@@ -672,6 +679,7 @@ Module {
                                                 end: 687,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 673,
                                             end: 687,
@@ -724,6 +732,7 @@ Module {
                                                 end: 715,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 693,
                                             end: 715,
@@ -776,6 +785,7 @@ Module {
                                                 end: 731,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 721,
                                             end: 731,
@@ -869,6 +879,7 @@ Module {
                         end: 960,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 948,
                     end: 960,
@@ -952,6 +963,7 @@ Module {
                                                 end: 1000,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 978,
                                             end: 1000,
@@ -1018,6 +1030,7 @@ Module {
                         end: 1076,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 1066,
                     end: 1076,
@@ -1125,6 +1138,7 @@ Module {
                                                 end: 1115,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 1097,
                                             end: 1115,
@@ -1262,6 +1276,7 @@ Module {
                         end: 1341,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 1314,
                     end: 1341,
@@ -1293,6 +1308,7 @@ Module {
                         end: 1356,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 1343,
                     end: 1356,
@@ -1384,6 +1400,7 @@ Module {
                                                 end: 1400,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 1376,
                                             end: 1400,
@@ -1450,6 +1467,7 @@ Module {
                         end: 1505,
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 1491,
                     end: 1505,
@@ -1578,6 +1596,7 @@ Module {
                                                     end: 1571,
                                                 },
                                             },
+                                            type_annotation: None,
                                             span: Span {
                                                 start: 1545,
                                                 end: 1571,
@@ -1599,6 +1618,7 @@ Module {
                         end: 1536,
                     },
                 },
+                type_annotation: None,
                 span: Span {
                     start: 1507,
                     end: 1536,
@@ -1888,6 +1908,7 @@ Module {
                                                 end: 2267,
                                             },
                                         ),
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2261,
                                             end: 2267,
@@ -2010,6 +2031,7 @@ Module {
                                                                         end: 2327,
                                                                     },
                                                                 },
+                                                                type_annotation: None,
                                                                 span: Span {
                                                                     start: 2303,
                                                                     end: 2327,
@@ -2062,6 +2084,7 @@ Module {
                                                                         end: 2347,
                                                                     },
                                                                 },
+                                                                type_annotation: None,
                                                                 span: Span {
                                                                     start: 2337,
                                                                     end: 2347,
@@ -2130,6 +2153,7 @@ Module {
                                                 end: 2390,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2359,
                                             end: 2390,
@@ -2182,6 +2206,7 @@ Module {
                                                 end: 2406,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2396,
                                             end: 2406,
@@ -2416,6 +2441,7 @@ Module {
                                                 end: 2741,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2713,
                                             end: 2741,
@@ -2751,6 +2777,7 @@ Module {
                                                 end: 3030,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 3010,
                                             end: 3030,
@@ -2811,6 +2838,7 @@ Module {
                         },
                     },
                 ),
+                type_annotation: None,
                 span: Span {
                     start: 3050,
                     end: 3071,
@@ -3030,6 +3058,7 @@ Module {
                                                 end: 3259,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 3231,
                                             end: 3259,
@@ -3095,6 +3124,7 @@ Module {
                                                 end: 3298,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 3273,
                                             end: 3298,
@@ -3145,64 +3175,14 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found state:",
-                    span: Span {
-                        start: 3334,
-                        end: 3340,
-                    },
-                },
-                selector: Unary(
-                    "result",
-                ),
-                arguments: [],
-                is_cast: false,
+            expression: Error {
+                message: "Type annotations on non-identifier assignments are not supported",
                 span: Span {
-                    start: 3334,
-                    end: 3347,
+                    start: 3348,
+                    end: 3350,
                 },
             },
             preceding_blank_line: true,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found ::",
-                    span: Span {
-                        start: 3348,
-                        end: 3350,
-                    },
-                },
-                selector: Unary(
-                    "Integer",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 3348,
-                    end: 3358,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found =",
-                span: Span {
-                    start: 3359,
-                    end: 3360,
-                },
-            },
-            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -3362,6 +3342,7 @@ Module {
                                                 end: 3727,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 3717,
                                             end: 3727,
@@ -3414,6 +3395,7 @@ Module {
                                                 end: 3743,
                                             },
                                         },
+                                        type_annotation: None,
                                         span: Span {
                                             start: 3733,
                                             end: 3743,
@@ -3501,8 +3483,7 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3204, end: 3205 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 3259, end: 3260 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint), notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3334, end: 3340 }, hint: None, category: None, notes: [] }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ::", span: Span { start: 3348, end: 3350 }, hint: None, category: None, notes: [] }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3359, end: 3360 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Type annotations on destructuring assignments are not yet supported", span: Span { start: 3348, end: 3350 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3362, end: 3363 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3365, end: 3366 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3551, end: 3552 }, hint: None, category: None, notes: [] }

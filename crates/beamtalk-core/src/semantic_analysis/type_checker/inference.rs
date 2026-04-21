@@ -464,9 +464,49 @@ impl TypeChecker {
             Expression::Assignment {
                 target,
                 value,
+                type_annotation,
                 span,
             } => {
-                let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+                let inferred_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+
+                // If there's a type annotation, use the declared type instead
+                // of the inferred type. Emit a warning if the RHS has a known
+                // (non-Dynamic) type that is incompatible with the annotation.
+                let ty = if let Some(ann) = type_annotation {
+                    let declared = Self::resolve_type_annotation(ann);
+                    // Check for type mismatch: known RHS that doesn't match declared type.
+                    // Dynamic RHS (the primary use case for annotations) is accepted silently.
+                    // Never RHS (diverging expressions like `self error:`) is compatible
+                    // with any declared type (bottom of the type lattice).
+                    if let Some(inferred_name) = inferred_ty.display_name() {
+                        if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
+                            if let Some(declared_name) = declared.display_name() {
+                                if !Self::is_assignable_to(
+                                    &inferred_name,
+                                    &declared_name,
+                                    hierarchy,
+                                ) {
+                                    self.diagnostics.push(
+                                        Diagnostic::warning(
+                                            format!(
+                                                "Type mismatch: declared as {declared_name}, got {inferred_name}"
+                                            ),
+                                            *span,
+                                        )
+                                        .with_category(DiagnosticCategory::Type)
+                                        .with_hint(format!(
+                                            "The right-hand side has type {inferred_name} which is not assignable to {declared_name}"
+                                        )),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    declared
+                } else {
+                    inferred_ty
+                };
+
                 match target.as_ref() {
                     Expression::Identifier(ident) => {
                         // BT-1588: Track type origin for generic type params
@@ -3646,6 +3686,7 @@ mod tests {
         let expr = Expression::Assignment {
             target: Box::new(var("x")),
             value: Box::new(int_lit(42)),
+            type_annotation: None,
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);

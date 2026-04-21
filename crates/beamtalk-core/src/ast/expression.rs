@@ -172,12 +172,17 @@ pub enum Expression {
     /// A block (closure/lambda).
     Block(Block),
 
-    /// An assignment statement (`x := value`).
+    /// An assignment statement (`x := value` or `x :: Type := value`).
     Assignment {
         /// The target being assigned to (identifier or field access).
         target: Box<Expression>,
         /// The value being assigned.
         value: Box<Expression>,
+        /// Optional type annotation (e.g., `x :: Integer := 5`).
+        ///
+        /// When present, the type checker uses this as the binding's type
+        /// rather than the inferred RHS type. Codegen ignores it (erased).
+        type_annotation: Option<TypeAnnotation>,
         /// Source location of the entire assignment.
         span: Span,
     },

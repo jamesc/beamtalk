@@ -1,0 +1,609 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Snapshot",
+                span: Span {
+                    start: 188,
+                    end: 196,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Value",
+                    span: Span {
+                        start: 172,
+                        end: 177,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "eventId",
+                        span: Span {
+                            start: 206,
+                            end: 213,
+                        },
+                    },
+                    type_annotation: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 217,
+                                    end: 224,
+                                },
+                            },
+                        ),
+                    ),
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 227,
+                                end: 228,
+                            },
+                        ),
+                    ),
+                    declared_keyword: Field,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 199,
+                        end: 228,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "eventId",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 254,
+                                            end: 258,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "eventId",
+                                    span: Span {
+                                        start: 259,
+                                        end: 266,
+                                    },
+                                },
+                                span: Span {
+                                    start: 254,
+                                    end: 266,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 243,
+                                    end: 250,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 232,
+                        end: 266,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 172,
+                            end: 177,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 172,
+                            end: 177,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-2012: Local variable type annotations",
+                        span: Span {
+                            start: 172,
+                            end: 177,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "Tests parsing of `identifier :: Type := expr` syntax.",
+                        span: Span {
+                            start: 172,
+                            end: 177,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            doc_comment: None,
+            backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 172,
+                end: 266,
+            },
+        },
+        ClassDefinition {
+            name: Identifier {
+                name: "AnnotatedLocalVarDemo",
+                span: Span {
+                    start: 284,
+                    end: 305,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Value",
+                    span: Span {
+                        start: 268,
+                        end: 273,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "simpleAnnotation",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "x",
+                                        span: Span {
+                                            start: 361,
+                                            end: 362,
+                                        },
+                                    },
+                                ),
+                                value: Literal(
+                                    Integer(
+                                        42,
+                                    ),
+                                    Span {
+                                        start: 377,
+                                        end: 379,
+                                    },
+                                ),
+                                type_annotation: Some(
+                                    Simple(
+                                        Identifier {
+                                            name: "Integer",
+                                            span: Span {
+                                                start: 366,
+                                                end: 373,
+                                            },
+                                        },
+                                    ),
+                                ),
+                                span: Span {
+                                    start: 361,
+                                    end: 379,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "x",
+                                        span: Span {
+                                            start: 384,
+                                            end: 385,
+                                        },
+                                    },
+                                ),
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 388,
+                                            end: 389,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 384,
+                                    end: 389,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Simple type annotation",
+                                span: Span {
+                                    start: 337,
+                                    end: 353,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                        ],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 337,
+                        end: 389,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "parametricAnnotation",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "r",
+                                        span: Span {
+                                            start: 453,
+                                            end: 454,
+                                        },
+                                    },
+                                ),
+                                value: MessageSend {
+                                    receiver: ClassReference {
+                                        name: Identifier {
+                                            name: "Result",
+                                            span: Span {
+                                                start: 484,
+                                                end: 490,
+                                            },
+                                        },
+                                        package: None,
+                                        span: Span {
+                                            start: 484,
+                                            end: 490,
+                                        },
+                                    },
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "ok:",
+                                                span: Span {
+                                                    start: 491,
+                                                    end: 494,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                42,
+                                            ),
+                                            Span {
+                                                start: 495,
+                                                end: 497,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 484,
+                                        end: 497,
+                                    },
+                                },
+                                type_annotation: Some(
+                                    Generic {
+                                        base: Identifier {
+                                            name: "Result",
+                                            span: Span {
+                                                start: 458,
+                                                end: 464,
+                                            },
+                                        },
+                                        parameters: [
+                                            Simple(
+                                                Identifier {
+                                                    name: "Integer",
+                                                    span: Span {
+                                                        start: 465,
+                                                        end: 472,
+                                                    },
+                                                },
+                                            ),
+                                            Simple(
+                                                Identifier {
+                                                    name: "Error",
+                                                    span: Span {
+                                                        start: 474,
+                                                        end: 479,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 458,
+                                            end: 480,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 453,
+                                    end: 497,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "r",
+                                    span: Span {
+                                        start: 502,
+                                        end: 503,
+                                    },
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Parametric type annotation",
+                                span: Span {
+                                    start: 425,
+                                    end: 445,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                        ],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 425,
+                        end: 503,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "unionAnnotation",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "name",
+                                        span: Span {
+                                            start: 557,
+                                            end: 561,
+                                        },
+                                    },
+                                ),
+                                value: Identifier(
+                                    Identifier {
+                                        name: "nil",
+                                        span: Span {
+                                            start: 581,
+                                            end: 584,
+                                        },
+                                    },
+                                ),
+                                type_annotation: Some(
+                                    Union {
+                                        types: [
+                                            Simple(
+                                                Identifier {
+                                                    name: "String",
+                                                    span: Span {
+                                                        start: 565,
+                                                        end: 571,
+                                                    },
+                                                },
+                                            ),
+                                            Simple(
+                                                Identifier {
+                                                    name: "nil",
+                                                    span: Span {
+                                                        start: 574,
+                                                        end: 577,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 565,
+                                            end: 577,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 557,
+                                    end: 584,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "name",
+                                    span: Span {
+                                        start: 589,
+                                        end: 593,
+                                    },
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Union type annotation",
+                                span: Span {
+                                    start: 534,
+                                    end: 549,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                        ],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 534,
+                        end: 593,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            doc_comment: None,
+            backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 268,
+                end: 593,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    expressions: [],
+    span: Span {
+        start: 172,
+        end: 593,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

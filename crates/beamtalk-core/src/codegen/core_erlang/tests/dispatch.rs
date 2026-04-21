@@ -262,6 +262,7 @@ fn test_generate_spawn_function() {
             Span::new(0, 5),
         ))),
         value: Box::new(Expression::Literal(Literal::Integer(0), Span::new(9, 10))),
+        type_annotation: None,
         span: Span::new(0, 10),
     };
 
@@ -1088,6 +1089,7 @@ fn test_cascade_field_assignment_arg_hoisted() {
             span: Span::new(10, 16),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(20, 21))),
+        type_annotation: None,
         span: Span::new(10, 21),
     };
 
@@ -1161,6 +1163,7 @@ fn test_cascade_multiple_field_assignments_state_threading() {
             span: Span::new(10, 16),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(20, 21))),
+        type_annotation: None,
         span: Span::new(10, 21),
     };
 
@@ -1183,6 +1186,7 @@ fn test_cascade_multiple_field_assignments_state_threading() {
             span: Span::new(30, 36),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(10), Span::new(40, 42))),
+        type_annotation: None,
         span: Span::new(30, 42),
     };
 
@@ -1704,6 +1708,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
                 is_cast: false,
                 span: Span::new(14, 23),
             }),
+            type_annotation: None,
             span: Span::new(5, 23),
         })],
         Span::new(0, 24),
@@ -1863,6 +1868,7 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
                 is_cast: false,
                 span: Span::new(12, 21),
             }),
+            type_annotation: None,
             span: Span::new(3, 21),
         })],
         Span::new(0, 22),
@@ -2519,6 +2525,7 @@ fn test_block_value_keyword_field_assignment_arg_hoisted() {
             span: Span::new(0, 6),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(10, 11))),
+        type_annotation: None,
         span: Span::new(0, 11),
     };
 
@@ -2586,6 +2593,7 @@ fn test_value_keyword_guard_field_assignment_arg_hoisted() {
             span: Span::new(0, 6),
         }),
         value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(10, 11))),
+        type_annotation: None,
         span: Span::new(0, 11),
     };
 
