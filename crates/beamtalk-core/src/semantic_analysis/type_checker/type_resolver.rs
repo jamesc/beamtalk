@@ -28,13 +28,7 @@ use ecow::{EcoString, eco_format};
 use crate::ast::TypeAnnotation;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 
-use super::{DynamicReason, InferredType, TypeProvenance, is_generic_type_param};
-
-// `ClassHierarchy` is threaded through [`receiver_type_for_class`] so the
-// helper can read the target class's declared type parameters. A future
-// evolution of the resolver may also consult the hierarchy for type-alias
-// resolution or existence checks during annotation resolution — at present
-// only the receiver helper needs it.
+use super::{DynamicReason, InferredType, TypeProvenance};
 
 /// Substitution map from a generic type parameter name to its concrete
 /// [`InferredType`].
@@ -189,18 +183,6 @@ fn resolve_type_keyword(name: &EcoString) -> EcoString {
         "true" => "True".into(),
         _ => name.clone(),
     }
-}
-
-/// Returns `true` if the name looks like an *unresolved* generic type
-/// parameter (single uppercase letter) — i.e. a class-level or method-local
-/// parameter that has no concrete binding yet.
-///
-/// Thin re-export of [`super::is_generic_type_param`] so the resolver module
-/// is self-contained for callers that only depend on this submodule.
-#[must_use]
-#[allow(dead_code)] // Exposed for potential external resolver callers; presently unused.
-pub(in crate::semantic_analysis) fn is_unresolved_type_param(name: &str) -> bool {
-    is_generic_type_param(name)
 }
 
 /// Split a stored-string type name into `(base, args_slice)`.
