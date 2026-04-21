@@ -942,6 +942,7 @@ impl CoreErlangGenerator {
     /// Used by both `self` sends and explicit class name sends (BT-773) within
     /// class methods. Generates direct module function calls to avoid deadlock
     /// since class methods execute inside a `gen_server:call` handler.
+    #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003) share args-capture scaffolding.
     fn generate_class_method_self_send(
         &mut self,
         selector: &MessageSelector,
@@ -1043,7 +1044,11 @@ impl CoreErlangGenerator {
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
 
         let call_doc = docvec![
-            Document::String(format!("call '{module}':'{fun_name}'(")),
+            "call '",
+            Document::Eco(module),
+            "':'",
+            Document::String(fun_name),
+            "'(",
             args_doc,
             ")"
         ];
