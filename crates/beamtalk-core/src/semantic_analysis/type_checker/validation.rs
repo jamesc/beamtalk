@@ -1226,7 +1226,8 @@ impl TypeChecker {
     /// Same as `resolve_type_keyword` but takes `&str` for use in validation contexts.
     fn resolve_type_keyword_static(name: &str) -> EcoString {
         match name {
-            "nil" => "UndefinedObject".into(),
+            // BT-2016: Match both `nil` and `Nil`, consistent with resolve_type_keyword.
+            "nil" | "Nil" => "UndefinedObject".into(),
             "false" => "False".into(),
             "true" => "True".into(),
             _ => EcoString::from(name),
