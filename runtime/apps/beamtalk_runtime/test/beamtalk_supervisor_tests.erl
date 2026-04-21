@@ -28,6 +28,9 @@ Tests cover:
 - ensure_root_table idempotent creation (BT-1960)
 - startLink/1 success, already_started, and error paths (BT-1980)
 - terminateChild/2 class path + terminateChild:class:/:child: aliases (BT-1980)
+- terminateChild/2 Result-shaped returns: idempotent not_found → {ok, nil}
+  on BOTH static and dynamic paths, {error, terminate_failed} for other
+  failures, {error, stale_handle} for dead supervisor (BT-1998)
 - startChild/1 and /2 success + error paths (BT-1980)
 - run_initialize/1 invokes class_initialize: via hierarchy walk (BT-1980)
 - to_otp_strategy/1 oneForAll, restForOne, pass-through (BT-1980)
@@ -468,7 +471,7 @@ stop_returns_ok_nil_test() ->
 %%====================================================================
 
 terminate_child_by_pid_test() ->
-    %% Test the actor-instance branch of terminateChild/2 (DynamicSupervisor path).
+    %% BT-1998: terminateChild/2 returns {ok, nil} on success (dynamic path).
     %% Uses a simple_one_for_one supervisor so OTP accepts terminate_child by pid.
     SupPid = start_dynamic_supervisor(),
     try
@@ -486,7 +489,7 @@ terminate_child_by_pid_test() ->
         %% is_class_object returns false (no " class" suffix in element 2), so the pid branch runs.
         ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
         Result = beamtalk_supervisor:terminateChild(Self, ChildArg),
-        ?assertEqual(nil, Result),
+        ?assertEqual({ok, nil}, Result),
         timer:sleep(50),
         ?assertEqual(false, is_process_alive(ChildPid))
     after
@@ -494,7 +497,9 @@ terminate_child_by_pid_test() ->
     end.
 
 terminate_child_not_found_dynamic_test() ->
-    %% BT-1960: terminateChild/2 for a pid not in the supervisor raises runtime_error.
+    %% BT-1998 / ADR 0080 Phase 1: terminateChild/2 on a pid not in the
+    %% supervisor returns {ok, nil} (idempotent — "child is already gone"
+    %% is the goal state, so this is success).
     SupPid = start_dynamic_supervisor(),
     FakePid = spawn(fun() ->
         receive
@@ -504,8 +509,8 @@ terminate_child_not_found_dynamic_test() ->
     try
         Self = make_supervisor_tuple('TestSup7', test_module7, SupPid),
         ChildArg = {beamtalk_object, 'SomeActor', some_mod, FakePid},
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        ?assertEqual(
+            {ok, nil},
             beamtalk_supervisor:terminateChild(Self, ChildArg)
         )
     after
@@ -514,19 +519,17 @@ terminate_child_not_found_dynamic_test() ->
     end.
 
 terminate_child_stale_handle_test() ->
-    %% BT-1960 / BT-1997: terminateChild/2 on a dead supervisor now returns
-    %% {error, #beamtalk_error{kind = stale_handle}} because
-    %% with_live_supervisor/3 was migrated to Result-shaped returns in
-    %% BT-1997. The sibling BT-1998 migrates the remaining terminateChild
-    %% success/non-not_found error branches to Result; until then the happy
-    %% path still returns the raw `nil` value.
+    %% BT-1998: terminateChild/2 on a dead supervisor returns
+    %% {error, #beamtalk_error{kind = stale_handle, ...}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Self = make_supervisor_tuple('StaleSup4', stale_mod4, SupPid),
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, self()},
-    Result = beamtalk_supervisor:terminateChild(Self, ChildArg),
-    ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result).
+    ?assertMatch(
+        {error, #beamtalk_error{kind = stale_handle}},
+        beamtalk_supervisor:terminateChild(Self, ChildArg)
+    ).
 
 %%====================================================================
 %% Tests: build_child_specs/1
@@ -1223,7 +1226,8 @@ startLink_error_returns_supervisor_start_failed_test() ->
 %%====================================================================
 
 terminate_child_by_class_test() ->
-    %% BT-1980: terminateChild with a class object arg terminates by child id.
+    %% BT-1980 / BT-1998: terminateChild with a class object arg terminates
+    %% by child id and returns {ok, nil} on success (static path).
     SupPid = start_anon_supervisor_with_worker(bt1980_class_child),
     Self = make_supervisor_tuple('BT1980TermClass', bt1980_term_mod, SupPid),
     %% Build a class object arg whose class_name/1 returns the child id atom.
@@ -1242,7 +1246,7 @@ terminate_child_by_class_test() ->
         ClassArg =
             {beamtalk_object, 'BT1980ClassChild class', bt1980_class_child_mod, FakeClassPid},
         Result = beamtalk_supervisor:terminateChild(Self, ClassArg),
-        ?assertEqual(nil, Result)
+        ?assertEqual({ok, nil}, Result)
     after
         FakeClassPid ! stop,
         (try
@@ -1253,7 +1257,11 @@ terminate_child_by_class_test() ->
     end.
 
 terminate_child_by_class_not_found_test() ->
-    %% BT-1980: terminateChild with a class arg for a non-running child raises error.
+    %% BT-1998 / ADR 0080 Phase 1 — BEHAVIOR CHANGE:
+    %% terminateChild/2 (static path) used to raise on {error, not_found}.
+    %% It now returns {ok, nil} (idempotent), matching the dynamic-path
+    %% convention. Any caller relying on the static path raising for a
+    %% missing child loses that signal. See ADR 0080 §Decision.
     SupPid = start_anon_supervisor(),
     Self = make_supervisor_tuple('BT1980TermClassNF', bt1980_term_nf_mod, SupPid),
     FakeClassPid = spawn(fun() ->
@@ -1269,8 +1277,8 @@ terminate_child_by_class_not_found_test() ->
     end),
     try
         ClassArg = {beamtalk_object, 'BT1980MissingChild class', bt1980_missing_mod, FakeClassPid},
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        ?assertEqual(
+            {ok, nil},
             beamtalk_supervisor:terminateChild(Self, ClassArg)
         )
     after
@@ -1686,7 +1694,7 @@ terminateChild_class_alias_delegates_test() ->
             {beamtalk_object, 'BT1980AliasClsChild class', bt1980_alias_cls_child_mod,
                 FakeClassPid},
         Result = beamtalk_supervisor:'terminateChild:class:'(Self, ClassArg),
-        ?assertEqual(nil, Result)
+        ?assertEqual({ok, nil}, Result)
     after
         FakeClassPid ! stop,
         (try
@@ -1710,8 +1718,114 @@ terminateChild_child_alias_delegates_test() ->
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
     try
         Result = beamtalk_supervisor:'terminateChild:child:'(Self, ChildArg),
-        ?assertEqual(nil, Result)
+        ?assertEqual({ok, nil}, Result)
     after
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-1998: terminateChild/2 Result-shaped returns (ADR 0080 Phase 1)
+%%====================================================================
+
+terminate_child_static_idempotent_double_call_test() ->
+    %% BT-1998 ACCEPTANCE CRITERION: second `terminateChild` call after
+    %% the child is gone returns {ok, nil} on the static path. Asserts
+    %% the new idempotent behavior explicitly.
+    SupPid = start_anon_supervisor_with_worker(bt1998_idemp_child),
+    Self = make_supervisor_tuple('BT1998Idemp', bt1998_idemp_mod, SupPid),
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, bt1998_idemp_child),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        ClassArg =
+            {beamtalk_object, 'BT1998IdempChild class', bt1998_idemp_child_mod, FakeClassPid},
+        %% First call — child is running, should return {ok, nil}.
+        ?assertEqual(
+            {ok, nil},
+            beamtalk_supervisor:terminateChild(Self, ClassArg)
+        ),
+        %% Second call — child is already gone. Pre-BT-1998 this would
+        %% raise {error, not_found}; now it returns {ok, nil} (idempotent).
+        ?assertEqual(
+            {ok, nil},
+            beamtalk_supervisor:terminateChild(Self, ClassArg)
+        )
+    after
+        FakeClassPid ! stop,
+        (try
+            gen_server:stop(SupPid)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+terminate_child_static_terminate_failed_test() ->
+    %% BT-1998: A non-`not_found` error from supervisor:terminate_child/2
+    %% on the static path maps to {error, #beamtalk_error{kind =
+    %% terminate_failed}}.
+    %%
+    %% Trigger: call the static path (class object arg) against a
+    %% simple_one_for_one supervisor. OTP returns {error, simple_one_for_one}
+    %% which is a genuine non-not_found failure.
+    SupPid = start_dynamic_supervisor(),
+    Self = make_supervisor_tuple('BT1998StaticFail', bt1998_static_fail_mod, SupPid),
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, some_class_name),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        ClassArg =
+            {beamtalk_object, 'BT1998StaticFailChild class', bt1998_fail_child_mod, FakeClassPid},
+        Result = beamtalk_supervisor:terminateChild(Self, ClassArg),
+        ?assertMatch({error, #beamtalk_error{kind = terminate_failed}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT1998StaticFail', BtError#beamtalk_error.class),
+        ?assertEqual('terminateChild:', BtError#beamtalk_error.selector)
+    after
+        FakeClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+terminate_child_static_alias_idempotent_test() ->
+    %% BT-1998: 'terminateChild:class:'/2 alias also honours the
+    %% idempotent not_found → {ok, nil} convention on the static path.
+    SupPid = start_anon_supervisor(),
+    Self = make_supervisor_tuple('BT1998AliasIdemp', bt1998_alias_idemp_mod, SupPid),
+    FakeClassPid = spawn(fun() ->
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, bt1998_alias_missing),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    try
+        ClassArg =
+            {beamtalk_object, 'BT1998AliasMissing class', bt1998_alias_missing_mod, FakeClassPid},
+        ?assertEqual(
+            {ok, nil},
+            beamtalk_supervisor:'terminateChild:class:'(Self, ClassArg)
+        )
+    after
+        FakeClassPid ! stop,
         gen_server:stop(SupPid)
     end.
 
