@@ -281,6 +281,9 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
 ///
 /// For each `ExpectDirective` at index `i`, the target span is the span of
 /// the expression at index `i + 1` (if present).
+///
+/// After scanning the flat statement list, recurses into expression subtrees
+/// to find `@expect` directives inside block bodies (BT-2010).
 fn collect_directives_from_exprs(
     exprs: &[ExpressionStatement],
     directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
@@ -301,6 +304,105 @@ fn collect_directives_from_exprs(
                 directives.push((*category, reason.clone(), *span, *span));
             }
         }
+        // BT-2010: Recurse into expression subtrees to find block bodies
+        // containing @expect directives.
+        collect_directives_from_expr(&stmt.expression, directives);
+    }
+}
+
+/// Recursively walks an expression tree to find nested `Block` bodies and
+/// collects `@expect` directives from them (BT-2010).
+///
+/// This handles `@expect` inside `ifTrue: [...]`, `collect: [:x | ...]`,
+/// nested blocks, match arms, and any other expression that contains
+/// sub-expressions with block bodies.
+fn collect_directives_from_expr(
+    expr: &Expression,
+    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
+) {
+    match expr {
+        Expression::Block(block) => {
+            // Found a block body — scan it for @expect directives using the
+            // same (i, i+1) semantics, then recurse into its children.
+            collect_directives_from_exprs(&block.body, directives);
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_directives_from_expr(receiver, directives);
+            for arg in arguments {
+                collect_directives_from_expr(arg, directives);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_directives_from_expr(target, directives);
+            collect_directives_from_expr(value, directives);
+        }
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+            collect_directives_from_expr(value, directives);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            collect_directives_from_expr(receiver, directives);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    collect_directives_from_expr(arg, directives);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            collect_directives_from_expr(expression, directives);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            collect_directives_from_expr(receiver, directives);
+        }
+        Expression::Match { value, arms, .. } => {
+            collect_directives_from_expr(value, directives);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_directives_from_expr(guard, directives);
+                }
+                collect_directives_from_expr(&arm.body, directives);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_directives_from_expr(&pair.key, directives);
+                collect_directives_from_expr(&pair.value, directives);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                collect_directives_from_expr(elem, directives);
+            }
+            if let Some(t) = tail {
+                collect_directives_from_expr(t, directives);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                collect_directives_from_expr(elem, directives);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                    collect_directives_from_expr(e, directives);
+                }
+            }
+        }
+        // Leaf nodes — nothing to recurse into.
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Error { .. }
+        | Expression::Spread { .. } => {}
     }
 }
 
@@ -1372,5 +1474,122 @@ typed Object subclass: MyTyped
                  but produced none — update the drift prevention test snippets"
             );
         }
+    }
+
+    // ── BT-2010: @expect inside block bodies ──────────────────────────────────
+
+    #[test]
+    fn expect_dnu_inside_block_body_suppresses_dnu() {
+        // @expect dnu inside an ifTrue: [...] block body should suppress the DNU
+        // hint on the next expression inside the same block.
+        let source = "\
+Object subclass: Foo
+  test =>
+    true ifTrue: [
+      @expect dnu
+      42 unknownMethod
+    ]
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu inside block body should suppress DNU hint, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_dnu_inside_nested_block_works() {
+        // @expect dnu inside a nested block (block-inside-block) should work.
+        let source = "\
+Object subclass: Foo
+  test =>
+    true ifTrue: [
+      true ifTrue: [
+        @expect dnu
+        42 unknownMethod
+      ]
+    ]
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu inside nested block should suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn stale_expect_inside_block_body_is_reported() {
+        // @expect dnu inside a block body where no DNU diagnostic fires should
+        // produce a stale @expect warning.
+        let source = "\
+Object subclass: Foo
+  test =>
+    true ifTrue: [
+      @expect dnu
+      42
+    ]
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "Stale @expect inside block body should be reported, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_at_method_level_still_works() {
+        // Existing @expect at method-body level must remain unchanged.
+        let source = "\
+Object subclass: Foo
+  test =>
+    @expect dnu
+    42 unknownMethod
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu at method level should still suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_at_module_level_still_works() {
+        // Existing @expect at module level must remain unchanged.
+        let source = "@expect dnu\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu at module level should still suppress DNU, got: {diagnostics:?}"
+        );
     }
 }
