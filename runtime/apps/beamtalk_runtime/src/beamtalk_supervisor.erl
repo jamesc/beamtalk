@@ -103,7 +103,7 @@ rewritten shape (bare tuple or re-wrapped Result) to the caller.
 """.
 -spec startLink(beamtalk_object()) ->
     {ok, {beamtalk_supervisor_new | beamtalk_supervisor, atom(), module(), pid()}}
-    | {error, beamtalk_error:t()}.
+    | {error, #beamtalk_error{}}.
 startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
@@ -223,21 +223,23 @@ current(Self) ->
 Return the child ids of currently-running children.
 
 Called from `children` on Supervisor instances.
-Returns a list of child id atoms (class name atoms by default, or custom
-ids when `withId:` was used in `SupervisionSpec`).
-Dead or restarting children are excluded.
+Returns `{ok, [Id]}` with a list of child id atoms (class name atoms by
+default, or custom ids when `withId:` was used in `SupervisionSpec`).
+Dead or restarting children are excluded. Returns `{error, BtError}` with
+`kind = stale_handle` when the supervisor process is dead (BT-1997).
 """.
--spec whichChildren(term()) -> term().
+-spec whichChildren(term()) -> {ok, [atom()]} | {error, #beamtalk_error{}}.
 whichChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, children, fun() ->
-        [
+        Ids = [
             Id
          || {Id, ChildPid, _, _} <- supervisor:which_children(Pid),
             Id =/= undefined,
             is_pid(ChildPid)
-        ]
+        ],
+        {ok, Ids}
     end).
 
 -doc """
@@ -247,9 +249,14 @@ Called from `which: aClass` on Supervisor instances.
 ClassArg is a class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 Matches by child module (position 4 in which_children tuples) rather than child id
 so that custom ids set via `withId:` in SupervisionSpec still resolve correctly.
-Returns {beamtalk_supervisor, ...} for supervisor subclasses, {beamtalk_object, ...} otherwise.
+
+Returns `{ok, {beamtalk_supervisor, ...}}` for supervisor subclasses or
+`{ok, {beamtalk_object, ...}}` for worker children; `{ok, nil}` when no
+running child matches. Returns `{error, BtError}` with `kind = stale_handle`
+when the supervisor process is dead (BT-1997).
 """.
--spec whichChild(term(), Class :: beamtalk_object()) -> term() | nil.
+-spec whichChild(term(), Class :: beamtalk_object()) ->
+    {ok, tuple() | nil} | {error, #beamtalk_error{}}.
 whichChild(Self, ClassArg) ->
     SupPid = element(4, Self),
     ClassName = element(2, Self),
@@ -267,9 +274,9 @@ whichChild(Self, ClassArg) ->
             )
         of
             {value, {_Id, ChildPid, _, _}} ->
-                wrap_child(ChildClass, ChildModule, ChildPid);
+                {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
             false ->
-                nil
+                {ok, nil}
         end
     end).
 
@@ -355,10 +362,18 @@ Start a new child with default args under a DynamicSupervisor.
 Called from `startChild` on DynamicSupervisor instances.
 Calls `Module:'childClass'()` to determine the child class and module,
 then starts the child via OTP simple_one_for_one.
-Returns {beamtalk_supervisor, ChildClass, ChildModule, ChildPid} for supervisor
-subclasses, or {beamtalk_object, ChildClass, ChildModule, ChildPid} for workers.
+
+## Return shape (ADR 0080 Phase 1 — BT-1997)
+
+Returns `{ok, {beamtalk_supervisor, ChildClass, ChildModule, ChildPid}}`
+for supervisor subclasses, or `{ok, {beamtalk_object, ...}}` for workers.
+On `supervisor:start_child/2` failure (typically a child `init/1` crash)
+returns `{error, #beamtalk_error{kind = child_start_failed}}`. On a stale
+supervisor handle returns `{error, #beamtalk_error{kind = stale_handle}}`.
+FFI coercion in `beamtalk_erlang_proxy:coerce_ffi_result/2` wraps the
+tagged tuple into a Beamtalk `Result` for the stdlib method body.
 """.
--spec startChild(term()) -> term().
+-spec startChild(term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
 startChild(Self) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
@@ -377,7 +392,7 @@ startChild(Self) ->
                     child_pid => ChildPid,
                     domain => [beamtalk, runtime]
                 }),
-                wrap_child(ChildClass, ChildModule, ChildPid);
+                {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
             {error, Reason} ->
                 ?LOG_ERROR("DynamicSupervisor child start failed", #{
                     supervisor => SupClass,
@@ -386,12 +401,14 @@ startChild(Self) ->
                     domain => [beamtalk, runtime]
                 }),
                 Error = beamtalk_error:new(
-                    runtime_error,
+                    child_start_failed,
                     SupClass,
                     startChild,
-                    iolist_to_binary(io_lib:format("~p", [Reason]))
+                    iolist_to_binary(
+                        io_lib:format("supervisor start_child failed: ~p", [Reason])
+                    )
                 ),
-                error(beamtalk_exception_handler:ensure_wrapped(Error))
+                {error, Error}
         end
     end).
 
@@ -401,10 +418,17 @@ Start a new child with args under a DynamicSupervisor.
 Called from `startChild: args` on DynamicSupervisor instances.
 Args is passed as the extra argument to OTP simple_one_for_one,
 which appends it to the child start function's argument list.
-Returns {beamtalk_supervisor, ChildClass, ChildModule, ChildPid} for supervisor
-subclasses, or {beamtalk_object, ChildClass, ChildModule, ChildPid} for workers.
+
+## Return shape (ADR 0080 Phase 1 — BT-1997)
+
+Returns `{ok, {beamtalk_supervisor, ChildClass, ChildModule, ChildPid}}`
+for supervisor subclasses, or `{ok, {beamtalk_object, ...}}` for workers.
+On `supervisor:start_child/2` failure returns
+`{error, #beamtalk_error{kind = child_start_failed}}`. On a stale handle
+returns `{error, #beamtalk_error{kind = stale_handle}}`. FFI coercion
+wraps this into a Beamtalk `Result` for the stdlib method body.
 """.
--spec startChild(term(), term()) -> term().
+-spec startChild(term(), term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
 startChild(Self, Args) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
@@ -423,7 +447,7 @@ startChild(Self, Args) ->
                     child_pid => ChildPid,
                     domain => [beamtalk, runtime]
                 }),
-                wrap_child(ChildClass, ChildModule, ChildPid);
+                {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
             {error, Reason} ->
                 ?LOG_ERROR("DynamicSupervisor child start failed", #{
                     supervisor => SupClass,
@@ -432,12 +456,14 @@ startChild(Self, Args) ->
                     domain => [beamtalk, runtime]
                 }),
                 Error = beamtalk_error:new(
-                    runtime_error,
+                    child_start_failed,
                     SupClass,
                     'startChild:',
-                    iolist_to_binary(io_lib:format("~p", [Reason]))
+                    iolist_to_binary(
+                        io_lib:format("supervisor start_child failed: ~p", [Reason])
+                    )
                 ),
-                error(beamtalk_exception_handler:ensure_wrapped(Error))
+                {error, Error}
         end
     end).
 
@@ -447,14 +473,17 @@ Return the count of active children.
 Called from `count` on Supervisor and DynamicSupervisor instances.
 Uses `supervisor:count_children/1` which returns a proplist with
 `active` (running), `workers`, `supervisors`, `specs` counts.
+
+Returns `{ok, Count}` on success; `{error, BtError}` with
+`kind = stale_handle` when the supervisor process is dead (BT-1997).
 """.
--spec countChildren(term()) -> non_neg_integer().
+-spec countChildren(term()) -> {ok, non_neg_integer()} | {error, #beamtalk_error{}}.
 countChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, count, fun() ->
         Counts = supervisor:count_children(Pid),
-        proplists:get_value(active, Counts, 0)
+        {ok, proplists:get_value(active, Counts, 0)}
     end).
 
 -doc """
@@ -462,9 +491,11 @@ Stop the supervisor and all its children.
 
 Called from `stop` on Supervisor and DynamicSupervisor instances.
 Uses gen_server:stop/1 since supervisors are OTP gen_servers.
-Returns nil.
+
+Returns `{ok, nil}` on success; `{error, BtError}` with `kind = stale_handle`
+when the supervisor process is already dead (BT-1997).
 """.
--spec stop(term()) -> nil.
+-spec stop(term()) -> {ok, nil} | {error, #beamtalk_error{}}.
 stop(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -473,7 +504,7 @@ stop(Self) ->
             supervisor => ClassName, pid => Pid, domain => [beamtalk, runtime]
         }),
         gen_server:stop(Pid),
-        nil
+        {ok, nil}
     end).
 
 -doc """
@@ -882,9 +913,9 @@ wrap_child(ChildClass, ChildModule, ChildPid) ->
 
 -doc """
 Execute Fun(), catching raw OTP process exits that indicate a stale
-supervisor handle (the target process is dead) and converting them to a
-structured stale_handle error instead of letting the raw exit leak across
-the public API boundary.
+supervisor handle (the target process is dead) and translating them to
+`{error, #beamtalk_error{kind = stale_handle}}` instead of letting the raw
+exit leak across the public API boundary.
 
 Two distinct exit shapes are handled:
 
@@ -892,13 +923,20 @@ Two distinct exit shapes are handled:
   `{noproc, MFA}` (tuple) when the target process is not alive.
 * `gen_server:stop/1` exits with the bare atom `noproc` (no MFA wrapper).
 
-ADR 0080 Phase 1 (BT-1996): error kind changed from `runtime_error` to
-`stale_handle` so callers can distinguish stale-handle failures from other
-runtime errors. The error is still raised (not returned) because instance
-methods (`startChild`, `terminateChild:`, etc.) are not yet migrated to
-Result-shaped returns — that happens in Phase 2 (stdlib migration).
+## Inner fun contract (BT-1997)
+
+After BT-1997, each inner fun returns `{ok, Value}` on success and
+`{error, #beamtalk_error{}}` on application-level failure.
+`with_live_supervisor/3` returns whichever tagged tuple Fun produced, or
+intercepts the raw OTP `noproc` exit and returns
+`{error, #beamtalk_error{kind = stale_handle, ...}}`. FFI coercion in
+`beamtalk_erlang_proxy:coerce_ffi_result/2` wraps the tagged tuple into
+a Beamtalk `Result` for the stdlib method body. (`terminateChild/2`
+migrates in the sibling BT-1998 issue; until then its Fun still calls
+`error/1` on failure, which passes through the try/catch here unchanged.)
 """.
--spec with_live_supervisor(atom(), atom(), fun(() -> term())) -> term().
+-spec with_live_supervisor(atom(), atom(), fun(() -> term())) ->
+    term() | {error, #beamtalk_error{}}.
 with_live_supervisor(ClassName, Selector, Fun) ->
     try
         Fun()
@@ -906,33 +944,31 @@ with_live_supervisor(ClassName, Selector, Fun) ->
         exit:{noproc, _} ->
             %% supervisor:* calls use gen_server:call internally, which exits
             %% with {noproc, MFA} when the target process is dead.
-            ?LOG_WARNING("Supervisor stale handle", #{
-                supervisor => ClassName,
-                selector => Selector,
-                domain => [beamtalk, runtime]
-            }),
-            Error = beamtalk_error:new(
-                stale_handle,
-                ClassName,
-                Selector,
-                <<"supervisor is not running — the handle is stale">>
-            ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error));
+            stale_handle_error(ClassName, Selector);
         exit:noproc ->
             %% gen_server:stop/1 exits with the bare atom noproc (no MFA wrapper).
-            ?LOG_WARNING("Supervisor stale handle", #{
-                supervisor => ClassName,
-                selector => Selector,
-                domain => [beamtalk, runtime]
-            }),
-            Error = beamtalk_error:new(
-                stale_handle,
-                ClassName,
-                Selector,
-                <<"supervisor is not running — the handle is stale">>
-            ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error))
+            stale_handle_error(ClassName, Selector)
     end.
+
+-doc """
+Build the `{error, #beamtalk_error{kind = stale_handle}}` return for
+`with_live_supervisor/3`. Logs a warning and constructs the Beamtalk
+error with class and selector context.
+""".
+-spec stale_handle_error(atom(), atom()) -> {error, #beamtalk_error{}}.
+stale_handle_error(ClassName, Selector) ->
+    ?LOG_WARNING("Supervisor stale handle", #{
+        supervisor => ClassName,
+        selector => Selector,
+        domain => [beamtalk, runtime]
+    }),
+    Error = beamtalk_error:new(
+        stale_handle,
+        ClassName,
+        Selector,
+        <<"supervisor is not running — the handle is stale">>
+    ),
+    {error, Error}.
 
 -doc """
 Ensure the root supervisor ETS table exists.
