@@ -131,9 +131,7 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             // these cases directly.
             InferredType::Dynamic(DynamicReason::Unknown)
         }
-        TypeAnnotation::Singleton { name, .. } => {
-            InferredType::known(eco_format!("#{name}"))
-        }
+        TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
     }
 }
 
@@ -222,9 +220,7 @@ pub(in crate::semantic_analysis) fn is_unresolved_type_param(name: &str) -> bool
 ///
 /// **References:** BT-2025.
 #[must_use]
-pub(in crate::semantic_analysis) fn split_generic_base<'a>(
-    type_name: &'a str,
-) -> (&'a str, Option<&'a str>) {
+pub(in crate::semantic_analysis) fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
     match type_name.split_once('(') {
         Some((base, rest)) if rest.ends_with(')') => {
             let args = &rest[..rest.len() - 1];
@@ -477,11 +473,13 @@ mod tests {
             panic!("expected Union");
         };
         assert_eq!(members.len(), 2);
-        let has_result_with_args = members.iter().any(|m| matches!(
-            m,
-            InferredType::Known { class_name, type_args, .. }
-            if class_name.as_str() == "Result" && type_args.len() == 2
-        ));
+        let has_result_with_args = members.iter().any(|m| {
+            matches!(
+                m,
+                InferredType::Known { class_name, type_args, .. }
+                if class_name.as_str() == "Result" && type_args.len() == 2
+            )
+        });
         assert!(
             has_result_with_args,
             "Result member must preserve its two type args: {members:?}"
@@ -638,8 +636,7 @@ mod tests {
         // hierarchy; we just assert the arity matches the class's declaration.
         let expected_arity = hierarchy
             .get_class("Collection")
-            .map(|info| info.type_params.len())
-            .unwrap_or(0);
+            .map_or(0, |info| info.type_params.len());
         assert_eq!(type_args.len(), expected_arity);
         // Every synthesised arg is itself a `Known { type_args: [] }` with the
         // param's literal name.
@@ -689,10 +686,7 @@ mod tests {
     #[test]
     fn split_generic_base_unterminated_treats_as_opaque() {
         // No closing `)` — treat the whole string as an opaque class name.
-        assert_eq!(
-            split_generic_base("Array(Integer"),
-            ("Array(Integer", None)
-        );
+        assert_eq!(split_generic_base("Array(Integer"), ("Array(Integer", None));
     }
 
     #[test]

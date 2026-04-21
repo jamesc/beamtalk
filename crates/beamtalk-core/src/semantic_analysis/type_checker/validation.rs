@@ -155,8 +155,7 @@ impl TypeChecker {
                         // resolves to the static receiver class. This powers
                         // ADR 0079's typed-lookup API where `Counter named: #c`
                         // should infer as `Result(Counter, Error)`.
-                        let (base, args_slice) =
-                            super::type_resolver::split_generic_base(ret_ty);
+                        let (base, args_slice) = super::type_resolver::split_generic_base(ret_ty);
                         if let Some(inner) = args_slice {
                             let params = super::TypeChecker::split_type_params(inner);
                             let resolved_args: Vec<super::InferredType> = params

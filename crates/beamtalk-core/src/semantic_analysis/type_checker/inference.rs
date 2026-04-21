@@ -332,9 +332,7 @@ impl TypeChecker {
             InferredType::Known {
                 class_name: base,
                 type_args,
-                provenance: super::TypeProvenance::Declared(
-                    crate::source_analysis::Span::default(),
-                ),
+                provenance: super::TypeProvenance::Declared(crate::source_analysis::Span::default()),
             }
         } else {
             InferredType::known(Self::resolve_type_keyword(type_name))
@@ -1477,11 +1475,9 @@ impl TypeChecker {
                                 // (type_args-dropping) behaviour but route
                                 // through the `base_name_of_string` helper
                                 // to satisfy the `no .find('(')` grep check.
-                                let base =
-                                    super::type_resolver::base_name_of_string(ret_ty);
+                                let base = super::type_resolver::base_name_of_string(ret_ty);
                                 if base.len() < ret_ty.len() {
-                                    return_types
-                                        .push(InferredType::known(EcoString::from(base)));
+                                    return_types.push(InferredType::known(EcoString::from(base)));
                                 } else {
                                     return_types.push(InferredType::known(ret_ty.clone()));
                                 }
