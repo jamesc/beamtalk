@@ -59,7 +59,7 @@ TestCase subclass: SupervisionClassMethodTest
 
   // === Live supervisor with class method ===
   testSupervisedActorViaClassMethod =>
-    sup := ClassMethodSupervisor supervise
+    sup := (ClassMethodSupervisor supervise) unwrap
     child := sup which: ClassMethodActor
     // The class method transforms #hello + 42 into "hello:42"
     self assert: child label equals: "hello:42"

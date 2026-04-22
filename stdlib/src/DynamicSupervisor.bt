@@ -14,8 +14,8 @@
 /// DynamicSupervisor(Worker) subclass: WorkerPool
 ///   class childClass => Worker
 ///
-/// pool := WorkerPool supervise
-/// w := pool startChild   // => Worker (type-narrowed via C)
+/// pool := (WorkerPool supervise) unwrap
+/// w := pool startChild unwrap   // => Worker (type-narrowed via C)
 /// pool count   // => 1
 /// ```
 ///
@@ -60,7 +60,7 @@ abstract Object subclass: DynamicSupervisor(C)
   /// DynamicSupervisor(Worker) subclass: WorkerPool
   ///   class childClass => Worker
   ///   class initialize: sup =>
-  ///     3 timesRepeat: [sup startChild]
+  ///     3 timesRepeat: [sup startChild unwrap]
   /// ```
   class initialize: _supervisor -> Nil => nil
 
@@ -68,12 +68,12 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Start this dynamic supervisor (or return the already-running instance).
   ///
-  /// BT-1994 / ADR 0080 Phase 0a probe: `startLink/1` returns a Result-
-  /// shaped value; call `unwrap` at the FFI boundary so the user-facing
-  /// signature remains `Self` until the full migration in Phase 1
-  /// (BT-P1-startLink).
-  class supervise -> Self =>
-    ((Erlang beamtalk_supervisor) startLink: self) unwrap
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Self, Error)`. Use
+  /// `unwrap` for boot-style "crash on failure" call sites, or
+  /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
+  /// as `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  class supervise -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) startLink: self
 
   /// Return the running supervisor instance, or nil if not started.
   class current => (Erlang beamtalk_supervisor) current: self
@@ -82,28 +82,30 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Start a new child with default args.
   ///
-  /// BT-1997 / ADR 0080 Phase 1: `startChild/1` returns a Result-shaped
-  /// value; call `unwrap` at the FFI boundary so the user-facing signature
-  /// stays `C` until Phase 2 (BT-P2-stdlib) migrates the stdlib signature
-  /// to `Result(C, Error)`.
-  startChild -> C => ((Erlang beamtalk_supervisor) startChild: self) unwrap
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`
+  /// when failure should propagate as an exception, or `ifOk:ifError:` /
+  /// `andThen:` for recoverable starts. Failures surface as
+  /// `Result error: #beamtalk_error{kind = child_start_failed}`.
+  startChild -> Result(C, Error) =>
+    (Erlang beamtalk_supervisor) startChild: self
 
   /// Start a new child with the given initialization args.
   ///
-  /// BT-1997 / ADR 0080 Phase 1: `startChild/2` returns a Result-shaped
-  /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
-  /// user-facing signature.
-  startChild: args -> C =>
-    ((Erlang beamtalk_supervisor) startChild: self with: args) unwrap
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`
+  /// when failure should propagate as an exception, or `ifOk:ifError:` /
+  /// `andThen:` for recoverable starts. Failures surface as
+  /// `Result error: #beamtalk_error{kind = child_start_failed}`.
+  startChild: args -> Result(C, Error) =>
+    (Erlang beamtalk_supervisor) startChild: self with: args
 
   /// Terminate the given child process.
   ///
-  /// BT-1998 / ADR 0080 Phase 1: `terminateChild/2` returns a Result-
-  /// shaped value; call `unwrap` at the FFI boundary so the user-facing
-  /// signature remains `Nil` until the stdlib signature migration in
-  /// Phase 2 (BT-1999).
-  terminateChild: child :: C -> Nil =>
-    ((Erlang beamtalk_supervisor) terminateChild: self child: child) unwrap
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Nil, Error)`. Idempotent
+  /// on `not_found` — terminating an already-gone child returns
+  /// `Result ok: nil`. Genuine failures surface as
+  /// `Result error: #beamtalk_error{kind = terminate_failed}`.
+  terminateChild: child :: C -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) terminateChild: self child: child
 
   /// Return the count of currently-running children.
   ///

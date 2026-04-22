@@ -23,7 +23,7 @@
 // ===========================================================================
 
 // supervise returns a human-readable #Supervisor<ClassName,Pid> object (not raw tuple)
-app := E2EAppSupervisor supervise
+app := (E2EAppSupervisor supervise) unwrap
 // => #Supervisor<E2EAppSupervisor,_>
 
 // ===========================================================================
@@ -35,7 +35,7 @@ appCurrent := E2EAppSupervisor current
 // => #Supervisor<E2EAppSupervisor,_>
 
 // supervise is idempotent — returns the same running instance
-app2 := E2EAppSupervisor supervise
+app2 := (E2EAppSupervisor supervise) unwrap
 // => #Supervisor<E2EAppSupervisor,_>
 
 // ===========================================================================
@@ -63,7 +63,7 @@ counterChild getValue
 // ===========================================================================
 
 // stop stops the supervisor and all children, returns nil
-E2EStopSupervisor supervise
+(E2EStopSupervisor supervise) unwrap
 // => #Supervisor<E2EStopSupervisor,_>
 
 E2EStopSupervisor current
@@ -84,7 +84,7 @@ E2EStopSupervisor current
 // ===========================================================================
 
 // supervise returns a human-readable #DynamicSupervisor<ClassName,Pid> object
-pool := E2EWorkerPool supervise
+pool := (E2EWorkerPool supervise) unwrap
 // => #DynamicSupervisor<E2EWorkerPool,_>
 
 // count starts at 0 — no children yet
@@ -96,7 +96,7 @@ pool count
 // ===========================================================================
 
 // startChild starts a new Counter worker under the supervisor
-w1 := pool startChild
+w1 := pool startChild unwrap
 // => #Actor<Counter,_>
 
 // count is now 1
@@ -104,21 +104,21 @@ pool count
 // => 1
 
 // start a second worker
-w2 := pool startChild
+w2 := pool startChild unwrap
 // => #Actor<Counter,_>
 
 pool count
 // => 2
 
 // terminateChild removes a child from the supervisor
-pool terminateChild: w1
+(pool terminateChild: w1) unwrap
 // => nil
 
 pool count
 // => 1
 
 // terminate the second child too
-pool terminateChild: w2
+(pool terminateChild: w2) unwrap
 // => nil
 
 pool count
@@ -130,7 +130,7 @@ pool count
 
 // E2EOuterSupervisor has E2EInnerSupervisor as its one child.
 // E2EInnerSupervisor has Counter as its one child.
-outer := E2EOuterSupervisor supervise
+outer := (E2EOuterSupervisor supervise) unwrap
 // => #Supervisor<E2EOuterSupervisor,_>
 
 // outer has 1 child (the inner supervisor)
@@ -151,7 +151,7 @@ innerSup count
 
 // E2EArgsSupervisor uses SupervisionSpec withArgs: to start a Counter with
 // initial value 42, exercising the spawnWith: code path in spec_to_otp.
-argsSup := E2EArgsSupervisor supervise
+argsSup := (E2EArgsSupervisor supervise) unwrap
 // => #Supervisor<E2EArgsSupervisor,_>
 
 // The supervisor has one Counter child
@@ -223,7 +223,7 @@ wsPool := Workspace startSupervisor: E2EWorkerPool
 wsPool count
 // => 0
 
-wsW1 := wsPool startChild
+wsW1 := wsPool startChild unwrap
 // => #Actor<Counter,_>
 
 wsPool count
