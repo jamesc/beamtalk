@@ -1498,6 +1498,13 @@ impl Parser {
         self.tokens.get(self.current + offset).map(Token::kind)
     }
 
+    /// Peeks at the full token at the given offset — including trivia — so
+    /// lookahead helpers can query `has_leading_newline()` on a non-current
+    /// token.
+    pub(super) fn peek_token_at(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.current + offset)
+    }
+
     /// Checks if the current token is a specific binary selector, and consumes it if so.
     pub(super) fn match_binary_selector(&mut self, expected: &str) -> bool {
         if let TokenKind::BinarySelector(s) = self.current_kind() {

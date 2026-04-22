@@ -798,6 +798,21 @@ pub enum TypeAnnotation {
         /// Source location.
         span: Span,
     },
+    /// The `<ClassName> class` metatype — resolves to the metaclass of a specific class.
+    ///
+    /// Denotes a class object whose instance protocol is the class-side of `class_name`
+    /// (or any subclass). Valid in any type position. Example use:
+    /// `field: actorClass :: Actor class | Nil = nil` — the field holds the class object
+    /// of `Actor` or any subclass, and class-side methods defined on that hierarchy
+    /// (e.g. `isSupervisor`) are in its method set.
+    ///
+    /// Example: `actorClass :: Actor class | Nil`
+    ClassOf {
+        /// The class whose metaclass is being referenced.
+        class_name: Identifier,
+        /// Source location of the whole `<ClassName> class` form.
+        span: Span,
+    },
 }
 
 impl TypeAnnotation {
@@ -811,7 +826,8 @@ impl TypeAnnotation {
             | Self::Generic { span, .. }
             | Self::FalseOr { span, .. }
             | Self::SelfType { span }
-            | Self::SelfClass { span } => *span,
+            | Self::SelfClass { span }
+            | Self::ClassOf { span, .. } => *span,
         }
     }
 
@@ -898,6 +914,7 @@ impl TypeAnnotation {
             }
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),
+            Self::ClassOf { class_name, .. } => eco_format!("{} class", class_name.name),
         }
     }
 }

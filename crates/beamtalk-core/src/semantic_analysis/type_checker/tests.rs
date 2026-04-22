@@ -3631,6 +3631,77 @@ Value subclass: User
     );
 }
 
+#[test]
+fn test_class_of_metatype_no_false_dnu_warnings() {
+    // BT-2034: A field typed `Actor class | Nil` must allow class-side messages
+    // (e.g. `isSupervisor`, `name`) to flow through after a nil-check without
+    // false DNU warnings. Mirrors the `Self class` behaviour from BT-1952.
+    let source = "
+Value subclass: Actor
+  class isSupervisor -> Boolean => false
+
+typed Value subclass: Spec
+  field: cls :: Actor class | Nil = nil
+  check -> Boolean =>
+    self.cls isNil ifTrue: [^false]
+    self.cls isSupervisor
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // Verify the field annotation parses as Union(ClassOf(Actor), UndefinedObject).
+    let spec = module
+        .classes
+        .iter()
+        .find(|c| c.name.name == "Spec")
+        .expect("Spec class");
+    let cls_field = spec
+        .state
+        .iter()
+        .find(|s| s.name.name == "cls")
+        .expect("cls field");
+    let ann = cls_field.type_annotation.as_ref().unwrap();
+    let TypeAnnotation::Union { types, .. } = ann else {
+        panic!("Expected Union annotation, got {ann:?}");
+    };
+    assert_eq!(
+        types.len(),
+        2,
+        "Expected exactly two union members for `Actor class | Nil`, got {types:?}"
+    );
+    assert!(
+        types.iter().any(|t| matches!(
+            t,
+            TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"
+        )),
+        "Expected ClassOf(Actor) in union, got {types:?}"
+    );
+    assert!(
+        types.iter().any(|t| matches!(
+            t,
+            TypeAnnotation::Simple(id) if id.name == "Nil"
+        )),
+        "Expected Nil in union, got {types:?}"
+    );
+
+    // No DNU warning for `isSupervisor` on the class-metatype receiver.
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "Expected no DNU warnings, got: {dnu_warnings:?}"
+    );
+}
+
 // ---- Self in generic position tests (BT-1986, Phase 0 of ADR 0079) ----
 
 /// BT-1986: Verify that `Self` substitutes correctly when it appears as a

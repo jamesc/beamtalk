@@ -622,6 +622,7 @@ impl CoreErlangGenerator {
             }
             TypeAnnotation::SelfType { .. } => "Self".to_string(),
             TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
+            TypeAnnotation::ClassOf { class_name, .. } => format!("{} class", class_name.name),
         }
     }
 

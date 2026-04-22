@@ -445,6 +445,9 @@ fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String
         }
         crate::ast::TypeAnnotation::SelfType { .. } => "Self".to_string(),
         crate::ast::TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
+        crate::ast::TypeAnnotation::ClassOf { class_name, .. } => {
+            format!("{} class", class_name.name)
+        }
     }
 }
 
