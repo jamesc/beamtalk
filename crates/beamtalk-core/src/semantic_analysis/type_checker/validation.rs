@@ -634,6 +634,15 @@ impl TypeChecker {
             return;
         }
 
+        // BT-2038: A class literal (e.g. `TestCase`) is a class value whose
+        // runtime type flows through the metaclass tower
+        // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
+        // instance-side chain fails, re-check via `Metaclass` so parameters
+        // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
+        // accept any class literal. Hoisted out of the loop since it's
+        // constant across all arguments.
+        let metaclass_name: EcoString = "Metaclass".into();
+
         for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
             let Some(expected_ty) = expected else {
                 continue;
@@ -646,22 +655,16 @@ impl TypeChecker {
                     class_name: actual_ty,
                     ..
                 } => {
-                    // BT-2038: A class literal (e.g. `TestCase`) is a class value
-                    // whose runtime type flows through the metaclass tower
-                    // (Metaclass → Class → Behaviour → Object → ProtoObject).
-                    // Check that chain when the instance-side chain fails so
-                    // parameters declared `:: Behaviour` / `:: Class` accept
-                    // any class literal.
-                    let class_literal_compat = is_class_ref_arg
+                    // Short-circuit: only consult the metaclass chain when the
+                    // instance-side check fails. Keeps the hot path at one
+                    // `is_type_compatible` call per argument.
+                    let instance_compat =
+                        Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
+                    let class_literal_compat = !instance_compat
+                        && is_class_ref_arg
                         && hierarchy.has_class(actual_ty)
-                        && Self::is_type_compatible(
-                            &EcoString::from("Metaclass"),
-                            expected_ty,
-                            hierarchy,
-                        );
-                    if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy)
-                        && !class_literal_compat
-                    {
+                        && Self::is_type_compatible(&metaclass_name, expected_ty, hierarchy);
+                    if !instance_compat && !class_literal_compat {
                         let param_pos = i + 1;
                         // BT-1588: Use hint severity for generic type params (likely false positive)
                         let is_generic = super::is_generic_type_param(actual_ty);

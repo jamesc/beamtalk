@@ -9145,6 +9145,54 @@ fn class_literal_arg_accepted_for_class_param() {
 }
 
 #[test]
+fn class_literal_arg_accepted_for_object_param() {
+    // Object sits above Behaviour in the metaclass tower, so a class
+    // literal must satisfy an Object-typed parameter.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Object");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as Object, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_accepted_for_protoobject_param() {
+    // ProtoObject is the root of the metaclass tower — every class literal
+    // must satisfy it.
+    let hierarchy = test_hierarchy_with_class_literal_arg("ProtoObject");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as ProtoObject, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
 fn class_literal_arg_rejected_for_unrelated_param() {
     // A class literal whose metaclass chain does NOT include the expected
     // type (e.g., expected Integer) should still warn.
