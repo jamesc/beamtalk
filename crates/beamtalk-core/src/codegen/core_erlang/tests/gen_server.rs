@@ -1096,6 +1096,38 @@ fn test_class_registration_generation() {
         code.contains("catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)"),
         "register_class/0 catch clause must re-raise via primop 'raw_raise' (BT-998). Got:\n{code}"
     );
+
+    // BT-2029: every generated class module must export method_table/0 and
+    // has_method/1 — these are the reflection accessors that runtime dispatch
+    // (beamtalk_class_dispatch, method_table lookups, DNU chain walk) relies
+    // on. The classifier at dispatch_codegen.rs:is_class_auto_export_selector
+    // must stay aligned with this export set — see its unit test for the
+    // reverse direction.
+    assert!(
+        code.contains("'method_table'/0"),
+        "Generated class module must export method_table/0. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'has_method'/1"),
+        "Generated class module must export has_method/1. Got:\n{code}"
+    );
+    // And the classifier's reachable set (superclass/0, class_name/0) must
+    // match what the module actually exports — these are the two auto-exports
+    // reachable via plain Beamtalk self-send.
+    assert!(
+        code.contains("'superclass'/0"),
+        "Generated class module must export superclass/0. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_name'/0"),
+        "Generated class module must export class_name/0. Got:\n{code}"
+    );
+    // The old mistaken auto-export `methods/0` must NOT appear — it was
+    // removed from the classifier after BT-2007 and no codegen site emits it.
+    assert!(
+        !code.contains("'methods'/0"),
+        "Generated class module must NOT export methods/0 — removed after BT-2007. Got:\n{code}"
+    );
 }
 
 #[test]
