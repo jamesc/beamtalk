@@ -702,15 +702,28 @@ impl TypeChecker {
 
             // Super — resolve to parent class type for method validation.
             //
-            // BT-2025: Uses the central `receiver_type_for_class` helper so
-            // the parent receiver threads its declared type parameters (if
-            // any). Downstream substitution can then rewrite them to the
-            // concrete bindings inherited from the current receiver.
+            // BT-2025 / BT-2021: Uses `super_receiver_type` so the parent
+            // receiver threads the *child's* type-arg bindings into the
+            // parent's type-param positions, mapped via the child's
+            // `superclass_type_args` (`ParamRef` for `Sub(R) extends Base(R)`,
+            // `Concrete` for `IntBase extends Base(Integer)`). Falls back to
+            // the parent's symbolic placeholders when no extends-annotation
+            // mapping is recorded.
             Expression::Super(_) => {
-                if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
+                if let Some(InferredType::Known {
+                    class_name,
+                    type_args,
+                    ..
+                }) = env.get("self")
+                {
                     if let Some(class_info) = hierarchy.get_class(&class_name) {
                         if let Some(ref parent) = class_info.superclass {
-                            super::type_resolver::receiver_type_for_class(parent, hierarchy)
+                            super::type_resolver::super_receiver_type(
+                                &class_name,
+                                &type_args,
+                                parent,
+                                hierarchy,
+                            )
                         } else {
                             InferredType::Dynamic(DynamicReason::Unknown)
                         }
