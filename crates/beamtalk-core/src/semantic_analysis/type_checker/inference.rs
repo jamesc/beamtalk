@@ -565,24 +565,40 @@ impl TypeChecker {
                 self.infer_expr(value, hierarchy, env, in_abstract_method)
             }
 
-            // Cascades: receiver type unchanged, check each message
+            // Cascades: all messages dispatch to the UNDERLYING receiver of
+            // the first send, not to its return value. The parser bundles
+            // `obj msg1; msg2; msg3` as Cascade { receiver: MessageSend(obj,
+            // msg1), messages: [msg2, msg3] }, so we have to peek through the
+            // first MessageSend to find the actual receiver. (BT-2017 surfaced
+            // this: when `assert:equals: -> Nil` resolves to UndefinedObject,
+            // the previous code dispatched cascaded messages to that return
+            // type, producing spurious DNU errors.)
             Expression::Cascade {
                 receiver, messages, ..
             } => {
-                let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
-                let is_class_ref = matches!(receiver.as_ref(), Expression::ClassReference { .. });
+                let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+                let (cascade_target, dispatch_ty) = match receiver.as_ref() {
+                    Expression::MessageSend {
+                        receiver: inner, ..
+                    } => {
+                        let inner_ty = self.infer_expr(inner, hierarchy, env, in_abstract_method);
+                        (inner.as_ref(), inner_ty)
+                    }
+                    _ => (receiver.as_ref(), send_ty.clone()),
+                };
+                let is_class_ref = matches!(cascade_target, Expression::ClassReference { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     self.infer_args_with_block_context(
                         &msg.arguments,
-                        &receiver_ty,
+                        &dispatch_ty,
                         &selector_name,
                         hierarchy,
                         env,
                         in_abstract_method,
                     );
                     if is_class_ref {
-                        if let Expression::ClassReference { name, .. } = receiver.as_ref() {
+                        if let Expression::ClassReference { name, .. } = cascade_target {
                             self.check_class_side_send(
                                 &name.name,
                                 &selector_name,
@@ -591,8 +607,8 @@ impl TypeChecker {
                                 &[], // cascade return type is receiver, not send result
                             );
                         }
-                    } else if let InferredType::Known { ref class_name, .. } = receiver_ty {
-                        if env.in_class_method && Self::is_self_receiver(receiver) {
+                    } else if let InferredType::Known { ref class_name, .. } = dispatch_ty {
+                        if env.in_class_method && Self::is_self_receiver(cascade_target) {
                             if !in_abstract_method {
                                 self.check_class_side_send(
                                     class_name,
@@ -610,12 +626,12 @@ impl TypeChecker {
                                 hierarchy,
                             );
                         }
-                    } else if let InferredType::Union { ref members, .. } = receiver_ty {
+                    } else if let InferredType::Union { ref members, .. } = dispatch_ty {
                         // Union cascades: validate selector on all members
                         self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
                     }
                 }
-                receiver_ty
+                send_ty
             }
 
             // Parenthesized — unwrap
@@ -1079,7 +1095,13 @@ impl TypeChecker {
                     if base.len() < ret_ty.len() {
                         return InferredType::known(EcoString::from(base));
                     }
-                    return InferredType::known(ret_ty.clone());
+                    // BT-2017: Use resolve_type_name_string to properly parse
+                    // union return types like "Integer | Nil" into
+                    // InferredType::Union instead of Known("Integer | Nil").
+                    // Without this, locals bound from method calls that return
+                    // union types get a flat Known type, which prevents
+                    // narrowing and causes false operand-type warnings.
+                    return Self::resolve_type_name_string(ret_ty);
                 }
             }
 
@@ -1560,7 +1582,10 @@ impl TypeChecker {
                                 if base.len() < ret_ty.len() {
                                     return_types.push(InferredType::known(EcoString::from(base)));
                                 } else {
-                                    return_types.push(InferredType::known(ret_ty.clone()));
+                                    // BT-2017: Use resolve_type_name_string to
+                                    // properly parse union return types (e.g.
+                                    // "Integer | Nil") into InferredType::Union.
+                                    return_types.push(Self::resolve_type_name_string(ret_ty));
                                 }
                             }
                         }
@@ -1578,11 +1603,38 @@ impl TypeChecker {
             }
         }
 
-        // BT-1857: If nil was in the union and at least one non-nil member
-        // responds, include Nil in the return-type union (the value may still
-        // be nil at runtime if the nil-check branch returns nil).
+        // BT-1857 / BT-2017: If nil was in the union and at least one
+        // non-nil member responds, include nil's contribution to the return
+        // type union.  If UndefinedObject responds to the selector (e.g.,
+        // notNil, isNil, class), use its actual return type — this avoids
+        // false `T | Nil` widening for methods that always return a definite
+        // type.  If UndefinedObject does NOT respond, skip it: the nil case
+        // is expected to be guarded by `isNil`/`notNil` checks, and adding
+        // UndefinedObject here would create noisy false-positive type
+        // warnings on every `T | Nil` union send.
+        //
+        // CodeRabbit on PR #2060: normalise the special return keywords
+        // (`Self`, `Self class`, `Never`) the same way other union members are
+        // normalised above, so an inherited `-> Self` selector resolves to
+        // `UndefinedObject` instead of leaking `Known("Self")` into the union.
         if has_nil && responding_count > 0 {
-            return_types.push(InferredType::known(EcoString::from("UndefinedObject")));
+            if let Some(method) = hierarchy.find_method("UndefinedObject", selector) {
+                if let Some(ref ret_ty) = method.return_type {
+                    let nil_contribution = if ret_ty.as_str() == "Self" {
+                        InferredType::known("UndefinedObject")
+                    } else if ret_ty.as_str() == "Self class" {
+                        InferredType::Dynamic(DynamicReason::Unknown)
+                    } else if ret_ty.as_str() == "Never" {
+                        InferredType::Never
+                    } else {
+                        Self::resolve_type_name_string(ret_ty)
+                    };
+                    return_types.push(nil_contribution);
+                } else {
+                    return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
+                }
+            }
+            // If UndefinedObject doesn't respond: no return-type widening.
         }
 
         // BT-1857: Suppress DNU warnings when Dynamic is in the union —

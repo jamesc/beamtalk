@@ -4853,25 +4853,15 @@ fn union_receiver_nil_skipped_no_warning() {
         "Should NOT warn when Nil is the only non-responding member (it's skipped)"
     );
 
-    // Return type should include Integer from String.size, plus Nil back since
-    // the receiver may be nil (BT-1857: Nil re-added to return type)
-    match &ty {
-        InferredType::Union { members, .. } => {
-            let names: Vec<&str> = members
-                .iter()
-                .filter_map(|m| m.as_known().map(EcoString::as_str))
-                .collect();
-            assert!(
-                names.contains(&"Integer"),
-                "Return type should include Integer from String>>size, got: {names:?}"
-            );
-            assert!(
-                names.contains(&"UndefinedObject"),
-                "Return type should include Nil since receiver may be nil, got: {names:?}"
-            );
-        }
-        other => panic!("Expected Union return type, got {other:?}"),
-    }
+    // BT-2017: Return type should be Integer from String.size.
+    // UndefinedObject does NOT respond to `size`, so no nil widening
+    // (BT-1857 only widens when UndefinedObject responds to the selector).
+    assert_eq!(
+        ty,
+        InferredType::known("Integer"),
+        "Return type should be Integer from String>>size (no nil widening \
+         since UndefinedObject doesn't respond to size)"
+    );
 }
 
 /// BT-1857: Nullable hint still appears when non-Nil member also lacks selector.
@@ -12453,5 +12443,185 @@ fn non_nil_type_strips_both_nil_variants() {
         narrowed,
         InferredType::known("Integer"),
         "non_nil_type should strip both UndefinedObject and Nil"
+    );
+}
+
+// ---- BT-2017: Method-call-bound locals must resolve union return types ----
+
+/// BT-2017: When a method returns `Integer | Nil`, the return type must be
+/// resolved as a proper `Union([Integer, UndefinedObject])`, not as a flat
+/// `Known("Integer | Nil")`. Without this fix, locals bound from such method
+/// calls get a malformed type that causes false binary-operand warnings
+/// (e.g. `>=` on Integer expects a numeric argument, got Integer | Nil).
+#[test]
+fn method_call_union_return_no_false_binary_warning() {
+    // Build two classes:
+    //   Object subclass: Cfg
+    //     v -> Integer | Nil => nil
+    //
+    //   typed Object subclass: Consumer
+    //     check: cfg :: Cfg -> Boolean =>
+    //       local := cfg v
+    //       5 >= local      // should NOT warn about "Integer | Nil"
+    //       true
+
+    // --- Cfg class: has method `v` returning `Integer | Nil` ---
+    let cfg_class = ClassDefinition::with_modifiers(
+        ident("Cfg"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Unary("v".into()),
+            vec![],
+            vec![bare(var("nil"))],
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Nil")),
+                ],
+                span: span(),
+            },
+            span(),
+        )],
+        span(),
+    );
+
+    // --- Consumer class (typed): calls cfg v, assigns to local, uses in >= ---
+    let consumer_class = ClassDefinition::with_modifiers(
+        ident("Consumer"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("cfg"),
+                TypeAnnotation::Simple(ident("Cfg")),
+            )],
+            vec![
+                // local := cfg v
+                bare(assign(
+                    "local",
+                    msg_send(var("cfg"), MessageSelector::Unary("v".into()), vec![]),
+                )),
+                // 5 >= local
+                bare(msg_send(
+                    int_lit(5),
+                    MessageSelector::Binary(">=".into()),
+                    vec![var("local")],
+                )),
+                // true
+                bare(var("true")),
+            ],
+            TypeAnnotation::Simple(ident("Boolean")),
+            span(),
+        )],
+        span(),
+    );
+
+    let module = make_module_with_classes(vec![], vec![cfg_class, consumer_class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let binary_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects a numeric argument"))
+        .collect();
+    assert!(
+        binary_warnings.is_empty(),
+        "BT-2017: method-call-bound local with union return type should not produce \
+         false binary operand warning, got: {binary_warnings:?}"
+    );
+}
+
+/// BT-2017: Verify that `resolve_type_name_string` correctly splits
+/// "Integer | Nil" into a proper Union type (not Known("Integer | Nil")).
+#[test]
+fn resolve_type_name_string_splits_union() {
+    let ty = TypeChecker::resolve_type_name_string(&"Integer | Nil".into());
+    match &ty {
+        InferredType::Union { members, .. } => {
+            assert_eq!(
+                members.len(),
+                2,
+                "Expected 2 union members for 'Integer | Nil', got {members:?}"
+            );
+            assert!(
+                members.contains(&InferredType::known("Integer")),
+                "Union should contain Integer"
+            );
+            assert!(
+                members.contains(&InferredType::known("UndefinedObject")),
+                "Union should contain UndefinedObject (resolved from Nil)"
+            );
+        }
+        other => panic!("Expected Union type for 'Integer | Nil', got: {other:?}"),
+    }
+}
+
+/// BT-2017: Parameter-bound locals (case a) should continue to work
+/// without binary operand warnings — regression guard.
+#[test]
+fn param_passthrough_local_no_false_binary_warning() {
+    // typed Object subclass: Test
+    //   check: x :: Integer | Nil -> Boolean =>
+    //     local := x
+    //     5 >= local
+    //     true
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Test"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("x"),
+                TypeAnnotation::Union {
+                    types: vec![
+                        TypeAnnotation::Simple(ident("Integer")),
+                        TypeAnnotation::Simple(ident("Nil")),
+                    ],
+                    span: span(),
+                },
+            )],
+            vec![
+                bare(assign("local", var("x"))),
+                bare(msg_send(
+                    int_lit(5),
+                    MessageSelector::Binary(">=".into()),
+                    vec![var("local")],
+                )),
+                bare(var("true")),
+            ],
+            TypeAnnotation::Simple(ident("Boolean")),
+            span(),
+        )],
+        span(),
+    );
+
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let binary_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects a numeric argument"))
+        .collect();
+    assert!(
+        binary_warnings.is_empty(),
+        "Parameter-bound local with union type should not produce false \
+         binary operand warning, got: {binary_warnings:?}"
     );
 }
