@@ -1174,11 +1174,16 @@ impl LanguageService for SimpleLanguageService {
                     method.selector.name(),
                     is_class_method,
                 );
-                if let Some(class_name) = inferred.get(&key) {
+                // BT-2022: inferred map now stores InferredType; use display_name
+                // to get e.g. "List(String)" for the annotation.
+                if let Some(inferred_ty) = inferred.get(&key) {
+                    let display = inferred_ty
+                        .display_name()
+                        .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
                     if let Some(offset) = find_body_open_offset(source, method.span) {
                         actions.push(CodeAction::new(
-                            format!("Add annotation: -> {class_name}"),
-                            format!("-> {class_name} "),
+                            format!("Add annotation: -> {display}"),
+                            format!("-> {display} "),
                             offset,
                         ));
                     }
@@ -1204,11 +1209,14 @@ impl LanguageService for SimpleLanguageService {
                 method.selector.name(),
                 standalone.is_class_method,
             );
-            if let Some(class_name) = inferred.get(&key) {
+            if let Some(inferred_ty) = inferred.get(&key) {
+                let display = inferred_ty
+                    .display_name()
+                    .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
                 if let Some(offset) = find_body_open_offset(source, method.span) {
                     actions.push(CodeAction::new(
-                        format!("Add annotation: -> {class_name}"),
-                        format!("-> {class_name} "),
+                        format!("Add annotation: -> {display}"),
+                        format!("-> {display} "),
                         offset,
                     ));
                 }

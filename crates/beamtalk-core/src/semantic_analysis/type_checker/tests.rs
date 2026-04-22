@@ -4086,7 +4086,7 @@ fn infer_method_return_types_collects_instance_methods() {
     let result = infer_method_return_types(&module, &hierarchy);
     assert_eq!(
         result.get(&("Greeter".into(), "greeting".into(), false)),
-        Some(&"String".into()),
+        Some(&InferredType::known("String")),
         "unannotated instance method returning String should be collected"
     );
 }
@@ -4101,7 +4101,7 @@ fn infer_method_return_types_collects_class_methods() {
     let result = infer_method_return_types(&module, &hierarchy);
     assert_eq!(
         result.get(&("Counter".into(), "zero".into(), true)),
-        Some(&"Integer".into()),
+        Some(&InferredType::known("Integer")),
         "unannotated class method returning Integer should be collected"
     );
 }
@@ -4122,7 +4122,7 @@ fn infer_method_return_types_collects_standalone_methods() {
     let result = infer_method_return_types(&module, &hierarchy);
     assert_eq!(
         result.get(&("Widget".into(), "label".into(), false)),
-        Some(&"String".into()),
+        Some(&InferredType::known("String")),
         "unannotated standalone method returning String should be collected"
     );
 }
@@ -4213,7 +4213,7 @@ fn infer_types_and_returns_produces_both_outputs() {
     // method_return_types should contain the inferred return type
     assert_eq!(
         returns.get(&("Box".into(), "value".into(), false)),
-        Some(&"Integer".into()),
+        Some(&InferredType::known("Integer")),
         "should infer Box#value returns Integer"
     );
 
@@ -4924,25 +4924,15 @@ fn union_receiver_nil_skipped_no_warning() {
         "Should NOT warn when Nil is the only non-responding member (it's skipped)"
     );
 
-    // Return type should include Integer from String.size, plus Nil back since
-    // the receiver may be nil (BT-1857: Nil re-added to return type)
-    match &ty {
-        InferredType::Union { members, .. } => {
-            let names: Vec<&str> = members
-                .iter()
-                .filter_map(|m| m.as_known().map(EcoString::as_str))
-                .collect();
-            assert!(
-                names.contains(&"Integer"),
-                "Return type should include Integer from String>>size, got: {names:?}"
-            );
-            assert!(
-                names.contains(&"UndefinedObject"),
-                "Return type should include Nil since receiver may be nil, got: {names:?}"
-            );
-        }
-        other => panic!("Expected Union return type, got {other:?}"),
-    }
+    // BT-2017: Return type should be Integer from String.size.
+    // UndefinedObject does NOT respond to `size`, so no nil widening
+    // (BT-1857 only widens when UndefinedObject responds to the selector).
+    assert_eq!(
+        ty,
+        InferredType::known("Integer"),
+        "Return type should be Integer from String>>size (no nil widening \
+         since UndefinedObject doesn't respond to size)"
+    );
 }
 
 /// BT-1857: Nullable hint still appears when non-Nil member also lacks selector.
@@ -12524,5 +12514,1047 @@ fn non_nil_type_strips_both_nil_variants() {
         narrowed,
         InferredType::known("Integer"),
         "non_nil_type should strip both UndefinedObject and Nil"
+    );
+}
+
+// ---- BT-2017: Method-call-bound locals must resolve union return types ----
+
+/// BT-2017: When a method returns `Integer | Nil`, the return type must be
+/// resolved as a proper `Union([Integer, UndefinedObject])`, not as a flat
+/// `Known("Integer | Nil")`. Without this fix, locals bound from such method
+/// calls get a malformed type that causes false binary-operand warnings
+/// (e.g. `>=` on Integer expects a numeric argument, got Integer | Nil).
+#[test]
+fn method_call_union_return_no_false_binary_warning() {
+    // Build two classes:
+    //   Object subclass: Cfg
+    //     v -> Integer | Nil => nil
+    //
+    //   typed Object subclass: Consumer
+    //     check: cfg :: Cfg -> Boolean =>
+    //       local := cfg v
+    //       5 >= local      // should NOT warn about "Integer | Nil"
+    //       true
+
+    // --- Cfg class: has method `v` returning `Integer | Nil` ---
+    let cfg_class = ClassDefinition::with_modifiers(
+        ident("Cfg"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Unary("v".into()),
+            vec![],
+            vec![bare(var("nil"))],
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Nil")),
+                ],
+                span: span(),
+            },
+            span(),
+        )],
+        span(),
+    );
+
+    // --- Consumer class (typed): calls cfg v, assigns to local, uses in >= ---
+    let consumer_class = ClassDefinition::with_modifiers(
+        ident("Consumer"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("cfg"),
+                TypeAnnotation::Simple(ident("Cfg")),
+            )],
+            vec![
+                // local := cfg v
+                bare(assign(
+                    "local",
+                    msg_send(var("cfg"), MessageSelector::Unary("v".into()), vec![]),
+                )),
+                // 5 >= local
+                bare(msg_send(
+                    int_lit(5),
+                    MessageSelector::Binary(">=".into()),
+                    vec![var("local")],
+                )),
+                // true
+                bare(var("true")),
+            ],
+            TypeAnnotation::Simple(ident("Boolean")),
+            span(),
+        )],
+        span(),
+    );
+
+    let module = make_module_with_classes(vec![], vec![cfg_class, consumer_class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let binary_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects a numeric argument"))
+        .collect();
+    assert!(
+        binary_warnings.is_empty(),
+        "BT-2017: method-call-bound local with union return type should not produce \
+         false binary operand warning, got: {binary_warnings:?}"
+    );
+}
+
+/// BT-2017: Verify that `resolve_type_name_string` correctly splits
+/// "Integer | Nil" into a proper Union type (not Known("Integer | Nil")).
+#[test]
+fn resolve_type_name_string_splits_union() {
+    let ty = TypeChecker::resolve_type_name_string(&"Integer | Nil".into());
+    match &ty {
+        InferredType::Union { members, .. } => {
+            assert_eq!(
+                members.len(),
+                2,
+                "Expected 2 union members for 'Integer | Nil', got {members:?}"
+            );
+            assert!(
+                members.contains(&InferredType::known("Integer")),
+                "Union should contain Integer"
+            );
+            assert!(
+                members.contains(&InferredType::known("UndefinedObject")),
+                "Union should contain UndefinedObject (resolved from Nil)"
+            );
+        }
+        other => panic!("Expected Union type for 'Integer | Nil', got: {other:?}"),
+    }
+}
+
+/// BT-2017: Parameter-bound locals (case a) should continue to work
+/// without binary operand warnings — regression guard.
+#[test]
+fn param_passthrough_local_no_false_binary_warning() {
+    // typed Object subclass: Test
+    //   check: x :: Integer | Nil -> Boolean =>
+    //     local := x
+    //     5 >= local
+    //     true
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Test"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        vec![],
+        vec![MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+            vec![ParameterDefinition::with_type(
+                ident("x"),
+                TypeAnnotation::Union {
+                    types: vec![
+                        TypeAnnotation::Simple(ident("Integer")),
+                        TypeAnnotation::Simple(ident("Nil")),
+                    ],
+                    span: span(),
+                },
+            )],
+            vec![
+                bare(assign("local", var("x"))),
+                bare(msg_send(
+                    int_lit(5),
+                    MessageSelector::Binary(">=".into()),
+                    vec![var("local")],
+                )),
+                bare(var("true")),
+            ],
+            TypeAnnotation::Simple(ident("Boolean")),
+            span(),
+        )],
+        span(),
+    );
+
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let binary_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects a numeric argument"))
+        .collect();
+    assert!(
+        binary_warnings.is_empty(),
+        "BT-2017: method-call-bound local with union return type should not produce \
+         false binary operand warning, got: {binary_warnings:?}"
+    );
+}
+
+// ---- BT-2022: Generic return type validation checks inner type args ----
+
+/// BT-2022 Bug A: Declared `-> Result(Integer, Error)` with body returning
+/// `Result(String, Error)` must warn about the type arg mismatch.
+#[test]
+fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as GenResult(String, Error) — inner arg mismatch
+    let body_type = InferredType::Known {
+        class_name: "GenResult".into(),
+        type_args: vec![InferredType::known("String"), InferredType::known("Error")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should warn when inner type arg (Integer vs String) mismatches: {type_warnings:?}"
+    );
+    assert!(
+        type_warnings[0]
+            .message
+            .contains("GenResult(Integer, Error)"),
+        "Warning should mention the declared type with args: {}",
+        type_warnings[0].message
+    );
+    assert!(
+        type_warnings[0]
+            .message
+            .contains("GenResult(String, Error)"),
+        "Warning should mention the actual type with args: {}",
+        type_warnings[0].message
+    );
+}
+
+/// BT-2022: When both declared and body have matching inner type args,
+/// no warning should be produced.
+#[test]
+fn bt2022_generic_return_type_matching_inner_args_no_warning() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as GenResult(Integer, Error) — exact match
+    let body_type = InferredType::Known {
+        class_name: "GenResult".into(),
+        type_args: vec![InferredType::known("Integer"), InferredType::known("Error")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Matching inner type args should produce no warning: {type_warnings:?}"
+    );
+}
+
+/// BT-2022: Body with bare `GenResult` (no `type_args`) is still compatible
+/// with declared `GenResult(Integer, Error)` — only warn when both sides
+/// have `type_args` and they mismatch.
+#[test]
+fn bt2022_generic_return_type_bare_body_no_warning() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as bare GenResult (no type_args) — no enough info to warn
+    let body_type = InferredType::known("GenResult");
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Bare GenResult body should be compatible with GenResult(Integer, Error): {type_warnings:?}"
+    );
+}
+
+/// BT-2022: Dictionary(Symbol, Integer) declared, body returns
+/// Dictionary(Symbol, String) — should warn about the value type mismatch.
+#[test]
+fn bt2022_dictionary_inner_arg_mismatch_warns() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("data".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("Dictionary"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Symbol")),
+                TypeAnnotation::Simple(ident("Integer")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body returns Dictionary(Symbol, String) — value type mismatch
+    let body_type = InferredType::Known {
+        class_name: "Dictionary".into(),
+        type_args: vec![InferredType::known("Symbol"), InferredType::known("String")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should warn about Dictionary value type mismatch (Integer vs String): {type_warnings:?}"
+    );
+}
+
+/// BT-2022: Array(Integer) declared, body returns Array(String) — should warn.
+#[test]
+fn bt2022_list_inner_arg_mismatch_warns() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("items".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("Array"),
+            parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body returns Array(String) — type arg mismatch
+    let body_type = InferredType::Known {
+        class_name: "Array".into(),
+        type_args: vec![InferredType::known("String")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should warn about Array element type mismatch (Integer vs String): {type_warnings:?}"
+    );
+}
+
+/// BT-2022 Bug B: `method_return_types` cache preserves `type_args`.
+/// An unannotated method whose body infers as a generic type should have
+/// the full `InferredType` (with `type_args`) stored in the cache.
+#[test]
+fn bt2022_method_return_type_cache_preserves_type_args() {
+    // Parse source with an unannotated method that returns an array literal
+    let src = "Object subclass: Holder\n  items => #(\"a\" \"b\" \"c\")";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+    let result = infer_method_return_types(&module, &hierarchy);
+
+    // The cache should contain the inferred return type for `items`
+    let key = ("Holder".into(), "items".into(), false);
+    let cached = result.get(&key);
+    assert!(
+        cached.is_some(),
+        "Unannotated method `items` should have an entry in method_return_types"
+    );
+    let cached_ty = cached.unwrap();
+    // BT-2022: The cache must store an InferredType (not the previous EcoString)
+    // so that any type_args produced by the inference path can flow to callers.
+    // Verifies the structural fix; element-type inference for array literals is
+    // a separate concern outside this issue's scope.
+    let InferredType::Known { class_name, .. } = cached_ty else {
+        panic!("Cached type should be Known, got: {cached_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "List", "expected List base class");
+}
+
+/// BT-2022: When declared inner args include a generic type parameter (T, E),
+/// the comparison should skip that arg rather than warn (type params are
+/// symbolic placeholders, not concrete types).
+#[test]
+fn bt2022_generic_type_param_in_declared_args_not_warned() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                // T is a generic type param placeholder — should be skipped
+                TypeAnnotation::Simple(ident("T")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body returns GenResult(String, Error) — T should be compatible with String
+    let body_type = InferredType::Known {
+        class_name: "GenResult".into(),
+        type_args: vec![InferredType::known("String"), InferredType::known("Error")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Type param T in declared type should not trigger a mismatch warning: {type_warnings:?}"
+    );
+}
+
+// =====================================================================
+// BT-2021 — Receiver type_args dropped for self / super in generic classes
+// =====================================================================
+//
+// Sub-bug A (self): a method body inside a generic class `Box(T)` that
+// `self`-sends a `-> T` helper used to see `self` as `Known("Box", [])`,
+// dropping the symbolic type arg and resolving T to Dynamic. After
+// BT-2025's `receiver_type_for_class` migration, `self` carries
+// `[Known("T")]` placeholders so substitution can rewrite T correctly.
+//
+// Sub-bug B (super): from a child generic class `Sub(R)` extending
+// `Base(E)`, `super`-sending a `-> E`-returning method has to thread the
+// child's type-param placeholder (via `superclass_type_args`) into the
+// parent's `E` slot — otherwise the parent and child end up using
+// unrelated symbolic placeholders.
+//
+// Sub-bug C (Self class): intentionally still resolves to Dynamic. The
+// previous attempt to make it `Known(class_name, type_args)` broke four
+// narrowing tests (`x class = Integer` semantics) so full metatype
+// support stays deferred. The regression test below pins that contract
+// down so a future change can't silently flip it.
+
+/// BT-2021 sub-bug A: inside a generic class `Box(T)`, calling a self-send
+/// that returns `T` must yield the symbolic `T` placeholder rather than
+/// `Dynamic`. We probe the cached return type of the wrapper method —
+/// without the fix, the wrapper's return type was bare `Dynamic`.
+#[test]
+fn bt2021_self_send_in_generic_class_preserves_type_param() {
+    let source = "
+Object subclass: Box(T)
+  state: x :: T = nil
+  value -> T => x
+  wrapped -> T => self value
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // The fix should produce no return-type-mismatch warnings — the wrapped
+    // method's body type must be the same `T` placeholder as its declared
+    // return type. Without the fix, `self value` resolves to Dynamic and
+    // the typed-class-context would warn.
+    let mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("does not match declared")
+                || d.message.contains("does not understand")
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "self-send in generic class should preserve T; got: {mismatches:?}"
+    );
+}
+
+/// BT-2021 sub-bug A direct check: probe the inferred type of `self value`
+/// inside a method of `Box(T)`. Must be `Known("T", [])`, never `Dynamic`.
+#[test]
+fn bt2021_self_send_inferred_type_is_symbolic_param() {
+    let source = "
+Object subclass: Box(T)
+  state: x :: T = nil
+  value -> T => x
+  wrapped -> T => self value
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Box")
+        .expect("Box class");
+    let wrapped = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "wrapped")
+        .expect("wrapped method");
+    let stmt = wrapped.body.last().expect("wrapped has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // Mirror what `check_module` does: seed `self` with the receiver type
+    // produced by the centralised helper.
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "T",
+            "expected `self value` to resolve to symbolic T placeholder, got {ty:?}"
+        ),
+        other => panic!("expected Known(T), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug A nested case: a multi-param generic class. Inside
+/// `Pair(K, V)`, calling `self second` (returning `V`) must resolve to
+/// the symbolic V placeholder, not Dynamic and not the wrong slot.
+#[test]
+fn bt2021_self_send_multi_param_generic_resolves_correct_slot() {
+    let source = "
+Object subclass: Pair(K, V)
+  state: k :: K = nil
+  state: v :: V = nil
+  first -> K => k
+  second -> V => v
+  rewrap -> V => self second
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Pair")
+        .expect("Pair class");
+    let rewrap = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "rewrap")
+        .expect("rewrap method");
+    let stmt = rewrap.body.last().expect("rewrap has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "V",
+            "expected `self second` on Pair(K,V) to resolve to V, got {ty:?}"
+        ),
+        other => panic!("expected Known(V), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug B: a child generic class calling `super`-send on a
+/// parent method that returns the parent's type param must yield the
+/// child's matching type-param placeholder (mapped via
+/// `superclass_type_args`).
+///
+/// Source: `Base(E)` declares `peek -> E`; `Sub(R)` extends `Base(R)` —
+/// Sub's R is forwarded to Base's E. Inside a method on Sub, `super peek`
+/// should infer as `Known("R", [])`, not `Known("E", [])` and not Dynamic.
+#[test]
+fn bt2021_super_send_in_generic_class_threads_child_param() {
+    let source = "
+Object subclass: Base(E)
+  state: x :: E = nil
+  peek -> E => x
+
+Base(R) subclass: Sub(R)
+  borrow -> R => super peek
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let sub = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Sub")
+        .expect("Sub class");
+    let borrow = sub
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "borrow")
+        .expect("borrow method");
+    let stmt = borrow.body.last().expect("borrow has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "R",
+            "expected `super peek` from Sub(R) extends Base(R) to resolve to R, got {ty:?}"
+        ),
+        other => panic!("expected Known(R), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug B with a *concrete* mapping: child binds parent's type
+/// param to a fixed type. `IntBase` extends `Base(Integer)`. Inside an
+/// `IntBase` method, `super peek` should resolve to `Integer`, not the
+/// parent's symbolic `E` placeholder.
+#[test]
+fn bt2021_super_send_with_concrete_superclass_arg_resolves_to_concrete() {
+    let source = "
+Object subclass: Base(E)
+  state: x :: E = nil
+  peek -> E => x
+
+Base(Integer) subclass: IntBase
+  borrow -> Integer => super peek
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let int_base = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "IntBase")
+        .expect("IntBase class");
+    let borrow = int_base
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "borrow")
+        .expect("borrow method");
+    let stmt = borrow.body.last().expect("borrow has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "Integer",
+            "expected `super peek` from IntBase extends Base(Integer) to resolve to Integer, got {ty:?}"
+        ),
+        other => panic!("expected Known(Integer), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug C contract pin: `Self class` (as returned by `Object>>class`)
+/// stays `Dynamic`. Promoting it to `Known(class_name, type_args)` would
+/// regress narrowing tests like `x class = Integer` (BT-1952 constraint).
+/// Full metatype support is tracked separately.
+#[test]
+fn bt2021_self_class_remains_dynamic_for_factory_pattern() {
+    // Probe `self class` directly (not `self class new`) so a future change
+    // that resolves the metatype to a Known type but leaves `new` Dynamic
+    // would still cause this test to fail. CodeRabbit on PR #2064.
+    let source = "
+Object subclass: Box(T)
+  state: x :: T = nil
+  metatype => self class
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Box")
+        .expect("Box class");
+    let metatype = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "metatype")
+        .expect("metatype method");
+    let stmt = metatype
+        .body
+        .last()
+        .expect("metatype has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    // `self class` on `Box(T)` resolves through `class -> Self class`
+    // (Object>>class) which intentionally returns Dynamic per BT-1952.
+    assert!(
+        matches!(&ty, InferredType::Dynamic(_)),
+        "self class should stay Dynamic (Self class metatype is deferred); got {ty:?}"
+    );
+}
+
+// ---- BT-2018: Generic return type args preserved on class-method assignment ----
+//
+// When a class method declares a parameterised return type like
+// `Result(List(String), Error)`, callers that bind the result to a local
+// must see the full nested type — not a flattened `Known("Result(...)")`.
+// Pre-fix the call site dropped the inner generics, which made downstream
+// `result unwrap` resolve to `Dynamic` and cascaded into block-parameter
+// inference (every `[:f | ...]` after that became Dynamic).
+//
+// These tests cover the three reproducer variants from the issue plus a
+// chained-assignment case and an instance-method case.
+
+/// BT-2018 (a): explicit annotation on the LHS already worked pre-fix —
+/// keep it as a baseline so a regression here is loud.
+#[test]
+fn class_method_return_with_explicit_annotation_preserves_type_args() {
+    let source = "
+typed Object subclass: Box
+  class wrap: v :: List(String) -> Result(List(String), Error) =>
+    Result ok: v
+
+typed Object subclass: Driver
+  probe -> Nil =>
+    r :: Result(List(String), Error) := Box wrap: #()
+    r
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe")
+        .expect("probe method");
+    // Last expression is `r` — its type should be Result(List(String), Error).
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    let _ = checker.infer_expr(&probe.body[0].expression, &hierarchy, &mut env, false);
+    let last_stmt = probe.body.last().expect("probe body non-empty");
+    let r_ty = checker.infer_expr(&last_stmt.expression, &hierarchy, &mut env, false);
+    assert_full_result_list_string_error(&r_ty);
+}
+
+/// BT-2018 (b): the bug — RHS is a class-method send returning the same
+/// concrete generic. Pre-fix, `r` lost its inner `type_args` and
+/// `r unwrap` collapsed to `Dynamic`.
+#[test]
+fn class_method_return_preserves_nested_type_args_on_assignment() {
+    let source = "
+typed Object subclass: Box
+  class wrap: v :: List(String) -> Result(List(String), Error) =>
+    Result ok: v
+
+typed Object subclass: Driver
+  probe -> Nil =>
+    r := Box wrap: #()
+    r
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe")
+        .expect("probe method");
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    let _ = checker.infer_expr(&probe.body[0].expression, &hierarchy, &mut env, false);
+    let r_ty = checker.infer_expr(
+        &probe.body.last().expect("probe body non-empty").expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_full_result_list_string_error(&r_ty);
+}
+
+/// BT-2018 chained: `a := ClassMethod`, `b := a instanceMethod` — type args
+/// on `a` must flow through to `b` so `b` resolves to the concrete type.
+#[test]
+fn class_method_return_type_args_flow_through_chained_assignment() {
+    let source = "
+typed Object subclass: Box
+  class wrap: v :: List(String) -> Result(List(String), Error) =>
+    Result ok: v
+
+typed Object subclass: Driver
+  probe -> Nil =>
+    r := Box wrap: #()
+    files := r unwrap
+    files frobnicate
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // Pre-fix: `files` was Dynamic, so `frobnicate` was silently accepted.
+    // Post-fix: `files` is `List(String)` and `List` does not understand
+    // `frobnicate`, so we expect a DNU warning. (We assert *some* DNU
+    // warning naming `frobnicate` rather than pinning the exact wording —
+    // the receiver class hint format may evolve.)
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand") && d.message.contains("frobnicate"))
+        .collect();
+    assert!(
+        !dnu.is_empty(),
+        "expected `frobnicate` DNU after chained assignment from class-method \
+         result; diagnostics: {:?}",
+        checker.diagnostics()
+    );
+}
+
+// BT-2018 instance-method case via chained assignment: the chained-flow
+// test above (`class_method_return_type_args_flow_through_chained_assignment`)
+// already exercises the instance-method substitution path: after
+// `r := Box wrap: #()` gives `r :: Result(List(String), Error)`, the
+// `r unwrap` send is an instance-method call whose return type `T`
+// substitutes through to `List(String)`. The DNU on `files frobnicate`
+// proves the instance-method substitution preserved the generics.
+// (Pure instance-method *concrete* return-type preservation — e.g.
+// `-> List(String)` on a non-generic receiver — is the sibling BT-2019,
+// not in scope here.)
+
+/// Helper: assert the type is the fully-nested
+/// `Known("Result", [Known("List", [Known("String")]), Known("Error")])`.
+fn assert_full_result_list_string_error(ty: &InferredType) {
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = ty
+    else {
+        panic!("expected Known(Result, ...), got {ty:?}");
+    };
+    assert_eq!(
+        class_name.as_str(),
+        "Result",
+        "outer class should be Result, got {class_name}"
+    );
+    assert_eq!(
+        type_args.len(),
+        2,
+        "Result should have 2 type args, got {type_args:?}"
+    );
+    let InferredType::Known {
+        class_name: inner_name,
+        type_args: inner_args,
+        ..
+    } = &type_args[0]
+    else {
+        panic!(
+            "expected first type_arg to be Known(List, [String]), got {:?}",
+            type_args[0]
+        );
+    };
+    assert_eq!(
+        inner_name.as_str(),
+        "List",
+        "first type_arg should be List, got {inner_name}"
+    );
+    assert_eq!(
+        inner_args.len(),
+        1,
+        "List should have 1 type_arg, got {inner_args:?}"
+    );
+    assert_eq!(
+        inner_args[0].as_known().map(EcoString::as_str),
+        Some("String"),
+        "List inner type_arg should be String, got {:?}",
+        inner_args[0]
+    );
+    assert_eq!(
+        type_args[1].as_known().map(EcoString::as_str),
+        Some("Error"),
+        "second type_arg should be Error, got {:?}",
+        type_args[1]
     );
 }

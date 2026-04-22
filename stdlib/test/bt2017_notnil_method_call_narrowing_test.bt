@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2017: notNil narrowing must work for locals bound from method calls.
+// Previously, `local := someObj method` where `method` returns `Integer | Nil`
+// produced Known("Integer | Nil") instead of Union([Integer, UndefinedObject]),
+// causing false binary-operand warnings.
+
+TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
+
+  // (a) local from parameter passthrough — always worked
+  testParamPassthroughNotNil =>
+    x :: Integer | Nil := 3
+    local := x
+    result := (local notNil and: [
+      local > 0 and: [5 >= local]
+    ]) ifTrue: [true] ifFalse: [false]
+    self assert: result equals: true
+
+  // (b) local from literal nil — always worked
+  testLiteralNilNotNil =>
+    local :: Integer | Nil := nil
+    result := (local notNil and: [
+      local > 0 and: [5 >= local]
+    ]) ifTrue: [true] ifFalse: [false]
+    self assert: result equals: false
+
+  // (c) local from method call — was broken before BT-2017
+  testMethodCallNotNil =>
+    cfg := Bt2017NarrowCfg v: 3
+    local := cfg v
+    result := (local notNil and: [
+      local > 0 and: [5 >= local]
+    ]) ifTrue: [true] ifFalse: [false]
+    self assert: result equals: true
+
+  // (c2) method call returning nil
+  testMethodCallNotNilWithNil =>
+    cfg := Bt2017NarrowCfg new
+    local := cfg v
+    result := (local notNil and: [
+      local > 0 and: [5 >= local]
+    ]) ifTrue: [true] ifFalse: [false]
+    self assert: result equals: false
+
+  // (c3) method call returning out-of-range value
+  testMethodCallNotNilOutOfRange =>
+    cfg := Bt2017NarrowCfg v: 10
+    local := cfg v
+    result := (local notNil and: [
+      local > 0 and: [5 >= local]
+    ]) ifTrue: [true] ifFalse: [false]
+    self assert: result equals: false

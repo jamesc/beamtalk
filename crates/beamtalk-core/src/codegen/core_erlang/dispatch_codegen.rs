@@ -1098,10 +1098,15 @@ impl CoreErlangGenerator {
 
         // BT-2007: Inherited class method — walk the hierarchy at runtime and
         // apply the defining module's class_<sel>(ClassSelf, ClassVars, Args...).
-        // Auto-generated 0-arity exports on every class module (superclass/0,
-        // methods/0, class_name/0) stay on the direct-call path because the
-        // chain walker only looks at user-defined class_methods. Anything else
-        // that falls through here — inherited or missing — routes through
+        // The two auto-generated 0-arity exports reachable via plain self-send
+        // (`superclass/0`, `class_name/0`) stay on the direct-call path because
+        // the chain walker only looks at user-defined class_methods. The other
+        // auto-exports (`method_table/0`, `has_method/1`, `register_class/0`,
+        // `__beamtalk_meta/0`) are codegen-internal reflection and metadata
+        // accessors without a stable user-level API, so they are deliberately
+        // NOT on the direct-call path — `is_class_auto_export_selector` must
+        // stay in sync with the actual reachable set. Anything else that falls
+        // through here — inherited or missing — routes through
         // class_self_dispatch/4, which raises a structured does_not_understand
         // error for genuine DNU.
         if is_class_auto_export_selector(&selector_atom, arguments.len()) {
@@ -2767,12 +2772,49 @@ pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -
 
 #[cfg(test)]
 mod tests {
+    use super::is_class_auto_export_selector;
     use crate::ast::{Expression, Identifier, KeywordPart, Literal, MessageSelector};
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
 
     fn s() -> Span {
         Span::new(0, 0)
+    }
+
+    /// BT-2029: the classifier must stay in sync with the actual reachable
+    /// auto-exports on generated class modules. Both `superclass/0` and
+    /// `class_name/0` are reachable via plain self-send and must short-circuit
+    /// to a direct call; `methods/0` does not exist on the current codegen
+    /// (an earlier mistaken inclusion); `method_table/0` and `has_method/1`
+    /// are codegen-internal reflection APIs with no Beamtalk surface and must
+    /// NOT be classified as auto-exports (they would compile to a direct call
+    /// that users cannot reach anyway, but including them would bypass the
+    /// structured DNU path that catches typos). Arity mismatches must also
+    /// return false so that, e.g., `self superclass: X` does not get hijacked
+    /// into a direct call to the 0-arity `superclass/0`.
+    #[test]
+    fn is_class_auto_export_selector_matches_reachable_exports() {
+        assert!(is_class_auto_export_selector("superclass", 0));
+        assert!(is_class_auto_export_selector("class_name", 0));
+
+        // Codegen-internal, not reachable via Beamtalk self-send.
+        assert!(!is_class_auto_export_selector("method_table", 0));
+        assert!(!is_class_auto_export_selector("has_method", 1));
+        assert!(!is_class_auto_export_selector("register_class", 0));
+        assert!(!is_class_auto_export_selector("__beamtalk_meta", 0));
+
+        // Historical mistake — `methods/0` is not emitted by the current
+        // codegen, so classifying it as auto-export would produce a call
+        // to a non-existent function.
+        assert!(!is_class_auto_export_selector("methods", 0));
+
+        // Arity mismatches must not match.
+        assert!(!is_class_auto_export_selector("superclass", 1));
+        assert!(!is_class_auto_export_selector("class_name", 1));
+
+        // Arbitrary user selectors must fall through to inherited dispatch.
+        assert!(!is_class_auto_export_selector("increment", 0));
+        assert!(!is_class_auto_export_selector("at:put:", 2));
     }
 
     #[test]

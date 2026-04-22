@@ -197,9 +197,13 @@ typed Value subclass: SupervisionSpec
         effectiveArgs := self args isNil ifTrue: [#()] ifFalse: [self args]
         #(self classMethod, effectiveArgs)
       ]
-    shutdown := self shutdown isNil ifTrue: [
-      self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]
-    ] ifFalse: [self shutdown]
+    shutdown := self shutdown isNil
+      ifTrue: [
+        @expect type
+        self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]
+      ]
+      ifFalse: [self shutdown]
+    @expect type
     childType := self actorClass isSupervisor ifTrue: [
       #supervisor
     ] ifFalse: [#worker]
