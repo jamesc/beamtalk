@@ -4963,8 +4963,7 @@ mod tests {
             type_args: vec![InferredType::known("String")],
             provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
         };
-        let result =
-            TypeChecker::substitute_ffi_return_type(&ret, &params, &[fun_arg, list_arg]);
+        let result = TypeChecker::substitute_ffi_return_type(&ret, &params, &[fun_arg, list_arg]);
         // Stays bare List — no unsound propagation
         assert_eq!(result, InferredType::known("List"));
     }
