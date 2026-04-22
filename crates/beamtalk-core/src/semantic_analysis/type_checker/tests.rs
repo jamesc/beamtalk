@@ -12313,3 +12313,145 @@ fn annotated_assignment_compatible_type_no_warning() {
         "Integer assigned to Number should not warn, got: {type_warnings:?}"
     );
 }
+
+// ── BT-2016: isNil narrowing propagation into keyword args / typed assignment ──
+
+/// BT-2016: After `ms isNil ifTrue: [^nil]`, the narrowed type of `ms`
+/// should be `Integer` (not `Integer | Nil`), so passing it to a class-side
+/// keyword method that expects `Integer` must not produce a type mismatch.
+#[test]
+fn narrowing_isnil_propagates_to_keyword_arg_e2e() {
+    let source = r"
+Object subclass: Receiver
+  class process: ms :: Integer => ms
+
+Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil ifTrue: [^nil]
+    Receiver process: ms
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    // Filter by DiagnosticCategory::Type so argument-type warnings
+    // (formatted as "Argument ... expects ... got ...") are caught too,
+    // not only assignment-style "Type mismatch" messages.
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Narrowed Integer should not warn as keyword arg, got: {type_warnings:?}"
+    );
+}
+
+/// BT-2016: After `ms isNil ifTrue: [^nil]`, assigning the narrowed value
+/// to a typed local `local :: Integer := ms` must not produce a type mismatch.
+#[test]
+fn narrowing_isnil_propagates_to_typed_assignment_rhs_e2e() {
+    let source = r"
+Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil ifTrue: [^nil]
+    local :: Integer := ms
+    local
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Narrowed Integer in typed assignment should not warn, got: {type_warnings:?}"
+    );
+}
+
+/// BT-2016: After `ms isNil ifTrue: [^nil]`, passing the narrowed value to
+/// an instance-side keyword method that expects `Integer` must not warn.
+#[test]
+fn narrowing_isnil_propagates_to_instance_send_arg_e2e() {
+    // `Value subclass:` so the receiver can be `new`d — Object subclasses are
+    // not instantiable. The test focuses on the narrowing propagation into
+    // `r process: ms`, not on instantiation semantics.
+    let source = r"
+Value subclass: Receiver
+  process: ms :: Integer => ms
+
+Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    r := Receiver new
+    ms isNil ifTrue: [^nil]
+    r process: ms
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Narrowed Integer in instance send arg should not warn, got: {type_warnings:?}"
+    );
+}
+
+/// BT-2016: `non_nil_type` must strip `Known("Nil")` from unions, not just
+/// `Known("UndefinedObject")`. This ensures the defense-in-depth layer works
+/// even if a `"Nil"` member slips past `resolve_type_keyword`.
+#[test]
+fn non_nil_type_strips_capital_nil_from_union() {
+    // Union containing "Nil" (capital, as parser might produce from type annotations)
+    let union_with_nil = InferredType::simple_union(&["Integer", "Nil"]);
+    let narrowed = TypeChecker::non_nil_type(&union_with_nil);
+    assert_eq!(
+        narrowed,
+        InferredType::known("Integer"),
+        "non_nil_type should strip Nil from union"
+    );
+}
+
+/// BT-2016: `non_nil_type` must strip both `Known("UndefinedObject")` and
+/// `Known("Nil")` when both appear in the same union.
+#[test]
+fn non_nil_type_strips_both_nil_variants() {
+    let union = InferredType::Union {
+        members: vec![
+            InferredType::known("Integer"),
+            InferredType::known("UndefinedObject"),
+            InferredType::known("Nil"),
+        ],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let narrowed = TypeChecker::non_nil_type(&union);
+    assert_eq!(
+        narrowed,
+        InferredType::known("Integer"),
+        "non_nil_type should strip both UndefinedObject and Nil"
+    );
+}
