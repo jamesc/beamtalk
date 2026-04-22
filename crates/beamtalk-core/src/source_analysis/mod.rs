@@ -41,6 +41,7 @@ mod error;
 mod lexer;
 mod parser;
 mod span;
+pub mod summary;
 mod token;
 
 // Property-based tests for the lexer (ADR 0011 Phase 2)
@@ -54,4 +55,5 @@ pub use parser::{
     needs_blank_line_to_complete, parse,
 };
 pub use span::Span;
+pub use summary::{DiagnosticSummary, SeverityCounts, category_name};
 pub use token::{Token, TokenKind, Trivia};

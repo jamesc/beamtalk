@@ -799,6 +799,7 @@ pub fn compile_source(
         &CompileContext::default(),
         None,
     )
+    .map(|_diags| ())
 }
 
 /// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
@@ -820,7 +821,7 @@ pub(crate) fn compile_source_with_bindings(
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     ctx: &CompileContext<'_>,
     cached_ast: Option<crate::commands::build::CachedAst>,
-) -> Result<()> {
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
     use crate::diagnostic::CompileDiagnostic;
 
     debug!("Compiling module '{}' with bindings", module_name);
@@ -938,6 +939,11 @@ pub(crate) fn compile_source_with_bindings(
 
     debug!("Parsed successfully: {}", source_path);
 
+    // Save diagnostics for the caller to build a summary (BT-2014).
+    // `diagnostics` is no longer needed after this point — the printing loop above
+    // borrowed them by reference and the error check already bailed if needed.
+    let returned_diags = diagnostics;
+
     // Generate Core Erlang (with source text for CompiledMethod introspection BT-101, and bindings BT-295)
     // BT-374: Pass workspace_mode for workspace binding dispatch
     // BT-845: Use an absolute path so reload works regardless of the
@@ -970,7 +976,7 @@ pub(crate) fn compile_source_with_bindings(
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 
     debug!("Generated Core Erlang: {}", core_output);
-    Ok(())
+    Ok(returned_diags)
 }
 
 // ---------------------------------------------------------------------------
