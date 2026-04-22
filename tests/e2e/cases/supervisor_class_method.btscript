@@ -25,7 +25,7 @@ cmSup count
 // => 1
 
 // The child was started via the class method which transforms args
-cmChild := cmSup which: E2EClassMethodActor
+cmChild := (cmSup which: E2EClassMethodActor) unwrap
 // => #Actor<E2EClassMethodActor,_>
 
 // The class method combined #test + 99 into "test:99"

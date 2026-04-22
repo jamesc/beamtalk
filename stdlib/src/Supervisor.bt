@@ -68,8 +68,8 @@ abstract Object subclass: Supervisor
   /// Supervisor subclass: App
   ///   class children => #(Store, Engine)
   ///   class initialize: sup =>
-  ///     engine := sup which: Engine
-  ///     store := sup which: Store
+  ///     engine := (sup which: Engine) unwrap
+  ///     store := (sup which: Store) unwrap
   ///     engine connectStore: store
   /// ```
   class initialize: _supervisor => nil
@@ -103,13 +103,14 @@ abstract Object subclass: Supervisor
   /// signature updates land in Phase 2 (BT-P2-stdlib).
   children -> Array => ((Erlang beamtalk_supervisor) whichChildren: self) unwrap
 
-  /// Return the running child process for the given class, or nil.
+  /// Return the running child process for the given class.
   ///
-  /// BT-1997 / ADR 0080 Phase 1: `whichChild/2` returns a Result-shaped
-  /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
-  /// user-facing signature.
-  which: aClass =>
-    ((Erlang beamtalk_supervisor) whichChild: self class: aClass) unwrap
+  /// ADR 0080 Phase 2 (BT-2041): returns `Result(Object, Error)`. The ok
+  /// variant spans `Object | nil` — not-found returns `Result ok: nil`, not
+  /// an error. Genuine failures (e.g. supervisor process dead) surface as
+  /// `Result error: #beamtalk_error{kind = stale_handle}`.
+  which: aClass :: Class -> Result(Object, Error) =>
+    (Erlang beamtalk_supervisor) whichChild: self class: aClass
 
   /// Terminate the running child process for the given class.
   ///
