@@ -1264,13 +1264,21 @@ impl TypeChecker {
     /// parameter, we copy the argument's `type_args` to the return type.
     ///
     /// This is a heuristic: it assumes that when the param and return share a
-    /// base class, the return preserves the same `type_args`. This covers the
-    /// common `[T] -> [T]` pattern without needing full Hindley-Milner on FFI.
+    /// base class, the return preserves the same `type_args`. To stay sound,
+    /// we restrict it to unary functions (single param) — the `[T] -> [T]`
+    /// pattern of `lists:reverse/1`, `lists:sort/1`, etc. Multi-arg functions
+    /// like `lists:map/2` (`Fun, [A] -> [B]`) would be unsound under this
+    /// rule, so we leave their return types alone.
     fn substitute_ffi_return_type(
         return_type: &InferredType,
         params: &[super::native_type_registry::ParamType],
         arg_types: &[InferredType],
     ) -> InferredType {
+        // Only applies to unary functions — see doc comment.
+        if params.len() != 1 || arg_types.len() != 1 {
+            return return_type.clone();
+        }
+
         // Only applies when the return type is a Known type with no type_args
         let InferredType::Known {
             class_name: ret_class,
@@ -1286,33 +1294,38 @@ impl TypeChecker {
             return return_type.clone();
         }
 
-        // Look for a param with the same base class whose call-site arg has type_args
-        for (param, arg_ty) in params.iter().zip(arg_types.iter()) {
-            if let InferredType::Known {
-                class_name: param_class,
-                ..
-            } = &param.type_
-            {
-                if param_class == ret_class {
-                    // Found a matching param — propagate arg's type_args to return
-                    if let InferredType::Known {
-                        type_args: arg_type_args,
-                        ..
-                    } = arg_ty
-                    {
-                        if !arg_type_args.is_empty() {
-                            return InferredType::Known {
-                                class_name: ret_class.clone(),
-                                type_args: arg_type_args.clone(),
-                                provenance: *provenance,
-                            };
-                        }
-                    }
-                }
-            }
+        let param = &params[0];
+        let arg_ty = &arg_types[0];
+
+        let InferredType::Known {
+            class_name: param_class,
+            ..
+        } = &param.type_
+        else {
+            return return_type.clone();
+        };
+
+        if param_class != ret_class {
+            return return_type.clone();
         }
 
-        return_type.clone()
+        let InferredType::Known {
+            type_args: arg_type_args,
+            ..
+        } = arg_ty
+        else {
+            return return_type.clone();
+        };
+
+        if arg_type_args.is_empty() {
+            return return_type.clone();
+        }
+
+        InferredType::Known {
+            class_name: ret_class.clone(),
+            type_args: arg_type_args.clone(),
+            provenance: *provenance,
+        }
     }
 
     /// Emits a warning when call-site keywords don't match the registry's declared
@@ -4926,5 +4939,33 @@ mod tests {
         };
         let result = TypeChecker::substitute_ffi_return_type(&ret, &params, &[arg]);
         assert!(matches!(result, InferredType::Dynamic(_)));
+    }
+
+    #[test]
+    fn substitute_ffi_return_type_skips_multi_arg() {
+        // Models lists:map/2: Fun, [A] -> [B]. The element type of the input
+        // list must NOT be propagated to the return — the return's element
+        // type is the block's result type, not the input element type.
+        let ret = InferredType::known("List");
+        let params = vec![
+            super::super::native_type_registry::ParamType {
+                keyword: Some("fun".into()),
+                type_: InferredType::known("Block"),
+            },
+            super::super::native_type_registry::ParamType {
+                keyword: Some("list".into()),
+                type_: InferredType::known("List"),
+            },
+        ];
+        let fun_arg = InferredType::known("Block");
+        let list_arg = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::known("String")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let result =
+            TypeChecker::substitute_ffi_return_type(&ret, &params, &[fun_arg, list_arg]);
+        // Stays bare List — no unsound propagation
+        assert_eq!(result, InferredType::known("List"));
     }
 }
