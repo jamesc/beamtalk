@@ -14358,9 +14358,10 @@ typed Object subclass: WidgetFactory
 #[test]
 fn bt2037_block_self_error_infers_as_never() {
     // Mirrors the exdura reproduction: a typed instance method whose body
-    // sends a block-accepting selector to a receiver of unknown type
-    // (`looksUp` returns Dynamic). The block body's `self error:` must
-    // still resolve to Never via the enclosing instance-method `self`.
+    // sends `valueOrDo:` to `registry` (an Object-typed field), with a
+    // fallback block containing `self error:`. The block body's `self
+    // error:` must still resolve to Never via the enclosing instance-method
+    // `self`.
     let source = "
 typed Object subclass: ExduraWorker
   state: registry :: Object = nil

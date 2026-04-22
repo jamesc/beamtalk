@@ -222,7 +222,7 @@ impl TypeChecker {
                 // semantics that aren't modelled in the static hierarchy
                 // (e.g. `Metaclass` not knowing arbitrary class-side
                 // selectors), so propagating them would surface false DNUs.
-                if hierarchy.find_class_method(class_name, selector).is_none() {
+                if !has_class_method {
                     if let Some(method) = hierarchy.find_method("Class", selector) {
                         if method
                             .return_type
