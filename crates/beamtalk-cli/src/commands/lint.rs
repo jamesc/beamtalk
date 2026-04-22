@@ -122,7 +122,6 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
-    let mut json_diags: Vec<serde_json::Value> = Vec::new();
 
     for (file, source, module, parse_diags) in parsed_files {
         let cross_file_classes =
@@ -141,6 +140,8 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                     eprintln!("{:?}", miette::Report::new(compile_diag));
                 }
                 OutputFormat::Json => {
+                    // BT-2031: Stream each diagnostic as line-delimited JSON
+                    // instead of buffering all diagnostics in memory.
                     let notes: Vec<serde_json::Value> = diag
                         .notes
                         .iter()
@@ -161,7 +162,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                         "hint": diag.hint.as_deref(),
                         "notes": notes,
                     });
-                    json_diags.push(json);
+                    println!("{json}");
                 }
             }
         }
@@ -181,11 +182,14 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Lint native .erl files (BT-1909).
     total_lint_count += lint_erl_files(&erl_files, format)?;
 
-    // BT-2014: Build and print diagnostic summary.
-    let files_checked = source_files.len() + erl_files.len();
+    // BT-2014 / BT-2031: Build and print diagnostic summary.
+    // `all_diags` only contains `.bt` diagnostics, so `files_checked` must
+    // count only `.bt` files to keep the ratio consistent.
+    let bt_files_checked = source_files.len();
+    let total_files_checked = bt_files_checked + erl_files.len();
     let summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
         &all_diags,
-        files_checked,
+        bt_files_checked,
     );
 
     match format {
@@ -196,10 +200,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             }
         }
         OutputFormat::Json => {
-            // Emit per-diagnostic JSON lines first.
-            for json in &json_diags {
-                println!("{json}");
-            }
+            // Per-diagnostic JSON lines were already streamed above (BT-2031).
             // Emit the summary as a final JSON object.
             let summary_json = diagnostic_summary_to_json(&summary);
             println!("{summary_json}");
@@ -209,7 +210,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     if total_lint_count > 0 {
         let plural = if total_lint_count == 1 { "" } else { "s" };
         miette::bail!(
-            "{total_lint_count} lint diagnostic{plural} found in {files_checked} file(s)"
+            "{total_lint_count} lint diagnostic{plural} found in {total_files_checked} file(s)"
         );
     }
 

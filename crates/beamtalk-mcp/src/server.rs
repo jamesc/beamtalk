@@ -520,7 +520,7 @@ pub struct PackageClassesParams {
 pub struct DiagnosticSummaryParams {
     /// Path to a `.bt` source file or directory. Defaults to the current directory.
     #[schemars(
-        description = "Path to a .bt source file or directory. Defaults to the current package root."
+        description = "Path to a .bt source file or directory. Defaults to the current directory."
     )]
     pub path: Option<String>,
 }
@@ -1797,16 +1797,26 @@ fn offset_to_line(source: &str, offset: usize) -> u32 {
 /// aggregates all diagnostics via the shared `DiagnosticSummary` type, and
 /// additionally computes type-coverage statistics. Returns a JSON-serializable
 /// value suitable for direct MCP tool output.
+#[allow(clippy::too_many_lines)] // Multi-pass pipeline is inherently sequential.
 fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
     use beamtalk_core::source_analysis::{DiagnosticSummary, category_name};
 
-    let Ok(source_files) = resolve_source_files(path) else {
-        return serde_json::json!({
-            "error": format!("No .bt source files found in '{path}'"),
-            "files_checked": 0,
-            "total": 0,
-        });
+    let source_files = match resolve_source_files(path) {
+        Ok(files) => files,
+        Err(result) => {
+            // BT-2031: Surface the actual error (permission, IO, path-not-found)
+            // instead of collapsing to a generic "no files found" message.
+            let error_msg = result.errors.first().map_or_else(
+                || format!("No .bt source files found in '{path}'"),
+                |e| e.message.clone(),
+            );
+            return serde_json::json!({
+                "error": error_msg,
+                "files_checked": 0,
+                "total": 0,
+            });
+        }
     };
 
     // Pass 1: Parse all files and extract class metadata.
@@ -1871,7 +1881,9 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         coverage.merge(file_report);
     }
 
-    let files_checked = source_files.len();
+    // BT-2031: Count only files that were actually read and analysed,
+    // not all resolved files (some may have been unreadable).
+    let files_checked = parsed_files.len();
     let summary = DiagnosticSummary::from_diagnostics(&all_diags, files_checked);
     let totals = summary.totals_by_severity();
 

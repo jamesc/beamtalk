@@ -92,8 +92,7 @@ At the end of a successful build, `beamtalk build` prints a summary of non-error
 Diagnostic summary (42 files):
   Type              12 warning
   Dnu                3 warning
-  UnresolvedClass    1 error
-  Total             16  (1 error, 15 warning)
+  Total             15  (15 warning)
 ```
 
 The summary is suppressed when `--no-warnings` is passed.
