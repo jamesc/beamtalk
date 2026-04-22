@@ -63,7 +63,7 @@ initSup count
 // => 1
 
 // The supervised InitCounter should have initialize called (value = 100, not 0)
-initChild := initSup which: InitCounter
+initChild := (initSup which: InitCounter) unwrap
 // => #Actor<InitCounter,_>
 
 initChild getValue

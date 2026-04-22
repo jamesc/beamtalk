@@ -10,5 +10,5 @@ Supervisor subclass: SupWithInitialize
   class children => #(SupInitChildA, SupInitChildB)
 
   class initialize: sup =>
-    childA := sup which: SupInitChildA
+    childA := (sup which: SupInitChildA) unwrap
     childA setValue: 42

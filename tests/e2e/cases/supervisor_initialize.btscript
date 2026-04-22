@@ -27,14 +27,14 @@ sup count
 // => 2
 
 // initialize: called which: on E2EInitChildA and set its value to 42
-childA := sup which: E2EInitChildA
+childA := (sup which: E2EInitChildA) unwrap
 // => #Actor<E2EInitChildA,_>
 
 childA getValue
 // => 42
 
 // ChildB was not modified by initialize:
-childB := sup which: E2EInitChildB
+childB := (sup which: E2EInitChildB) unwrap
 // => #Actor<E2EInitChildB,_>
 
 childB getValue

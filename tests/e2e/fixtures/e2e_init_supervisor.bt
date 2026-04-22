@@ -9,5 +9,5 @@ Supervisor subclass: E2EInitSupervisor
   class children => #(E2EInitChildA, E2EInitChildB)
 
   class initialize: sup =>
-    childA := sup which: E2EInitChildA
+    childA := (sup which: E2EInitChildA) unwrap
     childA setValue: 42
