@@ -13259,7 +13259,10 @@ Object subclass: Box(T)
         .iter()
         .find(|m| m.selector.name() == "metatype")
         .expect("metatype method");
-    let stmt = metatype.body.last().expect("metatype has at least one stmt");
+    let stmt = metatype
+        .body
+        .last()
+        .expect("metatype has at least one stmt");
     let expr = &stmt.expression;
 
     let mut checker = TypeChecker::new();
