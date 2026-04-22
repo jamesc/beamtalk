@@ -880,7 +880,7 @@ r :: Result(Integer, Error) := computeSomething
 
 Supported type forms: simple (`Integer`), parametric (`Result(T, E)`), and union (`String | nil`).
 
-**Type checking:** The compiler warns when the RHS type is unrelated to the declared type (e.g., `x :: Integer := "hello"`). Narrowing assertions — where the declared type is more specific than the inferred type — are accepted silently, since the annotation communicates that the runtime type is known to be more specific (BT-2015). Dynamic and Never RHS types are always accepted.
+**Type checking:** The compiler warns when the RHS type is unrelated to the declared type (e.g., `x :: Integer := "hello"`). Narrowing assertions — where the declared type is more specific than the inferred type — are accepted silently, since the annotation communicates that the runtime type is known to be more specific (BT-2015). `Dynamic` and `Never` RHS types are always accepted.
 
 ### Dynamic Type Visibility (ADR 0077)
 
