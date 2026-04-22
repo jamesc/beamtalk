@@ -60,7 +60,10 @@ TestCase subclass: SupervisionClassMethodTest
   // === Live supervisor with class method ===
   testSupervisedActorViaClassMethod =>
     sup := (ClassMethodSupervisor supervise) unwrap
-    child := sup which: ClassMethodActor
+    child := (sup which: ClassMethodActor) unwrap
     // The class method transforms #hello + 42 into "hello:42"
+    // `which:` returns Result(Object, Error) per ADR 0080 Phase 2, so `child` is
+    // typed as Object; `label` is only known on the concrete ClassMethodActor.
+    @expect dnu
     self assert: child label equals: "hello:42"
     [sup stop] on: Error do: [:e | nil]

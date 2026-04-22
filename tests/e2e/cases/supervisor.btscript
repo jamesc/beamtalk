@@ -50,8 +50,8 @@ app count
 app children
 // => ["Counter"]
 
-// which: returns the running child actor instance
-counterChild := app which: Counter
+// which: returns the running child actor instance (wrapped in Result)
+counterChild := (app which: Counter) unwrap
 // => #Actor<Counter,_>
 
 // the child actor responds to messages
@@ -137,8 +137,8 @@ outer := (E2EOuterSupervisor supervise) unwrap
 outer count
 // => 1
 
-// which: returns the inner supervisor as a supervisor object
-innerSup := outer which: E2EInnerSupervisor
+// which: returns the inner supervisor as a supervisor object (wrapped in Result)
+innerSup := (outer which: E2EInnerSupervisor) unwrap
 // => #Supervisor<E2EInnerSupervisor,_>
 
 // the inner supervisor has its own Counter child
@@ -159,7 +159,7 @@ argsSup count
 // => 1
 
 // The child Counter was started with initial value 42 via spawnWith:
-argsChild := argsSup which: Counter
+argsChild := (argsSup which: Counter) unwrap
 // => #Actor<Counter,_>
 
 argsChild getValue

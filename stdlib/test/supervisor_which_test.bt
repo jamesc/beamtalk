@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2041: Tests for Supervisor which: Result-returning behaviour (ADR 0080 Phase 2).
+//
+// which: returns Result(Object, Error):
+// - Result ok: child when the class has a running child
+// - Result ok: nil when the class has no running child (not-found is NOT an error)
+// - Result error: #beamtalk_error{kind = stale_handle} when the supervisor is dead
+//
+// Reuses ClassMethodSupervisor / ClassMethodActor fixtures from BT-1862.
+
+TestCase subclass: SupervisorWhichTest
+
+  // === ok with child — class has a running child ===
+  testWhichReturnsOkWithChild =>
+    sup := (ClassMethodSupervisor supervise) unwrap
+    result := sup which: ClassMethodActor
+    self assert: result isOk equals: true
+    // Unwrap is typed Object — `label` is only declared on ClassMethodActor.
+    @expect dnu
+    self assert: result unwrap label equals: "hello:42"
+    [sup stop] on: Error do: [:e | nil]
+
+  // === ok with nil — class is not in the supervision tree ===
+  testWhichReturnsOkNilForUnknownClass =>
+    sup := (ClassMethodSupervisor supervise) unwrap
+    result := sup which: SupInitChildA
+    self assert: result isOk equals: true
+    self assert: result unwrap equals: nil
+    [sup stop] on: Error do: [:e | nil]
+
+  // === error — supervisor process is dead ===
+  testWhichOnStoppedSupervisorReturnsError =>
+    sup := (ClassMethodSupervisor supervise) unwrap
+    sup stop
+    result := sup which: ClassMethodActor
+    self assert: result isError equals: true
+    self assert: result error kind equals: #stale_handle
