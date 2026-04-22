@@ -1546,6 +1546,69 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_superclass_type_args_empty() {
+        let mut code = String::new();
+        generate_superclass_type_args(&mut code, &[], &[]);
+        assert!(
+            code.contains("superclass_type_args: vec![],"),
+            "Should emit empty vec when no args. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_superclass_type_args_param_ref() {
+        let mut code = String::new();
+        generate_superclass_type_args(&mut code, &["E".to_string()], &["E".to_string()]);
+        assert!(
+            code.contains(
+                "superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }]"
+            ),
+            "Should emit ParamRef for forwarded type params. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_superclass_type_args_param_ref_second_position() {
+        // `Collection(V) subclass: Dictionary(K, V)` — V is at param_index 1.
+        let mut code = String::new();
+        generate_superclass_type_args(
+            &mut code,
+            &["V".to_string()],
+            &["K".to_string(), "V".to_string()],
+        );
+        assert!(
+            code.contains(
+                "superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 1 }]"
+            ),
+            "Should compute param_index relative to subclass's own type_params. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_superclass_type_args_concrete() {
+        // `Collection(Integer) subclass: IntArray` — Integer is not a type param.
+        let mut code = String::new();
+        generate_superclass_type_args(&mut code, &["Integer".to_string()], &[]);
+        assert!(
+            code.contains(
+                "superclass_type_args: vec![SuperclassTypeArg::Concrete { type_name: \"Integer\".into() }]"
+            ),
+            "Non-type-param args should emit Concrete. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_superclass_type_args_concrete_escaped() {
+        // Guard against unescaped quotes/backslashes breaking the generated Rust.
+        let mut code = String::new();
+        generate_superclass_type_args(&mut code, &["My\\\"Type".to_string()], &["E".to_string()]);
+        assert!(
+            code.contains("SuperclassTypeArg::Concrete { type_name: \"My\\\\\\\"Type\".into() }"),
+            "Should emit escaped Concrete type_name. Got: {code}"
+        );
+    }
+
+    #[test]
     fn test_generate_builtins_sorted_deterministic() {
         let meta = [
             ClassMeta {
