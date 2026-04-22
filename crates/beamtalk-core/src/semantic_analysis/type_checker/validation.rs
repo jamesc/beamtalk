@@ -209,6 +209,30 @@ impl TypeChecker {
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
                     return ret_ty.clone();
                 }
+                // BT-2037: When no class-side method exists, the runtime
+                // dispatches the message through the class object's instance
+                // chain (Class → Behaviour → Object → ProtoObject; ADR 0032
+                // Phase 0 fallthrough). Mirror that here for divergent
+                // selectors so a class-side `self error: "..."` carries the
+                // `-> Never` annotation from `Object#error:` instead of
+                // resolving to Dynamic.
+                //
+                // Limited to `-> Never` returns: other return types on this
+                // chain (e.g. `class -> Metaclass`) involve class-aware
+                // semantics that aren't modelled in the static hierarchy
+                // (e.g. `Metaclass` not knowing arbitrary class-side
+                // selectors), so propagating them would surface false DNUs.
+                if hierarchy.find_class_method(class_name, selector).is_none() {
+                    if let Some(method) = hierarchy.find_method("Class", selector) {
+                        if method
+                            .return_type
+                            .as_ref()
+                            .is_some_and(|ty| ty.as_str() == "Never")
+                        {
+                            return InferredType::Never;
+                        }
+                    }
+                }
                 InferredType::Dynamic(DynamicReason::UnannotatedReturn)
             }
         }
