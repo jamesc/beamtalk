@@ -20,7 +20,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
-use ecow::{EcoString, eco_format};
+use ecow::EcoString;
 
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -155,9 +155,8 @@ impl TypeChecker {
                         // resolves to the static receiver class. This powers
                         // ADR 0079's typed-lookup API where `Counter named: #c`
                         // should infer as `Result(Counter, Error)`.
-                        if let Some(open) = ret_ty.find('(') {
-                            let base = &ret_ty[..open];
-                            let inner = &ret_ty[open + 1..ret_ty.len() - 1];
+                        let (base, args_slice) = super::type_resolver::split_generic_base(ret_ty);
+                        if let Some(inner) = args_slice {
                             let params = super::TypeChecker::split_type_params(inner);
                             let resolved_args: Vec<super::InferredType> = params
                                 .iter()
@@ -658,20 +657,24 @@ impl TypeChecker {
             return; // Dynamic or Union body — can't reliably check
         };
 
-        // For `-> Self`, the expected type is the class itself
-        // For `-> Generic(...)`, extract the base type name for compatibility checking
-        // For `-> Union` / `-> FalseOr`, resolve via resolve_type_annotation
+        // Resolve the declared return type. The `-> Self` case needs the
+        // static receiver class (which the plain annotation resolver does not
+        // thread), so handle it specially via `receiver_type_for_class`.
+        // `-> Self class` returns a class object — existing body-type
+        // comparison cannot meaningfully validate this, so skip (BT-1952).
+        //
+        // BT-2025: All other arms — including `Generic` — go through the
+        // central `resolve_type_annotation` resolver. Previously the Generic
+        // arm dropped `type_args` via `InferredType::known(base.name)`;
+        // behaviour is preserved here because the downstream
+        // `is_type_compatible(actual_ty, expected_ty, ...)` comparison looks
+        // only at the `class_name`, never at the type args.
         let expected = match declared {
-            TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
-            TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
-            // BT-1952: Self class returns a class object, not an instance.
-            // Skip return-body validation since we can't meaningfully compare.
-            TypeAnnotation::SelfClass { .. } => return,
-            TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
-            TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
-                Self::resolve_type_annotation(declared)
+            TypeAnnotation::SelfType { .. } => {
+                super::type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
-            TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
+            TypeAnnotation::SelfClass { .. } => return,
+            _ => Self::resolve_type_annotation(declared),
         };
 
         match &expected {
@@ -1093,17 +1096,11 @@ impl TypeChecker {
             });
         }
         // For generic declared types like "Result(Integer, Error)", extract
-        // the base type name and compare structurally.
-        let declared_base = if let Some(open) = declared_type.find('(') {
-            &declared_type[..open]
-        } else {
-            declared_type.as_str()
-        };
-        let value_base = if let Some(open) = value_type.find('(') {
-            &value_type[..open]
-        } else {
-            value_type.as_str()
-        };
+        // the base type name and compare structurally. BT-2025: go through
+        // the centralised `base_name_of_string` helper so the grep for
+        // ad-hoc `.find('(')` slicing stays clean.
+        let declared_base = super::type_resolver::base_name_of_string(declared_type);
+        let value_base = super::type_resolver::base_name_of_string(value_type);
         if value_base == declared_base {
             return true;
         }
@@ -1170,11 +1167,7 @@ impl TypeChecker {
                 // Protocol types are NOT classes in the hierarchy, so is_type_compatible
                 // would return true (conservative unknown-type fallback), masking real errors.
                 if Self::is_protocol_type(decl_arg, hierarchy, protocol_registry) {
-                    let base_protocol = if let Some(open) = decl_arg.find('(') {
-                        &decl_arg[..open]
-                    } else {
-                        decl_arg.as_str()
-                    };
+                    let base_protocol = super::type_resolver::base_name_of_string(decl_arg);
                     if protocol_registry
                         .check_conformance(&val_eco, base_protocol, hierarchy)
                         .is_ok()
@@ -1203,22 +1196,21 @@ impl TypeChecker {
     ///
     /// Returns `("Array", ["Integer"])` for `"Array(Integer)"`.
     /// Returns `("Result", ["Integer", "Error"])` for `"Result(Integer, Error)"`.
+    /// Returns `("Map", ["Result(A, B)", "C"])` for `"Map(Result(A, B), C)"` —
+    /// nested multi-parameter generics split at the top level only, matching the
+    /// balanced splitter used elsewhere in the type checker (BT-2025).
     /// For non-generic types, returns the full name and an empty vec.
-    ///
-    /// **Limitation:** Uses a simple comma-split, which does not handle nested generic
-    /// type args with multiple parameters (e.g., `Map(Result(A, B), C)` would be
-    /// incorrectly split). This is acceptable because Beamtalk's current type system
-    /// does not produce such deeply nested multi-parameter generic annotations in
-    /// string form.
     pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
-        if let Some(open) = type_str.find('(') {
-            let base = type_str[..open].to_string();
-            let args_str = &type_str[open + 1..type_str.len() - 1]; // strip parens
-            let args: Vec<String> = args_str.split(',').map(|s| s.trim().to_string()).collect();
-            (base, args)
-        } else {
-            (type_str.to_string(), vec![])
-        }
+        let (base, args_slice) = super::type_resolver::split_generic_base(type_str);
+        let args: Vec<String> = args_slice
+            .map(|s| {
+                super::TypeChecker::split_type_params(s)
+                    .into_iter()
+                    .map(|p| p.trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        (base.to_string(), args)
     }
 
     /// Resolves type-position keywords to their class names (static version).
@@ -1318,11 +1310,7 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) {
         // Extract base protocol name for generic protocols (e.g., "Enumerable(T)" → "Enumerable")
-        let base_protocol = if let Some(open) = expected_protocol.find('(') {
-            &expected_protocol[..open]
-        } else {
-            expected_protocol
-        };
+        let base_protocol = super::type_resolver::base_name_of_string(expected_protocol);
 
         match arg_type {
             InferredType::Known { class_name, .. } => {
@@ -1428,11 +1416,7 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) -> bool {
         // Extract base name for generic types
-        let base_name = if let Some(open) = type_name.find('(') {
-            &type_name[..open]
-        } else {
-            type_name
-        };
+        let base_name = super::type_resolver::base_name_of_string(type_name);
 
         // A protocol type is one that's in the registry and NOT a class name
         protocol_registry.has_protocol(base_name) && !hierarchy.has_class(base_name)
