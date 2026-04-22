@@ -38,11 +38,18 @@ All source files in `src/` load automatically when you start the REPL.
 - **`Supervisor subclass:`** — static supervision tree; children are known at
   startup and declared by overriding `class children`.
 - **`DynamicSupervisor subclass:`** — dynamic pool; children are added at
-  runtime via `pool startChild` / `pool startChild: args`.
+  runtime via `pool startChild unwrap` / `(pool startChild: args) unwrap`.
 - **`class supervisionPolicy`** — per-actor restart strategy (`#permanent`,
   `#transient`, `#temporary`). Read by the supervisor when building child specs.
-- **`supervise`** — starts the supervisor process (or returns the already-running
-  instance if called again).
+- **`supervise`** — starts the supervisor process (or returns the
+  already-running instance if called again). Returns `Result(Self, Error)`
+  (ADR 0080); use `unwrap` for boot-style "crash on failure", or
+  `ifOk:ifError:` / `andThen:` for recoverable start flows.
+- **`startChild`** / **`startChild:`** — spawns a new child on a
+  `DynamicSupervisor`. Returns `Result(C, Error)` (the child type is narrowed
+  via the `DynamicSupervisor(C)` parameter).
+- **`terminate:`** / **`terminateChild:`** — returns `Result(Nil, Error)` and
+  is idempotent on `not_found` (already-gone children yield `Result ok: nil`).
 - **`current`** — returns the running supervisor instance looked up by class
   name. Available on `Supervisor` and `DynamicSupervisor` subclasses. Regular
   actors do not have `current`; reach them via the supervisor using `which:`.
@@ -94,8 +101,14 @@ whether code is correct, evaluate it directly rather than inferring from source.
 ## Common Pitfalls
 
 - `current` returns `nil` if the supervisor has not been started yet.
-  Always call `supervise` before `current`. Note: `current` is only available
-  on `Supervisor`/`DynamicSupervisor` subclasses, not on plain `Actor` subclasses.
+  Always call `supervise` (and `unwrap` the Result, or branch on it) before
+  `current`. Note: `current` is only available on `Supervisor` /
+  `DynamicSupervisor` subclasses, not on plain `Actor` subclasses.
+- `supervise`, `startChild`, `startChild:`, `terminate:`, and `terminateChild:`
+  all return `Result` (ADR 0080). Chaining sends directly on the return value
+  — e.g. `AppSupervisor supervise stop` — is a bug; the receiver is a
+  `Result`, not the supervisor. Insert `unwrap` (or branch with `ifOk:ifError:`)
+  before the chained send: `(AppSupervisor supervise) unwrap stop`.
 - `DynamicSupervisor` has no `class children` — only `class childClass`.
   Defining `children` on a `DynamicSupervisor` subclass has no effect.
 - A `#temporary` worker that crashes is **not restarted** — that is intentional.
