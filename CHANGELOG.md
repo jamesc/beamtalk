@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Language
+
+- **Local variable type annotations** — `name :: Type := expr` syntax for type-checked variable bindings at type-erasure boundaries; supports simple, parametric, and union types; annotation is erased at codegen (BT-2012).
+- Accept narrowing RHS in local type annotations — `dict :: Dictionary := someMethodReturningObject` no longer warns when the declared type is more specific than the inferred type (BT-2015).
+- Fix `@expect` directives inside block bodies (`ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`) being silently ignored — they now correctly suppress diagnostics on the next statement within the block (BT-2010).
+- Typechecker warns when a non-Block value is passed to a `Block(T, R)` parameter — previously, parametric type annotations like `Block(T, R)` were treated as unknown classes and the warning was suppressed (BT-2002).
+
 ### Standard Library
 
 - **Named actor registration** ([ADR 0079](docs/ADR/0079-named-actor-registration.md)) — actors can now be registered under a `Symbol` name and looked up from anywhere via a name-resolving proxy that survives supervised restarts (BT-1985 epic, BT-1986..BT-1991):
@@ -10,6 +17,8 @@
   - `actor registerAs: name` / `actor unregister` / `actor registeredName` / `actor isRegistered` — post-spawn registration API.
   - `Actor allRegistered` — enumerate Beamtalk-registered actors (excludes raw OTP kernel processes via the `$beamtalk_actor` process-dict marker).
   - `SupervisionSpec withName:` — declaratively name a supervised child so the supervisor re-registers the name on every restart.
+- **Integer rounding methods** — `ceiling`, `floor`, `rounded`, and `truncated` on Integer return `self` (identity), so numeric code can call rounding methods on any `Number` without branching on type (BT-2011).
+- Tighter parametric type annotations across stdlib classes (`File`, `Subprocess`, `ReactiveSubprocess`, `Regex`, `Result`, `SupervisionSpec`) — `Result` return types now carry concrete `T`/`E` parameters for better type flow through `andThen:`/`map:` chains (#2032).
 
 ### Compiler
 
@@ -22,16 +31,28 @@
 - Fix `'spawnAs'/2` defaulting to `[]` instead of `#{}`, which crashed supervised named children in `init/1` with `{badmap, []}` (BT-1991).
 - Fix REPL JSON formatter crashing when displaying a name-resolving proxy: `#beamtalk_object{pid = {registered, Name}}` now renders as `#Actor<Class,registered,Name>` instead of calling `pid_to_list/1` on a non-pid term (BT-1991).
 - Supervisor `startLink` returns Result-shaped values internally (`{ok, ...}` / `{error, #beamtalk_error{kind = supervisor_start_failed}}`); `class supervise` unwraps to preserve the existing user-facing `Supervisor` return type — preparatory infrastructure for [ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md) Phase 1 (BT-1994).
+- **ADR 0080 Phase 1: supervisor lifecycle Result migration** — `startLink/1`, `startChild/1,2`, and `terminateChild/2` now return `{ok, V} | {error, #beamtalk_error{}}` internally; stdlib shims preserve existing user-facing signatures via `.unwrap` until Phase 2 (BT-1996, BT-1997, BT-1998).
+- `terminateChild` is now idempotent — terminating an already-terminated child returns `{ok, nil}` instead of raising (BT-1998).
+- Fix deadlock when calling `self class spawnAs:` / `self class spawnWith:as:` inside a class factory method — metaclass dispatch now short-circuits spawn selectors to avoid re-entering the class gen_server (BT-2005).
+- Fix `undef` crash for `self spawnAs:` / `self spawnWith:as:` in class methods — new runtime helpers read class metadata from the process dictionary to avoid the gen_server deadlock (BT-2004).
+- Fix `undef` crash for inherited class-method self-sends — a new `class_self_dispatch/4` runtime helper walks the superclass chain and threads class-var state correctly (BT-2007).
+
+### Tooling
+
+- **Diagnostic summary** — `beamtalk build` and `beamtalk lint` print an aggregated diagnostic summary (category × severity) at end of run; `beamtalk lint --format json` emits a `summary` JSON object for CI diffing; new `diagnostic_summary` MCP tool for agent use (BT-2014).
 
 ### Documentation
 
 - ADR 0079: Named Actor Registration.
 - Language features: new "Named Actor Registration" chapter covering the API surface, proxy semantics caveats (monitors don't re-arm across restarts; equality rules; unregister makes proxy dead), reserved-name policy, BEAM mapping, and a before/after migration example from `Supervisor which:` + `initialize:` to named registration (BT-1991).
+- Language features: new "Local Variable Type Annotations" section; updated `@expect` documentation to reflect block-body support.
 
 ### Internal
 
 - ADR 0080: Migrate Supervisor Lifecycle to Result — proposed and accepted with Phase 0 probe outcomes (BT-1977, BT-1994, BT-1995).
 - Typechecker probe confirms class-level type parameter substitution through `Result(C, Error)` works without extension (BT-1995).
+- Unified LSP and CLI diagnostic pipelines into shared `compute_project_diagnostics` function (BT-2009).
+- Thread fixture-defined protocols through BUnit compile path to eliminate false `Unresolved class` warnings (BT-2006).
 
 ## 0.3.1 — 2026-03-26
 

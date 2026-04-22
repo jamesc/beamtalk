@@ -863,8 +863,24 @@ class -> Self class => @primitive "class"
 - Invalid annotation forms (e.g., `Self` in parameter position) are errors.
 - `typed` classes require parameter/return annotations on non-primitive methods.
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
+- Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
+
+### Local Variable Type Annotations
+
+Local variables can carry a type annotation using `name :: Type := expr`. The declared type overrides the inferred type of the right-hand side, which is useful at type-erasure boundaries (FFI returns, deserialization, untyped APIs). The annotation is erased at codegen — there is no runtime effect.
+
+```beamtalk
+x :: Integer := 42
+dict :: Dictionary := Binary deserialize: content
+name :: String | nil := dictionary at: "name"
+r :: Result(Integer, Error) := computeSomething
+```
+
+Supported type forms: simple (`Integer`), parametric (`Result(T, E)`), and union (`String | nil`).
+
+**Type checking:** The compiler warns when the RHS type is unrelated to the declared type (e.g., `x :: Integer := "hello"`). Narrowing assertions — where the declared type is more specific than the inferred type — are accepted silently, since the annotation communicates that the runtime type is known to be more specific (BT-2015). Dynamic and Never RHS types are always accepted.
 
 ### Dynamic Type Visibility (ADR 0077)
 
@@ -3229,7 +3245,7 @@ Declaration-level `@expect` supports the same categories and stale-directive rul
 
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression or declaration), the compiler emits a warning to prevent directives from silently becoming out of date.
 
-`@expect` works inside method bodies, on declarations in class definitions, and at module scope.
+`@expect` works inside method bodies, inside block bodies (e.g., `ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`), on declarations in class definitions, and at module scope (BT-2010).
 
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 
