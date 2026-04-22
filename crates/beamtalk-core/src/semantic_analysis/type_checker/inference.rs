@@ -2024,6 +2024,12 @@ impl TypeChecker {
 
     /// Type-check a block expression (or any expression) with a variable narrowed
     /// to a specific type in a child environment.
+    ///
+    /// BT-2020: Preserves the block body's inferred return type as a `type_arg`
+    /// on the returned `Block(..., R)` type. Without this, `ifTrue:ifFalse:`
+    /// return types collapsed to `Dynamic` because `infer_method_local_params`
+    /// requires the Block argument to carry its return type before it can unify
+    /// the method-local `R` type parameter.
     fn infer_block_with_narrowing(
         &mut self,
         arg: &Expression,
@@ -2036,14 +2042,28 @@ impl TypeChecker {
         if let Expression::Block(block) = arg {
             let mut block_env = env.child();
             block_env.set(var_name, narrowed_type.clone());
+            // Block parameters are unannotated in the narrowing context (the
+            // selectors we enter here — ifTrue:/ifFalse:/ifTrue:ifFalse: —
+            // take zero-arity blocks, but be defensive for any future use).
+            let mut block_param_types: Vec<InferredType> =
+                Vec::with_capacity(block.parameters.len());
             for param in &block.parameters {
-                block_env.set(
-                    param.name.as_str(),
-                    InferredType::Dynamic(DynamicReason::UnannotatedParam),
-                );
+                let param_ty = InferredType::Dynamic(DynamicReason::UnannotatedParam);
+                block_env.set(param.name.as_str(), param_ty.clone());
+                block_param_types.push(param_ty);
             }
-            self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
-            let ty = InferredType::known("Block");
+            let body_ty =
+                self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            // Build `Block(P1, ..., Pn, R)` so downstream generic inference
+            // (e.g. `infer_method_local_params` matching `Block(R) -> R`) can
+            // recover the block's return type.
+            let mut block_type_args = block_param_types;
+            block_type_args.push(body_ty);
+            let ty = InferredType::Known {
+                class_name: "Block".into(),
+                type_args: block_type_args,
+                provenance: super::TypeProvenance::Inferred(arg.span()),
+            };
             self.type_map.insert(arg.span(), ty.clone());
             ty
         } else {
@@ -2159,8 +2179,20 @@ impl TypeChecker {
                             in_abstract_method,
                         );
                     } else {
-                        // Block with only return type (e.g., Block(R)) — no params to type
-                        arg_types[i] = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                        // BT-2020: Block(R) — zero-arity block with a return type param.
+                        // Use `infer_block_with_typed_params` with no param types so the
+                        // returned Block type_args preserve the body's return type (R).
+                        // Without this, the bare `Block` returned by `infer_expr` gives
+                        // `infer_method_local_params` nothing to unify `R` against, and
+                        // callers see the method's return type as `Dynamic`.
+                        arg_types[i] = self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &[],
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
                     }
                 } else {
                     // No Block(...) param type for this position

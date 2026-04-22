@@ -18,7 +18,11 @@ abstract Value subclass: Boolean
   // === Abstract protocol (subclasses must implement) ===
 
   /// Conditional evaluation: evaluate `trueBlock` if true, `falseBlock` if false.
-  ifTrue: _trueBlock :: Block ifFalse: _falseBlock :: Block =>
+  ///
+  /// Both arms declare the same `Block(R)` parameter type so the result type
+  /// unifies to `R` — callers see the common return type of the two arms
+  /// without requiring an explicit local type annotation (BT-2020).
+  ifTrue: _trueBlock :: Block(R) ifFalse: _falseBlock :: Block(R) -> R =>
     self subclassResponsibility
 
   /// If true, evaluate `trueBlock`.

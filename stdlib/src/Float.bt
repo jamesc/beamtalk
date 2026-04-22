@@ -167,7 +167,9 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.5 min: 3.0     // => 1.5
   /// ```
-  min: other :: Number -> Float =>
+  /// Return type is `Number` because `other` may be any numeric type;
+  /// if `other` is the smaller value, the result carries its runtime type.
+  min: other :: Number -> Number =>
     (self < other) ifTrue: [self] ifFalse: [other]
 
   /// Return the larger of the receiver and `other`.
@@ -176,7 +178,9 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.5 max: 3.0     // => 3.0
   /// ```
-  max: other :: Number -> Float =>
+  /// Return type is `Number` because `other` may be any numeric type;
+  /// if `other` is the larger value, the result carries its runtime type.
+  max: other :: Number -> Number =>
     (self > other) ifTrue: [self] ifFalse: [other]
 
   /// Round to the nearest integer.
