@@ -47,7 +47,6 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace actorsOf: Counter
   /// ```
   actorsOf: aClass :: Class -> List(Actor) =>
-    @expect type
     self actors select: [:a | a class includesBehaviour: aClass]
 
   /// Return a list of loaded user classes with source file info.

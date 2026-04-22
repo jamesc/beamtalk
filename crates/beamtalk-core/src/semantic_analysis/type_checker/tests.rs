@@ -13487,3 +13487,327 @@ fn assert_full_result_list_string_error(ty: &InferredType) {
         type_args[1]
     );
 }
+
+// ---- BT-2019: Concrete parametric return types preserve type_args on
+// instance-method sends from non-generic receivers ----
+//
+// When a non-generic class declares an instance or class method returning a
+// concrete parametric type such as `-> List(String)` or `-> List(MyThing)`,
+// the call-site result must preserve the inner type arguments so downstream
+// generic resolution (`first`, `do:`, etc.) sees the element type.
+//
+// Pre-fix the path in `inference.rs` that handled instance-method return
+// types stripped the `(...)` portion off, so callers saw `Known("List", [])`
+// instead of `Known("List", [Known("MyThing")])`. Every downstream send then
+// fell back to Object/Dynamic.
+
+/// BT-2019 (b): instance method on a non-generic receiver returning a
+/// concrete parametric type. The call-site result must preserve the
+/// inner element type so `events first` resolves to `MyThing`, not bare
+/// `Object`/`Dynamic`.
+#[test]
+fn instance_method_concrete_parametric_return_preserves_type_args() {
+    let source = "
+typed Value subclass: MyThing
+  field: v :: Integer = 0
+
+typed Object subclass: Store
+  readEvents -> List(MyThing) =>
+    #()
+
+typed Object subclass: Driver
+  probe: store :: Store -> Nil =>
+    events := store readEvents
+    events
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe:")
+        .expect("probe: method");
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    env.set("store", InferredType::known("Store"));
+    // Walk the body so each binding is recorded in env.
+    for stmt in &probe.body {
+        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+    }
+    let events_ty = checker.infer_expr(
+        &probe.body.last().expect("probe body non-empty").expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = events_ty
+    else {
+        panic!("expected Known(List, [MyThing]), got {events_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "List");
+    assert_eq!(
+        type_args.len(),
+        1,
+        "List should preserve its element type arg, got {type_args:?}"
+    );
+    assert_eq!(
+        type_args[0].as_known().map(EcoString::as_str),
+        Some("MyThing"),
+        "List element type should be MyThing, got {:?}",
+        type_args[0]
+    );
+}
+
+/// BT-2019: end-to-end DNU check. After the fix, sending a non-existent
+/// selector to the element of a `List(MyThing)` returned by an instance
+/// method must produce a "`MyThing` does not understand 'xyzzyNonsense'"
+/// warning. Pre-fix the warning was silently lost (element type was
+/// Dynamic).
+#[test]
+fn instance_method_concrete_parametric_return_drives_element_dnu() {
+    let source = "
+typed Value subclass: MyThing
+  field: v :: Integer = 0
+
+typed Object subclass: Store
+  readEvents -> List(MyThing) =>
+    #()
+
+typed Object subclass: Driver
+  probe: store :: Store -> Nil =>
+    events := store readEvents
+    first := events first
+    first xyzzyNonsense
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("does not understand") && d.message.contains("xyzzyNonsense")
+        })
+        .collect();
+    assert!(
+        !dnu.is_empty(),
+        "expected `xyzzyNonsense` DNU on MyThing element from List(MyThing) \
+         instance-method return; diagnostics: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// BT-2019: class-method case. `ExduraSupervisor class >> children -> List(Actor)`
+/// — the call-site result of `Sup children` must be `List(Actor)`, not
+/// bare `List`.
+#[test]
+fn class_method_concrete_parametric_return_preserves_type_args() {
+    let source = "
+typed Object subclass: Actor
+  field: name :: String = \"\"
+
+typed Object subclass: Sup
+  class children -> List(Actor) =>
+    #()
+
+typed Object subclass: Driver
+  probe -> Nil =>
+    kids := Sup children
+    kids
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe")
+        .expect("probe method");
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    for stmt in &probe.body {
+        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+    }
+    let kids_ty = checker.infer_expr(
+        &probe.body.last().expect("probe body non-empty").expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = kids_ty
+    else {
+        panic!("expected Known(List, [Actor]), got {kids_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "List");
+    assert_eq!(
+        type_args.len(),
+        1,
+        "List should preserve its element type arg"
+    );
+    assert_eq!(
+        type_args[0].as_known().map(EcoString::as_str),
+        Some("Actor")
+    );
+}
+
+/// BT-2019: Dictionary(K, V) — two type args must be preserved.
+#[test]
+fn instance_method_dictionary_return_preserves_both_type_args() {
+    let source = "
+typed Object subclass: Store
+  readMap -> Dictionary(String, Integer) =>
+    Dictionary new
+
+typed Object subclass: Driver
+  probe: store :: Store -> Nil =>
+    m := store readMap
+    m
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe:")
+        .expect("probe: method");
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    env.set("store", InferredType::known("Store"));
+    for stmt in &probe.body {
+        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+    }
+    let m_ty = checker.infer_expr(
+        &probe.body.last().expect("probe body non-empty").expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = m_ty
+    else {
+        panic!("expected Known(Dictionary, [String, Integer]), got {m_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "Dictionary");
+    assert_eq!(type_args.len(), 2);
+    assert_eq!(
+        type_args[0].as_known().map(EcoString::as_str),
+        Some("String")
+    );
+    assert_eq!(
+        type_args[1].as_known().map(EcoString::as_str),
+        Some("Integer")
+    );
+}
+
+/// BT-2019: Set(T) — single-arg generic, instance-method return.
+#[test]
+fn instance_method_set_return_preserves_type_arg() {
+    let source = "
+typed Object subclass: Store
+  readSet -> Set(String) =>
+    Set new
+
+typed Object subclass: Driver
+  probe: store :: Store -> Nil =>
+    s := store readSet
+    s
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let driver = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Driver")
+        .expect("Driver class");
+    let probe = driver
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "probe:")
+        .expect("probe: method");
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set("self", InferredType::known("Driver"));
+    env.set("store", InferredType::known("Store"));
+    for stmt in &probe.body {
+        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+    }
+    let s_ty = checker.infer_expr(
+        &probe.body.last().expect("probe body non-empty").expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = s_ty
+    else {
+        panic!("expected Known(Set, [String]), got {s_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "Set");
+    assert_eq!(type_args.len(), 1);
+    assert_eq!(
+        type_args[0].as_known().map(EcoString::as_str),
+        Some("String")
+    );
+}
