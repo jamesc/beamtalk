@@ -107,15 +107,6 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// ```
   do: block :: Block(V, Object) -> Nil => @primitive "do:"
 
-  /// Fold/reduce over the values, threading an accumulator.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// #{#a => 1, #b => 2} inject: 0 into: [:sum :v | sum + v]  // => 3
-  /// ```
-  inject: initial :: A into: block :: Block(A, V, A) -> A =>
-    @primitive "inject:into:"
-
   /// Map `block` over each value, returning a new Dictionary with the
   /// same keys and transformed values.
   ///
