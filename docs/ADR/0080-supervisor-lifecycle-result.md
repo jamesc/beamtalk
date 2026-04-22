@@ -505,7 +505,9 @@ Separately:
 | 8 | [BT-2001](https://linear.app/beamtalk/issue/BT-2001) | 3 | Docs: language-features supervision chapter + CHANGELOG + this Implementation Tracking section |
 
 **Critical path:** BT-1994 → BT-1996 → BT-1997 → BT-1998 → BT-1999 → BT-2000 → BT-2001.
-**Parallelisable:** BT-1995 alongside BT-1994 (independent probes). Runtime migrations BT-1996..BT-1998 landed sequentially but touch disjoint functions in `beamtalk_supervisor.erl` so later reordering would also have been safe.
+**Parallelizable:** BT-1995 alongside BT-1994 (independent probes). Runtime migrations BT-1996..BT-1998 landed sequentially but touch disjoint functions in `beamtalk_supervisor.erl` so later reordering would also have been safe.
+
+**Divergence from proposed Phase 2 signature:** the proposal above (§Phase 1, §Phase 2) specifies `Supervisor class>>supervise -> Result(Supervisor, Error)` for the static path. Phase 2 shipped with `-> Result(Self, Error)` instead, unifying the static and dynamic paths and matching the ADR 0079 precedent for `Actor` registry operations (`spawnAs:`, `named:`). This means `AppSupervisor supervise` type-narrows to `Result(AppSupervisor, Error)` at the call site via the standard `Self` → concrete-subclass substitution. See `stdlib/src/Supervisor.bt:90` for the shipped signature.
 
 ## References
 - Related issues: [BT-1977](https://linear.app/beamtalk/issue/BT-1977) — this ADR's driving issue
