@@ -23,7 +23,6 @@ sealed typed Value subclass: Regex
 
   /// Use 'Regex from: pattern' to create a Regex.
   class new: _ :: Object -> Object =>
-    @expect type
     self error: "Use 'Regex from: pattern' to create a Regex"
 
   /// Compile a regex pattern string into a Regex object (class method).

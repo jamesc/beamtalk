@@ -46,7 +46,6 @@ sealed typed Number subclass: Float
   /// Float infinity       // => ERROR: _
   /// ```
   class infinity -> Float =>
-    @expect type
     self error: "BEAM does not support IEEE 754 infinity"
 
   /// Add a number to the receiver.
