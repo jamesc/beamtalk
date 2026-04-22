@@ -71,7 +71,9 @@ pub struct ProjectDiagnosticContext<'a> {
 /// # Arguments
 ///
 /// * `module` - The parsed AST
-/// * `parse_diagnostics` - Diagnostics from the parser
+/// * `initial_diagnostics` - Pre-analysis diagnostics (parse + any earlier passes,
+///   e.g. `@primitive` validation from the CLI compiler); the function appends
+///   semantic and post-analysis diagnostics to this list.
 /// * `ctx` - Project-level context bundling all optional inputs
 ///
 /// # Returns
@@ -80,10 +82,10 @@ pub struct ProjectDiagnosticContext<'a> {
 #[must_use]
 pub fn compute_project_diagnostics(
     module: &Module,
-    parse_diagnostics: Vec<Diagnostic>,
+    initial_diagnostics: Vec<Diagnostic>,
     ctx: &ProjectDiagnosticContext<'_>,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = parse_diagnostics;
+    let mut diagnostics = initial_diagnostics;
 
     // Run semantic analysis with the richest available entry point.
     let analysis_result = crate::semantic_analysis::analyse_with_natives_and_protocols(
