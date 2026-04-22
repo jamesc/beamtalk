@@ -163,10 +163,38 @@ impl TypeChecker {
                         let class_subst = Self::class_method_substitution(
                             class_name, hierarchy, &method, arg_types,
                         );
-                        // Self resolves to the receiver class (no inferred
-                        // type args at the class-method call site — the
-                        // substitution map carries them via the named params).
-                        let self_type = InferredType::known(class_name.clone());
+                        // Self resolves to the receiver class. For a generic
+                        // receiver (e.g. `Box(T)`) we thread the inferred
+                        // type args through `self_type` so nested `Self` in
+                        // the return type — `-> Result(Self, Error)` —
+                        // resolves to `Result(Box(Integer), Error)` rather
+                        // than the erased `Result(Box, Error)`. CodeRabbit
+                        // on PR #2065.
+                        let self_type_args: Vec<InferredType> = hierarchy
+                            .get_class(class_name)
+                            .map(|info| {
+                                info.type_params
+                                    .iter()
+                                    .map(|param| {
+                                        class_subst
+                                            .get(param)
+                                            .cloned()
+                                            .unwrap_or_else(|| InferredType::known(param.clone()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let self_type = if self_type_args.is_empty() {
+                            InferredType::known(class_name.clone())
+                        } else {
+                            InferredType::Known {
+                                class_name: class_name.clone(),
+                                type_args: self_type_args,
+                                provenance: crate::semantic_analysis::TypeProvenance::Inferred(
+                                    crate::source_analysis::Span::default(),
+                                ),
+                            }
+                        };
                         return super::TypeChecker::substitute_return_type_with_self(
                             ret_ty,
                             &class_subst,
