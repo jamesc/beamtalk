@@ -22,7 +22,7 @@
 /// #[10, 20, 30] at: 2         // => 20
 /// #[1, 2, 3] collect: [:x | x * 2]  // => #[2, 4, 6]
 /// ```
-sealed typed Collection subclass: Array(E)
+sealed typed Collection(E) subclass: Array(E)
 
   /// Create an Array from a list of elements.
   ///
@@ -30,7 +30,7 @@ sealed typed Collection subclass: Array(E)
   /// ```beamtalk
   /// Array withAll: #(1, 2, 3)   // => #[1, 2, 3]
   /// ```
-  class withAll: list :: List -> Array(E) => @primitive "withAll:"
+  class withAll: list :: List(E) -> Array(E) => @primitive "withAll:"
 
   /// Create an Array from a list. Convenience alias for `withAll:`.
   ///
@@ -38,7 +38,7 @@ sealed typed Collection subclass: Array(E)
   /// ```beamtalk
   /// Array new: #(1, 2, 3)            // => #[1, 2, 3]
   /// ```
-  class new: elements :: List -> Array(E) => self withAll: elements
+  class new: elements :: List(E) -> Array(E) => self withAll: elements
 
   /// Number of elements in the array.
   ///
