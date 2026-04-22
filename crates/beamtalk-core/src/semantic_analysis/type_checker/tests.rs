@@ -13028,6 +13028,92 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
     );
 }
 
+// ---- BT-2033: `-> Never` with non-divergent body must warn ----
+
+/// BT-2033: A method declared `-> Never` with a `Known` body type (e.g. `42`)
+/// is not divergent — warn so the mislabelled declaration is caught.
+#[test]
+fn bt2033_never_return_with_known_body_warns() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("diverge".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Simple(ident("Never"))),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as Integer — clearly not divergent
+    let body_type = InferredType::known("Integer");
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("NeverProbe"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Declared -> Never with Integer body should produce one warning: {type_warnings:?}"
+    );
+    assert!(
+        type_warnings[0].message.contains("Never"),
+        "Warning should mention Never: {}",
+        type_warnings[0].message
+    );
+    assert!(
+        type_warnings[0].message.contains("Integer"),
+        "Warning should mention the actual Integer body type: {}",
+        type_warnings[0].message
+    );
+}
+
+/// BT-2033: A method declared `-> Never` whose body is truly divergent
+/// (inferred as `InferredType::Never`) must not warn — the declaration is
+/// honest.
+#[test]
+fn bt2033_never_return_with_never_body_no_warning() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("diverge".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Simple(ident("Never"))),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body is divergent (e.g. always `self error: ...`)
+    let body_type = InferredType::Never;
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("NeverProbe"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Declared -> Never with Never body should not warn: {type_warnings:?}"
+    );
+}
+
 // =====================================================================
 // BT-2021 — Receiver type_args dropped for self / super in generic classes
 // =====================================================================

@@ -846,7 +846,34 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Dynamic(_) | InferredType::Never => {} // Can't check
+            InferredType::Never => {
+                // BT-2033: Declared `-> Never` means the method is divergent
+                // (never returns normally). The body must also be Never for the
+                // declaration to be honest. Any `Known` body reaching this arm
+                // means the method *does* return a value — warn.
+                //
+                // Note: `Never` body-types cause the early return on line ~753
+                // before this match, so we only reach this arm when the body
+                // has a non-Never `Known` type (the destructure above extracted
+                // `actual_ty`).
+                let selector = method.selector.name();
+                let actual_display = body_type
+                    .display_name()
+                    .unwrap_or_else(|| actual_ty.clone());
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Method '{selector}' in {class_name} declares return type Never, but body returns {actual_display}"
+                        ),
+                        method.span,
+                    )
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!(
+                        "`Never` means the method is divergent (throws or loops). Either remove `-> Never` or ensure the body always diverges (e.g. ends with `self error: ...`). Inferred body type is {actual_display}"
+                    )),
+                );
+            }
+            InferredType::Dynamic(_) => {} // Can't check
         }
     }
 
