@@ -488,6 +488,25 @@ Separately:
 - **`wasFreshlyStarted` accessor or `onFreshStart:` block form** on the supervisor returned by `supervise`, if post-migration usage shows callers consistently reach for the distinction. Not needed for the ADR; flagged here for decision-context continuity.
 - **Linter for pre-migration callsites** — warns on `sup := Class supervise` (no `unwrap`/`value`/`ifOk:`/etc.) during the transition window. Built once, decommissioned once external projects migrate.
 
+## Implementation Tracking
+
+**Epic:** [BT-1993](https://linear.app/beamtalk/issue/BT-1993) — Migrate Supervisor Lifecycle to Result (ADR 0080)
+**Status:** Complete — all phases landed across BT-1994..BT-2001.
+
+| # | Issue | Phase | Summary |
+|---|---|---|---|
+| 1 | [BT-1994](https://linear.app/beamtalk/issue/BT-1994) | 0 | Probe FFI coercion vs `beamtalk_supervisor_new` post-dispatch hook — selected Option 2 (hook extension) |
+| 2 | [BT-1995](https://linear.app/beamtalk/issue/BT-1995) | 0 | Probe `Result(C, Error)` typechecker substitution for `DynamicSupervisor(C)` — substitution works unchanged |
+| 3 | [BT-1996](https://linear.app/beamtalk/issue/BT-1996) | 1 | Runtime: migrate `startLink/1` to Result-shaped return |
+| 4 | [BT-1997](https://linear.app/beamtalk/issue/BT-1997) | 1 | Runtime: migrate `startChild/1,2` and `with_live_supervisor/3` to Result-shaped returns |
+| 5 | [BT-1998](https://linear.app/beamtalk/issue/BT-1998) | 1 | Runtime: migrate `terminateChild/2` (both arities) with idempotent `not_found` on static path |
+| 6 | [BT-1999](https://linear.app/beamtalk/issue/BT-1999) | 2 | Stdlib: update `Supervisor.bt` / `DynamicSupervisor.bt` return types and migrate BUnit tests |
+| 7 | [BT-2000](https://linear.app/beamtalk/issue/BT-2000) | 3 | E2E + examples: migrate supervisor btscripts and `examples/otp-tree` to Result-shaped API |
+| 8 | [BT-2001](https://linear.app/beamtalk/issue/BT-2001) | 3 | Docs: language-features supervision chapter + CHANGELOG + this Implementation Tracking section |
+
+**Critical path:** BT-1994 → BT-1996 → BT-1997 → BT-1998 → BT-1999 → BT-2000 → BT-2001.
+**Parallelisable:** BT-1995 alongside BT-1994 (independent probes). Runtime migrations BT-1996..BT-1998 landed sequentially but touch disjoint functions in `beamtalk_supervisor.erl` so later reordering would also have been safe.
+
 ## References
 - Related issues: [BT-1977](https://linear.app/beamtalk/issue/BT-1977) — this ADR's driving issue
 - Related ADRs:
