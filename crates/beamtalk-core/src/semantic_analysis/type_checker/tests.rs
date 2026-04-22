@@ -13234,10 +13234,13 @@ Base(Integer) subclass: IntBase
 /// Full metatype support is tracked separately.
 #[test]
 fn bt2021_self_class_remains_dynamic_for_factory_pattern() {
+    // Probe `self class` directly (not `self class new`) so a future change
+    // that resolves the metatype to a Known type but leaves `new` Dynamic
+    // would still cause this test to fail. CodeRabbit on PR #2064.
     let source = "
 Object subclass: Box(T)
   state: x :: T = nil
-  copy => self class new
+  metatype => self class
 ";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
@@ -13251,12 +13254,12 @@ Object subclass: Box(T)
         .iter()
         .find(|c| c.name.name.as_str() == "Box")
         .expect("Box class");
-    let copy = class
+    let metatype = class
         .methods
         .iter()
-        .find(|m| m.selector.name() == "copy")
-        .expect("copy method");
-    let stmt = copy.body.last().expect("copy has at least one stmt");
+        .find(|m| m.selector.name() == "metatype")
+        .expect("metatype method");
+    let stmt = metatype.body.last().expect("metatype has at least one stmt");
     let expr = &stmt.expression;
 
     let mut checker = TypeChecker::new();
@@ -13267,11 +13270,10 @@ Object subclass: Box(T)
     );
     let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
-    // `self class new` on `Box(T)` resolves through `class -> Self class`
-    // (Object>>class) which intentionally returns Dynamic. The resulting
-    // `new` send on a Dynamic receiver also stays Dynamic.
+    // `self class` on `Box(T)` resolves through `class -> Self class`
+    // (Object>>class) which intentionally returns Dynamic per BT-1952.
     assert!(
         matches!(&ty, InferredType::Dynamic(_)),
-        "self class new should stay Dynamic (Self class metatype is deferred); got {ty:?}"
+        "self class should stay Dynamic (Self class metatype is deferred); got {ty:?}"
     );
 }

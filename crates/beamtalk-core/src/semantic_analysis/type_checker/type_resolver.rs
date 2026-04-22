@@ -222,11 +222,13 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
                 .get(*param_index)
                 .cloned()
                 .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown)),
-            SuperclassTypeArg::Concrete { type_name } => InferredType::Known {
-                class_name: type_name.clone(),
-                type_args: vec![],
-                provenance: TypeProvenance::Inferred(crate::source_analysis::Span::default()),
-            },
+            // Copilot on PR #2064: parse the type-name string so concrete
+            // generics (`List(Integer)`), unions (`Integer | Nil`), and `Nil`
+            // keyword aliases canonicalise correctly instead of becoming an
+            // opaque `Known("List(Integer)")`.
+            SuperclassTypeArg::Concrete { type_name } => {
+                super::TypeChecker::resolve_type_name_string(type_name)
+            }
         })
         .collect();
 
