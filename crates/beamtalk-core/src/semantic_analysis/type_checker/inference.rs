@@ -2716,13 +2716,14 @@ impl TypeChecker {
             // the union shape doesn't match the param shape anyway.
             if super::is_generic_type_param(param_type) {
                 let param_eco: EcoString = param_type.clone();
-                if !class_type_params.contains(&param_eco) && !hierarchy.has_class(&param_eco) {
-                    if matches!(
+                if !class_type_params.contains(&param_eco)
+                    && !hierarchy.has_class(&param_eco)
+                    && matches!(
                         arg_ty,
                         InferredType::Known { .. } | InferredType::Union { .. }
-                    ) {
-                        method_subst.insert(param_eco, arg_ty.clone());
-                    }
+                    )
+                {
+                    method_subst.insert(param_eco, arg_ty.clone());
                 }
             }
 
@@ -4745,7 +4746,7 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = TypeChecker::infer_method_local_params(
             &method,
-            &[nullable.clone()],
+            std::slice::from_ref(&nullable),
             &HashMap::new(),
             &hierarchy,
             "TestCase",
