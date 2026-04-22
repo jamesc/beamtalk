@@ -276,17 +276,22 @@ pub type MethodReturnKey = (EcoString, EcoString, bool);
 
 /// Infers return types for all unannotated methods in a module.
 ///
-/// Only returns `InferredType::Known(class_name)` results. `Dynamic` types are
-/// omitted from the map (absence = dynamic, no annotation written back).
+/// Only returns `InferredType::Known` results (including generic type args).
+/// `Dynamic` types are omitted from the map (absence = dynamic, no annotation
+/// written back).
 ///
 /// This is used by the return-type writeback pass (BT-1005, ADR 0045 Phase 1b)
 /// before codegen so that unannotated user-defined methods appear in the emitted
 /// `method_return_types` map, enabling REPL expression completion.
+///
+/// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString` so
+/// that generic type arguments (e.g., `List(String)`) are preserved through
+/// the inference cache and available to callers for full type comparison.
 #[must_use]
 pub fn infer_method_return_types(
     module: &Module,
     hierarchy: &ClassHierarchy,
-) -> HashMap<MethodReturnKey, EcoString> {
+) -> HashMap<MethodReturnKey, InferredType> {
     let mut checker = TypeChecker::new();
     checker.check_module(module, hierarchy);
     checker.take_method_return_types()
@@ -303,7 +308,7 @@ pub fn infer_method_return_types(
 pub fn infer_types_and_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
-) -> (TypeMap, HashMap<MethodReturnKey, EcoString>) {
+) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
     checker.check_module(module, hierarchy);
     (checker.take_type_map(), checker.take_method_return_types())
@@ -324,7 +329,7 @@ pub fn infer_types_and_returns(
 pub struct TypeChecker {
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
-    pub(super) method_return_types: HashMap<MethodReturnKey, EcoString>,
+    pub(super) method_return_types: HashMap<MethodReturnKey, InferredType>,
     /// The package being compiled (ADR 0071 Phase 3).
     ///
     /// When set, enables cross-package `internal` method visibility enforcement
@@ -415,12 +420,12 @@ impl TypeChecker {
 
     /// Returns a reference to the method return types collected during checking.
     #[must_use]
-    pub fn method_return_types(&self) -> &HashMap<MethodReturnKey, EcoString> {
+    pub fn method_return_types(&self) -> &HashMap<MethodReturnKey, InferredType> {
         &self.method_return_types
     }
 
     /// Takes ownership of the method return types map, leaving an empty map.
-    pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, EcoString> {
+    pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, InferredType> {
         std::mem::take(&mut self.method_return_types)
     }
 

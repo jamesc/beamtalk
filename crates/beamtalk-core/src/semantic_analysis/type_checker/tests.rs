@@ -4015,7 +4015,7 @@ fn infer_method_return_types_collects_instance_methods() {
     let result = infer_method_return_types(&module, &hierarchy);
     assert_eq!(
         result.get(&("Greeter".into(), "greeting".into(), false)),
-        Some(&"String".into()),
+        Some(&InferredType::known("String")),
         "unannotated instance method returning String should be collected"
     );
 }
@@ -4030,7 +4030,7 @@ fn infer_method_return_types_collects_class_methods() {
     let result = infer_method_return_types(&module, &hierarchy);
     assert_eq!(
         result.get(&("Counter".into(), "zero".into(), true)),
-        Some(&"Integer".into()),
+        Some(&InferredType::known("Integer")),
         "unannotated class method returning Integer should be collected"
     );
 }
@@ -4051,7 +4051,7 @@ fn infer_method_return_types_collects_standalone_methods() {
     let result = infer_method_return_types(&module, &hierarchy);
     assert_eq!(
         result.get(&("Widget".into(), "label".into(), false)),
-        Some(&"String".into()),
+        Some(&InferredType::known("String")),
         "unannotated standalone method returning String should be collected"
     );
 }
@@ -4142,7 +4142,7 @@ fn infer_types_and_returns_produces_both_outputs() {
     // method_return_types should contain the inferred return type
     assert_eq!(
         returns.get(&("Box".into(), "value".into(), false)),
-        Some(&"Integer".into()),
+        Some(&InferredType::known("Integer")),
         "should infer Box#value returns Integer"
     );
 
@@ -12621,7 +12621,338 @@ fn param_passthrough_local_no_false_binary_warning() {
         .collect();
     assert!(
         binary_warnings.is_empty(),
-        "Parameter-bound local with union type should not produce false \
-         binary operand warning, got: {binary_warnings:?}"
+        "BT-2017: method-call-bound local with union return type should not produce \
+         false binary operand warning, got: {binary_warnings:?}"
+    );
+}
+
+// ---- BT-2022: Generic return type validation checks inner type args ----
+
+/// BT-2022 Bug A: Declared `-> Result(Integer, Error)` with body returning
+/// `Result(String, Error)` must warn about the type arg mismatch.
+#[test]
+fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as GenResult(String, Error) — inner arg mismatch
+    let body_type = InferredType::Known {
+        class_name: "GenResult".into(),
+        type_args: vec![InferredType::known("String"), InferredType::known("Error")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should warn when inner type arg (Integer vs String) mismatches: {type_warnings:?}"
+    );
+    assert!(
+        type_warnings[0]
+            .message
+            .contains("GenResult(Integer, Error)"),
+        "Warning should mention the declared type with args: {}",
+        type_warnings[0].message
+    );
+    assert!(
+        type_warnings[0]
+            .message
+            .contains("GenResult(String, Error)"),
+        "Warning should mention the actual type with args: {}",
+        type_warnings[0].message
+    );
+}
+
+/// BT-2022: When both declared and body have matching inner type args,
+/// no warning should be produced.
+#[test]
+fn bt2022_generic_return_type_matching_inner_args_no_warning() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as GenResult(Integer, Error) — exact match
+    let body_type = InferredType::Known {
+        class_name: "GenResult".into(),
+        type_args: vec![InferredType::known("Integer"), InferredType::known("Error")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Matching inner type args should produce no warning: {type_warnings:?}"
+    );
+}
+
+/// BT-2022: Body with bare `GenResult` (no `type_args`) is still compatible
+/// with declared `GenResult(Integer, Error)` — only warn when both sides
+/// have `type_args` and they mismatch.
+#[test]
+fn bt2022_generic_return_type_bare_body_no_warning() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body infers as bare GenResult (no type_args) — no enough info to warn
+    let body_type = InferredType::known("GenResult");
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Bare GenResult body should be compatible with GenResult(Integer, Error): {type_warnings:?}"
+    );
+}
+
+/// BT-2022: Dictionary(Symbol, Integer) declared, body returns
+/// Dictionary(Symbol, String) — should warn about the value type mismatch.
+#[test]
+fn bt2022_dictionary_inner_arg_mismatch_warns() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("data".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("Dictionary"),
+            parameters: vec![
+                TypeAnnotation::Simple(ident("Symbol")),
+                TypeAnnotation::Simple(ident("Integer")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body returns Dictionary(Symbol, String) — value type mismatch
+    let body_type = InferredType::Known {
+        class_name: "Dictionary".into(),
+        type_args: vec![InferredType::known("Symbol"), InferredType::known("String")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should warn about Dictionary value type mismatch (Integer vs String): {type_warnings:?}"
+    );
+}
+
+/// BT-2022: Array(Integer) declared, body returns Array(String) — should warn.
+#[test]
+fn bt2022_list_inner_arg_mismatch_warns() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("items".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("Array"),
+            parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body returns Array(String) — type arg mismatch
+    let body_type = InferredType::Known {
+        class_name: "Array".into(),
+        type_args: vec![InferredType::known("String")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        type_warnings.len(),
+        1,
+        "Should warn about Array element type mismatch (Integer vs String): {type_warnings:?}"
+    );
+}
+
+/// BT-2022 Bug B: `method_return_types` cache preserves `type_args`.
+/// An unannotated method whose body infers as a generic type should have
+/// the full `InferredType` (with `type_args`) stored in the cache.
+#[test]
+fn bt2022_method_return_type_cache_preserves_type_args() {
+    // Parse source with an unannotated method that returns an array literal
+    let src = "Object subclass: Holder\n  items => #(\"a\" \"b\" \"c\")";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+    let result = infer_method_return_types(&module, &hierarchy);
+
+    // The cache should contain the inferred return type for `items`
+    let key = ("Holder".into(), "items".into(), false);
+    let cached = result.get(&key);
+    assert!(
+        cached.is_some(),
+        "Unannotated method `items` should have an entry in method_return_types"
+    );
+    let cached_ty = cached.unwrap();
+    // BT-2022: The cache must store an InferredType (not the previous EcoString)
+    // so that any type_args produced by the inference path can flow to callers.
+    // Verifies the structural fix; element-type inference for array literals is
+    // a separate concern outside this issue's scope.
+    let InferredType::Known { class_name, .. } = cached_ty else {
+        panic!("Cached type should be Known, got: {cached_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "List", "expected List base class");
+}
+
+/// BT-2022: When declared inner args include a generic type parameter (T, E),
+/// the comparison should skip that arg rather than warn (type params are
+/// symbolic placeholders, not concrete types).
+#[test]
+fn bt2022_generic_type_param_in_declared_args_not_warned() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_generic_result_class(&mut hierarchy);
+
+    let method = MethodDefinition {
+        selector: MessageSelector::Unary("compute".into()),
+        parameters: vec![],
+        body: vec![bare(int_lit(42))],
+        return_type: Some(TypeAnnotation::Generic {
+            base: ident("GenResult"),
+            parameters: vec![
+                // T is a generic type param placeholder — should be skipped
+                TypeAnnotation::Simple(ident("T")),
+                TypeAnnotation::Simple(ident("Error")),
+            ],
+            span: span(),
+        }),
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        is_internal: false,
+        span: span(),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+
+    // Body returns GenResult(String, Error) — T should be compatible with String
+    let body_type = InferredType::Known {
+        class_name: "GenResult".into(),
+        type_args: vec![InferredType::known("String"), InferredType::known("Error")],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Type param T in declared type should not trigger a mismatch warning: {type_warnings:?}"
     );
 }
