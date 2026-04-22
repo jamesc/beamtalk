@@ -29,9 +29,25 @@ TestCase subclass: DynamicSupervisorDefaultsTest
 
   // === Type parameter C narrows startChild return type ===
   testStartChildReturnsTypedChild =>
-    pool := TestDynamicSupervisorCustom supervise
-    child := pool startChild
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    child := pool startChild unwrap
     // If C=Counter resolves, child is typed as Counter and getValue compiles.
     // Without the type parameter this would fail: "Object does not understand 'getValue'"
     self assert: child getValue equals: 0
+    [pool stop] on: Error do: [:e | nil]
+
+  // === BT-1999: terminateChild: is idempotent on already-gone children ===
+  //
+  // ADR 0080 Phase 2 contracts `terminateChild:` to return `Result ok: nil`
+  // both for a live child and for one that has already been terminated —
+  // callers should not have to distinguish "I succeeded" from "already done".
+  testTerminateChildIsIdempotent =>
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    child := pool startChild unwrap
+    first := pool terminateChild: child
+    self assert: first isOk equals: true
+    self assert: first unwrap equals: nil
+    second := pool terminateChild: child
+    self assert: second isOk equals: true
+    self assert: second unwrap equals: nil
     [pool stop] on: Error do: [:e | nil]

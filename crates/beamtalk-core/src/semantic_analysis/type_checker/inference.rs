@@ -278,17 +278,20 @@ impl TypeChecker {
 
     /// Resolves type-position keywords to their class names.
     ///
-    /// - `nil` → `UndefinedObject`
+    /// - `nil` / `Nil` → `UndefinedObject`
     /// - `false` → `False`
     /// - `true` → `True`
     /// - Everything else passes through unchanged.
     ///
-    /// Used by [`resolve_type_name_string`] which parses string-form type
-    /// names (from `ClassHierarchy::state_field_type`). The annotation-based
-    /// resolver lives in [`super::type_resolver`].
+    /// Both lowercase (`nil`) and capitalised (`Nil`) spellings map to
+    /// `UndefinedObject` so that `Integer | Nil` type annotations narrow
+    /// consistently under `isNil` guards (BT-2016).
     fn resolve_type_keyword(name: &EcoString) -> EcoString {
         match name.as_str() {
-            "nil" => "UndefinedObject".into(),
+            // BT-2016: Both `nil` (lowercase keyword) and `Nil` (class name) map
+            // to the canonical internal name `UndefinedObject` so narrowing,
+            // non_nil_type, and all downstream comparisons work consistently.
+            "nil" | "Nil" => "UndefinedObject".into(),
             "false" => "False".into(),
             "true" => "True".into(),
             _ => name.clone(),
@@ -2135,16 +2138,20 @@ impl TypeChecker {
 
     /// Remove `UndefinedObject` (nil) from a union type or convert a known type
     /// to itself if it is non-nil.
+    ///
+    /// BT-2016: Also matches `"Nil"` as a defensive measure — `resolve_type_keyword`
+    /// should canonicalize to `"UndefinedObject"`, but downstream callers may
+    /// encounter `"Nil"` from BEAM metadata or return-type strings.
     pub(super) fn non_nil_type(ty: &InferredType) -> InferredType {
         match ty {
             InferredType::Union {
                 members,
                 provenance,
             } => {
-                // Fast path: if no member is UndefinedObject, return unchanged.
+                // Fast path: if no member is UndefinedObject/Nil, return unchanged.
                 let has_nil = members.iter().any(|m| {
                     m.as_known()
-                        .is_some_and(|n| n.as_str() == "UndefinedObject")
+                        .is_some_and(|n| n.as_str() == "UndefinedObject" || n.as_str() == "Nil")
                 });
                 if !has_nil {
                     return ty.clone();
@@ -2152,8 +2159,9 @@ impl TypeChecker {
                 let non_nil: Vec<InferredType> = members
                     .iter()
                     .filter(|m| {
-                        m.as_known()
-                            .is_none_or(|name| name.as_str() != "UndefinedObject")
+                        m.as_known().is_none_or(|name| {
+                            name.as_str() != "UndefinedObject" && name.as_str() != "Nil"
+                        })
                     })
                     .cloned()
                     .collect();
