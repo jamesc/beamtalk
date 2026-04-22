@@ -13993,8 +13993,8 @@ fn bt_2020_if_true_if_false_mixed_arms_yield_concrete_type() {
                 .map(EcoString::as_str)
                 .collect();
             assert!(
-                names.contains("String") || names.contains("Integer"),
-                "expected union to contain String or Integer, got {names:?}"
+                names.contains("String") && names.contains("Integer"),
+                "expected union to contain both String and Integer, got {names:?}"
             );
         }
         other => panic!("unexpected type for mixed arms: {other:?}"),
@@ -14156,7 +14156,7 @@ fn bt_2020_narrowed_if_true_is_kind_of_preserves_inner_sends() {
     let dnu_size: Vec<_> = checker
         .diagnostics()
         .iter()
-        .filter(|d| d.message.contains("does not understand") && d.message.contains("'size'"))
+        .filter(|d| d.message.contains("does not understand") && d.message.contains("size"))
         .collect();
     assert!(
         dnu_size.is_empty(),
