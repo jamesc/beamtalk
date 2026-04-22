@@ -302,10 +302,14 @@ impl TypeChecker {
 
     /// Resolves type-position keywords to their class names.
     ///
-    /// - `nil` → `UndefinedObject`
+    /// - `nil` / `Nil` → `UndefinedObject`
     /// - `false` → `False`
     /// - `true` → `True`
     /// - Everything else passes through unchanged.
+    ///
+    /// Both lowercase (`nil`) and capitalised (`Nil`) spellings map to
+    /// `UndefinedObject` so that `Integer | Nil` type annotations narrow
+    /// consistently under `isNil` guards (BT-2016).
     fn resolve_type_keyword(name: &EcoString) -> EcoString {
         match name.as_str() {
             // BT-2016: Both `nil` (lowercase keyword) and `Nil` (class name) map

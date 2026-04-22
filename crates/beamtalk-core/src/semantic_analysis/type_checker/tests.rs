@@ -12321,7 +12321,7 @@ fn annotated_assignment_compatible_type_no_warning() {
 /// keyword method that expects `Integer` must not produce a type mismatch.
 #[test]
 fn narrowing_isnil_propagates_to_keyword_arg_e2e() {
-    let source = r#"
+    let source = r"
 Object subclass: Receiver
   class process: ms :: Integer => ms
 
@@ -12329,7 +12329,7 @@ Object subclass: Caller
   run: ms :: Integer | Nil =>
     ms isNil ifTrue: [^nil]
     Receiver process: ms
-"#;
+";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -12339,10 +12339,13 @@ Object subclass: Caller
         &crate::CompilerOptions::default(),
         vec![],
     );
+    // Filter by DiagnosticCategory::Type so argument-type warnings
+    // (formatted as "Argument ... expects ... got ...") are caught too,
+    // not only assignment-style "Type mismatch" messages.
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
-        .filter(|d| d.message.contains("Type mismatch"))
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
         .collect();
     assert!(
         type_warnings.is_empty(),
@@ -12354,13 +12357,13 @@ Object subclass: Caller
 /// to a typed local `local :: Integer := ms` must not produce a type mismatch.
 #[test]
 fn narrowing_isnil_propagates_to_typed_assignment_rhs_e2e() {
-    let source = r#"
+    let source = r"
 Object subclass: Caller
   run: ms :: Integer | Nil =>
     ms isNil ifTrue: [^nil]
     local :: Integer := ms
     local
-"#;
+";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -12373,7 +12376,7 @@ Object subclass: Caller
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
-        .filter(|d| d.message.contains("Type mismatch"))
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
         .collect();
     assert!(
         type_warnings.is_empty(),
@@ -12385,8 +12388,11 @@ Object subclass: Caller
 /// an instance-side keyword method that expects `Integer` must not warn.
 #[test]
 fn narrowing_isnil_propagates_to_instance_send_arg_e2e() {
-    let source = r#"
-Object subclass: Receiver
+    // `Value subclass:` so the receiver can be `new`d — Object subclasses are
+    // not instantiable. The test focuses on the narrowing propagation into
+    // `r process: ms`, not on instantiation semantics.
+    let source = r"
+Value subclass: Receiver
   process: ms :: Integer => ms
 
 Object subclass: Caller
@@ -12394,7 +12400,7 @@ Object subclass: Caller
     r := Receiver new
     ms isNil ifTrue: [^nil]
     r process: ms
-"#;
+";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -12407,7 +12413,7 @@ Object subclass: Caller
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
-        .filter(|d| d.message.contains("Type mismatch"))
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
         .collect();
     assert!(
         type_warnings.is_empty(),
