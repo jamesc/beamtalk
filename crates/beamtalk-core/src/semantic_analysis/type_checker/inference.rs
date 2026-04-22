@@ -1079,7 +1079,13 @@ impl TypeChecker {
                     if base.len() < ret_ty.len() {
                         return InferredType::known(EcoString::from(base));
                     }
-                    return InferredType::known(ret_ty.clone());
+                    // BT-2017: Use resolve_type_name_string to properly parse
+                    // union return types like "Integer | Nil" into
+                    // InferredType::Union instead of Known("Integer | Nil").
+                    // Without this, locals bound from method calls that return
+                    // union types get a flat Known type, which prevents
+                    // narrowing and causes false operand-type warnings.
+                    return Self::resolve_type_name_string(ret_ty);
                 }
             }
 
@@ -1482,7 +1488,10 @@ impl TypeChecker {
                                 if base.len() < ret_ty.len() {
                                     return_types.push(InferredType::known(EcoString::from(base)));
                                 } else {
-                                    return_types.push(InferredType::known(ret_ty.clone()));
+                                    // BT-2017: Use resolve_type_name_string to
+                                    // properly parse union return types (e.g.
+                                    // "Integer | Nil") into InferredType::Union.
+                                    return_types.push(Self::resolve_type_name_string(ret_ty));
                                 }
                             }
                         }
@@ -1500,11 +1509,24 @@ impl TypeChecker {
             }
         }
 
-        // BT-1857: If nil was in the union and at least one non-nil member
-        // responds, include Nil in the return-type union (the value may still
-        // be nil at runtime if the nil-check branch returns nil).
+        // BT-1857 / BT-2017: If nil was in the union and at least one
+        // non-nil member responds, include nil's contribution to the return
+        // type union.  If UndefinedObject responds to the selector (e.g.,
+        // notNil, isNil, class), use its actual return type — this avoids
+        // false `T | Nil` widening for methods that always return a definite
+        // type.  If UndefinedObject does NOT respond, skip it: the nil case
+        // is expected to be guarded by `isNil`/`notNil` checks, and adding
+        // UndefinedObject here would create noisy false-positive type
+        // warnings on every `T | Nil` union send.
         if has_nil && responding_count > 0 {
-            return_types.push(InferredType::known(EcoString::from("UndefinedObject")));
+            if let Some(method) = hierarchy.find_method("UndefinedObject", selector) {
+                if let Some(ref ret_ty) = method.return_type {
+                    return_types.push(Self::resolve_type_name_string(ret_ty));
+                } else {
+                    return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
+                }
+            }
+            // If UndefinedObject doesn't respond: no return-type widening.
         }
 
         // BT-1857: Suppress DNU warnings when Dynamic is in the union —

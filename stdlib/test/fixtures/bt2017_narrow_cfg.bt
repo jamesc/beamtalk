@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2017: Fixture class with a method returning Integer | Nil.
+// Used to test that locals bound from method calls with union return
+// types resolve properly for narrowing.
+
+Value subclass: Bt2017NarrowCfg
+  field: v :: Integer | Nil = nil
