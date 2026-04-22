@@ -612,6 +612,7 @@ impl TypeChecker {
 
     /// Check argument types against declared parameter types for a message send.
     #[allow(clippy::too_many_arguments)] // BT-1588: arg_exprs + env needed for origin tracing
+    #[allow(clippy::too_many_lines)] // BT-2038 adds class-literal subtyping arm
     pub(super) fn check_argument_types(
         &mut self,
         class_name: &EcoString,
@@ -637,12 +638,30 @@ impl TypeChecker {
             let Some(expected_ty) = expected else {
                 continue;
             };
+            let is_class_ref_arg = arg_exprs
+                .and_then(|exprs| exprs.get(i))
+                .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
                     ..
                 } => {
-                    if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                    // BT-2038: A class literal (e.g. `TestCase`) is a class value
+                    // whose runtime type flows through the metaclass tower
+                    // (Metaclass → Class → Behaviour → Object → ProtoObject).
+                    // Check that chain when the instance-side chain fails so
+                    // parameters declared `:: Behaviour` / `:: Class` accept
+                    // any class literal.
+                    let class_literal_compat = is_class_ref_arg
+                        && hierarchy.has_class(actual_ty)
+                        && Self::is_type_compatible(
+                            &EcoString::from("Metaclass"),
+                            expected_ty,
+                            hierarchy,
+                        );
+                    if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy)
+                        && !class_literal_compat
+                    {
                         let param_pos = i + 1;
                         // BT-1588: Use hint severity for generic type params (likely false positive)
                         let is_generic = super::is_generic_type_param(actual_ty);

@@ -9026,6 +9026,185 @@ fn union_arg_dynamic_still_skips() {
     );
 }
 
+// ── BT-2038: Class literal compatibility with Behaviour/Class/Object parameters ──
+//
+// A class reference like `TestCase` is a first-class class value whose runtime
+// type is `TestCase class` (a `Metaclass`, which inherits from `Class` →
+// `Behaviour` → `Object` → `ProtoObject`). When such a literal is passed to a
+// parameter declared as `Behaviour`, `Class`, `Object`, or `ProtoObject`, the
+// argument conformance check must accept it even though the class's *instance*
+// hierarchy (e.g., `TestCase` → `Value` → `Object`) does not pass through
+// `Behaviour`.
+
+fn test_hierarchy_with_class_literal_arg(
+    param_type: &str,
+) -> crate::semantic_analysis::class_hierarchy::ClassHierarchy {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![
+        ClassInfo {
+            name: "TestCase".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: true,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+        ClassInfo {
+            name: "ClassChecker".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: "accept:".into(),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: "ClassChecker".into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some("Boolean".into()),
+                param_types: vec![Some(param_type.into())],
+                doc: None,
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    ]);
+    hierarchy
+}
+
+#[test]
+fn class_literal_arg_accepted_for_behaviour_param() {
+    // BT-2038: Passing a class literal (TestCase) to a param expecting Behaviour
+    // should not warn — class objects flow through Metaclass → Class → Behaviour.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as Behaviour, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_accepted_for_class_param() {
+    // A class literal should satisfy a Class-typed parameter.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Class");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as Class, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_rejected_for_unrelated_param() {
+    // A class literal whose metaclass chain does NOT include the expected
+    // type (e.g., expected Integer) should still warn.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Integer");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Class literal TestCase should NOT type-check as Integer"
+    );
+    assert!(
+        checker.diagnostics()[0].message.contains("expects Integer"),
+        "got: {}",
+        checker.diagnostics()[0].message
+    );
+}
+
+#[test]
+fn instance_identifier_still_rejected_for_behaviour_param() {
+    // Regression guard: the class-literal escape must NOT apply when the
+    // argument is an identifier of a user class type — only class literals
+    // carry the "is-a Behaviour" semantics.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
+    let mut checker = TypeChecker::new();
+    let ident_arg = var("aTestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&ident_arg)),
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "A TestCase instance (not class literal) should not type-check as Behaviour"
+    );
+    assert!(
+        checker.diagnostics()[0]
+            .message
+            .contains("expects Behaviour"),
+        "got: {}",
+        checker.diagnostics()[0].message
+    );
+}
+
 // --- Field assignment with unions ---
 
 #[test]

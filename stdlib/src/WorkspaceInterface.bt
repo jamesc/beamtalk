@@ -65,7 +65,6 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace testClasses
   /// ```
   testClasses -> List(Behaviour) =>
-    @expect type
     self classes select: [:c | c inheritsFrom: TestCase]
 
   /// Return an immutable Dictionary snapshot of the project namespace.
