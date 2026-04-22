@@ -22,18 +22,46 @@
 //! - `TypeChecker::infer_method_return_types`
 //! - `MethodDefinition.return_type`
 
-use crate::ast::{Module, TypeAnnotation};
+use crate::ast::{Identifier, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{InferredType, infer_method_return_types};
+use crate::source_analysis::Span;
 use ecow::EcoString;
 
-/// Extract a class name suitable for `TypeAnnotation::simple` from an
-/// `InferredType`. Returns `Some(name)` for `Known` and `Never`, `None`
-/// for `Dynamic` and `Union` (which should not be written back).
-fn writeback_name(ty: &InferredType) -> Option<EcoString> {
+/// Build a `TypeAnnotation` from an `InferredType` for AST writeback.
+///
+/// BT-2022 + CodeRabbit on PR #2059: returns a `TypeAnnotation::Generic` with
+/// recursive parameters when the inferred type carries `type_args`, so an
+/// inferred `List(String)` writes back as `-> List(String)` rather than the
+/// erased `-> List`. Cross-module consumers (codegen, language service) read
+/// `MethodDefinition.return_type`, so dropping `type_args` here would
+/// reintroduce the type-arg loss the cache fix eliminated.
+///
+/// Returns `None` for `Dynamic` and `Union` — those don't have a single
+/// canonical annotation and shouldn't be written back.
+fn writeback_annotation(ty: &InferredType, span: Span) -> Option<TypeAnnotation> {
     match ty {
-        InferredType::Known { class_name, .. } => Some(class_name.clone()),
-        InferredType::Never => Some(EcoString::from("Never")),
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } if type_args.is_empty() => Some(TypeAnnotation::simple(class_name.clone(), span)),
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => Some(TypeAnnotation::Generic {
+            base: Identifier {
+                name: class_name.clone(),
+                span,
+            },
+            parameters: type_args
+                .iter()
+                .map(|arg| writeback_annotation(arg, span))
+                .collect::<Option<Vec<_>>>()?,
+            span,
+        }),
+        InferredType::Never => Some(TypeAnnotation::simple(EcoString::from("Never"), span)),
         _ => None,
     }
 }
@@ -52,9 +80,6 @@ fn writeback_name(ty: &InferredType) -> Option<EcoString> {
 pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarchy) {
     let inferred = infer_method_return_types(module, hierarchy);
 
-    // BT-2022: The inferred map now stores InferredType. For writeback we
-    // extract a simple class name via `writeback_name()`: Known returns its
-    // class name, Never maps to "Never", everything else returns None.
     for class in &mut module.classes {
         for method in &mut class.methods {
             if method.return_type.is_some() {
@@ -62,8 +87,8 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             }
             let key = (class.name.name.clone(), method.selector.name(), false);
             if let Some(inferred_ty) = inferred.get(&key) {
-                if let Some(name) = writeback_name(inferred_ty) {
-                    method.return_type = Some(TypeAnnotation::simple(name, method.span));
+                if let Some(annotation) = writeback_annotation(inferred_ty, method.span) {
+                    method.return_type = Some(annotation);
                 }
             }
         }
@@ -74,8 +99,8 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             }
             let key = (class.name.name.clone(), method.selector.name(), true);
             if let Some(inferred_ty) = inferred.get(&key) {
-                if let Some(name) = writeback_name(inferred_ty) {
-                    method.return_type = Some(TypeAnnotation::simple(name, method.span));
+                if let Some(annotation) = writeback_annotation(inferred_ty, method.span) {
+                    method.return_type = Some(annotation);
                 }
             }
         }
@@ -91,9 +116,8 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             standalone.is_class_method,
         );
         if let Some(inferred_ty) = inferred.get(&key) {
-            if let Some(name) = writeback_name(inferred_ty) {
-                standalone.method.return_type =
-                    Some(TypeAnnotation::simple(name, standalone.method.span));
+            if let Some(annotation) = writeback_annotation(inferred_ty, standalone.method.span) {
+                standalone.method.return_type = Some(annotation);
             }
         }
     }
