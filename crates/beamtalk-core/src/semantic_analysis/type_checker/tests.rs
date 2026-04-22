@@ -9026,6 +9026,267 @@ fn union_arg_dynamic_still_skips() {
     );
 }
 
+// ── BT-2038: Class literal compatibility with Behaviour/Class/Object parameters ──
+//
+// A class reference like `TestCase` is a first-class class value whose runtime
+// type is `TestCase class` (a `Metaclass`, which inherits from `Class` →
+// `Behaviour` → `Object` → `ProtoObject`). When such a literal is passed to a
+// parameter declared as `Behaviour`, `Class`, `Object`, or `ProtoObject`, the
+// argument conformance check must accept it even though the class's *instance*
+// hierarchy (e.g., `TestCase` → `Value` → `Object`) does not pass through
+// `Behaviour`.
+
+fn test_hierarchy_with_class_literal_arg(
+    param_type: &str,
+) -> crate::semantic_analysis::class_hierarchy::ClassHierarchy {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![
+        ClassInfo {
+            name: "TestCase".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: true,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+        ClassInfo {
+            name: "ClassChecker".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: "accept:".into(),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: "ClassChecker".into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some("Boolean".into()),
+                param_types: vec![Some(param_type.into())],
+                doc: None,
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    ]);
+    hierarchy
+}
+
+#[test]
+fn class_literal_arg_accepted_for_behaviour_param() {
+    // BT-2038: Passing a class literal (TestCase) to a param expecting Behaviour
+    // should not warn — class objects flow through Metaclass → Class → Behaviour.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as Behaviour, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_accepted_for_class_param() {
+    // A class literal should satisfy a Class-typed parameter.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Class");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as Class, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_accepted_for_object_param() {
+    // Object sits above Behaviour in the metaclass tower, so a class
+    // literal must satisfy an Object-typed parameter.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Object");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as Object, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_accepted_for_protoobject_param() {
+    // ProtoObject is the root of the metaclass tower — every class literal
+    // must satisfy it.
+    let hierarchy = test_hierarchy_with_class_literal_arg("ProtoObject");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Class literal TestCase should type-check as ProtoObject, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn class_literal_arg_rejected_for_unrelated_param() {
+    // A class literal whose metaclass chain does NOT include the expected
+    // type (e.g., expected Integer) should still warn.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Integer");
+    let mut checker = TypeChecker::new();
+    let class_ref_arg = class_ref("TestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&class_ref_arg)),
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Class literal TestCase should NOT type-check as Integer"
+    );
+    assert!(
+        checker.diagnostics()[0].message.contains("expects Integer"),
+        "got: {}",
+        checker.diagnostics()[0].message
+    );
+}
+
+#[test]
+fn instance_identifier_still_rejected_for_class_param() {
+    // Regression guard (CodeRabbit on PR #2071): the BT-1877 `expected == "Class"`
+    // shortcut in `is_type_compatible` previously accepted any known class name
+    // unconditionally. With BT-2038's metaclass-tower check handling class
+    // literals, that shortcut must stay scoped to class-literal arguments —
+    // a plain identifier typed as `TestCase` is an instance, not a class,
+    // and should not satisfy a `:: Class` parameter.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Class");
+    let mut checker = TypeChecker::new();
+    let ident_arg = var("aTestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&ident_arg)),
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "A TestCase instance (not class literal) should not type-check as Class, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        checker.diagnostics()[0].message.contains("expects Class"),
+        "got: {}",
+        checker.diagnostics()[0].message
+    );
+}
+
+#[test]
+fn instance_identifier_still_rejected_for_behaviour_param() {
+    // Regression guard: the class-literal escape must NOT apply when the
+    // argument is an identifier of a user class type — only class literals
+    // carry the "is-a Behaviour" semantics.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
+    let mut checker = TypeChecker::new();
+    let ident_arg = var("aTestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&ident_arg)),
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "A TestCase instance (not class literal) should not type-check as Behaviour"
+    );
+    assert!(
+        checker.diagnostics()[0]
+            .message
+            .contains("expects Behaviour"),
+        "got: {}",
+        checker.diagnostics()[0].message
+    );
+}
+
 // --- Field assignment with unions ---
 
 #[test]
@@ -14385,6 +14646,90 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
         "expected exactly one Dynamic-in-typed-class warning (the inner FFI \
          call). Before BT-2039 the outer ifTrue:ifFalse: also collapsed to \
          Dynamic and added a second warning. Got: {:?}",
+        dynamic_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+// =====================================================================
+// BT-2037 — `self error:` should infer as Never inside typed classes,
+// both class-side and inside block arguments.
+// =====================================================================
+
+/// BT-2037: a class-side method that calls `self error: "..."` should
+/// not warn about Dynamic-in-typed-class. `error:` is declared
+/// `-> Never` on `Object`; the type checker must propagate that through
+/// the Class→Behaviour→Object→ProtoObject chain when no class-side
+/// override exists.
+#[test]
+fn bt2037_class_side_self_error_infers_as_never() {
+    let source = "
+typed Object subclass: WidgetFactory
+  class new: arg :: Object -> Nil =>
+    self error: \"use named constructors\"
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "class-side `self error:` should resolve to Never, not Dynamic; got: {:?}",
+        dynamic_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// BT-2037: an instance-side method that wraps `self error: "..."` in a
+/// block argument (e.g. as a fallback for `valueOrDo:`) should not warn
+/// about Dynamic-in-typed-class. `self` inside the block is the same
+/// instance type as in the enclosing method, and `error:` is `-> Never`.
+#[test]
+fn bt2037_block_self_error_infers_as_never() {
+    // Mirrors the exdura reproduction: a typed instance method whose body
+    // sends `valueOrDo:` to `registry` (an Object-typed field), with a
+    // fallback block containing `self error:`. The block body's `self
+    // error:` must still resolve to Never via the enclosing instance-method
+    // `self`.
+    let source = "
+typed Object subclass: ExduraWorker
+  state: registry :: Object = nil
+  doWork -> Nil =>
+    registry valueOrDo: [:e | self error: \"failed\"]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "block-embedded `self error:` should resolve to Never, not Dynamic; got: {:?}",
         dynamic_warnings
             .iter()
             .map(|d| &d.message)

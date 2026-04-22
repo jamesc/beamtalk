@@ -209,6 +209,30 @@ impl TypeChecker {
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
                     return ret_ty.clone();
                 }
+                // BT-2037: When no class-side method exists, the runtime
+                // dispatches the message through the class object's instance
+                // chain (Class → Behaviour → Object → ProtoObject; ADR 0032
+                // Phase 0 fallthrough). Mirror that here for divergent
+                // selectors so a class-side `self error: "..."` carries the
+                // `-> Never` annotation from `Object#error:` instead of
+                // resolving to Dynamic.
+                //
+                // Limited to `-> Never` returns: other return types on this
+                // chain (e.g. `class -> Metaclass`) involve class-aware
+                // semantics that aren't modelled in the static hierarchy
+                // (e.g. `Metaclass` not knowing arbitrary class-side
+                // selectors), so propagating them would surface false DNUs.
+                if !has_class_method {
+                    if let Some(method) = hierarchy.find_method("Class", selector) {
+                        if method
+                            .return_type
+                            .as_ref()
+                            .is_some_and(|ty| ty.as_str() == "Never")
+                        {
+                            return InferredType::Never;
+                        }
+                    }
+                }
                 InferredType::Dynamic(DynamicReason::UnannotatedReturn)
             }
         }
@@ -612,6 +636,7 @@ impl TypeChecker {
 
     /// Check argument types against declared parameter types for a message send.
     #[allow(clippy::too_many_arguments)] // BT-1588: arg_exprs + env needed for origin tracing
+    #[allow(clippy::too_many_lines)] // BT-2038 adds class-literal subtyping arm
     pub(super) fn check_argument_types(
         &mut self,
         class_name: &EcoString,
@@ -633,16 +658,48 @@ impl TypeChecker {
             return;
         }
 
+        // BT-2038: A class literal (e.g. `TestCase`) is a class value whose
+        // runtime type flows through the metaclass tower
+        // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
+        // instance-side chain fails, re-check via `Metaclass` so parameters
+        // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
+        // accept any class literal. Hoisted out of the loop since it's
+        // constant across all arguments.
+        let metaclass_name: EcoString = "Metaclass".into();
+
         for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
             let Some(expected_ty) = expected else {
                 continue;
             };
+            let is_class_ref_arg = arg_exprs
+                .and_then(|exprs| exprs.get(i))
+                .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
                     ..
                 } => {
-                    if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                    // Short-circuit: only consult the metaclass chain when the
+                    // instance-side check fails. Keeps the hot path at one
+                    // `is_type_compatible` call per argument.
+                    //
+                    // CodeRabbit on PR #2071: `is_type_compatible` has a
+                    // pre-existing BT-1877 shortcut where `expected == "Class"`
+                    // accepts any known class name unconditionally. That was a
+                    // workaround for exactly the BT-2038 problem; with the
+                    // metaclass-tower check now handling class literals
+                    // properly, the shortcut must be scoped to class-literal
+                    // arguments here so a plain `TestCase` instance does not
+                    // satisfy a `:: Class` parameter.
+                    let class_shortcut_applies =
+                        expected_ty.as_str() == "Class" && !is_class_ref_arg;
+                    let instance_compat = !class_shortcut_applies
+                        && Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
+                    let class_literal_compat = !instance_compat
+                        && is_class_ref_arg
+                        && hierarchy.has_class(actual_ty)
+                        && Self::is_type_compatible(&metaclass_name, expected_ty, hierarchy);
+                    if !instance_compat && !class_literal_compat {
                         let param_pos = i + 1;
                         // BT-1588: Use hint severity for generic type params (likely false positive)
                         let is_generic = super::is_generic_type_param(actual_ty);
