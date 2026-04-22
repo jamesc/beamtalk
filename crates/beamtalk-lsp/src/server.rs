@@ -473,13 +473,34 @@ impl Backend {
     /// the project index was fully populated has its diagnostics recomputed
     /// against the complete hierarchy. Stale `unresolved_class` warnings
     /// against now-indexed classes self-heal without user intervention.
+    ///
+    /// `versions` is keyed by the internal path returned by
+    /// `resolve_path_for_uri`, so paths may represent `file://`, `untitled:`
+    /// (via the `__untitled__/` prefix), or `beamtalk-stdlib://` virtual docs
+    /// (real stdlib paths stored in `stdlib_paths`). The URI reconstructed
+    /// here must match the original scheme so `publish_diagnostics` routes
+    /// correctly — in particular, stdlib docs must not be republished under
+    /// `file://`, which would bypass the stdlib early-return and leak
+    /// diagnostics for sources the user never opened.
     async fn republish_open_diagnostics(&self) {
         let paths: Vec<Utf8PathBuf> = {
             let versions = self.versions.lock().expect("versions lock poisoned");
             versions.keys().cloned().collect()
         };
         for path in paths {
-            if let Ok(uri) = Url::from_file_path(path.as_std_path()) {
+            let is_stdlib = {
+                let stdlib_paths = self
+                    .stdlib_paths
+                    .lock()
+                    .expect("stdlib_paths lock poisoned");
+                stdlib_paths.contains(&path)
+            };
+            let uri = if is_stdlib {
+                path_to_stdlib_uri(&path)
+            } else {
+                path_to_uri(&path)
+            };
+            if let Some(uri) = uri {
                 self.publish_diagnostics(&uri).await;
             }
         }

@@ -294,6 +294,10 @@ fn collect_package_class_files(
     target_files: &[Utf8PathBuf],
 ) -> Vec<Utf8PathBuf> {
     use std::collections::HashSet;
+    // Dedup by canonical form: walked paths are absolute (`package_root` is
+    // canonicalized upstream) but `target_files` often arrive as relative
+    // user-typed paths (e.g. `test/Foo.bt`). Comparing raw `Utf8PathBuf`
+    // would let the same file appear twice and get parsed twice.
     let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
     let mut out: Vec<Utf8PathBuf> = Vec::new();
 
@@ -303,7 +307,7 @@ fn collect_package_class_files(
             match FileWalker::source_files().walk(&dir) {
                 Ok(files) => {
                     for f in files {
-                        if seen.insert(f.clone()) {
+                        if seen.insert(canonicalize_or_clone(&f)) {
                             out.push(f);
                         }
                     }
@@ -316,12 +320,22 @@ fn collect_package_class_files(
     // Ensure explicitly-targeted files are always included, even if they live
     // outside `src/`/`test/` (e.g. a one-off file at the package root).
     for f in target_files {
-        if seen.insert(f.clone()) {
+        if seen.insert(canonicalize_or_clone(f)) {
             out.push(f.clone());
         }
     }
 
     out
+}
+
+/// Returns the canonical filesystem form of `path`, falling back to a clone
+/// when the path cannot be canonicalized (e.g. it does not yet exist). Used
+/// as a normalized key for path-based deduplication.
+fn canonicalize_or_clone(path: &Utf8Path) -> Utf8PathBuf {
+    std::fs::canonicalize(path.as_std_path())
+        .ok()
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 /// Parse each lint target and collect class-info metadata from the package's
@@ -350,7 +364,14 @@ fn parse_and_extract_class_infos(
         None => source_files.to_vec(),
     };
 
-    let source_file_set: std::collections::HashSet<&Utf8PathBuf> = source_files.iter().collect();
+    // Match by canonical form: `source_files` may be user-typed relative
+    // paths while `extraction_files` contains absolute paths from the package
+    // walk. Comparing raw `Utf8PathBuf` would drop relative targets from
+    // `parsed_files` after dedup canonicalized them into walked form.
+    let source_file_set: std::collections::HashSet<Utf8PathBuf> = source_files
+        .iter()
+        .map(|p| canonicalize_or_clone(p))
+        .collect();
     let mut all_class_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
 
@@ -365,7 +386,7 @@ fn parse_and_extract_class_infos(
         all_class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
-        if source_file_set.contains(file) {
+        if source_file_set.contains(&canonicalize_or_clone(file)) {
             parsed_files.push((file.clone(), source, module, parse_diags));
         }
     }
@@ -606,8 +627,14 @@ mod tests {
         let src = root.join("src");
         std::fs::create_dir_all(&src).unwrap();
 
-        let root_utf8 = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
-        let src_utf8 = camino::Utf8PathBuf::from_path_buf(src.clone()).unwrap();
+        // Use the canonical form of root for the expected value: on macOS
+        // `/tmp` resolves to `/private/tmp`; on Windows short/long path names
+        // differ. `find_package_root` canonicalises internally, so the expected
+        // value must do the same to match.
+        let root_utf8 =
+            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
+        let src_utf8 =
+            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(&src).unwrap()).unwrap();
 
         // From subdir, should find parent
         assert_eq!(find_package_root(&src_utf8), Some(root_utf8.clone()));
@@ -630,7 +657,9 @@ mod tests {
         std::fs::write(src.join("foo.bt"), "Object subclass: Foo\n").unwrap();
 
         let file_utf8 = camino::Utf8PathBuf::from_path_buf(src.join("foo.bt")).unwrap();
-        let root_utf8 = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        // Canonicalise root — see find_package_root_from_subdir for rationale.
+        let root_utf8 =
+            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
 
         assert_eq!(find_package_root(&file_utf8), Some(root_utf8));
     }
@@ -781,6 +810,43 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "test/ file should resolve src/ classes, got unresolved: {unresolved:?}"
+        );
+    }
+
+    /// BT-2027: `collect_package_class_files` must dedup across the absolute
+    /// paths produced by walking `src/`/`test/` and the relative paths a user
+    /// may pass as explicit lint targets. Without canonical-form dedup the
+    /// same file would appear twice in the extraction list and be parsed
+    /// twice downstream.
+    #[test]
+    #[serial_test::serial(cwd)]
+    fn collect_package_class_files_dedups_absolute_and_relative() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"dp\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let test = root.join("test");
+        std::fs::create_dir_all(&test).unwrap();
+        std::fs::write(test.join("foo.bt"), "Object subclass: Foo\n").unwrap();
+
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+
+        // Walked form is absolute (under canonical package_root); user-typed
+        // target is relative. Both refer to the same file.
+        let pkg_root = find_package_root(&camino::Utf8PathBuf::from("test")).expect("package root");
+        let relative_target = camino::Utf8PathBuf::from("test/foo.bt");
+        let out = collect_package_class_files(&pkg_root, std::slice::from_ref(&relative_target));
+
+        std::env::set_current_dir(prev_cwd).unwrap();
+
+        assert_eq!(
+            out.len(),
+            1,
+            "expected single entry after canonical-form dedup, got {out:?}"
         );
     }
 
