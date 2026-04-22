@@ -14570,6 +14570,89 @@ fn bt_2020_narrowed_if_true_is_kind_of_preserves_inner_sends() {
     );
 }
 
+// =========================================================================
+// BT-2039: Dynamic|Known join on narrowing ifTrue:ifFalse:
+//
+// BT-2020 taught `ifTrue:ifFalse:` to carry `Block(R)` so the method-local
+// `R` could be unified. But `infer_method_local_params` last-wins when the
+// same type var appears in multiple arg positions: if branch 1 gave R=T and
+// branch 2 gave R=Dynamic(UntypedFfi), R collapsed to Dynamic and the BT-1914
+// "expression inferred as Dynamic in typed class" warning fired on the
+// method body. The fix prefers Known over Dynamic when merging bindings.
+// =========================================================================
+
+/// BT-2039: `method -> Integer => cond ifTrue: [self.value] ifFalse: [(Erlang foo) bar]`
+/// must not produce the "Dynamic in typed class" warning — the Known branch
+/// pins `R` to `Integer` so the method's declared return type is preserved.
+#[test]
+fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
+    // typed class Container
+    //   state: value :: Integer = 0
+    //   pick: cond :: Boolean -> Integer =>
+    //     cond ifTrue: [self.value] ifFalse: [(Erlang foo) bar]
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("value"),
+        TypeAnnotation::simple("Integer", span()),
+        int_lit(0),
+        span(),
+    )];
+    let pick_method = MethodDefinition::with_return_type(
+        MessageSelector::Keyword(vec![KeywordPart::new("pick:", span())]),
+        vec![ParameterDefinition::with_type(
+            ident("cond"),
+            TypeAnnotation::Simple(ident("Boolean")),
+        )],
+        vec![ExpressionStatement::bare(if_true_if_false(
+            var("cond"),
+            block_expr(vec![field_access("value")]),
+            block_expr(vec![msg_send(
+                erlang_module_recv("foo"),
+                MessageSelector::Unary("bar".into()),
+                vec![],
+            )]),
+        ))],
+        TypeAnnotation::Simple(ident("Integer")),
+        span(),
+    );
+    let class = ClassDefinition::with_modifiers(
+        ident("Container"),
+        Some(ident("Object")),
+        ClassModifiers {
+            is_typed: true,
+            ..Default::default()
+        },
+        state,
+        vec![pick_method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // The inner `(Erlang foo) bar` call still produces its own "Dynamic in
+    // typed class" warning (that's a separate, pre-existing warning at the
+    // FFI call itself). What BT-2039 fixes is the *outer* warning on the
+    // whole `ifTrue:ifFalse:` expression — so we should see exactly one
+    // Dynamic warning (the inner FFI call), not two.
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("inferred as Dynamic in typed class"))
+        .collect();
+    assert_eq!(
+        dynamic_warnings.len(),
+        1,
+        "expected exactly one Dynamic-in-typed-class warning (the inner FFI \
+         call). Before BT-2039 the outer ifTrue:ifFalse: also collapsed to \
+         Dynamic and added a second warning. Got: {:?}",
+        dynamic_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
 // =====================================================================
 // BT-2037 — `self error:` should infer as Never inside typed classes,
 // both class-side and inside block arguments.
