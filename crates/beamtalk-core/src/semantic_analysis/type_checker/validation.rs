@@ -1196,17 +1196,19 @@ impl TypeChecker {
     ///
     /// Returns `("Array", ["Integer"])` for `"Array(Integer)"`.
     /// Returns `("Result", ["Integer", "Error"])` for `"Result(Integer, Error)"`.
+    /// Returns `("Map", ["Result(A, B)", "C"])` for `"Map(Result(A, B), C)"` —
+    /// nested multi-parameter generics split at the top level only, matching the
+    /// balanced splitter used elsewhere in the type checker (BT-2025).
     /// For non-generic types, returns the full name and an empty vec.
-    ///
-    /// **Limitation:** Uses a simple comma-split, which does not handle nested generic
-    /// type args with multiple parameters (e.g., `Map(Result(A, B), C)` would be
-    /// incorrectly split). This is acceptable because Beamtalk's current type system
-    /// does not produce such deeply nested multi-parameter generic annotations in
-    /// string form.
     pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
         let (base, args_slice) = super::type_resolver::split_generic_base(type_str);
         let args: Vec<String> = args_slice
-            .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+            .map(|s| {
+                super::TypeChecker::split_type_params(s)
+                    .into_iter()
+                    .map(|p| p.trim().to_string())
+                    .collect()
+            })
             .unwrap_or_default();
         (base.to_string(), args)
     }

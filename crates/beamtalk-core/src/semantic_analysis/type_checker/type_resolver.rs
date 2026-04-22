@@ -174,11 +174,19 @@ pub(in crate::semantic_analysis) fn receiver_type_for_class(
     }
 }
 
-/// Resolve type-position keywords (`nil`, `true`, `false`) to their class
-/// names. Everything else passes through unchanged.
+/// Resolve type-position keywords to their class names.
+///
+/// - `nil` / `Nil` → `UndefinedObject`
+/// - `false` → `False`
+/// - `true` → `True`
+/// - Everything else passes through unchanged.
+///
+/// Both lowercase (`nil`) and capitalised (`Nil`) spellings map to
+/// `UndefinedObject` so that `Integer | Nil` type annotations narrow
+/// consistently under `isNil` guards (BT-2016).
 fn resolve_type_keyword(name: &EcoString) -> EcoString {
     match name.as_str() {
-        "nil" => "UndefinedObject".into(),
+        "nil" | "Nil" => "UndefinedObject".into(),
         "false" => "False".into(),
         "true" => "True".into(),
         _ => name.clone(),
@@ -269,6 +277,16 @@ mod tests {
     #[test]
     fn simple_nil_keyword_resolves_to_undefined_object() {
         let ann = TypeAnnotation::Simple(ident("nil"));
+        let result = resolve_type_annotation(&ann, &empty_subst());
+        assert_eq!(result, InferredType::known("UndefinedObject"));
+    }
+
+    #[test]
+    fn simple_capital_nil_keyword_resolves_to_undefined_object() {
+        // `Integer | Nil` annotations (BT-2016) — the capital-N spelling must
+        // canonicalize to the same class as lowercase `nil` so narrowing under
+        // `isNil` works regardless of which the user typed.
+        let ann = TypeAnnotation::Simple(ident("Nil"));
         let result = resolve_type_annotation(&ann, &empty_subst());
         assert_eq!(result, InferredType::known("UndefinedObject"));
     }
