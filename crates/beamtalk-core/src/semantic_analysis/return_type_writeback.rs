@@ -53,8 +53,8 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
     let inferred = infer_method_return_types(module, hierarchy);
 
     // BT-2022: The inferred map now stores InferredType. For writeback we
-    // extract the class name to create a simple TypeAnnotation. Known types
-    // use `as_known()`, Never uses "Never" directly.
+    // extract a simple class name via `writeback_name()`: Known returns its
+    // class name, Never maps to "Never", everything else returns None.
     for class in &mut module.classes {
         for method in &mut class.methods {
             if method.return_type.is_some() {

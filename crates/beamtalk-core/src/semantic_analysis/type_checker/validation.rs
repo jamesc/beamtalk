@@ -511,6 +511,53 @@ impl TypeChecker {
             .any(|ancestor| ancestor.as_str() == expected_base)
     }
 
+    /// BT-2022: Recursive structural compatibility for one type-arg slot.
+    ///
+    /// Used when comparing a declared generic return type's inner args against
+    /// the body's inferred inner args. Recurses into nested `Known` so that
+    /// shapes like `Result(Array(Integer), Error)` vs `Result(Array(String),
+    /// Error)` are detected as mismatches at the inner level.
+    ///
+    /// Returns true (compatible) for any non-`Known` shape (Dynamic, Union,
+    /// Never) — those are handled by the broader checker and we don't want to
+    /// double-warn here. Generic type-param placeholders (T, E, K, V) are
+    /// treated as compatible since they're symbolic.
+    fn type_args_compatible(
+        expected: &InferredType,
+        actual: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let (
+            InferredType::Known {
+                class_name: exp_name,
+                type_args: exp_inner,
+                ..
+            },
+            InferredType::Known {
+                class_name: act_name,
+                type_args: act_inner,
+                ..
+            },
+        ) = (expected, actual)
+        else {
+            return true; // Dynamic / Union / Never on either side — skip
+        };
+        if super::is_generic_type_param(exp_name) || super::is_generic_type_param(act_name) {
+            return true;
+        }
+        if !Self::is_type_compatible(act_name, exp_name, hierarchy) {
+            return false;
+        }
+        // Base classes match — recurse into inner type args when arity lines up.
+        if exp_inner.is_empty() || act_inner.is_empty() || exp_inner.len() != act_inner.len() {
+            return true;
+        }
+        exp_inner
+            .iter()
+            .zip(act_inner.iter())
+            .all(|(e, a)| Self::type_args_compatible(e, a, hierarchy))
+    }
+
     /// Check argument types against declared parameter types for a message send.
     #[allow(clippy::too_many_arguments)] // BT-1588: arg_exprs + env needed for origin tracing
     pub(super) fn check_argument_types(
@@ -690,9 +737,9 @@ impl TypeChecker {
                 // Check base class compatibility, then inner type args (BT-2022).
                 let base_mismatch = !Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
                 // BT-2022: When the base class matches, also verify inner type args
-                // match. Only compare when both sides have the same arity of type
-                // args. Skip generic type param placeholders (T, E, etc.) since
-                // those are symbolic, not concrete.
+                // match. Recurse into nested generics so mismatches like
+                // `Result(Array(Integer), Error)` vs `Result(Array(String), Error)`
+                // are caught (Copilot review on PR #2059).
                 let args_mismatch = !base_mismatch
                     && !expected_args.is_empty()
                     && !actual_args.is_empty()
@@ -701,18 +748,7 @@ impl TypeChecker {
                         .iter()
                         .zip(actual_args.iter())
                         .any(|(exp_arg, act_arg)| {
-                            let Some(exp_name) = exp_arg.as_known() else {
-                                return false; // Dynamic expected arg — can't check
-                            };
-                            let Some(act_name) = act_arg.as_known() else {
-                                return false; // Dynamic actual arg — can't check
-                            };
-                            if super::is_generic_type_param(exp_name)
-                                || super::is_generic_type_param(act_name)
-                            {
-                                return false;
-                            }
-                            !Self::is_type_compatible(act_name, exp_name, hierarchy)
+                            !Self::type_args_compatible(exp_arg, act_arg, hierarchy)
                         });
                 if base_mismatch || args_mismatch {
                     let expected_display = expected

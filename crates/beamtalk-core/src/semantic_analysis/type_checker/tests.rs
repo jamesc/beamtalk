@@ -12918,7 +12918,7 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
     );
 }
 
-/// BT-2022: List(MyThing) declared, body returns List(String) — should warn.
+/// BT-2022: Array(Integer) declared, body returns Array(String) — should warn.
 #[test]
 fn bt2022_list_inner_arg_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -12983,13 +12983,16 @@ fn bt2022_method_return_type_cache_preserves_type_args() {
         "Unannotated method `items` should have an entry in method_return_types"
     );
     let cached_ty = cached.unwrap();
-    // The body is an array literal of strings, which infers as Array(String)
-    // (or at minimum Array). Verify the cache contains a Known type.
-    assert!(
-        matches!(cached_ty, InferredType::Known { .. }),
-        "Cached type should be Known, got: {cached_ty:?}"
-    );
+    // BT-2022: The cache must store an InferredType (not the previous EcoString)
+    // so that any type_args produced by the inference path can flow to callers.
+    // Verifies the structural fix; element-type inference for array literals is
+    // a separate concern outside this issue's scope.
+    let InferredType::Known { class_name, .. } = cached_ty else {
+        panic!("Cached type should be Known, got: {cached_ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "List", "expected List base class");
 }
+
 
 /// BT-2022: When declared inner args include a generic type parameter (T, E),
 /// the comparison should skip that arg rather than warn (type params are
