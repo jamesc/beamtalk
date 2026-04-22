@@ -1534,10 +1534,24 @@ impl TypeChecker {
         // is expected to be guarded by `isNil`/`notNil` checks, and adding
         // UndefinedObject here would create noisy false-positive type
         // warnings on every `T | Nil` union send.
+        //
+        // CodeRabbit on PR #2060: normalise the special return keywords
+        // (`Self`, `Self class`, `Never`) the same way other union members are
+        // normalised above, so an inherited `-> Self` selector resolves to
+        // `UndefinedObject` instead of leaking `Known("Self")` into the union.
         if has_nil && responding_count > 0 {
             if let Some(method) = hierarchy.find_method("UndefinedObject", selector) {
                 if let Some(ref ret_ty) = method.return_type {
-                    return_types.push(Self::resolve_type_name_string(ret_ty));
+                    let nil_contribution = if ret_ty.as_str() == "Self" {
+                        InferredType::known("UndefinedObject")
+                    } else if ret_ty.as_str() == "Self class" {
+                        InferredType::Dynamic(DynamicReason::Unknown)
+                    } else if ret_ty.as_str() == "Never" {
+                        InferredType::Never
+                    } else {
+                        Self::resolve_type_name_string(ret_ty)
+                    };
+                    return_types.push(nil_contribution);
                 } else {
                     return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
                 }
