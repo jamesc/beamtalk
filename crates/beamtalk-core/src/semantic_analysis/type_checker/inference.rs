@@ -565,24 +565,42 @@ impl TypeChecker {
                 self.infer_expr(value, hierarchy, env, in_abstract_method)
             }
 
-            // Cascades: receiver type unchanged, check each message
+            // Cascades: all messages dispatch to the UNDERLYING receiver of
+            // the first send, not to its return value. The parser bundles
+            // `obj msg1; msg2; msg3` as Cascade { receiver: MessageSend(obj,
+            // msg1), messages: [msg2, msg3] }, so we have to peek through the
+            // first MessageSend to find the actual receiver. (BT-2017 surfaced
+            // this: when `assert:equals: -> Nil` resolves to UndefinedObject,
+            // the previous code dispatched cascaded messages to that return
+            // type, producing spurious DNU errors.)
             Expression::Cascade {
                 receiver, messages, ..
             } => {
-                let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
-                let is_class_ref = matches!(receiver.as_ref(), Expression::ClassReference { .. });
+                let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+                let (cascade_target, dispatch_ty) = match receiver.as_ref() {
+                    Expression::MessageSend {
+                        receiver: inner, ..
+                    } => {
+                        let inner_ty =
+                            self.infer_expr(inner, hierarchy, env, in_abstract_method);
+                        (inner.as_ref(), inner_ty)
+                    }
+                    _ => (receiver.as_ref(), send_ty.clone()),
+                };
+                let is_class_ref =
+                    matches!(cascade_target, Expression::ClassReference { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     self.infer_args_with_block_context(
                         &msg.arguments,
-                        &receiver_ty,
+                        &dispatch_ty,
                         &selector_name,
                         hierarchy,
                         env,
                         in_abstract_method,
                     );
                     if is_class_ref {
-                        if let Expression::ClassReference { name, .. } = receiver.as_ref() {
+                        if let Expression::ClassReference { name, .. } = cascade_target {
                             self.check_class_side_send(
                                 &name.name,
                                 &selector_name,
@@ -591,8 +609,8 @@ impl TypeChecker {
                                 &[], // cascade return type is receiver, not send result
                             );
                         }
-                    } else if let InferredType::Known { ref class_name, .. } = receiver_ty {
-                        if env.in_class_method && Self::is_self_receiver(receiver) {
+                    } else if let InferredType::Known { ref class_name, .. } = dispatch_ty {
+                        if env.in_class_method && Self::is_self_receiver(cascade_target) {
                             if !in_abstract_method {
                                 self.check_class_side_send(
                                     class_name,
@@ -610,12 +628,17 @@ impl TypeChecker {
                                 hierarchy,
                             );
                         }
-                    } else if let InferredType::Union { ref members, .. } = receiver_ty {
+                    } else if let InferredType::Union { ref members, .. } = dispatch_ty {
                         // Union cascades: validate selector on all members
-                        self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
+                        self.infer_union_message_send(
+                            members,
+                            &selector_name,
+                            msg.span,
+                            hierarchy,
+                        );
                     }
                 }
-                receiver_ty
+                send_ty
             }
 
             // Parenthesized — unwrap
