@@ -174,6 +174,69 @@ pub(in crate::semantic_analysis) fn receiver_type_for_class(
     }
 }
 
+/// Build the [`InferredType`] for a `super` expression's receiver, threading
+/// the child class's type-arg bindings into the parent class's type-param
+/// positions.
+///
+/// Walks the child's `superclass_type_args` (the `Sub(R) extends Base(R)` /
+/// `IntBase extends Base(Integer)` mapping) and resolves each entry against
+/// the child's symbolic / concrete type args:
+///
+/// * [`SuperclassTypeArg::ParamRef`] — looks up the child's type arg at the
+///   given index, so `Sub(R) extends Base(R)` makes `super`'s receiver
+///   `Known("Base", [Known("R")])` (Sub's R, not Base's symbolic E).
+/// * [`SuperclassTypeArg::Concrete`] — substitutes a fixed type, so
+///   `IntBase extends Base(Integer)` makes `super`'s receiver
+///   `Known("Base", [Known("Integer")])`.
+///
+/// When the child has no `superclass_type_args` (no `extends Base(...)`
+/// annotation), falls back to [`receiver_type_for_class`] which emits the
+/// parent's symbolic type-param placeholders.
+///
+/// **References:** BT-2021 sub-bug B — `super` sends used to lose receiver
+/// `type_args` in generic classes.
+///
+/// [`SuperclassTypeArg::ParamRef`]: crate::semantic_analysis::class_hierarchy::SuperclassTypeArg::ParamRef
+/// [`SuperclassTypeArg::Concrete`]: crate::semantic_analysis::class_hierarchy::SuperclassTypeArg::Concrete
+pub(in crate::semantic_analysis) fn super_receiver_type(
+    child_class: &EcoString,
+    child_type_args: &[InferredType],
+    parent_class: &EcoString,
+    hierarchy: &ClassHierarchy,
+) -> InferredType {
+    use crate::semantic_analysis::class_hierarchy::SuperclassTypeArg;
+
+    let Some(child_info) = hierarchy.get_class(child_class) else {
+        return receiver_type_for_class(parent_class, hierarchy);
+    };
+
+    if child_info.superclass_type_args.is_empty() {
+        return receiver_type_for_class(parent_class, hierarchy);
+    }
+
+    let parent_type_args: Vec<InferredType> = child_info
+        .superclass_type_args
+        .iter()
+        .map(|sta| match sta {
+            SuperclassTypeArg::ParamRef { param_index } => child_type_args
+                .get(*param_index)
+                .cloned()
+                .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown)),
+            SuperclassTypeArg::Concrete { type_name } => InferredType::Known {
+                class_name: type_name.clone(),
+                type_args: vec![],
+                provenance: TypeProvenance::Inferred(crate::source_analysis::Span::default()),
+            },
+        })
+        .collect();
+
+    InferredType::Known {
+        class_name: parent_class.clone(),
+        type_args: parent_type_args,
+        provenance: TypeProvenance::Inferred(crate::source_analysis::Span::default()),
+    }
+}
+
 /// Resolve type-position keywords to their class names.
 ///
 /// - `nil` / `Nil` → `UndefinedObject`
@@ -658,6 +721,89 @@ mod tests {
             assert_eq!(arg_name, param);
             assert!(inner_args.is_empty());
         }
+    }
+
+    // ---- super_receiver_type ----
+    //
+    // The tests below exercise BT-2021 sub-bug B's fix path: `super` sends
+    // must thread the *child's* type-arg bindings into the parent's
+    // type-param positions via `superclass_type_args` (`ParamRef` for
+    // forwarded type params, `Concrete` for fixed types).
+
+    fn parse_module(source: &str) -> (crate::ast::Module, ClassHierarchy) {
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, diags) = crate::source_analysis::parse(tokens);
+        assert!(diags.is_empty(), "Parse failed: {diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        (module, hierarchy)
+    }
+
+    #[test]
+    fn super_receiver_threads_child_param_through_param_ref() {
+        // `Sub(R) extends Base(R)` — Sub's R forwards to Base's E.
+        // Calling super from inside Sub(R) with self typed as
+        // Known("Sub", [Known("R")]) should produce Known("Base", [Known("R")]).
+        let (_, hierarchy) = parse_module(
+            "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(R) subclass: Sub(R)\n",
+        );
+        let child_type_args = vec![InferredType::known("R")];
+        let result =
+            super_receiver_type(&"Sub".into(), &child_type_args, &"Base".into(), &hierarchy);
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = result
+        else {
+            panic!("expected Known");
+        };
+        assert_eq!(class_name.as_str(), "Base");
+        assert_eq!(type_args, vec![InferredType::known("R")]);
+    }
+
+    #[test]
+    fn super_receiver_substitutes_concrete_superclass_arg() {
+        // `IntBase extends Base(Integer)` — Integer is fixed; Sub has no type
+        // params of its own. super's receiver must carry the concrete Integer.
+        let (_, hierarchy) = parse_module(
+            "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(Integer) subclass: IntBase\n",
+        );
+        let result = super_receiver_type(&"IntBase".into(), &[], &"Base".into(), &hierarchy);
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = result
+        else {
+            panic!("expected Known");
+        };
+        assert_eq!(class_name.as_str(), "Base");
+        assert_eq!(type_args, vec![InferredType::known("Integer")]);
+    }
+
+    #[test]
+    fn super_receiver_falls_back_when_no_extends_annotation() {
+        // Non-generic child of non-generic parent — no superclass_type_args.
+        // super's receiver should match `receiver_type_for_class(parent)`.
+        let (_, hierarchy) = parse_module("Object subclass: Parent\n\nParent subclass: Child\n");
+        let result = super_receiver_type(&"Child".into(), &[], &"Parent".into(), &hierarchy);
+        let expected = receiver_type_for_class(&"Parent".into(), &hierarchy);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn super_receiver_unknown_child_falls_back_safely() {
+        // Child class not in hierarchy — must not panic; falls back to the
+        // parent's symbolic placeholders.
+        let (_, hierarchy) = parse_module("Object subclass: Base(E)\n");
+        let result = super_receiver_type(
+            &"NonExistentChild".into(),
+            &[InferredType::known("R")],
+            &"Base".into(),
+            &hierarchy,
+        );
+        let expected = receiver_type_for_class(&"Base".into(), &hierarchy);
+        assert_eq!(result, expected);
     }
 
     // ---- split_generic_base / base_name_of_string ----

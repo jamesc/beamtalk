@@ -12956,3 +12956,322 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
         "Type param T in declared type should not trigger a mismatch warning: {type_warnings:?}"
     );
 }
+
+// =====================================================================
+// BT-2021 — Receiver type_args dropped for self / super in generic classes
+// =====================================================================
+//
+// Sub-bug A (self): a method body inside a generic class `Box(T)` that
+// `self`-sends a `-> T` helper used to see `self` as `Known("Box", [])`,
+// dropping the symbolic type arg and resolving T to Dynamic. After
+// BT-2025's `receiver_type_for_class` migration, `self` carries
+// `[Known("T")]` placeholders so substitution can rewrite T correctly.
+//
+// Sub-bug B (super): from a child generic class `Sub(R)` extending
+// `Base(E)`, `super`-sending a `-> E`-returning method has to thread the
+// child's type-param placeholder (via `superclass_type_args`) into the
+// parent's `E` slot — otherwise the parent and child end up using
+// unrelated symbolic placeholders.
+//
+// Sub-bug C (Self class): intentionally still resolves to Dynamic. The
+// previous attempt to make it `Known(class_name, type_args)` broke four
+// narrowing tests (`x class = Integer` semantics) so full metatype
+// support stays deferred. The regression test below pins that contract
+// down so a future change can't silently flip it.
+
+/// BT-2021 sub-bug A: inside a generic class `Box(T)`, calling a self-send
+/// that returns `T` must yield the symbolic `T` placeholder rather than
+/// `Dynamic`. We probe the cached return type of the wrapper method —
+/// without the fix, the wrapper's return type was bare `Dynamic`.
+#[test]
+fn bt2021_self_send_in_generic_class_preserves_type_param() {
+    let source = "
+Object subclass: Box(T)
+  state: x :: T = nil
+  value -> T => x
+  wrapped -> T => self value
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // The fix should produce no return-type-mismatch warnings — the wrapped
+    // method's body type must be the same `T` placeholder as its declared
+    // return type. Without the fix, `self value` resolves to Dynamic and
+    // the typed-class-context would warn.
+    let mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("does not match declared")
+                || d.message.contains("does not understand")
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "self-send in generic class should preserve T; got: {mismatches:?}"
+    );
+}
+
+/// BT-2021 sub-bug A direct check: probe the inferred type of `self value`
+/// inside a method of `Box(T)`. Must be `Known("T", [])`, never `Dynamic`.
+#[test]
+fn bt2021_self_send_inferred_type_is_symbolic_param() {
+    let source = "
+Object subclass: Box(T)
+  state: x :: T = nil
+  value -> T => x
+  wrapped -> T => self value
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Box")
+        .expect("Box class");
+    let wrapped = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "wrapped")
+        .expect("wrapped method");
+    let stmt = wrapped.body.last().expect("wrapped has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // Mirror what `check_module` does: seed `self` with the receiver type
+    // produced by the centralised helper.
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "T",
+            "expected `self value` to resolve to symbolic T placeholder, got {ty:?}"
+        ),
+        other => panic!("expected Known(T), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug A nested case: a multi-param generic class. Inside
+/// `Pair(K, V)`, calling `self second` (returning `V`) must resolve to
+/// the symbolic V placeholder, not Dynamic and not the wrong slot.
+#[test]
+fn bt2021_self_send_multi_param_generic_resolves_correct_slot() {
+    let source = "
+Object subclass: Pair(K, V)
+  state: k :: K = nil
+  state: v :: V = nil
+  first -> K => k
+  second -> V => v
+  rewrap -> V => self second
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Pair")
+        .expect("Pair class");
+    let rewrap = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "rewrap")
+        .expect("rewrap method");
+    let stmt = rewrap.body.last().expect("rewrap has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "V",
+            "expected `self second` on Pair(K,V) to resolve to V, got {ty:?}"
+        ),
+        other => panic!("expected Known(V), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug B: a child generic class calling `super`-send on a
+/// parent method that returns the parent's type param must yield the
+/// child's matching type-param placeholder (mapped via
+/// `superclass_type_args`).
+///
+/// Source: `Base(E)` declares `peek -> E`; `Sub(R)` extends `Base(R)` —
+/// Sub's R is forwarded to Base's E. Inside a method on Sub, `super peek`
+/// should infer as `Known("R", [])`, not `Known("E", [])` and not Dynamic.
+#[test]
+fn bt2021_super_send_in_generic_class_threads_child_param() {
+    let source = "
+Object subclass: Base(E)
+  state: x :: E = nil
+  peek -> E => x
+
+Base(R) subclass: Sub(R)
+  borrow -> R => super peek
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let sub = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Sub")
+        .expect("Sub class");
+    let borrow = sub
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "borrow")
+        .expect("borrow method");
+    let stmt = borrow.body.last().expect("borrow has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "R",
+            "expected `super peek` from Sub(R) extends Base(R) to resolve to R, got {ty:?}"
+        ),
+        other => panic!("expected Known(R), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug B with a *concrete* mapping: child binds parent's type
+/// param to a fixed type. `IntBase` extends `Base(Integer)`. Inside an
+/// `IntBase` method, `super peek` should resolve to `Integer`, not the
+/// parent's symbolic `E` placeholder.
+#[test]
+fn bt2021_super_send_with_concrete_superclass_arg_resolves_to_concrete() {
+    let source = "
+Object subclass: Base(E)
+  state: x :: E = nil
+  peek -> E => x
+
+Base(Integer) subclass: IntBase
+  borrow -> Integer => super peek
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let int_base = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "IntBase")
+        .expect("IntBase class");
+    let borrow = int_base
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "borrow")
+        .expect("borrow method");
+    let stmt = borrow.body.last().expect("borrow has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    match &ty {
+        InferredType::Known { class_name, .. } => assert_eq!(
+            class_name.as_str(),
+            "Integer",
+            "expected `super peek` from IntBase extends Base(Integer) to resolve to Integer, got {ty:?}"
+        ),
+        other => panic!("expected Known(Integer), got {other:?}"),
+    }
+}
+
+/// BT-2021 sub-bug C contract pin: `Self class` (as returned by `Object>>class`)
+/// stays `Dynamic`. Promoting it to `Known(class_name, type_args)` would
+/// regress narrowing tests like `x class = Integer` (BT-1952 constraint).
+/// Full metatype support is tracked separately.
+#[test]
+fn bt2021_self_class_remains_dynamic_for_factory_pattern() {
+    let source = "
+Object subclass: Box(T)
+  state: x :: T = nil
+  copy => self class new
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Box")
+        .expect("Box class");
+    let copy = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == "copy")
+        .expect("copy method");
+    let stmt = copy.body.last().expect("copy has at least one stmt");
+    let expr = &stmt.expression;
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set(
+        "self",
+        super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    );
+    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+
+    // `self class new` on `Box(T)` resolves through `class -> Self class`
+    // (Object>>class) which intentionally returns Dynamic. The resulting
+    // `new` send on a Dynamic receiver also stays Dynamic.
+    assert!(
+        matches!(&ty, InferredType::Dynamic(_)),
+        "self class new should stay Dynamic (Self class metatype is deferred); got {ty:?}"
+    );
+}
