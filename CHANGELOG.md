@@ -11,6 +11,10 @@
 
 ### Standard Library
 
+- **BREAKING: Supervisor lifecycle methods now return `Result`** ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md), BT-1993 epic) — `Supervisor class>>supervise` and `Supervisor>>terminate:` on the static path, plus `DynamicSupervisor class>>supervise`, `DynamicSupervisor>>startChild`, `DynamicSupervisor>>startChild:`, and `DynamicSupervisor>>terminateChild:` on the dynamic path, all return `Result` values instead of raising. `stop`, `current`, `which:`, `children`, and `count` are unchanged.
+  - Adopts the **idempotent-startup convention**: an operation succeeds (returns `Result ok: ...`) when the caller's target end state already holds — `supervise` on an already-running supervisor returns `Result ok: sup` (preserved from the prior runtime), and `terminate:` / `terminateChild:` on a child that is already gone returns `Result ok: nil` (new on the static path — previously raised).
+  - **Mechanical migration.** Boot-style call sites add `unwrap`: `app := WebApp supervise` becomes `app := (WebApp supervise) unwrap`. Recoverable flows use `ifOk:ifError:` / `andThen:`. Call sites that were swallowing the raise to express "stop it if it's running" — e.g. `[app terminate: Child] on: Error do: [:_e | nil]` — can now be written as `(app terminate: Child) unwrap` (idempotent by construction — `Ok` whether the child was alive or already gone). See ADR 0080 §Migration Path for the full rewrite guide.
+  - Structured `beamtalk_error` kinds (`kind` field): `#supervisor_start_failed`, `#child_start_failed`, `#terminate_failed`, `#stale_handle` — greppable in logs (BT-1999, BT-2000, BT-2001).
 - **Named actor registration** ([ADR 0079](docs/ADR/0079-named-actor-registration.md)) — actors can now be registered under a `Symbol` name and looked up from anywhere via a name-resolving proxy that survives supervised restarts (BT-1985 epic, BT-1986..BT-1991):
   - `Class spawnAs: name` / `Class spawnWith: args as: name` — atomic spawn + register, returns `Result(Self, Error)`.
   - `Class named: name` — typed lookup returning `Result(Self, Error)`; `Self` resolves to the receiver class at the call site.
@@ -30,9 +34,8 @@
 - Reserved-name blocklist at registration time for OTP kernel/stdlib atoms and the `beamtalk_` prefix; returns `Result error: (beamtalk_error reserved_name)`.
 - Fix `'spawnAs'/2` defaulting to `[]` instead of `#{}`, which crashed supervised named children in `init/1` with `{badmap, []}` (BT-1991).
 - Fix REPL JSON formatter crashing when displaying a name-resolving proxy: `#beamtalk_object{pid = {registered, Name}}` now renders as `#Actor<Class,registered,Name>` instead of calling `pid_to_list/1` on a non-pid term (BT-1991).
-- Supervisor `startLink` returns Result-shaped values internally (`{ok, ...}` / `{error, #beamtalk_error{kind = supervisor_start_failed}}`); `class supervise` unwraps to preserve the existing user-facing `Supervisor` return type — preparatory infrastructure for [ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md) Phase 1 (BT-1994).
-- **ADR 0080 Phase 1: supervisor lifecycle Result migration** — `startLink/1`, `startChild/1,2`, and `terminateChild/2` now return `{ok, V} | {error, #beamtalk_error{}}` internally; stdlib shims preserve existing user-facing signatures via `.unwrap` until Phase 2 (BT-1996, BT-1997, BT-1998).
-- `terminateChild` is now idempotent — terminating an already-terminated child returns `{ok, nil}` instead of raising (BT-1998).
+- **Supervisor lifecycle Result migration** ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md), BT-1993 epic) — runtime functions in `beamtalk_supervisor.erl` (`startLink/1`, `startChild/1,2`, `terminateChild/2` in both arities, `with_live_supervisor/3`) now return `{ok, V} | {error, #beamtalk_error{}}` instead of raising. FFI coercion (ADR 0076) lifts these to `Result` values at the Beamtalk boundary. The `beamtalk_class_dispatch` post-dispatch hook was extended to match both the bare `{beamtalk_supervisor_new, ...}` tuple and a `Result` tagged map wrapping it, preserving the ADR 0059 / BT-1285 guarantee that `class initialize:` runs in the caller's process (BT-1994, BT-1996, BT-1997, BT-1998).
+- `terminateChild` is now idempotent across both static and dynamic supervisor paths — terminating an already-terminated child returns `{ok, nil}` instead of raising. Previously only the dynamic path had this behaviour (BT-1998).
 - Fix deadlock when calling `self class spawnAs:` / `self class spawnWith:as:` inside a class factory method — metaclass dispatch now short-circuits spawn selectors to avoid re-entering the class gen_server (BT-2005).
 - Fix `undef` crash for `self spawnAs:` / `self spawnWith:as:` in class methods — new runtime helpers read class metadata from the process dictionary to avoid the gen_server deadlock (BT-2004).
 - Fix `undef` crash for inherited class-method self-sends — a new `class_self_dispatch/4` runtime helper walks the superclass chain and threads class-var state correctly (BT-2007).
@@ -44,12 +47,14 @@
 ### Documentation
 
 - ADR 0079: Named Actor Registration.
+- ADR 0080: Migrate Supervisor Lifecycle to Result — Implementation Tracking section lists the full BT-1993 epic breakdown (8 child issues across Phase 0 probes, Phase 1 runtime, Phase 2 stdlib, Phase 3 e2e + docs).
+- Language features: supervision chapter rewritten to document the Result-shaped lifecycle API, the idempotent-startup convention ("target end state holds = `Ok`"), and boot-style vs recoverable call-site patterns; cross-linked to Actor Named Registration for the parallel registry/boundary pattern (BT-2001).
 - Language features: new "Named Actor Registration" chapter covering the API surface, proxy semantics caveats (monitors don't re-arm across restarts; equality rules; unregister makes proxy dead), reserved-name policy, BEAM mapping, and a before/after migration example from `Supervisor which:` + `initialize:` to named registration (BT-1991).
 - Language features: new "Local Variable Type Annotations" section; updated `@expect` documentation to reflect block-body support.
 
 ### Internal
 
-- ADR 0080: Migrate Supervisor Lifecycle to Result — proposed and accepted with Phase 0 probe outcomes (BT-1977, BT-1994, BT-1995).
+- ADR 0080: Migrate Supervisor Lifecycle to Result — proposed, accepted, and implemented across Phase 0 probes, Phase 1 runtime, Phase 2 stdlib, Phase 3 e2e + examples + docs (BT-1977, BT-1993..BT-2001).
 - Typechecker probe confirms class-level type parameter substitution through `Result(C, Error)` works without extension (BT-1995).
 - Unified LSP and CLI diagnostic pipelines into shared `compute_project_diagnostics` function (BT-2009).
 - Thread fixture-defined protocols through BUnit compile path to eliminate false `Unresolved class` warnings (BT-2006).

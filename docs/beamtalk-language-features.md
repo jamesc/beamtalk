@@ -1743,17 +1743,25 @@ Supervisor subclass: WebApp
   class children => #(DatabasePool HTTPRouter MetricsCollector)
 ```
 
-Start the supervisor with `supervise`. It registers under its class name so it can be found from anywhere:
+Start the supervisor with `supervise`. It registers under its class name so it can be found from anywhere. `supervise` and `terminate:` both return `Result` values ([ADR 0080](ADR/0080-supervisor-lifecycle-result.md)) — use `unwrap` at boot / in the REPL, or `ifOk:ifError:` / `andThen:` for recoverable flows:
 
 ```beamtalk
-app := WebApp supervise
+// Boot-style: crash on failure (application boot, test setup, REPL exploration)
+app := (WebApp supervise) unwrap
 // => #Supervisor<WebApp,_>
 
-// Idempotent — returns the already-running instance if called again
-app2 := WebApp supervise
-// => #Supervisor<WebApp,_>
+// Idempotent — second call also returns a successful Result wrapping the
+// already-running supervisor, without restarting
+(WebApp supervise) isOk
+// => true
 
-// Find the running instance by class name (no reference needed)
+// Recoverable form — branch on the Result explicitly
+(WebApp supervise)
+  ifOk:    [:sup | sup count]
+  ifError: [:e | Logger error: e message]
+
+// Find the running instance by class name (no reference needed — returns the
+// bare supervisor or nil, unchanged from pre-ADR-0080 semantics)
 WebApp current
 // => #Supervisor<WebApp,_>
 ```
@@ -1761,15 +1769,17 @@ WebApp current
 Inspect and manage children:
 
 ```beamtalk
-app count                  // => 3  (number of running children)
-app children               // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
-app which: DatabasePool    // => #Actor<DatabasePool,_>  (running child instance)
-app terminate: HTTPRouter  // gracefully stop a single child
-app stop                   // stop the supervisor and all children
+app count                                 // => 3  (number of running children)
+app children                              // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
+app which: DatabasePool                   // => #Actor<DatabasePool,_>  (running child instance)
+(app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)
+app stop                                  // stop the supervisor and all children (unchanged — Nil)
 
 // After stop:
-WebApp current             // => nil
+WebApp current                            // => nil
 ```
+
+`terminate:` is **idempotent** — terminating a child that is already gone returns `Result ok: nil`, not an error (see [idempotent-startup convention](#supervisor-idempotent-startup-convention-adr-0080) below).
 
 ### Class-Side Configuration Defaults
 
@@ -1839,21 +1849,27 @@ DynamicSupervisor(Worker) subclass: WorkerPool
 ```
 
 ```beamtalk
-pool := WorkerPool supervise
+pool := (WorkerPool supervise) unwrap
 // => #DynamicSupervisor<WorkerPool,_>
 
-// Start children dynamically
-w1 := pool startChild          // => #Actor<Worker,_>
-w2 := pool startChild          // => #Actor<Worker,_>
-pool count                     // => 2
+// Start children dynamically — startChild returns Result(C, Error) where C is
+// the DynamicSupervisor's child class parameter (Worker here)
+w1 := pool startChild unwrap        // => #Actor<Worker,_>
+w2 := pool startChild unwrap        // => #Actor<Worker,_>
+pool count                          // => 2
 
-// Terminate a specific child
-pool terminateChild: w1        // => nil
-pool count                     // => 1
+// Recoverable variant — useful when a failing init should not abort the caller
+pool startChild
+  ifOk:    [:w | w process: 21]
+  ifError: [:e | Logger warn: e message]
 
-// Stop the whole pool
+// Terminate a specific child — idempotent (Ok(nil) even if already gone)
+(pool terminateChild: w1) unwrap    // => nil
+pool count                          // => 1
+
+// Stop the whole pool (unchanged — Nil, let-it-crash teardown)
 pool stop
-WorkerPool current             // => nil
+WorkerPool current                  // => nil
 ```
 
 ### Nested Supervisors
@@ -1868,10 +1884,84 @@ Supervisor subclass: AppRoot
 Nested supervisor children are identified by `isSupervisor => true` and started via OTP `start_link/0`, ensuring they are correctly linked into the supervision tree. The outer supervisor shuts down inner supervisors (and all their children) gracefully on `stop`.
 
 ```beamtalk
-root := AppRoot supervise
+root := (AppRoot supervise) unwrap
 root count                          // => 3
 root which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>
 ```
+
+### Lifecycle API returns Result (ADR 0080)
+
+Supervisor lifecycle methods that can fail at a startup / registry boundary return a `Result`:
+
+| Method | Signature | Error `kind`s |
+|--------|-----------|---------------|
+| `Supervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
+| `Supervisor>>terminate: aClass` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
+| `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
+| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
+| `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
+
+`stop`, `current`, `which:`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.
+
+This mirrors `Actor spawnAs:` / `Class named:` from the [Actor Named Registration](#actor-named-registration-adr-0079) section — both APIs speak `Result` at registry / lifecycle boundaries so call sites that chain actor spawns and supervisor operations stay on a single error idiom.
+
+Errors carry structured `beamtalk_error` values (ADR 0015) with a Symbol `kind` and a human-readable `message`. REPL display shows them as `Result error: (beamtalk_error <kind>)` so they are greppable in logs and aggregatable in metrics.
+
+<a id="supervisor-idempotent-startup-convention-adr-0080"></a>
+
+### Idempotent-startup convention
+
+Across every supervisor lifecycle method, **an operation returns a successful `Result` when the caller's target end state is already in effect**, regardless of whether this call or a prior one established it. The rule is "does the target state hold *now*?" — not "did this call change the input?"
+
+| Method | Target state | Idempotent case |
+|--------|--------------|-----------------|
+| `supervise` | "this supervisor is running" | OTP `{already_started, Pid}` → `Result ok: sup` |
+| `startChild` / `startChild:` | "a child of the configured class is running" | fresh start → `Result ok: child` |
+| `terminate:` / `terminateChild:` | "this child is not running" | OTP `{error, not_found}` → `Result ok: nil` |
+
+This matters in practice: you can call `WebApp supervise` at every entry point of your application without branching on "is this the first call?" — the second caller gets the already-running supervisor back in the `ok` branch. Similarly, a cleanup path that calls `app terminate: StaleChild` succeeds whether the child was still alive or already gone, so you never have to swallow a raise to express "stop it if it's running."
+
+`Error` is reserved for outcomes the caller cannot trivially ignore:
+- `#supervisor_start_failed` — `start_link` returned a non-`already_started` reason (init crash, config error, resource exhaustion).
+- `#child_start_failed` — child's `init/1` raised, or the supervisor rejected the spec.
+- `#terminate_failed` — `supervisor:terminate_child/2` returned a reason other than `not_found` (supervisor crash, timeout).
+- `#stale_handle` — the supervisor process itself is dead.
+
+### Call-site patterns
+
+**Boot-style: crash on failure.** Use `unwrap` at application boot, test setup, and in the REPL — the resulting exception carries the structured error payload.
+
+```beamtalk
+app  := (WebApp supervise) unwrap
+pool := (WorkerPool supervise) unwrap
+w    := pool startChild unwrap
+```
+
+**Recoverable: branch on the Result.** Use `ifOk:ifError:` (or `andThen:` / `mapError:`) when a failure should be logged or retried rather than crashing the caller.
+
+```beamtalk
+(WebApp supervise)
+  ifOk:    [:sup | Logger info: "app started with " , sup count asString , " children"]
+  ifError: [:e   | Logger error: e message]
+
+pool startChild
+  ifOk:    [:worker | worker process: job]
+  ifError: [:e      | Logger warn: "worker start failed: " , e message]
+```
+
+**Idempotent terminate.** `terminate:` / `terminateChild:` naturally express "make sure this child is gone" — no special-casing required.
+
+```beamtalk
+// Before ADR 0080 — had to swallow Error because not_found raised
+[app terminate: Counter] on: Error do: [:_e | nil]
+
+// After — idempotent: returns Result ok: nil whether fresh terminate or already gone
+(app terminate: Counter) unwrap
+// real failures still surface as Result error: (beamtalk_error terminate_failed)
+(app terminate: Counter) ifError: [:e | Logger warn: e message]
+```
+
+See [ADR 0080](ADR/0080-supervisor-lifecycle-result.md) §Migration Path for the full mechanical rewrite guide and common gotchas (chained sends on the return value, type-narrowing in tests, REPL display changes).
 
 ### BEAM Mapping
 
