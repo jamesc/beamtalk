@@ -103,12 +103,12 @@ abstract Object subclass: Supervisor
   /// signature updates land in Phase 2 (BT-P2-stdlib).
   children -> Array => ((Erlang beamtalk_supervisor) whichChildren: self) unwrap
 
-  /// Return the running child process for the given class.
+  /// Look up the running child process for the given class.
   ///
   /// ADR 0080 Phase 2 (BT-2041): returns `Result(Object, Error)`. The ok
-  /// variant spans `Object | nil` — not-found returns `Result ok: nil`, not
-  /// an error. Genuine failures (e.g. supervisor process dead) surface as
-  /// `Result error: #beamtalk_error{kind = stale_handle}`.
+  /// variant spans `Object | nil` — a class with no running child returns
+  /// `Result ok: nil`, not an error. Genuine failures (e.g. supervisor
+  /// process dead) surface as `Result error: #beamtalk_error{kind = stale_handle}`.
   which: aClass :: Class -> Result(Object, Error) =>
     (Erlang beamtalk_supervisor) whichChild: self class: aClass
 

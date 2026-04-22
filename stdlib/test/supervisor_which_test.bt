@@ -36,3 +36,4 @@ TestCase subclass: SupervisorWhichTest
     sup stop
     result := sup which: ClassMethodActor
     self assert: result isError equals: true
+    self assert: result error kind equals: #stale_handle
