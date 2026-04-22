@@ -496,7 +496,10 @@ impl Parser {
         if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
             return DoubleColonSkip::Malformed(o);
         }
-        o += 1;
+        // Advance past the type name, consuming a trailing `class` metatype
+        // suffix on the same line (BT-1952 / BT-2034). This lets binary method
+        // headers like `+ other :: Actor class => ...` be recognized.
+        o = self.skip_type_name_with_metatype(o);
         // Skip generic type parameters: `Name(Type, Type, ...)`
         if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
             if let Some(after) = self.skip_paren_type_params(o) {
@@ -509,7 +512,7 @@ impl Parser {
             if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
                 return DoubleColonSkip::Malformed(o);
             }
-            o += 1;
+            o = self.skip_type_name_with_metatype(o);
             // Skip generic type parameters on union member
             if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                 if let Some(after) = self.skip_paren_type_params(o) {
@@ -679,9 +682,15 @@ impl Parser {
     ///
     /// Given offset `o` pointing at an identifier (e.g. `Self`, `Actor`),
     /// returns the offset after it, plus a trailing `class` if the next token
-    /// is the bare identifier `class` (BT-1952 / BT-2034).
+    /// is the bare identifier `class` on the *same* line (BT-1952 / BT-2034).
+    /// A `class` token with a leading newline begins a new statement (e.g.
+    /// the class-method definition on the following line) and is not consumed.
     fn skip_type_name_with_metatype(&self, o: usize) -> usize {
-        if matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class") {
+        if matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class")
+            && self
+                .peek_token_at(o + 1)
+                .is_some_and(|t| !t.has_leading_newline())
+        {
             o + 2
         } else {
             o + 1
@@ -927,9 +936,15 @@ impl Parser {
             let span = self.current_token().span();
             if name.as_str() == "Self" {
                 self.advance();
-                // Check for `Self class` metatype annotation
+                // Check for `Self class` metatype annotation on the same line
+                // (BT-1952 / BT-2034). A `class` token with a leading newline
+                // starts a new statement — typically a class-method definition
+                // on the next line — and must not be consumed as a metatype
+                // suffix.
                 if let TokenKind::Identifier(next) = self.current_kind() {
-                    if next.as_str() == "class" {
+                    if next.as_str() == "class"
+                        && !self.current_token().has_leading_newline()
+                    {
                         let end_span = self.current_token().span();
                         self.advance();
                         return TypeAnnotation::SelfClass {

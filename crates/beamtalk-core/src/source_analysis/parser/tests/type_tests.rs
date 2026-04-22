@@ -1144,3 +1144,45 @@ fn parse_trailing_class_on_next_line_is_separate_method() {
         "Expected Simple(Integer), got {ret_ty:?}"
     );
 }
+
+#[test]
+fn parse_trailing_self_class_on_next_line_is_separate_method() {
+    // BT-2034: the same-line `class` guard must also apply to `Self` so that
+    // `-> Self\nclass bar => ...` parses as `Self` followed by a class-method
+    // definition on the next line (not `Self class`).
+    let module = parse_ok(
+        "Object subclass: Bar
+  foo -> Self => self
+  class bar -> Integer => 2",
+    );
+    let cls = &module.classes[0];
+    assert_eq!(cls.methods.len(), 1);
+    assert_eq!(cls.class_methods.len(), 1);
+    let ret_ty = cls.methods[0].return_type.as_ref().unwrap();
+    assert!(
+        matches!(ret_ty, TypeAnnotation::SelfType { .. }),
+        "Expected SelfType, got {ret_ty:?}"
+    );
+}
+
+#[test]
+fn parse_binary_method_with_class_metatype_param() {
+    // BT-2034: `+ other :: Actor class => ...` must be recognized as a
+    // binary method definition — the `::` lookahead needs to skip the
+    // `class` metatype suffix for method detection to succeed.
+    let module = parse_ok(
+        "Object subclass: Registry
+  + other :: Actor class => other",
+    );
+    let cls = &module.classes[0];
+    assert_eq!(cls.methods.len(), 1);
+    assert_eq!(cls.methods[0].selector.name(), "+");
+    let param_ty = cls.methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    assert!(
+        matches!(param_ty, TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {param_ty:?}"
+    );
+}

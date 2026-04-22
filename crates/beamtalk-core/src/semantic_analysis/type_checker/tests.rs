@@ -3670,12 +3670,24 @@ typed Value subclass: Spec
     let TypeAnnotation::Union { types, .. } = ann else {
         panic!("Expected Union annotation, got {ann:?}");
     };
+    assert_eq!(
+        types.len(),
+        2,
+        "Expected exactly two union members for `Actor class | Nil`, got {types:?}"
+    );
     assert!(
         types.iter().any(|t| matches!(
             t,
             TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"
         )),
         "Expected ClassOf(Actor) in union, got {types:?}"
+    );
+    assert!(
+        types.iter().any(|t| matches!(
+            t,
+            TypeAnnotation::Simple(id) if id.name == "Nil"
+        )),
+        "Expected Nil in union, got {types:?}"
     );
 
     // No DNU warning for `isSupervisor` on the class-metatype receiver.
