@@ -64,6 +64,11 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 ///   is a metatype that historically resolves to Dynamic here (see BT-1952) so
 ///   that existing patterns like `x class = Foo` keep working; the call-site
 ///   metatype wrapping lives in the caller.
+/// * [`TypeAnnotation::ClassOf`] — returns `Dynamic(Unknown)`. The
+///   `<ClassName> class` metatype (BT-2034) names the metaclass of a specific
+///   class hierarchy; like `Self class` it resolves to Dynamic so that
+///   class-side methods on the named class (e.g. `Actor class >> isSupervisor`)
+///   flow through without false DNU warnings.
 /// * [`TypeAnnotation::Singleton`] — `#name` becomes `Known("#name", [])`,
 ///   matching the existing singleton-as-Symbol-subtype convention.
 ///
@@ -118,11 +123,13 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             let inner_ty = resolve_type_annotation(inner, subst);
             InferredType::union_of(&[inner_ty, InferredType::known("False")])
         }
-        TypeAnnotation::SelfType { .. } | TypeAnnotation::SelfClass { .. } => {
-            // `Self` / `Self class` need the static receiver class, which the
-            // annotation-resolver does not have. Call sites that do know it
-            // (e.g. return-type validation, nested-Self substitution) handle
-            // these cases directly.
+        TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. }
+        | TypeAnnotation::ClassOf { .. } => {
+            // `Self` / `Self class` / `<ClassName> class` need the static
+            // receiver class, which the annotation-resolver does not have.
+            // Call sites that do know it (e.g. return-type validation,
+            // nested-Self substitution) handle these cases directly.
             InferredType::Dynamic(DynamicReason::Unknown)
         }
         TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
@@ -515,6 +522,18 @@ mod tests {
     #[test]
     fn self_class_resolves_to_dynamic() {
         let ann = TypeAnnotation::SelfClass { span: span() };
+        let result = resolve_type_annotation(&ann, &empty_subst());
+        assert!(matches!(result, InferredType::Dynamic(_)));
+    }
+
+    #[test]
+    fn class_of_resolves_to_dynamic() {
+        // BT-2034: `<Name> class` metatype resolves to Dynamic so that
+        // class-side methods on the named class flow through without DNU.
+        let ann = TypeAnnotation::ClassOf {
+            class_name: ident("Actor"),
+            span: span(),
+        };
         let result = resolve_type_annotation(&ann, &empty_subst());
         assert!(matches!(result, InferredType::Dynamic(_)));
     }

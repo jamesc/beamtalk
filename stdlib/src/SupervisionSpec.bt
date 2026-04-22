@@ -34,7 +34,11 @@ typed Value subclass: SupervisionSpec
   /// Child id override — nil uses the actor class name as the OTP child id.
   field: id :: Symbol | Nil = nil
   /// The actor class being supervised.
-  field: actorClass :: Class | Nil = nil
+  ///
+  /// Typed as `Actor class | Nil` so that class-side methods defined on the
+  /// `Actor` hierarchy (e.g. `isSupervisor`, `supervisionPolicy`) are in the
+  /// method set after a nil-check (BT-2034).
+  field: actorClass :: Actor class | Nil = nil
   /// OTP restart policy — `#permanent`, `#transient`, or `#temporary`.
   ///
   /// Defaults to `#temporary`. Set to the actor's `supervisionPolicy` when

@@ -648,16 +648,10 @@ impl Parser {
         if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
             return false;
         }
-        // BT-1952: Check for `Self class` metatype (two-token type annotation).
-        // Advance by 2 tokens instead of 1, then fall through to the union loop
-        // so `-> Self class | Nil =>` is also recognized.
-        if matches!(self.peek_at(o), Some(TokenKind::Identifier(name)) if name == "Self")
-            && matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class")
-        {
-            o += 2;
-        } else {
-            o += 1;
-        }
+        // BT-1952 / BT-2034: advance past the first type name, consuming a
+        // trailing `class` metatype token if present so that forms like
+        // `-> Self class =>` and `-> Actor class | Nil =>` are also recognized.
+        o = self.skip_type_name_with_metatype(o);
         // Skip generic type parameters: `Type(T, E)`
         if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
             if let Some(after) = self.skip_paren_type_params(o) {
@@ -670,7 +664,7 @@ impl Parser {
             if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
                 return false;
             }
-            o += 1;
+            o = self.skip_type_name_with_metatype(o);
             // Skip generic params on union member
             if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                 if let Some(after) = self.skip_paren_type_params(o) {
@@ -679,6 +673,19 @@ impl Parser {
             }
         }
         matches!(self.peek_at(o), Some(TokenKind::FatArrow))
+    }
+
+    /// Advance past a type-name token and an optional `class` metatype suffix.
+    ///
+    /// Given offset `o` pointing at an identifier (e.g. `Self`, `Actor`),
+    /// returns the offset after it, plus a trailing `class` if the next token
+    /// is the bare identifier `class` (BT-1952 / BT-2034).
+    fn skip_type_name_with_metatype(&self, o: usize) -> usize {
+        if matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class") {
+            o + 2
+        } else {
+            o + 1
+        }
     }
 
     /// Checks if there's a keyword method definition starting at the given offset.
@@ -956,6 +963,22 @@ impl Parser {
                         base: ident,
                         parameters,
                         span: span.merge(end_span),
+                    }
+                } else if let TokenKind::Identifier(next) = self.current_kind() {
+                    // Check for `<ClassName> class` metatype annotation (BT-2034).
+                    // Require `class` to be on the same line as the class name so
+                    // that `... -> Foo\nclass bar => ...` (a class-method
+                    // definition on the next line) still parses correctly as a
+                    // return type `Foo` followed by a new class method.
+                    if next.as_str() == "class" && !self.current_token().has_leading_newline() {
+                        let end_span = self.current_token().span();
+                        self.advance();
+                        TypeAnnotation::ClassOf {
+                            class_name: ident,
+                            span: span.merge(end_span),
+                        }
+                    } else {
+                        TypeAnnotation::Simple(ident)
                     }
                 } else {
                     TypeAnnotation::Simple(ident)

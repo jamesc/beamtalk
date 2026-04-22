@@ -310,6 +310,15 @@ fn check_type_annotation_cross_package(
         TypeAnnotation::FalseOr { inner, .. } => {
             check_type_annotation_cross_package(inner, current_pkg, hierarchy, diagnostics);
         }
+        TypeAnnotation::ClassOf { class_name, .. } => {
+            check_cross_package_ref(
+                &class_name.name,
+                class_name.span,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
+        }
         // Singleton, SelfType, and SelfClass don't reference classes
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
@@ -434,6 +443,19 @@ fn check_type_annotation_leaked(
         TypeAnnotation::FalseOr { inner, .. } => {
             check_type_annotation_leaked(
                 inner,
+                class_name,
+                method_selector,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::ClassOf {
+            class_name: cls, ..
+        } => {
+            check_leaked_ref(
+                &cls.name,
+                cls.span,
                 class_name,
                 method_selector,
                 current_pkg,

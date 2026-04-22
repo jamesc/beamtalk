@@ -279,6 +279,11 @@ fn collect_type_annotation_refs(
         TypeAnnotation::FalseOr { inner, .. } => {
             collect_type_annotation_refs(inner, name, file_path, results);
         }
+        TypeAnnotation::ClassOf { class_name, .. } => {
+            if class_name.name == name {
+                results.push(Location::new(file_path.clone(), class_name.span));
+            }
+        }
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. } => {}

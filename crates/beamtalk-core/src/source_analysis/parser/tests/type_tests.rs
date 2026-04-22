@@ -1070,3 +1070,77 @@ fn parse_self_class_union_return_type() {
         "Expected Union type, got: {ret_ty:?}"
     );
 }
+
+// ---- BT-2034: <ClassName> class metatype annotations ----
+
+#[test]
+fn parse_class_of_field_annotation() {
+    // BT-2034: `Actor class | Nil` field annotation parses as Union(ClassOf, Nil)
+    let module = parse_ok(
+        "typed Value subclass: Spec
+  field: cls :: Actor class | Nil = nil",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let state = &module.classes[0].state;
+    assert_eq!(state.len(), 1);
+    let ann = state[0].type_annotation.as_ref().unwrap();
+    let TypeAnnotation::Union { types, .. } = ann else {
+        panic!("Expected Union, got {ann:?}");
+    };
+    assert_eq!(types.len(), 2);
+    assert!(
+        matches!(&types[0], TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {:?}",
+        types[0]
+    );
+}
+
+#[test]
+fn parse_class_of_return_type() {
+    // BT-2034: `-> Actor class` return type parses as ClassOf
+    let module = parse_ok(
+        "Object subclass: Foo
+  actorClass -> Actor class => self actorClass",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let methods = &module.classes[0].methods;
+    assert_eq!(methods.len(), 1);
+    let ret_ty = methods[0].return_type.as_ref().unwrap();
+    assert!(
+        matches!(ret_ty, TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {ret_ty:?}"
+    );
+}
+
+#[test]
+fn parse_class_of_type_name() {
+    // BT-2034: type_name() for ClassOf returns "<Name> class"
+    let ann = TypeAnnotation::ClassOf {
+        class_name: crate::ast::Identifier::new("Actor", crate::source_analysis::Span::new(0, 5)),
+        span: crate::source_analysis::Span::new(0, 11),
+    };
+    assert_eq!(ann.type_name().as_str(), "Actor class");
+}
+
+#[test]
+fn parse_trailing_class_on_next_line_is_separate_method() {
+    // BT-2034: `-> Foo\nclass bar => ...` must not consume `class` into the
+    // return type as a metatype — it starts a class-method definition on the
+    // next line.
+    let module = parse_ok(
+        "Object subclass: Bar
+  foo -> Integer => 1
+  class bar -> Integer => 2",
+    );
+    let cls = &module.classes[0];
+    assert_eq!(cls.methods.len(), 1);
+    assert_eq!(cls.class_methods.len(), 1);
+    assert_eq!(cls.methods[0].selector.name(), "foo");
+    assert_eq!(cls.class_methods[0].selector.name(), "bar");
+    // And `foo`'s return type is a plain Simple(Integer), not ClassOf
+    let ret_ty = cls.methods[0].return_type.as_ref().unwrap();
+    assert!(
+        matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "Integer"),
+        "Expected Simple(Integer), got {ret_ty:?}"
+    );
+}

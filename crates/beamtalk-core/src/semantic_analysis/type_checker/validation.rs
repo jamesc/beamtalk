@@ -673,7 +673,7 @@ impl TypeChecker {
             TypeAnnotation::SelfType { .. } => {
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
-            TypeAnnotation::SelfClass { .. } => return,
+            TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
             _ => Self::resolve_type_annotation(declared),
         };
 
