@@ -2862,7 +2862,7 @@ impl TypeChecker {
                         InferredType::Known { .. } | InferredType::Union { .. }
                     )
                 {
-                    method_subst.insert(param_eco, arg_ty.clone());
+                    Self::merge_method_local_binding(&mut method_subst, param_eco, arg_ty.clone());
                 }
             }
 
@@ -2903,7 +2903,11 @@ impl TypeChecker {
                                 && !class_type_params.contains(&decl_eco)
                                 && !hierarchy.has_class(&decl_eco)
                             {
-                                method_subst.insert(decl_eco, actual.clone());
+                                Self::merge_method_local_binding(
+                                    &mut method_subst,
+                                    decl_eco,
+                                    actual.clone(),
+                                );
                             }
                         }
                     }
@@ -2912,6 +2916,32 @@ impl TypeChecker {
         }
 
         method_subst
+    }
+
+    /// Merge a new binding for a method-local type parameter, preferring Known
+    /// types over Dynamic.
+    ///
+    /// BT-2039: When the same type parameter appears in multiple argument
+    /// positions (e.g. `Block(R) Block(R) -> R` in `ifTrue:ifFalse:`), a
+    /// last-wins `insert` could collapse a Known return type to
+    /// `Dynamic(UntypedFfi)` whenever one branch was an untyped FFI call.
+    /// Preserve the Known binding instead so the method's declared return type
+    /// survives the join.
+    fn merge_method_local_binding(
+        method_subst: &mut HashMap<EcoString, InferredType>,
+        key: EcoString,
+        new_ty: InferredType,
+    ) {
+        match method_subst.get(&key) {
+            Some(InferredType::Known { .. } | InferredType::Union { .. })
+                if matches!(new_ty, InferredType::Dynamic(_)) =>
+            {
+                // Keep the existing Known/Union — Dynamic loses.
+            }
+            _ => {
+                method_subst.insert(key, new_ty);
+            }
+        }
     }
 
     /// Infer the type of a literal value.
@@ -4591,6 +4621,62 @@ mod tests {
         // Only the Block param yields inference; Object is non-parametric
         assert_eq!(result.get("T"), Some(&InferredType::known("Integer")));
         assert_eq!(result.get("R"), Some(&InferredType::known("Integer")));
+    }
+
+    /// BT-2039: When the same method-local type parameter is unified across
+    /// multiple argument positions and one resolves to `Known` while another
+    /// resolves to `Dynamic`, the Known binding must win. Otherwise
+    /// `Block(R) Block(R) -> R` on `ifTrue:ifFalse:` collapses to `Dynamic`
+    /// whenever one branch is an untyped FFI call, triggering a spurious
+    /// "expression inferred as Dynamic in typed class" warning.
+    #[test]
+    fn bt_2039_method_local_known_beats_dynamic_across_args() {
+        let method = method_info(
+            "ifTrue:ifFalse:",
+            vec![Some("Block(R)"), Some("Block(R)")],
+            Some("R"),
+        );
+        let known_block = InferredType::Known {
+            class_name: "Block".into(),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let dynamic_block = InferredType::Known {
+            class_name: "Block".into(),
+            type_args: vec![InferredType::Dynamic(DynamicReason::UntypedFfi)],
+            provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Known branch first, Dynamic second — naive last-wins would pick Dynamic.
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[known_block.clone(), dynamic_block.clone()],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result.get("R"),
+            Some(&InferredType::known("Integer")),
+            "Known branch must win when second arg is Dynamic, got {:?}",
+            result.get("R")
+        );
+
+        // Reverse order — Dynamic first, Known second — also resolves to Known.
+        let result_rev = TypeChecker::infer_method_local_params(
+            &method,
+            &[dynamic_block, known_block],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result_rev.get("R"),
+            Some(&InferredType::known("Integer")),
+            "Known branch must win when first arg is Dynamic, got {:?}",
+            result_rev.get("R")
+        );
     }
 
     #[test]
