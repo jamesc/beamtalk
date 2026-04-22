@@ -2570,7 +2570,7 @@ impl TypeChecker {
     /// passes through as a class-named `Known("Self")`, which is wrong but
     /// matches historic behaviour for call sites that don't know the
     /// receiver).
-    fn substitute_return_type_with_self(
+    pub(super) fn substitute_return_type_with_self(
         ret_ty: &str,
         subst: &HashMap<EcoString, InferredType>,
         method_local_subst: &HashMap<EcoString, InferredType>,
