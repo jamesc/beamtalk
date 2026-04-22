@@ -942,9 +942,7 @@ impl Parser {
                 // on the next line — and must not be consumed as a metatype
                 // suffix.
                 if let TokenKind::Identifier(next) = self.current_kind() {
-                    if next.as_str() == "class"
-                        && !self.current_token().has_leading_newline()
-                    {
+                    if next.as_str() == "class" && !self.current_token().has_leading_newline() {
                         let end_span = self.current_token().span();
                         self.advance();
                         return TypeAnnotation::SelfClass {
