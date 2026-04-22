@@ -30,7 +30,7 @@ use ecow::EcoString;
 
 /// Build a `TypeAnnotation` from an `InferredType` for AST writeback.
 ///
-/// BT-2022 + CodeRabbit on PR #2059: returns a `TypeAnnotation::Generic` with
+/// `BT-2022` + `CodeRabbit` on PR #2059: returns a `TypeAnnotation::Generic` with
 /// recursive parameters when the inferred type carries `type_args`, so an
 /// inferred `List(String)` writes back as `-> List(String)` rather than the
 /// erased `-> List`. Cross-module consumers (codegen, language service) read
