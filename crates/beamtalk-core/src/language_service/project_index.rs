@@ -200,6 +200,16 @@ impl ProjectIndex {
         self.file_classes.get(file).map(Vec::as_slice)
     }
 
+    /// Returns `true` if `file` was loaded as part of the stdlib source set.
+    ///
+    /// BT-2027: `SimpleLanguageService::diagnostics` uses this to suppress the
+    /// "conflicts with a stdlib class" shadowing check for stdlib files
+    /// themselves (which would otherwise flag every class they define).
+    #[must_use]
+    pub fn is_stdlib_file(&self, file: &Utf8PathBuf) -> bool {
+        self.stdlib_files.contains(file)
+    }
+
     /// Returns cross-file `ClassInfo` entries for diagnostic computation (BT-2009).
     ///
     /// Returns all `ClassInfo` entries from the merged hierarchy that were NOT

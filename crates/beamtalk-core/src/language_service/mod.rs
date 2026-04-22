@@ -912,7 +912,16 @@ impl LanguageService for SimpleLanguageService {
                 // the ProjectIndex are passed so type checking, @expect
                 // directives, and all post-analysis passes run identically.
                 let cross_file_classes = self.project_index.cross_file_class_infos_for(file);
+                // BT-2027: Stdlib source files must be analysed with
+                // `stdlib_mode = true` so the "conflicts with a stdlib class"
+                // shadowing check (BT-738) doesn't flag every class the file
+                // legitimately defines.
+                let mut options = crate::CompilerOptions::default();
+                if self.project_index.is_stdlib_file(file) {
+                    options.stdlib_mode = true;
+                }
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
+                    options,
                     cross_file_classes,
                     native_type_registry: self.native_types.clone(),
                     ..Default::default()
@@ -2782,5 +2791,67 @@ mod tests {
         assert!(refs.iter().any(|r| r.file == file_proto));
         assert!(refs.iter().any(|r| r.file == file_logger));
         assert!(refs.iter().any(|r| r.file == file_sortable));
+    }
+
+    /// BT-2027: `SimpleLanguageService::diagnostics` must hand off the
+    /// cross-file class set from the `ProjectIndex` to the unified diagnostic
+    /// pipeline, so that a file referencing a class defined elsewhere does
+    /// not produce a spurious `UnresolvedClass` diagnostic.
+    #[test]
+    fn diagnostics_resolve_cross_file_class_via_project_index() {
+        use crate::source_analysis::DiagnosticCategory;
+
+        let mut service = SimpleLanguageService::new();
+        let src_file = Utf8PathBuf::from("src/Foo.bt");
+        let test_file = Utf8PathBuf::from("test/FooTest.bt");
+
+        service.update_file(
+            src_file.clone(),
+            "Object subclass: Foo\n  class demo => 42\n".to_string(),
+        );
+        service.update_file(
+            test_file.clone(),
+            "Object subclass: FooTest\n  class run =>\n    Foo demo\n".to_string(),
+        );
+
+        let diags = service.diagnostics(&test_file);
+        let unresolved: Vec<_> = diags
+            .iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::UnresolvedClass))
+            .collect();
+        assert!(
+            unresolved.is_empty(),
+            "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
+        );
+    }
+
+    /// BT-2027: Opening a stdlib source file must not emit "conflicts with
+    /// stdlib class" diagnostics for every class the file defines. The
+    /// language service now sets `stdlib_mode = true` for files tracked as
+    /// stdlib in the `ProjectIndex`.
+    #[test]
+    fn diagnostics_skip_stdlib_shadowing_for_stdlib_files() {
+        use crate::language_service::project_index::ProjectIndex;
+
+        // Pre-index a stdlib file defining `Counter`.
+        let stdlib_path = Utf8PathBuf::from("stdlib/src/Counter.bt");
+        let stdlib_source = "Object subclass: Counter\n  class zero => 0\n".to_string();
+        let (index_result, _) =
+            ProjectIndex::with_stdlib(&[(stdlib_path.clone(), stdlib_source.clone())]);
+        let index = index_result.unwrap();
+
+        let mut service = SimpleLanguageService::with_project_index(index);
+        // Re-register through update_file so `files` has an entry for it.
+        service.update_file(stdlib_path.clone(), stdlib_source);
+
+        let diags = service.diagnostics(&stdlib_path);
+        let shadowing: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("conflicts with a stdlib class"))
+            .collect();
+        assert!(
+            shadowing.is_empty(),
+            "stdlib files should not emit stdlib-shadowing diagnostics, got: {shadowing:?}"
+        );
     }
 }

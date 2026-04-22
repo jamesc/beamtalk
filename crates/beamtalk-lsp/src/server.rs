@@ -467,6 +467,24 @@ impl Backend {
         }])
     }
 
+    /// Republishes diagnostics for every currently-open file.
+    ///
+    /// BT-2027: Called once preload completes so that any file opened before
+    /// the project index was fully populated has its diagnostics recomputed
+    /// against the complete hierarchy. Stale `unresolved_class` warnings
+    /// against now-indexed classes self-heal without user intervention.
+    async fn republish_open_diagnostics(&self) {
+        let paths: Vec<Utf8PathBuf> = {
+            let versions = self.versions.lock().expect("versions lock poisoned");
+            versions.keys().cloned().collect()
+        };
+        for path in paths {
+            if let Ok(uri) = Url::from_file_path(path.as_std_path()) {
+                self.publish_diagnostics(&uri).await;
+            }
+        }
+    }
+
     /// Publishes diagnostics for a file after every change.
     async fn publish_diagnostics(&self, uri: &Url) {
         // Stdlib virtual documents have no user-facing diagnostics.
@@ -558,6 +576,14 @@ impl LanguageServer for Backend {
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
             self.load_type_cache(&config.roots).await;
+
+            // BT-2027: Re-publish diagnostics for every open file after preload
+            // completes. If a file was opened via `did_open` before preload
+            // finished (or against an incomplete project index), its initial
+            // diagnostics may contain stale `unresolved_class` warnings against
+            // classes that have since been indexed. Republishing self-heals
+            // those without requiring the user to touch the file.
+            self.republish_open_diagnostics().await;
         }
 
         // Resolve OTP lib dir for FFI goto-definition.
@@ -1162,19 +1188,25 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
 
     let preload_walker = FileWalker::preload_files(remaining_budget);
 
+    // BT-2027: Preload both `src/` and `test/` so that opening a file in
+    // `test/` immediately sees classes defined in `src/` (and vice versa).
+    // Before this, the LSP would report spurious `Unresolved class` for every
+    // test-to-src reference until the user touched the src file manually.
     for root in &roots {
-        if remaining_budget == 0 {
-            break;
-        }
-        let src_dir = root.join("src");
-        if src_dir.is_dir() {
-            if let Ok(found) = preload_walker
-                .clone()
-                .max_files(remaining_budget)
-                .walk_pathbuf(&src_dir)
-            {
-                remaining_budget = remaining_budget.saturating_sub(found.len());
-                user_paths.extend(found);
+        for subdir in ["src", "test"] {
+            if remaining_budget == 0 {
+                break;
+            }
+            let dir = root.join(subdir);
+            if dir.is_dir() {
+                if let Ok(found) = preload_walker
+                    .clone()
+                    .max_files(remaining_budget)
+                    .walk_pathbuf(&dir)
+                {
+                    remaining_budget = remaining_budget.saturating_sub(found.len());
+                    user_paths.extend(found);
+                }
             }
         }
     }
@@ -1989,6 +2021,41 @@ mod tests {
         assert_eq!(loaded.stdlib_files.len(), 1);
         assert!(loaded.user_files[0].0.ends_with("User.bt"));
         assert!(loaded.stdlib_files[0].0.ends_with("Integer.bt"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2027: Preload must walk both `src/` and `test/`. Before this fix,
+    /// opening a `test/` file in the LSP reported spurious `Unresolved class`
+    /// for every reference to a `src/` class.
+    #[test]
+    fn collect_preload_files_walks_src_and_test() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_test_dir");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        let test_dir = project_root.join("test");
+
+        fs::create_dir_all(&src_dir).expect("create src dir");
+        fs::create_dir_all(&test_dir).expect("create test dir");
+
+        fs::write(src_dir.join("Foo.bt"), "Object subclass: Foo").expect("write src file");
+        fs::write(test_dir.join("FooTest.bt"), "Object subclass: FooTest")
+            .expect("write test file");
+
+        let config = PreloadConfig {
+            roots: vec![project_root],
+            stdlib_dirs: vec![],
+        };
+        let loaded = collect_preload_files(config);
+
+        assert_eq!(loaded.user_files.len(), 2);
+        assert!(loaded.user_files.iter().any(|(p, _)| p.ends_with("Foo.bt")));
+        assert!(
+            loaded
+                .user_files
+                .iter()
+                .any(|(p, _)| p.ends_with("FooTest.bt"))
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }

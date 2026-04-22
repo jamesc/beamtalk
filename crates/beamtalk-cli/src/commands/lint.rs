@@ -88,35 +88,21 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // type/DNU diagnostics in Pass 2 match what `build` emits. Without this,
     // `@expect` annotations that suppress real cross-file diagnostics during
     // build would be reported as stale by lint.
-    let mut all_class_infos = Vec::new();
-    let mut parsed_files: Vec<(
-        Utf8PathBuf,
-        String,
-        beamtalk_core::ast::Module,
-        Vec<beamtalk_core::source_analysis::Diagnostic>,
-    )> = Vec::new();
-
-    for file in &source_files {
-        let source = std::fs::read_to_string(file)
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
-
-        let tokens = lex_with_eof(&source);
-        let (module, parse_diags) = parse(tokens);
-
-        all_class_infos
-            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
-
-        parsed_files.push((file.clone(), source, module, parse_diags));
-    }
+    //
+    // BT-2027: When the lint target is a subset of a package (e.g. `test/` or a
+    // single file), extraction must still cover the full package source set so
+    // classes defined in sibling directories (`src/` from `test/`, etc.) are
+    // visible. Otherwise a test file that references a `src/` class produces
+    // spurious `Unresolved class` diagnostics.
+    let package_root = find_package_root(&source_path);
+    let (mut all_class_infos, parsed_files) =
+        parse_and_extract_class_infos(&source_files, package_root.as_deref())?;
 
     // Resolve dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
     // diagnostics would be reported as stale.
-    // Walk ancestors to find the package root (directory containing beamtalk.toml),
-    // since the lint target may be a subdirectory or single file.
-    if let Some(project_root) = find_package_root(&source_path) {
-        resolve_dep_class_infos(&project_root, &mut all_class_infos);
+    if let Some(ref project_root) = package_root {
+        resolve_dep_class_infos(project_root, &mut all_class_infos);
     }
 
     // Pass 2: Analyse each file with cross-file class context.
@@ -295,14 +281,117 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
     Ok(count)
 }
 
+/// Collect all `.bt` files in the package's conventional source directories
+/// (`src/` and `test/`) plus any explicitly-targeted lint files that fall
+/// outside those directories.
+///
+/// BT-2027: Used so that `beamtalk lint test/` or `beamtalk lint src/foo.bt`
+/// extracts class metadata from the full package source set, not just the
+/// path the user passed. Without this, a test file that references a `src/`
+/// class produces spurious `Unresolved class` diagnostics.
+fn collect_package_class_files(
+    package_root: &Utf8Path,
+    target_files: &[Utf8PathBuf],
+) -> Vec<Utf8PathBuf> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
+    let mut out: Vec<Utf8PathBuf> = Vec::new();
+
+    for subdir in ["src", "test"] {
+        let dir = package_root.join(subdir);
+        if dir.is_dir() {
+            match FileWalker::source_files().walk(&dir) {
+                Ok(files) => {
+                    for f in files {
+                        if seen.insert(f.clone()) {
+                            out.push(f);
+                        }
+                    }
+                }
+                Err(e) => warn!("failed to walk '{dir}' for cross-file class extraction: {e}"),
+            }
+        }
+    }
+
+    // Ensure explicitly-targeted files are always included, even if they live
+    // outside `src/`/`test/` (e.g. a one-off file at the package root).
+    for f in target_files {
+        if seen.insert(f.clone()) {
+            out.push(f.clone());
+        }
+    }
+
+    out
+}
+
+/// Parse each lint target and collect class-info metadata from the package's
+/// full source set (src/ + test/) so cross-file class resolution works for
+/// partial-path lint targets (BT-2027).
+///
+/// Returns `(all_class_infos, parsed_files)` where `parsed_files` contains only
+/// the files the user asked to lint; sibling files walked purely for
+/// class-info extraction are dropped.
+type ParsedLintFile = (
+    Utf8PathBuf,
+    String,
+    beamtalk_core::ast::Module,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+);
+
+fn parse_and_extract_class_infos(
+    source_files: &[Utf8PathBuf],
+    package_root: Option<&Utf8Path>,
+) -> Result<(
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    Vec<ParsedLintFile>,
+)> {
+    let extraction_files = match package_root {
+        Some(root) => collect_package_class_files(root, source_files),
+        None => source_files.to_vec(),
+    };
+
+    let source_file_set: std::collections::HashSet<&Utf8PathBuf> = source_files.iter().collect();
+    let mut all_class_infos = Vec::new();
+    let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
+
+    for file in &extraction_files {
+        let source = std::fs::read_to_string(file)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
+
+        let tokens = lex_with_eof(&source);
+        let (module, parse_diags) = parse(tokens);
+
+        all_class_infos
+            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
+
+        if source_file_set.contains(file) {
+            parsed_files.push((file.clone(), source, module, parse_diags));
+        }
+    }
+
+    Ok((all_class_infos, parsed_files))
+}
+
 /// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
 ///
 /// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
+///
+/// BT-2027: Relative paths like `test/` or `src/foo.bt` are canonicalized
+/// before ancestor walking so that the search reaches the real package root
+/// rather than bailing out when the short relative path runs out of parents.
 pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
-    let start_dir = if start.is_file() {
-        start.parent()?
+    // Canonicalize so relative paths (e.g. `test/` invoked from the package
+    // root) have enough ancestors to walk up to the manifest.
+    let canonical: Utf8PathBuf = std::fs::canonicalize(start.as_std_path())
+        .ok()
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .unwrap_or_else(|| start.to_path_buf());
+
+    let start_dir: &Utf8Path = if canonical.is_file() {
+        canonical.parent()?
     } else {
-        start
+        canonical.as_path()
     };
 
     let mut dir = start_dir;
@@ -626,5 +715,101 @@ mod tests {
             text.contains(&format!("Total{:>15}", summary.total())),
             "Text should contain total count, got: {text}"
         );
+    }
+
+    /// BT-2027: Regression — linting `test/` in a package must pull class
+    /// infos from sibling `src/` so references to src-defined classes resolve.
+    #[test]
+    fn lint_on_test_dir_resolves_sibling_src_classes() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"xpkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        let test = root.join("test");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&test).unwrap();
+        std::fs::write(
+            src.join("foo.bt"),
+            "Object subclass: Foo\n  class demo => 42\n",
+        )
+        .unwrap();
+        std::fs::write(
+            test.join("foo_test.bt"),
+            "Object subclass: FooTest\n  class run =>\n    Foo demo\n",
+        )
+        .unwrap();
+
+        // Emulate what run_lint does: walk the `test/` directory, but extract
+        // class infos from the full package source set (src/ + test/).
+        let test_utf8 = camino::Utf8PathBuf::from_path_buf(test.clone()).unwrap();
+        let test_files = collect_source_files_from_dir(&test_utf8).unwrap();
+        let pkg_root = find_package_root(&test_utf8).expect("package root must be found");
+        let extraction_files = collect_package_class_files(&pkg_root, &test_files);
+
+        let mut all_class_infos = Vec::new();
+        for file in &extraction_files {
+            let source = std::fs::read_to_string(file).unwrap();
+            let tokens = lex_with_eof(&source);
+            let (module, _) = parse(tokens);
+            all_class_infos.extend(
+                beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module),
+            );
+        }
+
+        // Now lint-analyse the test file with the full class info set.
+        let test_source = std::fs::read_to_string(test.join("foo_test.bt")).unwrap();
+        let tokens = lex_with_eof(&test_source);
+        let (module, parse_diags) = parse(tokens);
+        let cross_file_classes =
+            beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
+                &all_class_infos,
+                &module,
+            );
+        let diags = collect_diagnostics(&module, parse_diags, cross_file_classes);
+
+        let unresolved: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.category
+                    == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass)
+            })
+            .collect();
+        assert!(
+            unresolved.is_empty(),
+            "test/ file should resolve src/ classes, got unresolved: {unresolved:?}"
+        );
+    }
+
+    /// BT-2027: `find_package_root` must work for relative paths like `test/`
+    /// by canonicalizing the start path.
+    ///
+    /// Serialized on `cwd` because it temporarily mutates the process working
+    /// directory, matching the convention used by tests in `run.rs` / `test.rs`.
+    #[test]
+    #[serial_test::serial(cwd)]
+    fn find_package_root_canonicalizes_relative_paths() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let test_dir = root.join("test");
+        std::fs::create_dir_all(&test_dir).unwrap();
+
+        // Run the check from the package root with a relative argument.
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+        let relative = camino::Utf8PathBuf::from("test");
+        let found = find_package_root(&relative);
+        std::env::set_current_dir(prev_cwd).unwrap();
+
+        let expected = camino::Utf8PathBuf::from_path_buf(root.canonicalize().unwrap()).unwrap();
+        assert_eq!(found, Some(expected));
     }
 }
