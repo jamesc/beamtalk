@@ -565,15 +565,42 @@ impl TypeChecker {
             Expression::Cascade {
                 receiver, messages, ..
             } => {
-                let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
-                let (cascade_target, dispatch_ty) = match receiver.as_ref() {
-                    Expression::MessageSend {
-                        receiver: inner, ..
-                    } => {
-                        let inner_ty = self.infer_expr(inner, hierarchy, env, in_abstract_method);
-                        (inner.as_ref(), inner_ty)
-                    }
-                    _ => (receiver.as_ref(), send_ty.clone()),
+                // BT-2035: to avoid walking the inner receiver subtree twice
+                // (which would double-emit any DNU / type diagnostics it
+                // produces), we infer the inner type once and thread it into
+                // the first send's inference via `infer_message_send_with_receiver_ty`.
+                let (send_ty, cascade_target, dispatch_ty) = if let Expression::MessageSend {
+                    receiver: inner,
+                    selector: inner_sel,
+                    arguments: inner_args,
+                    span: inner_span,
+                    is_cast: false,
+                    ..
+                } = receiver.as_ref()
+                {
+                    let inner_ty = self.infer_expr(inner, hierarchy, env, in_abstract_method);
+                    let send_ty = self.infer_message_send_with_receiver_ty(
+                        inner,
+                        inner_ty.clone(),
+                        inner_sel,
+                        inner_args,
+                        *inner_span,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
+                    // The cascade's first-send node (the outer `MessageSend`
+                    // that is `receiver`) bypasses `infer_expr`, so record its
+                    // type in the LSP type map and run the BT-1914 Dynamic
+                    // warning for it here — mirroring `infer_expr`'s tail.
+                    self.post_process_expr_type(receiver, &send_ty);
+                    (send_ty, inner.as_ref(), inner_ty)
+                } else {
+                    // Non-MessageSend receiver (or a cast send, which short-circuits
+                    // to Dynamic): fall back to a single infer_expr; the cascade
+                    // dispatches messages to that same type.
+                    let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+                    (send_ty.clone(), receiver.as_ref(), send_ty)
                 };
                 let is_class_ref = matches!(cascade_target, Expression::ClassReference { .. });
                 for msg in messages {
@@ -743,6 +770,18 @@ impl TypeChecker {
             }
         };
 
+        self.post_process_expr_type(expr, &ty);
+        ty
+    }
+
+    /// Shared tail of [`Self::infer_expr`] — record the inferred type in the
+    /// LSP type map and emit the BT-1914 "Dynamic in typed class" warning.
+    ///
+    /// Factored out so the cascade fast-path (BT-2035) can apply the same
+    /// post-processing to the first-send `MessageSend` node, which it resolves
+    /// via `infer_message_send_with_receiver_ty` instead of routing through
+    /// `infer_expr`.
+    fn post_process_expr_type(&mut self, expr: &Expression, ty: &InferredType) {
         // Record inferred type for the expression's full span for LSP queries.
         // Dynamic types with a known reason (e.g., UnannotatedParam) are included
         // so that hover can display "Dynamic (reason)" — see BT-1912.
@@ -755,7 +794,7 @@ impl TypeChecker {
         // Only warn for root-cause Dynamic reasons (not DynamicReceiver, which is
         // propagated from a receiver that already produced its own warning).
         // Unknown is also skipped — no actionable message.
-        if let InferredType::Dynamic(reason) = &ty {
+        if let InferredType::Dynamic(reason) = ty {
             if !matches!(
                 reason,
                 DynamicReason::DynamicReceiver
@@ -778,8 +817,6 @@ impl TypeChecker {
                 }
             }
         }
-
-        ty
     }
 
     /// Bind all named variables in a destructuring `pattern` into `env` as `Dynamic`.
@@ -797,7 +834,6 @@ impl TypeChecker {
 
     /// Infer the type of a message send and validate the selector.
     #[allow(clippy::too_many_arguments)] // hierarchy + env + flag needed for recursive checking
-    #[allow(clippy::too_many_lines)] // generic substitution adds necessary branches
     fn infer_message_send(
         &mut self,
         receiver: &Expression,
@@ -809,6 +845,40 @@ impl TypeChecker {
         in_abstract_method: bool,
     ) -> InferredType {
         let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+        self.infer_message_send_with_receiver_ty(
+            receiver,
+            receiver_ty,
+            selector,
+            arguments,
+            span,
+            hierarchy,
+            env,
+            in_abstract_method,
+        )
+    }
+
+    /// Variant of [`Self::infer_message_send`] that takes a pre-computed receiver
+    /// type, avoiding a second walk of the receiver subtree.
+    ///
+    /// Used by the `Expression::Cascade` arm (BT-2035): the cascade's first send
+    /// is itself a `MessageSend`, whose inner receiver type is needed both to
+    /// resolve the first send and to dispatch the cascaded messages. Re-inferring
+    /// the inner subtree via `infer_expr` would re-emit any DNU / type warnings
+    /// it produces. By threading the receiver type through, we walk the inner
+    /// subtree exactly once.
+    #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
+    #[allow(clippy::too_many_lines)] // generic substitution adds necessary branches
+    fn infer_message_send_with_receiver_ty(
+        &mut self,
+        receiver: &Expression,
+        receiver_ty: InferredType,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
         let selector_name = selector.name();
 
         // Control-flow narrowing (ADR 0068 Phase 1g):

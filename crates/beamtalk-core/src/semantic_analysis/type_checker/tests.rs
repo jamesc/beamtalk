@@ -432,6 +432,51 @@ fn test_cascade_invalid_selector() {
 }
 
 #[test]
+fn test_cascade_complex_receiver_diagnostic_emitted_once() {
+    // BT-2035 regression: a cascade whose inner receiver subtree is itself
+    // a message send with a DNU must emit the DNU diagnostic exactly once.
+    // Previously the Cascade arm called `infer_expr` twice on the inner
+    // receiver — once via the outer MessageSend, once directly to extract
+    // the dispatch type — doubling any diagnostics produced by the subtree.
+    //
+    // AST for `(42 bogus) negated; abs`:
+    //   Cascade {
+    //     receiver: MessageSend { receiver: MessageSend(42, bogus),
+    //                             selector: negated, .. },
+    //     messages: [abs],
+    //   }
+    let inner_bad = msg_send(int_lit(42), MessageSelector::Unary("bogus".into()), vec![]);
+    let first_send = msg_send(inner_bad, MessageSelector::Unary("negated".into()), vec![]);
+    let module = make_module(vec![Expression::Cascade {
+        receiver: Box::new(first_send),
+        messages: vec![CascadeMessage::new(
+            MessageSelector::Unary("abs".into()),
+            vec![],
+            span(),
+        )],
+        span: span(),
+    }]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let bogus_diagnostics: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("bogus"))
+        .collect();
+    assert_eq!(
+        bogus_diagnostics.len(),
+        1,
+        "expected exactly one diagnostic for the DNU `bogus` on the inner cascade receiver, got {}: {:?}",
+        bogus_diagnostics.len(),
+        bogus_diagnostics
+            .iter()
+            .map(|d| d.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_string_methods() {
     // 'hello' length  ← String responds to length
     let module = make_module(vec![msg_send(
