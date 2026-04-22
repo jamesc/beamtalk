@@ -50,15 +50,26 @@ All source files in `src/` load automatically.
 ### 1. Start the supervision tree
 
 ```text
-> sup := AppSupervisor supervise
+> sup := (AppSupervisor supervise) unwrap
 ```
 
-`supervise` starts `AppSupervisor` as a named OTP supervisor process.
-Its two children — `EventLogger` and `WorkerPool` — start automatically.
+`supervise` starts `AppSupervisor` as a named OTP supervisor process and
+returns `Result(Self, Error)` (ADR 0080). Use `unwrap` at application boot
+/ REPL exploration where a start failure should propagate as an exception;
+use `ifOk:ifError:` / `andThen:` for recoverable flows. Its two children —
+`EventLogger` and `WorkerPool` — start automatically.
 
 ```text
 > sup count
 2
+```
+
+If you would rather branch on the result, the recoverable form reads:
+
+```text
+> (AppSupervisor supervise)
+    ifOk:    [:app | app count]
+    ifError: [:e | Logger warn: e message]
 ```
 
 ### 2. Reach named supervisors without a direct reference
@@ -82,13 +93,23 @@ reach a worker actor managed by the supervisor:
 
 ### 4. Spawn workers dynamically
 
-`startChild` asks `WorkerPool` to start a new `TaskWorker` and returns it:
+`startChild` asks `WorkerPool` to start a new `TaskWorker` and returns
+`Result(TaskWorker, Error)` (ADR 0080). `unwrap` is the boot-style path;
+`ifOk:ifError:` is the recoverable form:
 
 ```text
-> w1 := pool startChild
-> w2 := pool startChild
+> w1 := pool startChild unwrap
+> w2 := pool startChild unwrap
 > pool count
 2
+```
+
+If a start might fail at runtime, branch on the Result instead:
+
+```text
+> pool startChild
+    ifOk:    [:w | w process: 21]
+    ifError: [:e | Logger warn: e message]
 ```
 
 ### 5. Process tasks
@@ -205,9 +226,11 @@ live root supervisor instance.
 - **`DynamicSupervisor subclass:`** for pools — children added and removed at
   runtime
 - **`supervisionPolicy`** on each actor class controls restart behaviour
-- **`supervise`** starts the supervisor; **`current`** finds the live supervisor
-  instance (Supervisor/DynamicSupervisor only); **`which:`** reaches a specific
-  child actor managed by the supervisor
+- **`supervise`** starts the supervisor and returns `Result(Self, Error)`;
+  **`current`** finds the live supervisor instance (Supervisor/DynamicSupervisor
+  only); **`which:`** reaches a specific child actor managed by the supervisor.
+  Use `unwrap` for the happy-path/boot flow or `ifOk:ifError:` / `andThen:`
+  when you want to handle start failures explicitly (ADR 0080)
 - **Fault isolation is automatic** — OTP's one_for_one strategy contains crashes
   to the failing child only
 - **`[application] supervisor`** in `beamtalk.toml` wires the tree into the OTP

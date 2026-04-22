@@ -16,9 +16,10 @@ This is a [Beamtalk](https://jamesc.github.io/beamtalk) workspace demonstrating 
 - `class supervisionPolicy =>` — per-actor restart strategy (`#permanent`, `#transient`, `#temporary`)
 - `class children =>` — returns the list of child classes for the supervisor
 - `class childClass =>` — the worker class for a DynamicSupervisor
-- `supervise` — starts the supervisor (or returns the running instance)
+- `supervise` — starts the supervisor (or returns the running instance); returns `Result(Self, Error)` — use `unwrap` for boot-style call sites or `ifOk:ifError:` / `andThen:` to handle failures
 - `current` — returns the running supervisor instance by class name (Supervisor/DynamicSupervisor only)
-- `startChild` — spawns a new dynamic child
+- `startChild` / `startChild:` — spawns a new dynamic child; returns `Result(C, Error)` (child type narrowed via the `DynamicSupervisor(C)` parameter)
+- `terminate:` / `terminateChild:` — returns `Result(Nil, Error)` and is idempotent on `not_found`
 
 ## Beamtalk Syntax
 
