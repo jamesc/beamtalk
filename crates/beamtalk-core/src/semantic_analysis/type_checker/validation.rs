@@ -146,40 +146,61 @@ impl TypeChecker {
                                 class_name, hierarchy, selector, arg_types,
                             );
                         }
-                        // BT-1836: Parse parameterized return types like "Stream(Integer)"
-                        // into Known { class_name: "Stream", type_args: [Known("Integer")] }
-                        // so downstream method resolution works correctly.
+                        // BT-1836 / BT-2018: Parse parameterised return types like
+                        // `Result(List(String), Error)` into a fully-nested
+                        // `Known { class_name, type_args }` so that downstream
+                        // sends on the bound local resolve correctly.
                         //
                         // BT-1986: `Self` appearing as a (nested) type argument —
                         // e.g. `class named: -> Result(Self, Error)` on Actor —
                         // resolves to the static receiver class. This powers
                         // ADR 0079's typed-lookup API where `Counter named: #c`
                         // should infer as `Result(Counter, Error)`.
-                        let (base, args_slice) = super::type_resolver::split_generic_base(ret_ty);
-                        if let Some(inner) = args_slice {
-                            let params = super::TypeChecker::split_type_params(inner);
-                            let resolved_args: Vec<super::InferredType> = params
-                                .iter()
-                                .map(|p| {
-                                    let p_eco: EcoString = (*p).into();
-                                    if p_eco.as_str() == "Self" {
-                                        super::InferredType::known(class_name.clone())
-                                    } else if super::is_generic_type_param(&p_eco) {
-                                        super::InferredType::Dynamic(DynamicReason::Unknown)
-                                    } else {
-                                        super::InferredType::known(p_eco)
-                                    }
-                                })
-                                .collect();
-                            return super::InferredType::Known {
-                                class_name: base.into(),
-                                type_args: resolved_args,
-                                provenance: super::TypeProvenance::Substituted(
+                        //
+                        // Build the class-level substitution map (for generic
+                        // class methods like `class wrap: v :: T -> Box(T)`)
+                        // by mapping declared param types to argument types.
+                        let class_subst = Self::class_method_substitution(
+                            class_name, hierarchy, &method, arg_types,
+                        );
+                        // Self resolves to the receiver class. For a generic
+                        // receiver (e.g. `Box(T)`) we thread the inferred
+                        // type args through `self_type` so nested `Self` in
+                        // the return type — `-> Result(Self, Error)` —
+                        // resolves to `Result(Box(Integer), Error)` rather
+                        // than the erased `Result(Box, Error)`. CodeRabbit
+                        // on PR #2065.
+                        let self_type_args: Vec<InferredType> = hierarchy
+                            .get_class(class_name)
+                            .map(|info| {
+                                info.type_params
+                                    .iter()
+                                    .map(|param| {
+                                        class_subst
+                                            .get(param)
+                                            .cloned()
+                                            .unwrap_or_else(|| InferredType::known(param.clone()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let self_type = if self_type_args.is_empty() {
+                            InferredType::known(class_name.clone())
+                        } else {
+                            InferredType::Known {
+                                class_name: class_name.clone(),
+                                type_args: self_type_args,
+                                provenance: crate::semantic_analysis::TypeProvenance::Inferred(
                                     crate::source_analysis::Span::default(),
                                 ),
-                            };
-                        }
-                        return InferredType::known(ret_ty.clone());
+                            }
+                        };
+                        return super::TypeChecker::substitute_return_type_with_self(
+                            ret_ty,
+                            &class_subst,
+                            &HashMap::new(),
+                            Some(&self_type),
+                        );
                     }
                 }
                 // BT-1047: Fall back to return types inferred earlier in this pass.
@@ -191,6 +212,43 @@ impl TypeChecker {
                 InferredType::Dynamic(DynamicReason::UnannotatedReturn)
             }
         }
+    }
+
+    /// Build the class-level substitution map for a class-method call.
+    ///
+    /// Walks the method's declared parameter types and, for each parameter
+    /// whose declared type is one of the class's type parameters (e.g. `T`
+    /// in `Box(T)`), records the mapping `T -> arg_type`. The resulting map
+    /// is threaded into [`super::TypeChecker::substitute_return_type_with_self`]
+    /// so the return type's references to those params resolve to the
+    /// concrete inferred types.
+    ///
+    /// For non-generic classes (or classes with no class-method type
+    /// substitution to do), the returned map is empty.
+    ///
+    /// **References:** BT-2018 (preserve generic return types on class-method
+    /// assignments), ADR 0068 Phase 1c.
+    fn class_method_substitution(
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+        method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
+        arg_types: &[InferredType],
+    ) -> HashMap<EcoString, InferredType> {
+        let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
+        let Some(class_info) = hierarchy.get_class(class_name) else {
+            return subst;
+        };
+        if class_info.type_params.is_empty() {
+            return subst;
+        }
+        for (param_ty_opt, arg_ty) in method.param_types.iter().zip(arg_types.iter()) {
+            if let Some(param_ty) = param_ty_opt {
+                if class_info.type_params.contains(param_ty) {
+                    subst.insert(param_ty.clone(), arg_ty.clone());
+                }
+            }
+        }
+        subst
     }
 
     /// Infer the constructor return type for a generic class (ADR 0068 Phase 1c).
@@ -216,18 +274,12 @@ impl TypeChecker {
         }
 
         // Build inference map from class method param types → argument types
-        let mut inferred: HashMap<EcoString, InferredType> = HashMap::new();
-
-        if let Some(method) = hierarchy.find_class_method(class_name, selector) {
-            for (param_ty_opt, arg_ty) in method.param_types.iter().zip(arg_types.iter()) {
-                if let Some(param_ty) = param_ty_opt {
-                    // If param type is a class type param (e.g., "T"), map it to the arg type
-                    if class_info.type_params.contains(param_ty) {
-                        inferred.insert(param_ty.clone(), arg_ty.clone());
-                    }
-                }
-            }
-        }
+        // (shared with non-`Self` returns via `class_method_substitution`).
+        let mut inferred = if let Some(method) = hierarchy.find_class_method(class_name, selector) {
+            Self::class_method_substitution(class_name, hierarchy, &method, arg_types)
+        } else {
+            HashMap::new()
+        };
 
         // Build type_args in class param order, defaulting unresolved to Dynamic
         let type_args: Vec<InferredType> = class_info
