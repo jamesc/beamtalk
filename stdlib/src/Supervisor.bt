@@ -81,11 +81,13 @@ abstract Object subclass: Supervisor
   /// Registers the supervisor under its class name. Subsequent calls to
   /// `supervise` or `current` return the running instance.
   ///
-  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Supervisor, Error)`. Use
-  /// `unwrap` for boot-style "crash on failure" call sites, or
-  /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
-  /// as `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
-  class supervise -> Result(Supervisor, Error) =>
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Self, Error)` so subclass
+  /// typing is preserved (e.g. `MySupervisor supervise unwrap` is typed as
+  /// `MySupervisor`, not the abstract `Supervisor` base). Use `unwrap` for
+  /// boot-style "crash on failure" call sites, or `ifOk:ifError:` /
+  /// `andThen:` for recoverable starts. Failures surface as
+  /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  class supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Return the running supervisor instance, or nil if not started.
