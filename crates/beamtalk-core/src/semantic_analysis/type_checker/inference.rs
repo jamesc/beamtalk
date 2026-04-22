@@ -2707,17 +2707,21 @@ impl TypeChecker {
 
             // BT-1834: Handle plain (non-parametric) type param parameters.
             // e.g., `inject: initial :: A` — if A is method-local, map it to the arg type.
-            // BT-2023(A): Also handle nullable-union args (e.g. `String | Nil`) by
-            // stripping nil before matching.
+            //
+            // For a bare `A` parameter, `A` represents the *whole* argument type
+            // including any nilability. Don't strip nil here — that would turn
+            // `identity: x :: A -> A` called with `String | Nil` into `A = String`
+            // and lose the nullability in the inferred return. Nil-stripping is
+            // only safe for the outer-generic path below (`List(T)` etc.) where
+            // the union shape doesn't match the param shape anyway.
             if super::is_generic_type_param(param_type) {
                 let param_eco: EcoString = param_type.clone();
                 if !class_type_params.contains(&param_eco) && !hierarchy.has_class(&param_eco) {
-                    let effective = match arg_ty {
-                        InferredType::Union { .. } => Self::non_nil_type(arg_ty),
-                        other => other.clone(),
-                    };
-                    if let InferredType::Known { .. } = &effective {
-                        method_subst.insert(param_eco, effective);
+                    if matches!(
+                        arg_ty,
+                        InferredType::Known { .. } | InferredType::Union { .. }
+                    ) {
+                        method_subst.insert(param_eco, arg_ty.clone());
                     }
                 }
             }
@@ -4726,9 +4730,12 @@ mod tests {
 
     #[test]
     fn infer_method_local_params_plain_type_param_nullable_union() {
-        // Plain type param A with nullable union arg: String | Nil → A=String
+        // Plain type param A with nullable union arg: A binds to the whole
+        // union (String | Nil), preserving nilability through the return type.
+        // CodeRabbit on PR #2058: stripping Nil here would unsoundly turn
+        // `identity: x :: A -> A` called with `String | Nil` into `A = String`.
         let method = method_info("inject:", vec![Some("A")], Some("A"));
-        let arg = InferredType::Union {
+        let nullable = InferredType::Union {
             members: vec![
                 InferredType::known("String"),
                 InferredType::known("UndefinedObject"),
@@ -4738,15 +4745,15 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = TypeChecker::infer_method_local_params(
             &method,
-            &[arg],
+            &[nullable.clone()],
             &HashMap::new(),
             &hierarchy,
             "TestCase",
         );
         assert_eq!(
             result.get("A"),
-            Some(&InferredType::known("String")),
-            "Plain type param should unify with non-nil member of nullable union"
+            Some(&nullable),
+            "Plain type param A should bind to the full nullable union"
         );
     }
 
