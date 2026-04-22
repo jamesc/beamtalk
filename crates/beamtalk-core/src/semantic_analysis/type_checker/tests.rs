@@ -9222,6 +9222,40 @@ fn class_literal_arg_rejected_for_unrelated_param() {
 }
 
 #[test]
+fn instance_identifier_still_rejected_for_class_param() {
+    // Regression guard (CodeRabbit on PR #2071): the BT-1877 `expected == "Class"`
+    // shortcut in `is_type_compatible` previously accepted any known class name
+    // unconditionally. With BT-2038's metaclass-tower check handling class
+    // literals, that shortcut must stay scoped to class-literal arguments —
+    // a plain identifier typed as `TestCase` is an instance, not a class,
+    // and should not satisfy a `:: Class` parameter.
+    let hierarchy = test_hierarchy_with_class_literal_arg("Class");
+    let mut checker = TypeChecker::new();
+    let ident_arg = var("aTestCase");
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[InferredType::known("TestCase")],
+        span(),
+        &hierarchy,
+        false,
+        Some(std::slice::from_ref(&ident_arg)),
+        None,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "A TestCase instance (not class literal) should not type-check as Class, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        checker.diagnostics()[0].message.contains("expects Class"),
+        "got: {}",
+        checker.diagnostics()[0].message
+    );
+}
+
+#[test]
 fn instance_identifier_still_rejected_for_behaviour_param() {
     // Regression guard: the class-literal escape must NOT apply when the
     // argument is an identifier of a user class type — only class literals

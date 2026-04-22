@@ -658,8 +658,19 @@ impl TypeChecker {
                     // Short-circuit: only consult the metaclass chain when the
                     // instance-side check fails. Keeps the hot path at one
                     // `is_type_compatible` call per argument.
-                    let instance_compat =
-                        Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
+                    //
+                    // CodeRabbit on PR #2071: `is_type_compatible` has a
+                    // pre-existing BT-1877 shortcut where `expected == "Class"`
+                    // accepts any known class name unconditionally. That was a
+                    // workaround for exactly the BT-2038 problem; with the
+                    // metaclass-tower check now handling class literals
+                    // properly, the shortcut must be scoped to class-literal
+                    // arguments here so a plain `TestCase` instance does not
+                    // satisfy a `:: Class` parameter.
+                    let class_shortcut_applies =
+                        expected_ty.as_str() == "Class" && !is_class_ref_arg;
+                    let instance_compat = !class_shortcut_applies
+                        && Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
                     let class_literal_compat = !instance_compat
                         && is_class_ref_arg
                         && hierarchy.has_class(actual_ty)
