@@ -12993,7 +12993,6 @@ fn bt2022_method_return_type_cache_preserves_type_args() {
     assert_eq!(class_name.as_str(), "List", "expected List base class");
 }
 
-
 /// BT-2022: When declared inner args include a generic type parameter (T, E),
 /// the comparison should skip that arg rather than warn (type params are
 /// symbolic placeholders, not concrete types).
