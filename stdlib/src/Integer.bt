@@ -243,7 +243,9 @@ sealed typed Number subclass: Integer
   /// 3 min: 7      // => 3
   /// 10 min: 2     // => 2
   /// ```
-  min: other :: Number -> Integer =>
+  /// Return type is `Number` because `other` may be any numeric type;
+  /// if `other` is the smaller value, the result carries its runtime type.
+  min: other :: Number -> Number =>
     (self < other) ifTrue: [self] ifFalse: [other]
 
   /// Return the larger of the receiver and `other`.
@@ -253,7 +255,9 @@ sealed typed Number subclass: Integer
   /// 3 max: 7      // => 7
   /// 10 max: 2     // => 10
   /// ```
-  max: other :: Number -> Integer =>
+  /// Return type is `Number` because `other` may be any numeric type;
+  /// if `other` is the larger value, the result carries its runtime type.
+  max: other :: Number -> Number =>
     (self > other) ifTrue: [self] ifFalse: [other]
 
   /// Evaluate `block` the receiver number of times.

@@ -20,7 +20,8 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifTrue: ["yes"] ifFalse: ["no"]   // => "yes"
   /// ```
-  ifTrue: trueBlock :: Block ifFalse: _falseBlock :: Block => trueBlock value
+  ifTrue: trueBlock :: Block(R) ifFalse: _falseBlock :: Block(R) -> R =>
+    trueBlock value
 
   /// If true, evaluate `trueBlock`. Returns block result.
   ///
