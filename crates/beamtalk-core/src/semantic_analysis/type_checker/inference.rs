@@ -1081,28 +1081,19 @@ impl TypeChecker {
                         return InferredType::Dynamic(DynamicReason::Unknown);
                     }
 
-                    // BT-1576: If the return type is a generic like "Array(R)",
-                    // extract the base class name so completion/chain
-                    // resolution works.
+                    // BT-2019: Resolve the return type through the centralised
+                    // string-form parser, which preserves the full
+                    // parameterised type — `List(String)` becomes
+                    // `Known("List", [Known("String")])` rather than the
+                    // pre-fix bare `Known("List", [])` that silently dropped
+                    // the element type.
                     //
-                    // BT-2025 preserves current (buggy — type_args dropped)
-                    // behaviour here. The fix lives in the follow-up PRs
-                    // (BT-2018..BT-2023); this commit only introduces the
-                    // resolver framework, it does not flip behaviour at the
-                    // call sites. See the parent epic BT-2024. The
-                    // `base_name_of_string` helper keeps the
-                    // `no .find('(')` grep clean without altering the
-                    // (deliberately preserved) type-args-dropping behaviour.
-                    let base = super::type_resolver::base_name_of_string(ret_ty);
-                    if base.len() < ret_ty.len() {
-                        return InferredType::known(EcoString::from(base));
-                    }
-                    // BT-2017: Use resolve_type_name_string to properly parse
-                    // union return types like "Integer | Nil" into
-                    // InferredType::Union instead of Known("Integer | Nil").
-                    // Without this, locals bound from method calls that return
-                    // union types get a flat Known type, which prevents
-                    // narrowing and causes false operand-type warnings.
+                    // Also handles:
+                    //  * BT-2017: union return types like `"Integer | Nil"`
+                    //    parse into `InferredType::Union`, enabling narrowing.
+                    //  * Plain class names — pass through to `Known(name, [])`.
+                    //  * Nested generics — `Result(List(String), Error)`
+                    //    keeps both layers.
                     return Self::resolve_type_name_string(ret_ty);
                 }
             }
@@ -1575,19 +1566,12 @@ impl TypeChecker {
                             {
                                 return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
                             } else {
-                                // BT-1576 / BT-2025: preserve the existing
-                                // (type_args-dropping) behaviour but route
-                                // through the `base_name_of_string` helper
-                                // to satisfy the `no .find('(')` grep check.
-                                let base = super::type_resolver::base_name_of_string(ret_ty);
-                                if base.len() < ret_ty.len() {
-                                    return_types.push(InferredType::known(EcoString::from(base)));
-                                } else {
-                                    // BT-2017: Use resolve_type_name_string to
-                                    // properly parse union return types (e.g.
-                                    // "Integer | Nil") into InferredType::Union.
-                                    return_types.push(Self::resolve_type_name_string(ret_ty));
-                                }
+                                // BT-2019 / BT-2017: Resolve through the
+                                // centralised string-form parser to preserve
+                                // parametric type args (`List(String)` keeps
+                                // its element type) and parse union return
+                                // types into `InferredType::Union`.
+                                return_types.push(Self::resolve_type_name_string(ret_ty));
                             }
                         }
                     } else {
