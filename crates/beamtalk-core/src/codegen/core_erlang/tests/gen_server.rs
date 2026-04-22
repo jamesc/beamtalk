@@ -35,6 +35,30 @@ fn extract_core_fn<'a>(code: &'a str, marker: &str) -> Option<&'a str> {
     Some(body)
 }
 
+/// Extract the module-header export list from generated Core Erlang.
+///
+/// A Core Erlang module header looks like:
+///   module 'Name' ['export1'/0, 'export2'/1, ...]
+///     attributes [...]
+///
+/// Returns the bracketed export list as a string (without the surrounding
+/// brackets), or an empty string if no header is found. Used by tests that
+/// want to assert on the exported API surface without false-positive matches
+/// against function definitions deeper in the module body.
+fn extract_module_exports(code: &str) -> String {
+    let Some(module_start) = code.find("module '") else {
+        return String::new();
+    };
+    let after_module = &code[module_start..];
+    let Some(bracket_open) = after_module.find('[') else {
+        return String::new();
+    };
+    let Some(bracket_close) = after_module[bracket_open..].find(']') else {
+        return String::new();
+    };
+    after_module[bracket_open + 1..bracket_open + bracket_close].to_string()
+}
+
 #[test]
 fn test_generate_empty_module() {
     let module = Module::new(Vec::new(), Span::new(0, 0));
@@ -1103,30 +1127,35 @@ fn test_class_registration_generation() {
     // on. The classifier at dispatch_codegen.rs:is_class_auto_export_selector
     // must stay aligned with this export set — see its unit test for the
     // reverse direction.
+    //
+    // Scope the assertions to the module header export list so we verify the
+    // API surface, not just a substring match that could pick up function
+    // definitions or other mentions.
+    let header_exports = extract_module_exports(&code);
     assert!(
-        code.contains("'method_table'/0"),
-        "Generated class module must export method_table/0. Got:\n{code}"
+        header_exports.contains("'method_table'/0"),
+        "Generated class module must export method_table/0 in header. Got header:\n{header_exports}\n\nFull code:\n{code}"
     );
     assert!(
-        code.contains("'has_method'/1"),
-        "Generated class module must export has_method/1. Got:\n{code}"
+        header_exports.contains("'has_method'/1"),
+        "Generated class module must export has_method/1 in header. Got header:\n{header_exports}"
     );
     // And the classifier's reachable set (superclass/0, class_name/0) must
     // match what the module actually exports — these are the two auto-exports
     // reachable via plain Beamtalk self-send.
     assert!(
-        code.contains("'superclass'/0"),
-        "Generated class module must export superclass/0. Got:\n{code}"
+        header_exports.contains("'superclass'/0"),
+        "Generated class module must export superclass/0 in header. Got header:\n{header_exports}"
     );
     assert!(
-        code.contains("'class_name'/0"),
-        "Generated class module must export class_name/0. Got:\n{code}"
+        header_exports.contains("'class_name'/0"),
+        "Generated class module must export class_name/0 in header. Got header:\n{header_exports}"
     );
     // The old mistaken auto-export `methods/0` must NOT appear — it was
     // removed from the classifier after BT-2007 and no codegen site emits it.
     assert!(
-        !code.contains("'methods'/0"),
-        "Generated class module must NOT export methods/0 — removed after BT-2007. Got:\n{code}"
+        !header_exports.contains("'methods'/0"),
+        "Generated class module must NOT export methods/0 in header — removed after BT-2007. Got header:\n{header_exports}"
     );
 }
 
