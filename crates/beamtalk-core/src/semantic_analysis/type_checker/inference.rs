@@ -589,6 +589,11 @@ impl TypeChecker {
                         env,
                         in_abstract_method,
                     );
+                    // The cascade's first-send node (the outer `MessageSend`
+                    // that is `receiver`) bypasses `infer_expr`, so record its
+                    // type in the LSP type map and run the BT-1914 Dynamic
+                    // warning for it here — mirroring `infer_expr`'s tail.
+                    self.post_process_expr_type(receiver, &send_ty);
                     (send_ty, inner.as_ref(), inner_ty)
                 } else {
                     // Non-MessageSend receiver (or a cast send, which short-circuits
@@ -765,6 +770,18 @@ impl TypeChecker {
             }
         };
 
+        self.post_process_expr_type(expr, &ty);
+        ty
+    }
+
+    /// Shared tail of [`Self::infer_expr`] — record the inferred type in the
+    /// LSP type map and emit the BT-1914 "Dynamic in typed class" warning.
+    ///
+    /// Factored out so the cascade fast-path (BT-2035) can apply the same
+    /// post-processing to the first-send `MessageSend` node, which it resolves
+    /// via `infer_message_send_with_receiver_ty` instead of routing through
+    /// `infer_expr`.
+    fn post_process_expr_type(&mut self, expr: &Expression, ty: &InferredType) {
         // Record inferred type for the expression's full span for LSP queries.
         // Dynamic types with a known reason (e.g., UnannotatedParam) are included
         // so that hover can display "Dynamic (reason)" — see BT-1912.
@@ -777,7 +794,7 @@ impl TypeChecker {
         // Only warn for root-cause Dynamic reasons (not DynamicReceiver, which is
         // propagated from a receiver that already produced its own warning).
         // Unknown is also skipped — no actionable message.
-        if let InferredType::Dynamic(reason) = &ty {
+        if let InferredType::Dynamic(reason) = ty {
             if !matches!(
                 reason,
                 DynamicReason::DynamicReceiver
@@ -800,8 +817,6 @@ impl TypeChecker {
                 }
             }
         }
-
-        ty
     }
 
     /// Bind all named variables in a destructuring `pattern` into `env` as `Dynamic`.
