@@ -1806,10 +1806,18 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         Ok(files) => files,
         Err(result) => {
             // BT-2031: Surface the actual error (permission, IO, path-not-found)
-            // instead of collapsing to a generic "no files found" message.
+            // instead of collapsing to a generic "no files found" message. Include
+            // the file context from the diagnostic since the message alone may not
+            // name the offending path.
             let error_msg = result.errors.first().map_or_else(
                 || format!("No .bt source files found in '{path}'"),
-                |e| e.message.clone(),
+                |e| {
+                    if e.file.is_empty() {
+                        format!("{}: {}", path, e.message)
+                    } else {
+                        format!("{}: {}", e.file, e.message)
+                    }
+                },
             );
             return serde_json::json!({
                 "error": error_msg,
