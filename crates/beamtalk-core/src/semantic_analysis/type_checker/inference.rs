@@ -109,25 +109,22 @@ impl TypeChecker {
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
+                // BT-2022: Cache the full InferredType (including type_args)
+                // so callers see e.g. List(String) instead of bare List.
                 if method.return_type.is_none()
                     && !method
                         .body
                         .iter()
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
-                    let inferred_name = match &body_type {
-                        InferredType::Known {
-                            class_name: inferred,
-                            ..
-                        } => Some(inferred.clone()),
-                        InferredType::Never => Some(EcoString::from("Never")),
-                        _ => None,
-                    };
-                    if let Some(inferred) = inferred_name {
-                        self.method_return_types.insert(
-                            (class.name.name.clone(), method.selector.name(), false),
-                            inferred,
-                        );
+                    match &body_type {
+                        InferredType::Known { .. } | InferredType::Never => {
+                            self.method_return_types.insert(
+                                (class.name.name.clone(), method.selector.name(), false),
+                                body_type.clone(),
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -146,25 +143,21 @@ impl TypeChecker {
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
+                // BT-2022: Cache the full InferredType (including type_args)
                 if method.return_type.is_none()
                     && !method
                         .body
                         .iter()
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
-                    let inferred_name = match &body_type {
-                        InferredType::Known {
-                            class_name: inferred,
-                            ..
-                        } => Some(inferred.clone()),
-                        InferredType::Never => Some(EcoString::from("Never")),
-                        _ => None,
-                    };
-                    if let Some(inferred) = inferred_name {
-                        self.method_return_types.insert(
-                            (class.name.name.clone(), method.selector.name(), true),
-                            inferred,
-                        );
+                    match &body_type {
+                        InferredType::Known { .. } | InferredType::Never => {
+                            self.method_return_types.insert(
+                                (class.name.name.clone(), method.selector.name(), true),
+                                body_type.clone(),
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -204,6 +197,7 @@ impl TypeChecker {
             );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
             self.check_no_self_in_params(&standalone.method, class_name);
+            // BT-2022: Cache the full InferredType (including type_args)
             if standalone.method.return_type.is_none()
                 && !standalone
                     .method
@@ -211,23 +205,18 @@ impl TypeChecker {
                     .iter()
                     .any(|s| matches!(s.expression, Expression::Primitive { .. }))
             {
-                let inferred_name = match &body_type {
-                    InferredType::Known {
-                        class_name: inferred,
-                        ..
-                    } => Some(inferred.clone()),
-                    InferredType::Never => Some(EcoString::from("Never")),
-                    _ => None,
-                };
-                if let Some(inferred) = inferred_name {
-                    self.method_return_types.insert(
-                        (
-                            class_name.clone(),
-                            standalone.method.selector.name(),
-                            standalone.is_class_method,
-                        ),
-                        inferred,
-                    );
+                match &body_type {
+                    InferredType::Known { .. } | InferredType::Never => {
+                        self.method_return_types.insert(
+                            (
+                                class_name.clone(),
+                                standalone.method.selector.name(),
+                                standalone.is_class_method,
+                            ),
+                            body_type.clone(),
+                        );
+                    }
+                    _ => {}
                 }
             }
 
@@ -1121,12 +1110,11 @@ impl TypeChecker {
             // BT-1047: Fall back to return types inferred earlier in this same pass.
             // Method bodies are processed before top-level expressions, so inferred
             // return types are available for chain resolution without a second pass.
+            // BT-2022: Return the full InferredType from the cache, preserving
+            // type_args so callers see e.g. List(String) instead of bare List.
             let key = (class_name.clone(), selector_name.clone(), false);
             if let Some(ret_ty) = self.method_return_types.get(&key) {
-                if ret_ty.as_str() == "Never" {
-                    return InferredType::Never;
-                }
-                return InferredType::known(ret_ty.clone());
+                return ret_ty.clone();
             }
         }
 

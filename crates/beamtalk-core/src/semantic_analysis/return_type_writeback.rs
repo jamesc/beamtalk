@@ -24,7 +24,19 @@
 
 use crate::ast::{Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::semantic_analysis::type_checker::infer_method_return_types;
+use crate::semantic_analysis::type_checker::{InferredType, infer_method_return_types};
+use ecow::EcoString;
+
+/// Extract a class name suitable for `TypeAnnotation::simple` from an
+/// `InferredType`. Returns `Some(name)` for `Known` and `Never`, `None`
+/// for `Dynamic` and `Union` (which should not be written back).
+fn writeback_name(ty: &InferredType) -> Option<EcoString> {
+    match ty {
+        InferredType::Known { class_name, .. } => Some(class_name.clone()),
+        InferredType::Never => Some(EcoString::from("Never")),
+        _ => None,
+    }
+}
 
 /// Writes inferred return types back into `MethodDefinition.return_type` for
 /// unannotated methods where body inference resolves to a known class name.
@@ -40,14 +52,19 @@ use crate::semantic_analysis::type_checker::infer_method_return_types;
 pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarchy) {
     let inferred = infer_method_return_types(module, hierarchy);
 
+    // BT-2022: The inferred map now stores InferredType. For writeback we
+    // extract the class name to create a simple TypeAnnotation. Known types
+    // use `as_known()`, Never uses "Never" directly.
     for class in &mut module.classes {
         for method in &mut class.methods {
             if method.return_type.is_some() {
                 continue;
             }
             let key = (class.name.name.clone(), method.selector.name(), false);
-            if let Some(class_name) = inferred.get(&key) {
-                method.return_type = Some(TypeAnnotation::simple(class_name.clone(), method.span));
+            if let Some(inferred_ty) = inferred.get(&key) {
+                if let Some(name) = writeback_name(inferred_ty) {
+                    method.return_type = Some(TypeAnnotation::simple(name, method.span));
+                }
             }
         }
 
@@ -56,8 +73,10 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
                 continue;
             }
             let key = (class.name.name.clone(), method.selector.name(), true);
-            if let Some(class_name) = inferred.get(&key) {
-                method.return_type = Some(TypeAnnotation::simple(class_name.clone(), method.span));
+            if let Some(inferred_ty) = inferred.get(&key) {
+                if let Some(name) = writeback_name(inferred_ty) {
+                    method.return_type = Some(TypeAnnotation::simple(name, method.span));
+                }
             }
         }
     }
@@ -71,11 +90,11 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             standalone.method.selector.name(),
             standalone.is_class_method,
         );
-        if let Some(class_name) = inferred.get(&key) {
-            standalone.method.return_type = Some(TypeAnnotation::simple(
-                class_name.clone(),
-                standalone.method.span,
-            ));
+        if let Some(inferred_ty) = inferred.get(&key) {
+            if let Some(name) = writeback_name(inferred_ty) {
+                standalone.method.return_type =
+                    Some(TypeAnnotation::simple(name, standalone.method.span));
+            }
         }
     }
 }

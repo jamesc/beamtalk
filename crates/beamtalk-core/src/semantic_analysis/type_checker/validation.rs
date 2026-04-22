@@ -183,9 +183,10 @@ impl TypeChecker {
                     }
                 }
                 // BT-1047: Fall back to return types inferred earlier in this pass.
+                // BT-2022: Return the full InferredType (including type_args).
                 let key = (class_name.clone(), EcoString::from(selector), true);
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
-                    return InferredType::known(ret_ty.clone());
+                    return ret_ty.clone();
                 }
                 InferredType::Dynamic(DynamicReason::UnannotatedReturn)
             }
@@ -630,6 +631,7 @@ impl TypeChecker {
     }
 
     /// Check that a method body's inferred return type matches its declared return type.
+    #[allow(clippy::too_many_lines)] // BT-2022 added type_args comparison arm
     pub(super) fn check_return_type(
         &mut self,
         method: &crate::ast::MethodDefinition,
@@ -651,6 +653,7 @@ impl TypeChecker {
         };
         let InferredType::Known {
             class_name: actual_ty,
+            type_args: actual_args,
             ..
         } = body_type
         else {
@@ -664,11 +667,12 @@ impl TypeChecker {
         // comparison cannot meaningfully validate this, so skip (BT-1952).
         //
         // BT-2025: All other arms — including `Generic` — go through the
-        // central `resolve_type_annotation` resolver. Previously the Generic
-        // arm dropped `type_args` via `InferredType::known(base.name)`;
-        // behaviour is preserved here because the downstream
-        // `is_type_compatible(actual_ty, expected_ty, ...)` comparison looks
-        // only at the `class_name`, never at the type args.
+        // central `resolve_type_annotation` resolver.
+        //
+        // BT-2022: The resolver now preserves type_args, and the comparison
+        // below checks them when both sides carry generic arguments. This
+        // closes the bug where `-> Result(Integer, Error)` with body
+        // `Result(String, Error)` produced no warning.
         let expected = match declared {
             TypeAnnotation::SelfType { .. } => {
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy)
@@ -680,19 +684,53 @@ impl TypeChecker {
         match &expected {
             InferredType::Known {
                 class_name: expected_ty,
+                type_args: expected_args,
                 ..
             } => {
-                if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                // Check base class compatibility, then inner type args (BT-2022).
+                let base_mismatch = !Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
+                // BT-2022: When the base class matches, also verify inner type args
+                // match. Only compare when both sides have the same arity of type
+                // args. Skip generic type param placeholders (T, E, etc.) since
+                // those are symbolic, not concrete.
+                let args_mismatch = !base_mismatch
+                    && !expected_args.is_empty()
+                    && !actual_args.is_empty()
+                    && expected_args.len() == actual_args.len()
+                    && expected_args
+                        .iter()
+                        .zip(actual_args.iter())
+                        .any(|(exp_arg, act_arg)| {
+                            let Some(exp_name) = exp_arg.as_known() else {
+                                return false; // Dynamic expected arg — can't check
+                            };
+                            let Some(act_name) = act_arg.as_known() else {
+                                return false; // Dynamic actual arg — can't check
+                            };
+                            if super::is_generic_type_param(exp_name)
+                                || super::is_generic_type_param(act_name)
+                            {
+                                return false;
+                            }
+                            !Self::is_type_compatible(act_name, exp_name, hierarchy)
+                        });
+                if base_mismatch || args_mismatch {
+                    let expected_display = expected
+                        .display_name()
+                        .unwrap_or_else(|| expected_ty.clone());
+                    let actual_display = body_type
+                        .display_name()
+                        .unwrap_or_else(|| actual_ty.clone());
                     let selector = method.selector.name();
                     self.diagnostics.push(
                         Diagnostic::warning(
                             format!(
-                                "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
+                                "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {actual_display}"
                             ),
                             method.span,
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}")),
+                        .with_hint(format!("Declared -> {expected_display}, inferred body type is {actual_display}")),
                     );
                 }
             }

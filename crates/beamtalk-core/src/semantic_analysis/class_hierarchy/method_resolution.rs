@@ -7,6 +7,7 @@
 //! ancestor checks, DNU override detection, and return-type inference application.
 
 use crate::ast::MethodKind;
+use crate::semantic_analysis::type_checker::InferredType;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
@@ -381,13 +382,28 @@ impl ClassHierarchy {
     ///
     /// # Arguments
     ///
-    /// * `inferred` — map from `(ClassName, Selector, IsClassMethod)` to return type name,
+    /// * `inferred` — map from `(ClassName, Selector, IsClassMethod)` to inferred type,
     ///   as returned by `infer_method_return_types`.
+    ///
+    /// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString`.
+    /// For hierarchy enrichment we extract the display name (which includes
+    /// generic type args, e.g. `"List(String)"`) so downstream consumers see
+    /// the full parametric return type.
     pub fn apply_inferred_return_types(
         &mut self,
-        inferred: &HashMap<(EcoString, EcoString, bool), EcoString>,
+        inferred: &HashMap<(EcoString, EcoString, bool), InferredType>,
     ) {
-        for ((class_name, selector, is_class_method), return_type) in inferred {
+        for ((class_name, selector, is_class_method), inferred_ty) in inferred {
+            // Extract display name: "List(String)" for Known with type_args,
+            // "Integer" for Known without, "Never" for Never.
+            let return_type_name = match inferred_ty {
+                InferredType::Known { .. } => inferred_ty.display_name(),
+                InferredType::Never => Some(EcoString::from("Never")),
+                _ => None,
+            };
+            let Some(return_type) = return_type_name else {
+                continue;
+            };
             if let Some(class_info) = self.classes.get_mut(class_name) {
                 let methods = if *is_class_method {
                     &mut class_info.class_methods
