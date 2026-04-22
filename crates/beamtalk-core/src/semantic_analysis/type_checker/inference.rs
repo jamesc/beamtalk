@@ -581,14 +581,12 @@ impl TypeChecker {
                     Expression::MessageSend {
                         receiver: inner, ..
                     } => {
-                        let inner_ty =
-                            self.infer_expr(inner, hierarchy, env, in_abstract_method);
+                        let inner_ty = self.infer_expr(inner, hierarchy, env, in_abstract_method);
                         (inner.as_ref(), inner_ty)
                     }
                     _ => (receiver.as_ref(), send_ty.clone()),
                 };
-                let is_class_ref =
-                    matches!(cascade_target, Expression::ClassReference { .. });
+                let is_class_ref = matches!(cascade_target, Expression::ClassReference { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     self.infer_args_with_block_context(
@@ -630,12 +628,7 @@ impl TypeChecker {
                         }
                     } else if let InferredType::Union { ref members, .. } = dispatch_ty {
                         // Union cascades: validate selector on all members
-                        self.infer_union_message_send(
-                            members,
-                            &selector_name,
-                            msg.span,
-                            hierarchy,
-                        );
+                        self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
                     }
                 }
                 send_ty
