@@ -15,7 +15,7 @@
 /// #{#name => "Alice"} at: #name               // => "Alice"
 /// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
 /// ```
-sealed typed Collection subclass: Dictionary(K, V)
+sealed typed Collection(V) subclass: Dictionary(K, V)
 
   /// Number of key-value pairs.
   ///

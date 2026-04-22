@@ -17,7 +17,7 @@
 /// #(1, 2, 3) first         // => 1
 /// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
 /// ```
-sealed typed Collection subclass: List(E)
+sealed typed Collection(E) subclass: List(E)
 
   /// Create a List from a list (identity — a list is already a List).
   ///
@@ -28,7 +28,7 @@ sealed typed Collection subclass: List(E)
   /// ```beamtalk
   /// List class withAll: #(1, 2, 3)   // => #(1, 2, 3)
   /// ```
-  class withAll: list :: List -> List(E) => @primitive "withAll:"
+  class withAll: list :: List(E) -> List(E) => @primitive "withAll:"
 
   /// Create a List from a list. Convenience alias for `withAll:`.
   ///
@@ -36,7 +36,7 @@ sealed typed Collection subclass: List(E)
   /// ```beamtalk
   /// List new: #(1, 2, 3)             // => #(1, 2, 3)
   /// ```
-  class new: elements :: List -> List(E) => self withAll: elements
+  class new: elements :: List(E) -> List(E) => self withAll: elements
 
   /// Number of elements in the list.
   ///
