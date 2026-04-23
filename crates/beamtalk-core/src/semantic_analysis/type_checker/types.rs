@@ -247,23 +247,31 @@ impl InferredType {
         }
         let is_ident_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
         let mut out = String::with_capacity(name.len());
-        let mut remaining = name;
-        while let Some(idx) = remaining.find(TARGET) {
-            out.push_str(&remaining[..idx]);
-            let before_ok = remaining[..idx]
+        let mut cursor = 0;
+        while let Some(rel) = name[cursor..].find(TARGET) {
+            let start = cursor + rel;
+            let end = start + TARGET.len();
+            out.push_str(&name[cursor..start]);
+            // Use the original `name` for both boundary checks — the cursor
+            // walks forward, but the char immediately before `start` must be
+            // inspected against full context, not the (possibly empty) slice
+            // we copied over this iteration.
+            let before_ok = name[..start]
                 .chars()
                 .next_back()
                 .is_none_or(|c| !is_ident_char(c));
-            let tail = &remaining[idx + TARGET.len()..];
-            let after_ok = tail.chars().next().is_none_or(|c| !is_ident_char(c));
+            let after_ok = name[end..]
+                .chars()
+                .next()
+                .is_none_or(|c| !is_ident_char(c));
             if before_ok && after_ok {
                 out.push_str("Nil");
             } else {
                 out.push_str(TARGET);
             }
-            remaining = tail;
+            cursor = end;
         }
-        out.push_str(remaining);
+        out.push_str(&name[cursor..]);
         EcoString::from(out)
     }
 
@@ -540,6 +548,12 @@ mod display_tests {
         assert_eq!(
             InferredType::class_name_for_diagnostic("UndefinedObjectFactory"),
             "UndefinedObjectFactory"
+        );
+        // Adjacent repeats — both sides are identifier characters, neither
+        // occurrence forms a whole identifier, so both must be preserved.
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("UndefinedObjectUndefinedObject"),
+            "UndefinedObjectUndefinedObject"
         );
     }
 
