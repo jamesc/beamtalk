@@ -28,6 +28,7 @@ use ecow::{EcoString, eco_format};
 use crate::ast::TypeAnnotation;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 
+use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeProvenance};
 
 /// Substitution map from a generic type parameter name to its concrete
@@ -83,7 +84,7 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
     match ann {
         TypeAnnotation::Simple(type_id) => {
             let name = &type_id.name;
-            if name.as_str() == "Never" {
+            if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
                 return InferredType::Never;
             }
             // Method-local / class-level type-parameter substitution wins over
@@ -258,7 +259,7 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
 /// consistently under `isNil` guards (BT-2016).
 fn resolve_type_keyword(name: &EcoString) -> EcoString {
     match name.as_str() {
-        "nil" | "Nil" => "UndefinedObject".into(),
+        "nil" | "Nil" => WellKnownClass::UndefinedObject.as_str().into(),
         "false" => "False".into(),
         "true" => "True".into(),
         _ => name.clone(),

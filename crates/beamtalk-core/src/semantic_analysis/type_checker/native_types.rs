@@ -30,6 +30,7 @@
 
 use super::native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
 use super::types::{DynamicReason, InferredType, TypeProvenance};
+use super::well_known::WellKnownClass;
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -61,7 +62,7 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 pub fn map_type_name(type_name: &str) -> InferredType {
     let trimmed = type_name.trim();
 
-    if trimmed == "Dynamic" {
+    if WellKnownClass::from_str(trimmed) == Some(WellKnownClass::Dynamic) {
         return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
 
@@ -79,10 +80,10 @@ pub fn map_type_name(type_name: &str) -> InferredType {
 
 /// Maps a single (non-union) type name to an [`InferredType`].
 fn map_single_type_name(name: &str) -> InferredType {
-    if name == "Dynamic" {
+    if WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic) {
         return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
-    if name == "Never" {
+    if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
         return InferredType::Never;
     }
 

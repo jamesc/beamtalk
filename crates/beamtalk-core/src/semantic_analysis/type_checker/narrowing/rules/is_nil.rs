@@ -12,6 +12,7 @@
 
 use crate::ast::{Expression, MessageSelector};
 use crate::semantic_analysis::type_checker::InferredType;
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 
 use super::super::extract::extract_variable_name;
 use super::super::info::NarrowingInfo;
@@ -34,7 +35,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     let var_name = extract_variable_name(inner_recv)?;
     Some(NarrowingInfo {
         variable: var_name,
-        true_type: InferredType::known("UndefinedObject"),
+        true_type: InferredType::known(WellKnownClass::UndefinedObject.as_str()),
         false_type: None,
         is_nil_check: true,
         is_result_ok_check: false,

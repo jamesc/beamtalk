@@ -8,6 +8,8 @@
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
+use super::well_known::WellKnownClass;
+
 /// Why a type could not be determined — enables hover provenance,
 /// coverage detail, and diagnostic messages.
 ///
@@ -164,7 +166,7 @@ impl InferredType {
         let members: Vec<Self> = names
             .iter()
             .map(|name| match *name {
-                "nil" => Self::known("UndefinedObject"),
+                "nil" => Self::known(WellKnownClass::UndefinedObject.as_str()),
                 "true" => Self::known("True"),
                 "false" => Self::known("False"),
                 other => Self::known(other),

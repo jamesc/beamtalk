@@ -26,6 +26,7 @@ use super::narrowing::extract::extract_variable_name;
 use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
+use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv, narrowing};
 
 impl TypeChecker {
@@ -240,7 +241,7 @@ impl TypeChecker {
             // BT-2016: Both `nil` (lowercase keyword) and `Nil` (class name) map
             // to the canonical internal name `UndefinedObject` so narrowing,
             // non_nil_type, and all downstream comparisons work consistently.
-            "nil" | "Nil" => "UndefinedObject".into(),
+            "nil" | "Nil" => WellKnownClass::UndefinedObject.as_str().into(),
             "false" => "False".into(),
             "true" => "True".into(),
             _ => name.clone(),
@@ -255,7 +256,7 @@ impl TypeChecker {
     /// - `"String | nil"` → `Union(["String", "UndefinedObject"])`
     /// - `"List(String)"` → `Known("List", type_args: [Known("String")])`
     pub(super) fn resolve_type_name_string(type_name: &EcoString) -> InferredType {
-        if type_name.as_str() == "Never" {
+        if WellKnownClass::from_str(type_name) == Some(WellKnownClass::Never) {
             return InferredType::Never;
         }
         // Split on `|` respecting parenthesis nesting, so
@@ -311,8 +312,8 @@ impl TypeChecker {
             Expression::Identifier(ident) => {
                 let name = ident.name.as_str();
                 match name {
-                    "true" | "false" => InferredType::known("Boolean"),
-                    "nil" => InferredType::known("UndefinedObject"),
+                    "true" | "false" => InferredType::known(WellKnownClass::Boolean.as_str()),
+                    "nil" => InferredType::known(WellKnownClass::UndefinedObject.as_str()),
                     "self" => env
                         .get("self")
                         .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown)),
@@ -1003,7 +1004,7 @@ impl TypeChecker {
                     if !is_class_protocol_selector(module_name) {
                         // Static module name: `Erlang lists` → ErlangModule<lists>
                         return InferredType::Known {
-                            class_name: EcoString::from("ErlangModule"),
+                            class_name: EcoString::from(WellKnownClass::ErlangModule.as_str()),
                             type_args: vec![InferredType::Known {
                                 class_name: module_name.clone(),
                                 type_args: vec![],
@@ -1074,7 +1075,7 @@ impl TypeChecker {
             // BT-1880: Class protocol selectors (class, new, printString, etc.)
             // and binary selectors (==, etc.) on ErlangModule instances must use
             // normal dispatch, not FFI lookup.
-            if class_name == "ErlangModule"
+            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::ErlangModule)
                 && !is_class_protocol_selector(&selector_name)
                 && !matches!(selector, MessageSelector::Binary(_))
             {
@@ -1130,7 +1131,7 @@ impl TypeChecker {
                     }
 
                     // BT-1945: `Never` resolves to the bottom type (divergent methods)
-                    if ret_ty.as_str() == "Never" {
+                    if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                         return InferredType::Never;
                     }
 
@@ -1198,7 +1199,7 @@ impl TypeChecker {
             // BT-1834: Block value/value:/value:value: — return the last type arg.
             // Block is variadic: Block(R), Block(A, R), Block(A, B, R), etc.
             // The convention is that the last type arg is always the return type.
-            if class_name == "Block"
+            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
                 && !type_args.is_empty()
                 && matches!(
                     selector_name.as_str(),
@@ -1348,7 +1349,7 @@ impl TypeChecker {
                 // Object is the root of the BT class hierarchy — any class is
                 // a subtype. This arises when Erlang specs use beamtalk_object()
                 // (which maps to Object) and the call site passes a concrete class.
-                if expected == "Object" {
+                if WellKnownClass::from_str(expected) == Some(WellKnownClass::Object) {
                     continue;
                 }
                 let param_pos = i + 1;
@@ -1586,8 +1587,9 @@ impl TypeChecker {
         let mut responding_count: usize = 0;
         let mut uncertain_member_count: usize = 0;
         let has_nil = members.iter().any(|m| {
-            m.as_known()
-                .is_some_and(|n| n.as_str() == "UndefinedObject")
+            m.as_known().is_some_and(|n| {
+                WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class)
+            })
         });
         let has_dynamic = members
             .iter()
@@ -1607,7 +1609,7 @@ impl TypeChecker {
             // BT-1857: Skip Nil (UndefinedObject) for method resolution.
             // Nil is expected to be guarded by `isNil` checks; emitting a DNU
             // warning for every `T | Nil` union is noisy and unhelpful.
-            if member_name.as_str() == "UndefinedObject" {
+            if WellKnownClass::from_str(member_name).is_some_and(WellKnownClass::is_nil_class) {
                 continue;
             }
             if !hierarchy.has_class(member_name) {
@@ -1631,7 +1633,7 @@ impl TypeChecker {
                             // BT-1952: Self class — resolve to Dynamic (class objects
                             // respond to all Object messages at runtime)
                             return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
-                        } else if ret_ty.as_str() == "Never" {
+                        } else if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                             // BT-1945: Bottom type for divergent methods
                             return_types.push(InferredType::Never);
                         } else {
@@ -1700,13 +1702,15 @@ impl TypeChecker {
         // normalised above, so an inherited `-> Self` selector resolves to
         // `UndefinedObject` instead of leaking `Known("Self")` into the union.
         if has_nil && responding_count > 0 {
-            if let Some(method) = hierarchy.find_method("UndefinedObject", selector) {
+            if let Some(method) =
+                hierarchy.find_method(WellKnownClass::UndefinedObject.as_str(), selector)
+            {
                 if let Some(ref ret_ty) = method.return_type {
                     let nil_contribution = if ret_ty.as_str() == "Self" {
-                        InferredType::known("UndefinedObject")
+                        InferredType::known(WellKnownClass::UndefinedObject.as_str())
                     } else if ret_ty.as_str() == "Self class" {
                         InferredType::Dynamic(DynamicReason::Unknown)
-                    } else if ret_ty.as_str() == "Never" {
+                    } else if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                         InferredType::Never
                     } else {
                         Self::resolve_type_name_string(ret_ty)
@@ -1816,7 +1820,8 @@ impl TypeChecker {
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
         let is_result = matches!(
             &current_ty,
-            InferredType::Known { class_name, .. } if class_name.as_str() == "Result"
+            InferredType::Known { class_name, .. }
+                if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Result)
         );
         if is_result {
             // Both branches keep the full Result(T, E) type so generic
@@ -2555,11 +2560,12 @@ impl TypeChecker {
     fn is_nil_only(ty: &InferredType) -> bool {
         match ty {
             InferredType::Known { class_name, .. } => {
-                class_name.as_str() == "UndefinedObject" || class_name.as_str() == "Nil"
+                WellKnownClass::from_str(class_name).is_some_and(WellKnownClass::is_nil_class)
             }
             InferredType::Union { members, .. } => members.iter().all(|m| {
-                m.as_known()
-                    .is_some_and(|n| n.as_str() == "UndefinedObject" || n.as_str() == "Nil")
+                m.as_known().is_some_and(|n| {
+                    WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class)
+                })
             }),
             _ => false,
         }
@@ -2599,7 +2605,7 @@ impl TypeChecker {
             ..
         }) = self.type_map.get(block.span)
         {
-            if class_name.as_str() == "Block" {
+            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block) {
                 if let Some(body_ty) = type_args.last() {
                     if matches!(body_ty, InferredType::Never) {
                         return true;
@@ -2677,8 +2683,9 @@ impl TypeChecker {
             } => {
                 // Fast path: if no member is UndefinedObject/Nil, return unchanged.
                 let has_nil = members.iter().any(|m| {
-                    m.as_known()
-                        .is_some_and(|n| n.as_str() == "UndefinedObject" || n.as_str() == "Nil")
+                    m.as_known().is_some_and(|n| {
+                        WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class)
+                    })
                 });
                 if !has_nil {
                     return ty.clone();
@@ -2687,7 +2694,8 @@ impl TypeChecker {
                     .iter()
                     .filter(|m| {
                         m.as_known().is_none_or(|name| {
-                            name.as_str() != "UndefinedObject" && name.as_str() != "Nil"
+                            !WellKnownClass::from_str(name)
+                                .is_some_and(WellKnownClass::is_nil_class)
                         })
                     })
                     .cloned()

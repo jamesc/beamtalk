@@ -16,6 +16,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
+use super::well_known::WellKnownClass;
 use super::{InferredType, TypeChecker, TypeEnv};
 
 impl TypeChecker {
@@ -273,15 +274,16 @@ impl TypeChecker {
                 // BT-1861: Warn when type args are provided for a class with no type params.
                 // Block is exempt — parameterized Block annotations (e.g., Block(E, Boolean))
                 // are a documentation convention for describing closure signatures.
-                let has_type_params = if base.name == "Block" {
-                    true // Block uses type args as documentation convention
-                } else if let Some(class_info) = hierarchy.get_class(&base.name) {
-                    !class_info.type_params.is_empty()
-                } else if let Some(proto_info) = protocol_registry.get(&base.name) {
-                    !proto_info.type_params.is_empty()
-                } else {
-                    true // Unknown type — don't warn (may be defined elsewhere)
-                };
+                let has_type_params =
+                    if WellKnownClass::from_str(&base.name) == Some(WellKnownClass::Block) {
+                        true // Block uses type args as documentation convention
+                    } else if let Some(class_info) = hierarchy.get_class(&base.name) {
+                        !class_info.type_params.is_empty()
+                    } else if let Some(proto_info) = protocol_registry.get(&base.name) {
+                        !proto_info.type_params.is_empty()
+                    } else {
+                        true // Unknown type — don't warn (may be defined elsewhere)
+                    };
 
                 if has_type_params {
                     // Check bounds against the base class's type_param_bounds

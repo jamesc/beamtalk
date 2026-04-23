@@ -36,6 +36,7 @@ mod tests;
 mod type_resolver;
 mod types;
 mod validation;
+pub(crate) mod well_known;
 
 pub use native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
 pub use native_types::{
