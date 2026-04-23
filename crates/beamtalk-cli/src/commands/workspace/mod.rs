@@ -1033,6 +1033,22 @@ mod tests {
         panic!("Workspace '{workspace_id}' should be reported as Stopped");
     }
 
+    /// Default `WorkspaceConfig` for integration tests.
+    ///
+    /// Port 0 (OS-assigned), 60 s idle timeout, no extra options.
+    fn test_workspace_config() -> WorkspaceConfig<'static> {
+        WorkspaceConfig {
+            port: 0,
+            bind_addr: None,
+            web_port: None,
+            auto_cleanup: false,
+            max_idle_seconds: Some(60),
+            log_level: "info",
+            otp_app_name: None,
+            hex_dep_names: &[],
+        }
+    }
+
     /// Locate BEAM directories needed to start a workspace node.
     fn beam_dirs_for_tests() -> beamtalk_cli::repl_startup::BeamPaths {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
@@ -1061,17 +1077,7 @@ mod tests {
     fn start_test_node(prefix: &str) -> (TestWorkspace, NodeInfo, NodeGuard) {
         let paths = beam_dirs_for_tests();
         let project_path = std::env::current_dir().unwrap();
-
-        let config = WorkspaceConfig {
-            port: 0,
-            bind_addr: None,
-            web_port: None,
-            auto_cleanup: false,
-            max_idle_seconds: Some(60),
-            log_level: "info",
-            otp_app_name: None,
-            hex_dep_names: &[],
-        };
+        let config = test_workspace_config();
 
         let mut last_err = None;
         for attempt in 0..3_usize {
@@ -1108,6 +1114,106 @@ mod tests {
             }
         }
         panic!("start_test_node failed after 3 attempts: {last_err:?}");
+    }
+
+    /// Retry wrapper for `start_detached_node` on a **fixed** workspace ID.
+    ///
+    /// Unlike `start_test_node` (which creates a fresh workspace ID per retry to
+    /// avoid epmd collisions), this helper retries on the **same** workspace ID.
+    /// It is intended for tests that need to control the workspace directory
+    /// between start/kill/restart cycles (e.g. the stale-port and tombstone tests).
+    ///
+    /// Between retries: kills any partially-started node, cleans stale runtime
+    /// files, and waits for epmd deregistration so the next attempt starts clean.
+    fn start_detached_node_with_retry(
+        workspace_id: &str,
+        paths: &beamtalk_cli::repl_startup::BeamPaths,
+        config: &WorkspaceConfig<'_>,
+    ) -> NodeInfo {
+        let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
+        let mut last_err = None;
+        for attempt in 0..3_usize {
+            if attempt > 0 {
+                eprintln!(
+                    "start_detached_node_with_retry attempt {}/3 for '{workspace_id}'",
+                    attempt + 1
+                );
+            }
+            match start_detached_node(workspace_id, paths, &[], config) {
+                Ok(info) => return info,
+                Err(e) => {
+                    eprintln!(
+                        "start_detached_node_with_retry attempt {}/3 failed: {e}",
+                        attempt + 1
+                    );
+                    // Kill any partially-started node before retrying.
+                    // When the WS health check fails, node.info hasn't been written
+                    // yet (it's saved after health check success), so get_node_info
+                    // returns None. Read the PID file directly instead — it's written
+                    // by the BEAM eval command at the very start of startup.
+                    if let Ok(ws_dir) = workspace_dir(workspace_id) {
+                        if let Ok(contents) = fs::read_to_string(ws_dir.join("pid")) {
+                            if let Ok(pid) = contents.trim().parse::<u32>() {
+                                let _ = force_kill_process(pid);
+                            }
+                        }
+                    }
+                    // Clean all stale runtime files (port, pid, node.info, starting
+                    // tombstone) so the next attempt starts from a clean slate.
+                    cleanup_stale_node_info(workspace_id).ok();
+                    // Wait for epmd to release the node name before retrying
+                    // with the same workspace ID. Without this, the next attempt
+                    // may fail immediately with an epmd name conflict.
+                    let _ = wait_for_epmd_deregistration(&node_name, 5);
+                    last_err = Some(e);
+                }
+            }
+        }
+        panic!("start_detached_node_with_retry failed after 3 attempts: {last_err:?}");
+    }
+
+    /// Retry wrapper for `get_or_start_workspace` on a fixed workspace ID.
+    ///
+    /// Retries up to 3 times for transient WS health-check failures on loaded CI
+    /// runners. Between retries: kills any partially-started node and cleans up
+    /// stale node info so the next attempt sees a fresh workspace.
+    fn get_or_start_workspace_with_retry(
+        project_path: &std::path::Path,
+        workspace_id: &str,
+        paths: &beamtalk_cli::repl_startup::BeamPaths,
+        config: &WorkspaceConfig<'_>,
+    ) -> (NodeInfo, bool, String) {
+        let mut last_err = None;
+        for attempt in 0..3_usize {
+            if attempt > 0 {
+                eprintln!(
+                    "get_or_start_workspace_with_retry attempt {}/3 for '{workspace_id}'",
+                    attempt + 1
+                );
+            }
+            match get_or_start_workspace(project_path, Some(workspace_id), paths, &[], config) {
+                Ok(result) => return result,
+                Err(e) => {
+                    eprintln!(
+                        "get_or_start_workspace_with_retry attempt {}/3 failed: {e}",
+                        attempt + 1
+                    );
+                    // Kill any partially-started node before retrying.
+                    // Read PID file directly — node.info may not exist yet when
+                    // the WS health check fails (it's written after health check).
+                    if let Ok(ws_dir) = workspace_dir(workspace_id) {
+                        if let Ok(contents) = fs::read_to_string(ws_dir.join("pid")) {
+                            if let Ok(pid) = contents.trim().parse::<u32>() {
+                                let _ = force_kill_process(pid);
+                            }
+                        }
+                    }
+                    cleanup_stale_node_info(workspace_id).ok();
+                    last_err = Some(e);
+                }
+            }
+        }
+        panic!("get_or_start_workspace_with_retry failed after 3 attempts: {last_err:?}");
     }
 
     /// Combined test: start a node once and exercise all read-only queries against it,
@@ -1215,48 +1321,13 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
 
         let paths = beam_dirs_for_tests();
-        let config = WorkspaceConfig {
-            port: 0,
-            bind_addr: None,
-            web_port: None,
-            auto_cleanup: false,
-            max_idle_seconds: Some(60),
-            log_level: "info",
-            otp_app_name: None,
-            hex_dep_names: &[],
-        };
+        let config = test_workspace_config();
 
         // Step 1: First call creates workspace and starts node.
         // Retry up to 3 times for transient WS health-check failures on loaded
-        // CI runners (same pattern as start_test_node). Between retries we must
-        // clean up the partially-started node so get_or_start_workspace sees a
-        // fresh workspace on the next attempt.
-        let (info1, started1, id1) = {
-            let mut last_err = None;
-            let mut result = None;
-            for attempt in 0..3_usize {
-                match get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config) {
-                    Ok(r) => {
-                        result = Some(r);
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("lifecycle step 1 attempt {}/{} failed: {e}", attempt + 1, 3);
-                        // Kill any partially-started node before retrying.
-                        if let Ok(Some(info)) = get_node_info(&tw.id) {
-                            let _ = force_kill_process(info.pid);
-                        }
-                        cleanup_stale_node_info(&tw.id).ok();
-                        last_err = Some(e);
-                    }
-                }
-            }
-            result.unwrap_or_else(|| {
-                panic!(
-                    "first get_or_start should succeed after 3 attempts, last error: {last_err:?}"
-                )
-            })
-        };
+        // CI runners (BT-2040).
+        let (info1, started1, id1) =
+            get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard1 = NodeGuard::new(&info1);
         assert!(started1, "first call should start a new node");
         assert_eq!(id1, tw.id);
@@ -1287,29 +1358,8 @@ mod tests {
             .expect("epmd should deregister node name within timeout");
 
         // Step 4: Restart — third call starts a new node (with retry, same as step 1)
-        let (info3, started3, id3) = {
-            let mut last_err = None;
-            let mut result = None;
-            for attempt in 0..3_usize {
-                match get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config) {
-                    Ok(r) => {
-                        result = Some(r);
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("lifecycle step 4 attempt {}/{} failed: {e}", attempt + 1, 3);
-                        if let Ok(Some(info)) = get_node_info(&tw.id) {
-                            let _ = force_kill_process(info.pid);
-                        }
-                        cleanup_stale_node_info(&tw.id).ok();
-                        last_err = Some(e);
-                    }
-                }
-            }
-            result.unwrap_or_else(|| {
-                panic!("restart should succeed after 3 attempts, last error: {last_err:?}")
-            })
-        };
+        let (info3, started3, id3) =
+            get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard3 = NodeGuard::new(&info3);
         assert!(started3, "third call should start a new node");
         assert_eq!(id3, tw.id);
@@ -1438,21 +1488,11 @@ mod tests {
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
         let paths = beam_dirs_for_tests();
-
-        let config = WorkspaceConfig {
-            port: 0,
-            bind_addr: None,
-            web_port: None,
-            auto_cleanup: false,
-            max_idle_seconds: Some(60),
-            log_level: "info",
-            otp_app_name: None,
-            hex_dep_names: &[],
-        };
+        let config = test_workspace_config();
 
         // Step 1: Start a node to get a real port, then kill it without cleanup.
-        let first_info =
-            start_detached_node(&tw.id, &paths, &[], &config).expect("first start should succeed");
+        // Retry up to 3 times for transient WS health-check failures (BT-2040).
+        let first_info = start_detached_node_with_retry(&tw.id, &paths, &config);
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
 
@@ -1476,9 +1516,9 @@ mod tests {
         // so it calls `start_detached_node` directly (not via cleanup_stale_node_info).
         // The stale port file must be deleted before discovery, otherwise the loop
         // reads stale_port immediately and wait_for_tcp_ready times out.
+        // Retry up to 3 times for transient WS health-check failures (BT-2040).
         let (new_info, started, _) =
-            get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config)
-                .expect("restart with stale port file should succeed without timing out");
+            get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard = NodeGuard::new(&new_info);
 
         assert!(started, "should have started a new node");
@@ -1513,21 +1553,11 @@ mod tests {
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
         let paths = beam_dirs_for_tests();
-
-        let config = WorkspaceConfig {
-            port: 0,
-            bind_addr: None,
-            web_port: None,
-            auto_cleanup: false,
-            max_idle_seconds: Some(60),
-            log_level: "info",
-            otp_app_name: None,
-            hex_dep_names: &[],
-        };
+        let config = test_workspace_config();
 
         // Step 1: Start a node to produce real runtime files, then kill it.
-        let first_info =
-            start_detached_node(&tw.id, &paths, &[], &config).expect("first start should succeed");
+        // Retry up to 3 times for transient WS health-check failures (BT-2040).
+        let first_info = start_detached_node_with_retry(&tw.id, &paths, &config);
         kill_node_raw(&first_info);
 
         // Step 2: Write a `starting` tombstone to simulate a partial startup that
@@ -1544,9 +1574,9 @@ mod tests {
 
         // Step 3: Start a new node.  The tombstone must be detected, all stale
         // files cleaned, and startup must succeed.
+        // Retry up to 3 times for transient WS health-check failures (BT-2040).
         let (new_info, started, _) =
-            get_or_start_workspace(&project_path, Some(&tw.id), &paths, &[], &config)
-                .expect("restart with tombstone present should succeed");
+            get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard = NodeGuard::new(&new_info);
 
         assert!(started, "should have started a new node");
