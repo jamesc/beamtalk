@@ -14869,3 +14869,177 @@ typed Object subclass: Repro
         "variable first arg should leave handler param as Dynamic(UnannotatedParam)"
     );
 }
+
+// ── BT-2049: Post-guard narrowing for locals and self.field after diverging guards ──
+
+/// BT-2049: `x isNil ifTrue: [self error: "..."]` should narrow the local
+/// `x` to non-Nil for subsequent statements, even though the block has no
+/// `^` return — the `error:` call returns `Never` and therefore diverges.
+#[test]
+fn bt2049_local_narrows_after_self_error_guard() {
+    let source = r#"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil ifTrue: [self error: "missing"]
+    Receiver process: ms
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`ms` should be narrowed to Integer after `self error:` guard, got: {type_warnings:?}"
+    );
+}
+
+/// BT-2049: `self.field isNil ifTrue: [^err]` should narrow `self.field`
+/// to non-Nil for subsequent statements, so passing it to a typed parameter
+/// does not warn.
+#[test]
+fn bt2049_self_field_narrows_after_return_guard() {
+    let source = r"
+typed Object subclass: Store
+  class process: v :: Integer => v
+
+typed Actor subclass: Engine
+  state: eventStore :: Integer | Nil = nil
+  run =>
+    self.eventStore isNil ifTrue: [^nil]
+    Store process: self.eventStore
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`self.eventStore` should be narrowed to Integer after `^nil` guard, got: {type_warnings:?}"
+    );
+}
+
+/// BT-2049: `self.field isNil ifTrue: [self error: "..."]` should narrow
+/// `self.field` to non-Nil via the diverging-call path (no `^`).
+#[test]
+fn bt2049_self_field_narrows_after_self_error_guard() {
+    let source = r#"
+typed Object subclass: Store
+  class process: v :: Integer => v
+
+typed Actor subclass: Engine
+  state: eventStore :: Integer | Nil = nil
+  run =>
+    self.eventStore isNil ifTrue: [self error: "no event store"]
+    Store process: self.eventStore
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`self.eventStore` should be narrowed to Integer after `self error:` guard, got: {type_warnings:?}"
+    );
+}
+
+/// BT-2049: A non-diverging `ifTrue:` block (no `^`, last expression is not
+/// `Never`) must NOT narrow the variable — the binding may still be Nil
+/// when control falls through.
+#[test]
+fn bt2049_non_diverging_guard_does_not_narrow() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil ifTrue: [42]
+    Receiver process: ms
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        !type_warnings.is_empty(),
+        "non-diverging guard must leave `ms` as Integer | Nil, expected a warning but got none",
+    );
+}
+
+/// BT-2049: Bare identifier `eventStore` (sugar for `self.eventStore`) should
+/// also be narrowed after a `self.eventStore isNil ifTrue: [^nil]` guard,
+/// because both spellings resolve through the same synthetic `self.field` key.
+#[test]
+fn bt2049_bare_field_narrows_after_guard() {
+    let source = r"
+typed Object subclass: Store
+  class process: v :: Integer => v
+
+typed Actor subclass: Engine
+  state: eventStore :: Integer | Nil = nil
+  run =>
+    self.eventStore isNil ifTrue: [^nil]
+    Store process: eventStore
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Bare `eventStore` should be narrowed to Integer after guard, got: {type_warnings:?}"
+    );
+}

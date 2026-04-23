@@ -2481,6 +2481,42 @@ impl TypeChecker {
             .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
     }
 
+    /// Check whether a block's execution cannot fall through to the enclosing
+    /// method's next statement (BT-2049).
+    ///
+    /// A block "diverges" when any of the following hold:
+    /// - It contains a non-local return `^expr` (already handled by
+    ///   [`Self::block_has_return`]).
+    /// - Its body's inferred return type is [`InferredType::Never`] — i.e. the
+    ///   last expression is a call to a `-> Never`-returning method such as
+    ///   `Object>>error:` or `Object>>notImplemented`.
+    ///
+    /// The block's inferred type is read from [`TypeChecker::type_map`] as the
+    /// final type-arg of its `Block(...)` representation (populated by
+    /// [`Self::infer_block_with_narrowing`]). The block must therefore have
+    /// been type-checked already; callers run this after the enclosing
+    /// expression has been inferred.
+    fn block_diverges(&self, block: &crate::ast::Block) -> bool {
+        if Self::block_has_return(block) {
+            return true;
+        }
+        // Look up the block's type from the type_map; the last type-arg of the
+        // `Block(P1, ..., Pn, R)` representation is the body's return type.
+        if let Some(InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        }) = self.type_map.get(block.span)
+        {
+            if class_name.as_str() == "Block" {
+                if let Some(body_ty) = type_args.last() {
+                    return matches!(body_ty, InferredType::Never);
+                }
+            }
+        }
+        false
+    }
+
     /// Remove `UndefinedObject` (nil) from a union type or convert a known type
     /// to itself if it is non-nil.
     ///
@@ -2579,9 +2615,11 @@ impl TypeChecker {
 
             body_type = self.infer_expr(expr, hierarchy, env, in_abstract_method);
 
-            // Early-return narrowing (ADR 0068 Phase 1g):
-            // After `x isNil ifTrue: [^...]`, narrow x to non-nil for the rest.
-            Self::apply_early_return_narrowing(expr, env, hierarchy);
+            // Early-return narrowing (ADR 0068 Phase 1g, extended in BT-2049):
+            // After `x isNil ifTrue: [<diverge>]`, narrow x to non-nil for the
+            // rest.  Divergence covers both `^` returns and calls to
+            // `-> Never` methods like `self error: "..."`.
+            self.apply_early_return_narrowing(expr, env, hierarchy);
 
             if matches!(expr, Expression::Return { .. }) {
                 break;
@@ -2593,15 +2631,19 @@ impl TypeChecker {
 
     /// Apply early-return narrowing to the environment after a statement.
     ///
-    /// Detects `x isNil ifTrue: [^...]` — if the true-block contains a non-local
-    /// return, the variable must be non-nil in subsequent statements (because if
-    /// it were nil, we would have already returned).
+    /// Detects `x isNil ifTrue: [<diverge>]` — if the true-block cannot fall
+    /// through (either a non-local return `^` or a diverging call such as
+    /// `self error: "..."` whose inferred type is `Never`), the variable must
+    /// be non-nil in subsequent statements.  Covers both local variables and
+    /// synthetic `self.field` keys via
+    /// [`Self::resolve_narrowing_variable_type`] (BT-2049).
     fn apply_early_return_narrowing(
+        &self,
         expr: &Expression,
         env: &mut TypeEnv,
         hierarchy: &ClassHierarchy,
     ) {
-        // Match: `<receiver> ifTrue: [block with ^]`
+        // Match: `<receiver> ifTrue: [diverging block]`
         if let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Keyword(parts),
@@ -2609,7 +2651,7 @@ impl TypeChecker {
             ..
         } = expr
         {
-            // Only applies to `ifTrue:` (single block with early return)
+            // Only applies to `ifTrue:` (single diverging block)
             if !(parts.len() == 1 && parts[0].keyword == "ifTrue:") {
                 return;
             }
@@ -2617,9 +2659,9 @@ impl TypeChecker {
                 if !info.is_nil_check {
                     return;
                 }
-                // Check if the block contains a non-local return
+                // Check if the block diverges (non-local return or Never-typed body)
                 if let Some(Expression::Block(block)) = arguments.first() {
-                    if Self::block_has_return(block) {
+                    if self.block_diverges(block) {
                         // After this statement, the variable is non-nil
                         let current_ty =
                             Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
