@@ -3944,3 +3944,86 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         "Fixture-sourced protocol name should not trigger unresolved-class warnings, got: {unresolved:?}"
     );
 }
+
+// ── BT-2043: typed block parameters should not cause false-positive
+//    "Unused variable" warnings for method-local names read on a later line.
+
+#[test]
+fn typed_block_param_in_typed_class_nested_if_false_no_unused_warning() {
+    // BT-2043: In a `typed` class, a local assigned inside a deeply nested
+    // `ifFalse:` block and read on the next line was reported as "Unused"
+    // because the typed block param `:: Dictionary` on the inner block
+    // confused the parser, corrupting the surrounding AST.
+    let source = r#"
+typed Value subclass: UnusedInTyped
+  field: states :: List(String) = #()
+
+  check: issue :: Dictionary -> Boolean =>
+    state := issue at: "state" ifAbsent: [nil]
+    state isNil ifTrue: [^false]
+
+    (state == "todo")
+      ifTrue: [
+        blockers := issue at: "blocked_by" ifAbsent: [#()]
+        blockers isEmpty
+          ifFalse: [
+            hasNonTerminal := blockers
+              anySatisfy: [:b :: Dictionary |
+                bState := b at: "state" ifAbsent: [nil]
+                bState isNil
+              ]
+            hasNonTerminal ifTrue: [^false]
+          ]
+      ]
+
+    true
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+
+    let unused: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("Unused variable"))
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "`hasNonTerminal` is read on the next line; no unused warning expected, got: {unused:?}"
+    );
+}
+
+#[test]
+fn typed_block_param_does_not_affect_unused_variable_pass() {
+    // BT-2043: The Unused-variable pass must behave identically with or
+    // without a `typed` class modifier. Both variants should be warning-free.
+    let typed_src = r"
+typed Value subclass: UnusedInTypedSmall
+  check: xs :: List(Dictionary) -> Boolean =>
+    hasMore := xs anySatisfy: [:b :: Dictionary | b isNil]
+    hasMore ifTrue: [^false]
+    true
+";
+    let untyped_src = r"
+Value subclass: UnusedUntypedSmall
+  check: xs =>
+    hasMore := xs anySatisfy: [:b :: Dictionary | b isNil]
+    hasMore ifTrue: [^false]
+    true
+";
+
+    for source in [typed_src, untyped_src] {
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = analyse(&module);
+        let unused: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(
+            unused.is_empty(),
+            "Expected no unused warnings for source:\n{source}\ngot: {unused:?}"
+        );
+    }
+}

@@ -931,7 +931,7 @@ impl Parser {
     /// - Generic types: `Result(T, E)`, `Array(Integer)`, `Block(T, Result(R, E))`
     /// - Self type: `Self`
     /// - Self class metatype: `Self class`
-    fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
+    pub(super) fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
             if name.as_str() == "Self" {
