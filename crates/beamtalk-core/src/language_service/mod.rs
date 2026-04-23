@@ -1183,8 +1183,9 @@ impl LanguageService for SimpleLanguageService {
                     method.selector.name(),
                     is_class_method,
                 );
-                // BT-2022: inferred map now stores InferredType; use display_name
-                // to get e.g. "List(String)" for the annotation.
+                // BT-2022: inferred map stores InferredType; use
+                // `display_for_diagnostic()` so user-facing annotations render
+                // source-friendly names (e.g., `Nil` instead of `UndefinedObject`).
                 if let Some(inferred_ty) = inferred.get(&key) {
                     let display = inferred_ty
                         .display_for_diagnostic()

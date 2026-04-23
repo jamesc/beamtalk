@@ -15682,6 +15682,15 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
+    // BT-2066: canonical `UndefinedObject` must NOT leak into user-facing
+    // diagnostic messages.
+    for d in &mismatch_warnings {
+        assert!(
+            !d.message.contains("UndefinedObject"),
+            "user-facing diagnostic leaked canonical `UndefinedObject`: {}",
+            d.message
+        );
+    }
 }
 
 // ── BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return-type unification ──

@@ -291,11 +291,8 @@ impl InferredType {
                 type_args,
                 ..
             } => {
-                let rendered_name: EcoString = if opts.nil_as_source_name
-                    && WellKnownClass::from_str(class_name.as_str())
-                        .is_some_and(WellKnownClass::is_nil_class)
-                {
-                    EcoString::from("Nil")
+                let rendered_name: EcoString = if opts.nil_as_source_name {
+                    Self::class_name_for_diagnostic(class_name.as_str())
                 } else {
                     class_name.clone()
                 };
