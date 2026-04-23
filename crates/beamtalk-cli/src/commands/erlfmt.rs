@@ -132,11 +132,14 @@ fn invoke_erlfmt(
             format!(
                 "case erlfmt:format_file(\"{escaped_file}\", [{{print_width, 100}}]) of \
                     {{ok, Formatted, _}} -> \
-                        {{ok, Original}} = file:read_file(\"{escaped_file}\"), \
-                        Bin = unicode:characters_to_binary(Formatted), \
-                        case Bin =:= Original of \
-                            true -> halt(0); \
-                            false -> halt(1) \
+                        case file:read_file(\"{escaped_file}\") of \
+                            {{ok, Original}} -> \
+                                Bin = unicode:characters_to_binary(Formatted), \
+                                case Bin =:= Original of \
+                                    true -> halt(0); \
+                                    false -> halt(10) \
+                                end; \
+                            {{error, _}} -> halt(2) \
                         end; \
                     {{skip, _}} -> halt(0); \
                     {{error, _}} -> halt(2) \
@@ -171,8 +174,8 @@ fn invoke_erlfmt(
             Some(0) => {
                 // File is already formatted (check) or was formatted (write).
             }
-            Some(1) if check_only => {
-                // File needs formatting.
+            Some(10) if check_only => {
+                // File needs formatting. (Distinct from halt(1)/VM-crash exit 1.)
                 result.changed_files.push(file.clone());
             }
             Some(code) => {
@@ -314,6 +317,7 @@ mod tests {
     /// `invoke_erlfmt` must report the file in `error_files`, not silently
     /// succeed.
     #[test]
+    #[ignore = "requires erl on PATH"]
     fn erlfmt_surfaces_errors_on_subprocess_failure() {
         let bad_ebin = Utf8PathBuf::from("/nonexistent/ebin/path");
         let (_dir, path) = write_temp_erl("ok.erl", "-module(ok).\n");
