@@ -364,7 +364,12 @@ impl TypeChecker {
                             // Bare identifier might be implicit self field access
                             // (e.g., `getValue => value` is sugar for `getValue => self.value`)
                             if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
-                                if let Some(field_type) =
+                                // BT-2048: Check the synthetic `self.field` key first
+                                // so the bare and explicit spellings narrow consistently.
+                                let synthetic_key = eco_format!("self.{}", name);
+                                if let Some(narrowed) = env.get(&synthetic_key) {
+                                    narrowed
+                                } else if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
                                 {
                                     Self::resolve_type_name_string(&field_type)
@@ -383,13 +388,23 @@ impl TypeChecker {
             Expression::ClassReference { name, .. } => InferredType::known(name.name.clone()),
 
             // Field access — infer type from declared state type for self.field
+            // BT-2048: Check env first for narrowed type (e.g. inside isNil ifFalse: block)
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
                 let mut result = InferredType::Dynamic(DynamicReason::Unknown);
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     if recv_id.name == "self" {
-                        if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
+                        // BT-2048: Check for a narrowed type in the env first.
+                        // Inside `self.field isNil ifFalse: [...]`, the block env
+                        // will have "self.field" → narrowed non-nil type. Assign
+                        // to `result` (rather than returning early) so the shared
+                        // post-processing hook still runs on narrowed reads.
+                        let synthetic_key = eco_format!("self.{}", field.name);
+                        if let Some(narrowed) = env.get(&synthetic_key) {
+                            result = narrowed;
+                        } else if let Some(InferredType::Known { class_name, .. }) = env.get("self")
+                        {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
                             {
@@ -509,6 +524,10 @@ impl TypeChecker {
                         if is_self_receiver {
                             // `self.field := value` — validate against declared state type
                             self.check_field_assignment(field, &ty, *span, hierarchy, env);
+                            // BT-2048: Invalidate any stale narrowing on self.field.
+                            // After a write, the narrowed type is no longer guaranteed.
+                            let synthetic_key = eco_format!("self.{}", field.name);
+                            env.remove(&synthetic_key);
                         } else {
                             // `other.field := value` or `(expr).field := value` —
                             // objects cannot mutate another object's state.
@@ -891,7 +910,7 @@ impl TypeChecker {
         ) {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
-                .map(|info| Self::refine_result_narrowing(info, env))
+                .map(|info| Self::refine_result_narrowing(info, env, hierarchy))
         } else {
             None
         };
@@ -1939,13 +1958,15 @@ impl TypeChecker {
     /// If the variable is not typed as `Result`, the result-specific flags are
     /// cleared and `true_type` is set to the variable's current type so the
     /// narrowing is effectively a no-op (preserves the existing type in blocks).
-    fn refine_result_narrowing(mut info: NarrowingInfo, env: &TypeEnv) -> NarrowingInfo {
+    fn refine_result_narrowing(
+        mut info: NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> NarrowingInfo {
         if !info.is_result_ok_check && !info.is_result_error_check {
             return info;
         }
-        let current_ty = env
-            .get(&info.variable)
-            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
+        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
         let is_result = matches!(
             &current_ty,
             InferredType::Known { class_name, .. } if class_name.as_str() == "Result"
@@ -2043,6 +2064,9 @@ impl TypeChecker {
     /// For `ifTrue:`, the true-block gets the narrowed type.
     /// For `ifFalse:`, the false-block gets the complement (non-nil for nil checks).
     /// For `ifTrue:ifFalse:`, both blocks get their respective narrowings.
+    // The three match arms share similar-but-not-identical shapes; BT-2050 tracks
+    // extracting them into a NarrowingRule dispatch table.
+    #[allow(clippy::too_many_lines)]
     fn infer_args_with_narrowing(
         &mut self,
         arguments: &[Expression],
@@ -2085,9 +2109,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifFalse: → variable is non-nil
-                        let current_ty = env
-                            .get(&info.variable)
-                            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
+                        let current_ty =
+                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             arg,
@@ -2132,9 +2155,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
-                        let current_ty = env
-                            .get(&info.variable)
-                            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
+                        let current_ty =
+                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
@@ -2418,12 +2440,26 @@ impl TypeChecker {
         InferredType::Dynamic(DynamicReason::UnannotatedParam)
     }
 
-    /// Extract a variable name from an expression, supporting identifiers
-    /// and parenthesized identifiers.
+    /// Extract a variable name from an expression, supporting identifiers,
+    /// parenthesized identifiers, and `self.field` access (BT-2048).
+    ///
+    /// For `self.field` expressions, returns `"self.fieldname"` as a synthetic
+    /// key so that narrowing can be applied via the type environment.
     fn extract_variable_name(expr: &Expression) -> Option<EcoString> {
         match expr {
             Expression::Identifier(ident) => Some(ident.name.clone()),
             Expression::Parenthesized { expression, .. } => Self::extract_variable_name(expression),
+            // BT-2048: `self.field` — return synthetic key "self.fieldname"
+            Expression::FieldAccess {
+                receiver, field, ..
+            } => {
+                if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                    if recv_id.name == "self" {
+                        return Some(eco_format!("self.{}", field.name));
+                    }
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -2489,6 +2525,31 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve the current type of a narrowing variable from the environment.
+    ///
+    /// For regular variables (e.g. `"x"`), this is a simple env lookup.
+    /// For synthetic `self.field` keys (BT-2048), the field type is resolved
+    /// from the class hierarchy via the `self` type in the env.
+    fn resolve_narrowing_variable_type(
+        var_name: &str,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> InferredType {
+        // Regular env lookup first (handles locals and previously-narrowed fields)
+        if let Some(ty) = env.get(var_name) {
+            return ty;
+        }
+        // BT-2048: For "self.fieldname" synthetic keys, look up via hierarchy
+        if let Some(field_name) = var_name.strip_prefix("self.") {
+            if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
+                if let Some(field_type) = hierarchy.state_field_type(&class_name, field_name) {
+                    return Self::resolve_type_name_string(&field_type);
+                }
+            }
+        }
+        InferredType::Dynamic(DynamicReason::Unknown)
+    }
+
     /// Infer types for a sequence of expression statements.
     ///
     /// Skips `@expect` directive nodes so they don't reset the inferred body type
@@ -2520,7 +2581,7 @@ impl TypeChecker {
 
             // Early-return narrowing (ADR 0068 Phase 1g):
             // After `x isNil ifTrue: [^...]`, narrow x to non-nil for the rest.
-            Self::apply_early_return_narrowing(expr, env);
+            Self::apply_early_return_narrowing(expr, env, hierarchy);
 
             if matches!(expr, Expression::Return { .. }) {
                 break;
@@ -2535,7 +2596,11 @@ impl TypeChecker {
     /// Detects `x isNil ifTrue: [^...]` — if the true-block contains a non-local
     /// return, the variable must be non-nil in subsequent statements (because if
     /// it were nil, we would have already returned).
-    fn apply_early_return_narrowing(expr: &Expression, env: &mut TypeEnv) {
+    fn apply_early_return_narrowing(
+        expr: &Expression,
+        env: &mut TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) {
         // Match: `<receiver> ifTrue: [block with ^]`
         if let Expression::MessageSend {
             receiver,
@@ -2556,9 +2621,8 @@ impl TypeChecker {
                 if let Some(Expression::Block(block)) = arguments.first() {
                     if Self::block_has_return(block) {
                         // After this statement, the variable is non-nil
-                        let current_ty = env
-                            .get(&info.variable)
-                            .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown));
+                        let current_ty =
+                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         env.set(&info.variable, non_nil);
                     }
@@ -3569,7 +3633,8 @@ mod tests {
             is_result_error_check: false,
             responded_selector: None,
         };
-        let refined = TypeChecker::refine_result_narrowing(info, &env);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
         assert_eq!(refined.true_type, result_ty);
         assert_eq!(refined.false_type, Some(result_ty));
         assert!(refined.is_result_ok_check);
@@ -3590,7 +3655,8 @@ mod tests {
             is_result_error_check: false,
             responded_selector: None,
         };
-        let refined = TypeChecker::refine_result_narrowing(info, &env);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
         assert!(!refined.is_result_ok_check);
         assert!(!refined.is_result_error_check);
         assert!(refined.false_type.is_none());
@@ -3679,6 +3745,54 @@ mod tests {
     fn extract_variable_name_from_non_ident() {
         let expr = int_lit(42);
         assert!(TypeChecker::extract_variable_name(&expr).is_none());
+    }
+
+    #[test]
+    fn extract_variable_name_from_self_field() {
+        // BT-2048: self.supervisor → "self.supervisor"
+        let expr = Expression::FieldAccess {
+            receiver: Box::new(var("self")),
+            field: ident("supervisor"),
+            span: span(),
+        };
+        assert_eq!(
+            TypeChecker::extract_variable_name(&expr),
+            Some("self.supervisor".into())
+        );
+    }
+
+    #[test]
+    fn extract_variable_name_from_non_self_field() {
+        // other.field → None (only self.field is supported)
+        let expr = Expression::FieldAccess {
+            receiver: Box::new(var("other")),
+            field: ident("value"),
+            span: span(),
+        };
+        assert!(TypeChecker::extract_variable_name(&expr).is_none());
+    }
+
+    // ---- detect_narrowing: self.field isNil (BT-2048) ----
+
+    #[test]
+    fn detect_narrowing_self_field_is_nil() {
+        // self.supervisor isNil
+        let field_access = Expression::FieldAccess {
+            receiver: Box::new(var("self")),
+            field: ident("supervisor"),
+            span: span(),
+        };
+        let expr = Expression::MessageSend {
+            receiver: Box::new(field_access),
+            selector: MessageSelector::Unary("isNil".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect self.field isNil");
+        assert_eq!(info.variable.as_str(), "self.supervisor");
+        assert_eq!(info.true_type, InferredType::known("UndefinedObject"));
+        assert!(info.is_nil_check);
     }
 
     // ---- block_has_return ----
