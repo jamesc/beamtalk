@@ -20,53 +20,13 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
-use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
-
-/// Describes a control-flow narrowing detected from a type-test expression.
-///
-/// When a Boolean-producing expression like `x class = Foo` or `x isNil` is used
-/// as the receiver of `ifTrue:`/`ifFalse:`, the type checker narrows the tested
-/// variable inside the block scope (ADR 0068 Phase 1g).
-///
-/// The `respondsTo:` variant (ADR 0068 Phase 2e) initially narrows to `Dynamic`,
-/// then `refine_responds_to_narrowing` consults the protocol registry: if exactly
-/// one protocol requires the tested selector, the type is refined to that
-/// protocol (BT-1833). Multiple or zero matches fall back to `Dynamic`.
-#[derive(Debug, Clone)]
-pub(super) struct NarrowingInfo {
-    /// The variable name being narrowed.
-    pub(super) variable: EcoString,
-    /// The type the variable is narrowed to in the *true* branch.
-    pub(super) true_type: InferredType,
-    /// The type the variable is narrowed to in the *false* branch, if any.
-    ///
-    /// When `Some`, the false branch of `ifFalse:` / `ifTrue:ifFalse:` uses
-    /// this type.  When `None`, false-branch narrowing falls back to the
-    /// `is_nil_check` logic (non-nil stripping) or no narrowing.
-    pub(super) false_type: Option<InferredType>,
-    /// Whether this is a nil-check (`isNil`). If so, the *false* branch
-    /// narrows to non-nil and early-return narrowing applies.
-    pub(super) is_nil_check: bool,
-    /// Whether this is a Result `isOk` / `ok` check (BT-1859).
-    ///
-    /// When true, the true branch knows `value` is safe (ok variant) and the
-    /// false branch knows `error` is safe (error variant).  The actual type
-    /// of the variable stays `Result(T, E)` in both branches — the generic
-    /// substitution already resolves `value -> T` and `error -> E`.
-    pub(super) is_result_ok_check: bool,
-    /// Whether this is a Result `isError` check (BT-1859).
-    ///
-    /// Inverse of `is_result_ok_check`: true branch is the error variant,
-    /// false branch is the ok variant.
-    pub(super) is_result_error_check: bool,
-    /// The selector tested in a `respondsTo:` narrowing (ADR 0068 Phase 2e).
-    ///
-    /// When set, the narrowing was detected from `x respondsTo: #selector`.
-    /// Used by `refine_responds_to_narrowing` to look up the matching
-    /// protocol in the registry and narrow to that protocol type instead
-    /// of `Dynamic` (BT-1833).
-    pub(super) responded_selector: Option<EcoString>,
-}
+use super::narrowing::NarrowingInfo;
+#[cfg(test)]
+use super::narrowing::extract::extract_variable_name;
+use super::narrowing::extract::unwrap_parens;
+use super::narrowing::refinement::RefinementLayer;
+use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
+use super::{DynamicReason, InferredType, TypeChecker, TypeEnv, narrowing};
 
 impl TypeChecker {
     /// Checks types in a module using the class hierarchy for method resolution.
@@ -978,7 +938,7 @@ impl TypeChecker {
         // flow through `check_class_side_send` so an invalid metaclass send
         // still emits DNU. Unwrap parens first so `(ClassName) ifNil: ...`
         // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
-        let unwrapped_receiver = Self::unwrap_parens(receiver);
+        let unwrapped_receiver = unwrap_parens(receiver);
         let is_class_side_receiver =
             matches!(unwrapped_receiver, Expression::ClassReference { .. })
                 || (env.in_class_method && Self::is_self_receiver(unwrapped_receiver));
@@ -1803,167 +1763,11 @@ impl TypeChecker {
 
     /// Detect control-flow narrowing from the receiver of `ifTrue:`/`ifFalse:`.
     ///
-    /// Recognises a fixed set of type-testing patterns (ADR 0068 Phase 1g):
-    ///
-    /// | Pattern | Detected as |
-    /// |---|---|
-    /// | `x class = ClassName` / `x class =:= ClassName` | class identity check |
-    /// | `(x class) = ClassName` / `(x class) =:= ClassName` | class identity check (parens) |
-    /// | `x isKindOf: ClassName` | kind check |
-    /// | `x isNil` | nil check |
-    #[allow(clippy::too_many_lines)] // Pattern-matching arms for each narrowing kind
+    /// Dispatches through the [`narrowing::rules::RULES`] table (BT-2050).
+    /// Kept as a thin wrapper so existing test helpers that call
+    /// `TypeChecker::detect_narrowing` stay working without import churn.
     pub(super) fn detect_narrowing(receiver: &Expression) -> Option<NarrowingInfo> {
-        // Unwrap parentheses
-        let receiver = match receiver {
-            Expression::Parenthesized { expression, .. } => expression.as_ref(),
-            _ => receiver,
-        };
-
-        match receiver {
-            // Pattern: `x isNil`
-            Expression::MessageSend {
-                receiver: inner_recv,
-                selector: MessageSelector::Unary(sel),
-                ..
-            } if sel.as_str() == "isNil" => {
-                let var_name = Self::extract_variable_name(inner_recv)?;
-                Some(NarrowingInfo {
-                    variable: var_name,
-                    true_type: InferredType::known("UndefinedObject"),
-                    false_type: None,
-                    is_nil_check: true,
-                    is_result_ok_check: false,
-                    is_result_error_check: false,
-                    responded_selector: None,
-                })
-            }
-
-            // Pattern: `x isOk` / `x ok` — Result ok-check (BT-1859)
-            Expression::MessageSend {
-                receiver: inner_recv,
-                selector: MessageSelector::Unary(sel),
-                ..
-            } if sel.as_str() == "isOk" || sel.as_str() == "ok" => {
-                let var_name = Self::extract_variable_name(inner_recv)?;
-                Some(NarrowingInfo {
-                    variable: var_name,
-                    // Placeholder — refined by `refine_result_narrowing` once
-                    // we know the variable's actual type from the env.
-                    true_type: InferredType::Dynamic(DynamicReason::Unknown),
-                    false_type: None,
-                    is_nil_check: false,
-                    is_result_ok_check: true,
-                    is_result_error_check: false,
-                    responded_selector: None,
-                })
-            }
-
-            // Pattern: `x isError` — Result error-check (BT-1859)
-            Expression::MessageSend {
-                receiver: inner_recv,
-                selector: MessageSelector::Unary(sel),
-                ..
-            } if sel.as_str() == "isError" => {
-                let var_name = Self::extract_variable_name(inner_recv)?;
-                Some(NarrowingInfo {
-                    variable: var_name,
-                    true_type: InferredType::Dynamic(DynamicReason::Unknown),
-                    false_type: None,
-                    is_nil_check: false,
-                    is_result_ok_check: false,
-                    is_result_error_check: true,
-                    responded_selector: None,
-                })
-            }
-
-            // Pattern: `x respondsTo: #selector` (ADR 0068 Phase 2e)
-            Expression::MessageSend {
-                receiver: inner_recv,
-                selector: MessageSelector::Keyword(parts),
-                arguments,
-                ..
-            } if parts.len() == 1 && parts[0].keyword == "respondsTo:" => {
-                let var_name = Self::extract_variable_name(inner_recv)?;
-                // Extract the selector name from a symbol literal argument (#selector)
-                if let Some(Expression::Literal(Literal::Symbol(sel_name), _)) = arguments.first() {
-                    Some(NarrowingInfo {
-                        variable: var_name,
-                        // Narrow to Dynamic — we know the object responds to the selector,
-                        // but not its concrete class. Dynamic suppresses DNU warnings.
-                        true_type: InferredType::Dynamic(DynamicReason::Unknown),
-                        false_type: None,
-                        is_nil_check: false,
-                        is_result_ok_check: false,
-                        is_result_error_check: false,
-                        responded_selector: Some(sel_name.clone()),
-                    })
-                } else {
-                    None
-                }
-            }
-
-            // Pattern: `x isKindOf: ClassName`
-            Expression::MessageSend {
-                receiver: inner_recv,
-                selector: MessageSelector::Keyword(parts),
-                arguments,
-                ..
-            } if parts.len() == 1 && parts[0].keyword == "isKindOf:" => {
-                let var_name = Self::extract_variable_name(inner_recv)?;
-                if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
-                    Some(NarrowingInfo {
-                        variable: var_name,
-                        true_type: InferredType::known(name.name.clone()),
-                        false_type: None,
-                        is_nil_check: false,
-                        is_result_ok_check: false,
-                        is_result_error_check: false,
-                        responded_selector: None,
-                    })
-                } else {
-                    None
-                }
-            }
-
-            // Pattern: `x class = ClassName` or `x class =:= ClassName`
-            // Also handles `(x class) = ClassName` via parenthesized unwrap
-            Expression::MessageSend {
-                receiver: inner_recv,
-                selector: MessageSelector::Binary(op),
-                arguments,
-                ..
-            } if op.as_str() == "=" || op.as_str() == "=:=" => {
-                // The inner receiver should be `x class` or `(x class)`
-                let class_send = match inner_recv.as_ref() {
-                    Expression::Parenthesized { expression, .. } => expression.as_ref(),
-                    other => other,
-                };
-                if let Expression::MessageSend {
-                    receiver: var_expr,
-                    selector: MessageSelector::Unary(sel),
-                    ..
-                } = class_send
-                {
-                    if sel.as_str() == "class" {
-                        let var_name = Self::extract_variable_name(var_expr)?;
-                        if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
-                            return Some(NarrowingInfo {
-                                variable: var_name,
-                                true_type: InferredType::known(name.name.clone()),
-                                false_type: None,
-                                is_nil_check: false,
-                                is_result_ok_check: false,
-                                is_result_error_check: false,
-                                responded_selector: None,
-                            });
-                        }
-                    }
-                }
-                None
-            }
-
-            _ => None,
-        }
+        narrowing::detect(receiver)
     }
 
     /// Refines a `respondsTo:` narrowing from `Dynamic` to a protocol type
@@ -2061,8 +1865,8 @@ impl TypeChecker {
 
         // Unwrap parentheses so `on: (Error) do: ([:e | ...])` also gets the
         // contextual block-param typing.
-        let ex_class_inner = Self::unwrap_parens(ex_class_arg);
-        let handler_inner = Self::unwrap_parens(handler_arg);
+        let ex_class_inner = unwrap_parens(ex_class_arg);
+        let handler_inner = unwrap_parens(handler_arg);
 
         // Extract class name from ClassReference for block param typing
         let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_inner {
@@ -2152,7 +1956,7 @@ impl TypeChecker {
                     // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
                     // `infer_expr` would drop the `Block(..., R)` return type,
                     // degrading the whole send on statically-known receivers.
-                    let inner = Self::unwrap_parens(arg);
+                    let inner = unwrap_parens(arg);
                     if let Expression::Block(block) = inner {
                         self.infer_block_with_typed_params(
                             block,
@@ -2187,7 +1991,7 @@ impl TypeChecker {
     ) -> InferredType {
         // Unwrap parens: `ifNotNil: ([:x | ...])` should narrow the same as
         // the unparenthesised form.
-        let inner = Self::unwrap_parens(arg);
+        let inner = unwrap_parens(arg);
         let Expression::Block(block) = inner else {
             return self.infer_expr(arg, hierarchy, env, in_abstract_method);
         };
@@ -2267,8 +2071,8 @@ impl TypeChecker {
             // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
             // the method before the expression value is observed — treat
             // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = Self::unwrap_parens(arg) {
-                if Self::block_has_any_return(block) {
+            if let Expression::Block(block) = unwrap_parens(arg) {
+                if block_has_any_return(block) {
                     return Some(InferredType::Never);
                 }
             }
@@ -2285,8 +2089,6 @@ impl TypeChecker {
     /// For `ifTrue:`, the true-block gets the narrowed type.
     /// For `ifFalse:`, the false-block gets the complement (non-nil for nil checks).
     /// For `ifTrue:ifFalse:`, both blocks get their respective narrowings.
-    // The three match arms share similar-but-not-identical shapes; BT-2050 tracks
-    // extracting them into a NarrowingRule dispatch table.
     #[allow(clippy::too_many_lines)]
     fn infer_args_with_narrowing(
         &mut self,
@@ -2429,7 +2231,12 @@ impl TypeChecker {
     ) -> InferredType {
         if let Expression::Block(block) = arg {
             let mut block_env = env.child();
-            block_env.set(var_name, narrowed_type.clone());
+            // BT-2050: narrowing uses the unified refinement API; the layer
+            // is block-scoped because the child env is dropped on return.
+            block_env.push_refinement(RefinementLayer::block_scope(
+                var_name,
+                narrowed_type.clone(),
+            ));
             // Block parameters are unannotated in the narrowing context (the
             // selectors we enter here — ifTrue:/ifFalse:/ifTrue:ifFalse: —
             // take zero-arity blocks, but be defensive for any future use).
@@ -2650,7 +2457,7 @@ impl TypeChecker {
                 // Unwrap parens so `foo: ([:x | ...])` gets the same
                 // Dynamic(DynamicReceiver) propagation as the unparenthesised
                 // `foo: [:x | ...]` form.
-                let inner = Self::unwrap_parens(arg);
+                let inner = unwrap_parens(arg);
                 if let Expression::Block(block) = inner {
                     if propagate_dynamic {
                         let param_types: Vec<InferredType> = (0..block.parameters.len())
@@ -2740,91 +2547,6 @@ impl TypeChecker {
         InferredType::Dynamic(DynamicReason::UnannotatedParam)
     }
 
-    /// Extract a variable name from an expression, supporting identifiers,
-    /// parenthesized identifiers, and `self.field` access (BT-2048).
-    ///
-    /// For `self.field` expressions, returns `"self.fieldname"` as a synthetic
-    /// key so that narrowing can be applied via the type environment.
-    fn extract_variable_name(expr: &Expression) -> Option<EcoString> {
-        match expr {
-            Expression::Identifier(ident) => Some(ident.name.clone()),
-            Expression::Parenthesized { expression, .. } => Self::extract_variable_name(expression),
-            // BT-2048: `self.field` — return synthetic key "self.fieldname"
-            Expression::FieldAccess {
-                receiver, field, ..
-            } => {
-                if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                    if recv_id.name == "self" {
-                        return Some(eco_format!("self.{}", field.name));
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Peel `Expression::Parenthesized` wrappers so callers can pattern-match
-    /// on the inner expression directly.
-    fn unwrap_parens(expr: &Expression) -> &Expression {
-        match expr {
-            Expression::Parenthesized { expression, .. } => Self::unwrap_parens(expression),
-            other => other,
-        }
-    }
-
-    /// Check whether a block contains a non-local return (`^`) at the top
-    /// level of its body. Used where only the block's own direct return
-    /// matters (e.g. guard-block divergence checks).
-    fn block_has_return(block: &crate::ast::Block) -> bool {
-        block
-            .body
-            .iter()
-            .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
-    }
-
-    /// Check whether a block contains a non-local return (`^`) anywhere
-    /// in its body, including inside nested expressions (e.g.
-    /// `[[^1] value]` or `[foo: (^bar)]`). BT-2047 uses this to detect
-    /// branches that exit the enclosing method even when the `^` is
-    /// buried in a sub-expression.
-    fn block_has_any_return(block: &crate::ast::Block) -> bool {
-        block
-            .body
-            .iter()
-            .any(|stmt| Self::expr_contains_return(&stmt.expression))
-    }
-
-    fn expr_contains_return(expr: &Expression) -> bool {
-        match expr {
-            Expression::Return { .. } => true,
-            Expression::Parenthesized { expression, .. } => Self::expr_contains_return(expression),
-            Expression::Assignment { target, value, .. } => {
-                Self::expr_contains_return(target) || Self::expr_contains_return(value)
-            }
-            Expression::MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => {
-                Self::expr_contains_return(receiver)
-                    || arguments.iter().any(Self::expr_contains_return)
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                Self::expr_contains_return(receiver)
-                    || messages
-                        .iter()
-                        .any(|m| m.arguments.iter().any(Self::expr_contains_return))
-            }
-            Expression::Block(block) => Self::block_has_any_return(block),
-            // Literals, identifiers, class references, field access —
-            // no sub-expressions that could contain `^`.
-            _ => false,
-        }
-    }
-
     /// Check whether a type is *only* the nil type (`UndefinedObject` or
     /// its legacy `Nil` alias). Returns `true` for the bare nil type itself,
     /// or a union whose members are all nil. Used by the `ifNotNil:` block-
@@ -2848,7 +2570,7 @@ impl TypeChecker {
     ///
     /// A block "diverges" when any of the following hold:
     /// - It contains a non-local return `^expr` (already handled by
-    ///   [`Self::block_has_return`]).
+    ///   [`block_has_return`]).
     /// - Its body's inferred return type is [`InferredType::Never`] — i.e. the
     ///   last expression is a call to a `-> Never`-returning method such as
     ///   `Object>>error:` or `Object>>notImplemented`.
@@ -2861,7 +2583,7 @@ impl TypeChecker {
     /// been type-checked already; callers run this after the enclosing
     /// expression has been inferred.
     fn block_diverges(&self, block: &crate::ast::Block) -> bool {
-        if Self::block_has_return(block) {
+        if block_has_return(block) {
             return true;
         }
         // Look up the block's type from the type_map; the last type-arg of the
@@ -3049,36 +2771,25 @@ impl TypeChecker {
                 // unsound — skip it.
                 if is_if_true_if_false {
                     if let Some(Expression::Block(false_block)) = arguments.get(1) {
-                        if Self::block_may_reassign(false_block, &info.variable) {
+                        if block_may_reassign(false_block, &info.variable) {
                             return;
                         }
                     }
                 }
-                // After this statement, the variable is non-nil
+                // BT-2050: after this statement, the variable is non-nil.
+                // Use method-remainder scope: the refinement outlives the
+                // guard send and applies to the rest of the enclosing method
+                // body (unlike the block-scoped narrowings pushed inside
+                // `infer_block_with_narrowing`).
                 let current_ty =
                     Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                 let non_nil = Self::non_nil_type(&current_ty);
-                env.set(&info.variable, non_nil);
+                env.push_refinement(RefinementLayer::method_remainder(
+                    info.variable.clone(),
+                    non_nil,
+                ));
             }
         }
-    }
-
-    /// Conservative scan: does `block` contain an assignment whose target is
-    /// the same binding as `var_name`? `var_name` can be a bare identifier
-    /// (e.g. `"x"`) or a synthetic `self.field` key (BT-2048).
-    ///
-    /// Only inspects top-level statements in the block, which matches the
-    /// shapes [`Self::apply_early_return_narrowing`] currently reasons about.
-    /// False positives are safe (we skip narrowing); false negatives would be
-    /// unsound, so anything non-trivial defaults to "assume reassignment".
-    fn block_may_reassign(block: &crate::ast::Block, var_name: &str) -> bool {
-        block.body.iter().any(|stmt| {
-            if let Expression::Assignment { target, .. } = &stmt.expression {
-                Self::extract_variable_name(target).is_some_and(|n| n.as_str() == var_name)
-            } else {
-                false
-            }
-        })
     }
 
     /// Build a substitution map from a class's type parameters and concrete type arguments.
@@ -4173,10 +3884,7 @@ mod tests {
     #[test]
     fn extract_variable_name_from_ident() {
         let expr = var("foo");
-        assert_eq!(
-            TypeChecker::extract_variable_name(&expr),
-            Some("foo".into())
-        );
+        assert_eq!(extract_variable_name(&expr), Some("foo".into()));
     }
 
     #[test]
@@ -4185,16 +3893,13 @@ mod tests {
             expression: Box::new(var("bar")),
             span: span(),
         };
-        assert_eq!(
-            TypeChecker::extract_variable_name(&expr),
-            Some("bar".into())
-        );
+        assert_eq!(extract_variable_name(&expr), Some("bar".into()));
     }
 
     #[test]
     fn extract_variable_name_from_non_ident() {
         let expr = int_lit(42);
-        assert!(TypeChecker::extract_variable_name(&expr).is_none());
+        assert!(extract_variable_name(&expr).is_none());
     }
 
     #[test]
@@ -4205,10 +3910,7 @@ mod tests {
             field: ident("supervisor"),
             span: span(),
         };
-        assert_eq!(
-            TypeChecker::extract_variable_name(&expr),
-            Some("self.supervisor".into())
-        );
+        assert_eq!(extract_variable_name(&expr), Some("self.supervisor".into()));
     }
 
     #[test]
@@ -4219,7 +3921,7 @@ mod tests {
             field: ident("value"),
             span: span(),
         };
-        assert!(TypeChecker::extract_variable_name(&expr).is_none());
+        assert!(extract_variable_name(&expr).is_none());
     }
 
     // ---- detect_narrowing: self.field isNil (BT-2048) ----
@@ -4257,19 +3959,19 @@ mod tests {
             })],
             span(),
         );
-        assert!(TypeChecker::block_has_return(&block));
+        assert!(block_has_return(&block));
     }
 
     #[test]
     fn block_has_return_false() {
         let block = Block::new(vec![], vec![ExpressionStatement::bare(int_lit(42))], span());
-        assert!(!TypeChecker::block_has_return(&block));
+        assert!(!block_has_return(&block));
     }
 
     #[test]
     fn block_has_return_empty() {
         let block = Block::new(vec![], vec![], span());
-        assert!(!TypeChecker::block_has_return(&block));
+        assert!(!block_has_return(&block));
     }
 
     // ---- split_type_params ----
