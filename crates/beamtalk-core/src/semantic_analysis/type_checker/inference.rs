@@ -2113,13 +2113,30 @@ impl TypeChecker {
                 if Some(i) == not_nil_index {
                     self.infer_if_not_nil_block(
                         arg,
+                        receiver_ty,
                         &non_nil_ty,
                         hierarchy,
                         env,
                         in_abstract_method,
                     )
                 } else {
-                    self.infer_expr(arg, hierarchy, env, in_abstract_method)
+                    // Preserve block-context inference for the `ifNil:` arm in
+                    // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
+                    // `infer_expr` would drop the `Block(..., R)` return type,
+                    // degrading the whole send on statically-known receivers.
+                    let inner = Self::unwrap_parens(arg);
+                    if let Expression::Block(block) = inner {
+                        self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &[],
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        )
+                    } else {
+                        self.infer_expr(arg, hierarchy, env, in_abstract_method)
+                    }
                 }
             })
             .collect()
@@ -2134,6 +2151,7 @@ impl TypeChecker {
     fn infer_if_not_nil_block(
         &mut self,
         arg: &Expression,
+        receiver_ty: &InferredType,
         non_nil_ty: &InferredType,
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
@@ -2153,13 +2171,13 @@ impl TypeChecker {
         let param_types: Vec<InferredType> = if block.parameters.is_empty() {
             vec![]
         } else {
-            // If the non-nil branch is itself `UndefinedObject`/`Nil` (e.g.
-            // receiver is a literal `nil`), the block is dead code. Don't
-            // narrow the param to `UndefinedObject` — that would break
-            // otherwise-legal body code (like `s ++ "!"`) by producing DNU
-            // errors. Leave the param as Dynamic so unreachable bodies still
-            // compile.
-            let first_param_ty = if Self::is_nil_only(non_nil_ty) {
+            // If the RECEIVER is nil-only (e.g. receiver is a literal `nil`,
+            // `UndefinedObject | Nil`), the block is dead code. Check against
+            // the original receiver — `non_nil_type` collapses a nil-only
+            // union to `Dynamic(Unknown)`, so checking `non_nil_ty` here would
+            // miss the case. Leave the param as `Dynamic(UnannotatedParam)`
+            // so unreachable bodies still compile without DNU noise.
+            let first_param_ty = if Self::is_nil_only(receiver_ty) {
                 InferredType::Dynamic(DynamicReason::UnannotatedParam)
             } else {
                 non_nil_ty.clone()

@@ -14971,6 +14971,19 @@ typed Object subclass: Repro
         "w name should resolve — w typed as Widget; got: {:?}",
         dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
+    let unannotated_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("unannotated parameter"))
+        .collect();
+    assert!(
+        unannotated_warnings.is_empty(),
+        "block param `w` should be typed Widget, not Dynamic; got: {:?}",
+        unannotated_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
 }
 
 /// `ifNil: [..] ifNotNil: [:x | ..]` — the `ifNotNil:` block param (second
@@ -15010,6 +15023,19 @@ typed Object subclass: Repro
         "snap workflowId should resolve — snap narrowed to ReplaySnapshot; got: {:?}",
         dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
+    let unannotated_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("unannotated parameter"))
+        .collect();
+    assert!(
+        unannotated_warnings.is_empty(),
+        "block param `snap` should be narrowed to ReplaySnapshot, not Dynamic; got: {:?}",
+        unannotated_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
 }
 
 /// `ifNotNil: [:x | ..] ifNil: [..]` — the `ifNotNil:` block param (first
@@ -15048,6 +15074,19 @@ typed Object subclass: Repro
         dnu_warnings.is_empty(),
         "snap workflowId should resolve — snap narrowed to ReplaySnapshot; got: {:?}",
         dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let unannotated_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("unannotated parameter"))
+        .collect();
+    assert!(
+        unannotated_warnings.is_empty(),
+        "block param `snap` should be narrowed to ReplaySnapshot, not Dynamic; got: {:?}",
+        unannotated_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
