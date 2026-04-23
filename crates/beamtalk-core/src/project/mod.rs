@@ -7,6 +7,8 @@
 //!
 //! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.).
 
+pub mod package;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

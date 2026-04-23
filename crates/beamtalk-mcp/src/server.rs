@@ -1993,80 +1993,14 @@ fn lint_error(file: &str, message: String) -> LintResult {
     }
 }
 
-/// Walk ancestors from the given path to find the package root (containing
-/// `beamtalk.toml`).
+/// BT-2060: Package root / source-file resolution now lives in
+/// [`beamtalk_core::project::package`] so CLI lint and MCP lint share one
+/// implementation.
 ///
-/// BT-2052: Mirrors the logic from CLI `commands/lint.rs::find_package_root`
-/// so the MCP lint pipeline can collect the full package source set for
-/// cross-file class resolution.
-fn find_package_root(start: &std::path::Path) -> Option<std::path::PathBuf> {
-    let canonical = std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
-    let start_dir = if canonical.is_file() {
-        canonical.parent()?.to_path_buf()
-    } else {
-        canonical
-    };
-
-    let mut dir = start_dir.as_path();
-    loop {
-        if dir.as_os_str().is_empty() {
-            return None;
-        }
-        if dir.join("beamtalk.toml").exists() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}
-
-/// Collect all `.bt` files from a package's conventional source directories
-/// (`src/` and `test/`) for cross-file class resolution.
-///
-/// BT-2052: When linting a subset of a package (e.g. `test/` or a single
-/// file), class metadata must still cover the full package source set so
-/// that cross-file type/DNU diagnostics match what `build` emits.
-fn collect_package_source_files(package_root: &std::path::Path) -> Vec<std::path::PathBuf> {
-    use beamtalk_core::file_walker::FileWalker;
-    use std::collections::HashSet;
-
-    let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
-    let mut out: Vec<std::path::PathBuf> = Vec::new();
-
-    for subdir in ["src", "test"] {
-        let dir = package_root.join(subdir);
-        if dir.is_dir() {
-            match FileWalker::source_files().walk_pathbuf(&dir) {
-                Ok(files) => {
-                    for f in files {
-                        let key = std::fs::canonicalize(&f).unwrap_or_else(|_| f.clone());
-                        if seen.insert(key) {
-                            out.push(f);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        dir = %dir.display(),
-                        "failed to walk directory for cross-file class extraction"
-                    );
-                }
-            }
-        }
-    }
-
-    out
-}
-
-/// Determine the full set of files to parse for class extraction, and
-/// build a canonical set of target files for matching.
-///
-/// BT-2052: When a package root is found, extraction covers the full
-/// package source set (src/ + test/) so cross-file class references resolve
-/// correctly. Target files outside conventional directories are included too.
-///
-/// Returns `(extraction_files, target_set)` where `target_set` contains the
-/// canonical paths of the original `source_files` for filtering parsed results.
+/// This thin wrapper exists only to keep the MCP call sites readable — it
+/// forwards to
+/// [`beamtalk_core::project::package::resolve_extraction_files`] and adapts
+/// the `&str` path argument the MCP layer carries around.
 fn resolve_extraction_files(
     path: &str,
     source_files: &[std::path::PathBuf],
@@ -2074,37 +2008,10 @@ fn resolve_extraction_files(
     Vec<std::path::PathBuf>,
     std::collections::HashSet<std::path::PathBuf>,
 ) {
-    let source_path = std::path::Path::new(path);
-    let package_root = find_package_root(source_path);
-
-    let target_set: std::collections::HashSet<std::path::PathBuf> = source_files
-        .iter()
-        .map(|f| std::fs::canonicalize(f).unwrap_or_else(|_| f.clone()))
-        .collect();
-
-    let extraction_files = match &package_root {
-        Some(root) => {
-            let mut pkg_files = collect_package_source_files(root);
-            // Build a canonical set of already-included package files for
-            // O(1) dedup lookups instead of O(n) linear scans.
-            let pkg_canonical: std::collections::HashSet<std::path::PathBuf> = pkg_files
-                .iter()
-                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()))
-                .collect();
-            // Ensure target files are included even if they live outside
-            // conventional src/ and test/ directories.
-            for f in source_files {
-                let key = std::fs::canonicalize(f).unwrap_or_else(|_| f.clone());
-                if !pkg_canonical.contains(&key) {
-                    pkg_files.push(f.clone());
-                }
-            }
-            pkg_files
-        }
-        None => source_files.to_vec(),
-    };
-
-    (extraction_files, target_set)
+    beamtalk_core::project::package::resolve_extraction_files(
+        std::path::Path::new(path),
+        source_files,
+    )
 }
 
 /// Run lint passes on `path` (file or directory) and return structured results.
@@ -2564,38 +2471,10 @@ mod tests {
         );
     }
 
-    /// BT-2052: Verify `find_package_root` walks ancestors to find `beamtalk.toml`.
-    #[test]
-    fn find_package_root_finds_manifest() {
-        let dir =
-            std::env::temp_dir().join(format!("beamtalk-mcp-pkg-root-{}", std::process::id()));
-        let subdir = dir.join("src");
-        std::fs::create_dir_all(&subdir).unwrap();
-        std::fs::write(
-            dir.join("beamtalk.toml"),
-            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-
-        let found = find_package_root(&subdir);
-        let expected = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
-        let _ = std::fs::remove_dir_all(&dir);
-
-        assert_eq!(found, Some(expected));
-    }
-
-    /// BT-2052: `find_package_root` returns `None` when no `beamtalk.toml` exists.
-    #[test]
-    fn find_package_root_returns_none_without_manifest() {
-        let dir =
-            std::env::temp_dir().join(format!("beamtalk-mcp-no-manifest-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let found = find_package_root(&dir);
-        let _ = std::fs::remove_dir_all(&dir);
-
-        assert_eq!(found, None);
-    }
+    // BT-2060: `find_package_root` tests moved to
+    // `beamtalk_core::project::package` tests — the MCP helper is now a thin
+    // wrapper around the shared implementation, so duplicating the
+    // ancestor-walk assertions here would only lock in behaviour twice.
 
     // --- search_examples ---
 

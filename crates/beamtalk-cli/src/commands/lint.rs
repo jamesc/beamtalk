@@ -20,6 +20,7 @@ use crate::commands::build::collect_source_files_from_dir;
 use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::file_walker::FileWalker;
+use beamtalk_core::project::package;
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
@@ -289,11 +290,26 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 /// extracts class metadata from the full package source set, not just the
 /// path the user passed. Without this, a test file that references a `src/`
 /// class produces spurious `Unresolved class` diagnostics.
+///
+/// BT-2060: Thin camino wrapper around
+/// [`beamtalk_core::project::package::collect_package_source_files_with_errors`]
+/// so MCP and CLI share the underlying implementation. Walk errors are logged
+/// via the `tracing` stack that CLI already uses.
 fn collect_package_class_files(
     package_root: &Utf8Path,
     target_files: &[Utf8PathBuf],
 ) -> Vec<Utf8PathBuf> {
     use std::collections::HashSet;
+
+    let (files, errors) =
+        package::collect_package_source_files_with_errors(package_root.as_std_path());
+    for (dir, e) in errors {
+        warn!(
+            "failed to walk '{}' for cross-file class extraction: {e}",
+            dir.display()
+        );
+    }
+
     // Dedup by canonical form: walked paths are absolute (`package_root` is
     // canonicalized upstream) but `target_files` often arrive as relative
     // user-typed paths (e.g. `test/Foo.bt`). Comparing raw `Utf8PathBuf`
@@ -301,19 +317,11 @@ fn collect_package_class_files(
     let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
     let mut out: Vec<Utf8PathBuf> = Vec::new();
 
-    for subdir in ["src", "test"] {
-        let dir = package_root.join(subdir);
-        if dir.is_dir() {
-            match FileWalker::source_files().walk(&dir) {
-                Ok(files) => {
-                    for f in files {
-                        if seen.insert(canonicalize_or_clone(&f)) {
-                            out.push(f);
-                        }
-                    }
-                }
-                Err(e) => warn!("failed to walk '{dir}' for cross-file class extraction: {e}"),
-            }
+    for f in files {
+        let utf8 = Utf8PathBuf::from_path_buf(f)
+            .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().into_owned()));
+        if seen.insert(canonicalize_or_clone(&utf8)) {
+            out.push(utf8);
         }
     }
 
@@ -401,31 +409,12 @@ fn parse_and_extract_class_infos(
 /// BT-2027: Relative paths like `test/` or `src/foo.bt` are canonicalized
 /// before ancestor walking so that the search reaches the real package root
 /// rather than bailing out when the short relative path runs out of parents.
+///
+/// BT-2060: Camino wrapper around
+/// [`beamtalk_core::project::package::find_package_root`] so MCP and CLI share
+/// the same implementation.
 pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
-    // Canonicalize so relative paths (e.g. `test/` invoked from the package
-    // root) have enough ancestors to walk up to the manifest.
-    let canonical: Utf8PathBuf = std::fs::canonicalize(start.as_std_path())
-        .ok()
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-        .unwrap_or_else(|| start.to_path_buf());
-
-    let start_dir: &Utf8Path = if canonical.is_file() {
-        canonical.parent()?
-    } else {
-        canonical.as_path()
-    };
-
-    let mut dir = start_dir;
-    loop {
-        // Guard against empty paths from single-component relative paths.
-        if dir.as_str().is_empty() {
-            return None;
-        }
-        if dir.join("beamtalk.toml").exists() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
+    package::find_package_root(start.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
 }
 
 /// Resolve dependency classes and merge them into the class info list.
