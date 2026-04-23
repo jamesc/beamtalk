@@ -250,7 +250,10 @@ impl InferredType {
         let mut remaining = name;
         while let Some(idx) = remaining.find(TARGET) {
             out.push_str(&remaining[..idx]);
-            let before_ok = remaining[..idx].chars().next_back().is_none_or(|c| !is_ident_char(c));
+            let before_ok = remaining[..idx]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !is_ident_char(c));
             let tail = &remaining[idx + TARGET.len()..];
             let after_ok = tail.chars().next().is_none_or(|c| !is_ident_char(c));
             if before_ok && after_ok {
