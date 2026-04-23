@@ -398,8 +398,7 @@ impl TypeChecker {
                         let synthetic_key = eco_format!("self.{}", field.name);
                         if let Some(narrowed) = env.get(&synthetic_key) {
                             result = narrowed;
-                        } else if let Some(InferredType::Known { class_name, .. }) =
-                            env.get("self")
+                        } else if let Some(InferredType::Known { class_name, .. }) = env.get("self")
                         {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
@@ -1957,8 +1956,7 @@ impl TypeChecker {
         if !info.is_result_ok_check && !info.is_result_error_check {
             return info;
         }
-        let current_ty =
-            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
         let is_result = matches!(
             &current_ty,
             InferredType::Known { class_name, .. } if class_name.as_str() == "Result"
@@ -2031,11 +2029,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifFalse: → variable is non-nil
-                        let current_ty = Self::resolve_narrowing_variable_type(
-                            &info.variable,
-                            env,
-                            hierarchy,
-                        );
+                        let current_ty =
+                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             arg,
@@ -2080,11 +2075,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
-                        let current_ty = Self::resolve_narrowing_variable_type(
-                            &info.variable,
-                            env,
-                            hierarchy,
-                        );
+                        let current_ty =
+                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
@@ -2540,11 +2532,8 @@ impl TypeChecker {
                 if let Some(Expression::Block(block)) = arguments.first() {
                     if Self::block_has_return(block) {
                         // After this statement, the variable is non-nil
-                        let current_ty = Self::resolve_narrowing_variable_type(
-                            &info.variable,
-                            env,
-                            hierarchy,
-                        );
+                        let current_ty =
+                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         env.set(&info.variable, non_nil);
                     }
