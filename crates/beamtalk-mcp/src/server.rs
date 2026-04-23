@@ -2457,9 +2457,9 @@ mod tests {
         .unwrap();
 
         let found = find_package_root(&subdir);
+        let expected = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
         let _ = std::fs::remove_dir_all(&dir);
 
-        let expected = std::fs::canonicalize(&dir).unwrap_or(dir);
         assert_eq!(found, Some(expected));
     }
 
