@@ -139,6 +139,54 @@ fn parse_block_with_params() {
 }
 
 #[test]
+fn parse_block_with_typed_param_simple() {
+    // BT-2043: `[:b :: Dictionary | b isNil]` — the `:: Type` annotation is
+    // consumed (and currently discarded). Prior to the fix the parser left
+    // `::` in place, producing cascading errors that also corrupted the
+    // surrounding method body and caused a spurious "Unused variable"
+    // warning for the assignment receiving the block.
+    let module = parse_ok("[:b :: Dictionary | b isNil]");
+    match &module.expressions[0].expression {
+        Expression::Block(block) => {
+            assert_eq!(block.parameters.len(), 1);
+            assert_eq!(block.parameters[0].name.as_str(), "b");
+            assert_eq!(block.body.len(), 1);
+        }
+        _ => panic!("Expected block"),
+    }
+}
+
+#[test]
+fn parse_block_with_typed_params_multiple() {
+    // BT-2043: multiple typed block parameters.
+    let module = parse_ok("[:x :: Integer :y :: Integer | x + y]");
+    match &module.expressions[0].expression {
+        Expression::Block(block) => {
+            assert_eq!(block.parameters.len(), 2);
+            assert_eq!(block.parameters[0].name.as_str(), "x");
+            assert_eq!(block.parameters[1].name.as_str(), "y");
+            assert_eq!(block.body.len(), 1);
+        }
+        _ => panic!("Expected block"),
+    }
+}
+
+#[test]
+fn parse_block_with_typed_param_generic() {
+    // BT-2043: Generic types such as `List(Integer)` should not confuse the
+    // block parser, since the parens are balanced inside the type annotation.
+    let module = parse_ok("[:xs :: List(Integer) | xs size]");
+    match &module.expressions[0].expression {
+        Expression::Block(block) => {
+            assert_eq!(block.parameters.len(), 1);
+            assert_eq!(block.parameters[0].name.as_str(), "xs");
+            assert_eq!(block.body.len(), 1);
+        }
+        _ => panic!("Expected block"),
+    }
+}
+
+#[test]
 fn parse_return_statement() {
     let module = parse_ok("^42");
     assert_eq!(module.expressions.len(), 1);
