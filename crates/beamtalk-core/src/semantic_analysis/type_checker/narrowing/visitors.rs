@@ -59,12 +59,13 @@ pub(crate) fn block_has_any_return(block: &Block) -> bool {
 /// Does `expr` contain a `^` anywhere?
 ///
 /// Recurses through parenthesization, assignments, message sends, and cascades.
-/// For `Expression::Block`, recurses into its body via
-/// [`block_has_any_return`] — but that helper only looks at the block's own
-/// top-level statements, so a `^` buried in a further-nested `Block` literal
-/// stays opaque. This matches BT-2051's "nested Block literals stay opaque"
-/// rule: a block literal by itself never runs, and we must not treat it as if
-/// it does.
+/// **Nested block literals are opaque**: `[[^1] value]` — or any branch body
+/// that constructs a block containing `^` without invoking it — does NOT
+/// count as diverging. The inner block is a value, not control flow, so
+/// treating it as a method-exit would make `apply_early_return_narrowing`
+/// (and BT-2047's `if_nil_branch_union_ret_ty`) unsoundly narrow after
+/// branches that can still fall through. Mirrors the same opacity rule in
+/// [`expr_contains_never`] (BT-2051).
 pub(crate) fn expr_contains_return(expr: &Expression) -> bool {
     match expr {
         Expression::Return { .. } => true,
@@ -85,9 +86,9 @@ pub(crate) fn expr_contains_return(expr: &Expression) -> bool {
                     .iter()
                     .any(|m| m.arguments.iter().any(expr_contains_return))
         }
-        Expression::Block(block) => block_has_any_return(block),
-        // Literals, identifiers, class references, field access — no sub-
-        // expressions that could contain `^`.
+        // - `Block` literal: opaque — an inert block value never runs here.
+        // - Literals, identifiers, class references, field access, etc.
+        //   have no sub-expressions that could contain `^`.
         _ => false,
     }
 }

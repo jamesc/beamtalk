@@ -28,7 +28,8 @@ pub(crate) use info::NarrowingInfo;
 
 /// Detect a narrowing from a receiver expression.
 ///
-/// Unwraps parentheses once at the top level, then dispatches through the
+/// Recursively unwraps all nested top-level parentheses, then dispatches
+/// through the
 /// [`rules::RULES`] table. The first rule to match wins; rules are written to
 /// be mutually exclusive by shape (different expression variants or
 /// selectors), so order is not semantically significant.
