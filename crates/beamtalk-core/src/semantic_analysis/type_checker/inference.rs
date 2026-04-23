@@ -364,7 +364,12 @@ impl TypeChecker {
                             // Bare identifier might be implicit self field access
                             // (e.g., `getValue => value` is sugar for `getValue => self.value`)
                             if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
-                                if let Some(field_type) =
+                                // BT-2048: Check the synthetic `self.field` key first
+                                // so the bare and explicit spellings narrow consistently.
+                                let synthetic_key = eco_format!("self.{}", name);
+                                if let Some(narrowed) = env.get(&synthetic_key) {
+                                    narrowed
+                                } else if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
                                 {
                                     Self::resolve_type_name_string(&field_type)
