@@ -2676,17 +2676,49 @@ impl TypeChecker {
                     return;
                 }
                 // In both shapes, the true block is argument 0.
-                if let Some(Expression::Block(block)) = arguments.first() {
-                    if self.block_diverges(block) {
-                        // After this statement, the variable is non-nil
-                        let current_ty =
-                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
-                        let non_nil = Self::non_nil_type(&current_ty);
-                        env.set(&info.variable, non_nil);
+                let Some(Expression::Block(true_block)) = arguments.first() else {
+                    return;
+                };
+                if !self.block_diverges(true_block) {
+                    return;
+                }
+                // For `ifTrue:ifFalse:`, execution may reach the next
+                // statement through the `ifFalse:` block. If that block
+                // reassigns the tested variable (e.g. `[self.user := nil]`
+                // or `[x := nil]`), the post-statement narrowing would be
+                // unsound — skip it.
+                if is_if_true_if_false {
+                    if let Some(Expression::Block(false_block)) = arguments.get(1) {
+                        if Self::block_may_reassign(false_block, &info.variable) {
+                            return;
+                        }
                     }
                 }
+                // After this statement, the variable is non-nil
+                let current_ty =
+                    Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+                let non_nil = Self::non_nil_type(&current_ty);
+                env.set(&info.variable, non_nil);
             }
         }
+    }
+
+    /// Conservative scan: does `block` contain an assignment whose target is
+    /// the same binding as `var_name`? `var_name` can be a bare identifier
+    /// (e.g. `"x"`) or a synthetic `self.field` key (BT-2048).
+    ///
+    /// Only inspects top-level statements in the block, which matches the
+    /// shapes [`Self::apply_early_return_narrowing`] currently reasons about.
+    /// False positives are safe (we skip narrowing); false negatives would be
+    /// unsound, so anything non-trivial defaults to "assume reassignment".
+    fn block_may_reassign(block: &crate::ast::Block, var_name: &str) -> bool {
+        block.body.iter().any(|stmt| {
+            if let Expression::Assignment { target, .. } = &stmt.expression {
+                Self::extract_variable_name(target).is_some_and(|n| n.as_str() == var_name)
+            } else {
+                false
+            }
+        })
     }
 
     /// Build a substitution map from a class's type parameters and concrete type arguments.

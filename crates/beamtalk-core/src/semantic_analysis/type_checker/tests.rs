@@ -15058,3 +15058,88 @@ typed Actor subclass: Engine
         "Bare `eventStore` should be narrowed to Integer after guard, got: {type_warnings:?}"
     );
 }
+
+/// BT-2049: `block_diverges` must treat a block as diverging when a
+/// `Never`-typed statement appears anywhere in the body, not only as the
+/// trailing statement. `[self error: "...". 42]` — the trailing `42` looks
+/// reachable but the block actually diverges at `self error:`.
+#[test]
+fn bt2049_guard_with_diverge_then_trailing_nondiverging() {
+    let source = r#"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil ifTrue: [
+      self error: "missing"
+      42
+    ]
+    Receiver process: ms
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "ms should narrow: non-tail `self error:` still diverges. got: {type_warnings:?}"
+    );
+}
+
+/// BT-2049: `ifTrue: [diverge] ifFalse: [reassign to nil]` must NOT narrow
+/// after the statement — execution reaches the next statement through the
+/// `ifFalse:` branch, and the reassignment makes the variable nil again.
+#[test]
+fn bt2049_if_true_if_false_reassigning_false_branch_does_not_narrow() {
+    let source = r#"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil
+      ifTrue: [self error: "missing"]
+      ifFalse: [ms := nil]
+    Receiver process: ms
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    // Because the ifFalse: block reassigns `ms` to nil, we must still warn
+    // on the `process:` call — otherwise we'd be unsound.
+    let mismatch_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.category == Some(DiagnosticCategory::Type)
+                && d.message.contains("'process:'")
+                && d.message.contains("UndefinedObject")
+        })
+        .collect();
+    assert!(
+        !mismatch_warnings.is_empty(),
+        "ifFalse: branch reassigns `ms` to nil — `process:` call must still warn; got: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
