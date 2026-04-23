@@ -965,6 +965,22 @@ impl TypeChecker {
             return receiver_ty;
         }
 
+        // BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
+        // both branch bodies' return types. `infer_args_for_if_not_nil`
+        // (BT-2046) already inferred both branches as `Block(..., R)` with
+        // narrowed params, so we read back R from each arg and union them.
+        // Blocks with a non-local return (`^`) exit the enclosing method —
+        // their branch contributes `Never`, and `union_of` skips Never, so
+        // the expression's type comes from the surviving branch.
+        if matches!(
+            selector_name.as_str(),
+            "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+        ) {
+            if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
+                return ty;
+            }
+        }
+
         // Validate binary operand types when both sides are known
         // Only check if the receiver type actually defines the operator (avoids
         // duplicate warnings when the selector is already unknown).
@@ -2201,6 +2217,53 @@ impl TypeChecker {
             env,
             in_abstract_method,
         )
+    }
+
+    /// BT-2047: Compute the return type of `ifNil:ifNotNil:` /
+    /// `ifNotNil:ifNil:` as the union of both branch bodies' return types.
+    ///
+    /// `arg_types` must be the pair of `Block(..., R)` types produced by
+    /// [`Self::infer_args_for_if_not_nil`]; the last type-arg of each Block is
+    /// the branch body's inferred return type. A block literal containing a
+    /// non-local return (`^`) exits the enclosing method, so its branch
+    /// contributes `Never` to the union regardless of the returned value's
+    /// type — matching the semantics noted in the issue's AC #3.
+    ///
+    /// Returns `None` if either arg isn't a well-formed `Block(...)` (e.g. the
+    /// caller passed a symbol or bare value instead of a block literal), so
+    /// the caller falls back to the generic method-lookup path for those cases.
+    fn if_nil_branch_union_ret_ty(
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+    ) -> Option<InferredType> {
+        if arg_types.len() < 2 || arguments.len() < 2 {
+            return None;
+        }
+        let branch_ret = |arg: &Expression, ty: &InferredType| -> Option<InferredType> {
+            let InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } = ty
+            else {
+                return None;
+            };
+            if class_name.as_str() != "Block" {
+                return None;
+            }
+            // Non-local `^` inside the branch exits the method before the
+            // expression value is observed — treat as Never so `union_of`
+            // skips it.
+            if let Expression::Block(block) = Self::unwrap_parens(arg) {
+                if Self::block_has_return(block) {
+                    return Some(InferredType::Never);
+                }
+            }
+            type_args.last().cloned()
+        };
+        let a = branch_ret(&arguments[0], &arg_types[0])?;
+        let b = branch_ret(&arguments[1], &arg_types[1])?;
+        Some(InferredType::union_of(&[a, b]))
     }
 
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with

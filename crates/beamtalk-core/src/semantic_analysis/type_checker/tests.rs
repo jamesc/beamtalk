@@ -15452,3 +15452,230 @@ typed Object subclass: Caller
             .collect::<Vec<_>>()
     );
 }
+
+// ── BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return-type unification ──
+//
+// The whole `receiver ifNil: [a] ifNotNil: [:x | b]` expression should type as
+// `typeof(a) | typeof(b)` (deduplicated) instead of `Dynamic`. BT-2046 already
+// inferred both branches as `Block(..., R)` with narrowed params — this test
+// family locks in that the outer send's return type is the branch union.
+
+/// Assert the module's `type_map` contains a Union whose members' class names
+/// match `expected` (order-insensitive). Returns the matching type on success.
+fn find_union_in_type_map<'a>(
+    type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+    expected: &[&str],
+) -> Option<&'a InferredType> {
+    type_map.iter().find_map(|(_, ty)| {
+        if let InferredType::Union { members, .. } = ty {
+            let names: std::collections::BTreeSet<String> = members
+                .iter()
+                .filter_map(|m| m.as_known().map(std::string::ToString::to_string))
+                .collect();
+            let want: std::collections::BTreeSet<String> =
+                expected.iter().map(|s| (*s).to_string()).collect();
+            if names == want {
+                return Some(ty);
+            }
+        }
+        None
+    })
+}
+
+/// Minimal repro from the BT-2047 issue: `self.snapshot ifNil: [42] ifNotNil:
+/// [:snap | "got one"]` should type as `Integer | String`, not Dynamic.
+#[test]
+fn bt2047_if_nil_if_not_nil_returns_branch_union() {
+    let source = r#"
+typed Object subclass: ReplaySnapshot
+  workflowId -> String =>
+    [^"wf-1"]
+
+typed Object subclass: Repro
+  field: snapshot :: ReplaySnapshot | Nil = nil
+
+  go =>
+    self.snapshot
+      ifNil: [42]
+      ifNotNil: [:snap | "got one"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_some(),
+        "expected `Integer | String` in type_map; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .filter_map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Reversed keyword order: `ifNotNil: [:x | a] ifNil: [b]` yields the same
+/// union (acceptance criterion #2).
+#[test]
+fn bt2047_if_not_nil_if_nil_returns_branch_union() {
+    let source = r#"
+typed Object subclass: ReplaySnapshot
+  workflowId -> String =>
+    [^"wf-1"]
+
+typed Object subclass: Repro
+  field: snapshot :: ReplaySnapshot | Nil = nil
+
+  go =>
+    self.snapshot
+      ifNotNil: [:snap | "got one"]
+      ifNil: [42]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_some(),
+        "expected `Integer | String` in type_map; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .filter_map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// When both branches produce the same type, `union_of` dedups to that type
+/// (no spurious `String | String`).
+#[test]
+fn bt2047_same_branch_types_deduplicate() {
+    let source = r#"
+typed Object subclass: ReplaySnapshot
+
+typed Object subclass: Repro
+  field: snapshot :: ReplaySnapshot | Nil = nil
+
+  go -> String =>
+    ^self.snapshot
+      ifNil: ["none"]
+      ifNotNil: [:snap | "some"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // No type warnings — method declares -> String, and dedup'd branch union
+    // resolves to bare `String`, which satisfies the declared return.
+    let diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        diags.is_empty(),
+        "both branches typed String — expression should infer String, not Dynamic; got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Early-returning branch: `ifNil: [^42] ifNotNil: [:x | "ok"]` should type
+/// as `String` alone (the non-diverging branch), NOT `Integer | String`. The
+/// `^` exits the method before the expression value is observed, so the
+/// diverging branch contributes `Never` to the union (AC #3).
+#[test]
+fn bt2047_diverging_if_nil_branch_contributes_only_other_arm() {
+    let source = r#"
+typed Object subclass: ReplaySnapshot
+
+typed Object subclass: Repro
+  field: snapshot :: ReplaySnapshot | Nil = nil
+
+  go -> String =>
+    ^self.snapshot
+      ifNil: [^"early"]
+      ifNotNil: [:snap | "got one"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // No type mismatch warnings — the diverging ifNil: branch is Never, so the
+    // expression's type comes from the ifNotNil: branch (String), which
+    // satisfies the method's declared -> String.
+    let diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        diags.is_empty(),
+        "diverging ifNil: branch should not widen the expression type; got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Key test: the divergent branch has a DIFFERENT type than the surviving
+/// branch. `ifNil: [^42]` (Integer) with `ifNotNil: [:x | "ok"]` (String) —
+/// without the `Never` projection, the expression would type as
+/// `Integer | String` and mismatch the method's declared `-> String`. With
+/// it, only the non-diverging branch contributes.
+#[test]
+fn bt2047_diverging_branch_with_distinct_type_projects_to_never() {
+    let source = r#"
+typed Object subclass: ReplaySnapshot
+
+typed Object subclass: Repro
+  field: snapshot :: ReplaySnapshot | Nil = nil
+
+  go -> String =>
+    ^self.snapshot
+      ifNil: [^42]
+      ifNotNil: [:snap | "got one"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // Must NOT surface `Integer | String` return-type mismatch against `-> String`.
+    let type_diags: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_diags.is_empty(),
+        "diverging `ifNil: [^42]` should not widen expression to Integer | String; got: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
