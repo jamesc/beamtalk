@@ -260,10 +260,7 @@ impl InferredType {
                 .chars()
                 .next_back()
                 .is_none_or(|c| !is_ident_char(c));
-            let after_ok = name[end..]
-                .chars()
-                .next()
-                .is_none_or(|c| !is_ident_char(c));
+            let after_ok = name[end..].chars().next().is_none_or(|c| !is_ident_char(c));
             if before_ok && after_ok {
                 out.push_str("Nil");
             } else {
