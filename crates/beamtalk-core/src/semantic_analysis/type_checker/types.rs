@@ -72,6 +72,27 @@ pub enum TypeProvenance {
     Extracted,
 }
 
+/// Controls how [`InferredType`] renders class names when converted to a
+/// display string.
+///
+/// See [`InferredType::display_name`] and
+/// [`InferredType::display_for_diagnostic`].
+#[derive(Debug, Clone, Copy)]
+struct DisplayOptions {
+    /// When `true`, `Known("UndefinedObject")` renders as `"Nil"`. When
+    /// `false`, the canonical `UndefinedObject` name is used.
+    nil_as_source_name: bool,
+}
+
+impl DisplayOptions {
+    const CANONICAL: Self = Self {
+        nil_as_source_name: false,
+    };
+    const SOURCE_FRIENDLY: Self = Self {
+        nil_as_source_name: true,
+    };
+}
+
 /// Inferred type for an expression or variable.
 ///
 /// **Equality semantics:** Two types are equal if they represent the same type,
@@ -187,36 +208,85 @@ impl InferredType {
         }
     }
 
-    /// Returns a human-readable display name for this type.
+    /// Returns a human-readable display name for this type, using canonical
+    /// class-hierarchy names.
     ///
     /// - `Known("Integer", [])` → `"Integer"`
+    /// - `Known("UndefinedObject", [])` → `"UndefinedObject"`
     /// - `Known("Result", [Known("Integer"), Known("String")])` → `"Result(Integer, String)"`
     /// - `Union([Known("String"), Known("UndefinedObject")])` → `"String | UndefinedObject"`
     /// - `Dynamic(Unknown)` → `"Dynamic"`
     /// - `Dynamic(UnannotatedParam)` → `"Dynamic (unannotated parameter)"`
+    ///
+    /// This is the "internal" display — it surfaces the canonical
+    /// `UndefinedObject` name. For user-facing diagnostics, hover, signature
+    /// help, and code actions, prefer [`display_for_diagnostic`](Self::display_for_diagnostic),
+    /// which renders the source-sympathetic `Nil` spelling instead.
     #[must_use]
     pub fn display_name(&self) -> Option<EcoString> {
+        Some(self.display_with_options(DisplayOptions::CANONICAL))
+    }
+
+    /// Maps a raw class-name string to its user-facing diagnostic spelling.
+    ///
+    /// Today this rewrites `"UndefinedObject"` → `"Nil"` and leaves all other
+    /// names untouched. Use this when you have a bare `EcoString`/`&str`
+    /// class name (e.g., a union-member list passed to a diagnostic) rather
+    /// than a full `InferredType`.
+    ///
+    /// **References:** BT-2066
+    #[must_use]
+    pub fn class_name_for_diagnostic(name: &str) -> EcoString {
+        if WellKnownClass::from_str(name).is_some_and(WellKnownClass::is_nil_class) {
+            EcoString::from("Nil")
+        } else {
+            EcoString::from(name)
+        }
+    }
+
+    /// Returns a human-readable display name for this type, using the
+    /// source-sympathetic names users type in their code.
+    ///
+    /// Identical to [`display_name`](Self::display_name) except that
+    /// `Known("UndefinedObject")` renders as `"Nil"`. Users write `:: Foo | Nil`
+    /// in source and never see the canonical `UndefinedObject` spelling
+    /// anywhere else, so diagnostics echoing `UndefinedObject` back at them
+    /// were jarring and triggered BT-2066.
+    ///
+    /// Use this for any user-facing string: diagnostic messages, hover
+    /// contents, signature help labels, and code-action inserts. Keep
+    /// [`display_name`](Self::display_name) for internal bookkeeping where the
+    /// canonical name is required (e.g., `is_assignable_to` lookups).
+    ///
+    /// **References:** BT-2066
+    #[must_use]
+    pub fn display_for_diagnostic(&self) -> Option<EcoString> {
+        Some(self.display_with_options(DisplayOptions::SOURCE_FRIENDLY))
+    }
+
+    fn display_with_options(&self, opts: DisplayOptions) -> EcoString {
         match self {
             Self::Known {
                 class_name,
                 type_args,
                 ..
             } => {
+                let rendered_name: EcoString = if opts.nil_as_source_name
+                    && WellKnownClass::from_str(class_name.as_str())
+                        .is_some_and(WellKnownClass::is_nil_class)
+                {
+                    EcoString::from("Nil")
+                } else {
+                    class_name.clone()
+                };
                 if type_args.is_empty() {
-                    Some(class_name.clone())
+                    rendered_name
                 } else {
                     let args: Vec<String> = type_args
                         .iter()
-                        .map(|a| {
-                            a.display_name()
-                                .map_or_else(|| "Dynamic".to_string(), |n| n.to_string())
-                        })
+                        .map(|a| a.display_with_options(opts).to_string())
                         .collect();
-                    Some(EcoString::from(format!(
-                        "{}({})",
-                        class_name,
-                        args.join(", ")
-                    )))
+                    EcoString::from(format!("{}({})", rendered_name, args.join(", ")))
                 }
             }
             Self::Union { members, .. } => {
@@ -225,22 +295,18 @@ impl InferredType {
                     if i > 0 {
                         result.push_str(" | ");
                     }
-                    if let Some(name) = m.display_name() {
-                        result.push_str(&name);
-                    } else {
-                        result.push_str("Dynamic");
-                    }
+                    result.push_str(&m.display_with_options(opts));
                 }
-                Some(result)
+                result
             }
             Self::Dynamic(reason) => {
                 if let Some(desc) = reason.description() {
-                    Some(EcoString::from(format!("Dynamic ({desc})")))
+                    EcoString::from(format!("Dynamic ({desc})"))
                 } else {
-                    Some(EcoString::from("Dynamic"))
+                    EcoString::from("Dynamic")
                 }
             }
-            Self::Never => Some(EcoString::from("Never")),
+            Self::Never => EcoString::from("Never"),
         }
     }
 
@@ -333,4 +399,105 @@ impl InferredType {
 pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
     let bytes = name.as_bytes();
     bytes.len() == 1 && bytes[0].is_ascii_uppercase()
+}
+
+#[cfg(test)]
+mod display_tests {
+    //! BT-2066: `display_name` uses the canonical `UndefinedObject`
+    //! class-hierarchy spelling; `display_for_diagnostic` substitutes the
+    //! source-sympathetic `Nil` spelling for user-facing messages.
+
+    use super::*;
+
+    #[test]
+    fn display_name_keeps_canonical_undefined_object() {
+        let ty = InferredType::known("UndefinedObject");
+        assert_eq!(ty.display_name().unwrap(), "UndefinedObject");
+    }
+
+    #[test]
+    fn display_for_diagnostic_renders_undefined_object_as_nil() {
+        let ty = InferredType::known("UndefinedObject");
+        assert_eq!(ty.display_for_diagnostic().unwrap(), "Nil");
+    }
+
+    #[test]
+    fn display_for_diagnostic_renders_union_members_as_nil() {
+        let ty = InferredType::simple_union(&["Integer", "UndefinedObject"]);
+        let rendered = ty.display_for_diagnostic().unwrap();
+        assert!(
+            rendered.contains("Nil"),
+            "union should render `Nil` not `UndefinedObject`, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("UndefinedObject"),
+            "union must not leak canonical name, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn display_name_union_keeps_canonical_undefined_object() {
+        let ty = InferredType::simple_union(&["Integer", "UndefinedObject"]);
+        let rendered = ty.display_name().unwrap();
+        assert!(
+            rendered.contains("UndefinedObject"),
+            "display_name must keep canonical spelling for internal use, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn display_for_diagnostic_rewrites_nested_generic_nil() {
+        // `Result(Integer, UndefinedObject)` should display as
+        // `Result(Integer, Nil)` in user-facing messages.
+        let ty = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("UndefinedObject"),
+            ],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let rendered = ty.display_for_diagnostic().unwrap();
+        assert_eq!(rendered, "Result(Integer, Nil)");
+    }
+
+    #[test]
+    fn display_for_diagnostic_leaves_non_nil_names_untouched() {
+        let ty = InferredType::known("Integer");
+        assert_eq!(ty.display_for_diagnostic().unwrap(), "Integer");
+
+        let ty2 = InferredType::known("MyCustomClass");
+        assert_eq!(ty2.display_for_diagnostic().unwrap(), "MyCustomClass");
+    }
+
+    #[test]
+    fn class_name_for_diagnostic_maps_undefined_object_and_nil_alias() {
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("UndefinedObject"),
+            "Nil"
+        );
+        // The legacy `Nil` spelling is already source-sympathetic; round-trip.
+        assert_eq!(InferredType::class_name_for_diagnostic("Nil"), "Nil");
+        // Non-nil names pass through.
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("Integer"),
+            "Integer"
+        );
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("MyCustomClass"),
+            "MyCustomClass"
+        );
+    }
+
+    #[test]
+    fn debug_still_shows_canonical_undefined_object() {
+        // `Debug` derive uses the raw class_name — must stay canonical for
+        // unambiguous test-failure / log output.
+        let ty = InferredType::known("UndefinedObject");
+        let debug_out = format!("{ty:?}");
+        assert!(
+            debug_out.contains("UndefinedObject"),
+            "Debug output must keep canonical name, got: {debug_out}"
+        );
+    }
 }

@@ -1187,7 +1187,7 @@ impl LanguageService for SimpleLanguageService {
                 // to get e.g. "List(String)" for the annotation.
                 if let Some(inferred_ty) = inferred.get(&key) {
                     let display = inferred_ty
-                        .display_name()
+                        .display_for_diagnostic()
                         .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
                     if let Some(offset) = find_body_open_offset(source, method.span) {
                         actions.push(CodeAction::new(
@@ -1220,7 +1220,7 @@ impl LanguageService for SimpleLanguageService {
             );
             if let Some(inferred_ty) = inferred.get(&key) {
                 let display = inferred_ty
-                    .display_name()
+                    .display_for_diagnostic()
                     .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
                 if let Some(offset) = find_body_open_offset(source, method.span) {
                     actions.push(CodeAction::new(

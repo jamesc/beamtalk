@@ -384,7 +384,7 @@ fn resolve_ffi_signature_help(
         let param_name = param.keyword.as_deref().unwrap_or("arg");
         let type_display = param
             .type_
-            .display_name()
+            .display_for_diagnostic()
             .unwrap_or_else(|| EcoString::from("Dynamic"));
         let param_label = format!("{keyword} {param_name} :: {type_display}");
         label_fragments.push(param_label.clone());
@@ -396,7 +396,7 @@ fn resolve_ffi_signature_help(
 
     let ret_display = sig
         .return_type
-        .display_name()
+        .display_for_diagnostic()
         .unwrap_or_else(|| EcoString::from("Dynamic"));
     let label = format!("{} -> {ret_display}", label_fragments.join(" "));
 

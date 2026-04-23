@@ -71,7 +71,7 @@ impl FunctionSignature {
         if self.params.is_empty() {
             let ret_display = self
                 .return_type
-                .display_name()
+                .display_for_diagnostic()
                 .unwrap_or_else(|| EcoString::from("Dynamic"));
             return format!("{} -> {ret_display}", self.name);
         }
@@ -89,14 +89,14 @@ impl FunctionSignature {
             let param_name = param.keyword.as_deref().unwrap_or("arg");
             let type_display = param
                 .type_
-                .display_name()
+                .display_for_diagnostic()
                 .unwrap_or_else(|| EcoString::from("Dynamic"));
             parts.push(format!("{keyword} {param_name} :: {type_display}"));
         }
 
         let ret_display = self
             .return_type
-            .display_name()
+            .display_for_diagnostic()
             .unwrap_or_else(|| EcoString::from("Dynamic"));
         format!("{} -> {ret_display}", parts.join(" "))
     }

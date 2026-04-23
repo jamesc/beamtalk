@@ -564,7 +564,7 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
             if offset >= ident.span.start() && offset < ident.span.end() {
                 let type_info = type_map
                     .get(ident.span)
-                    .and_then(InferredType::display_name);
+                    .and_then(InferredType::display_for_diagnostic);
                 let contents = if let Some(ty) = type_info {
                     format!("Pattern variable: `{}` — Type: {ty}", ident.name)
                 } else {
@@ -640,7 +640,7 @@ fn find_hover_in_expr(
                 // Show inferred type if available
                 let type_info = type_map
                     .get(ident.span)
-                    .and_then(InferredType::display_name);
+                    .and_then(InferredType::display_for_diagnostic);
                 let contents = if let Some(ty) = type_info {
                     format!("Identifier: `{}` — Type: {ty}", ident.name)
                 } else {
