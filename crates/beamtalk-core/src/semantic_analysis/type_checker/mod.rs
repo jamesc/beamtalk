@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 mod inference;
+mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
 mod protocol;
@@ -550,5 +551,31 @@ impl TypeEnv {
     /// Create a child scope that inherits parent bindings.
     fn child(&self) -> Self {
         self.clone()
+    }
+
+    /// Push a narrowing refinement into this environment (BT-2050).
+    ///
+    /// Semantically this writes the refined type to the variable binding. The
+    /// [`Scope`](narrowing::refinement::Scope) on the layer describes how
+    /// long the refinement survives — block-scope refinements are applied to
+    /// a child env and dropped when the child goes out of scope;
+    /// method-remainder refinements are applied to the method's own env so
+    /// they outlive the guard statement. Both cases resolve to the same
+    /// underlying `set` because the env's lifetime matches the scope the
+    /// caller chose.
+    ///
+    /// Unifying both paths through this method makes the rule API symmetric
+    /// and lets a future rule request method-remainder scope without editing
+    /// `inference.rs` at every call site.
+    fn push_refinement(&mut self, layer: narrowing::refinement::RefinementLayer) {
+        // The scope is metadata carried with the layer so rule authors and
+        // future readers can see at a glance whether a refinement is
+        // block-scoped or survives into the method remainder. The env itself
+        // doesn't need to branch on it today because the caller already chose
+        // the right env (child for block, method env for remainder); reading
+        // the field here keeps the intent visible and silences dead-code
+        // warnings without an `#[allow]`.
+        let _scope = layer.scope;
+        self.set(&layer.variable, layer.ty);
     }
 }
