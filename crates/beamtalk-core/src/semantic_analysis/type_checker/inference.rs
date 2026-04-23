@@ -2929,13 +2929,14 @@ impl TypeChecker {
                         .any(|m| m.arguments.iter().any(|a| self.expr_contains_never(a)))
             }
             Expression::FieldAccess { receiver, .. } => self.expr_contains_never(receiver),
-            Expression::Block(block) => block
-                .body
-                .iter()
-                .any(|stmt| self.expr_contains_never(&stmt.expression)),
-            // Literals, identifiers, class references, super, and other
-            // variants have no sub-expressions that could be `Never`-typed
-            // without the top-level check above having already caught them.
+            // - Nested `Block` literals are opaque: a block value is
+            //   *constructed*, not *executed*, at this position. Guards like
+            //   `[callbacks add: [self error: "later"]]` would otherwise be
+            //   mis-classified as diverging even though the outer block can
+            //   still fall through.
+            // - Literals, identifiers, class references, super, etc. have
+            //   no sub-expressions the top-level check above didn't already
+            //   cover.
             _ => false,
         }
     }

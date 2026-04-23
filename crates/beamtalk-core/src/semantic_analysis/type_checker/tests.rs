@@ -15602,6 +15602,61 @@ typed Object subclass: Caller
     );
 }
 
+/// BT-2051 soundness: a `Never`-typed expression INSIDE a nested block literal
+/// must NOT make the enclosing guard count as diverging. The inner block is
+/// constructed, not executed, so the outer guard can still fall through and
+/// `ms` must stay nullable at the downstream use site.
+#[test]
+fn bt2051_never_inside_nested_block_literal_does_not_diverge() {
+    let source = r#"
+typed Object subclass: Callbacks
+  class new => [^Callbacks new]
+  add: block =>
+    [^self]
+
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    callbacks := Callbacks new
+    ms isNil ifTrue: [callbacks add: [self error: "later"]]
+    Receiver process: ms
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    // The `ifTrue:` branch constructs a block that *would* diverge if run,
+    // but the outer branch doesn't execute it — control falls through to
+    // `Receiver process: ms` with `ms` still `Integer | Nil`, so the
+    // argument-mismatch diagnostic must still fire.
+    let mismatch_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.category == Some(DiagnosticCategory::Type)
+                && d.message.contains("'process:'")
+                && d.message.contains("UndefinedObject")
+        })
+        .collect();
+    assert!(
+        !mismatch_warnings.is_empty(),
+        "nested block literal containing `self error:` must NOT cause post-guard narrowing; \
+         `process:` call should still warn. Got diagnostics: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
 // ── BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return-type unification ──
 //
 // The whole `receiver ifNil: [a] ifNotNil: [:x | b]` expression should type as
