@@ -22,6 +22,7 @@ use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
+use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
 impl TypeChecker {
@@ -224,11 +225,9 @@ impl TypeChecker {
                 // selectors), so propagating them would surface false DNUs.
                 if !has_class_method {
                     if let Some(method) = hierarchy.find_method("Class", selector) {
-                        if method
-                            .return_type
-                            .as_ref()
-                            .is_some_and(|ty| ty.as_str() == "Never")
-                        {
+                        if method.return_type.as_ref().is_some_and(|ty| {
+                            WellKnownClass::from_str(ty) == Some(WellKnownClass::Never)
+                        }) {
                             return InferredType::Never;
                         }
                     }
@@ -522,10 +521,10 @@ impl TypeChecker {
         // Never is the bottom type — compatible with everything as actual.
         // As expected, only Never itself is compatible (a non-divergent method
         // returning Integer does not satisfy -> Never).
-        if actual.as_str() == "Never" {
+        if WellKnownClass::from_str(actual) == Some(WellKnownClass::Never) {
             return true;
         }
-        if expected.as_str() == "Never" {
+        if WellKnownClass::from_str(expected) == Some(WellKnownClass::Never) {
             return false;
         }
         // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
@@ -1074,8 +1073,8 @@ impl TypeChecker {
 
         // String concatenation with ++ expects a String argument
         if operator == "++"
-            && receiver_ty.as_str() == "String"
-            && arg_ty.as_str() != "String"
+            && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String)
+            && WellKnownClass::from_str(arg_ty) != Some(WellKnownClass::String)
             && arg_ty.as_str() != "Symbol"
             && !arg_ty.starts_with('#')
         {
@@ -1429,7 +1428,7 @@ impl TypeChecker {
     fn resolve_type_keyword_static(name: &str) -> EcoString {
         match name {
             // BT-2016: Match both `nil` and `Nil`, consistent with resolve_type_keyword.
-            "nil" | "Nil" => "UndefinedObject".into(),
+            "nil" | "Nil" => WellKnownClass::UndefinedObject.as_str().into(),
             "false" => "False".into(),
             "true" => "True".into(),
             _ => EcoString::from(name),
@@ -1445,7 +1444,7 @@ impl TypeChecker {
     /// and the conservative fallback disables validation.
     fn resolve_type_alias(name: &EcoString) -> Option<EcoString> {
         match name.as_str() {
-            "Nil" => Some("UndefinedObject".into()),
+            "Nil" => Some(WellKnownClass::UndefinedObject.as_str().into()),
             _ => None,
         }
     }
