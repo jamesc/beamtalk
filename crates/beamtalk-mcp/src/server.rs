@@ -1827,11 +1827,15 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
     };
 
+    // BT-2052: Determine the full extraction set (package-wide src/ + test/)
+    // so cross-file class references resolve correctly.
+    let (extraction_files, target_set) = resolve_extraction_files(path, &source_files);
+
     // Pass 1: Parse all files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
 
-    for file in &source_files {
+    for file in &extraction_files {
         let Ok(source) = std::fs::read_to_string(file) else {
             continue;
         };
@@ -1839,7 +1843,11 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
         all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
-        parsed_files.push((file_str, source, module, parse_diags));
+
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+        if target_set.contains(&canonical) {
+            parsed_files.push((file_str, source, module, parse_diags));
+        }
     }
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
@@ -1970,30 +1978,182 @@ fn lint_error(file: &str, message: String) -> LintResult {
     }
 }
 
+/// Walk ancestors from the given path to find the package root (containing
+/// `beamtalk.toml`).
+///
+/// BT-2052: Mirrors the logic from CLI `commands/lint.rs::find_package_root`
+/// so the MCP lint pipeline can collect the full package source set for
+/// cross-file class resolution.
+fn find_package_root(start: &std::path::Path) -> Option<std::path::PathBuf> {
+    let canonical = std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    let start_dir = if canonical.is_file() {
+        canonical.parent()?.to_path_buf()
+    } else {
+        canonical
+    };
+
+    let mut dir = start_dir.as_path();
+    loop {
+        if dir.as_os_str().is_empty() {
+            return None;
+        }
+        if dir.join("beamtalk.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// Collect all `.bt` files from a package's conventional source directories
+/// (`src/` and `test/`) for cross-file class resolution.
+///
+/// BT-2052: When linting a subset of a package (e.g. `test/` or a single
+/// file), class metadata must still cover the full package source set so
+/// that cross-file type/DNU diagnostics match what `build` emits.
+fn collect_package_source_files(package_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    use beamtalk_core::file_walker::FileWalker;
+    use std::collections::HashSet;
+
+    let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+
+    for subdir in ["src", "test"] {
+        let dir = package_root.join(subdir);
+        if dir.is_dir() {
+            match FileWalker::source_files().walk_pathbuf(&dir) {
+                Ok(files) => {
+                    for f in files {
+                        let key = std::fs::canonicalize(&f).unwrap_or_else(|_| f.clone());
+                        if seen.insert(key) {
+                            out.push(f);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        dir = %dir.display(),
+                        "failed to walk directory for cross-file class extraction"
+                    );
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Determine the full set of files to parse for class extraction, and
+/// build a canonical set of target files for matching.
+///
+/// BT-2052: When a package root is found, extraction covers the full
+/// package source set (src/ + test/) so cross-file class references resolve
+/// correctly. Target files outside conventional directories are included too.
+///
+/// Returns `(extraction_files, target_set)` where `target_set` contains the
+/// canonical paths of the original `source_files` for filtering parsed results.
+fn resolve_extraction_files(
+    path: &str,
+    source_files: &[std::path::PathBuf],
+) -> (
+    Vec<std::path::PathBuf>,
+    std::collections::HashSet<std::path::PathBuf>,
+) {
+    let source_path = std::path::Path::new(path);
+    let package_root = find_package_root(source_path);
+
+    let target_set: std::collections::HashSet<std::path::PathBuf> = source_files
+        .iter()
+        .map(|f| std::fs::canonicalize(f).unwrap_or_else(|_| f.clone()))
+        .collect();
+
+    let extraction_files = match &package_root {
+        Some(root) => {
+            let mut pkg_files = collect_package_source_files(root);
+            // Build a canonical set of already-included package files for
+            // O(1) dedup lookups instead of O(n) linear scans.
+            let pkg_canonical: std::collections::HashSet<std::path::PathBuf> = pkg_files
+                .iter()
+                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()))
+                .collect();
+            // Ensure target files are included even if they live outside
+            // conventional src/ and test/ directories.
+            for f in source_files {
+                let key = std::fs::canonicalize(f).unwrap_or_else(|_| f.clone());
+                if !pkg_canonical.contains(&key) {
+                    pkg_files.push(f.clone());
+                }
+            }
+            pkg_files
+        }
+        None => source_files.to_vec(),
+    };
+
+    (extraction_files, target_set)
+}
+
 /// Run lint passes on `path` (file or directory) and return structured results.
+///
+/// BT-2052: Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
+/// - Pass 1: Parse all files in the package and extract class metadata
+/// - Pass 2: Analyse each target file with cross-file class context
+///
+/// Without cross-file classes, the MCP lint produces different diagnostics
+/// than the CLI — e.g. `@expect type` annotations are falsely reported as
+/// stale because the type/DNU diagnostics they suppress require cross-file
+/// class resolution to appear.
+#[allow(clippy::too_many_lines)] // Two-pass pipeline is inherently sequential.
 fn run_lint_structured(path: &str) -> LintResult {
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+
     let source_files = match resolve_source_files(path) {
         Ok(files) => files,
         Err(result) => return result,
     };
 
+    // BT-2052: Determine the full extraction set (package-wide src/ + test/)
+    // so cross-file class references resolve correctly.
+    let (extraction_files, target_set) = resolve_extraction_files(path, &source_files);
+
+    // Pass 1: Parse files and extract class metadata.
+    let mut all_class_infos = Vec::new();
+    let mut parsed_targets: Vec<(
+        std::path::PathBuf,
+        String,
+        beamtalk_core::ast::Module,
+        Vec<beamtalk_core::source_analysis::Diagnostic>,
+    )> = Vec::new();
+
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
 
-    for file in &source_files {
+    for file in &extraction_files {
         let Ok(source) = std::fs::read_to_string(file) else {
-            errors.push(LintDiagnostic {
-                file: file.to_string_lossy().into_owned(),
-                line: None,
-                message: format!("Failed to read '{}'", file.display()),
-                severity: "error",
-            });
+            let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+            if target_set.contains(&canonical) {
+                errors.push(LintDiagnostic {
+                    file: file.to_string_lossy().into_owned(),
+                    line: None,
+                    message: format!("Failed to read '{}'", file.display()),
+                    severity: "error",
+                });
+            }
             continue;
         };
 
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
+        all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
+
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+        if target_set.contains(&canonical) {
+            parsed_targets.push((file.clone(), source, module, parse_diags));
+        }
+    }
+
+    // Pass 2: Analyse each target file with cross-file class context.
+    for (file, source, module, parse_diags) in parsed_targets {
         // Include parse errors (syntax problems) and warnings so files with
         // broken syntax or parser-emitted warnings don't silently appear clean.
         // Hint-severity diagnostics (DNU hints) are excluded as they are
@@ -2009,10 +2169,16 @@ fn run_lint_structured(path: &str) -> LintResult {
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
-        // BT-1587: Run semantic analysis to collect type/DNU diagnostics,
-        // mirroring CLI `beamtalk lint`. Without this, compile-level warnings
-        // (e.g. "Object does not understand 'at:'", type mismatches) are missed.
-        let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
+        // BT-1587 / BT-2052: Run semantic analysis with cross-file class
+        // context, mirroring CLI `beamtalk lint`. Without cross-file classes,
+        // type/DNU diagnostics from cross-file references are missed, causing
+        // `@expect type` annotations to be falsely reported as stale.
+        let cross_file_classes = ClassHierarchy::cross_file_class_infos(&all_class_infos, &module);
+        let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+            &module,
+            &beamtalk_core::CompilerOptions::default(),
+            cross_file_classes,
+        );
         lint_diags.extend(
             analysis_result
                 .diagnostics
@@ -2219,6 +2385,95 @@ mod tests {
             !has_dnu,
             "@expect type should suppress DNU in MCP lint, got: {result:?}",
         );
+    }
+
+    /// BT-2052: MCP lint must resolve cross-file classes from the full package
+    /// source set (src/ + test/). Without this, `@expect type` annotations that
+    /// suppress diagnostics referencing classes from other files in the same
+    /// package are falsely reported as stale.
+    #[test]
+    fn run_lint_structured_cross_file_classes() {
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-lint-cross-file-{}",
+            std::process::id()
+        ));
+        let src_dir = dir.join("src");
+        let test_dir = dir.join("test");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&test_dir).unwrap();
+
+        // Create a beamtalk.toml so find_package_root works.
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"cross-test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        // Define an Actor in src/ — Actor subclasses are known types.
+        std::fs::write(
+            src_dir.join("my_actor.bt"),
+            "Actor subclass: MyActor\n  run => 42\n",
+        )
+        .unwrap();
+
+        // A test file that uses `@expect all` on `MyActor new` — the `new`
+        // message on an Actor produces an instantiation_error diagnostic that
+        // the @expect suppresses. Without cross-file class info, the @expect
+        // would be reported as stale.
+        std::fs::write(
+            test_dir.join("my_actor_test.bt"),
+            "Object subclass: MyActorTest\n\n  class run =>\n    @expect all\n    MyActor new\n",
+        )
+        .unwrap();
+
+        // Lint only the test file, but cross-file resolution should still see
+        // MyActor from src/.
+        let test_file = test_dir.join("my_actor_test.bt");
+        let result = run_lint_structured(test_file.to_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let stale = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "MCP lint with cross-file classes should not report @expect as stale, got: {result:?}",
+        );
+    }
+
+    /// BT-2052: Verify `find_package_root` walks ancestors to find `beamtalk.toml`.
+    #[test]
+    fn find_package_root_finds_manifest() {
+        let dir =
+            std::env::temp_dir().join(format!("beamtalk-mcp-pkg-root-{}", std::process::id()));
+        let subdir = dir.join("src");
+        std::fs::create_dir_all(&subdir).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let found = find_package_root(&subdir);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let expected = std::fs::canonicalize(&dir).unwrap_or(dir);
+        assert_eq!(found, Some(expected));
+    }
+
+    /// BT-2052: `find_package_root` returns `None` when no `beamtalk.toml` exists.
+    #[test]
+    fn find_package_root_returns_none_without_manifest() {
+        let dir =
+            std::env::temp_dir().join(format!("beamtalk-mcp-no-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let found = find_package_root(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(found, None);
     }
 
     // --- search_examples ---
