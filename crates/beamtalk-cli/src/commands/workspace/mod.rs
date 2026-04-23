@@ -1184,6 +1184,7 @@ mod tests {
         paths: &beamtalk_cli::repl_startup::BeamPaths,
         config: &WorkspaceConfig<'_>,
     ) -> (NodeInfo, bool, String) {
+        let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
         let mut last_err = None;
         for attempt in 0..3_usize {
             if attempt > 0 {
@@ -1210,6 +1211,9 @@ mod tests {
                         }
                     }
                     cleanup_stale_node_info(workspace_id).ok();
+                    // Wait for epmd to release the node name before retrying
+                    // with the same workspace ID, mirroring start_detached_node_with_retry.
+                    let _ = wait_for_epmd_deregistration(&node_name, 5);
                     last_err = Some(e);
                 }
             }
