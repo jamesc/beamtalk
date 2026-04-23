@@ -442,16 +442,23 @@ impl TypeChecker {
                                     hierarchy,
                                 );
                                 if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
+                                    // BT-2066: Use source-sympathetic spelling (`Nil`) for user-facing messages.
+                                    let inferred_display = inferred_ty
+                                        .display_for_diagnostic()
+                                        .unwrap_or_else(|| inferred_name.clone());
+                                    let declared_display = declared
+                                        .display_for_diagnostic()
+                                        .unwrap_or_else(|| declared_name.clone());
                                     self.diagnostics.push(
                                         Diagnostic::warning(
                                             format!(
-                                                "Type mismatch: declared as {declared_name}, got {inferred_name}"
+                                                "Type mismatch: declared as {declared_display}, got {inferred_display}"
                                             ),
                                             *span,
                                         )
                                         .with_category(DiagnosticCategory::Type)
                                         .with_hint(format!(
-                                            "The right-hand side has type {inferred_name} which is not assignable to {declared_name}"
+                                            "The right-hand side has type {inferred_display} which is not assignable to {declared_display}"
                                         )),
                                     );
                                 }
@@ -1361,9 +1368,12 @@ impl TypeChecker {
                 let param_pos = i + 1;
                 let fallback_label = format!("parameter {param_pos}");
                 let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
+                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                let expected_display = InferredType::class_name_for_diagnostic(expected.as_str());
+                let actual_display = InferredType::class_name_for_diagnostic(actual.as_str());
                 self.diagnostics.push(Diagnostic::warning(
                     format!(
-                        "{module_name}:{function_name}/{arity} {param_label} expects {expected}, got {actual}",
+                        "{module_name}:{function_name}/{arity} {param_label} expects {expected_display}, got {actual_display}",
                         arity = sig.arity,
                     ),
                     span,
@@ -1732,12 +1742,17 @@ impl TypeChecker {
         // BT-1857: Suppress DNU warnings when Dynamic is in the union —
         // Dynamic accepts any message, so we can't know the full method set.
         if !missing_names.is_empty() && !has_dynamic {
+            // BT-2066: Render `UndefinedObject` as `Nil` for user-facing messages.
             let member_names: Vec<String> = members
                 .iter()
-                .filter_map(|m| m.display_name().map(|n| n.to_string()))
+                .filter_map(|m| m.display_for_diagnostic().map(|n| n.to_string()))
                 .collect();
             let union_display = member_names.join(" | ");
-            let missing_display: Vec<&str> = missing_names.iter().map(EcoString::as_str).collect();
+            // BT-2066: Also map missing-member names through the diagnostic rewriter.
+            let missing_display: Vec<EcoString> = missing_names
+                .iter()
+                .map(|n| InferredType::class_name_for_diagnostic(n.as_str()))
+                .collect();
 
             let message = if missing_names.len() == 1 {
                 format!(

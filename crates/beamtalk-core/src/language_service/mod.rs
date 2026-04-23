@@ -1183,11 +1183,12 @@ impl LanguageService for SimpleLanguageService {
                     method.selector.name(),
                     is_class_method,
                 );
-                // BT-2022: inferred map now stores InferredType; use display_name
-                // to get e.g. "List(String)" for the annotation.
+                // BT-2022: inferred map stores InferredType; use
+                // `display_for_diagnostic()` so user-facing annotations render
+                // source-friendly names (e.g., `Nil` instead of `UndefinedObject`).
                 if let Some(inferred_ty) = inferred.get(&key) {
                     let display = inferred_ty
-                        .display_name()
+                        .display_for_diagnostic()
                         .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
                     if let Some(offset) = find_body_open_offset(source, method.span) {
                         actions.push(CodeAction::new(
@@ -1220,7 +1221,7 @@ impl LanguageService for SimpleLanguageService {
             );
             if let Some(inferred_ty) = inferred.get(&key) {
                 let display = inferred_ty
-                    .display_name()
+                    .display_for_diagnostic()
                     .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
                 if let Some(offset) = find_body_open_offset(source, method.span) {
                     actions.push(CodeAction::new(

@@ -416,17 +416,20 @@ impl TypeChecker {
             hierarchy,
             protocol_registry,
         ) {
+            // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+            let declared_display = InferredType::class_name_for_diagnostic(declared_type.as_str());
+            let value_display = InferredType::class_name_for_diagnostic(value_type.as_str());
             self.diagnostics.push(
                 Diagnostic::warning(
                     format!(
-                        "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
+                        "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
                         state_decl.name.name
                     ),
                     state_decl.span,
                 )
                 .with_category(DiagnosticCategory::Type)
                 .with_hint(format!(
-                    "Default value type {value_type} is not compatible with {declared_type}"
+                    "Default value type {value_display} is not compatible with {declared_display}"
                 )),
             );
         }
@@ -503,16 +506,25 @@ impl TypeChecker {
                                                         protocol_registry,
                                                     ) {
                                                         let param_pos = i + 1;
+                                                        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                                                        let expected_display =
+                                                            InferredType::class_name_for_diagnostic(
+                                                                expected_ty.as_str(),
+                                                            );
+                                                        let arg_display =
+                                                            InferredType::class_name_for_diagnostic(
+                                                                arg_str.as_str(),
+                                                            );
                                                         self.diagnostics.push(
                                                             Diagnostic::warning(
                                                                 format!(
-                                                                    "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_ty}, got {arg_str}"
+                                                                    "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_display}, got {arg_display}"
                                                                 ),
                                                                 *span,
                                                             )
                                                             .with_category(DiagnosticCategory::Type)
                                                             .with_hint(format!(
-                                                                "Type arguments are not compatible: expected {expected_ty}, got {arg_str}"
+                                                                "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
                                                             )),
                                                         );
                                                     }

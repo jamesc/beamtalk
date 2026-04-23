@@ -702,25 +702,30 @@ impl TypeChecker {
                         let param_pos = i + 1;
                         // BT-1588: Use hint severity for generic type params (likely false positive)
                         let is_generic = super::is_generic_type_param(actual_ty);
+                        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                        let actual_display =
+                            InferredType::class_name_for_diagnostic(actual_ty.as_str());
+                        let expected_display =
+                            InferredType::class_name_for_diagnostic(expected_ty.as_str());
                         let mut diag = if is_generic {
                             Diagnostic::hint(
                                 format!(
-                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
                                 ),
                                 span,
                             )
                             .with_hint(format!(
-                                "This is likely a false positive — `{actual_ty}` is a generic type parameter that may be {expected_ty} at runtime. \
+                                "This is likely a false positive — `{actual_display}` is a generic type parameter that may be {expected_display} at runtime. \
                                  Use `@expect type` to suppress"
                             ))
                         } else {
                             Diagnostic::warning(
                                 format!(
-                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
                                 ),
                                 span,
                             )
-                            .with_hint(format!("Expected {expected_ty} (or a subclass), got {actual_ty}"))
+                            .with_hint(format!("Expected {expected_display} (or a subclass), got {actual_display}"))
                         };
                         // BT-1588: Attach origin note if available
                         if let (Some(exprs), Some(e)) = (arg_exprs, env) {
@@ -749,25 +754,28 @@ impl TypeChecker {
                     }
                     let param_pos = i + 1;
                     let union_display = arg_ty
-                        .display_name()
+                        .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    // BT-2066: Render `UndefinedObject` as `Nil` for the declared type too.
+                    let expected_display =
+                        InferredType::class_name_for_diagnostic(expected_ty.as_str());
                     let mut diag = if compat == 0 {
                         Diagnostic::warning(
-                            format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {union_display}"),
+                            format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {union_display}"),
                             span,
                         )
-                        .with_hint(format!("No member of {union_display} is compatible with {expected_ty}"))
+                        .with_hint(format!("No member of {union_display} is compatible with {expected_display}"))
                     } else {
                         let list = incompatible
                             .iter()
-                            .map(|m| m.as_str())
+                            .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
                             .collect::<Vec<_>>()
                             .join(", ");
                         Diagnostic::hint(
-                            format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {union_display}"),
+                            format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {union_display}"),
                             span,
                         )
-                        .with_hint(format!("Some members of the union are not compatible with {expected_ty}: {list}"))
+                        .with_hint(format!("Some members of the union are not compatible with {expected_display}: {list}"))
                     };
                     if let (Some(exprs), Some(e)) = (arg_exprs, env) {
                         if let Some(Expression::Identifier(ident)) = exprs.get(i) {
@@ -859,12 +867,12 @@ impl TypeChecker {
                             !Self::type_args_compatible(exp_arg, act_arg, hierarchy)
                         });
                 if base_mismatch || args_mismatch {
-                    let expected_display = expected
-                        .display_name()
-                        .unwrap_or_else(|| expected_ty.clone());
-                    let actual_display = body_type
-                        .display_name()
-                        .unwrap_or_else(|| actual_ty.clone());
+                    let expected_display = expected.display_for_diagnostic().unwrap_or_else(|| {
+                        InferredType::class_name_for_diagnostic(expected_ty.as_str())
+                    });
+                    let actual_display = body_type.display_for_diagnostic().unwrap_or_else(|| {
+                        InferredType::class_name_for_diagnostic(actual_ty.as_str())
+                    });
                     let selector = method.selector.name();
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -888,17 +896,19 @@ impl TypeChecker {
                 if !compatible {
                     let selector = method.selector.name();
                     let union_display = expected
-                        .display_name()
+                        .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    let actual_display =
+                        InferredType::class_name_for_diagnostic(actual_ty.as_str());
                     self.diagnostics.push(
                         Diagnostic::warning(
                             format!(
-                                "Method '{selector}' in {class_name} declares return type {union_display}, but body returns {actual_ty}"
+                                "Method '{selector}' in {class_name} declares return type {union_display}, but body returns {actual_display}"
                             ),
                             method.span,
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!("Declared -> {union_display}, inferred body type is {actual_ty}")),
+                        .with_hint(format!("Declared -> {union_display}, inferred body type is {actual_display}")),
                     );
                 }
             }
@@ -914,8 +924,8 @@ impl TypeChecker {
                 // `actual_ty`).
                 let selector = method.selector.name();
                 let actual_display = body_type
-                    .display_name()
-                    .unwrap_or_else(|| actual_ty.clone());
+                    .display_for_diagnostic()
+                    .unwrap_or_else(|| InferredType::class_name_for_diagnostic(actual_ty.as_str()));
                 self.diagnostics.push(
                     Diagnostic::warning(
                         format!(
@@ -1042,6 +1052,9 @@ impl TypeChecker {
         let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
         let is_generic = super::is_generic_type_param(arg_ty);
+        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+        let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
+        let receiver_display = InferredType::class_name_for_diagnostic(receiver_ty.as_str());
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
@@ -1049,14 +1062,14 @@ impl TypeChecker {
             let mut diag = if is_generic {
                 Diagnostic::hint(
                     format!(
-                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                        "`{operator}` on {receiver_display} expects a numeric argument, got {arg_display}"
                     ),
                     span,
                 )
             } else {
                 Diagnostic::warning(
                     format!(
-                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                        "`{operator}` on {receiver_display} expects a numeric argument, got {arg_display}"
                     ),
                     span,
                 )
@@ -1081,7 +1094,7 @@ impl TypeChecker {
             // BT-1588: Use hint severity for generic type params (likely false positive)
             let mut diag = if is_generic {
                 Diagnostic::hint(
-                    format!("`++` on String expects a String argument, got {arg_ty}"),
+                    format!("`++` on String expects a String argument, got {arg_display}"),
                     span,
                 )
                 .with_hint(
@@ -1090,7 +1103,7 @@ impl TypeChecker {
                 )
             } else {
                 Diagnostic::warning(
-                    format!("`++` on String expects a String argument, got {arg_ty}"),
+                    format!("`++` on String expects a String argument, got {arg_display}"),
                     span,
                 )
                 .with_hint("Convert the argument to String first")
@@ -1108,14 +1121,14 @@ impl TypeChecker {
             let mut diag = if is_generic {
                 Diagnostic::hint(
                     format!(
-                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                        "`{operator}` on {receiver_display} expects a numeric argument, got {arg_display}"
                     ),
                     span,
                 )
             } else {
                 Diagnostic::warning(
                     format!(
-                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                        "`{operator}` on {receiver_display} expects a numeric argument, got {arg_display}"
                     ),
                     span,
                 )
@@ -1154,17 +1167,22 @@ impl TypeChecker {
                 ..
             } => {
                 if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                    // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                    let declared_display =
+                        InferredType::class_name_for_diagnostic(declared_type.as_str());
+                    let value_display =
+                        InferredType::class_name_for_diagnostic(value_type.as_str());
                     self.diagnostics.push(
                         Diagnostic::warning(
                             format!(
-                                "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
+                                "Type mismatch: field `{}` declared as {declared_display}, got {value_display}",
                                 field.name
                             ),
                             span,
                         )
                         .with_category(DiagnosticCategory::Type)
                         .with_hint(format!(
-                            "Expected {declared_type} but assigning {value_type}"
+                            "Expected {declared_display} but assigning {value_display}"
                         )),
                     );
                 }
@@ -1182,25 +1200,28 @@ impl TypeChecker {
                     return; // All match → pass
                 }
                 let union_display = value_ty
-                    .display_name()
+                    .display_for_diagnostic()
                     .unwrap_or_else(|| EcoString::from("Dynamic"));
+                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                let declared_display =
+                    InferredType::class_name_for_diagnostic(declared_type.as_str());
                 let diag = if compat == 0 {
                     Diagnostic::warning(
-                        format!("Type mismatch: field `{}` declared as {declared_type}, got {union_display}", field.name),
+                        format!("Type mismatch: field `{}` declared as {declared_display}, got {union_display}", field.name),
                         span,
                     )
-                    .with_hint(format!("No member of {union_display} is compatible with {declared_type}"))
+                    .with_hint(format!("No member of {union_display} is compatible with {declared_display}"))
                 } else {
                     let list = incompatible
                         .iter()
-                        .map(|m| m.as_str())
+                        .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
                         .collect::<Vec<_>>()
                         .join(", ");
                     Diagnostic::hint(
-                        format!("Type mismatch: field `{}` declared as {declared_type}, got {union_display}", field.name),
+                        format!("Type mismatch: field `{}` declared as {declared_display}, got {union_display}", field.name),
                         span,
                     )
-                    .with_hint(format!("Some members of the union are not compatible with {declared_type}: {list}"))
+                    .with_hint(format!("Some members of the union are not compatible with {declared_display}: {list}"))
                 };
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
@@ -1244,17 +1265,21 @@ impl TypeChecker {
                 continue; // Dynamic defaults are fine
             };
             if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                let declared_display =
+                    InferredType::class_name_for_diagnostic(declared_type.as_str());
+                let value_display = InferredType::class_name_for_diagnostic(value_type.as_str());
                 self.diagnostics.push(
                     Diagnostic::warning(
                         format!(
-                            "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
+                            "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
                             decl.name.name
                         ),
                         decl.span,
                     )
                     .with_category(DiagnosticCategory::Type)
                     .with_hint(format!(
-                        "Default value type {value_type} is not compatible with {declared_type}"
+                        "Default value type {value_display} is not compatible with {declared_display}"
                     )),
                 );
             }
@@ -1576,8 +1601,9 @@ impl TypeChecker {
                 if compat == total {
                     return; // All conform → pass
                 }
+                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
                 let union_display = arg_type
-                    .display_name()
+                    .display_for_diagnostic()
                     .unwrap_or_else(|| EcoString::from("Dynamic"));
                 let diag = if compat == 0 {
                     // Collect missing methods across all members
@@ -1597,7 +1623,7 @@ impl TypeChecker {
                 } else {
                     let list = non_conforming
                         .iter()
-                        .map(|m| m.as_str())
+                        .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
                         .collect::<Vec<_>>()
                         .join(", ");
                     Diagnostic::hint(
@@ -1719,8 +1745,9 @@ impl TypeChecker {
                         continue; // All conform → pass
                     }
                     let param_name = param_names.get(i).map_or("?", |p| p.as_str());
+                    // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
                     let union_display = arg
-                        .display_name()
+                        .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
                     let diag = if compat == 0 {
                         let missing = Self::collect_missing_protocol_methods(
@@ -1737,7 +1764,7 @@ impl TypeChecker {
                     } else {
                         let list = non_conforming
                             .iter()
-                            .map(|m| m.as_str())
+                            .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
                             .collect::<Vec<_>>()
                             .join(", ");
                         Diagnostic::hint(

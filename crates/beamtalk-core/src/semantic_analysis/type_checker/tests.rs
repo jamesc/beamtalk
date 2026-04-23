@@ -15312,16 +15312,21 @@ typed Object subclass: Caller
     );
     // The negative case must produce the specific argument-mismatch
     // diagnostic at the `process:` call site: `ms` should still be
-    // `Integer | UndefinedObject` because the `ifTrue: [42]` block does not
+    // `Integer | Nil` because the `ifTrue: [42]` block does not
     // diverge. A bare "any Type warning" check could hide regressions where
     // narrowing silently happens but some other Type warning appears.
+    //
+    // BT-2066: user-facing messages render the source-sympathetic `Nil`
+    // spelling, not the canonical `UndefinedObject` hierarchy name. The
+    // assertion below is deliberately strict — if the renderer regresses
+    // and leaks `UndefinedObject` back into diagnostics, this test fails.
     let mismatch_warnings: Vec<_> = result
         .diagnostics
         .iter()
         .filter(|d| {
             d.category == Some(DiagnosticCategory::Type)
                 && d.message.contains("'process:'")
-                && d.message.contains("UndefinedObject")
+                && d.message.contains("Nil")
         })
         .collect();
     assert!(
@@ -15334,6 +15339,15 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
+    // BT-2066: the canonical `UndefinedObject` name must NOT leak into the
+    // user-facing message. Guard against regressions explicitly.
+    for d in &mismatch_warnings {
+        assert!(
+            !d.message.contains("UndefinedObject"),
+            "user-facing diagnostic leaked canonical `UndefinedObject`: {}",
+            d.message
+        );
+    }
 }
 
 /// BT-2049: Bare identifier `eventStore` (sugar for `self.eventStore`) should
@@ -15436,13 +15450,16 @@ typed Object subclass: Caller
     );
     // Because the ifFalse: block reassigns `ms` to nil, we must still warn
     // on the `process:` call — otherwise we'd be unsound.
+    //
+    // BT-2066: user-facing messages render the source-sympathetic `Nil`
+    // spelling, not the canonical `UndefinedObject` hierarchy name.
     let mismatch_warnings: Vec<_> = result
         .diagnostics
         .iter()
         .filter(|d| {
             d.category == Some(DiagnosticCategory::Type)
                 && d.message.contains("'process:'")
-                && d.message.contains("UndefinedObject")
+                && d.message.contains("Nil")
         })
         .collect();
     assert!(
@@ -15454,6 +15471,15 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
+    // BT-2066: the canonical `UndefinedObject` name must NOT leak into the
+    // user-facing message.
+    for d in &mismatch_warnings {
+        assert!(
+            !d.message.contains("UndefinedObject"),
+            "user-facing diagnostic leaked canonical `UndefinedObject`: {}",
+            d.message
+        );
+    }
 }
 
 // ── BT-2051: Deep-descendant `Never` detection in `block_diverges` ──
@@ -15637,13 +15663,16 @@ typed Object subclass: Caller
     // but the outer branch doesn't execute it — control falls through to
     // `Receiver process: ms` with `ms` still `Integer | Nil`, so the
     // argument-mismatch diagnostic must still fire.
+    //
+    // BT-2066: user-facing messages render the source-sympathetic `Nil`
+    // spelling, not the canonical `UndefinedObject` hierarchy name.
     let mismatch_warnings: Vec<_> = result
         .diagnostics
         .iter()
         .filter(|d| {
             d.category == Some(DiagnosticCategory::Type)
                 && d.message.contains("'process:'")
-                && d.message.contains("UndefinedObject")
+                && d.message.contains("Nil")
         })
         .collect();
     assert!(
@@ -15656,6 +15685,15 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
+    // BT-2066: canonical `UndefinedObject` must NOT leak into user-facing
+    // diagnostic messages.
+    for d in &mismatch_warnings {
+        assert!(
+            !d.message.contains("UndefinedObject"),
+            "user-facing diagnostic leaked canonical `UndefinedObject`: {}",
+            d.message
+        );
+    }
 }
 
 // ── BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return-type unification ──

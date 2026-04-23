@@ -209,3 +209,24 @@ Example: `runtime/apps/beamtalk_runtime/test/beamtalk_actor_tests.erl` has compr
 - Future awaiting
 
 **Summary:** Add `// =>` assertions for every deterministic result. For actor state tests, use runtime EUnit tests where you have full control.
+
+## `Nil` vs `UndefinedObject` — the two spellings
+
+Beamtalk has **one** nil class with **two** names:
+
+| Name              | Where it appears                                                                 |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `UndefinedObject` | Canonical class-hierarchy spelling. Used internally by the type checker, BEAM FFI specs, protocol registry, `InferredType::known(...)`, `is_assignable_to` lookups, `Debug` output for `InferredType`, and the stdlib class definition (`stdlib/src/UndefinedObject.bt`). |
+| `Nil`             | Source-sympathetic surface spelling. What users type in annotations (`:: Nil`, `-> Nil`) and read back in user-facing messages: diagnostics, hover, signature help, code-action inserts, and REPL output. (Beamtalk does not yet support union type annotations in `.bt` source — `Foo \| Nil` is how the compiler _renders_ a nullable inference, not something you can write as a type.) |
+
+The two are aliased: the type resolver canonicalises `Nil`/`nil` → `UndefinedObject` during annotation resolution (`type_resolver.rs`), and `WellKnownClass::is_nil_class()` treats both as the nil type.
+
+**When rendering an `InferredType`, pick the right method for the audience:**
+
+- `InferredType::display_name()` — canonical. Use for internal bookkeeping (method-resolution keys, hierarchy enrichment) where the string must round-trip through `is_type_compatible` / `is_assignable_to`.
+- `InferredType::display_for_diagnostic()` — source-sympathetic. Use for anything the user reads: diagnostic messages, hover contents, signature-help labels, code-action insert text, signature display in `display_signature()`.
+- `InferredType::class_name_for_diagnostic(name)` — when you have a bare `EcoString` / `&str` (e.g., union-member names in a hint), use this helper to apply the same `UndefinedObject → Nil` rewrite.
+
+The `Debug` derive on `InferredType` keeps the canonical `UndefinedObject` spelling so test failures and logs stay unambiguous.
+
+**History:** The canonical-vs-surface split is enforced at the rendering boundary because renaming the class in the hierarchy would break BEAM FFI and stdlib protocols (BT-2016 documents the alias history; BT-2066 fixed the rendering regression that leaked `UndefinedObject` into diagnostics during the BT-2044 narrowing epic).
