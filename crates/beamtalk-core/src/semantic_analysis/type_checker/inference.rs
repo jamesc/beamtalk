@@ -1995,8 +1995,13 @@ impl TypeChecker {
         // Infer the exception class argument normally
         let ex_class_ty = self.infer_expr(ex_class_arg, hierarchy, env, in_abstract_method);
 
+        // Unwrap parentheses so `on: (Error) do: ([:e | ...])` also gets the
+        // contextual block-param typing.
+        let ex_class_inner = Self::unwrap_parens(ex_class_arg);
+        let handler_inner = Self::unwrap_parens(handler_arg);
+
         // Extract class name from ClassReference for block param typing
-        let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_arg {
+        let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_inner {
             Some(name.name.clone())
         } else {
             None
@@ -2004,7 +2009,7 @@ impl TypeChecker {
 
         // If handler is a block and we have a class name, type the block param
         let handler_ty = if let (Some(class_name), Expression::Block(block)) =
-            (&exception_class_name, handler_arg)
+            (&exception_class_name, handler_inner)
         {
             let param_types = if block.parameters.is_empty() {
                 vec![]
@@ -2420,6 +2425,15 @@ impl TypeChecker {
             Expression::Identifier(ident) => Some(ident.name.clone()),
             Expression::Parenthesized { expression, .. } => Self::extract_variable_name(expression),
             _ => None,
+        }
+    }
+
+    /// Peel `Expression::Parenthesized` wrappers so callers can pattern-match
+    /// on the inner expression directly.
+    fn unwrap_parens(expr: &Expression) -> &Expression {
+        match expr {
+            Expression::Parenthesized { expression, .. } => Self::unwrap_parens(expression),
+            other => other,
         }
     }
 
