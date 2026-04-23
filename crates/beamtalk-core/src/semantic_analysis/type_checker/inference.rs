@@ -972,10 +972,19 @@ impl TypeChecker {
         // Blocks with a non-local return (`^`) exit the enclosing method —
         // their branch contributes `Never`, and `union_of` skips Never, so
         // the expression's type comes from the surviving branch.
-        if matches!(
-            selector_name.as_str(),
-            "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
-        ) {
+        //
+        // Restricted to non-class-side receivers: `ClassName ifNil: ... ifNotNil: ...`
+        // and `self ifNil: ... ifNotNil: ...` inside a class method must
+        // flow through `check_class_side_send` so an invalid metaclass send
+        // still emits DNU.
+        let is_class_side_receiver = matches!(receiver, Expression::ClassReference { .. })
+            || (env.in_class_method && Self::is_self_receiver(receiver));
+        if !is_class_side_receiver
+            && matches!(
+                selector_name.as_str(),
+                "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+            )
+        {
             if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
                 return ty;
             }
@@ -2251,11 +2260,12 @@ impl TypeChecker {
             if class_name.as_str() != "Block" {
                 return None;
             }
-            // Non-local `^` inside the branch exits the method before the
-            // expression value is observed — treat as Never so `union_of`
-            // skips it.
+            // Non-local `^` anywhere inside the branch (including nested
+            // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
+            // the method before the expression value is observed — treat
+            // the branch as Never so `union_of` skips it.
             if let Expression::Block(block) = Self::unwrap_parens(arg) {
-                if Self::block_has_return(block) {
+                if Self::block_has_any_return(block) {
                     return Some(InferredType::Never);
                 }
             }
@@ -2681,12 +2691,56 @@ impl TypeChecker {
         }
     }
 
-    /// Check whether a block contains a non-local return (`^`).
+    /// Check whether a block contains a non-local return (`^`) at the top
+    /// level of its body. Used where only the block's own direct return
+    /// matters (e.g. guard-block divergence checks).
     fn block_has_return(block: &crate::ast::Block) -> bool {
         block
             .body
             .iter()
             .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
+    }
+
+    /// Check whether a block contains a non-local return (`^`) anywhere
+    /// in its body, including inside nested expressions (e.g.
+    /// `[[^1] value]` or `[foo: (^bar)]`). BT-2047 uses this to detect
+    /// branches that exit the enclosing method even when the `^` is
+    /// buried in a sub-expression.
+    fn block_has_any_return(block: &crate::ast::Block) -> bool {
+        block
+            .body
+            .iter()
+            .any(|stmt| Self::expr_contains_return(&stmt.expression))
+    }
+
+    fn expr_contains_return(expr: &Expression) -> bool {
+        match expr {
+            Expression::Return { .. } => true,
+            Expression::Parenthesized { expression, .. } => Self::expr_contains_return(expression),
+            Expression::Assignment { target, value, .. } => {
+                Self::expr_contains_return(target) || Self::expr_contains_return(value)
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                Self::expr_contains_return(receiver)
+                    || arguments.iter().any(Self::expr_contains_return)
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                Self::expr_contains_return(receiver)
+                    || messages
+                        .iter()
+                        .any(|m| m.arguments.iter().any(Self::expr_contains_return))
+            }
+            Expression::Block(block) => Self::block_has_any_return(block),
+            // Literals, identifiers, class references, field access —
+            // no sub-expressions that could contain `^`.
+            _ => false,
+        }
     }
 
     /// Check whether a type is *only* the nil type (`UndefinedObject` or

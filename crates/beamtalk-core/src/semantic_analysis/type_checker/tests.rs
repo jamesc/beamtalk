@@ -15482,6 +15482,73 @@ fn find_union_in_type_map<'a>(
     })
 }
 
+/// Walk the module AST to find the first `MessageSend` whose selector name
+/// matches `selector_name`, then look up its inferred type in `type_map`.
+/// Used by BT-2047 tests to assert the exact type of the `ifNil:ifNotNil:`
+/// expression — checking diagnostics alone isn't enough because
+/// `check_return_type` bails on `Union` / `Dynamic` inferred bodies.
+fn find_send_inferred_ty<'a>(
+    module: &crate::ast::Module,
+    type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+    selector_name: &str,
+) -> Option<&'a InferredType> {
+    fn walk_expr<'a>(
+        expr: &crate::ast::Expression,
+        type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+        selector_name: &str,
+    ) -> Option<&'a InferredType> {
+        use crate::ast::{Expression, MessageSelector};
+        match expr {
+            Expression::MessageSend {
+                selector,
+                span,
+                receiver,
+                arguments,
+                ..
+            } => {
+                let this_sel = match selector {
+                    MessageSelector::Unary(s) | MessageSelector::Binary(s) => s.to_string(),
+                    MessageSelector::Keyword(parts) => {
+                        parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                    }
+                };
+                if this_sel == selector_name {
+                    return type_map.get(*span);
+                }
+                if let Some(t) = walk_expr(receiver, type_map, selector_name) {
+                    return Some(t);
+                }
+                for a in arguments {
+                    if let Some(t) = walk_expr(a, type_map, selector_name) {
+                        return Some(t);
+                    }
+                }
+                None
+            }
+            Expression::Return { value, .. }
+            | Expression::Parenthesized {
+                expression: value, ..
+            }
+            | Expression::Assignment { value, .. } => walk_expr(value, type_map, selector_name),
+            Expression::Block(block) => block
+                .body
+                .iter()
+                .find_map(|s| walk_expr(&s.expression, type_map, selector_name)),
+            _ => None,
+        }
+    }
+    for class in &module.classes {
+        for method in &class.methods {
+            for stmt in &method.body {
+                if let Some(t) = walk_expr(&stmt.expression, type_map, selector_name) {
+                    return Some(t);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Minimal repro from the BT-2047 issue: `self.snapshot ifNil: [42] ifNotNil:
 /// [:snap | "got one"]` should type as `Integer | String`, not Dynamic.
 #[test]
@@ -15583,17 +15650,14 @@ typed Object subclass: Repro
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
 
-    // No type warnings — method declares -> String, and dedup'd branch union
-    // resolves to bare `String`, which satisfies the declared return.
-    let diags: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
+    // Assert the inferred type of the `ifNil:ifNotNil:` send directly —
+    // "no Type diagnostics" alone would pass even if the expression fell
+    // back to `Dynamic` (which skips return-type mismatch checks).
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:ifNotNil:")
+        .expect("no ifNil:ifNotNil: send found in type_map");
     assert!(
-        diags.is_empty(),
-        "both branches typed String — expression should infer String, not Dynamic; got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "both branches typed String — expression should dedup to Known(\"String\"), got: {send_ty:?}",
     );
 }
 
@@ -15624,18 +15688,11 @@ typed Object subclass: Repro
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
 
-    // No type mismatch warnings — the diverging ifNil: branch is Never, so the
-    // expression's type comes from the ifNotNil: branch (String), which
-    // satisfies the method's declared -> String.
-    let diags: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:ifNotNil:")
+        .expect("no ifNil:ifNotNil: send found in type_map");
     assert!(
-        diags.is_empty(),
-        "diverging ifNil: branch should not widen the expression type; got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "diverging ifNil: branch should project to Never — expression should be Known(\"String\"), got: {send_ty:?}",
     );
 }
 
@@ -15667,15 +15724,15 @@ typed Object subclass: Repro
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
 
-    // Must NOT surface `Integer | String` return-type mismatch against `-> String`.
-    let type_diags: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
+    // The key assertion: the send's inferred type is Known("String"), not
+    // `Integer | String`. Without the `Never` projection, the union would
+    // include Integer and the return type mismatch would surface; with it,
+    // the diverging branch drops out.
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:ifNotNil:")
+        .expect("no ifNil:ifNotNil: send found in type_map");
     assert!(
-        type_diags.is_empty(),
-        "diverging `ifNil: [^42]` should not widen expression to Integer | String; got: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "diverging `ifNil: [^42]` with distinct `ifNotNil:` type should project to \
+         Known(\"String\"), not `Integer | String`; got: {send_ty:?}",
     );
 }
