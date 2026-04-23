@@ -524,6 +524,11 @@ impl TypeEnv {
         self.bindings.insert(name.into(), ty);
     }
 
+    fn remove(&mut self, name: &str) {
+        self.bindings.remove(name);
+        self.origins.remove(name);
+    }
+
     /// Set a variable's type with origin tracking (BT-1588).
     fn set_with_origin(
         &mut self,

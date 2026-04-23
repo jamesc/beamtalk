@@ -392,12 +392,15 @@ impl TypeChecker {
                     if recv_id.name == "self" {
                         // BT-2048: Check for a narrowed type in the env first.
                         // Inside `self.field isNil ifFalse: [...]`, the block env
-                        // will have "self.field" → narrowed non-nil type.
+                        // will have "self.field" → narrowed non-nil type. Assign
+                        // to `result` (rather than returning early) so the shared
+                        // post-processing hook still runs on narrowed reads.
                         let synthetic_key = eco_format!("self.{}", field.name);
                         if let Some(narrowed) = env.get(&synthetic_key) {
-                            return narrowed;
-                        }
-                        if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
+                            result = narrowed;
+                        } else if let Some(InferredType::Known { class_name, .. }) =
+                            env.get("self")
+                        {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
                             {
@@ -517,6 +520,10 @@ impl TypeChecker {
                         if is_self_receiver {
                             // `self.field := value` — validate against declared state type
                             self.check_field_assignment(field, &ty, *span, hierarchy, env);
+                            // BT-2048: Invalidate any stale narrowing on self.field.
+                            // After a write, the narrowed type is no longer guaranteed.
+                            let synthetic_key = eco_format!("self.{}", field.name);
+                            env.remove(&synthetic_key);
                         } else {
                             // `other.field := value` or `(expr).field := value` —
                             // objects cannot mutate another object's state.
@@ -1979,6 +1986,9 @@ impl TypeChecker {
     /// For `ifTrue:`, the true-block gets the narrowed type.
     /// For `ifFalse:`, the false-block gets the complement (non-nil for nil checks).
     /// For `ifTrue:ifFalse:`, both blocks get their respective narrowings.
+    // The three match arms share similar-but-not-identical shapes; BT-2050 tracks
+    // extracting them into a NarrowingRule dispatch table.
+    #[allow(clippy::too_many_lines)]
     fn infer_args_with_narrowing(
         &mut self,
         arguments: &[Expression],
