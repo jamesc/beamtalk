@@ -15610,9 +15610,7 @@ typed Object subclass: Caller
 fn bt2051_never_inside_nested_block_literal_does_not_diverge() {
     let source = r#"
 typed Object subclass: Callbacks
-  class new => [^Callbacks new]
-  add: block =>
-    [^self]
+  add: block => self
 
 typed Object subclass: Receiver
   class process: v :: Integer => v
