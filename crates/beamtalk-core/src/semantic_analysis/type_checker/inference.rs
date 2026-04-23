@@ -2390,6 +2390,17 @@ impl TypeChecker {
     /// For example, `List(String)>>sort:` declares `Block(E, E, Boolean)`.
     /// With E=String (from receiver type args), block params get typed as String
     /// instead of `Dynamic(UnannotatedParam)`.
+    ///
+    /// **BT-2042:** When the receiver is Dynamic (or the method can't be resolved),
+    /// block arguments still need their parameters typed — otherwise each unannotated
+    /// block param defaults to `Dynamic(UnannotatedParam)`, which fires the
+    /// "expression inferred as Dynamic in typed class" warning at every use of the
+    /// block param. In a `typed` class this forces users to annotate every block
+    /// parameter whose upstream iterable happens to be Dynamic, even though the
+    /// root cause is the Dynamic receiver, not the block itself. We propagate
+    /// `Dynamic(DynamicReceiver)` into block params in the fallback paths so
+    /// downstream uses propagate that reason (which is filtered from the warning),
+    /// matching how the send result itself is already classified.
     fn infer_args_with_block_context(
         &mut self,
         arguments: &[Expression],
@@ -2399,25 +2410,37 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> Vec<InferredType> {
-        // Fast path: receiver must be Known to look up method signatures
+        // Fast path: receiver must be Known to look up method signatures.
+        // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
+        // param types from the signature — but we can still propagate a reason-
+        // preserving type into the block params so their uses don't re-fire the
+        // "Dynamic in typed class" warning (BT-2042).
         let InferredType::Known {
             class_name,
             type_args,
             ..
         } = receiver_ty
         else {
-            return arguments
-                .iter()
-                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
-                .collect();
+            return self.infer_args_with_dynamic_block_params(
+                arguments,
+                receiver_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            );
         };
 
-        // Look up the method to get param types
+        // Look up the method to get param types. If the selector isn't defined on
+        // the receiver's class, block params likewise have no resolvable type;
+        // use the Dynamic-block-param fallback so usages don't double-warn.
         let Some(method) = hierarchy.find_method(class_name, selector_name) else {
-            return arguments
-                .iter()
-                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
-                .collect();
+            return self.infer_args_with_dynamic_block_params(
+                arguments,
+                receiver_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            );
         };
 
         // Check if any param type is a Block(...) type
@@ -2514,6 +2537,56 @@ impl TypeChecker {
         }
 
         arg_types
+    }
+
+    /// Fallback variant of [`Self::infer_args_with_block_context`] used when the
+    /// receiver type isn't `Known` (Dynamic/Never/Union/…) or when the selector
+    /// can't be resolved on the receiver.
+    ///
+    /// Walks each argument via `infer_expr`, **except** for block literals: those
+    /// are walked with their parameters pre-bound to `Dynamic(DynamicReceiver)`
+    /// so that usages inside the block body inherit a "propagated Dynamic" reason
+    /// (which is filtered out of the BT-1914 "Dynamic in typed class" warning).
+    /// Without this step, each block param would default to
+    /// `Dynamic(UnannotatedParam)`, re-firing the warning at every use of the
+    /// block param inside a `typed` class — see BT-2042.
+    ///
+    /// The chosen reason follows the send's result classification at line
+    /// `infer_message_send_with_receiver_ty` fallback (see `Dynamic(DynamicReceiver)`
+    /// returns): the send's result is already classified that way for the same
+    /// root cause, so block params inherit the same provenance for consistency.
+    fn infer_args_with_dynamic_block_params(
+        &mut self,
+        arguments: &[Expression],
+        receiver_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        // Only propagate DynamicReceiver when the receiver actually is Dynamic.
+        // For Never / Union / other shapes, fall back to the plain walk so we
+        // don't mask unrelated root causes.
+        let propagate_dynamic = matches!(receiver_ty, InferredType::Dynamic(_));
+
+        arguments
+            .iter()
+            .map(|arg| match arg {
+                Expression::Block(block) if propagate_dynamic => {
+                    let param_types: Vec<InferredType> = (0..block.parameters.len())
+                        .map(|_| InferredType::Dynamic(DynamicReason::DynamicReceiver))
+                        .collect();
+                    self.infer_block_with_typed_params(
+                        block,
+                        arg.span(),
+                        &param_types,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    )
+                }
+                _ => self.infer_expr(arg, hierarchy, env, in_abstract_method),
+            })
+            .collect()
     }
 
     /// Infer a block expression with typed parameters resolved from the callee
