@@ -1834,9 +1834,18 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // Pass 1: Parse all files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
+    let mut unreadable_files: Vec<String> = Vec::new();
 
     for file in &extraction_files {
         let Ok(source) = std::fs::read_to_string(file) else {
+            // BT-2056: Track package-extraction files that couldn't be read so
+            // the caller knows cross-file class extraction may be incomplete.
+            // Only warn for files the resolver chose (not direct targets, which
+            // are already counted by `resolve_source_files`).
+            let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+            if !target_set.contains(&canonical) {
+                unreadable_files.push(file.to_string_lossy().into_owned());
+            }
             continue;
         };
         let file_str = file.to_string_lossy().into_owned();
@@ -1924,7 +1933,9 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         0.0
     };
 
-    serde_json::json!({
+    // BT-2056: Include unreadable package files in the output so the caller
+    // knows cross-file class extraction may be incomplete.
+    let mut result = serde_json::json!({
         "files_checked": files_checked,
         "totals_by_severity": {
             "error": totals.error,
@@ -1939,7 +1950,11 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             "total": coverage.total_expressions,
             "dynamic_percent": dynamic_pct,
         },
-    })
+    });
+    if !unreadable_files.is_empty() {
+        result["unreadable_package_files"] = serde_json::json!(unreadable_files);
+    }
+    result
 }
 
 /// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
@@ -2136,6 +2151,21 @@ fn run_lint_structured(path: &str) -> LintResult {
                     line: None,
                     message: format!("Failed to read '{}'", file.display()),
                     severity: "error",
+                });
+            } else {
+                // BT-2056: Surface a warning when a package-extraction file
+                // (chosen by the resolver but not a direct lint target) cannot
+                // be read. Without this, cross-file class extraction silently
+                // drops the file, potentially re-introducing diagnostic
+                // divergence from CLI lint.
+                warnings.push(LintDiagnostic {
+                    file: file.to_string_lossy().into_owned(),
+                    line: None,
+                    message: format!(
+                        "Failed to read package file '{}'; cross-file class extraction may be incomplete",
+                        file.display()
+                    ),
+                    severity: "warning",
                 });
             }
             continue;
@@ -2440,6 +2470,97 @@ mod tests {
         assert!(
             !stale,
             "MCP lint with cross-file classes should not report @expect as stale, got: {result:?}",
+        );
+    }
+
+    /// BT-2056: When a package-extraction file in src/ cannot be read, MCP lint
+    /// must surface a warning rather than silently dropping it from the
+    /// extraction set.
+    #[cfg(unix)]
+    #[test]
+    fn run_lint_structured_unreadable_package_file_warns() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-lint-unreadable-{}",
+            std::process::id()
+        ));
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        // Create a beamtalk.toml so find_package_root works.
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"unreadable-test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        // Create a readable target file.
+        let target = src_dir.join("main.bt");
+        std::fs::write(&target, "Object subclass: Main\n  class hello => 42\n").unwrap();
+
+        // Create a sibling file, then make it unreadable.
+        let sibling = src_dir.join("helper.bt");
+        std::fs::write(&sibling, "Object subclass: Helper\n  class help => 1\n").unwrap();
+        std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = run_lint_structured(target.to_str().unwrap());
+
+        // Restore permissions before cleanup so remove_dir_all succeeds.
+        let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let has_unreadable_warning = result.warnings.iter().any(|d| {
+            d.message
+                .contains("cross-file class extraction may be incomplete")
+        });
+        assert!(
+            has_unreadable_warning,
+            "MCP lint should warn about unreadable package files, got: {result:?}",
+        );
+    }
+
+    /// BT-2056: `compute_diagnostic_summary` should include unreadable package
+    /// files in its output when a sibling file cannot be read.
+    #[cfg(unix)]
+    #[test]
+    fn compute_diagnostic_summary_unreadable_package_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-summary-unreadable-{}",
+            std::process::id()
+        ));
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"unreadable-test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let target = src_dir.join("main.bt");
+        std::fs::write(&target, "Object subclass: Main\n  class hello => 42\n").unwrap();
+
+        let sibling = src_dir.join("helper.bt");
+        std::fs::write(&sibling, "Object subclass: Helper\n  class help => 1\n").unwrap();
+        std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = compute_diagnostic_summary(target.to_str().unwrap());
+
+        let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            result.get("unreadable_package_files").is_some(),
+            "diagnostic summary should include unreadable_package_files, got: {result}",
+        );
+        let unreadable = result["unreadable_package_files"].as_array().unwrap();
+        assert_eq!(unreadable.len(), 1);
+        assert!(
+            unreadable[0].as_str().unwrap().contains("helper.bt"),
+            "unreadable file should be helper.bt, got: {unreadable:?}",
         );
     }
 
