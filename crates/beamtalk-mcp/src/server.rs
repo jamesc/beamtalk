@@ -2476,8 +2476,11 @@ mod tests {
     /// BT-2056: When a package-extraction file in src/ cannot be read, MCP lint
     /// must surface a warning rather than silently dropping it from the
     /// extraction set.
+    #[cfg(unix)]
     #[test]
     fn run_lint_structured_unreadable_package_file_warns() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-lint-unreadable-{}",
             std::process::id()
@@ -2499,42 +2502,31 @@ mod tests {
         // Create a sibling file, then make it unreadable.
         let sibling = src_dir.join("helper.bt");
         std::fs::write(&sibling, "Object subclass: Helper\n  class help => 1\n").unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o000);
-            std::fs::set_permissions(&sibling, perms).unwrap();
-        }
+        std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let result = run_lint_structured(target.to_str().unwrap());
 
         // Restore permissions before cleanup so remove_dir_all succeeds.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o644);
-            let _ = std::fs::set_permissions(&sibling, perms);
-        }
+        let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
         let _ = std::fs::remove_dir_all(&dir);
 
-        #[cfg(unix)]
-        {
-            let has_unreadable_warning = result.warnings.iter().any(|d| {
-                d.message
-                    .contains("cross-file class extraction may be incomplete")
-            });
-            assert!(
-                has_unreadable_warning,
-                "MCP lint should warn about unreadable package files, got: {result:?}",
-            );
-        }
+        let has_unreadable_warning = result.warnings.iter().any(|d| {
+            d.message
+                .contains("cross-file class extraction may be incomplete")
+        });
+        assert!(
+            has_unreadable_warning,
+            "MCP lint should warn about unreadable package files, got: {result:?}",
+        );
     }
 
     /// BT-2056: `compute_diagnostic_summary` should include unreadable package
     /// files in its output when a sibling file cannot be read.
+    #[cfg(unix)]
     #[test]
     fn compute_diagnostic_summary_unreadable_package_file() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-summary-unreadable-{}",
             std::process::id()
@@ -2553,37 +2545,23 @@ mod tests {
 
         let sibling = src_dir.join("helper.bt");
         std::fs::write(&sibling, "Object subclass: Helper\n  class help => 1\n").unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o000);
-            std::fs::set_permissions(&sibling, perms).unwrap();
-        }
+        std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let result = compute_diagnostic_summary(target.to_str().unwrap());
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o644);
-            let _ = std::fs::set_permissions(&sibling, perms);
-        }
+        let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
         let _ = std::fs::remove_dir_all(&dir);
 
-        #[cfg(unix)]
-        {
-            assert!(
-                result.get("unreadable_package_files").is_some(),
-                "diagnostic summary should include unreadable_package_files, got: {result}",
-            );
-            let unreadable = result["unreadable_package_files"].as_array().unwrap();
-            assert_eq!(unreadable.len(), 1);
-            assert!(
-                unreadable[0].as_str().unwrap().contains("helper.bt"),
-                "unreadable file should be helper.bt, got: {unreadable:?}",
-            );
-        }
+        assert!(
+            result.get("unreadable_package_files").is_some(),
+            "diagnostic summary should include unreadable_package_files, got: {result}",
+        );
+        let unreadable = result["unreadable_package_files"].as_array().unwrap();
+        assert_eq!(unreadable.len(), 1);
+        assert!(
+            unreadable[0].as_str().unwrap().contains("helper.bt"),
+            "unreadable file should be helper.bt, got: {unreadable:?}",
+        );
     }
 
     /// BT-2052: Verify `find_package_root` walks ancestors to find `beamtalk.toml`.
