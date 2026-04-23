@@ -139,10 +139,14 @@ fn invoke_erlfmt(
                                     true -> halt(0); \
                                     false -> halt(10) \
                                 end; \
-                            {{error, _}} -> halt(2) \
+                            {{error, ReadReason}} -> \
+                                io:put_chars(standard_error, io_lib:format(\"~tp~n\", [ReadReason])), \
+                                halt(2) \
                         end; \
                     {{skip, _}} -> halt(0); \
-                    {{error, _}} -> halt(2) \
+                    {{error, FmtReason}} -> \
+                        io:put_chars(standard_error, io_lib:format(\"~tp~n\", [FmtReason])), \
+                        halt(2) \
                 end."
             )
         } else {
@@ -152,10 +156,14 @@ fn invoke_erlfmt(
                         Bin = unicode:characters_to_binary(Formatted), \
                         case file:write_file(\"{escaped_file}\", Bin) of \
                             ok -> halt(0); \
-                            {{error, _}} -> halt(2) \
+                            {{error, WriteReason}} -> \
+                                io:put_chars(standard_error, io_lib:format(\"~tp~n\", [WriteReason])), \
+                                halt(2) \
                         end; \
                     {{skip, _}} -> halt(0); \
-                    {{error, _}} -> halt(2) \
+                    {{error, FmtReason}} -> \
+                        io:put_chars(standard_error, io_lib:format(\"~tp~n\", [FmtReason])), \
+                        halt(2) \
                 end."
             )
         };
