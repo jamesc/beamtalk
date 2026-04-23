@@ -906,6 +906,11 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )
+        } else if selector_name == "on:do:" {
+            // BT-2045: Exception handler block parameter inference.
+            // `[...] on: SomeException do: [:e | ...]` — infer `e` as `SomeException`
+            // when the first argument is a class reference.
+            self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
         } else {
             self.infer_args_with_block_context(
                 arguments,
@@ -1960,6 +1965,71 @@ impl TypeChecker {
             info.false_type = None;
         }
         info
+    }
+
+    /// BT-2045: Infer argument types for `on:do:` with exception class propagation.
+    ///
+    /// When the first argument is a class reference (e.g., `Exception`, `Error`),
+    /// the handler block's parameter is typed as that class instead of
+    /// `Dynamic(UnannotatedParam)`.
+    ///
+    /// `[...] on: Error do: [:e | e message]` → `e :: Error`
+    fn infer_args_for_on_do(
+        &mut self,
+        arguments: &[Expression],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        // on:do: expects exactly 2 arguments: exClass and handler
+        if arguments.len() != 2 {
+            return arguments
+                .iter()
+                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+                .collect();
+        }
+
+        let ex_class_arg = &arguments[0];
+        let handler_arg = &arguments[1];
+
+        // Infer the exception class argument normally
+        let ex_class_ty = self.infer_expr(ex_class_arg, hierarchy, env, in_abstract_method);
+
+        // Extract class name from ClassReference for block param typing
+        let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_arg {
+            Some(name.name.clone())
+        } else {
+            None
+        };
+
+        // If handler is a block and we have a class name, type the block param
+        let handler_ty = if let (Some(class_name), Expression::Block(block)) =
+            (&exception_class_name, handler_arg)
+        {
+            let param_types = if block.parameters.is_empty() {
+                vec![]
+            } else {
+                // Type the first (and typically only) block parameter as the exception class
+                let mut types = vec![InferredType::known(class_name.clone())];
+                // Any additional params beyond the first stay Dynamic
+                for _ in 1..block.parameters.len() {
+                    types.push(InferredType::Dynamic(DynamicReason::UnannotatedParam));
+                }
+                types
+            };
+            self.infer_block_with_typed_params(
+                block,
+                handler_arg.span(),
+                &param_types,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        } else {
+            self.infer_expr(handler_arg, hierarchy, env, in_abstract_method)
+        };
+
+        vec![ex_class_ty, handler_ty]
     }
 
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with

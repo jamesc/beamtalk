@@ -14736,3 +14736,136 @@ typed Object subclass: ExduraWorker
             .collect::<Vec<_>>()
     );
 }
+
+// --- BT-2045: on:do: block parameter inference ---
+
+/// `on: Exception do: [:e | e message]` should infer `e :: Exception`,
+/// so `e message` resolves to `String` with no Dynamic or DNU warnings.
+#[test]
+fn bt2045_on_do_infers_block_param_from_exception_class() {
+    let source = "
+typed Object subclass: Repro
+  handleIt -> String =>
+    [^42]
+      on: Exception
+      do: [:e | e message]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "on:do: handler param should be typed as Exception, not Dynamic; got: {:?}",
+        dynamic_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "e message should resolve — Exception defines `message`; got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Subclass of Exception: `on: Error do: [:e | e message]` should
+/// infer `e :: Error` and its inherited `message` method should resolve.
+#[test]
+fn bt2045_on_do_infers_block_param_from_exception_subclass() {
+    let source = "
+typed Object subclass: Repro
+  handleIt -> String =>
+    [^42]
+      on: Error
+      do: [:e | e message]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "on:do: handler param should be typed as Error, not Dynamic; got: {:?}",
+        dynamic_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "e message should resolve — Error inherits `message` from Exception; got: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Non-class-reference first argument to `on:do:` should not crash;
+/// the handler param falls back to `Dynamic(UnannotatedParam)`.
+#[test]
+fn bt2045_on_do_non_class_ref_falls_back_to_dynamic() {
+    let source = "
+typed Object subclass: Repro
+  handleIt: exClass :: Object -> Nil =>
+    [^42]
+      on: exClass
+      do: [:e | e message]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // With a variable (not class reference), we expect Dynamic — which is
+    // correct because we can't statically determine the exception class.
+    // The test just verifies we don't crash.
+    let dynamic_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("inferred as Dynamic") && d.message.contains("unannotated parameter")
+        })
+        .collect();
+    assert!(
+        !dynamic_warnings.is_empty(),
+        "variable first arg should leave handler param as Dynamic(UnannotatedParam)"
+    );
+}
