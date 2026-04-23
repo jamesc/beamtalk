@@ -930,6 +930,21 @@ impl TypeChecker {
             // `[...] on: SomeException do: [:e | ...]` — infer `e` as `SomeException`
             // when the first argument is a class reference.
             self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
+        } else if matches!(
+            selector_name.as_str(),
+            "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+        ) {
+            // BT-2046: Narrow block parameter of `ifNotNil: [:x | ...]` to the
+            // non-nil branch of the receiver's type. Dual of the receiver-side
+            // `isNil ifFalse:` narrowing (BT-2048).
+            self.infer_args_for_if_not_nil(
+                &selector_name,
+                arguments,
+                &receiver_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
         } else {
             self.infer_args_with_block_context(
                 arguments,
@@ -2058,6 +2073,136 @@ impl TypeChecker {
         vec![ex_class_ty, handler_ty]
     }
 
+    /// BT-2046: Infer argument types for `ifNotNil:` / `ifNil:ifNotNil:` /
+    /// `ifNotNil:ifNil:` with non-nil narrowing of the receiver propagated to
+    /// the not-nil block's parameter.
+    ///
+    /// When the receiver is `T | Nil`, the block parameter in
+    /// `ifNotNil: [:x | ...]` should be typed `T` (the non-nil branch),
+    /// instead of `Dynamic(UnannotatedParam)`. For non-nullable receivers the
+    /// parameter is typed as the full receiver type (not a regression from
+    /// prior behaviour, which also produced `Dynamic`).
+    ///
+    /// Nil-branch blocks (`ifNil:`) and blocks with no declared parameter get
+    /// the default inference path.
+    fn infer_args_for_if_not_nil(
+        &mut self,
+        selector_name: &str,
+        arguments: &[Expression],
+        receiver_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        // Compute the non-nil branch type once. `non_nil_type` strips
+        // `UndefinedObject` / `Nil` from a union and returns other types
+        // unchanged (matches the `isNil ifFalse:` narrowing — BT-2048).
+        let non_nil_ty = Self::non_nil_type(receiver_ty);
+
+        // Positions of the `ifNotNil:` block in the argument list per selector.
+        let not_nil_index: Option<usize> = match selector_name {
+            "ifNil:ifNotNil:" => Some(1),
+            "ifNotNil:" | "ifNotNil:ifNil:" => Some(0),
+            _ => None,
+        };
+
+        arguments
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                if Some(i) == not_nil_index {
+                    self.infer_if_not_nil_block(
+                        arg,
+                        receiver_ty,
+                        &non_nil_ty,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    )
+                } else {
+                    // Preserve block-context inference for the `ifNil:` arm in
+                    // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
+                    // `infer_expr` would drop the `Block(..., R)` return type,
+                    // degrading the whole send on statically-known receivers.
+                    let inner = Self::unwrap_parens(arg);
+                    if let Expression::Block(block) = inner {
+                        self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &[],
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        )
+                    } else {
+                        self.infer_expr(arg, hierarchy, env, in_abstract_method)
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Infer the `ifNotNil:` block, typing its first parameter (if any) as the
+    /// non-nil branch of the receiver's type.
+    ///
+    /// Falls back to the normal expression inference path when the argument
+    /// isn't a block literal (e.g. `receiver ifNotNil: aSymbol` is legal but
+    /// non-local-inferable here).
+    fn infer_if_not_nil_block(
+        &mut self,
+        arg: &Expression,
+        receiver_ty: &InferredType,
+        non_nil_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        // Unwrap parens: `ifNotNil: ([:x | ...])` should narrow the same as
+        // the unparenthesised form.
+        let inner = Self::unwrap_parens(arg);
+        let Expression::Block(block) = inner else {
+            return self.infer_expr(arg, hierarchy, env, in_abstract_method);
+        };
+
+        // Zero-arity `ifNotNil: [ ... ]` — still call the typed-param helper
+        // with an empty param list so the returned `Block(..., R)` type
+        // carries the body's return type (consistent with
+        // `infer_block_with_narrowing`; relevant for BT-2047).
+        let param_types: Vec<InferredType> = if block.parameters.is_empty() {
+            vec![]
+        } else {
+            // If the RECEIVER is nil-only (e.g. receiver is a literal `nil`,
+            // `UndefinedObject | Nil`), the block is dead code. Check against
+            // the original receiver — `non_nil_type` collapses a nil-only
+            // union to `Dynamic(Unknown)`, so checking `non_nil_ty` here would
+            // miss the case. Leave the param as `Dynamic(UnannotatedParam)`
+            // so unreachable bodies still compile without DNU noise.
+            let first_param_ty = if Self::is_nil_only(receiver_ty) {
+                InferredType::Dynamic(DynamicReason::UnannotatedParam)
+            } else {
+                non_nil_ty.clone()
+            };
+            let mut types = Vec::with_capacity(block.parameters.len());
+            types.push(first_param_ty);
+            // Any additional params beyond the first stay Dynamic. A
+            // well-formed `ifNotNil:` block has 0 or 1 parameter (validated by
+            // `validate_if_not_nil_block` in codegen), so this is defensive.
+            for _ in 1..block.parameters.len() {
+                types.push(InferredType::Dynamic(DynamicReason::UnannotatedParam));
+            }
+            types
+        };
+
+        self.infer_block_with_typed_params(
+            block,
+            arg.span(),
+            &param_types,
+            hierarchy,
+            env,
+            in_abstract_method,
+        )
+    }
+
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
     /// narrowed type environments for block arguments.
     ///
@@ -2481,6 +2626,24 @@ impl TypeChecker {
             .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
     }
 
+    /// Check whether a type is *only* the nil type (`UndefinedObject` or
+    /// its legacy `Nil` alias). Returns `true` for the bare nil type itself,
+    /// or a union whose members are all nil. Used by the `ifNotNil:` block-
+    /// param narrowing (BT-2046) to avoid typing the param as `UndefinedObject`
+    /// when the non-nil branch is dead code.
+    fn is_nil_only(ty: &InferredType) -> bool {
+        match ty {
+            InferredType::Known { class_name, .. } => {
+                class_name.as_str() == "UndefinedObject" || class_name.as_str() == "Nil"
+            }
+            InferredType::Union { members, .. } => members.iter().all(|m| {
+                m.as_known()
+                    .is_some_and(|n| n.as_str() == "UndefinedObject" || n.as_str() == "Nil")
+            }),
+            _ => false,
+        }
+    }
+
     /// Check whether a block's execution cannot fall through to the enclosing
     /// method's next statement (BT-2049).
     ///
@@ -2490,6 +2653,8 @@ impl TypeChecker {
     /// - Its body's inferred return type is [`InferredType::Never`] — i.e. the
     ///   last expression is a call to a `-> Never`-returning method such as
     ///   `Object>>error:` or `Object>>notImplemented`.
+    /// - Any statement inside the body has inferred type `Never` (e.g.
+    ///   `[self error: "…". ^nil]` — the trailing `^nil` is unreachable).
     ///
     /// The block's inferred type is read from [`TypeChecker::type_map`] as the
     /// final type-arg of its `Block(...)` representation (populated by
@@ -2516,10 +2681,6 @@ impl TypeChecker {
                 }
             }
         }
-        // Any statement inside the block whose inferred type is Never means the
-        // block cannot fall through, even if trailing statements have a
-        // non-Never type (e.g. `[self error: "…". ^nil]` or cleanup calls
-        // after a diverging expression).
         block.body.iter().any(|stmt| {
             matches!(
                 self.type_map.get(stmt.expression.span()),
