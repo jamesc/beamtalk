@@ -133,7 +133,8 @@ fn invoke_erlfmt(
                 "case erlfmt:format_file(\"{escaped_file}\", [{{print_width, 100}}]) of \
                     {{ok, Formatted, _}} -> \
                         {{ok, Original}} = file:read_file(\"{escaped_file}\"), \
-                        case iolist_to_binary(Formatted) =:= Original of \
+                        Bin = unicode:characters_to_binary(Formatted), \
+                        case Bin =:= Original of \
                             true -> halt(0); \
                             false -> halt(1) \
                         end; \
@@ -145,7 +146,8 @@ fn invoke_erlfmt(
             format!(
                 "case erlfmt:format_file(\"{escaped_file}\", [{{print_width, 100}}]) of \
                     {{ok, Formatted, _}} -> \
-                        case file:write_file(\"{escaped_file}\", Formatted) of \
+                        Bin = unicode:characters_to_binary(Formatted), \
+                        case file:write_file(\"{escaped_file}\", Bin) of \
                             ok -> halt(0); \
                             {{error, _}} -> halt(2) \
                         end; \
@@ -173,15 +175,28 @@ fn invoke_erlfmt(
                 // File needs formatting.
                 result.changed_files.push(file.clone());
             }
-            _ => {
+            Some(code) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                if !stderr.is_empty() {
-                    eprintln!(
-                        "warning: erlfmt {action} error on '{}': {}",
-                        file,
-                        stderr.trim()
-                    );
-                }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let detail = if !stderr.is_empty() {
+                    stderr.trim().to_string()
+                } else if !stdout.is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    format!("exit code {code}")
+                };
+                eprintln!("warning: erlfmt {action} error on '{file}': {detail}");
+                result.error_files.push(file.clone());
+            }
+            None => {
+                // Process was killed by a signal (no exit code).
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let detail = if stderr.is_empty() {
+                    "process terminated by signal".to_string()
+                } else {
+                    stderr.trim().to_string()
+                };
+                eprintln!("warning: erlfmt {action} crashed on '{file}': {detail}");
                 result.error_files.push(file.clone());
             }
         }
@@ -208,4 +223,106 @@ fn escape_for_erlang_string(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// Write `content` to a temp `.erl` file and return (dir, path).
+    fn write_temp_erl(name: &str, content: &str) -> (tempfile::TempDir, Utf8PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(name);
+        let mut f = std::fs::File::create(&path).expect("create temp file");
+        f.write_all(content.as_bytes()).expect("write temp file");
+        let utf8_path = Utf8PathBuf::from_path_buf(path).expect("utf8 path");
+        (dir, utf8_path)
+    }
+
+    /// Return the project root (two levels up from the crate manifest directory).
+    fn project_root() -> Utf8PathBuf {
+        let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("project root")
+            .to_owned()
+    }
+
+    #[test]
+    fn escape_for_erlang_string_handles_special_chars() {
+        assert_eq!(escape_for_erlang_string(r"hello"), "hello");
+        assert_eq!(escape_for_erlang_string(r#"a"b"#), r#"a\"b"#);
+        assert_eq!(escape_for_erlang_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_for_erlang_string("a\nb"), "a\\nb");
+    }
+
+    /// erlfmt must correctly format and write back a `.erl` file containing
+    /// non-ASCII Unicode characters (e.g. arrows, em-dashes) in comments.
+    ///
+    /// This is an integration test requiring `erl` and `rebar3` on PATH.
+    /// Erlfmt beams are bootstrapped automatically if not already built.
+    #[test]
+    #[ignore = "requires erl and rebar3 on PATH"]
+    fn erlfmt_write_preserves_unicode_in_comments() {
+        let root = project_root();
+
+        // U+2192 RIGHTWARDS ARROW, U+2014 EM DASH
+        let source = "-module(unicode_test).\n\n\
+                       %% Dispatch: request \u{2192} handler \u{2014} see docs.\n\n\
+                       -export([hello/0]).\n\n\
+                       hello() -> ok.\n";
+
+        let (_dir, path) = write_temp_erl("unicode_test.erl", source);
+        let files = vec![path.clone()];
+
+        // Format in write mode (bootstraps erlfmt if needed).
+        let result = run_erlfmt(&files, false, &root).expect("run_erlfmt write");
+        assert!(
+            result.error_files.is_empty(),
+            "erlfmt should not report errors for Unicode file; errors: {:?}",
+            result.error_files
+        );
+
+        // Read back and verify Unicode chars survived.
+        let written = std::fs::read_to_string(path.as_std_path()).expect("read formatted file");
+        assert!(
+            written.contains('\u{2192}'),
+            "formatted output must preserve U+2192 RIGHTWARDS ARROW; got: {written:?}"
+        );
+        assert!(
+            written.contains('\u{2014}'),
+            "formatted output must preserve U+2014 EM DASH; got: {written:?}"
+        );
+
+        // Check mode on the already-formatted file must report no changes.
+        let check_result = run_erlfmt(&files, true, &root).expect("run_erlfmt check");
+        assert!(
+            check_result.changed_files.is_empty(),
+            "fmt-check after fmt must report 0 changed files; got: {:?}",
+            check_result.changed_files
+        );
+        assert!(
+            check_result.error_files.is_empty(),
+            "fmt-check must not report errors; got: {:?}",
+            check_result.error_files
+        );
+    }
+
+    /// When the Erlang subprocess crashes (e.g. nonexistent ebin path),
+    /// `invoke_erlfmt` must report the file in `error_files`, not silently
+    /// succeed.
+    #[test]
+    fn erlfmt_surfaces_errors_on_subprocess_failure() {
+        let bad_ebin = Utf8PathBuf::from("/nonexistent/ebin/path");
+        let (_dir, path) = write_temp_erl("ok.erl", "-module(ok).\n");
+        let files = vec![path.clone()];
+
+        let result = invoke_erlfmt(&bad_ebin, &files, false).expect("invoke_erlfmt");
+        assert!(
+            !result.error_files.is_empty(),
+            "erlfmt with bad ebin path must report file as error"
+        );
+    }
 }
