@@ -861,7 +861,7 @@ class -> Self class => @primitive "class"
 // Tells the type checker the value is a class object in the named class
 // hierarchy, so class-side methods on that class resolve without false DNU
 // warnings. Resolves to Dynamic at runtime (type-erased).
-field: actorClass :: Actor class | Nil = nil
+field: actorClass :: Actor class | nil = nil
 // After `actorClass isNil ifTrue: [^nil]`, actorClass is narrowed to
 // `Actor class` — class-side methods like `isSupervisor` type-check.
 ```
