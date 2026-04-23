@@ -2646,21 +2646,27 @@ impl TypeChecker {
 
         arguments
             .iter()
-            .map(|arg| match arg {
-                Expression::Block(block) if propagate_dynamic => {
-                    let param_types: Vec<InferredType> = (0..block.parameters.len())
-                        .map(|_| InferredType::Dynamic(DynamicReason::DynamicReceiver))
-                        .collect();
-                    self.infer_block_with_typed_params(
-                        block,
-                        arg.span(),
-                        &param_types,
-                        hierarchy,
-                        env,
-                        in_abstract_method,
-                    )
+            .map(|arg| {
+                // Unwrap parens so `foo: ([:x | ...])` gets the same
+                // Dynamic(DynamicReceiver) propagation as the unparenthesised
+                // `foo: [:x | ...]` form.
+                let inner = Self::unwrap_parens(arg);
+                if let Expression::Block(block) = inner {
+                    if propagate_dynamic {
+                        let param_types: Vec<InferredType> = (0..block.parameters.len())
+                            .map(|_| InferredType::Dynamic(DynamicReason::DynamicReceiver))
+                            .collect();
+                        return self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &param_types,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                    }
                 }
-                _ => self.infer_expr(arg, hierarchy, env, in_abstract_method),
+                self.infer_expr(arg, hierarchy, env, in_abstract_method)
             })
             .collect()
     }
