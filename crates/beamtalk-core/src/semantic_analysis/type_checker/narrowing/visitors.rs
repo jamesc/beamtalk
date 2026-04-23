@@ -27,6 +27,7 @@
 //! Extracted from `inference.rs` under BT-2050.
 
 use crate::ast::{Block, Expression};
+use crate::semantic_analysis::type_checker::EnvKey;
 
 use super::extract::extract_variable_name;
 
@@ -94,17 +95,17 @@ pub(crate) fn expr_contains_return(expr: &Expression) -> bool {
 }
 
 /// Conservative scan: does `block` contain an assignment whose target is the
-/// same binding as `var_name`?
+/// same binding as `key`?
 ///
-/// `var_name` can be a bare identifier (e.g. `"x"`) or a synthetic
-/// `self.field` key (BT-2048). Only inspects top-level statements in the
-/// block, which matches the shapes post-guard narrowing currently reasons
-/// about. False positives are safe (we skip narrowing); false negatives would
-/// be unsound, so anything non-trivial defaults to "assume reassignment".
-pub(crate) fn block_may_reassign(block: &Block, var_name: &str) -> bool {
+/// `key` may be a lexical local or a synthetic `self.<field>` key
+/// (BT-2048 / BT-2062). Only inspects top-level statements in the block,
+/// which matches the shapes post-guard narrowing currently reasons about.
+/// False positives are safe (we skip narrowing); false negatives would be
+/// unsound, so anything non-trivial defaults to "assume reassignment".
+pub(crate) fn block_may_reassign(block: &Block, key: &EnvKey) -> bool {
     block.body.iter().any(|stmt| {
         if let Expression::Assignment { target, .. } = &stmt.expression {
-            extract_variable_name(target).is_some_and(|n| n.as_str() == var_name)
+            extract_variable_name(target).is_some_and(|n| &n == key)
         } else {
             false
         }

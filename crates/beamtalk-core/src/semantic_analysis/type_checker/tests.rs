@@ -594,13 +594,16 @@ fn test_did_you_mean_hint() {
 #[test]
 fn test_type_env_child_scope() {
     let mut parent = TypeEnv::new();
-    parent.set("x", InferredType::known("Integer"));
+    parent.set_local("x", InferredType::known("Integer"));
 
     let mut child = parent.child();
-    assert_eq!(child.get("x"), Some(InferredType::known("Integer")));
+    assert_eq!(child.get_local("x"), Some(InferredType::known("Integer")));
 
-    child.set("y", InferredType::known("String"));
-    assert!(parent.get("y").is_none(), "parent should not see child's y");
+    child.set_local("y", InferredType::known("String"));
+    assert!(
+        parent.get_local("y").is_none(),
+        "parent should not see child's y"
+    );
 }
 
 #[test]
@@ -631,7 +634,7 @@ fn test_match_arm_pattern_vars_bound_in_body() {
     let mut checker = TypeChecker::new();
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
-    env.set("n", InferredType::known("Integer"));
+    env.set_local("n", InferredType::known("Integer"));
 
     let match_expr = Expression::Match {
         value: Box::new(int_lit(42)),
@@ -663,7 +666,7 @@ fn test_match_arm_pattern_vars_bound_in_guard() {
     let mut checker = TypeChecker::new();
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
-    env.set("n", InferredType::known("Integer"));
+    env.set_local("n", InferredType::known("Integer"));
 
     let match_expr = Expression::Match {
         value: Box::new(int_lit(42)),
@@ -3852,7 +3855,7 @@ Value subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
+    env.set_local("self", InferredType::known("Driver"));
     let ty = checker.infer_expr(expr, &probe_hierarchy, &mut env, false);
 
     // Assert the outer type is Result with Sub as its first type arg.
@@ -3935,7 +3938,7 @@ Value subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
+    env.set_local("self", InferredType::known("Driver"));
     let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
@@ -4010,10 +4013,10 @@ Value subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
+    env.set_local("self", InferredType::known("Driver"));
     // `pool` is a FakeWorkerPool instance (no receiver type args; the
     // binding of C flows from superclass_type_args on FakeWorkerPool).
-    env.set("pool", InferredType::known("FakeWorkerPool"));
+    env.set_local("pool", InferredType::known("FakeWorkerPool"));
     let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
@@ -4409,11 +4412,11 @@ fn test_bind_pattern_vars_skips_wildcard() {
     let mut env = TypeEnv::new();
     TypeChecker::bind_pattern_vars(&pattern, &mut env);
     assert!(
-        env.get("_").is_none(),
+        env.get_local("_").is_none(),
         "`_` must not be bound by bind_pattern_vars"
     );
     assert_eq!(
-        env.get("y"),
+        env.get_local("y"),
         Some(InferredType::Dynamic(DynamicReason::Unknown)),
         "`y` must be bound as Dynamic"
     );
@@ -4906,7 +4909,7 @@ fn union_receiver_warns_when_non_nil_member_lacks_selector() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     let _ty = checker.infer_expr(
         &module.expressions[0].expression,
@@ -4947,7 +4950,7 @@ fn union_receiver_nil_skipped_no_warning() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "x",
         InferredType::simple_union(&["String", "UndefinedObject"]),
     );
@@ -4997,7 +5000,7 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "x",
         InferredType::simple_union(&["Float", "UndefinedObject"]),
     );
@@ -5049,7 +5052,7 @@ fn union_receiver_no_warning_when_all_understand() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("x", InferredType::simple_union(&["Integer", "String"]));
+    env.set_local("x", InferredType::simple_union(&["Integer", "String"]));
 
     checker.infer_expr(
         &module.expressions[0].expression,
@@ -5087,7 +5090,7 @@ fn union_receiver_dynamic_member_no_warning() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
     // Union with a Dynamic member — should fall through to Dynamic result
-    env.set(
+    env.set_local(
         "x",
         InferredType::Union {
             members: vec![
@@ -5138,7 +5141,7 @@ fn union_receiver_return_type_is_union_of_member_returns() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("x", InferredType::simple_union(&["Integer", "String"]));
+    env.set_local("x", InferredType::simple_union(&["Integer", "String"]));
 
     let ty = checker.infer_expr(
         &module.expressions[0].expression,
@@ -5170,7 +5173,7 @@ fn union_receiver_nil_only_returns_dynamic() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
     // Degenerate case: union of just Nil
-    env.set(
+    env.set_local(
         "x",
         InferredType::Union {
             members: vec![InferredType::known("UndefinedObject")],
@@ -5213,7 +5216,7 @@ fn union_receiver_non_responding_member_does_not_widen_return_type() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     let ty = checker.infer_expr(
         &module.expressions[0].expression,
@@ -5257,7 +5260,7 @@ fn union_receiver_no_members_respond_returns_dynamic() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     let ty = checker.infer_expr(
         &module.expressions[0].expression,
@@ -5509,7 +5512,7 @@ fn generic_substitution_unwrap_returns_concrete_type() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "r",
         InferredType::Known {
             class_name: eco_string("GenResult"),
@@ -5543,7 +5546,7 @@ fn generic_substitution_error_returns_concrete_type() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "r",
         InferredType::Known {
             class_name: eco_string("GenResult"),
@@ -5577,7 +5580,7 @@ fn generic_substitution_non_generic_return_unchanged() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "r",
         InferredType::Known {
             class_name: eco_string("GenResult"),
@@ -5612,7 +5615,7 @@ fn generic_no_type_args_returns_unsubstituted() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
     // Set r to bare GenResult (no type_args) — unparameterized
-    env.set("r", InferredType::known("GenResult"));
+    env.set_local("r", InferredType::known("GenResult"));
 
     let result_ty = checker.infer_expr(
         &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
@@ -5650,7 +5653,7 @@ fn set_param_types_resolves_generic_annotation() {
     let mut env = TypeEnv::new();
     TypeChecker::set_param_types(&mut env, &params);
 
-    let r_type = env.get("r").expect("r should be in env");
+    let r_type = env.get_local("r").expect("r should be in env");
     match r_type {
         InferredType::Known {
             class_name,
@@ -6426,7 +6429,7 @@ fn test_detect_narrowing_class_eq_pattern() {
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect class = narrowing");
     let info = info.unwrap();
-    assert_eq!(info.variable.as_str(), "x");
+    assert_eq!(info.variable, EnvKey::local("x"));
     assert_eq!(info.true_type, InferredType::known("Integer"));
     assert!(!info.is_nil_check);
 }
@@ -6437,7 +6440,7 @@ fn test_detect_narrowing_is_kind_of_pattern() {
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect isKindOf: narrowing");
     let info = info.unwrap();
-    assert_eq!(info.variable.as_str(), "x");
+    assert_eq!(info.variable, EnvKey::local("x"));
     assert_eq!(info.true_type, InferredType::known("Number"));
     assert!(!info.is_nil_check);
 }
@@ -6448,7 +6451,7 @@ fn test_detect_narrowing_is_nil_pattern() {
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect isNil narrowing");
     let info = info.unwrap();
-    assert_eq!(info.variable.as_str(), "x");
+    assert_eq!(info.variable, EnvKey::local("x"));
     assert!(info.is_nil_check);
 }
 
@@ -6528,7 +6531,7 @@ fn test_detect_narrowing_responds_to_pattern() {
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect respondsTo: narrowing");
     let info = info.unwrap();
-    assert_eq!(info.variable.as_str(), "x");
+    assert_eq!(info.variable, EnvKey::local("x"));
     assert_eq!(
         info.true_type,
         InferredType::Dynamic(DynamicReason::Unknown)
@@ -7215,7 +7218,7 @@ fn generic_inheritance_inherited_method_returns_substituted_type() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "arr",
         InferredType::Known {
             class_name: eco_string("GenArray"),
@@ -7246,7 +7249,7 @@ fn generic_inheritance_non_generic_return_unchanged() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "arr",
         InferredType::Known {
             class_name: eco_string("GenArray"),
@@ -7304,7 +7307,7 @@ fn generic_inheritance_concrete_superclass_type_arg() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("ia", InferredType::known("IntArray"));
+    env.set_local("ia", InferredType::known("IntArray"));
 
     let result_ty = checker.infer_expr(
         &msg_send(var("ia"), MessageSelector::Unary("first".into()), vec![]),
@@ -7328,7 +7331,7 @@ fn generic_inheritance_self_type_carries_type_args() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "arr",
         InferredType::Known {
             class_name: eco_string("GenArray"),
@@ -7405,7 +7408,7 @@ fn generic_inheritance_multi_level_composition() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "sa",
         InferredType::Known {
             class_name: eco_string("SortedArray"),
@@ -7437,7 +7440,7 @@ fn generic_inheritance_own_method_uses_direct_substitution() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "r",
         InferredType::Known {
             class_name: eco_string("GenResult"),
@@ -8154,23 +8157,23 @@ fn test_type_env_origin_tracking() {
     let mut env = TypeEnv::new();
 
     // Set without origin
-    env.set("x", InferredType::known("Integer"));
-    assert!(env.get_origin("x").is_none());
+    env.set_local("x", InferredType::known("Integer"));
+    assert!(env.get_local_origin("x").is_none());
 
     // Set with origin
     env.set_with_origin(
-        "val",
+        EnvKey::local("val"),
         InferredType::known("V"),
         "`Dictionary at:ifAbsent:` returns generic type `V`",
         Span::new(100, 120),
     );
-    let origin = env.get_origin("val").unwrap();
+    let origin = env.get_local_origin("val").unwrap();
     assert!(origin.description.contains("Dictionary"));
     assert_eq!(origin.span, Span::new(100, 120));
 
     // Child inherits origins
     let child = env.child();
-    assert!(child.get_origin("val").is_some());
+    assert!(child.get_local_origin("val").is_some());
 }
 
 #[test]
@@ -8488,7 +8491,7 @@ fn method_local_params_block_regression() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "r",
         InferredType::Known {
             class_name: eco_string("GenResult"),
@@ -8500,7 +8503,7 @@ fn method_local_params_block_regression() {
         },
     );
     // Simulate a block argument with type Block(Integer, String)
-    env.set(
+    env.set_local(
         "blk",
         InferredType::Known {
             class_name: eco_string("Block"),
@@ -8558,8 +8561,8 @@ fn method_local_params_from_result_type() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("p", InferredType::known("Processor"));
-    env.set(
+    env.set_local("p", InferredType::known("Processor"));
+    env.set_local(
         "r",
         InferredType::Known {
             class_name: eco_string("GenResult"),
@@ -8599,8 +8602,8 @@ fn method_local_params_from_array_type() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("p", InferredType::known("Processor"));
-    env.set(
+    env.set_local("p", InferredType::known("Processor"));
+    env.set_local(
         "a",
         InferredType::Known {
             class_name: eco_string("Array"),
@@ -9308,7 +9311,7 @@ fn union_field_assign_all_compatible_no_warning() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Counter"));
+    env.set_local("self", InferredType::known("Counter"));
     checker.check_field_assignment(
         &ident("count"),
         &InferredType::simple_union(&["Integer", "Float"]),
@@ -9339,7 +9342,7 @@ fn union_field_assign_none_compatible_warns() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Counter"));
+    env.set_local("self", InferredType::known("Counter"));
     checker.check_field_assignment(
         &ident("count"),
         &InferredType::simple_union(&["String", "Symbol"]),
@@ -9376,7 +9379,7 @@ fn union_field_assign_mixed_compatible_hints() {
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Counter"));
+    env.set_local("self", InferredType::known("Counter"));
     checker.check_field_assignment(
         &ident("count"),
         &InferredType::simple_union(&["Integer", "String"]),
@@ -9835,7 +9838,7 @@ fn generic_list_first_returns_element_type() {
     let mut env = TypeEnv::new();
 
     // Simulate a variable typed as List(String)
-    env.set(
+    env.set_local(
         "names",
         InferredType::Known {
             class_name: eco_string("List"),
@@ -9864,7 +9867,7 @@ fn generic_list_last_returns_element_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "nums",
         InferredType::Known {
             class_name: eco_string("List"),
@@ -9893,7 +9896,7 @@ fn generic_list_at_returns_element_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "items",
         InferredType::Known {
             class_name: eco_string("List"),
@@ -9926,7 +9929,7 @@ fn generic_array_at_returns_element_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "arr",
         InferredType::Known {
             class_name: eco_string("Array"),
@@ -9959,7 +9962,7 @@ fn generic_dictionary_at_returns_value_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "dict",
         InferredType::Known {
             class_name: eco_string("Dictionary"),
@@ -9995,7 +9998,7 @@ fn generic_nested_dictionary_at_returns_nested_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "nested",
         InferredType::Known {
             class_name: eco_string("Dictionary"),
@@ -10048,7 +10051,7 @@ fn generic_block_value_returns_last_type_arg() {
     let mut env = TypeEnv::new();
 
     // Block(String) — zero-arg block returning String
-    env.set(
+    env.set_local(
         "blk",
         InferredType::Known {
             class_name: eco_string("Block"),
@@ -10078,7 +10081,7 @@ fn generic_block_value_colon_returns_last_type_arg() {
     let mut env = TypeEnv::new();
 
     // Block(Integer, String) — one-arg block taking Integer, returning String
-    env.set(
+    env.set_local(
         "blk",
         InferredType::Known {
             class_name: eco_string("Block"),
@@ -10115,7 +10118,7 @@ fn generic_unresolved_type_param_falls_back_to_dynamic() {
     let mut env = TypeEnv::new();
 
     // Bare List without type args — first should be Dynamic
-    env.set("plain", InferredType::known("List"));
+    env.set_local("plain", InferredType::known("List"));
 
     let result = checker.infer_expr(
         &msg_send(var("plain"), MessageSelector::Unary("first".into()), vec![]),
@@ -10136,7 +10139,7 @@ fn generic_inject_into_resolves_accumulator_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "arr",
         InferredType::Known {
             class_name: eco_string("Array"),
@@ -10187,7 +10190,7 @@ fn generic_list_detect_returns_element_type() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "strs",
         InferredType::Known {
             class_name: eco_string("List"),
@@ -11212,7 +11215,7 @@ fn test_detect_narrowing_is_ok_pattern() {
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect isOk narrowing");
     let info = info.unwrap();
-    assert_eq!(info.variable.as_str(), "r");
+    assert_eq!(info.variable, EnvKey::local("r"));
     assert!(info.is_result_ok_check);
     assert!(!info.is_result_error_check);
     assert!(!info.is_nil_check);
@@ -11224,7 +11227,7 @@ fn test_detect_narrowing_is_error_pattern() {
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect isError narrowing");
     let info = info.unwrap();
-    assert_eq!(info.variable.as_str(), "r");
+    assert_eq!(info.variable, EnvKey::local("r"));
     assert!(!info.is_result_ok_check);
     assert!(info.is_result_error_check);
     assert!(!info.is_nil_check);
@@ -11751,7 +11754,7 @@ fn union_dnu_all_missing_emits_warning() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "x",
         InferredType::Union {
             members: vec![InferredType::known("Integer"), InferredType::known("Float")],
@@ -11800,7 +11803,7 @@ fn union_dnu_partial_missing_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("x", InferredType::simple_union(&["String", "Integer"]));
+    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     let _ty = checker.infer_expr(
         &module.expressions[0].expression,
@@ -11836,7 +11839,7 @@ fn generic_list_flatten_returns_unparameterized_list() {
     let mut env = TypeEnv::new();
 
     // Variable typed as List(List(Integer)) — a nested list
-    env.set(
+    env.set_local(
         "nested",
         InferredType::Known {
             class_name: eco_string("List"),
@@ -11873,7 +11876,7 @@ fn generic_list_partition_returns_dictionary() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
 
-    env.set(
+    env.set_local(
         "nums",
         InferredType::Known {
             class_name: eco_string("List"),
@@ -12529,7 +12532,7 @@ fn annotated_assignment_uses_declared_type() {
     };
     let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
     assert_eq!(ty, InferredType::known("Integer"));
-    assert_eq!(env.get("x"), Some(InferredType::known("Integer")));
+    assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
 }
 
 #[test]
@@ -12569,7 +12572,7 @@ fn annotated_assignment_narrowing_from_object_no_warning() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     // Seed someVar with inferred type Object in the env
-    env.set("someVar", InferredType::known("Object"));
+    env.set_local("someVar", InferredType::known("Object"));
 
     let expr = Expression::Assignment {
         target: Box::new(var("x")),
@@ -12598,7 +12601,7 @@ fn annotated_assignment_narrowing_to_parametric_type_no_warning() {
     let mut env = TypeEnv::new();
     let hierarchy = ClassHierarchy::with_builtins();
 
-    env.set("someVar", InferredType::known("Object"));
+    env.set_local("someVar", InferredType::known("Object"));
 
     let dict_ann = TypeAnnotation::Generic {
         base: Identifier::new("Dictionary", span()),
@@ -13516,7 +13519,7 @@ Object subclass: Box(T)
     let mut env = TypeEnv::new();
     // Mirror what `check_module` does: seed `self` with the receiver type
     // produced by the centralised helper.
-    env.set(
+    env.set_local(
         "self",
         super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
     );
@@ -13567,7 +13570,7 @@ Object subclass: Pair(K, V)
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "self",
         super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
     );
@@ -13623,7 +13626,7 @@ Base(R) subclass: Sub(R)
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "self",
         super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
     );
@@ -13675,7 +13678,7 @@ Base(Integer) subclass: IntBase
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "self",
         super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
     );
@@ -13730,7 +13733,7 @@ Object subclass: Box(T)
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set(
+    env.set_local(
         "self",
         super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
     );
@@ -13790,7 +13793,7 @@ typed Object subclass: Driver
     // Last expression is `r` — its type should be Result(List(String), Error).
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
+    env.set_local("self", InferredType::known("Driver"));
     let _ = checker.infer_expr(&probe.body[0].expression, &hierarchy, &mut env, false);
     let last_stmt = probe.body.last().expect("probe body non-empty");
     let r_ty = checker.infer_expr(&last_stmt.expression, &hierarchy, &mut env, false);
@@ -13831,7 +13834,7 @@ typed Object subclass: Driver
         .expect("probe method");
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
+    env.set_local("self", InferredType::known("Driver"));
     let _ = checker.infer_expr(&probe.body[0].expression, &hierarchy, &mut env, false);
     let r_ty = checker.infer_expr(
         &probe.body.last().expect("probe body non-empty").expression,
@@ -14003,8 +14006,8 @@ typed Object subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
-    env.set("store", InferredType::known("Store"));
+    env.set_local("self", InferredType::known("Driver"));
+    env.set_local("store", InferredType::known("Store"));
     // Walk the body so each binding is recorded in env.
     for stmt in &probe.body {
         let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
@@ -14121,7 +14124,7 @@ typed Object subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
+    env.set_local("self", InferredType::known("Driver"));
     for stmt in &probe.body {
         let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
     }
@@ -14184,8 +14187,8 @@ typed Object subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
-    env.set("store", InferredType::known("Store"));
+    env.set_local("self", InferredType::known("Driver"));
+    env.set_local("store", InferredType::known("Store"));
     for stmt in &probe.body {
         let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
     }
@@ -14248,8 +14251,8 @@ typed Object subclass: Driver
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("self", InferredType::known("Driver"));
-    env.set("store", InferredType::known("Store"));
+    env.set_local("self", InferredType::known("Driver"));
+    env.set_local("store", InferredType::known("Store"));
     for stmt in &probe.body {
         let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
     }
@@ -14292,7 +14295,7 @@ fn bt_2020_if_true_if_false_integer_branches_yield_integer() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("cond", InferredType::known("Boolean"));
+    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_true_if_false(
         var("cond"),
@@ -14316,7 +14319,7 @@ fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
     // x :: Integer | Nil
-    env.set(
+    env.set_local(
         "x",
         InferredType::Union {
             members: vec![
@@ -14326,7 +14329,7 @@ fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
             provenance: super::TypeProvenance::Inferred(span()),
         },
     );
-    env.set("default", InferredType::known("Integer"));
+    env.set_local("default", InferredType::known("Integer"));
 
     let expr = if_true_if_false(
         is_nil("x"),
@@ -14357,7 +14360,7 @@ fn bt_2020_if_true_if_false_mixed_arms_yield_concrete_type() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
-    env.set("cond", InferredType::known("Boolean"));
+    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_true_if_false(
         var("cond"),

@@ -397,7 +397,7 @@ impl TypeChecker {
 
         let declared_type = type_annotation.type_name();
         let mut env = TypeEnv::new();
-        env.set("self", InferredType::known(class.name.name.clone()));
+        env.set_local("self", InferredType::known(class.name.name.clone()));
         let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
 
         let InferredType::Known {

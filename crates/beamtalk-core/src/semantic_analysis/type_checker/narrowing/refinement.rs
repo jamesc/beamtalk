@@ -15,9 +15,7 @@
 //!
 //! Extracted from `inference.rs` under BT-2050.
 
-use ecow::EcoString;
-
-use crate::semantic_analysis::type_checker::InferredType;
+use crate::semantic_analysis::type_checker::{EnvKey, InferredType};
 
 /// Scope of a [`RefinementLayer`] — how long the refinement survives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,9 +38,9 @@ pub(crate) enum Scope {
 /// matches the number of active refinements.
 #[derive(Debug, Clone)]
 pub(crate) struct RefinementLayer {
-    /// Variable name being refined. May be a synthetic `self.field` key
-    /// (BT-2048).
-    pub(crate) variable: EcoString,
+    /// Env key being refined. `EnvKey::SelfField(..)` for synthetic
+    /// `self.<field>` bindings (BT-2048 / BT-2062).
+    pub(crate) variable: EnvKey,
     /// The refined type.
     pub(crate) ty: InferredType,
     /// Scope — block-local or method-remainder.
@@ -51,18 +49,18 @@ pub(crate) struct RefinementLayer {
 
 impl RefinementLayer {
     /// Build a block-scoped refinement for the common narrowing path.
-    pub(crate) fn block_scope(variable: impl Into<EcoString>, ty: InferredType) -> Self {
+    pub(crate) fn block_scope(variable: EnvKey, ty: InferredType) -> Self {
         Self {
-            variable: variable.into(),
+            variable,
             ty,
             scope: Scope::BlockScope,
         }
     }
 
     /// Build a method-remainder refinement (post-guard narrowing, BT-2049).
-    pub(crate) fn method_remainder(variable: impl Into<EcoString>, ty: InferredType) -> Self {
+    pub(crate) fn method_remainder(variable: EnvKey, ty: InferredType) -> Self {
         Self {
-            variable: variable.into(),
+            variable,
             ty,
             scope: Scope::MethodRemainder,
         }

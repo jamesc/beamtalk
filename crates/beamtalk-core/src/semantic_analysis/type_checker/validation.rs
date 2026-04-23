@@ -725,7 +725,7 @@ impl TypeChecker {
                         // BT-1588: Attach origin note if available
                         if let (Some(exprs), Some(e)) = (arg_exprs, env) {
                             if let Some(Expression::Identifier(ident)) = exprs.get(i) {
-                                if let Some(origin) = e.get_origin(&ident.name) {
+                                if let Some(origin) = e.get_local_origin(&ident.name) {
                                     diag = diag
                                         .with_note(origin.description.clone(), Some(origin.span));
                                 }
@@ -771,7 +771,7 @@ impl TypeChecker {
                     };
                     if let (Some(exprs), Some(e)) = (arg_exprs, env) {
                         if let Some(Expression::Identifier(ident)) = exprs.get(i) {
-                            if let Some(origin) = e.get_origin(&ident.name) {
+                            if let Some(origin) = e.get_local_origin(&ident.name) {
                                 diag =
                                     diag.with_note(origin.description.clone(), Some(origin.span));
                             }
@@ -1142,7 +1142,7 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
     ) {
-        let Some(InferredType::Known { class_name, .. }) = env.get("self") else {
+        let Some(InferredType::Known { class_name, .. }) = env.get_local("self") else {
             return;
         };
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
@@ -1234,7 +1234,7 @@ impl TypeChecker {
                 continue;
             }
             let mut env = TypeEnv::new();
-            env.set("self", InferredType::known(class.name.name.clone()));
+            env.set_local("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
             let InferredType::Known {
                 class_name: value_type,

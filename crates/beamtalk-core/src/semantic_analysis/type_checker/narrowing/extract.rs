@@ -3,15 +3,16 @@
 
 //! Utilities for extracting narrowable variable names from expressions.
 //!
-//! Narrowing rules need to lift a stable key (variable name, or synthetic
-//! `self.field` key) out of the expression under the type test, so that the
-//! refinement can be stored in `TypeEnv` keyed by that name.
+//! Narrowing rules need to lift a stable key out of the expression under the
+//! type test so that the refinement can be stored in `TypeEnv` keyed by that
+//! key. BT-2062 replaced the old `"self.field"` string convention with a
+//! typed [`EnvKey`] — the shape of the refinement is now visible in the type
+//! system rather than buried in a prefix.
 //!
-//! Extracted from `inference.rs` under BT-2050.
-
-use ecow::{EcoString, eco_format};
+//! Extracted from `inference.rs` under BT-2050; re-typed under BT-2062.
 
 use crate::ast::Expression;
+use crate::semantic_analysis::type_checker::EnvKey;
 
 /// Peel `Expression::Parenthesized` wrappers so callers can pattern-match on
 /// the inner expression directly.
@@ -22,22 +23,23 @@ pub(crate) fn unwrap_parens(expr: &Expression) -> &Expression {
     }
 }
 
-/// Extract a variable name from an expression, supporting identifiers,
-/// parenthesized identifiers, and `self.field` access (BT-2048).
+/// Extract a [`EnvKey`] naming the variable under a type test.
 ///
-/// For `self.field` expressions, returns `"self.fieldname"` as a synthetic
-/// key so that narrowing can be applied via the type environment.
-pub(crate) fn extract_variable_name(expr: &Expression) -> Option<EcoString> {
+/// Supports identifiers, parenthesized identifiers, and `self.<field>`
+/// access (BT-2048). Returns `None` for any other shape — narrowing only
+/// applies to bindings the env can key.
+pub(crate) fn extract_variable_name(expr: &Expression) -> Option<EnvKey> {
     match expr {
-        Expression::Identifier(ident) => Some(ident.name.clone()),
+        Expression::Identifier(ident) => Some(EnvKey::local(ident.name.clone())),
         Expression::Parenthesized { expression, .. } => extract_variable_name(expression),
-        // BT-2048: `self.field` — return synthetic key "self.fieldname"
+        // BT-2048: `self.<field>` — the binding lives in the narrowing
+        // overlay, not on the class hierarchy.
         Expression::FieldAccess {
             receiver, field, ..
         } => {
             if let Expression::Identifier(recv_id) = receiver.as_ref() {
                 if recv_id.name == "self" {
-                    return Some(eco_format!("self.{}", field.name));
+                    return Some(EnvKey::self_field(field.name.clone()));
                 }
             }
             None

@@ -10,7 +10,7 @@
 
 use ecow::EcoString;
 
-use crate::semantic_analysis::type_checker::InferredType;
+use crate::semantic_analysis::type_checker::{EnvKey, InferredType};
 
 /// Describes a control-flow narrowing detected from a type-test expression.
 ///
@@ -24,8 +24,9 @@ use crate::semantic_analysis::type_checker::InferredType;
 /// protocol (BT-1833). Multiple or zero matches fall back to `Dynamic`.
 #[derive(Debug, Clone)]
 pub(crate) struct NarrowingInfo {
-    /// The variable name being narrowed.
-    pub(crate) variable: EcoString,
+    /// The env key being narrowed (local variable or synthetic
+    /// `self.<field>` binding, BT-2048 / BT-2062).
+    pub(crate) variable: EnvKey,
     /// The type the variable is narrowed to in the *true* branch.
     pub(crate) true_type: InferredType,
     /// The type the variable is narrowed to in the *false* branch, if any.

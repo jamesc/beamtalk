@@ -27,7 +27,7 @@ use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
 use super::well_known::WellKnownClass;
-use super::{DynamicReason, InferredType, TypeChecker, TypeEnv, narrowing};
+use super::{DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, narrowing};
 
 impl TypeChecker {
     /// Checks types in a module using the class hierarchy for method resolution.
@@ -57,7 +57,7 @@ impl TypeChecker {
 
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
-                method_env.set(
+                method_env.set_local(
                     "self",
                     super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
                 );
@@ -92,7 +92,7 @@ impl TypeChecker {
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
                 method_env.in_class_method = true;
-                method_env.set(
+                method_env.set_local(
                     "self",
                     super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
                 );
@@ -145,7 +145,7 @@ impl TypeChecker {
 
             let mut method_env = TypeEnv::new();
             method_env.in_class_method = standalone.is_class_method;
-            method_env.set(
+            method_env.set_local(
                 "self",
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy),
             );
@@ -208,7 +208,7 @@ impl TypeChecker {
                 Some(ann) => Self::resolve_type_annotation(ann),
                 None => InferredType::Dynamic(DynamicReason::UnannotatedParam), // preserve parameter shadowing of state fields
             };
-            env.set(&param.name.name, ty);
+            env.set_local(param.name.name.clone(), ty);
         }
     }
 
@@ -315,20 +315,22 @@ impl TypeChecker {
                     "true" | "false" => InferredType::known(WellKnownClass::Boolean.as_str()),
                     "nil" => InferredType::known(WellKnownClass::UndefinedObject.as_str()),
                     "self" => env
-                        .get("self")
+                        .get_local("self")
                         .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown)),
                     _ => {
                         // First check environment for local variables or parameters
-                        if let Some(ty) = env.get(name) {
+                        if let Some(ty) = env.get_local(name) {
                             ty
                         } else {
                             // Bare identifier might be implicit self field access
                             // (e.g., `getValue => value` is sugar for `getValue => self.value`)
-                            if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
-                                // BT-2048: Check the synthetic `self.field` key first
-                                // so the bare and explicit spellings narrow consistently.
-                                let synthetic_key = eco_format!("self.{}", name);
-                                if let Some(narrowed) = env.get(&synthetic_key) {
+                            if let Some(InferredType::Known { class_name, .. }) =
+                                env.get_local("self")
+                            {
+                                // BT-2048 / BT-2062: Check the synthetic `self.<field>`
+                                // key first so the bare and explicit spellings narrow
+                                // consistently.
+                                if let Some(narrowed) = env.get(&EnvKey::self_field(name)) {
                                     narrowed
                                 } else if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
@@ -356,15 +358,16 @@ impl TypeChecker {
                 let mut result = InferredType::Dynamic(DynamicReason::Unknown);
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     if recv_id.name == "self" {
-                        // BT-2048: Check for a narrowed type in the env first.
-                        // Inside `self.field isNil ifFalse: [...]`, the block env
-                        // will have "self.field" → narrowed non-nil type. Assign
-                        // to `result` (rather than returning early) so the shared
-                        // post-processing hook still runs on narrowed reads.
-                        let synthetic_key = eco_format!("self.{}", field.name);
-                        if let Some(narrowed) = env.get(&synthetic_key) {
+                        // BT-2048 / BT-2062: Check for a narrowed type in the env
+                        // first. Inside `self.field isNil ifFalse: [...]`, the
+                        // block env will have `SelfField("field")` → narrowed
+                        // non-nil type. Assign to `result` (rather than returning
+                        // early) so the shared post-processing hook still runs on
+                        // narrowed reads.
+                        if let Some(narrowed) = env.get(&EnvKey::self_field(field.name.clone())) {
                             result = narrowed;
-                        } else if let Some(InferredType::Known { class_name, .. }) = env.get("self")
+                        } else if let Some(InferredType::Known { class_name, .. }) =
+                            env.get_local("self")
                         {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
@@ -466,13 +469,13 @@ impl TypeChecker {
                         if let Some(origin) = Self::describe_type_origin(value, &ty, hierarchy, env)
                         {
                             env.set_with_origin(
-                                ident.name.as_str(),
+                                EnvKey::local(ident.name.clone()),
                                 ty.clone(),
                                 origin.0,
                                 origin.1,
                             );
                         } else {
-                            env.set(ident.name.as_str(), ty.clone());
+                            env.set_local(ident.name.clone(), ty.clone());
                         }
                     }
                     Expression::FieldAccess {
@@ -485,10 +488,10 @@ impl TypeChecker {
                         if is_self_receiver {
                             // `self.field := value` — validate against declared state type
                             self.check_field_assignment(field, &ty, *span, hierarchy, env);
-                            // BT-2048: Invalidate any stale narrowing on self.field.
-                            // After a write, the narrowed type is no longer guaranteed.
-                            let synthetic_key = eco_format!("self.{}", field.name);
-                            env.remove(&synthetic_key);
+                            // BT-2048 / BT-2062: Invalidate any stale narrowing on
+                            // `self.<field>`. After a write, the narrowed type is
+                            // no longer guaranteed.
+                            env.remove(&EnvKey::self_field(field.name.clone()));
                         } else {
                             // `other.field := value` or `(expr).field := value` —
                             // objects cannot mutate another object's state.
@@ -639,8 +642,8 @@ impl TypeChecker {
             Expression::Block(block) => {
                 let mut block_env = env.child();
                 for param in &block.parameters {
-                    block_env.set(
-                        param.name.as_str(),
+                    block_env.set_local(
+                        param.name.clone(),
                         InferredType::Dynamic(DynamicReason::UnannotatedParam),
                     );
                 }
@@ -721,7 +724,7 @@ impl TypeChecker {
                     class_name,
                     type_args,
                     ..
-                }) = env.get("self")
+                }) = env.get_local("self")
                 {
                     if let Some(class_info) = hierarchy.get_class(&class_name) {
                         if let Some(ref parent) = class_info.superclass {
@@ -808,7 +811,10 @@ impl TypeChecker {
     pub(super) fn bind_pattern_vars(pattern: &Pattern, env: &mut TypeEnv) {
         let (bindings, _diagnostics) = crate::semantic_analysis::extract_pattern_bindings(pattern);
         for id in bindings {
-            env.set(&id.name, InferredType::Dynamic(DynamicReason::Unknown));
+            env.set_local(
+                id.name.clone(),
+                InferredType::Dynamic(DynamicReason::Unknown),
+            );
         }
     }
 
@@ -972,7 +978,7 @@ impl TypeChecker {
                     // BT-1588: Collect origin info for the argument expression
                     let arg_origin = arguments.first().and_then(|arg_expr| {
                         if let Expression::Identifier(ident) = arg_expr {
-                            env.get_origin(&ident.name)
+                            env.get_local_origin(&ident.name)
                                 .map(|o| (o.description.clone(), Some(o.span)))
                         } else {
                             None
@@ -1534,7 +1540,7 @@ impl TypeChecker {
             // Try to get the receiver's type name for context
             let receiver_type = match receiver.as_ref() {
                 Expression::Identifier(ident) => env
-                    .get(&ident.name)
+                    .get_local(&ident.name)
                     .and_then(|t| t.as_known().cloned())
                     .unwrap_or_else(|| ident.name.clone()),
                 Expression::ClassReference { name, .. } => name.name.clone(),
@@ -2228,7 +2234,7 @@ impl TypeChecker {
     fn infer_block_with_narrowing(
         &mut self,
         arg: &Expression,
-        var_name: &str,
+        var_key: &EnvKey,
         narrowed_type: &InferredType,
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
@@ -2239,7 +2245,7 @@ impl TypeChecker {
             // BT-2050: narrowing uses the unified refinement API; the layer
             // is block-scoped because the child env is dropped on return.
             block_env.push_refinement(RefinementLayer::block_scope(
-                var_name,
+                var_key.clone(),
                 narrowed_type.clone(),
             ));
             // Block parameters are unannotated in the narrowing context (the
@@ -2249,7 +2255,7 @@ impl TypeChecker {
                 Vec::with_capacity(block.parameters.len());
             for param in &block.parameters {
                 let param_ty = InferredType::Dynamic(DynamicReason::UnannotatedParam);
-                block_env.set(param.name.as_str(), param_ty.clone());
+                block_env.set_local(param.name.clone(), param_ty.clone());
                 block_param_types.push(param_ty);
             }
             let body_ty =
@@ -2496,12 +2502,12 @@ impl TypeChecker {
     ) -> InferredType {
         let mut block_env = env.child();
         for (param, ty) in block.parameters.iter().zip(param_types.iter()) {
-            block_env.set(param.name.as_str(), ty.clone());
+            block_env.set_local(param.name.clone(), ty.clone());
         }
         // Extra params beyond resolved types stay Dynamic
         for param in block.parameters.iter().skip(param_types.len()) {
-            block_env.set(
-                param.name.as_str(),
+            block_env.set_local(
+                param.name.clone(),
                 InferredType::Dynamic(DynamicReason::UnannotatedParam),
             );
         }
@@ -2717,21 +2723,23 @@ impl TypeChecker {
 
     /// Resolve the current type of a narrowing variable from the environment.
     ///
-    /// For regular variables (e.g. `"x"`), this is a simple env lookup.
-    /// For synthetic `self.field` keys (BT-2048), the field type is resolved
-    /// from the class hierarchy via the `self` type in the env.
+    /// For locals, this is a simple env lookup. For
+    /// [`EnvKey::SelfField`] (BT-2048 / BT-2062) we prefer a previously
+    /// pushed narrowing, falling back to the declared state type resolved
+    /// through the class hierarchy when none is present.
     fn resolve_narrowing_variable_type(
-        var_name: &str,
+        var_key: &EnvKey,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
     ) -> InferredType {
-        // Regular env lookup first (handles locals and previously-narrowed fields)
-        if let Some(ty) = env.get(var_name) {
+        // Regular env lookup first (handles locals and previously-narrowed fields).
+        if let Some(ty) = env.get(var_key) {
             return ty;
         }
-        // BT-2048: For "self.fieldname" synthetic keys, look up via hierarchy
-        if let Some(field_name) = var_name.strip_prefix("self.") {
-            if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
+        // BT-2048 / BT-2062: for `self.<field>` keys, resolve via the class
+        // hierarchy using the `self` binding in the env.
+        if let EnvKey::SelfField(field_name) = var_key {
+            if let Some(InferredType::Known { class_name, .. }) = env.get_local("self") {
                 if let Some(field_type) = hierarchy.state_field_type(&class_name, field_name) {
                     return Self::resolve_type_name_string(&field_type);
                 }
@@ -3631,7 +3639,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect isNil");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(info.true_type, InferredType::known("UndefinedObject"));
         assert!(info.is_nil_check);
         assert!(info.responded_selector.is_none());
@@ -3651,7 +3659,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect isKindOf:");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(info.true_type, InferredType::known("Integer"));
         assert!(!info.is_nil_check);
     }
@@ -3674,7 +3682,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(info.true_type, InferredType::known("String"));
         assert!(!info.is_nil_check);
     }
@@ -3697,7 +3705,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =:=");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(info.true_type, InferredType::known("Float"));
     }
 
@@ -3718,7 +3726,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect respondsTo:");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(
             info.true_type,
             InferredType::Dynamic(DynamicReason::Unknown)
@@ -3778,7 +3786,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect (x class) = Type");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(info.true_type, InferredType::known("Integer"));
     }
 
@@ -3795,7 +3803,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect isOk");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert!(info.is_result_ok_check);
         assert!(!info.is_result_error_check);
         assert!(!info.is_nil_check);
@@ -3812,7 +3820,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect ok");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert!(info.is_result_ok_check);
         assert!(!info.is_result_error_check);
     }
@@ -3828,7 +3836,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect isError");
-        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.variable, EnvKey::local("x"));
         assert!(!info.is_result_ok_check);
         assert!(info.is_result_error_check);
         assert!(!info.is_nil_check);
@@ -3844,10 +3852,10 @@ mod tests {
             type_args: vec![InferredType::known("String"), InferredType::known("Error")],
             provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
         };
-        env.set("r", result_ty.clone());
+        env.set_local("r", result_ty.clone());
 
         let info = NarrowingInfo {
-            variable: "r".into(),
+            variable: EnvKey::local("r"),
             true_type: InferredType::Dynamic(DynamicReason::Unknown),
             false_type: None,
             is_nil_check: false,
@@ -3866,10 +3874,10 @@ mod tests {
     fn refine_result_narrowing_non_result_disables() {
         // When the variable is not a Result, the result flags are cleared.
         let mut env = TypeEnv::new();
-        env.set("x", InferredType::known("Integer"));
+        env.set_local("x", InferredType::known("Integer"));
 
         let info = NarrowingInfo {
-            variable: "x".into(),
+            variable: EnvKey::local("x"),
             true_type: InferredType::Dynamic(DynamicReason::Unknown),
             false_type: None,
             is_nil_check: false,
@@ -3945,7 +3953,7 @@ mod tests {
     #[test]
     fn extract_variable_name_from_ident() {
         let expr = var("foo");
-        assert_eq!(extract_variable_name(&expr), Some("foo".into()));
+        assert_eq!(extract_variable_name(&expr), Some(EnvKey::local("foo")));
     }
 
     #[test]
@@ -3954,7 +3962,7 @@ mod tests {
             expression: Box::new(var("bar")),
             span: span(),
         };
-        assert_eq!(extract_variable_name(&expr), Some("bar".into()));
+        assert_eq!(extract_variable_name(&expr), Some(EnvKey::local("bar")));
     }
 
     #[test]
@@ -3965,13 +3973,16 @@ mod tests {
 
     #[test]
     fn extract_variable_name_from_self_field() {
-        // BT-2048: self.supervisor → "self.supervisor"
+        // BT-2048 / BT-2062: self.supervisor → EnvKey::SelfField("supervisor")
         let expr = Expression::FieldAccess {
             receiver: Box::new(var("self")),
             field: ident("supervisor"),
             span: span(),
         };
-        assert_eq!(extract_variable_name(&expr), Some("self.supervisor".into()));
+        assert_eq!(
+            extract_variable_name(&expr),
+            Some(EnvKey::self_field("supervisor")),
+        );
     }
 
     #[test]
@@ -4003,7 +4014,7 @@ mod tests {
             span: span(),
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect self.field isNil");
-        assert_eq!(info.variable.as_str(), "self.supervisor");
+        assert_eq!(info.variable, EnvKey::self_field("supervisor"));
         assert_eq!(info.true_type, InferredType::known("UndefinedObject"));
         assert!(info.is_nil_check);
     }
@@ -4261,7 +4272,7 @@ mod tests {
         let mut env = TypeEnv::new();
         TypeChecker::set_param_types(&mut env, &params);
         assert_eq!(
-            env.get("x"),
+            env.get_local("x"),
             Some(InferredType::Dynamic(DynamicReason::Unknown))
         );
     }
@@ -4274,7 +4285,7 @@ mod tests {
         }];
         let mut env = TypeEnv::new();
         TypeChecker::set_param_types(&mut env, &params);
-        assert_eq!(env.get("x"), Some(InferredType::known("Integer")));
+        assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
     }
 
     #[test]
@@ -4288,9 +4299,9 @@ mod tests {
         ];
         let mut env = TypeEnv::new();
         TypeChecker::set_param_types(&mut env, &params);
-        assert_eq!(env.get("x"), Some(InferredType::known("String")));
+        assert_eq!(env.get_local("x"), Some(InferredType::known("String")));
         assert_eq!(
-            env.get("y"),
+            env.get_local("y"),
             Some(InferredType::Dynamic(DynamicReason::Unknown))
         );
     }
@@ -4347,7 +4358,7 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
-        env.set("self", InferredType::known("Counter"));
+        env.set_local("self", InferredType::known("Counter"));
         let ty = checker.infer_expr(&var("self"), &hierarchy, &mut env, false);
         assert_eq!(ty, InferredType::known("Counter"));
     }
@@ -4357,7 +4368,7 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
-        env.set("myVar", InferredType::known("String"));
+        env.set_local("myVar", InferredType::known("String"));
         let ty = checker.infer_expr(&var("myVar"), &hierarchy, &mut env, false);
         assert_eq!(ty, InferredType::known("String"));
     }
@@ -4394,7 +4405,7 @@ mod tests {
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
         assert_eq!(ty, InferredType::known("Integer"));
         // The variable should now be tracked in the environment
-        assert_eq!(env.get("x"), Some(InferredType::known("Integer")));
+        assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
     }
 
     #[test]
