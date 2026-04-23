@@ -242,8 +242,8 @@ ProtoObject (minimal — identity, DNU)
        ├─ Integer, String (primitives)
        ├─ Value (immutable value objects — field:)
        │    ├─ Point, Color (value types)
-       │    ├─ Collection (abstract)
-       │    │    └─ Set, Bag, Interval
+       │    ├─ Collection(E) (abstract)
+       │    │    └─ Set(E), Bag(E), Interval
        │    └─ TestCase (BUnit test base)
        └─ Actor (process-based — state: + spawn)
             └─ Counter, Server (actors)
@@ -834,7 +834,7 @@ maybeName: flag :: Boolean -> Integer | String =>
 
 // Self return type — resolves to the static receiver class at call sites
 // (only valid in return position, not parameters)
-collect: block :: Block -> Self =>
+collect: block :: Block(E, R) -> Self =>
   self species withAll: (self inject: #() into: [:acc :each |
     acc addFirst: (block value: each)
   ]) reversed
@@ -855,6 +855,15 @@ class named: name :: Symbol -> Result(Self, Error) => ...
 class -> Self class => @primitive "class"
 // (Counter new) class — inferred type: Counter's metaclass, so
 // `self class instanceCount` type-checks against class-side methods
+
+// <ClassName> class — a named class metatype annotation
+// Valid in any type position (fields, parameters, return types, locals).
+// Tells the type checker the value is a class object in the named class
+// hierarchy, so class-side methods on that class resolve without false DNU
+// warnings. Resolves to Dynamic at runtime (type-erased).
+field: actorClass :: Actor class | Nil = nil
+// After `actorClass isNil ifTrue: [^nil]`, actorClass is narrowed to
+// `Actor class` — class-side methods like `isSupervisor` type-check.
 ```
 
 ### Current Semantics
@@ -1334,6 +1343,18 @@ validate: x :: Object =>
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
 
+### Conditional Return Type Inference
+
+`ifTrue:ifFalse:` on `Boolean` (and `True`/`False`) is declared as `Block(R), Block(R) -> R` — the type checker unifies both arms to a common return type. The result of a conditional expression is now statically typed rather than `Dynamic`:
+
+```beamtalk
+x := condition ifTrue: [42] ifFalse: [0]
+// x is inferred as Integer (not Dynamic)
+
+result isOk ifTrue: [result unwrap] ifFalse: [default]
+// inferred as the common type of both arms
+```
+
 ### Union + Narrowing Compose
 
 ```beamtalk
@@ -1771,7 +1792,7 @@ Inspect and manage children:
 ```beamtalk
 app count                                 // => 3  (number of running children)
 app children                              // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
-app which: DatabasePool                   // => #Actor<DatabasePool,_>  (running child instance)
+(app which: DatabasePool) unwrap           // => #Actor<DatabasePool,_>  (running child instance)
 (app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)
 app stop                                  // stop the supervisor and all children (unchanged — Nil)
 
@@ -1886,7 +1907,7 @@ Nested supervisor children are identified by `isSupervisor => true` and started 
 ```beamtalk
 root := (AppRoot supervise) unwrap
 root count                          // => 3
-root which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>
+(root which: DatabaseSupervisor) unwrap  // => #Supervisor<DatabaseSupervisor,_>
 ```
 
 ### Lifecycle API returns Result (ADR 0080)
@@ -1897,11 +1918,12 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 |--------|-----------|---------------|
 | `Supervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
 | `Supervisor>>terminate: aClass` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
+| `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
 | `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
-`stop`, `current`, `which:`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.
+`stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.
 
 This mirrors `Actor spawnAs:` / `Class named:` from the [Actor Named Registration](#actor-named-registration-adr-0079) section — both APIs speak `Result` at registry / lifecycle boundaries so call sites that chain actor spawns and supervisor operations stay on a single error idiom.
 
@@ -2077,9 +2099,9 @@ typed Supervisor subclass: ExduraSupervisor
 
   // Re-runs after every restart to rebuild cached pids.
   class initialize: sup :: Supervisor -> Nil =>
-    store := sup which: EventStore
-    pool := sup which: ActivityWorkerPool
-    engine := sup which: WorkflowEngine
+    store := (sup which: EventStore) unwrap
+    pool := (sup which: ActivityWorkerPool) unwrap
+    engine := (sup which: WorkflowEngine) unwrap
     engine initWithStore: store pool: pool
     nil
 ```
@@ -3082,9 +3104,9 @@ An `Interval` represents an arithmetic sequence of integers without materialisin
 (1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)
 ```
 
-### Bag — Multisets
+### Bag(E) — Multisets
 
-A `Bag` is an unordered collection that allows duplicate elements. It is backed by a `Dictionary` mapping elements to occurrence counts. Like other collections, Bag is immutable — mutating operations return a new Bag.
+`Bag(E)` is an unordered collection that allows duplicate elements. It is backed by a `Dictionary(E, Integer)` mapping elements to occurrence counts. Like other collections, Bag is immutable — mutating operations return a new Bag.
 
 ```beamtalk
 Bag new class                           // => Bag
