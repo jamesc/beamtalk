@@ -1116,37 +1116,37 @@ mod tests {
         panic!("start_test_node failed after 3 attempts: {last_err:?}");
     }
 
-    /// Retry wrapper for `start_detached_node` on a **fixed** workspace ID.
+    /// Retry wrapper for starting a workspace node on a **fixed** workspace ID.
     ///
     /// Unlike `start_test_node` (which creates a fresh workspace ID per retry to
     /// avoid epmd collisions), this helper retries on the **same** workspace ID.
     /// It is intended for tests that need to control the workspace directory
     /// between start/kill/restart cycles (e.g. the stale-port and tombstone tests).
     ///
-    /// Between retries: kills any partially-started node, cleans stale runtime
-    /// files, and waits for epmd deregistration so the next attempt starts clean.
-    #[cfg(unix)]
-    fn start_detached_node_with_retry(
+    /// Between retries: kills any partially-started node (via PID file), cleans
+    /// stale runtime files, and waits for epmd deregistration so the next attempt
+    /// starts clean.
+    ///
+    /// `caller_label` is used in diagnostic messages (e.g. `"start_detached_node_with_retry"`).
+    /// `start_fn` is a closure that attempts to start the node and returns `miette::Result<T>`.
+    fn retry_with_cleanup<T>(
         workspace_id: &str,
-        paths: &beamtalk_cli::repl_startup::BeamPaths,
-        config: &WorkspaceConfig<'_>,
-    ) -> NodeInfo {
+        caller_label: &str,
+        mut start_fn: impl FnMut() -> miette::Result<T>,
+    ) -> T {
         let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
         let mut last_err = None;
         for attempt in 0..3_usize {
             if attempt > 0 {
                 eprintln!(
-                    "start_detached_node_with_retry attempt {}/3 for '{workspace_id}'",
+                    "{caller_label} attempt {}/3 for '{workspace_id}'",
                     attempt + 1
                 );
             }
-            match start_detached_node(workspace_id, paths, &[], config) {
-                Ok(info) => return info,
+            match start_fn() {
+                Ok(value) => return value,
                 Err(e) => {
-                    eprintln!(
-                        "start_detached_node_with_retry attempt {}/3 failed: {e}",
-                        attempt + 1
-                    );
+                    eprintln!("{caller_label} attempt {}/3 failed: {e}", attempt + 1);
                     // Kill any partially-started node before retrying.
                     // When the WS health check fails, node.info hasn't been written
                     // yet (it's saved after health check success), so get_node_info
@@ -1170,55 +1170,37 @@ mod tests {
                 }
             }
         }
-        panic!("start_detached_node_with_retry failed after 3 attempts: {last_err:?}");
+        panic!("{caller_label} failed after 3 attempts: {last_err:?}");
+    }
+
+    /// Retry wrapper for `start_detached_node` on a **fixed** workspace ID.
+    ///
+    /// Delegates to `retry_with_cleanup` for the shared kill-pid +
+    /// `cleanup_stale_node_info` + `wait_for_epmd_deregistration` sequence.
+    #[cfg(unix)]
+    fn start_detached_node_with_retry(
+        workspace_id: &str,
+        paths: &beamtalk_cli::repl_startup::BeamPaths,
+        config: &WorkspaceConfig<'_>,
+    ) -> NodeInfo {
+        retry_with_cleanup(workspace_id, "start_detached_node_with_retry", || {
+            start_detached_node(workspace_id, paths, &[], config)
+        })
     }
 
     /// Retry wrapper for `get_or_start_workspace` on a fixed workspace ID.
     ///
-    /// Retries up to 3 times for transient WS health-check failures on loaded CI
-    /// runners. Between retries: kills any partially-started node and cleans up
-    /// stale node info so the next attempt sees a fresh workspace.
+    /// Delegates to `retry_with_cleanup` for the shared kill-pid +
+    /// `cleanup_stale_node_info` + `wait_for_epmd_deregistration` sequence.
     fn get_or_start_workspace_with_retry(
         project_path: &std::path::Path,
         workspace_id: &str,
         paths: &beamtalk_cli::repl_startup::BeamPaths,
         config: &WorkspaceConfig<'_>,
     ) -> (NodeInfo, bool, String) {
-        let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
-        let mut last_err = None;
-        for attempt in 0..3_usize {
-            if attempt > 0 {
-                eprintln!(
-                    "get_or_start_workspace_with_retry attempt {}/3 for '{workspace_id}'",
-                    attempt + 1
-                );
-            }
-            match get_or_start_workspace(project_path, Some(workspace_id), paths, &[], config) {
-                Ok(result) => return result,
-                Err(e) => {
-                    eprintln!(
-                        "get_or_start_workspace_with_retry attempt {}/3 failed: {e}",
-                        attempt + 1
-                    );
-                    // Kill any partially-started node before retrying.
-                    // Read PID file directly — node.info may not exist yet when
-                    // the WS health check fails (it's written after health check).
-                    if let Ok(ws_dir) = workspace_dir(workspace_id) {
-                        if let Ok(contents) = fs::read_to_string(ws_dir.join("pid")) {
-                            if let Ok(pid) = contents.trim().parse::<u32>() {
-                                let _ = force_kill_process(pid);
-                            }
-                        }
-                    }
-                    cleanup_stale_node_info(workspace_id).ok();
-                    // Wait for epmd to release the node name before retrying
-                    // with the same workspace ID, mirroring start_detached_node_with_retry.
-                    let _ = wait_for_epmd_deregistration(&node_name, 5);
-                    last_err = Some(e);
-                }
-            }
-        }
-        panic!("get_or_start_workspace_with_retry failed after 3 attempts: {last_err:?}");
+        retry_with_cleanup(workspace_id, "get_or_start_workspace_with_retry", || {
+            get_or_start_workspace(project_path, Some(workspace_id), paths, &[], config)
+        })
     }
 
     /// Combined test: start a node once and exercise all read-only queries against it,
