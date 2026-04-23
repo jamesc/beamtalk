@@ -98,44 +98,79 @@ fn check_doc_on_exports(file: &Utf8Path, source: &str, diags: &mut Vec<ErlangLin
     let mut seen_functions: std::collections::HashSet<(&str, usize)> =
         std::collections::HashSet::new();
 
+    // Track whether we're at the top level of the module. A function head can
+    // only appear at the top level — i.e., after the previous form ended with
+    // `.` (period). Inside a function body, a line like `'get:'(foo).` is a
+    // call, not a definition. We start `true` because the beginning of the
+    // file is top-level.
+    let mut at_top_level = true;
+
     for (line_no, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Look for function head definitions: `name(` at the start of a line.
+        // Look for function head definitions, but only at the top level.
+        // A function head only appears when the previous form has ended
+        // (indicated by `at_top_level`). Inside a function body, even
+        // keyword-form calls like `'get:headers:'(Url, []).` must not be
+        // mistaken for definitions.
+        if at_top_level {
+            // Skip blank lines and comments — they don't change top-level state.
+            if trimmed.is_empty() || trimmed.starts_with('%') {
+                continue;
+            }
+            // Skip attributes (lines starting with `-`).
+            if trimmed.starts_with('-') {
+                // Attributes are forms too; check if this one ends on this line.
+                let stripped = strip_trailing_comment(trimmed);
+                at_top_level = stripped.ends_with('.');
+                continue;
+            }
+        } else {
+            // We're inside a form (function body or multi-line attribute).
+            // Check if this line ends the form.
+            let stripped = strip_trailing_comment(trimmed);
+            if stripped.ends_with('.') {
+                at_top_level = true;
+            }
+            continue;
+        }
+
+        // At this point we're at the top level and the line is not blank,
+        // a comment, or an attribute — it could be a function head.
         if let Some(func_name) = parse_function_head(trimmed) {
             let arity = count_function_arity(trimmed);
-            if !export_set.contains(&(func_name, arity)) {
-                continue;
-            }
 
-            // Only check the first clause of each function.
-            if !seen_functions.insert((func_name, arity)) {
-                continue;
-            }
-
-            // Skip OTP behaviour callbacks.
-            if OTP_CALLBACKS
+            let is_exported = export_set.contains(&(func_name, arity));
+            let is_first_clause = seen_functions.insert((func_name, arity));
+            let is_otp_callback = OTP_CALLBACKS
                 .iter()
-                .any(|(n, a)| *n == func_name && *a == arity)
-            {
-                continue;
-            }
+                .any(|(n, a)| *n == func_name && *a == arity);
 
-            // Check preceding lines for a `-doc` attribute.
-            if !has_preceding_doc(line_no, &lines) {
-                diags.push(ErlangLintDiagnostic {
-                    file: file.to_path_buf(),
-                    line: line_no + 1,
-                    column: 1,
-                    message: format!(
-                        "exported function `{func_name}/{arity}` missing `-doc` attribute"
-                    ),
-                    hint: Some(
-                        "add `-doc \"Description.\".` before the function definition".to_string(),
-                    ),
-                });
+            if is_exported && is_first_clause && !is_otp_callback {
+                // Check preceding lines for a `-doc` attribute.
+                if !has_preceding_doc(line_no, &lines) {
+                    diags.push(ErlangLintDiagnostic {
+                        file: file.to_path_buf(),
+                        line: line_no + 1,
+                        column: 1,
+                        message: format!(
+                            "exported function `{func_name}/{arity}` missing `-doc` attribute"
+                        ),
+                        hint: Some(
+                            "add `-doc \"Description.\".` before the function definition"
+                                .to_string(),
+                        ),
+                    });
+                }
             }
         }
+
+        // Determine whether the form ends on this line (single-line function
+        // like `foo() -> ok.`) or continues on the next line (multi-line body).
+        // This must run unconditionally — even for non-exported or OTP callback
+        // functions — so that `at_top_level` is correctly tracked.
+        let stripped = strip_trailing_comment(trimmed);
+        at_top_level = stripped.ends_with('.');
     }
 }
 
@@ -180,6 +215,20 @@ fn check_hardcoded_bt_refs(file: &Utf8Path, source: &str, diags: &mut Vec<Erlang
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
+
+/// Strip a trailing `%`-style line comment from an Erlang source line.
+///
+/// Returns the portion of the line before the comment (trimmed of trailing
+/// whitespace). This is a simple heuristic — it doesn't handle `%` inside
+/// string literals, but for the purpose of detecting form-ending `.` that's
+/// sufficient since a `.` inside a string wouldn't be at the end of the line
+/// anyway.
+fn strip_trailing_comment(line: &str) -> &str {
+    match line.find('%') {
+        Some(pos) => line[..pos].trim_end(),
+        None => line,
+    }
+}
 
 /// Parse all `-export([...]).` attributes and collect `(name, arity)` pairs.
 ///
@@ -495,6 +544,128 @@ mod tests {
         assert!(
             diags.is_empty(),
             "multi-line spec between -doc and function should not trigger; got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn keyword_call_in_body_not_mistaken_for_definition() {
+        // A keyword-form function call inside a body must not be flagged
+        // as an undocumented definition. This is the core BT-2053 scenario.
+        let source = "\
+-module(t).
+-moduledoc \"\".
+-export([dispatch/1, 'get:'/1]).
+-doc \"\".
+dispatch('get:') ->
+    'get:'(foo).
+-doc \"\".
+'get:'(_) -> ok.
+";
+        let diags: Vec<_> = lint(source)
+            .into_iter()
+            .filter(|d| d.message.contains("-doc"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "keyword call inside body should not produce diagnostics; got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn delegate_keyword_call_not_flagged() {
+        // A one-line delegate function calling another keyword-form export.
+        let source = "\
+-module(t).
+-moduledoc \"\".
+-export(['get:'/1, 'get:headers:'/2]).
+-doc \"Perform a GET request with no extra headers.\".
+-spec 'get:'(binary()) -> ok.
+'get:'(Url) ->
+    'get:headers:'(Url, []).
+-doc \"Perform a GET request with headers.\".
+-spec 'get:headers:'(binary(), list()) -> ok.
+'get:headers:'(Url, Headers) -> ok.
+";
+        let diags: Vec<_> = lint(source)
+            .into_iter()
+            .filter(|d| d.message.contains("-doc"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "delegate call to keyword export should not produce diagnostics; got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn multi_clause_dispatch_calling_keyword_exports() {
+        // A dispatch/3-style multi-clause router that calls keyword-form exports.
+        let source = "\
+-module(t).
+-moduledoc \"\".
+-export([dispatch/1, 'get:'/1, 'post:'/1]).
+-doc \"Dispatch.\".
+dispatch('get:') ->
+    'get:'(url);
+dispatch('post:') ->
+    'post:'(url).
+-doc \"Get.\".
+'get:'(_) -> ok.
+-doc \"Post.\".
+'post:'(_) -> ok.
+";
+        let diags: Vec<_> = lint(source)
+            .into_iter()
+            .filter(|d| d.message.contains("-doc"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "dispatch calling keyword exports should not produce diagnostics; got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn function_call_with_trailing_comment_not_flagged() {
+        // A function call inside a body with a trailing comment that includes
+        // a period should not confuse form-end detection.
+        let source = "\
+-module(t).
+-moduledoc \"\".
+-export([foo/0, bar/0]).
+-doc \"Foo.\".
+foo() ->
+    bar().  % call bar
+-doc \"Bar.\".
+bar() -> ok.
+";
+        let diags: Vec<_> = lint(source)
+            .into_iter()
+            .filter(|d| d.message.contains("-doc"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "trailing comment after call should not produce diagnostics; got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn attribute_with_trailing_comment() {
+        // A `-spec` attribute with a trailing comment must still be
+        // recognized as ending the form on that line.
+        let source = "\
+-module(t).
+-moduledoc \"\".
+-export([foo/0]).
+-doc \"Foo.\".
+-spec foo() -> ok. % returns ok
+foo() -> ok.
+";
+        let diags: Vec<_> = lint(source)
+            .into_iter()
+            .filter(|d| d.message.contains("-doc"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "attribute with trailing comment should not confuse form tracking; got: {diags:?}"
         );
     }
 
