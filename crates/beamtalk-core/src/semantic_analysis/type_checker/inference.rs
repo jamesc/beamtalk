@@ -965,6 +965,34 @@ impl TypeChecker {
             return receiver_ty;
         }
 
+        // BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
+        // both branch bodies' return types. `infer_args_for_if_not_nil`
+        // (BT-2046) already inferred both branches as `Block(..., R)` with
+        // narrowed params, so we read back R from each arg and union them.
+        // Blocks with a non-local return (`^`) exit the enclosing method —
+        // their branch contributes `Never`, and `union_of` skips Never, so
+        // the expression's type comes from the surviving branch.
+        //
+        // Restricted to non-class-side receivers: `ClassName ifNil: ... ifNotNil: ...`
+        // and `self ifNil: ... ifNotNil: ...` inside a class method must
+        // flow through `check_class_side_send` so an invalid metaclass send
+        // still emits DNU. Unwrap parens first so `(ClassName) ifNil: ...`
+        // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
+        let unwrapped_receiver = Self::unwrap_parens(receiver);
+        let is_class_side_receiver =
+            matches!(unwrapped_receiver, Expression::ClassReference { .. })
+                || (env.in_class_method && Self::is_self_receiver(unwrapped_receiver));
+        if !is_class_side_receiver
+            && matches!(
+                selector_name.as_str(),
+                "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+            )
+        {
+            if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
+                return ty;
+            }
+        }
+
         // Validate binary operand types when both sides are known
         // Only check if the receiver type actually defines the operator (avoids
         // duplicate warnings when the selector is already unknown).
@@ -2203,6 +2231,54 @@ impl TypeChecker {
         )
     }
 
+    /// BT-2047: Compute the return type of `ifNil:ifNotNil:` /
+    /// `ifNotNil:ifNil:` as the union of both branch bodies' return types.
+    ///
+    /// `arg_types` must be the pair of `Block(..., R)` types produced by
+    /// [`Self::infer_args_for_if_not_nil`]; the last type-arg of each Block is
+    /// the branch body's inferred return type. A block literal containing a
+    /// non-local return (`^`) exits the enclosing method, so its branch
+    /// contributes `Never` to the union regardless of the returned value's
+    /// type — matching the semantics noted in the issue's AC #3.
+    ///
+    /// Returns `None` if either arg isn't a well-formed `Block(...)` (e.g. the
+    /// caller passed a symbol or bare value instead of a block literal), so
+    /// the caller falls back to the generic method-lookup path for those cases.
+    fn if_nil_branch_union_ret_ty(
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+    ) -> Option<InferredType> {
+        if arg_types.len() < 2 || arguments.len() < 2 {
+            return None;
+        }
+        let branch_ret = |arg: &Expression, ty: &InferredType| -> Option<InferredType> {
+            let InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } = ty
+            else {
+                return None;
+            };
+            if class_name.as_str() != "Block" {
+                return None;
+            }
+            // Non-local `^` anywhere inside the branch (including nested
+            // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
+            // the method before the expression value is observed — treat
+            // the branch as Never so `union_of` skips it.
+            if let Expression::Block(block) = Self::unwrap_parens(arg) {
+                if Self::block_has_any_return(block) {
+                    return Some(InferredType::Never);
+                }
+            }
+            type_args.last().cloned()
+        };
+        let a = branch_ret(&arguments[0], &arg_types[0])?;
+        let b = branch_ret(&arguments[1], &arg_types[1])?;
+        Some(InferredType::union_of(&[a, b]))
+    }
+
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
     /// narrowed type environments for block arguments.
     ///
@@ -2691,12 +2767,56 @@ impl TypeChecker {
         }
     }
 
-    /// Check whether a block contains a non-local return (`^`).
+    /// Check whether a block contains a non-local return (`^`) at the top
+    /// level of its body. Used where only the block's own direct return
+    /// matters (e.g. guard-block divergence checks).
     fn block_has_return(block: &crate::ast::Block) -> bool {
         block
             .body
             .iter()
             .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
+    }
+
+    /// Check whether a block contains a non-local return (`^`) anywhere
+    /// in its body, including inside nested expressions (e.g.
+    /// `[[^1] value]` or `[foo: (^bar)]`). BT-2047 uses this to detect
+    /// branches that exit the enclosing method even when the `^` is
+    /// buried in a sub-expression.
+    fn block_has_any_return(block: &crate::ast::Block) -> bool {
+        block
+            .body
+            .iter()
+            .any(|stmt| Self::expr_contains_return(&stmt.expression))
+    }
+
+    fn expr_contains_return(expr: &Expression) -> bool {
+        match expr {
+            Expression::Return { .. } => true,
+            Expression::Parenthesized { expression, .. } => Self::expr_contains_return(expression),
+            Expression::Assignment { target, value, .. } => {
+                Self::expr_contains_return(target) || Self::expr_contains_return(value)
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                Self::expr_contains_return(receiver)
+                    || arguments.iter().any(Self::expr_contains_return)
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                Self::expr_contains_return(receiver)
+                    || messages
+                        .iter()
+                        .any(|m| m.arguments.iter().any(Self::expr_contains_return))
+            }
+            Expression::Block(block) => Self::block_has_any_return(block),
+            // Literals, identifiers, class references, field access —
+            // no sub-expressions that could contain `^`.
+            _ => false,
+        }
     }
 
     /// Check whether a type is *only* the nil type (`UndefinedObject` or

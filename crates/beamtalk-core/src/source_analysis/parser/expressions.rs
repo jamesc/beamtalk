@@ -1035,12 +1035,31 @@ impl Parser {
 
         let mut parameters = Vec::new();
 
-        // Parse block parameters: [:x :y |
+        // Parse block parameters: [:x :y | ...] or [:x :: Type :y :: Type | ...]
+        //
+        // Optional `:: Type` annotations after each parameter are accepted and
+        // consumed so the parser stays on track. Block parameter types are
+        // currently inferred by the type checker from the message signature
+        // (BT-2036) rather than from these annotations, so the annotation is
+        // parsed and discarded. Supporting it as a workaround for BT-2042 /
+        // BT-2043 avoids cascading parse errors that previously caused false
+        // "Unused variable" warnings because the surrounding method body
+        // failed to parse cleanly.
+        //
+        // Use `parse_single_type_annotation` — not `parse_type_annotation` —
+        // because union `|` would otherwise swallow the block's `|` separator.
+        // Callers that need a union type on a block parameter can wrap the
+        // type in parentheses via a generic, e.g. `Maybe(Integer | String)`.
         while self.match_token(&TokenKind::Colon) {
             if let TokenKind::Identifier(name) = self.current_kind() {
                 let span = self.current_token().span();
                 parameters.push(BlockParameter::new(name.clone(), span));
                 self.advance();
+
+                // Optional `:: Type` annotation — parse and discard.
+                if self.match_token(&TokenKind::DoubleColon) {
+                    let _ = self.parse_single_type_annotation();
+                }
             } else {
                 self.error("Expected parameter name after ':'");
                 break;
