@@ -229,19 +229,39 @@ impl InferredType {
 
     /// Maps a raw class-name string to its user-facing diagnostic spelling.
     ///
-    /// Today this rewrites `"UndefinedObject"` → `"Nil"` and leaves all other
-    /// names untouched. Use this when you have a bare `EcoString`/`&str`
-    /// class name (e.g., a union-member list passed to a diagnostic) rather
-    /// than a full `InferredType`.
+    /// Rewrites every occurrence of `"UndefinedObject"` → `"Nil"` as a whole
+    /// identifier, so this scrubs both bare class names (`"UndefinedObject"`)
+    /// and nested annotations (`"Array(UndefinedObject)"`,
+    /// `"Foo | UndefinedObject"`). Identifiers that merely *contain*
+    /// `UndefinedObject` as a substring (e.g. `"MyUndefinedObjectWrapper"`)
+    /// are left alone. Use this when you have an `EcoString`/`&str` that may
+    /// be either a bare class name or a full annotation string rather than a
+    /// structured [`InferredType`].
     ///
     /// **References:** BT-2066
     #[must_use]
     pub fn class_name_for_diagnostic(name: &str) -> EcoString {
-        if WellKnownClass::from_str(name).is_some_and(WellKnownClass::is_nil_class) {
-            EcoString::from("Nil")
-        } else {
-            EcoString::from(name)
+        const TARGET: &str = "UndefinedObject";
+        if !name.contains(TARGET) {
+            return EcoString::from(name);
         }
+        let is_ident_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut out = String::with_capacity(name.len());
+        let mut remaining = name;
+        while let Some(idx) = remaining.find(TARGET) {
+            out.push_str(&remaining[..idx]);
+            let before_ok = remaining[..idx].chars().next_back().is_none_or(|c| !is_ident_char(c));
+            let tail = &remaining[idx + TARGET.len()..];
+            let after_ok = tail.chars().next().is_none_or(|c| !is_ident_char(c));
+            if before_ok && after_ok {
+                out.push_str("Nil");
+            } else {
+                out.push_str(TARGET);
+            }
+            remaining = tail;
+        }
+        out.push_str(remaining);
+        EcoString::from(out)
     }
 
     /// Returns a human-readable display name for this type, using the
@@ -486,6 +506,40 @@ mod display_tests {
         assert_eq!(
             InferredType::class_name_for_diagnostic("MyCustomClass"),
             "MyCustomClass"
+        );
+    }
+
+    #[test]
+    fn class_name_for_diagnostic_scrubs_nested_undefined_object() {
+        // Nested generic — annotation strings like `Array(UndefinedObject)`
+        // must also get scrubbed even though they aren't bare class names.
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("Array(UndefinedObject)"),
+            "Array(Nil)"
+        );
+        // Union spelling.
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("Foo | UndefinedObject"),
+            "Foo | Nil"
+        );
+        // Deeply nested.
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("Result(Integer, UndefinedObject)"),
+            "Result(Integer, Nil)"
+        );
+    }
+
+    #[test]
+    fn class_name_for_diagnostic_preserves_substring_matches() {
+        // `UndefinedObject` as part of a longer identifier (user-defined
+        // wrapper class) must NOT be scrubbed — whole-identifier match only.
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("MyUndefinedObjectWrapper"),
+            "MyUndefinedObjectWrapper"
+        );
+        assert_eq!(
+            InferredType::class_name_for_diagnostic("UndefinedObjectFactory"),
+            "UndefinedObjectFactory"
         );
     }
 

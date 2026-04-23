@@ -217,7 +217,7 @@ Beamtalk has **one** nil class with **two** names:
 | Name              | Where it appears                                                                 |
 | ----------------- | -------------------------------------------------------------------------------- |
 | `UndefinedObject` | Canonical class-hierarchy spelling. Used internally by the type checker, BEAM FFI specs, protocol registry, `InferredType::known(...)`, `is_assignable_to` lookups, `Debug` output for `InferredType`, and the stdlib class definition (`stdlib/src/UndefinedObject.bt`). |
-| `Nil`             | Source-sympathetic surface spelling. What users type in annotations (`:: Foo \| Nil`) and read back in user-facing messages: diagnostics, hover, signature help, code-action inserts, and REPL output. |
+| `Nil`             | Source-sympathetic surface spelling. What users type in annotations (`:: Nil`, `-> Nil`) and read back in user-facing messages: diagnostics, hover, signature help, code-action inserts, and REPL output. (Beamtalk does not yet support union type annotations in `.bt` source — `Foo \| Nil` is how the compiler _renders_ a nullable inference, not something you can write as a type.) |
 
 The two are aliased: the type resolver canonicalises `Nil`/`nil` → `UndefinedObject` during annotation resolution (`type_resolver.rs`), and `WellKnownClass::is_nil_class()` treats both as the nil type.
 
