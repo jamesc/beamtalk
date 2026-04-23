@@ -1203,6 +1203,49 @@ mod tests {
         })
     }
 
+    /// Regression test for BT-2057: even after the retry wrapper has exhausted
+    /// all three attempts (each running `cleanup_stale_node_info` after failure),
+    /// a pre-existing `startup.log` must still be present so the panic message's
+    /// "Check …/startup.log" reference is not dangling.
+    ///
+    /// This exercises `retry_with_cleanup` with an always-failing closure and
+    /// catches the final panic so we can inspect the workspace directory.
+    #[test]
+    fn test_retry_with_cleanup_preserves_startup_log_on_final_failure() {
+        let tw = TestWorkspace::new("retry_preserve_log");
+        fs::create_dir_all(tw.dir()).unwrap();
+
+        // Simulate a startup.log left behind by a crashing BEAM node.
+        let log_path = tw.dir().join("startup.log");
+        let log_contents = b"ERROR: epmd name conflict (simulated)\n";
+        fs::write(&log_path, log_contents).unwrap();
+
+        // Run retry_with_cleanup with a closure that always errors. It will
+        // panic after 3 attempts — capture that panic so the test can continue.
+        let ws_id = tw.id.clone();
+        let result = std::panic::catch_unwind(|| {
+            retry_with_cleanup::<()>(&ws_id, "preserve_log_test", || {
+                Err(miette::miette!("simulated failure"))
+            });
+        });
+        assert!(
+            result.is_err(),
+            "retry_with_cleanup must panic after final attempt"
+        );
+
+        // startup.log must survive all three cleanup cycles.
+        assert!(
+            log_path.exists(),
+            "startup.log must still exist after retry_with_cleanup exhausts \
+             its attempts, so the panic's diagnostic reference is valid (BT-2057)"
+        );
+        let preserved = fs::read(&log_path).expect("startup.log should be readable");
+        assert_eq!(
+            preserved, log_contents,
+            "startup.log content must be preserved verbatim across retries"
+        );
+    }
+
     /// Combined test: start a node once and exercise all read-only queries against it,
     /// then verify `is_node_running` detects death after a raw kill.
     ///

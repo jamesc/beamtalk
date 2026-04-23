@@ -137,6 +137,14 @@ fn prepare_workspace_paths(
     // node.info from a previous aborted run without a tombstone).
     remove_stale_runtime_files(workspace_id)?;
 
+    // Clear any previous crash diagnostic so `read_startup_log_detail()` cannot
+    // surface a stale run's error for the current attempt. `startup.log` is
+    // deliberately owned here rather than by `remove_stale_runtime_files` so
+    // that retry helpers (which call `cleanup_stale_node_info` between failed
+    // attempts) preserve the log for their panic message (BT-2057).
+    let ws_dir = workspace_dir(workspace_id)?;
+    remove_file_if_exists(&ws_dir.join("startup.log"))?;
+
     // Write the tombstone before spawning the BEAM node.  If startup is
     // interrupted at any point after this, the next call will detect the file
     // and trigger the cleanup above (BT-969).

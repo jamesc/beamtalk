@@ -286,6 +286,13 @@ pub(super) fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
 /// `start_detached_node` and removed on success; its presence here indicates a
 /// partial startup that was interrupted (BT-969).
 ///
+/// **`startup.log` is intentionally preserved** (BT-2057): the retry helpers
+/// and panic messages in `start_detached_node` reference this file by path as
+/// the user-facing diagnostic ("Check …/startup.log"). Deleting it between
+/// attempts (or after the final failure) would strip the referenced error
+/// content. `start_detached_node` clears `startup.log` itself immediately
+/// before spawning a fresh BEAM node so no stale content leaks into a new run.
+///
 /// Called by:
 /// - `cleanup_stale_node_info` — after detecting an orphaned workspace
 /// - `start_detached_node` (via `process.rs`) — before spawning a new BEAM node
@@ -297,10 +304,11 @@ pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
     // renames to port.  A crash between those two steps leaves a stale tmp file.
     remove_file_if_exists(&ws_dir.join("port.tmp"))?;
     remove_file_if_exists(&ws_dir.join("pid"))?;
-    // Clear previous crash diagnostics so read_startup_log_detail() cannot
-    // accidentally surface a stale run's error for the current attempt.
-    remove_file_if_exists(&ws_dir.join("startup.log"))?;
     remove_file_if_exists(&ws_dir.join("starting"))?;
+    // NOTE: `startup.log` is deliberately NOT removed here — see BT-2057.
+    // The file is cleared by `start_detached_node` immediately before spawning
+    // a fresh BEAM node, and otherwise kept so retry/panic messages pointing
+    // at its path remain valid.
     Ok(())
 }
 
@@ -382,7 +390,9 @@ mod tests {
     }
 
     /// Verify that `remove_stale_runtime_files` removes all known runtime files
-    /// including the `starting` tombstone introduced in BT-969.
+    /// including the `starting` tombstone introduced in BT-969, but preserves
+    /// `startup.log` so retry/panic diagnostics that reference it remain valid
+    /// (BT-2057).
     #[test]
     fn test_remove_stale_runtime_files_removes_starting_tombstone() {
         let ws_id = format!("test_stale_tombstone_{}", std::process::id());
@@ -403,19 +413,55 @@ mod tests {
 
         remove_stale_runtime_files(&ws_id).expect("remove_stale_runtime_files should not fail");
 
-        for name in &[
-            "node.info",
-            "port",
-            "port.tmp",
-            "pid",
-            "startup.log",
-            "starting",
-        ] {
+        for name in &["node.info", "port", "port.tmp", "pid", "starting"] {
             assert!(
                 !ws_dir.join(name).exists(),
                 "{name} should have been removed by remove_stale_runtime_files"
             );
         }
+
+        // `startup.log` must be preserved — callers that need a fresh log
+        // (e.g. `start_detached_node`) delete it explicitly (BT-2057).
+        assert!(
+            ws_dir.join("startup.log").exists(),
+            "startup.log should be preserved by remove_stale_runtime_files so \
+             retry/panic diagnostics referencing it remain valid (BT-2057)"
+        );
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&ws_dir);
+    }
+
+    /// Verify that `remove_stale_runtime_files` preserves an existing
+    /// `startup.log` file across multiple invocations. The retry helpers in
+    /// `mod.rs` call `cleanup_stale_node_info` after every failed attempt, so
+    /// repeated calls must leave `startup.log` intact for the final panic
+    /// message to reference valid diagnostics (BT-2057).
+    #[test]
+    fn test_remove_stale_runtime_files_preserves_startup_log_across_retries() {
+        let ws_id = format!("test_stale_preserve_log_{}", std::process::id());
+        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+
+        let log_path = ws_dir.join("startup.log");
+        let log_contents = b"epmd name conflict: beamtalk_workspace_foo@localhost\n";
+        fs::write(&log_path, log_contents).unwrap();
+
+        // Simulate three failed-retry cleanup cycles.
+        for _ in 0..3 {
+            remove_stale_runtime_files(&ws_id).expect("remove_stale_runtime_files should not fail");
+            assert!(
+                log_path.exists(),
+                "startup.log must still exist after each cleanup (BT-2057)"
+            );
+        }
+
+        // Content must match the original bytes — not truncated or overwritten.
+        let preserved = fs::read(&log_path).expect("startup.log should be readable");
+        assert_eq!(
+            preserved, log_contents,
+            "startup.log contents must be preserved verbatim across cleanups"
+        );
 
         // Cleanup
         let _ = fs::remove_dir_all(&ws_dir);
