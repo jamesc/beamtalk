@@ -2844,7 +2844,7 @@ impl TypeChecker {
     }
 
     /// Check whether a block's execution cannot fall through to the enclosing
-    /// method's next statement (BT-2049).
+    /// method's next statement (BT-2049, extended in BT-2051).
     ///
     /// A block "diverges" when any of the following hold:
     /// - It contains a non-local return `^expr` (already handled by
@@ -2852,8 +2852,13 @@ impl TypeChecker {
     /// - Its body's inferred return type is [`InferredType::Never`] — i.e. the
     ///   last expression is a call to a `-> Never`-returning method such as
     ///   `Object>>error:` or `Object>>notImplemented`.
-    /// - Any statement inside the body has inferred type `Never` (e.g.
-    ///   `[self error: "…". ^nil]` — the trailing `^nil` is unreachable).
+    /// - Any statement inside the body has — or *contains* as a descendant —
+    ///   an expression of inferred type `Never`. This covers both
+    ///   `[self error: "…". ^nil]` (trailing `^nil` unreachable) and
+    ///   `[logger info: (self error: "…")]` (the diverging call is buried
+    ///   in a method-send argument). BT-2051 walks descendants via
+    ///   [`Self::expr_contains_never`], symmetric with the `^`-walker
+    ///   [`Self::expr_contains_return`].
     ///
     /// The block's inferred type is read from [`TypeChecker::type_map`] as the
     /// final type-arg of its `Block(...)` representation (populated by
@@ -2880,12 +2885,60 @@ impl TypeChecker {
                 }
             }
         }
-        block.body.iter().any(|stmt| {
-            matches!(
-                self.type_map.get(stmt.expression.span()),
-                Some(InferredType::Never)
-            )
-        })
+        block
+            .body
+            .iter()
+            .any(|stmt| self.expr_contains_never(&stmt.expression))
+    }
+
+    /// Recursively check whether `expr` — or any sub-expression in the same
+    /// statement-position slots walked by [`Self::expr_contains_return`] —
+    /// has inferred type [`InferredType::Never`] in the type map (BT-2051).
+    ///
+    /// This is the `Never`-typed companion to [`Self::expr_contains_return`]:
+    /// both walk the same `Expression` variants (`Return`, `Parenthesized`,
+    /// `Assignment`, `MessageSend`, `Cascade`, `Block`, `FieldAccess`) so a
+    /// diverging call such as `self error: "…"` is detected whether it
+    /// appears as the whole statement (`[self error: "…"]`), as a receiver,
+    /// or buried in a method-send argument
+    /// (`[logger info: (self error: "…")]`).
+    fn expr_contains_never(&self, expr: &Expression) -> bool {
+        if matches!(self.type_map.get(expr.span()), Some(InferredType::Never)) {
+            return true;
+        }
+        match expr {
+            Expression::Return { value, .. } => self.expr_contains_never(value),
+            Expression::Parenthesized { expression, .. } => self.expr_contains_never(expression),
+            Expression::Assignment { target, value, .. } => {
+                self.expr_contains_never(target) || self.expr_contains_never(value)
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                self.expr_contains_never(receiver)
+                    || arguments.iter().any(|a| self.expr_contains_never(a))
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.expr_contains_never(receiver)
+                    || messages
+                        .iter()
+                        .any(|m| m.arguments.iter().any(|a| self.expr_contains_never(a)))
+            }
+            Expression::FieldAccess { receiver, .. } => self.expr_contains_never(receiver),
+            // - Nested `Block` literals are opaque: a block value is
+            //   *constructed*, not *executed*, at this position. Guards like
+            //   `[callbacks add: [self error: "later"]]` would otherwise be
+            //   mis-classified as diverging even though the outer block can
+            //   still fall through.
+            // - Literals, identifiers, class references, super, etc. have
+            //   no sub-expressions the top-level check above didn't already
+            //   cover.
+            _ => false,
+        }
     }
 
     /// Remove `UndefinedObject` (nil) from a union type or convert a known type
