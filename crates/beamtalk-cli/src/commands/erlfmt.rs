@@ -12,6 +12,8 @@ use miette::{IntoDiagnostic, Result};
 use std::process::Command;
 use tracing::warn;
 
+use super::erlang_eval::{self, ErlangEval};
+
 /// Result of an erlfmt invocation.
 #[derive(Debug, Default)]
 pub struct ErlfmtResult {
@@ -122,51 +124,7 @@ fn invoke_erlfmt(
 
     for file in files {
         let action = if check_only { "check" } else { "write" };
-        // Escape the file path for embedding in an Erlang string literal.
-        // Must handle: backslash, double-quote, and control characters.
-        let escaped_file = escape_for_erlang_string(file.as_str());
-        // Build an Erlang expression that formats a single file.
-        // erlfmt:format_file/2 returns {ok, Code, Warnings} | {skip, Reason} | {error, Error}
-        // For check mode we compare the formatted output with the original.
-        let eval_expr = if check_only {
-            format!(
-                "case erlfmt:format_file(\"{escaped_file}\", [{{print_width, 100}}]) of \
-                    {{ok, Formatted, _}} -> \
-                        case file:read_file(\"{escaped_file}\") of \
-                            {{ok, Original}} -> \
-                                Bin = unicode:characters_to_binary(Formatted), \
-                                case Bin =:= Original of \
-                                    true -> halt(0); \
-                                    false -> halt(10) \
-                                end; \
-                            {{error, ReadReason}} -> \
-                                io:put_chars(standard_error, io_lib:format(\"~tp~n\", [ReadReason])), \
-                                halt(2) \
-                        end; \
-                    {{skip, _}} -> halt(0); \
-                    {{error, FmtReason}} -> \
-                        io:put_chars(standard_error, io_lib:format(\"~tp~n\", [FmtReason])), \
-                        halt(2) \
-                end."
-            )
-        } else {
-            format!(
-                "case erlfmt:format_file(\"{escaped_file}\", [{{print_width, 100}}]) of \
-                    {{ok, Formatted, _}} -> \
-                        Bin = unicode:characters_to_binary(Formatted), \
-                        case file:write_file(\"{escaped_file}\", Bin) of \
-                            ok -> halt(0); \
-                            {{error, WriteReason}} -> \
-                                io:put_chars(standard_error, io_lib:format(\"~tp~n\", [WriteReason])), \
-                                halt(2) \
-                        end; \
-                    {{skip, _}} -> halt(0); \
-                    {{error, FmtReason}} -> \
-                        io:put_chars(standard_error, io_lib:format(\"~tp~n\", [FmtReason])), \
-                        halt(2) \
-                end."
-            )
-        };
+        let eval_expr = ErlangEval::new(file.as_str()).build(check_only);
 
         let output = Command::new("erl")
             .arg("-noshell")
@@ -179,11 +137,13 @@ fn invoke_erlfmt(
             .map_err(|e| miette::miette!("Failed to run erlfmt on '{}': {e}", file))?;
 
         match output.status.code() {
-            Some(0) => {
+            Some(code) if code == i32::from(erlang_eval::exit_codes::SUCCESS) => {
                 // File is already formatted (check) or was formatted (write).
             }
-            Some(10) if check_only => {
-                // File needs formatting. (Distinct from halt(1)/VM-crash exit 1.)
+            Some(code)
+                if check_only && code == i32::from(erlang_eval::exit_codes::NEEDS_FORMAT) =>
+            {
+                // File needs formatting. (Distinct from VM-crash exit 1.)
                 result.changed_files.push(file.clone());
             }
             Some(code) => {
@@ -216,26 +176,6 @@ fn invoke_erlfmt(
     Ok(result)
 }
 
-/// Escape a string for embedding in an Erlang string literal.
-///
-/// Handles backslashes, double-quotes, and control characters that the
-/// Erlang parser would otherwise interpret.
-fn escape_for_erlang_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\0' => out.push_str("\\0"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +203,7 @@ mod tests {
 
     #[test]
     fn escape_for_erlang_string_handles_special_chars() {
+        use erlang_eval::escape_for_erlang_string;
         assert_eq!(escape_for_erlang_string(r"hello"), "hello");
         assert_eq!(escape_for_erlang_string(r#"a"b"#), r#"a\"b"#);
         assert_eq!(escape_for_erlang_string("a\\b"), "a\\\\b");

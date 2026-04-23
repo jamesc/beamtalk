@@ -14,6 +14,7 @@ pub mod deps;
 pub mod doc;
 pub(crate) mod doc_tests;
 pub mod doctor;
+pub(crate) mod erlang_eval;
 pub(crate) mod erlang_lint;
 pub(crate) mod erlfmt;
 pub mod fmt;
