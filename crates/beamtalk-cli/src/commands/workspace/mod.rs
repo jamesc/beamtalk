@@ -1125,6 +1125,7 @@ mod tests {
     ///
     /// Between retries: kills any partially-started node, cleans stale runtime
     /// files, and waits for epmd deregistration so the next attempt starts clean.
+    #[cfg(unix)]
     fn start_detached_node_with_retry(
         workspace_id: &str,
         paths: &beamtalk_cli::repl_startup::BeamPaths,
