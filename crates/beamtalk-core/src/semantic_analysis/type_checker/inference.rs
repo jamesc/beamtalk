@@ -2510,11 +2510,22 @@ impl TypeChecker {
         {
             if class_name.as_str() == "Block" {
                 if let Some(body_ty) = type_args.last() {
-                    return matches!(body_ty, InferredType::Never);
+                    if matches!(body_ty, InferredType::Never) {
+                        return true;
+                    }
                 }
             }
         }
-        false
+        // Any statement inside the block whose inferred type is Never means the
+        // block cannot fall through, even if trailing statements have a
+        // non-Never type (e.g. `[self error: "…". ^nil]` or cleanup calls
+        // after a diverging expression).
+        block.body.iter().any(|stmt| {
+            matches!(
+                self.type_map.get(stmt.expression.span()),
+                Some(InferredType::Never)
+            )
+        })
     }
 
     /// Remove `UndefinedObject` (nil) from a union type or convert a known type
@@ -2643,7 +2654,10 @@ impl TypeChecker {
         env: &mut TypeEnv,
         hierarchy: &ClassHierarchy,
     ) {
-        // Match: `<receiver> ifTrue: [diverging block]`
+        // Match: `<receiver> ifTrue: [diverging block]` or
+        //         `<receiver> ifTrue: [diverging] ifFalse: [...]` — if the
+        // true branch diverges, any execution reaching the next statement
+        // came through the false branch and the variable is non-nil.
         if let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Keyword(parts),
@@ -2651,15 +2665,17 @@ impl TypeChecker {
             ..
         } = expr
         {
-            // Only applies to `ifTrue:` (single diverging block)
-            if !(parts.len() == 1 && parts[0].keyword == "ifTrue:") {
+            let is_if_true = parts.len() == 1 && parts[0].keyword == "ifTrue:";
+            let is_if_true_if_false =
+                parts.len() == 2 && parts[0].keyword == "ifTrue:" && parts[1].keyword == "ifFalse:";
+            if !(is_if_true || is_if_true_if_false) {
                 return;
             }
             if let Some(info) = Self::detect_narrowing(receiver) {
                 if !info.is_nil_check {
                     return;
                 }
-                // Check if the block diverges (non-local return or Never-typed body)
+                // In both shapes, the true block is argument 0.
                 if let Some(Expression::Block(block)) = arguments.first() {
                     if self.block_diverges(block) {
                         // After this statement, the variable is non-nil

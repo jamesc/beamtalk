@@ -14998,14 +14998,29 @@ typed Object subclass: Caller
         &crate::CompilerOptions::default(),
         vec![],
     );
-    let type_warnings: Vec<_> = result
+    // The negative case must produce the specific argument-mismatch
+    // diagnostic at the `process:` call site: `ms` should still be
+    // `Integer | UndefinedObject` because the `ifTrue: [42]` block does not
+    // diverge. A bare "any Type warning" check could hide regressions where
+    // narrowing silently happens but some other Type warning appears.
+    let mismatch_warnings: Vec<_> = result
         .diagnostics
         .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .filter(|d| {
+            d.category == Some(DiagnosticCategory::Type)
+                && d.message.contains("'process:'")
+                && d.message.contains("UndefinedObject")
+        })
         .collect();
     assert!(
-        !type_warnings.is_empty(),
-        "non-diverging guard must leave `ms` as Integer | Nil, expected a warning but got none",
+        !mismatch_warnings.is_empty(),
+        "non-diverging guard must leave `ms` nullable and warn at `process:`; \
+         got diagnostics: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
