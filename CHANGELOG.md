@@ -8,10 +8,14 @@
 - Accept narrowing RHS in local type annotations — `dict :: Dictionary := someMethodReturningObject` no longer warns when the declared type is more specific than the inferred type (BT-2015).
 - Fix `@expect` directives inside block bodies (`ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`) being silently ignored — they now correctly suppress diagnostics on the next statement within the block (BT-2010).
 - Typechecker warns when a non-Block value is passed to a `Block(T, R)` parameter — previously, parametric type annotations like `Block(T, R)` were treated as unknown classes and the warning was suppressed (BT-2002).
+- **`<ClassName> class` metatype annotation** — `Actor class`, `MyService class`, etc. can now appear in any type position (fields, parameters, return types, locals) to denote a class object in the named hierarchy. Class-side methods on that class resolve without false DNU warnings after nil-check narrowing. Resolves to `Dynamic` at runtime (BT-2034).
+- **Conditional return type inference** — `ifTrue:ifFalse:` now declares `Block(R), Block(R) -> R`, so the type checker unifies both arms to a common return type instead of collapsing to `Dynamic` (BT-2020).
+- Typechecker warns when a method declared `-> Never` has a body that returns a known type (BT-2033).
+- Fix generic return type inner arg validation — the type checker now correctly warns when inner type args of a generic return type mismatch (e.g., `-> Result(Integer, Error)` with body returning `Result(String, Error)`) (BT-2022).
 
 ### Standard Library
 
-- **BREAKING: Supervisor lifecycle methods now return `Result`** ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md), BT-1993 epic) — `Supervisor class>>supervise` and `Supervisor>>terminate:` on the static path, plus `DynamicSupervisor class>>supervise`, `DynamicSupervisor>>startChild`, `DynamicSupervisor>>startChild:`, and `DynamicSupervisor>>terminateChild:` on the dynamic path, all return `Result` values instead of raising. `stop`, `current`, `which:`, `children`, and `count` are unchanged.
+- **BREAKING: Supervisor lifecycle methods now return `Result`** ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md), BT-1993 epic) — `Supervisor class>>supervise` and `Supervisor>>terminate:` on the static path, plus `DynamicSupervisor class>>supervise`, `DynamicSupervisor>>startChild`, `DynamicSupervisor>>startChild:`, and `DynamicSupervisor>>terminateChild:` on the dynamic path, all return `Result` values instead of raising. `stop`, `current`, `children`, and `count` are unchanged.
   - Adopts the **idempotent-startup convention**: an operation succeeds (returns `Result ok: ...`) when the caller's target end state already holds — `supervise` on an already-running supervisor returns `Result ok: sup` (preserved from the prior runtime), and `terminate:` / `terminateChild:` on a child that is already gone returns `Result ok: nil` (new on the static path — previously raised).
   - **Mechanical migration.** Boot-style call sites add `unwrap`: `app := WebApp supervise` becomes `app := (WebApp supervise) unwrap`. Recoverable flows use `ifOk:ifError:` / `andThen:`. Call sites that were swallowing the raise to express "stop it if it's running" — e.g. `[app terminate: Child] on: Error do: [:_e | nil]` — can now be written as `(app terminate: Child) unwrap` (idempotent by construction — `Ok` whether the child was alive or already gone). See ADR 0080 §Migration Path for the full rewrite guide.
   - Structured `beamtalk_error` kinds (`kind` field): `#supervisor_start_failed`, `#child_start_failed`, `#terminate_failed`, `#stale_handle` — greppable in logs (BT-1999, BT-2000, BT-2001).
@@ -23,6 +27,9 @@
   - `SupervisionSpec withName:` — declaratively name a supervised child so the supervisor re-registers the name on every restart.
 - **Integer rounding methods** — `ceiling`, `floor`, `rounded`, and `truncated` on Integer return `self` (identity), so numeric code can call rounding methods on any `Number` without branching on type (BT-2011).
 - Tighter parametric type annotations across stdlib classes (`File`, `Subprocess`, `ReactiveSubprocess`, `Regex`, `Result`, `SupervisionSpec`) — `Result` return types now carry concrete `T`/`E` parameters for better type flow through `andThen:`/`map:` chains.
+- **`Supervisor>>which:` now returns `Result(Object, Error)`** — migrated to ADR 0080 Phase 2 Result signature, consistent with `supervise` and `terminate:`. Callers must `unwrap` or use Result combinators; returns `Result ok: nil` when the class is not in the supervision tree, `Result error: (beamtalk_error stale_handle)` when the supervisor is stopped (BT-2041).
+- **`Collection(E)` parametrized** — `Collection` is now `Collection(E)` with typed block parameters on `do:`, `collect:`, `select:`, `reject:`, `detect:`, `inject:into:`, `anySatisfy:`, `allSatisfy:`, and `includes:`. `Bag` is now `Bag(E)` with typed `add:`, `remove:`, `occurrencesOf:`. Enables type-safe iteration and better IDE support (BT-2036).
+- `Float>>min:/max:` and `Integer>>min:/max:` return type corrected from `Float`/`Integer` to `Number` (BT-2020).
 
 ### Compiler
 
@@ -43,6 +50,8 @@
 ### Tooling
 
 - **Diagnostic summary** — `beamtalk build` and `beamtalk lint` print an aggregated diagnostic summary (category × severity) at end of run; `beamtalk lint --format json` emits a `summary` JSON object for CI diffing; new `diagnostic_summary` MCP tool for agent use (BT-2014).
+- Fix `beamtalk lint` diagnostic summary accounting — `files_checked` count, error surfacing, and `--format json` buffered output now report correctly (BT-2031).
+- Fix `beamtalk lint test/` emitting spurious `Unresolved class` diagnostics for classes defined in the package's `src/`; fix LSP falsely flagging every class as "conflicts with a stdlib class" when opening stdlib `.bt` files (BT-2027).
 
 ### Documentation
 
@@ -58,6 +67,18 @@
 - Typechecker probe confirms class-level type parameter substitution through `Result(C, Error)` works without extension (BT-1995).
 - Unified LSP and CLI diagnostic pipelines into shared `compute_project_diagnostics` function (BT-2009).
 - Thread fixture-defined protocols through BUnit compile path to eliminate false `Unresolved class` warnings (BT-2006).
+- Centralised parametric type resolution into shared `type_resolver` submodule — infrastructure for BT-2018..BT-2023 bug fixes (BT-2025).
+- Fix generic return type args lost when assigned to a local from a class method call (BT-2018).
+- Fix receiver type_args not threaded through super sends in generic classes (BT-2021).
+- Fix generic unification failures on nested, union, and FFI type shapes (BT-2023).
+- Fix union return types stored as flat `Known` instead of proper `Union`, causing false numeric-operand warnings (BT-2017).
+- Fix `Nil` in type annotations not canonicalized to `UndefinedObject`, causing `isNil` narrowing to silently fail (BT-2016).
+- Preserve type_args on concrete parametric instance-method returns (BT-2019).
+- Propagate `-> Never` through class-side dispatch fallback so `self error:` infers as Never (BT-2037).
+- Accept class literals as valid arguments for `Behaviour`/`Class` typed parameters (BT-2038).
+- Dedup cascade receiver inference so inner DNU warnings fire once instead of duplicating (BT-2035).
+- Fix spurious untyped-FFI warning on narrowing-path blocks in Result.bt (BT-2039).
+- Remove 11+ stale `@expect type` directives across stdlib following type checker improvements (#2076).
 
 ## 0.3.1 — 2026-03-26
 
