@@ -976,9 +976,12 @@ impl TypeChecker {
         // Restricted to non-class-side receivers: `ClassName ifNil: ... ifNotNil: ...`
         // and `self ifNil: ... ifNotNil: ...` inside a class method must
         // flow through `check_class_side_send` so an invalid metaclass send
-        // still emits DNU.
-        let is_class_side_receiver = matches!(receiver, Expression::ClassReference { .. })
-            || (env.in_class_method && Self::is_self_receiver(receiver));
+        // still emits DNU. Unwrap parens first so `(ClassName) ifNil: ...`
+        // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
+        let unwrapped_receiver = Self::unwrap_parens(receiver);
+        let is_class_side_receiver =
+            matches!(unwrapped_receiver, Expression::ClassReference { .. })
+                || (env.in_class_method && Self::is_self_receiver(unwrapped_receiver));
         if !is_class_side_receiver
             && matches!(
                 selector_name.as_str(),
