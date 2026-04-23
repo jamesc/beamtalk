@@ -26,6 +26,7 @@ use ecow::EcoString;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod env_key;
 mod inference;
 mod narrowing;
 pub mod native_type_registry;
@@ -44,6 +45,8 @@ pub use native_types::{
 };
 pub(in crate::semantic_analysis) use types::is_generic_type_param;
 pub use types::{DynamicReason, InferredType, TypeProvenance};
+
+pub(crate) use env_key::EnvKey;
 
 /// Map of expression spans to their inferred types.
 ///
@@ -494,12 +497,15 @@ struct TypeOrigin {
 
 /// Type environment for tracking variable → type mappings.
 ///
-/// Supports nested scopes via `child()` which clones the parent env.
+/// Keyed by [`EnvKey`] (BT-2062) so that `self.field` bindings used by
+/// narrowing are distinguishable from locals at the type level — no string
+/// convention, no prefix-stripping at call sites. Supports nested scopes via
+/// `child()` which clones the parent env.
 #[derive(Debug, Clone)]
 struct TypeEnv {
-    bindings: HashMap<EcoString, InferredType>,
+    bindings: HashMap<EnvKey, InferredType>,
     /// Where each variable got its type (BT-1588).
-    origins: HashMap<EcoString, TypeOrigin>,
+    origins: HashMap<EnvKey, TypeOrigin>,
     /// Whether we're inside a class method body (self refers to class-side).
     in_class_method: bool,
 }
@@ -513,40 +519,51 @@ impl TypeEnv {
         }
     }
 
-    fn get(&self, name: &str) -> Option<InferredType> {
-        self.bindings.get(name).cloned()
+    fn get(&self, key: &EnvKey) -> Option<InferredType> {
+        self.bindings.get(key).cloned()
     }
 
-    /// Get the origin description for a variable's type, if tracked.
-    fn get_origin(&self, name: &str) -> Option<&TypeOrigin> {
-        self.origins.get(name)
+    /// Local-binding shorthand for [`TypeEnv::get`] — used pervasively for
+    /// identifier lookup where the caller has a bare name, not a typed key.
+    fn get_local(&self, name: &str) -> Option<InferredType> {
+        self.get(&EnvKey::local(name))
     }
 
-    fn set(&mut self, name: &str, ty: InferredType) {
-        self.bindings.insert(name.into(), ty);
+    /// Get the origin description for a local variable's type, if tracked.
+    fn get_local_origin(&self, name: &str) -> Option<&TypeOrigin> {
+        self.origins.get(&EnvKey::local(name))
     }
 
-    fn remove(&mut self, name: &str) {
-        self.bindings.remove(name);
-        self.origins.remove(name);
+    fn set(&mut self, key: EnvKey, ty: InferredType) {
+        self.bindings.insert(key, ty);
+    }
+
+    /// Local-binding shorthand for [`TypeEnv::set`].
+    fn set_local(&mut self, name: impl Into<EcoString>, ty: InferredType) {
+        self.set(EnvKey::Local(name.into()), ty);
+    }
+
+    fn remove(&mut self, key: &EnvKey) {
+        self.bindings.remove(key);
+        self.origins.remove(key);
     }
 
     /// Set a variable's type with origin tracking (BT-1588).
     fn set_with_origin(
         &mut self,
-        name: &str,
+        key: EnvKey,
         ty: InferredType,
         description: impl Into<EcoString>,
         span: Span,
     ) {
-        self.bindings.insert(name.into(), ty);
         self.origins.insert(
-            name.into(),
+            key.clone(),
             TypeOrigin {
                 description: description.into(),
                 span,
             },
         );
+        self.bindings.insert(key, ty);
     }
 
     /// Create a child scope that inherits parent bindings.
@@ -577,6 +594,6 @@ impl TypeEnv {
         // the field here keeps the intent visible and silences dead-code
         // warnings without an `#[allow]`.
         let _scope = layer.scope;
-        self.set(&layer.variable, layer.ty);
+        self.set(layer.variable, layer.ty);
     }
 }
