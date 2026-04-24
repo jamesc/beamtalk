@@ -5,7 +5,7 @@
 //!
 //! Also handles `(x class) = ClassName` via a parenthesized-unwrap.
 
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::type_checker::InferredType;
 
 use super::super::extract::extract_variable_name;
@@ -34,13 +34,13 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     };
     let Expression::MessageSend {
         receiver: var_expr,
-        selector: MessageSelector::Unary(sel),
+        selector,
         ..
     } = class_send
     else {
         return None;
     };
-    if sel.as_str() != "class" {
+    if selector.well_known() != Some(WellKnownSelector::Class) {
         return None;
     }
     let var_name = extract_variable_name(var_expr)?;

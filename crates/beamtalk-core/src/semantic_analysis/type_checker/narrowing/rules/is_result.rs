@@ -7,7 +7,7 @@
 //! are filled in by `refine_result_narrowing` in `inference.rs` once the
 //! variable's current type is resolved from the environment.
 
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
 
 use super::super::extract::extract_variable_name;
@@ -25,29 +25,48 @@ pub(super) const IS_ERROR_RULE: NarrowingRule = NarrowingRule {
 };
 
 fn detect_is_ok_or_ok(receiver: &Expression) -> Option<NarrowingInfo> {
-    detect_unary(receiver, &["isOk", "ok"], /* is_error */ false)
-}
-
-fn detect_is_error(receiver: &Expression) -> Option<NarrowingInfo> {
-    detect_unary(receiver, &["isError"], /* is_error */ true)
-}
-
-fn detect_unary(
-    receiver: &Expression,
-    selectors: &[&str],
-    is_error: bool,
-) -> Option<NarrowingInfo> {
     let Expression::MessageSend {
         receiver: inner_recv,
-        selector: MessageSelector::Unary(sel),
+        selector,
         ..
     } = receiver
     else {
         return None;
     };
-    if !selectors.iter().any(|s| *s == sel.as_str()) {
+    // `isOk` is a well-known selector; `ok` is a bare unary selector that is
+    // not (and deliberately is not) part of `WellKnownSelector` because it is
+    // also a legitimate user-defined selector on many receivers. We only
+    // narrow when shape is unambiguous (unary send with receiver being a
+    // variable-shaped expression) — `refine_result_narrowing` later checks
+    // the receiver's declared type and drops the narrowing if it isn't a
+    // Result.
+    let is_ok = match selector.well_known() {
+        Some(WellKnownSelector::IsOk) => true,
+        None => matches!(selector, MessageSelector::Unary(sel) if sel.as_str() == "ok"),
+        _ => false,
+    };
+    if !is_ok {
         return None;
     }
+    build_info(inner_recv, /* is_error */ false)
+}
+
+fn detect_is_error(receiver: &Expression) -> Option<NarrowingInfo> {
+    let Expression::MessageSend {
+        receiver: inner_recv,
+        selector,
+        ..
+    } = receiver
+    else {
+        return None;
+    };
+    if selector.well_known() != Some(WellKnownSelector::IsError) {
+        return None;
+    }
+    build_info(inner_recv, /* is_error */ true)
+}
+
+fn build_info(inner_recv: &Expression, is_error: bool) -> Option<NarrowingInfo> {
     let var_name = extract_variable_name(inner_recv)?;
     Some(NarrowingInfo {
         variable: var_name,
