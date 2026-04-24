@@ -151,14 +151,45 @@ impl WellKnownSelector {
 
     /// Classifies a [`MessageSelector`] as a well-known selector.
     ///
-    /// This is the primary entry point — it computes the selector's name string
-    /// and delegates to [`from_name`](Self::from_name).
+    /// This is the primary entry point. The selector's *kind* (unary vs keyword)
+    /// must match the variant's expected kind — a `MessageSelector::Binary("class")`
+    /// is not classified as `Class`, even though the name matches, because it
+    /// could not have been produced by the parser.
     ///
-    /// Returns `None` for user-defined selectors.
+    /// Returns `None` for user-defined selectors and for kind/name mismatches.
     #[must_use]
     pub fn from_selector(selector: &MessageSelector) -> Option<Self> {
-        let name = selector.name();
-        Self::from_name(&name)
+        let known = Self::from_name(&selector.name())?;
+        match (selector, known) {
+            (
+                MessageSelector::Unary(_),
+                Self::IsNil
+                | Self::NotNil
+                | Self::Class
+                | Self::IsOk
+                | Self::IsError
+                | Self::Value,
+            )
+            | (
+                MessageSelector::Keyword(_),
+                Self::IfNil
+                | Self::IfNotNil
+                | Self::IfNilIfNotNil
+                | Self::IfNotNilIfNil
+                | Self::IsKindOf
+                | Self::RespondsTo
+                | Self::IfTrue
+                | Self::IfFalse
+                | Self::IfTrueIfFalse
+                | Self::OnDo
+                | Self::ValueColon
+                | Self::ValueValue
+                | Self::ValueValueValue
+                | Self::IsOkColon
+                | Self::IsErrorColon,
+            ) => Some(known),
+            _ => None,
+        }
     }
 }
 
@@ -363,6 +394,23 @@ mod tests {
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
 
         let sel = MessageSelector::Binary("=".into());
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+    }
+
+    #[test]
+    fn from_selector_rejects_kind_name_mismatches() {
+        // A binary selector whose name happens to match a unary well-known name
+        // (e.g., constructed by hand bypassing the parser) must not classify.
+        let sel = MessageSelector::Binary("class".into());
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+
+        // A unary selector whose name matches a keyword well-known name.
+        let sel = MessageSelector::Unary("ifTrue:".into());
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+
+        // A keyword selector whose flattened name matches a unary well-known name.
+        let sel =
+            MessageSelector::Keyword(vec![KeywordPart::new("class", Span::new(0, 1))]);
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
     }
 

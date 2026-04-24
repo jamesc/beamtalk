@@ -80,6 +80,7 @@
 //! - `pattern` — Pattern matching and destructuring
 //! - `class` — Class, protocol, and state declarations
 //! - `method` — Method definitions and parameters
+//! - `well_known` — Compiler-recognised selectors ([`WellKnownSelector`])
 
 mod class;
 mod expression;
