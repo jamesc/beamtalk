@@ -163,12 +163,7 @@ impl WellKnownSelector {
         match (selector, known) {
             (
                 MessageSelector::Unary(_),
-                Self::IsNil
-                | Self::NotNil
-                | Self::Class
-                | Self::IsOk
-                | Self::IsError
-                | Self::Value,
+                Self::IsNil | Self::NotNil | Self::Class | Self::IsOk | Self::IsError | Self::Value,
             )
             | (
                 MessageSelector::Keyword(_),
@@ -409,8 +404,7 @@ mod tests {
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
 
         // A keyword selector whose flattened name matches a unary well-known name.
-        let sel =
-            MessageSelector::Keyword(vec![KeywordPart::new("class", Span::new(0, 1))]);
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("class", Span::new(0, 1))]);
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
     }
 
