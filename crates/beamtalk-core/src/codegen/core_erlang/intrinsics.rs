@@ -24,7 +24,7 @@
 
 use super::document::{Document, join};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
-use crate::ast::{Block, Expression, MessageSelector};
+use crate::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
@@ -166,11 +166,14 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        match selector {
-            MessageSelector::Unary(name) if name == "value" => {
-                self.try_generate_block_value_unary(receiver, arguments)
-            }
+        // Block unary `value` is a well-known selector — dispatch via the enum.
+        if matches!(selector.well_known(), Some(WellKnownSelector::Value)) {
+            return self.try_generate_block_value_unary(receiver, arguments);
+        }
 
+        match selector {
+            // `repeat` is not a well-known selector (not intrinsified outside block
+            // evaluation semantics), so it stays as a string match.
             MessageSelector::Unary(name) if name == "repeat" => {
                 let doc = self.generate_repeat(receiver)?;
                 Ok(Some(doc))
@@ -178,7 +181,12 @@ impl CoreErlangGenerator {
 
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                self.try_generate_block_keyword_message(receiver, arguments, &selector_name)
+                self.try_generate_block_keyword_message(
+                    receiver,
+                    selector,
+                    arguments,
+                    &selector_name,
+                )
             }
 
             _ => Ok(None),
@@ -243,17 +251,38 @@ impl CoreErlangGenerator {
     }
 
     /// Generates code for keyword block messages (`value:`, `whileTrue:`, `timesRepeat:`, etc.).
+    ///
+    /// Well-known keyword selectors (`value:`/`value:value:`/`value:value:value:`,
+    /// `on:do:`) route through the `WellKnownSelector` enum so arity is checked
+    /// structurally by the classifier (see BT-1260 / BT-2065 epic). The remaining
+    /// keyword selectors (`whileTrue:`, `whileFalse:`, `timesRepeat:`, `to:do:`,
+    /// `to:by:do:`, `ensure:`) are not in the enum and stay as string matches.
     fn try_generate_block_keyword_message(
         &mut self,
         receiver: &Expression,
+        selector: &MessageSelector,
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
-        match selector_name {
-            "value:" | "value:value:" | "value:value:value:" => {
-                self.try_generate_block_value_keyword(receiver, arguments, selector_name)
+        // Well-known block-application / exception-handling selectors.
+        // The classifier handles arity matching — intercept before the FFI path.
+        match selector.well_known() {
+            Some(
+                WellKnownSelector::ValueColon
+                | WellKnownSelector::ValueValue
+                | WellKnownSelector::ValueValueValue,
+            ) => {
+                return self.try_generate_block_value_keyword(receiver, arguments, selector_name);
             }
+            Some(WellKnownSelector::OnDo) => {
+                debug_assert_eq!(arguments.len(), 2);
+                let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
+                return Ok(Some(doc));
+            }
+            _ => {}
+        }
 
+        match selector_name {
             "whileTrue:" => {
                 let doc = self.generate_while_true(receiver, &arguments[0])?;
                 Ok(Some(doc))
@@ -269,11 +298,6 @@ impl CoreErlangGenerator {
             "to:do:" if arguments.len() == 2 => self.try_generate_to_do(receiver, arguments),
 
             "to:by:do:" if arguments.len() == 3 => self.try_generate_to_by_do(receiver, arguments),
-
-            "on:do:" if arguments.len() == 2 => {
-                let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
-                Ok(Some(doc))
-            }
 
             "ensure:" => {
                 let doc = self.generate_ensure(receiver, &arguments[0])?;
@@ -1025,24 +1049,22 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // BT-412: `class` (unary, well-known) returns class as first-class object.
+        if matches!(selector.well_known(), Some(WellKnownSelector::Class)) {
+            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+            let recv_doc = docs.remove(0);
+            let call_doc = docvec![
+                "call 'beamtalk_primitive':'class_of_object'(",
+                recv_doc,
+                ")",
+            ];
+            return Ok(Some(
+                self.finalize_dispatch_with_preamble(preamble, call_doc, "ClassRes"),
+            ));
+        }
+
         match selector {
-            MessageSelector::Unary(name) => match name.as_str() {
-                "class" if arguments.is_empty() => {
-                    // BT-412: Return class as first-class object (#beamtalk_object{})
-                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
-                    let recv_doc = docs.remove(0);
-                    let call_doc = docvec![
-                        "call 'beamtalk_primitive':'class_of_object'(",
-                        recv_doc,
-                        ")",
-                    ];
-                    Ok(Some(self.finalize_dispatch_with_preamble(
-                        preamble, call_doc, "ClassRes",
-                    )))
-                }
-                _ => Ok(None),
-            },
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
@@ -1115,7 +1137,7 @@ impl CoreErlangGenerator {
                     _ => Ok(None),
                 }
             }
-            MessageSelector::Binary(_) => Ok(None),
+            MessageSelector::Unary(_) | MessageSelector::Binary(_) => Ok(None),
         }
     }
 
@@ -1172,225 +1194,223 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        match selector {
-            MessageSelector::Unary(name) => match name.as_str() {
-                "isNil" if arguments.is_empty() => {
-                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
-                    let recv_doc = docs.remove(0);
-                    let recv_var = self.fresh_temp_var("Obj");
-                    let call_doc = docvec![
-                        "let ",
-                        Document::String(recv_var.clone()),
-                        " = ",
-                        recv_doc,
-                        " in case ",
-                        Document::String(recv_var),
-                        " of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end",
-                    ];
-                    Ok(Some(self.finalize_dispatch_with_preamble(
-                        preamble, call_doc, "IsNilRes",
-                    )))
-                }
-                "notNil" if arguments.is_empty() => {
-                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
-                    let recv_doc = docs.remove(0);
-                    let recv_var = self.fresh_temp_var("Obj");
-                    let call_doc = docvec![
-                        "let ",
-                        Document::String(recv_var.clone()),
-                        " = ",
-                        recv_doc,
-                        " in case ",
-                        Document::String(recv_var),
-                        " of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end",
-                    ];
-                    Ok(Some(self.finalize_dispatch_with_preamble(
-                        preamble,
-                        call_doc,
-                        "NotNilRes",
-                    )))
-                }
-                _ => Ok(None),
-            },
-            MessageSelector::Keyword(parts) => {
-                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-
-                match selector_name.as_str() {
-                    "ifNil:" if arguments.len() == 1 => {
-                        // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
-                        let (preamble, mut docs) =
-                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNil")?;
-                        let recv_doc = docs.remove(0);
-                        let block_doc = docs.remove(0);
-                        let recv_var = self.fresh_temp_var("Obj");
-                        let block_var = self.fresh_temp_var("NilBlk");
-                        let call_doc = docvec![
-                            "let ",
-                            Document::String(recv_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            Document::String(block_var.clone()),
-                            " = ",
-                            block_doc,
-                            " in case ",
-                            Document::String(recv_var.clone()),
-                            " of <'nil'> when 'true' -> apply ",
-                            Document::String(block_var),
-                            " () <_> when 'true' -> ",
-                            Document::String(recv_var),
-                            " end",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble, call_doc, "IfNilRes",
-                        )))
-                    }
-                    "ifNotNil:" if arguments.len() == 1 => {
-                        // BT-1226: When in actor context or loop body, check if the block
-                        // contains field mutations. If so, generate inline state-threaded code
-                        // instead of a closure to ensure mutations persist correctly.
-                        use super::CodeGenContext;
-                        use super::block_analysis;
-                        if self.context == CodeGenContext::Actor || self.in_loop_body {
-                            if let Expression::Block(block) = &arguments[0] {
-                                let analysis = block_analysis::analyze_block(block);
-                                let needs_threading = self.needs_mutation_threading(&analysis)
-                                    || (self.in_loop_body && !analysis.local_writes.is_empty());
-                                if needs_threading {
-                                    // Validate arity before generating mutation-threaded code.
-                                    // This ensures a block with >1 params still raises
-                                    // BlockArityMismatch rather than producing invalid Core Erlang.
-                                    validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
-                                    let doc =
-                                        self.generate_if_not_nil_with_mutations(receiver, block)?;
-                                    return Ok(Some(doc));
-                                }
-                            }
-                        }
-                        // If the block has 0 parameters, don't pass the receiver (avoids badarity)
-                        // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
-                        let block_takes_arg =
-                            validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
-                        let (preamble, mut docs) =
-                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNotNil")?;
-                        let recv_doc = docs.remove(0);
-                        let block_doc = docs.remove(0);
-                        let recv_var = self.fresh_temp_var("Obj");
-                        let block_var = self.fresh_temp_var("NotNilBlk");
-                        let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
-                        let call_doc = docvec![
-                            "let ",
-                            Document::String(recv_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            Document::String(block_var),
-                            " = ",
-                            block_doc,
-                            " in case ",
-                            Document::String(recv_var),
-                            " of <'nil'> when 'true' -> 'nil' <_> when 'true' -> ",
-                            apply,
-                            " end",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble,
-                            call_doc,
-                            "IfNotNilRes",
-                        )))
-                    }
-                    "ifNil:ifNotNil:" if arguments.len() == 2 => {
-                        // If the notNil block has 0 parameters, don't pass the receiver
-                        // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
-                        let block_takes_arg =
-                            validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
-                        let (preamble, mut docs) = self.capture_subexpr_sequence(
-                            &[receiver, &arguments[0], &arguments[1]],
-                            "IfNilNotNil",
-                        )?;
-                        let recv_doc = docs.remove(0);
-                        let nil_doc = docs.remove(0);
-                        let not_nil_doc = docs.remove(0);
-                        let recv_var = self.fresh_temp_var("Obj");
-                        let nil_var = self.fresh_temp_var("NilBlk");
-                        let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                        let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
-                        let call_doc = docvec![
-                            "let ",
-                            Document::String(recv_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            Document::String(nil_var.clone()),
-                            " = ",
-                            nil_doc,
-                            " in let ",
-                            Document::String(not_nil_var),
-                            " = ",
-                            not_nil_doc,
-                            " in case ",
-                            Document::String(recv_var),
-                            " of <'nil'> when 'true' -> apply ",
-                            Document::String(nil_var),
-                            " () <_> when 'true' -> ",
-                            apply,
-                            " end",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble,
-                            call_doc,
-                            "IfNilNotNilRes",
-                        )))
-                    }
-                    "ifNotNil:ifNil:" if arguments.len() == 2 => {
-                        // If the notNil block has 0 parameters, don't pass the receiver
-                        // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
-                        let block_takes_arg =
-                            validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
-                        let (preamble, mut docs) = self.capture_subexpr_sequence(
-                            &[receiver, &arguments[0], &arguments[1]],
-                            "IfNotNilNil",
-                        )?;
-                        let recv_doc = docs.remove(0);
-                        let not_nil_doc = docs.remove(0);
-                        let nil_doc = docs.remove(0);
-                        let recv_var = self.fresh_temp_var("Obj");
-                        let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                        let nil_var = self.fresh_temp_var("NilBlk");
-                        let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
-                        let call_doc = docvec![
-                            "let ",
-                            Document::String(recv_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            Document::String(not_nil_var.clone()),
-                            " = ",
-                            not_nil_doc,
-                            " in let ",
-                            Document::String(nil_var.clone()),
-                            " = ",
-                            nil_doc,
-                            " in case ",
-                            Document::String(recv_var),
-                            " of <'nil'> when 'true' -> apply ",
-                            Document::String(nil_var),
-                            " () <_> when 'true' -> ",
-                            apply,
-                            " end",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble,
-                            call_doc,
-                            "IfNotNilNilRes",
-                        )))
-                    }
-                    _ => Ok(None),
-                }
+        // BT-2065/BT-2071: Dispatch nil-protocol intrinsics via the `WellKnownSelector`
+        // enum. The classifier guarantees arity (e.g. `ifNil:ifNotNil:` requires
+        // exactly two keyword parts), so explicit `arguments.len()` guards become
+        // redundant — we keep one `debug_assert` per arm for paranoia.
+        match selector.well_known() {
+            Some(WellKnownSelector::IsNil) => {
+                debug_assert!(arguments.is_empty());
+                // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+                let recv_doc = docs.remove(0);
+                let recv_var = self.fresh_temp_var("Obj");
+                let call_doc = docvec![
+                    "let ",
+                    Document::String(recv_var.clone()),
+                    " = ",
+                    recv_doc,
+                    " in case ",
+                    Document::String(recv_var),
+                    " of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble, call_doc, "IsNilRes",
+                )))
             }
-            MessageSelector::Binary(_) => Ok(None),
+            Some(WellKnownSelector::NotNil) => {
+                debug_assert!(arguments.is_empty());
+                // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+                let recv_doc = docs.remove(0);
+                let recv_var = self.fresh_temp_var("Obj");
+                let call_doc = docvec![
+                    "let ",
+                    Document::String(recv_var.clone()),
+                    " = ",
+                    recv_doc,
+                    " in case ",
+                    Document::String(recv_var),
+                    " of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble,
+                    call_doc,
+                    "NotNilRes",
+                )))
+            }
+            Some(WellKnownSelector::IfNil) => {
+                debug_assert_eq!(arguments.len(), 1);
+                // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
+                let (preamble, mut docs) =
+                    self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNil")?;
+                let recv_doc = docs.remove(0);
+                let block_doc = docs.remove(0);
+                let recv_var = self.fresh_temp_var("Obj");
+                let block_var = self.fresh_temp_var("NilBlk");
+                let call_doc = docvec![
+                    "let ",
+                    Document::String(recv_var.clone()),
+                    " = ",
+                    recv_doc,
+                    " in let ",
+                    Document::String(block_var.clone()),
+                    " = ",
+                    block_doc,
+                    " in case ",
+                    Document::String(recv_var.clone()),
+                    " of <'nil'> when 'true' -> apply ",
+                    Document::String(block_var),
+                    " () <_> when 'true' -> ",
+                    Document::String(recv_var),
+                    " end",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble, call_doc, "IfNilRes",
+                )))
+            }
+            Some(WellKnownSelector::IfNotNil) => {
+                debug_assert_eq!(arguments.len(), 1);
+                let selector_name = WellKnownSelector::IfNotNil.as_str();
+                // BT-1226: When in actor context or loop body, check if the block
+                // contains field mutations. If so, generate inline state-threaded code
+                // instead of a closure to ensure mutations persist correctly.
+                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                    if let Expression::Block(block) = &arguments[0] {
+                        let analysis = block_analysis::analyze_block(block);
+                        let needs_threading = self.needs_mutation_threading(&analysis)
+                            || (self.in_loop_body && !analysis.local_writes.is_empty());
+                        if needs_threading {
+                            // Validate arity before generating mutation-threaded code.
+                            // This ensures a block with >1 params still raises
+                            // BlockArityMismatch rather than producing invalid Core Erlang.
+                            validate_if_not_nil_block(&arguments[0], selector_name)?;
+                            let doc = self.generate_if_not_nil_with_mutations(receiver, block)?;
+                            return Ok(Some(doc));
+                        }
+                    }
+                }
+                // If the block has 0 parameters, don't pass the receiver (avoids badarity)
+                // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
+                let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
+                let (preamble, mut docs) =
+                    self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNotNil")?;
+                let recv_doc = docs.remove(0);
+                let block_doc = docs.remove(0);
+                let recv_var = self.fresh_temp_var("Obj");
+                let block_var = self.fresh_temp_var("NotNilBlk");
+                let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
+                let call_doc = docvec![
+                    "let ",
+                    Document::String(recv_var.clone()),
+                    " = ",
+                    recv_doc,
+                    " in let ",
+                    Document::String(block_var),
+                    " = ",
+                    block_doc,
+                    " in case ",
+                    Document::String(recv_var),
+                    " of <'nil'> when 'true' -> 'nil' <_> when 'true' -> ",
+                    apply,
+                    " end",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble,
+                    call_doc,
+                    "IfNotNilRes",
+                )))
+            }
+            Some(WellKnownSelector::IfNilIfNotNil) => {
+                debug_assert_eq!(arguments.len(), 2);
+                let selector_name = WellKnownSelector::IfNilIfNotNil.as_str();
+                // If the notNil block has 0 parameters, don't pass the receiver
+                // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
+                let block_takes_arg = validate_if_not_nil_block(&arguments[1], selector_name)?;
+                let (preamble, mut docs) = self.capture_subexpr_sequence(
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "IfNilNotNil",
+                )?;
+                let recv_doc = docs.remove(0);
+                let nil_doc = docs.remove(0);
+                let not_nil_doc = docs.remove(0);
+                let recv_var = self.fresh_temp_var("Obj");
+                let nil_var = self.fresh_temp_var("NilBlk");
+                let not_nil_var = self.fresh_temp_var("NotNilBlk");
+                let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
+                let call_doc = docvec![
+                    "let ",
+                    Document::String(recv_var.clone()),
+                    " = ",
+                    recv_doc,
+                    " in let ",
+                    Document::String(nil_var.clone()),
+                    " = ",
+                    nil_doc,
+                    " in let ",
+                    Document::String(not_nil_var),
+                    " = ",
+                    not_nil_doc,
+                    " in case ",
+                    Document::String(recv_var),
+                    " of <'nil'> when 'true' -> apply ",
+                    Document::String(nil_var),
+                    " () <_> when 'true' -> ",
+                    apply,
+                    " end",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble,
+                    call_doc,
+                    "IfNilNotNilRes",
+                )))
+            }
+            Some(WellKnownSelector::IfNotNilIfNil) => {
+                debug_assert_eq!(arguments.len(), 2);
+                let selector_name = WellKnownSelector::IfNotNilIfNil.as_str();
+                // If the notNil block has 0 parameters, don't pass the receiver
+                // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
+                let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
+                let (preamble, mut docs) = self.capture_subexpr_sequence(
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "IfNotNilNil",
+                )?;
+                let recv_doc = docs.remove(0);
+                let not_nil_doc = docs.remove(0);
+                let nil_doc = docs.remove(0);
+                let recv_var = self.fresh_temp_var("Obj");
+                let not_nil_var = self.fresh_temp_var("NotNilBlk");
+                let nil_var = self.fresh_temp_var("NilBlk");
+                let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
+                let call_doc = docvec![
+                    "let ",
+                    Document::String(recv_var.clone()),
+                    " = ",
+                    recv_doc,
+                    " in let ",
+                    Document::String(not_nil_var.clone()),
+                    " = ",
+                    not_nil_doc,
+                    " in let ",
+                    Document::String(nil_var.clone()),
+                    " = ",
+                    nil_doc,
+                    " in case ",
+                    Document::String(recv_var),
+                    " of <'nil'> when 'true' -> apply ",
+                    Document::String(nil_var),
+                    " () <_> when 'true' -> ",
+                    apply,
+                    " end",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble,
+                    call_doc,
+                    "IfNotNilNilRes",
+                )))
+            }
+            // Not a nil-protocol intrinsic — let the caller continue.
+            _ => Ok(None),
         }
     }
 
@@ -1596,39 +1616,43 @@ impl CoreErlangGenerator {
                 _ => Ok(None),
             },
             MessageSelector::Keyword(parts) => {
+                // `respondsTo:` is well-known; dispatch via the enum first so arity
+                // correctness is guaranteed by the classifier.
+                if matches!(selector.well_known(), Some(WellKnownSelector::RespondsTo)) {
+                    debug_assert_eq!(arguments.len(), 1);
+                    // BT-1942: Hoist open-scope receiver + selector (e.g. class method self-sends).
+                    let (preamble, mut docs) =
+                        self.capture_subexpr_sequence(&[receiver, &arguments[0]], "RespTo")?;
+                    let recv_doc = docs.remove(0);
+                    let sel_doc = docs.remove(0);
+                    let receiver_var = self.fresh_var("Receiver");
+                    let selector_var = self.fresh_var("Selector");
+
+                    let call_doc = docvec![
+                        "let ",
+                        Document::String(receiver_var.clone()),
+                        " = ",
+                        recv_doc,
+                        " in let ",
+                        Document::String(selector_var.clone()),
+                        " = ",
+                        sel_doc,
+                        " in call 'beamtalk_primitive':'responds_to'(",
+                        Document::String(receiver_var),
+                        ", ",
+                        Document::String(selector_var),
+                        ")",
+                    ];
+                    return Ok(Some(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "RespToRes",
+                    )));
+                }
+
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
                 match selector_name.as_str() {
-                    "respondsTo:" if arguments.len() == 1 => {
-                        // BT-1942: Hoist open-scope receiver + selector (e.g. class method self-sends).
-                        let (preamble, mut docs) =
-                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "RespTo")?;
-                        let recv_doc = docs.remove(0);
-                        let sel_doc = docs.remove(0);
-                        let receiver_var = self.fresh_var("Receiver");
-                        let selector_var = self.fresh_var("Selector");
-
-                        let call_doc = docvec![
-                            "let ",
-                            Document::String(receiver_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            Document::String(selector_var.clone()),
-                            " = ",
-                            sel_doc,
-                            " in call 'beamtalk_primitive':'responds_to'(",
-                            Document::String(receiver_var),
-                            ", ",
-                            Document::String(selector_var),
-                            ")",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble,
-                            call_doc,
-                            "RespToRes",
-                        )))
-                    }
                     "fieldAt:" if arguments.len() == 1 => {
                         // BT-1321: Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
@@ -1891,15 +1915,9 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
 
-        let selector_name = match selector {
-            MessageSelector::Keyword(parts) => {
-                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
-            }
-            _ => return Ok(None),
-        };
-
-        match selector_name.as_str() {
-            "ifTrue:" if arguments.len() == 1 => {
+        match selector.well_known() {
+            Some(WellKnownSelector::IfTrue) => {
+                debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
                     let analysis = block_analysis::analyze_block(block);
                     // BT-1053: When inside a loop body, also trigger for any local write
@@ -1916,7 +1934,8 @@ impl CoreErlangGenerator {
                     }
                 }
             }
-            "ifFalse:" if arguments.len() == 1 => {
+            Some(WellKnownSelector::IfFalse) => {
+                debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
                     let analysis = block_analysis::analyze_block(block);
                     let needs_threading = self.needs_mutation_threading(&analysis)
@@ -1930,7 +1949,8 @@ impl CoreErlangGenerator {
                     }
                 }
             }
-            "ifTrue:ifFalse:" if arguments.len() == 2 => {
+            Some(WellKnownSelector::IfTrueIfFalse) => {
+                debug_assert_eq!(arguments.len(), 2);
                 if let (Expression::Block(true_block), Expression::Block(false_block)) =
                     (&arguments[0], &arguments[1])
                 {

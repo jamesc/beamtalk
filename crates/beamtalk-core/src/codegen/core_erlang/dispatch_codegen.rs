@@ -38,7 +38,7 @@
 
 use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -1605,26 +1605,58 @@ impl CoreErlangGenerator {
             if matches!(selector, MessageSelector::Binary(_)) {
                 return false;
             }
+            // BT-2065/BT-2071: Well-known selectors that the intrinsics layer
+            // **unconditionally** handles before `try_handle_self_dispatch`.
+            // Covers ProtoObject (`class`), Object reflection (`respondsTo:`),
+            // Nil protocol (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/
+            // `ifNil:ifNotNil:`/`ifNotNil:ifNil:`), exception handling (`on:do:`)
+            // and block application (`value`/`value:`/`value:value:`/
+            // `value:value:value:`).
+            //
+            // NOTE: Boolean conditionals (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`)
+            // are NOT included here — `try_generate_boolean_protocol` returns
+            // `Ok(None)` (falls through) when no mutation-threading is needed,
+            // allowing the send to reach self-dispatch.
+            if let Some(wk) = selector.well_known() {
+                if matches!(
+                    wk,
+                    WellKnownSelector::Class
+                        | WellKnownSelector::RespondsTo
+                        | WellKnownSelector::IsNil
+                        | WellKnownSelector::NotNil
+                        | WellKnownSelector::IfNil
+                        | WellKnownSelector::IfNotNil
+                        | WellKnownSelector::IfNilIfNotNil
+                        | WellKnownSelector::IfNotNilIfNil
+                        | WellKnownSelector::OnDo
+                        | WellKnownSelector::Value
+                        | WellKnownSelector::ValueColon
+                        | WellKnownSelector::ValueValue
+                        | WellKnownSelector::ValueValueValue
+                ) {
+                    return false;
+                }
+            }
+            // Remaining intrinsics not yet modelled as `WellKnownSelector`
+            // variants — these still need string matching for now.
             let name = selector.name();
-            // Selectors intercepted before try_handle_self_dispatch
             if matches!(
                 name.as_str(),
                 // asType: (compile-time erasure)
                 "asType:"
-                // ProtoObject
-                | "class" | "perform:" | "perform:withArguments:" | "performLocally:withArguments:"
-                // Object reflection
-                | "fieldAt:" | "fieldAt:put:" | "fieldNames" | "respondsTo:"
-                // Nil protocol
-                | "isNil" | "notNil" | "ifNil:" | "ifNotNil:"
-                | "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+                // ProtoObject — dynamic dispatch
+                | "perform:" | "perform:withArguments:" | "performLocally:withArguments:"
+                // Object reflection — slot access
+                | "fieldAt:" | "fieldAt:put:" | "fieldNames"
                 // Identity
                 | "yourself" | "hash"
                 // Error signaling
                 | "error:"
-                // Block evaluation
-                | "value" | "value:" | "value:value:" | "value:value:value:"
+                // Block loops (non-well-known)
                 | "repeat" | "whileTrue:" | "whileFalse:"
+                // Exception cleanup — intercepted by intrinsics.rs as a plain
+                // intrinsic expression, so it is not a dispatching self-send.
+                | "ensure:"
             ) {
                 return false;
             }
