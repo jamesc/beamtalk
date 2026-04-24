@@ -601,6 +601,17 @@ impl MessageSelector {
             Self::Keyword(parts) => parts.iter().map(|p| p.keyword.as_str()).collect(),
         }
     }
+
+    /// Classifies this selector as a well-known selector, if it matches one.
+    ///
+    /// Returns `None` for user-defined selectors.
+    ///
+    /// This is a convenience wrapper around
+    /// [`WellKnownSelector::from_selector`].
+    #[must_use]
+    pub fn well_known(&self) -> Option<super::well_known::WellKnownSelector> {
+        super::well_known::WellKnownSelector::from_selector(self)
+    }
 }
 
 /// A keyword part in a keyword message.
