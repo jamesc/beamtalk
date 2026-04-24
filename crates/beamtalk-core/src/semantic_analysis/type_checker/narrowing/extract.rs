@@ -10,6 +10,14 @@
 //! system rather than buried in a prefix.
 //!
 //! Extracted from `inference.rs` under BT-2050; re-typed under BT-2062.
+//!
+//! BT-2063 note: these helpers deliberately do **not** use
+//! [`crate::ast::visitor`]. They are shape destructors — "peel parens, then
+//! match one specific shape and return" — not structural walkers; feeding
+//! them through a recursive visitor would obscure their intent and change
+//! their soundness story (both callers want to reject anything that isn't
+//! exactly `Identifier` or `self.<field>`, not "contains an identifier
+//! somewhere").
 
 use crate::ast::Expression;
 use crate::semantic_analysis::type_checker::EnvKey;
