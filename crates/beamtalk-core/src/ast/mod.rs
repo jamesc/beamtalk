@@ -85,6 +85,7 @@ mod class;
 mod expression;
 mod method;
 mod pattern;
+pub(crate) mod visitor;
 
 // Re-export all public types so `use crate::ast::Foo` continues to work.
 pub use class::*;

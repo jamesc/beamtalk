@@ -2640,54 +2640,51 @@ impl TypeChecker {
             .any(|stmt| self.expr_contains_never(&stmt.expression))
     }
 
-    /// Recursively check whether `expr` — or any sub-expression in the same
-    /// statement-position slots walked by [`Self::expr_contains_return`] —
-    /// has inferred type [`InferredType::Never`] in the type map (BT-2051).
+    /// Recursively check whether `expr` — or any sub-expression — has
+    /// inferred type [`InferredType::Never`] in the type map (BT-2051).
     ///
-    /// This is the `Never`-typed companion to [`Self::expr_contains_return`]:
-    /// both walk the same `Expression` variants (`Return`, `Parenthesized`,
-    /// `Assignment`, `MessageSend`, `Cascade`, `Block`, `FieldAccess`) so a
-    /// diverging call such as `self error: "…"` is detected whether it
-    /// appears as the whole statement (`[self error: "…"]`), as a receiver,
-    /// or buried in a method-send argument
-    /// (`[logger info: (self error: "…")]`).
+    /// This is the `Never`-typed companion to
+    /// [`super::narrowing::visitors::expr_contains_return`]: both share the
+    /// exhaustive [`crate::ast::visitor`] walker so every sub-expression
+    /// variant gets covered (BT-2063). A diverging call such as
+    /// `self error: "…"` is detected whether it appears as the whole
+    /// statement (`[self error: "…"]`), as a receiver, buried in a message
+    /// send argument (`[logger info: (self error: "…")]`), inside a
+    /// `DestructureAssignment`, `Match`, `MapLiteral`, `ListLiteral`, etc.
+    ///
+    /// **Nested block literals are opaque**: a block value is *constructed*,
+    /// not *executed*, at this position. Guards like
+    /// `[callbacks add: [self error: "later"]]` would otherwise be
+    /// mis-classified as diverging even though the outer block still falls
+    /// through. This is the [`crate::ast::visitor::Visitor`] default.
     fn expr_contains_never(&self, expr: &Expression) -> bool {
-        if matches!(self.type_map.get(expr.span()), Some(InferredType::Never)) {
-            return true;
+        use crate::ast::visitor::{Visitor, walk_expr};
+
+        struct Finder<'a> {
+            type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+            found: bool,
         }
-        match expr {
-            Expression::Return { value, .. } => self.expr_contains_never(value),
-            Expression::Parenthesized { expression, .. } => self.expr_contains_never(expression),
-            Expression::Assignment { target, value, .. } => {
-                self.expr_contains_never(target) || self.expr_contains_never(value)
+        impl<'ast> Visitor<'ast> for Finder<'_> {
+            fn visit_expr(&mut self, e: &'ast Expression) {
+                if self.found {
+                    return;
+                }
+                if matches!(self.type_map.get(e.span()), Some(InferredType::Never)) {
+                    self.found = true;
+                    return;
+                }
+                walk_expr(self, e);
             }
-            Expression::MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => {
-                self.expr_contains_never(receiver)
-                    || arguments.iter().any(|a| self.expr_contains_never(a))
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                self.expr_contains_never(receiver)
-                    || messages
-                        .iter()
-                        .any(|m| m.arguments.iter().any(|a| self.expr_contains_never(a)))
-            }
-            Expression::FieldAccess { receiver, .. } => self.expr_contains_never(receiver),
-            // - Nested `Block` literals are opaque: a block value is
-            //   *constructed*, not *executed*, at this position. Guards like
-            //   `[callbacks add: [self error: "later"]]` would otherwise be
-            //   mis-classified as diverging even though the outer block can
-            //   still fall through.
-            // - Literals, identifiers, class references, super, etc. have
-            //   no sub-expressions the top-level check above didn't already
-            //   cover.
-            _ => false,
+            // `visit_block` default (opaque) preserves the BT-2051 rule:
+            // inert block literals must NOT count toward divergence.
         }
+
+        let mut finder = Finder {
+            type_map: &self.type_map,
+            found: false,
+        };
+        finder.visit_expr(expr);
+        finder.found
     }
 
     /// Remove `UndefinedObject` (nil) from a union type or convert a known type

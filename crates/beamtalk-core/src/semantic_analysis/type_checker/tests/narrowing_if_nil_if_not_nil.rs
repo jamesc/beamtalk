@@ -39,66 +39,71 @@ fn find_union_in_type_map<'a>(
 /// Used by BT-2047 tests to assert the exact type of the `ifNil:ifNotNil:`
 /// expression — checking diagnostics alone isn't enough because
 /// `check_return_type` bails on `Union` / `Dynamic` inferred bodies.
+///
+/// Re-expressed under BT-2063 on top of the shared
+/// [`crate::ast::visitor::Visitor`] trait so that variant coverage is
+/// exhaustive (`ArrayLiteral`, `ListLiteral`, `Match`, etc. are all
+/// searched). Unlike the default opaque-block visitor, this walker
+/// overrides `visit_block` to descend: the test needs to find sends
+/// anywhere in the AST, including inside nested block bodies.
 fn find_send_inferred_ty<'a>(
-    module: &crate::ast::Module,
+    module: &'a crate::ast::Module,
     type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
-    selector_name: &str,
+    selector_name: &'a str,
 ) -> Option<&'a InferredType> {
-    fn walk_expr<'a>(
-        expr: &crate::ast::Expression,
+    use crate::ast::visitor::{Visitor, walk_block, walk_expr};
+    use crate::ast::{Expression, MessageSelector};
+
+    struct Finder<'a> {
         type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
-        selector_name: &str,
-    ) -> Option<&'a InferredType> {
-        use crate::ast::{Expression, MessageSelector};
-        match expr {
-            Expression::MessageSend {
-                selector,
-                span,
-                receiver,
-                arguments,
-                ..
-            } => {
+        selector_name: &'a str,
+        found: Option<&'a InferredType>,
+    }
+    impl<'a> Visitor<'a> for Finder<'a> {
+        fn visit_expr(&mut self, e: &'a Expression) {
+            if self.found.is_some() {
+                return;
+            }
+            if let Expression::MessageSend { selector, span, .. } = e {
                 let this_sel = match selector {
                     MessageSelector::Unary(s) | MessageSelector::Binary(s) => s.to_string(),
                     MessageSelector::Keyword(parts) => {
                         parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
                     }
                 };
-                if this_sel == selector_name {
-                    return type_map.get(*span);
+                if this_sel == self.selector_name {
+                    // Match: capture the outermost send's type. Intentionally
+                    // do NOT descend into receiver/arguments — tests want the
+                    // outermost `ifNil:ifNotNil:` send, not a matching send
+                    // buried inside its arguments.
+                    self.found = self.type_map.get(*span);
+                    return;
                 }
-                if let Some(t) = walk_expr(receiver, type_map, selector_name) {
-                    return Some(t);
-                }
-                for a in arguments {
-                    if let Some(t) = walk_expr(a, type_map, selector_name) {
-                        return Some(t);
-                    }
-                }
-                None
             }
-            Expression::Return { value, .. }
-            | Expression::Parenthesized {
-                expression: value, ..
-            }
-            | Expression::Assignment { value, .. } => walk_expr(value, type_map, selector_name),
-            Expression::Block(block) => block
-                .body
-                .iter()
-                .find_map(|s| walk_expr(&s.expression, type_map, selector_name)),
-            _ => None,
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'a crate::ast::Block) {
+            // Opt-in descent: tests want to see into nested blocks.
+            walk_block(self, block);
         }
     }
+
+    let mut finder = Finder {
+        type_map,
+        selector_name,
+        found: None,
+    };
     for class in &module.classes {
         for method in &class.methods {
             for stmt in &method.body {
-                if let Some(t) = walk_expr(&stmt.expression, type_map, selector_name) {
-                    return Some(t);
+                finder.visit_expr(&stmt.expression);
+                if finder.found.is_some() {
+                    return finder.found;
                 }
             }
         }
     }
-    None
+    finder.found
 }
 
 /// Minimal repro from the BT-2047 issue: `self.snapshot ifNil: [42] ifNotNil:
