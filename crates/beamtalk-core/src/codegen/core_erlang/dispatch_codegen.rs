@@ -1654,6 +1654,9 @@ impl CoreErlangGenerator {
                 | "error:"
                 // Block loops (non-well-known)
                 | "repeat" | "whileTrue:" | "whileFalse:"
+                // Exception cleanup — intercepted by intrinsics.rs as a plain
+                // intrinsic expression, so it is not a dispatching self-send.
+                | "ensure:"
             ) {
                 return false;
             }
