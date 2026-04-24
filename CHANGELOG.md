@@ -12,6 +12,14 @@
 - **Conditional return type inference** — `ifTrue:ifFalse:` now declares `Block(R), Block(R) -> R`, so the type checker unifies both arms to a common return type instead of collapsing to `Dynamic` (BT-2020).
 - Typechecker warns when a method declared `-> Never` has a body that returns a known type (BT-2033).
 - Fix generic return type inner arg validation — the type checker now correctly warns when inner type args of a generic return type mismatch (e.g., `-> Result(Integer, Error)` with body returning `Result(String, Error)`) (BT-2022).
+- **Nil-check narrowing extensions** — `isNil ifFalse:` narrows receiver to non-nil inside the block; diverging guards (`isNil ifTrue: [self error: "..."]`) narrow to non-nil for the rest of the method, not just `^` returns; `self.field` reads narrow after nil-check guards (BT-2048, BT-2049).
+- **`ifNotNil:` block parameter narrowing** — block parameters in `ifNotNil:`, `ifNil:ifNotNil:`, and `ifNotNil:ifNil:` are typed as the non-nil branch of the receiver's type (BT-2046).
+- **`ifNil:ifNotNil:` branch-union return type** — `receiver ifNil: [a] ifNotNil: [:x | b]` infers as `typeof(a) | typeof(b)` instead of `Dynamic`; a branch containing `^` contributes `Never` (BT-2047).
+- **`on:do:` handler block parameter inference** — block parameters in `on: SomeException do: [:e | ...]` are typed as the exception class argument instead of `Dynamic` (BT-2045).
+- Diagnostics now render `Nil` where the source uses `Nil`, instead of the internal name `UndefinedObject` (BT-2066).
+- Deep-descendant `Never` detection in diverging guard blocks — nested `Never`-typed expressions (e.g., `[Sink log: (self error: "...")]`) correctly trigger nil-check narrowing (BT-2051).
+- Fix false-positive "Unused variable" warning from typed block parameters — block parameters with `:: Type` annotations are now parsed correctly (BT-2043).
+- Fix spurious `Dynamic` inference on block parameters when iterating a `Dynamic`-typed receiver in a typed class (BT-2042).
 
 ### Standard Library
 
@@ -52,6 +60,11 @@
 - **Diagnostic summary** — `beamtalk build` and `beamtalk lint` print an aggregated diagnostic summary (category × severity) at end of run; `beamtalk lint --format json` emits a `summary` JSON object for CI diffing; new `diagnostic_summary` MCP tool for agent use (BT-2014).
 - Fix `beamtalk lint` diagnostic summary accounting — `files_checked` count, error surfacing, and `--format json` buffered output now report correctly (BT-2031).
 - Fix `beamtalk lint test/` emitting spurious `Unresolved class` diagnostics for classes defined in the package's `src/`; fix LSP falsely flagging every class as "conflicts with a stdlib class" when opening stdlib `.bt` files (BT-2027).
+- Fix `beamtalk lint` false-positive on keyword-form function calls inside Erlang function bodies being misidentified as undocumented exports (BT-2053).
+- Fix `beamtalk fmt` silently failing on `.erl` files containing non-ASCII Unicode characters (BT-2054).
+- Fix MCP `lint` tool producing different diagnostics from CLI `beamtalk lint` for cross-file type/DNU issues (BT-2052).
+- MCP `lint` tool now surfaces warning diagnostics when package files are unreadable during cross-file class extraction (BT-2056).
+- Preserve `startup.log` on final workspace retry failure so error diagnostics referencing the file remain valid (BT-2057).
 
 ### Documentation
 
@@ -79,6 +92,13 @@
 - Dedup cascade receiver inference so inner DNU warnings fire once instead of duplicating (BT-2035).
 - Fix spurious untyped-FFI warning on narrowing-path blocks in Result.bt (BT-2039).
 - Remove 11+ stale `@expect type` directives across stdlib following type checker improvements (#2076).
+- Split 16k-line `type_checker/tests.rs` into 28 per-feature test modules (BT-2061).
+- Typed `EnvKey` enum replaces string-key convention for type environment entries (BT-2062).
+- Typed `WellKnownClass` enum replaces fragile class-name string comparisons across type checker (BT-2064).
+- Refactor narrowing into `NarrowingRule` table with per-rule modules and env-level refinement (BT-2050).
+- Unify workspace retry helpers into single parameterized `retry_with_cleanup` wrapper (BT-2058).
+- Replace erlfmt inline Erlang eval strings with structured `ErlangEval` builder (BT-2059).
+- Share package-root resolution between MCP lint and CLI lint via `project::package` module (BT-2060).
 
 ## 0.3.1 — 2026-03-26
 

@@ -724,11 +724,12 @@ result ifOk: [:content | content] ifError: [:e | "error"]
 result value  // raises on error
 ```
 
-**Error handling:** Errors from Erlang calls are wrapped as `BEAMError`, `ExitError`, or `ThrowError` — catchable with `on:do:`:
+**Error handling:** Errors from Erlang calls are wrapped as `BEAMError`, `ExitError`, or `ThrowError` — catchable with `on:do:`. The handler block parameter is typed from the exception class argument, so `e` in `on: BEAMError do: [:e | ...]` is inferred as `BEAMError` (not `Dynamic`):
 
 ```beamtalk
 [Erlang erlang error: #badarg] on: BEAMError do: [:e | e message]
 // => "badarg"
+// e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
 ### Type Specs for Native Modules
@@ -1301,7 +1302,7 @@ The nullable pattern (`String | nil`) is the most common union — Beamtalk's Op
 
 ```beamtalk
 name :: String | nil := dictionary at: "name"
-name size              // Warning: UndefinedObject does not respond to 'size'
+name size              // Warning: Nil does not respond to 'size'
 ```
 
 Similarly, `false` in type position resolves to `False` — used for Erlang FFI patterns:
@@ -1341,7 +1342,13 @@ validate: x :: Object =>
 | `x class = Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
+| `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
+| `x isNil ifFalse: [...]` | `x` is non-nil in false block | False block |
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
+| `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
+| `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
+
+The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
 
 ### Conditional Return Type Inference
 
@@ -1353,6 +1360,17 @@ x := condition ifTrue: [42] ifFalse: [0]
 
 result isOk ifTrue: [result unwrap] ifFalse: [default]
 // inferred as the common type of both arms
+```
+
+`ifNil:ifNotNil:` (and `ifNotNil:ifNil:`) on nullable receivers also infers a branch-union return type — `typeof(nilBranch) | typeof(notNilBranch)`. A branch containing a non-local return (`^`) contributes `Never`, leaving only the surviving branch's type:
+
+```beamtalk
+name :: String | nil := dictionary at: "name"
+result := name ifNil: ["unknown"] ifNotNil: [:n | n size]
+// result is inferred as String | Integer
+
+value := name ifNil: [^nil] ifNotNil: [:n | n]
+// value is inferred as String (nil branch contributes Never, skipped)
 ```
 
 ### Union + Narrowing Compose
