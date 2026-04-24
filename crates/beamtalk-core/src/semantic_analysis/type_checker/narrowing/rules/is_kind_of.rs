@@ -3,7 +3,7 @@
 
 //! `x isKindOf: ClassName` narrowing (BT-1573 Phase 1g).
 
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::type_checker::InferredType;
 
 use super::super::extract::extract_variable_name;
@@ -15,14 +15,14 @@ pub(super) const RULE: NarrowingRule = NarrowingRule { detect };
 fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     let Expression::MessageSend {
         receiver: inner_recv,
-        selector: MessageSelector::Keyword(parts),
+        selector,
         arguments,
         ..
     } = receiver
     else {
         return None;
     };
-    if !(parts.len() == 1 && parts[0].keyword == "isKindOf:") {
+    if selector.well_known() != Some(WellKnownSelector::IsKindOf) {
         return None;
     }
     let var_name = extract_variable_name(inner_recv)?;

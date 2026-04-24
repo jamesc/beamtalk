@@ -7,7 +7,7 @@
 //! `inference.rs` consults the protocol registry and upgrades to a concrete
 //! protocol type when exactly one protocol requires the tested selector.
 
-use crate::ast::{Expression, Literal, MessageSelector};
+use crate::ast::{Expression, Literal, WellKnownSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
 
 use super::super::extract::extract_variable_name;
@@ -19,14 +19,14 @@ pub(super) const RULE: NarrowingRule = NarrowingRule { detect };
 fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     let Expression::MessageSend {
         receiver: inner_recv,
-        selector: MessageSelector::Keyword(parts),
+        selector,
         arguments,
         ..
     } = receiver
     else {
         return None;
     };
-    if !(parts.len() == 1 && parts[0].keyword == "respondsTo:") {
+    if selector.well_known() != Some(WellKnownSelector::RespondsTo) {
         return None;
     }
     let var_name = extract_variable_name(inner_recv)?;

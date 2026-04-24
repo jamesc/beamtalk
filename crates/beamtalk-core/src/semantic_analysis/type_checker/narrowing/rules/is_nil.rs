@@ -10,7 +10,7 @@
 //! Supports `x isNil` and `self.field isNil` (BT-2048 synthetic key path via
 //! [`extract_variable_name`]).
 
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::type_checker::InferredType;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 
@@ -23,13 +23,13 @@ pub(super) const RULE: NarrowingRule = NarrowingRule { detect };
 fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     let Expression::MessageSend {
         receiver: inner_recv,
-        selector: MessageSelector::Unary(sel),
+        selector,
         ..
     } = receiver
     else {
         return None;
     };
-    if sel.as_str() != "isNil" {
+    if selector.well_known() != Some(WellKnownSelector::IsNil) {
         return None;
     }
     let var_name = extract_variable_name(inner_recv)?;

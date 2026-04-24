@@ -5,6 +5,18 @@
 //!
 //! Used by both `semantic_analysis` (for `DispatchKind::ControlFlow` classification)
 //! and `codegen` (for block-mutation analysis and state-threading code generation).
+//!
+//! Predicates in this module classify selectors for block-mutation analysis.
+//! Where a selector is also part of [`WellKnownSelector`](crate::ast::WellKnownSelector)
+//! — conditionals, `on:do:` — the predicate matches on the enum via
+//! [`WellKnownSelector::from_name`] so a typo in either place is a compile
+//! error at the call site. Loop and iteration selectors (`whileTrue:`, `do:`,
+//! `collect:`, etc.) are not classified as well-known and so remain matched
+//! by string; the split is deliberate — `WellKnownSelector` is reserved for
+//! selectors the type-checker/codegen *intrinsify*, not every selector the
+//! compiler happens to recognise.
+
+use crate::ast::WellKnownSelector;
 
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
@@ -12,6 +24,18 @@
 /// as part of state-threading control flow.
 #[must_use]
 pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
+    if matches!(
+        WellKnownSelector::from_name(sel),
+        Some(
+            WellKnownSelector::OnDo
+                | WellKnownSelector::IfTrue
+                | WellKnownSelector::IfFalse
+                | WellKnownSelector::IfTrueIfFalse
+                | WellKnownSelector::IfNotNil,
+        )
+    ) {
+        return true;
+    }
     matches!(
         sel,
         "whileTrue:"
@@ -37,12 +61,7 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "inject:into:"
             | "doWithKey:"
             | "keysAndValuesDo:"
-            | "on:do:"
             | "ensure:"
-            | "ifTrue:"
-            | "ifFalse:"
-            | "ifTrue:ifFalse:"
-            | "ifNotNil:"
     )
 }
 
@@ -58,7 +77,12 @@ pub(crate) fn is_state_threading_unary_selector(sel: &str) -> bool {
 /// analysed for field mutations, in addition to the argument blocks.
 #[must_use]
 pub(crate) fn is_exception_selector(sel: &str) -> bool {
-    matches!(sel, "on:do:" | "ensure:")
+    // `on:do:` is a well-known selector; `ensure:` is not (it's not
+    // intrinsified by the type-checker, only by codegen's state-threading).
+    matches!(
+        WellKnownSelector::from_name(sel),
+        Some(WellKnownSelector::OnDo)
+    ) || sel == "ensure:"
 }
 
 /// Returns `true` if `sel` is a Boolean/optional conditional selector.
@@ -68,8 +92,13 @@ pub(crate) fn is_exception_selector(sel: &str) -> bool {
 #[must_use]
 pub(crate) fn is_conditional_selector(sel: &str) -> bool {
     matches!(
-        sel,
-        "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:"
+        WellKnownSelector::from_name(sel),
+        Some(
+            WellKnownSelector::IfTrue
+                | WellKnownSelector::IfFalse
+                | WellKnownSelector::IfTrueIfFalse
+                | WellKnownSelector::IfNotNil,
+        )
     )
 }
 
