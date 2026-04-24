@@ -461,7 +461,9 @@ Binary operators follow standard math precedence (highest to lowest):
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 - `=` - Legacy alias for `=:=` (strict equality). Prefer `=:=` instead. `beamtalk lint` warns on `x = true` / `x = false`.
 
-**Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
+#### Short-circuit boolean operators (`and:`/`or:`)
+
+`and` and `or` are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
 ```beamtalk
 // Short-circuit AND - second block only evaluated if first is true
 result := condition and: [self expensiveCheck]

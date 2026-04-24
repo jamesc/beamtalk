@@ -765,7 +765,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-15",
-      "title": "Equality (lowest precedence) (beamtalk-language-features)",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "assign",
