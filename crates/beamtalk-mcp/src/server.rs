@@ -1835,15 +1835,19 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
     let mut unreadable_files: Vec<String> = Vec::new();
+    let mut unreadable_target_files: Vec<String> = Vec::new();
 
     for file in &extraction_files {
         let Ok(source) = std::fs::read_to_string(file) else {
-            // BT-2056: Track package-extraction files that couldn't be read so
-            // the caller knows cross-file class extraction may be incomplete.
-            // Only warn for files the resolver chose (not direct targets, which
-            // are already counted by `resolve_source_files`).
+            // BT-2067: Track unreadable target files separately so the caller
+            // sees a clear error instead of a deceptively-clean `files_checked=0`
+            // summary. BT-2056: Unreadable package-only files produce a softer
+            // warning since cross-file class extraction may be incomplete but
+            // the targets themselves were still checked.
             let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
-            if !target_set.contains(&canonical) {
+            if target_set.contains(&canonical) {
+                unreadable_target_files.push(file.to_string_lossy().into_owned());
+            } else {
                 unreadable_files.push(file.to_string_lossy().into_owned());
             }
             continue;
@@ -1953,6 +1957,14 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     });
     if !unreadable_files.is_empty() {
         result["unreadable_package_files"] = serde_json::json!(unreadable_files);
+    }
+    // BT-2067: Surface unreadable target files as a structured field and a
+    // top-level `error` message so callers treating the response as a summary
+    // do not mistake zero-checked-files for a clean result.
+    if !unreadable_target_files.is_empty() {
+        let joined = unreadable_target_files.join(", ");
+        result["unreadable_target_files"] = serde_json::json!(unreadable_target_files);
+        result["error"] = serde_json::json!(format!("Failed to read target file(s): {joined}"));
     }
     result
 }
@@ -2468,6 +2480,120 @@ mod tests {
         assert!(
             unreadable[0].as_str().unwrap().contains("helper.bt"),
             "unreadable file should be helper.bt, got: {unreadable:?}",
+        );
+    }
+
+    /// BT-2067: `compute_diagnostic_summary` must surface an error when a
+    /// direct target file is unreadable, not a clean `files_checked=0` result.
+    #[cfg(unix)]
+    #[test]
+    fn compute_diagnostic_summary_unreadable_direct_target() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-summary-unreadable-target-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let target = dir.join("locked.bt");
+        std::fs::write(&target, "Object subclass: Locked\n  class hello => 1\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = compute_diagnostic_summary(target.to_str().unwrap());
+
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(result["files_checked"], 0);
+        assert!(
+            result["error"].is_string(),
+            "should surface an error for unreadable target, got: {result}",
+        );
+        let err_msg = result["error"].as_str().unwrap();
+        assert!(
+            err_msg.contains("locked.bt"),
+            "error should name the unreadable file, got: {err_msg}",
+        );
+        let listed = result["unreadable_target_files"].as_array().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].as_str().unwrap().contains("locked.bt"));
+    }
+
+    /// BT-2067: Directory-based lint invocations must still surface a specific
+    /// unreadable target when some files resolve successfully and others do
+    /// not.
+    #[cfg(unix)]
+    #[test]
+    fn compute_diagnostic_summary_directory_with_unreadable_target() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-summary-dir-unreadable-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let readable = dir.join("readable.bt");
+        std::fs::write(&readable, "Object subclass: Readable\n  class hello => 1\n").unwrap();
+
+        let locked = dir.join("locked.bt");
+        std::fs::write(&locked, "Object subclass: Locked\n  class hello => 2\n").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = compute_diagnostic_summary(dir.to_str().unwrap());
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            result["files_checked"], 1,
+            "readable sibling should still be checked, got: {result}",
+        );
+        let listed = result["unreadable_target_files"]
+            .as_array()
+            .unwrap_or_else(|| panic!("unreadable_target_files missing, got: {result}"));
+        assert_eq!(listed.len(), 1);
+        assert!(
+            listed[0].as_str().unwrap().contains("locked.bt"),
+            "should name the locked file, got: {listed:?}",
+        );
+        let err_msg = result["error"].as_str().unwrap();
+        assert!(err_msg.contains("locked.bt"));
+    }
+
+    /// BT-2067: `run_lint_structured` must emit a file-level error for
+    /// unreadable targets surfaced by a directory walk, not drop them silently.
+    #[cfg(unix)]
+    #[test]
+    fn run_lint_structured_directory_with_unreadable_target_errors() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-lint-dir-unreadable-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let readable = dir.join("readable.bt");
+        std::fs::write(&readable, "Object subclass: Readable\n  class hello => 1\n").unwrap();
+
+        let locked = dir.join("locked.bt");
+        std::fs::write(&locked, "Object subclass: Locked\n  class hello => 2\n").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = run_lint_structured(dir.to_str().unwrap());
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let has_locked_error = result
+            .errors
+            .iter()
+            .any(|d| d.file.contains("locked.bt") && d.message.contains("Failed to read"));
+        assert!(
+            has_locked_error,
+            "expected a read-failure error naming locked.bt, got: {result:?}",
         );
     }
 
