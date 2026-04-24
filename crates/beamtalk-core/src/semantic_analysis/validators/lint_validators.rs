@@ -11,7 +11,7 @@
 //! - Empty method bodies (BT-859)
 //! - Effect-free statements (BT-951)
 
-use crate::ast::{Expression, Identifier, MessageSelector, Module};
+use crate::ast::{Expression, Identifier, MessageSelector, Module, WellKnownSelector};
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -73,22 +73,29 @@ pub(crate) fn check_literal_boolean_condition(module: &Module, diagnostics: &mut
     });
 }
 
-/// Returns `true` if the selector is a boolean conditional message.
-fn is_boolean_conditional_selector(sel: &str) -> bool {
-    matches!(sel, "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:")
+/// Classifies a selector as a boolean conditional message, returning the
+/// matching [`WellKnownSelector`] variant or `None` if it isn't one.
+fn boolean_conditional(selector: &MessageSelector) -> Option<WellKnownSelector> {
+    match selector.well_known()? {
+        sel @ (WellKnownSelector::IfTrue
+        | WellKnownSelector::IfFalse
+        | WellKnownSelector::IfTrueIfFalse) => Some(sel),
+        _ => None,
+    }
 }
 
 /// Returns a hint string describing the unreachable or redundant branch.
-fn dead_branch_hint(is_true: bool, selector: &str) -> &'static str {
+fn dead_branch_hint(is_true: bool, selector: WellKnownSelector) -> &'static str {
+    use WellKnownSelector::{IfFalse, IfTrue, IfTrueIfFalse};
     match (is_true, selector) {
-        (true, "ifTrue:") | (false, "ifFalse:") => {
+        (true, IfTrue) | (false, IfFalse) => {
             "The branch is always taken. Remove the conditional and use the branch body directly."
         }
-        (true, "ifFalse:") | (false, "ifTrue:") => "This branch is never executed. Remove it.",
-        (true, "ifTrue:ifFalse:") => {
+        (true, IfFalse) | (false, IfTrue) => "This branch is never executed. Remove it.",
+        (true, IfTrueIfFalse) => {
             "The `ifFalse:` branch is never executed. Simplify to the `ifTrue:` block."
         }
-        (false, "ifTrue:ifFalse:") => {
+        (false, IfTrueIfFalse) => {
             "The `ifTrue:` branch is never executed. Simplify to the `ifFalse:` block."
         }
         _ => "Remove the unreachable branch.",
@@ -113,12 +120,11 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
             _ => None,
         };
         if let Some(is_true) = literal_val {
-            let selector_str = selector.name();
-            if is_boolean_conditional_selector(&selector_str) {
+            if let Some(well_known) = boolean_conditional(selector) {
                 let literal_name = if is_true { "true" } else { "false" };
                 diagnostics.push(
                     Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span)
-                        .with_hint(dead_branch_hint(is_true, &selector_str))
+                        .with_hint(dead_branch_hint(is_true, well_known))
                         .with_category(DiagnosticCategory::Lint),
                 );
             }
@@ -138,14 +144,13 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
         if let Some(is_true) = literal_val {
             let literal_name = if is_true { "true" } else { "false" };
             for msg in messages {
-                let selector_str = msg.selector.name();
-                if is_boolean_conditional_selector(&selector_str) {
+                if let Some(well_known) = boolean_conditional(&msg.selector) {
                     diagnostics.push(
                         Diagnostic::warning(
                             format!("Condition is always `{literal_name}`"),
                             msg.span,
                         )
-                        .with_hint(dead_branch_hint(is_true, &selector_str))
+                        .with_hint(dead_branch_hint(is_true, well_known))
                         .with_category(DiagnosticCategory::Lint),
                     );
                 }
@@ -928,7 +933,7 @@ mod tests {
             diagnostics[0]
                 .hint
                 .as_ref()
-                .is_some_and(|h| h.contains("ifFalse:")),
+                .is_some_and(|h| h.contains(WellKnownSelector::IfFalse.as_str())),
             "Expected hint to mention `ifFalse:`, got: {:?}",
             diagnostics[0].hint
         );
@@ -958,7 +963,7 @@ mod tests {
             diagnostics[0]
                 .hint
                 .as_ref()
-                .is_some_and(|h| h.contains("ifTrue:")),
+                .is_some_and(|h| h.contains(WellKnownSelector::IfTrue.as_str())),
             "Expected hint to mention `ifTrue:`, got: {:?}",
             diagnostics[0].hint
         );

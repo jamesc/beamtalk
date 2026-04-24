@@ -148,7 +148,7 @@ fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
 /// Context about the enclosing message send for a block argument.
 #[derive(Debug, Clone)]
 struct BlockMessageContext {
-    /// The full selector name (e.g., "inject:into:", "do:", "ifTrue:")
+    /// The full selector name (e.g., `inject:into:`, `do:`, `ifTrue:`)
     selector: String,
     /// The index of this block argument in the message send's argument list
     arg_index: usize,
