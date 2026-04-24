@@ -80,18 +80,21 @@
 //! - `pattern` — Pattern matching and destructuring
 //! - `class` — Class, protocol, and state declarations
 //! - `method` — Method definitions and parameters
+//! - `well_known` — Compiler-recognised selectors ([`WellKnownSelector`])
 
 mod class;
 mod expression;
 mod method;
 mod pattern;
 pub(crate) mod visitor;
+pub mod well_known;
 
 // Re-export all public types so `use crate::ast::Foo` continues to work.
 pub use class::*;
 pub use expression::*;
 pub use method::*;
 pub use pattern::*;
+pub use well_known::*;
 
 use crate::source_analysis::Span;
 use ecow::EcoString;
