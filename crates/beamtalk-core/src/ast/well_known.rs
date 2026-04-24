@@ -149,41 +149,57 @@ impl WellKnownSelector {
         }
     }
 
+    /// The expected number of arguments for this selector.
+    ///
+    /// Equivalent to the arity that a parser-produced [`MessageSelector`] would
+    /// have (`arity == number of keyword parts` for keywords, `0` for unary).
+    #[must_use]
+    pub fn arity(self) -> usize {
+        match self {
+            Self::IsNil | Self::NotNil | Self::Class | Self::IsOk | Self::IsError | Self::Value => {
+                0
+            }
+            Self::IfNil
+            | Self::IfNotNil
+            | Self::IsKindOf
+            | Self::RespondsTo
+            | Self::IfTrue
+            | Self::IfFalse
+            | Self::ValueColon
+            | Self::IsOkColon
+            | Self::IsErrorColon => 1,
+            Self::IfNilIfNotNil
+            | Self::IfNotNilIfNil
+            | Self::IfTrueIfFalse
+            | Self::OnDo
+            | Self::ValueValue => 2,
+            Self::ValueValueValue => 3,
+        }
+    }
+
     /// Classifies a [`MessageSelector`] as a well-known selector.
     ///
-    /// This is the primary entry point. The selector's *kind* (unary vs keyword)
-    /// must match the variant's expected kind — a `MessageSelector::Binary("class")`
-    /// is not classified as `Class`, even though the name matches, because it
-    /// could not have been produced by the parser.
+    /// This is the primary entry point. Both the selector's *kind* (unary vs
+    /// keyword) and its *arity* must match the variant's expectations — a
+    /// `MessageSelector::Binary("class")` or a `Keyword([KeywordPart("ifTrue:ifFalse:")])`
+    /// (one part containing the whole flattened name) is not classified, even
+    /// though the name matches, because the parser could never produce such a
+    /// shape.
     ///
-    /// Returns `None` for user-defined selectors and for kind/name mismatches.
+    /// Returns `None` for user-defined selectors and for shape/name mismatches.
     #[must_use]
     pub fn from_selector(selector: &MessageSelector) -> Option<Self> {
         let known = Self::from_name(&selector.name())?;
-        match (selector, known) {
-            (
-                MessageSelector::Unary(_),
-                Self::IsNil | Self::NotNil | Self::Class | Self::IsOk | Self::IsError | Self::Value,
-            )
-            | (
-                MessageSelector::Keyword(_),
-                Self::IfNil
-                | Self::IfNotNil
-                | Self::IfNilIfNotNil
-                | Self::IfNotNilIfNil
-                | Self::IsKindOf
-                | Self::RespondsTo
-                | Self::IfTrue
-                | Self::IfFalse
-                | Self::IfTrueIfFalse
-                | Self::OnDo
-                | Self::ValueColon
-                | Self::ValueValue
-                | Self::ValueValueValue
-                | Self::IsOkColon
-                | Self::IsErrorColon,
-            ) => Some(known),
-            _ => None,
+        let expected_arity = known.arity();
+        let kind_ok = match (selector, expected_arity) {
+            (MessageSelector::Unary(_), 0) => true,
+            (MessageSelector::Keyword(_), n) if n > 0 => true,
+            _ => false,
+        };
+        if kind_ok && selector.arity() == expected_arity {
+            Some(known)
+        } else {
+            None
         }
     }
 }
@@ -389,6 +405,25 @@ mod tests {
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
 
         let sel = MessageSelector::Binary("=".into());
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+    }
+
+    #[test]
+    fn from_selector_rejects_keyword_arity_mismatches() {
+        let span = Span::new(0, 1);
+
+        // One part containing the whole flattened name — name matches a 2-arity
+        // variant but the actual arity is 1. Parser would never produce this.
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:ifFalse:", span)]);
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("ifNil:ifNotNil:", span)]);
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("on:do:", span)]);
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("value:value:", span)]);
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
     }
 
