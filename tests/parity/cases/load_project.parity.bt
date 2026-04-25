@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case: loading a tiny project must surface the same set of class
+// names across REPL (`Workspace load:`), MCP (`load_project` tool) and CLI
+// (`beamtalk build`). The fixture is staged to a tmp dir per run; the harness
+// rewrites the input token `<project>` to that path.
+
+// @input
+<project>
+// @surfaces repl, mcp, cli
+// @op load
+// @expect-classes Counter, Greeter

@@ -42,8 +42,6 @@ pub fn is_enabled() -> bool {
 
 /// ANSI escape sequence to reset all text attributes.
 pub const RESET: &str = "\x1b[0m";
-/// ANSI escape sequence for bold text.
-pub const BOLD: &str = "\x1b[1m";
 /// ANSI escape sequence for dim (faint) text.
 pub const DIM: &str = "\x1b[2m";
 

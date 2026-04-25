@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// References the `HasSize` protocol from a sibling file. Without cross-file
+/// protocol resolution (BT-1950), every diagnostic surface would falsely
+/// flag `HasSize` as an unresolved type.
+Object subclass: SizeConsumer
+
+  measure: thing :: HasSize -> Integer =>
+    thing size

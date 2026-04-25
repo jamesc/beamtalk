@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ValueTyped — typed Value class (ADR 0025).
+/// Class-shape flavour: typed Value (parallel to TypedAccount which is an
+/// Actor) so the fixture exercises both typed Value and typed Actor shapes.
+typed Value subclass: ValueTyped
+  field: id :: Integer = 0
+  field: tag :: String = ""
+
+  describe -> String =>
+    "ValueTyped(" ++ self.id printString ++ ", " ++ self.tag ++ ")"

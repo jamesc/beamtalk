@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case (BT-2080): a TestCase whose `tearDown` raises after the body
+// passes must be classified the *same way* on every surface (REPL / MCP /
+// CLI). Whatever the runner decides about post-body cleanup failures, all
+// surfaces must agree — that's the parity guarantee, not a stance on
+// whether tearDown errors should fail the test.
+//
+// Today the BUnit runner treats tearDown failures as non-fatal (the body
+// already produced its outcome), so every surface reports `pass`. If a
+// future change makes tearDown errors fatal, this expectation should be
+// flipped on all three surfaces simultaneously.
+
+// @input
+TeardownErrorRunnerTest
+// @surfaces repl, mcp, cli
+// @op test
+// @expect pass

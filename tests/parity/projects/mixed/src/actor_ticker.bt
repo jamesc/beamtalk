@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ActorTicker — Actor with a richer state shape.
+/// Class-shape flavour: another plain Actor class.
+Actor subclass: ActorTicker
+  state: ticks = 0
+  state: paused = false
+
+  tick =>
+    self.paused ifTrue: [^self.ticks]
+    self.ticks := self.ticks + 1
+    self.ticks
+
+  pause => self.paused := true
+
+  resume => self.paused := false

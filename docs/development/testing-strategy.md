@@ -17,6 +17,7 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
 | REPL Protocol Tests (Rust) | Rust + REPL | `tests/repl-protocol/` | REPL TCP-protocol integration tests |
+| Parity Tests | Rust + REPL/MCP/CLI/LSP | `tests/parity/` (cases) + `crates/beamtalk-parity-tests/` (harness) | Cross-surface equivalence checks (BT-2077) |
 
 ## Running Tests
 
@@ -34,6 +35,7 @@ cargo fmt --all -- --check
 cargo test --all-targets
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (~85 files)
+just test-parity         # Cross-surface parity tests (BT-2077, ~30s)
 just test-repl-protocol  # REPL TCP-protocol tests (slower, ~50s)
 ```
 
@@ -530,6 +532,61 @@ undefined_var
 ```
 
 See [tests/repl-protocol/README.md](../../tests/repl-protocol/README.md) for full documentation.
+
+### 9. Cross-surface Parity Tests (BT-2077)
+
+Drives the same input through every public surface of the compiler stack
+(REPL, MCP, CLI, LSP) and asserts the observable behaviour is equivalent.
+Catches surface drift early — without this layer, a regression that affects
+only the MCP `evaluate` tool would slip through both the REPL E2E suite and
+the BUnit suite.
+
+**Location:**
+- Cases: `tests/parity/cases/*.parity.bt`
+- Fixtures: `tests/parity/fixtures/`
+- Harness crate: `crates/beamtalk-parity-tests/`
+
+**What they test:**
+- Literal evaluation (REPL + MCP) — same value
+- Project loading (REPL + MCP + CLI) — same class set
+- Lint (MCP + CLI) — same diagnostic count on a clean project
+- BUnit test execution (REPL + MCP) — same pass/fail outcome
+- Diagnostics on a broken file (CLI + MCP + LSP) — every surface flags it
+
+**Case file format:**
+
+```text
+// @input
+3 + 4
+// @surfaces repl, mcp
+// @expect 7
+```
+
+Three expectation directives are supported:
+
+| Directive | Meaning |
+|-----------|---------|
+| `// @expect <text>` | Every surface must produce this normalized value |
+| `// @expect-classes A, B, …` | Every surface must observe at least these class names |
+| `// @expect-diagnostics N` | Every surface must report (≥) N diagnostics; `0` means exactly zero |
+
+The harness recognises two placeholder tokens in the input:
+
+* `<project>` — replaced with the staged temp copy of `tests/parity/fixtures/simple_project/`
+* `<bad_file>` — replaced with the staged copy of `tests/parity/fixtures/diagnostic/BadSyntax.bt`
+
+**Workspace pool:** all REPL and MCP cases share a single workspace started
+once per harness run. The pattern is borrowed from `crates/beamtalk-mcp/src/client.rs::tests`.
+
+**Running:**
+```bash
+just test-parity
+```
+
+**When to add a new case:**
+- A new operation appears on more than one surface
+- A bug fix corrected a divergence between surfaces — add a regression case
+- A surface gets a new tool/command that maps to an existing REPL op
 
 ---
 

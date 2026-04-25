@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BUnit test that spins up a stateful Actor in `setUp` and asserts on its
+/// behaviour — exercises the Actor lifecycle path of the test runner on
+/// every surface (REPL / MCP / CLI) per BT-2080.
+TestCase subclass: ActorStateRunnerTest
+  field: actor = nil
+
+  setUp => self withActor: StorageActor spawn
+
+  testActorRetainsState =>
+    self.actor set: 7
+    self.actor bump
+    self assert: self.actor current equals: 8

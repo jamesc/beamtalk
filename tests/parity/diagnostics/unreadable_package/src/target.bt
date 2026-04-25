@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Direct lint target. The harness lints this file specifically while
+/// `locked_sibling.bt` (in the same `src/` directory) is chmod'd to 000;
+/// every surface must surface a warning that the extraction set is
+/// incomplete (BT-2056).
+Object subclass: TargetClass
+  greet -> String => "hello"

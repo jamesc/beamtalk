@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case: running the BUnit test suite for the staged project should
+// pass on every surface that supports `test`. The harness loads the project
+// over the REPL surface first (so `CounterTest` is in the workspace) before
+// invoking the test op.
+
+// @input
+CounterTest
+// @surfaces repl, mcp
+// @op test
+// @expect pass

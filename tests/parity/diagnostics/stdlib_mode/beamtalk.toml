@@ -1,0 +1,14 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: BT-2027 regression — `beamtalk lint test/` (and
+# the equivalent MCP / LSP lookups) must include `src/` files in the
+# cross-file extraction set. Otherwise the `MathBoxTest` reference to
+# `MathBox` produces a spurious "Unresolved class" diagnostic.
+
+[package]
+name = "parity_stdlib_mode"
+version = "0.1.0"
+description = "BT-2027 regression: package-mode cross-file lookup parity fixture"
+
+[dependencies]

@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Mixed-diagnostic fixture: combines a DNU send and a numeric type mismatch
+/// in a single file. Every diagnostic surface should report >= 2 issues.
+Object subclass: Mixer
+
+  /// Sends an unknown selector to a String literal — produces a DNU warning.
+  badSelector -> Object =>
+    "abc" doesNotExistAsAMethod
+
+  /// Adds a String to an Integer — produces a numeric type warning.
+  badArithmetic -> Integer =>
+    1 + "two"

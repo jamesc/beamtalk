@@ -1,0 +1,17 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: BT-2067 regression — when a direct lint target
+# file is unreadable, every diagnostic surface must surface an error rather
+# than returning a deceptively-clean result.
+#
+# The harness (test/diagnostic_parity.rs) chmods `src/locked.bt` to 000
+# before driving the surfaces and restores the mode afterwards. This is
+# Unix-only; the test is skipped on Windows.
+
+[package]
+name = "parity_unreadable_target"
+version = "0.1.0"
+description = "BT-2067 regression: unreadable target file parity fixture"
+
+[dependencies]

@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Actor used by the parity test-runner stateful test (BT-2080).
+///
+/// Holds an integer that can be set, read and incremented. Trivial enough
+/// that any divergence in the runner across surfaces is what we observe,
+/// not the actor itself.
+Actor subclass: StorageActor
+  state: count :: Integer = 0
+
+  current -> Integer => self.count
+
+  set: n :: Integer -> Integer => self.count := n
+
+  bump -> Integer => self.count := self.count + 1

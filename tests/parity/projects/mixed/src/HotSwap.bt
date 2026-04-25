@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HotSwap — class declared in a CamelCase-named file. The CLI build path
+/// must snake-case the file stem when computing the module name; if any
+/// surface skips that step the loaded class set diverges (BT-1670).
+///
+/// Class-shape flavour: module-name edge case (CamelCase filename).
+Actor subclass: HotSwap
+  state: payload = nil
+
+  setPayload: p =>
+    self.payload := p
+    self.payload
+
+  current => self.payload

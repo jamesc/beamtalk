@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case: a literal arithmetic expression must evaluate to the same
+// value through every surface that supports `eval`. The CLI does not have an
+// `eval` subcommand (you can only evaluate via `beamtalk repl` interactively),
+// so this case targets only the surfaces that do.
+
+// @input
+3 + 4
+// @surfaces repl, mcp
+// @expect 7
+
+// @input
+2 * 21
+// @surfaces repl, mcp
+// @expect 42
