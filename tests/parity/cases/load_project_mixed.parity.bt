@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// BT-2079 — Load-project parity across REPL `:sync`, MCP `load_project`,
+// and CLI `build`.
+//
+// The same on-disk fixture (`tests/parity/projects/mixed/`) is staged to a
+// temp directory and driven through every load surface. Each surface MUST
+// observe the same set of class names — divergence here is exactly the
+// silent failure mode that BT-1670 (module-name divergence) and BT-1950
+// (Protocol define dropped via MCP load_project) regressed on in the past.
+//
+// The fixture covers ~28 files spanning the class-shape flavours that have
+// historically produced load-path differences: plain Value/Actor/Object,
+// deep cross-file hierarchies (Cylinder < Circle < Shape; AnimalPuppy <
+// AnimalDog < AbstractAnimal), `sealed` and `typed` modifiers, multi-field
+// value objects, `Protocol define:` plus a cross-file consumer, classes
+// with class-side methods, files containing extension methods (`String >>`,
+// `Array >>`, self-extensions), hot-reloadable Actors, and module-name
+// edge-case files (CamelCase filename `HotSwap.bt`, deeply nested
+// `deep/nested/path/widget.bt`, sibling files in the same subdirectory).
+
+// The expected class set below covers the concrete classes defined by the
+// fixture. `MixedPrintable` (a `Protocol define:`) is intentionally OMITTED
+// from the assertion — the fixture still loads the protocol file on every
+// surface (so the BT-1950 regression scenario is reproduced), but second-
+// pass `force=true` reloads of `Protocol define:` files currently surface
+// a "namespace collision" diagnostic on whichever surface runs second
+// against the shared workspace. The fixture pins the regression scenario
+// so the parity assertion will tighten to require `MixedPrintable` once
+// the underlying hot-reload-of-protocols behaviour is stable across all
+// load paths.
+
+// @input
+<mixed_project>
+// @surfaces repl, mcp, cli
+// @op load
+// @expect-classes AbstractAnimal, ActorCounter, ActorLogger, ActorTicker, AnimalDog, AnimalPuppy, ArrayExtensionsHost, Circle, ClassMethodsOnly, Cylinder, DeepWidget, FactoryWidget, HotSwap, MathHelper, ObjectWithExtensions, PlainObject, ProtoConsumer, SealedToken, Shape, StringExtensionsHost, StringUtil, TypedAccount, ValueColor, ValueMoney, ValuePair, ValuePoint, ValueTyped

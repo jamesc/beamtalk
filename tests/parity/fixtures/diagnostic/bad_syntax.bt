@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Intentionally-broken file used by the parity diagnostic case.
+///
+/// The body has a real lex/parse error — every surface that surfaces compile
+/// diagnostics must flag at least one issue.
+Value subclass: BadSyntax
+
+  go => @@@ +-+

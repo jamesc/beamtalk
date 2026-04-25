@@ -1,0 +1,24 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-surface-drift"
+description = "Surface parity drift checker — verifies REPL ops × CLI × MCP × LSP coverage matches docs/development/surface-parity.md (BT-2082)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["beamtalk", "surface", "parity", "ci"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "beamtalk-surface-drift"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

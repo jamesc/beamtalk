@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case: a clean project linted via the CLI and the MCP `lint` tool
+// should both report zero diagnostics. This guards against either surface
+// drifting into spurious warnings.
+
+// @input
+<project>
+// @surfaces mcp, cli
+// @op lint
+// @expect-diagnostics 0

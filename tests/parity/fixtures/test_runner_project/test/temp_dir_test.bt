@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BUnit test that round-trips a file through `File tempDirectory` —
+/// exercises the cross-platform temp-path policy from CLAUDE.md inside
+/// the test-runner parity fixture (BT-2080).
+TestCase subclass: TempDirRunnerTest
+
+  testTempDirRoundtrip =>
+    tmp := File tempDirectory
+    path := tmp ++ "/_bt_parity_runner_temp.txt"
+    self assert: (File writeAll: path contents: "parity") isOk
+    self assert: (File readAll: path) unwrap equals: "parity"
+    (File delete: path) unwrap

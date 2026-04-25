@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BUnit test whose `tearDown` raises after the body passes.
+///
+/// Test-runner parity (BT-2080): the runner must agree across surfaces
+/// (REPL / MCP / CLI) on whether tearDown failures count as failures and
+/// what message they surface. The body itself succeeds; only tearDown
+/// raises, so any divergence in pass/fail reporting between surfaces is
+/// solely about post-test cleanup behaviour.
+TestCase subclass: TeardownErrorRunnerTest
+
+  testPassesBody =>
+    // The test body itself succeeds. Failure (if any) comes from tearDown.
+    self assert: true
+
+  tearDown =>
+    Error signal: "intentional teardown failure"

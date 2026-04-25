@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ClassMethodsOnly — Object subclass exposing only class-side methods
+/// (FFI-namespace pattern). Class-shape flavour: class-methods-only class.
+Object subclass: ClassMethodsOnly
+
+  class identity: x => x
+
+  class greeting -> String => "hi"
+
+  class doubled: n => n * 2

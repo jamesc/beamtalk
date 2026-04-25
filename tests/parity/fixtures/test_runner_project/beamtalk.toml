@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "parity_test_runner"
+version = "0.1.0"
+description = "BUnit fixture suite for the test-runner parity case (BT-2080)"
+
+[dependencies]

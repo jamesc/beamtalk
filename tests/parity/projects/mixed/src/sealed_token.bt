@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SealedToken — sealed Value class (cannot be subclassed).
+/// Class-shape flavour: sealed class modifier.
+sealed Value subclass: SealedToken
+  field: value = 0
+
+  doubled => self.value * 2

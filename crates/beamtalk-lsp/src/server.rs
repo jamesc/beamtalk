@@ -35,9 +35,10 @@ use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, OneOf,
     ParameterInformation, ParameterLabel, Range, ReferenceParams, ServerCapabilities,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolKind,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
+    SymbolInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -575,6 +576,7 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
@@ -1015,6 +1017,80 @@ impl LanguageServer for Backend {
             Ok(None)
         } else {
             Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
+        }
+    }
+
+    /// Returns workspace-wide class symbols matching the query (BT-2081).
+    ///
+    /// Iterates over every indexed user file and emits one `SymbolInformation`
+    /// per top-level class whose name contains the query string (case-insensitive,
+    /// substring match). Stdlib files are excluded so the result mirrors the
+    /// MCP `list_classes` "user" scope.
+    ///
+    /// An empty query returns every user class; this matches MCP behaviour.
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query_lower = params.query.to_ascii_lowercase();
+        let svc = self.service.lock().expect("service lock poisoned");
+        let mut out: Vec<SymbolInformation> = Vec::new();
+        // Snapshot indexed file paths first; `document_symbols` does not
+        // require a separate borrow of the project index.
+        let files: Vec<Utf8PathBuf> = svc
+            .project_index()
+            .indexed_files()
+            .into_iter()
+            .filter(|f| !svc.project_index().is_stdlib_file(f))
+            .cloned()
+            .collect();
+        for file in files {
+            let Some(source) = svc.file_source(&file) else {
+                continue;
+            };
+            let symbols = svc.document_symbols(&file);
+            let Some(uri) = path_to_uri(&file) else {
+                continue;
+            };
+            for sym in symbols {
+                if !matches!(sym.kind, DocumentSymbolKind::Class) {
+                    continue;
+                }
+                // The document-symbol provider tags class entries with a
+                // trailing " (class)" disambiguator (so editors can render
+                // `Counter (class)` in document outlines). Strip it here so
+                // workspace/symbol surfaces a bare class name — that
+                // matches the MCP `list_classes` semantics and is the
+                // string editors typically expect for symbol queries.
+                let name = sym
+                    .name
+                    .as_str()
+                    .strip_suffix(" (class)")
+                    .unwrap_or(sym.name.as_str())
+                    .to_string();
+                if !query_lower.is_empty() && !name.to_ascii_lowercase().contains(&query_lower) {
+                    continue;
+                }
+                let range = span_to_range(sym.span, &source);
+                #[expect(deprecated, reason = "LSP SymbolInformation requires deprecated field")]
+                let info = SymbolInformation {
+                    name,
+                    kind: SymbolKind::CLASS,
+                    tags: None,
+                    deprecated: None,
+                    location: tower_lsp::lsp_types::Location {
+                        uri: uri.clone(),
+                        range,
+                    },
+                    container_name: None,
+                };
+                out.push(info);
+            }
+        }
+        if out.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(out))
         }
     }
 

@@ -1,0 +1,13 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: a `Protocol define:` in one file is referenced
+# by a sibling file as a type annotation. Lint surfaces must resolve the
+# protocol via cross-file extraction (BT-1950) and lint clean.
+
+[package]
+name = "parity_protocol_cross_file"
+version = "0.1.0"
+description = "Cross-file Protocol use parity fixture (BT-1950)"
+
+[dependencies]

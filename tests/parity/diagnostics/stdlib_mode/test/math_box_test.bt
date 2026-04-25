@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Sibling-package test referencing `MathBox` via a type annotation. Per
+/// BT-2027, lint of `test/` must extract classes from `src/` so this file
+/// is clean.
+Object subclass: MathBoxHarness
+
+  bumpTwice: box :: MathBox -> Integer =>
+    box bump
+    box bump

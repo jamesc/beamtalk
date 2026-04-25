@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case (BT-2080): a TestCase whose `setUp` raises must report a
+// genuine failure on every surface — *not* the bogus
+// `setUp failed: error:undef` shroud BT-931 fixed on MCP. If any surface
+// silently returns `pass` (or another surface starts emitting `error:undef`
+// again), this case fails.
+
+// @input
+SetupErrorRunnerTest
+// @surfaces repl, mcp, cli
+// @op test
+// @expect fail

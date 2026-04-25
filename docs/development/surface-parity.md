@@ -77,9 +77,9 @@ When adding a new capability to any surface, update this table. If the capabilit
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `docs` | -- | -- | `docs` | -- | Class/method documentation (deprecated op, use `Beamtalk help:`) |
+| `docs` | -- | -- | `docs` | `textDocument/hover` | Class/method documentation (deprecated op, use `Beamtalk help:`); LSP exposes via hover (BT-2081) |
 | `methods` | -- | -- | -- | -- | List methods for a class |
-| `list-classes` | -- | -- | `list_classes` | -- | List available classes |
+| `list-classes` | -- | -- | `list_classes` | `workspace/symbol` | List available classes; LSP exposes via workspace symbol query (BT-2081) |
 | `erlang-help` | -- | -- | -- | -- | Erlang module documentation |
 | `erlang-complete` | -- | -- | -- | -- | Erlang module/function completion |
 
@@ -152,9 +152,8 @@ These LSP capabilities are editor-specific and have no direct REPL op.
 
 | LSP capability | Notes |
 |----------------|-------|
-| `textDocument/hover` | `surface-specific: editor hover information` |
 | `textDocument/signatureHelp` | `surface-specific: editor parameter hints` |
-| `textDocument/definition` | `surface-specific: editor go-to-definition` |
+| `textDocument/definition` | `surface-specific: editor go-to-definition; parity-tested (BT-2081) against the user-class set surfaced by MCP list_classes — every LSP-resolved location must point inside the loaded project tree` |
 | `textDocument/references` | `surface-specific: editor find-all-references` |
 | `textDocument/documentSymbol` | `surface-specific: editor outline/breadcrumbs` |
 | `textDocument/rangeFormatting` | `surface-specific: editor format-selection` |
@@ -164,6 +163,39 @@ These LSP capabilities are editor-specific and have no direct REPL op.
 | `textDocument/didChange` | `surface-specific: editor document lifecycle` |
 | `textDocument/didClose` | `surface-specific: editor document lifecycle` |
 | `textDocument/didSave` | `surface-specific: editor document lifecycle` |
+
+## Drift Check (CI)
+
+The `beamtalk-surface-drift` binary (`crates/beamtalk-surface-drift/`,
+BT-2082) enforces this contract automatically. It runs on every PR via
+`just check-surface-drift`, wired into the `check` job in
+`.github/workflows/ci.yml` and `just ci`.
+
+The check parses this document plus the canonical inventory sources
+listed above and fails when:
+
+- A REPL op is registered in `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_*.erl`
+  but missing from any operations table here. Add a row, with `--` /
+  binding name / `surface-specific: <reason>` per surface.
+- A documented `Bound` binding cell has no corresponding code artifact
+  (e.g. `:cmd` listed but no dispatch arm in
+  `crates/beamtalk-cli/src/commands/repl/mod.rs::handle_repl_command`,
+  or an MCP tool name with no `#[tool(...)]` `async fn` of that name in
+  `crates/beamtalk-mcp/src/server.rs`, or an LSP capability that is not
+  enabled in `ServerCapabilities`).
+- An MCP tool is implemented but missing from this doc — add it to the
+  matching op row, or to the **MCP-Only Tools** section if it is
+  intentionally `surface-specific`.
+- A REPL meta-command is dispatched in the CLI but missing from this
+  doc — add it to the matching op row or the **REPL Meta-Command
+  Reference** table.
+- An LSP capability is enabled in `crates/beamtalk-lsp/src/server.rs`
+  but missing from this doc — add it to the **LSP-Only Capabilities**
+  section (or the matching op row).
+
+When adding a new surface binding, the workflow is: implement on the
+surface(s), update this document in the same PR, and let CI confirm the
+inventory matches.
 
 ## REPL Meta-Command Reference
 

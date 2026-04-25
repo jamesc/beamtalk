@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// MixedPrintable — a structural protocol used cross-file.
+/// Class-shape flavour: Protocol define (BT-1950 — must reach the registry
+/// when loaded via every surface).
+Protocol define: MixedPrintable
+  /// Return a short display label.
+  describe -> String

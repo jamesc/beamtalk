@@ -82,7 +82,7 @@ pub mod bind;
 
 use bind::{resolve_bind_addr, validate_network_binding};
 use client::ReplClient;
-use display::{format_error, format_value, history_path, print_help};
+use display::{format_error, format_value, history_path, output_mode, print_help};
 use helper::ReplHelper;
 use process::{
     BeamChildGuard, connect_with_retries, drain_child_stderr, read_port_from_child,
@@ -483,8 +483,14 @@ pub fn run(
                 if let Some(actors) = response.actors {
                     if !actors.is_empty() {
                         println!("\nAvailable actors:");
-                        for actor in actors {
-                            println!("  - {} ({})", actor.class, actor.pid);
+                        for actor in &actors {
+                            println!(
+                                "  - {}",
+                                beamtalk_repl_protocol::format::format_actor_summary(
+                                    actor,
+                                    output_mode(),
+                                )
+                            );
                         }
                     }
                 }
@@ -786,33 +792,21 @@ fn handle_sync(client: &mut ReplClient) {
 /// hint (when available), followed by a summary line listing all failed file
 /// paths so the user can identify problems without manual bisection.
 fn display_sync_diagnostics(response: &ReplResponse) {
+    use beamtalk_repl_protocol::format::{WarningStyle, format_file_diagnostic, format_warning};
+
+    let mode = output_mode();
+
     // BT-1855: Collect distinct failed file paths for the summary line.
     let mut failed_paths: Vec<&str> = Vec::new();
 
     for err in &response.errors {
-        if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
+        if let Some(rendered) = format_file_diagnostic(err, mode) {
+            eprintln!("{rendered}");
+
             let path = err
                 .get("path")
                 .and_then(|p| p.as_str())
                 .unwrap_or("unknown");
-            let line = err.get("line").and_then(serde_json::Value::as_u64);
-            let hint = err.get("hint").and_then(serde_json::Value::as_str);
-            let painted = color::paint(color::RED, &format!("Error: {msg}"));
-            match (line, hint) {
-                (Some(ln), Some(h)) => {
-                    eprintln!("  {painted} in {path} at line {ln} ({h})");
-                }
-                (Some(ln), None) => {
-                    eprintln!("  {painted} in {path} at line {ln}");
-                }
-                (None, Some(h)) => {
-                    eprintln!("  {painted} in {path} ({h})");
-                }
-                (None, None) => {
-                    eprintln!("  {painted} in {path}");
-                }
-            }
-
             if !failed_paths.contains(&path) {
                 failed_paths.push(path);
             }
@@ -831,7 +825,7 @@ fn display_sync_diagnostics(response: &ReplResponse) {
 
     if let Some(ref warns) = response.warnings {
         for w in warns {
-            eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+            eprintln!("{}", format_warning(w, mode, WarningStyle::Prefixed));
         }
     }
 }
@@ -881,7 +875,14 @@ fn handle_show_codegen(line: &str, client: &mut ReplClient) {
             }
             if let Some(ref warns) = response.warnings {
                 for w in warns {
-                    eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+                    eprintln!(
+                        "{}",
+                        beamtalk_repl_protocol::format::format_warning(
+                            w,
+                            output_mode(),
+                            beamtalk_repl_protocol::format::WarningStyle::Prefixed,
+                        )
+                    );
                 }
             }
         }
@@ -984,7 +985,14 @@ fn display_eval_response(response: &ReplResponse) {
     // Display compilation warnings (BT-407)
     if let Some(ref warnings) = response.warnings {
         for warning in warnings {
-            eprintln!("⚠ {warning}");
+            eprintln!(
+                "{}",
+                beamtalk_repl_protocol::format::format_warning(
+                    warning,
+                    output_mode(),
+                    beamtalk_repl_protocol::format::WarningStyle::Bullet,
+                )
+            );
         }
     }
     if response.is_error() {

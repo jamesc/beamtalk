@@ -10,11 +10,21 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
+use beamtalk_repl_protocol::format::{self as fmt, Diagnostic as FmtDiagnostic, OutputMode};
 use miette::{IntoDiagnostic, Result};
 
 use crate::paths::beamtalk_dir;
 
 use super::color;
+
+/// Selects [`OutputMode::Ansi`] when colour is enabled, otherwise plain.
+pub(crate) fn output_mode() -> OutputMode {
+    if color::is_enabled() {
+        OutputMode::Ansi
+    } else {
+        OutputMode::Plain
+    }
+}
 
 /// Return the path to the REPL history file, creating the parent directory if needed.
 pub(crate) fn history_path() -> Result<PathBuf> {
@@ -24,48 +34,20 @@ pub(crate) fn history_path() -> Result<PathBuf> {
 }
 
 /// Format a value for REPL display with optional coloring.
+///
+/// Delegates to the shared [`beamtalk_repl_protocol::format::format_value`]
+/// helper (BT-2086) so CLI / MCP / future surfaces share a single rendering
+/// for REPL eval results.
 pub(crate) fn format_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => {
-            // Values are pre-formatted by the backend:
-            // - Actors: "#Actor<0.123.0>" or "#ClassName<0.123.0>"
-            // - Blocks: "a Block/N"
-            // - Floats: "6.0", "3.14" (BT-1336: sent as strings to preserve ".0")
-            if (s.starts_with('#') && s.contains('<')) || s.starts_with("a Block") {
-                color::paint(color::CYAN, s)
-            } else if s.contains('.') && s.parse::<f64>().is_ok() {
-                // BT-1336: Float values are serialized as strings to preserve
-                // the decimal point (e.g. "6.0" instead of JSON number 6).
-                color::paint(color::YELLOW, s)
-            } else {
-                color::paint(color::GREEN, s)
-            }
-        }
-        serde_json::Value::Number(n) => color::paint(color::YELLOW, &n.to_string()),
-        serde_json::Value::Bool(b) => color::paint(color::BOLD_BLUE, &b.to_string()),
-        serde_json::Value::Null => color::paint(color::BOLD_BLUE, "nil"),
-        serde_json::Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(format_value).collect();
-            format!("#({})", items.join(", "))
-        }
-        serde_json::Value::Object(obj) => {
-            // Regular object
-            let pairs: Vec<String> = obj
-                .iter()
-                .map(|(k, v)| format!("{k}: {}", format_value(v)))
-                .collect();
-            format!("{{{}}}", pairs.join(", "))
-        }
-    }
+    fmt::format_value(value, output_mode())
 }
 
 /// Format an error message for REPL display.
+///
+/// Delegates to the shared [`beamtalk_repl_protocol::format::format_diagnostic`]
+/// helper (BT-2086).
 pub(crate) fn format_error(msg: &str) -> String {
-    if color::is_enabled() {
-        format!("{}{}Error:{} {msg}", color::BOLD, color::RED, color::RESET)
-    } else {
-        format!("Error: {msg}")
-    }
+    fmt::format_diagnostic(&FmtDiagnostic::new(msg), output_mode())
 }
 
 /// Print help message.

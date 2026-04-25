@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case (BT-2080): a deliberately-failing assertion must surface as
+// `fail` on every surface — *not* as a phantom `error:undef` (the BT-931
+// regression). This case directly guards against MCP and REPL diverging on
+// what counts as "this test failed".
+
+// @input
+AssertFailRunnerTest
+// @surfaces repl, mcp, cli
+// @op test
+// @expect fail

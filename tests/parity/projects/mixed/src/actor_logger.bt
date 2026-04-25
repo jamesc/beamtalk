@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ActorLogger — Actor designed for hot-reload (BT-2079 fixture).
+/// Class-shape flavour: hot-reloadable class. Re-defining this class via
+/// `:reload` in the REPL replaces the implementation while preserving any
+/// running processes.
+Actor subclass: ActorLogger
+  state: log = #()
+
+  append: line =>
+    self.log := self.log copyWith: line
+    self.log
+
+  current => self.log
