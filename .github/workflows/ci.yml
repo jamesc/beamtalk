@@ -357,16 +357,20 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Generate Rust coverage (Cobertura format for action)
-        run: |
-          # Generate Cobertura format (for CodeCoverageSummary action)
-          cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml
-
+      # The Erlang runtime + stdlib must be built before `cargo llvm-cov`
+      # because some Rust integration tests (e.g. cli_doctor from BT-2084)
+      # exec the real `beamtalk` binary against the workspace runtime,
+      # which fails fast if stdlib .beam files are missing.
       - name: Build Erlang runtime
         run: just build-erlang
 
       - name: Build standard library
         run: just build-stdlib
+
+      - name: Generate Rust coverage (Cobertura format for action)
+        run: |
+          # Generate Cobertura format (for CodeCoverageSummary action)
+          cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml
 
       - name: Generate Erlang coverage (unit + E2E + stdlib)
         run: just coverage-all
