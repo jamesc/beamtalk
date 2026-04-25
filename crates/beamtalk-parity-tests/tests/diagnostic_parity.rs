@@ -289,21 +289,23 @@ fn stage_fixture(corpus_root: &Path, case: &CorpusCase) -> Result<StagedFixture,
         dst.join(case.lint_target)
     };
 
-    let mut locked_files = Vec::new();
     #[cfg(unix)]
-    {
+    let locked_files: Vec<std::path::PathBuf> = {
         use std::os::unix::fs::PermissionsExt;
+        let mut acc = Vec::new();
         for rel in case.unreadable_files {
             let p = dst.join(rel);
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000))
                 .map_err(|e| format!("chmod 000 {}: {e}", p.display()))?;
-            locked_files.push(p);
+            acc.push(p);
         }
-    }
+        acc
+    };
     #[cfg(not(unix))]
-    {
+    let locked_files: Vec<std::path::PathBuf> = {
         let _ = case.unreadable_files;
-    }
+        Vec::new()
+    };
 
     Ok(StagedFixture {
         root: dst,
