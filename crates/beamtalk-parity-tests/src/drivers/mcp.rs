@@ -227,20 +227,20 @@ impl McpDriver {
     }
 
     /// Drive the `test` MCP tool against a class name.
+    ///
+    /// MCP returns either a JSON test-result envelope (success path) or a
+    /// `TEST FAILURES:\n<json>` blob (`is_error=true` path). Both carry a
+    /// `failed` integer in the embedded JSON; we trust that field over any
+    /// loose text scraping so a JSON key like `"failed": 1` doesn't get
+    /// misread as the literal word "fail".
     pub async fn test_class(&mut self, class: &str) -> Result<SurfaceOutput, String> {
         let result = self.call_tool("test", json!({"class": class})).await?;
         let text = extract_content_text(&result);
-        let summary =
-            if text.to_lowercase().contains("fail") || text.to_lowercase().contains("error") {
-                // "0 failed" / "0 errors" still counts as pass.
-                if has_nonzero_failures(&text) {
-                    "fail".to_string()
-                } else {
-                    "pass".to_string()
-                }
-            } else {
-                "pass".to_string()
-            };
+        let summary = if test_summary_failed(&text) {
+            "fail".to_string()
+        } else {
+            "pass".to_string()
+        };
         Ok(SurfaceOutput {
             value: Some(summary),
             raw: text,
@@ -356,17 +356,54 @@ fn count_error_lines(text: &str) -> usize {
         .count()
 }
 
+/// True when the MCP `test` tool's text content reports at least one failure.
+///
+/// Prefers the `failed` integer in the embedded JSON envelope (success or
+/// `TEST FAILURES:` paths both carry it) and falls back to a token scan for
+/// older response shapes. This avoids the JSON-key-name false positive
+/// where a literal `"failed":` or `"error":` substring made the test look
+/// like it failed when the count was actually zero.
+fn test_summary_failed(text: &str) -> bool {
+    // Prefix variant: MCP returns `TEST FAILURES:\n{...}` for runs with
+    // failures. Treat any well-formed JSON body as authoritative.
+    let json_text = text
+        .find('{')
+        .map(|idx| &text[idx..])
+        .unwrap_or(text)
+        .trim();
+    if let Ok(v) = serde_json::from_str::<Value>(json_text) {
+        if let Some(n) = v.get("failed").and_then(Value::as_u64) {
+            return n > 0;
+        }
+    }
+    // Fallback: token scan for legacy text formats. `has_nonzero_failures`
+    // tolerates both `<n> failed` and `failed: <n>` orderings.
+    has_nonzero_failures(text)
+}
+
 fn has_nonzero_failures(text: &str) -> bool {
-    // Accept patterns like "1 failed" / "2 errors" but not "0 failed".
+    // Accept patterns like "1 failed" / "2 errors" / `"failed": 1` /
+    // `failed: 3` but not "0 failed". Walks token windows in both
+    // orderings so JSON-style `key: value` and prose `count word` both
+    // round-trip without false positives.
     let lower = text.to_lowercase();
-    lower
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|w| {
-            let n = w[0].trim_end_matches(',').parse::<u64>().unwrap_or(0);
-            n > 0 && (w[1].starts_with("fail") || w[1].starts_with("error"))
-        })
+    let tokens: Vec<&str> = lower.split_whitespace().collect();
+    tokens.windows(2).any(|w| {
+        // `<n> fail*` / `<n> error*`
+        let count_first = w[0].trim_end_matches(',').parse::<u64>().unwrap_or(0);
+        if count_first > 0 && (w[1].starts_with("fail") || w[1].starts_with("error")) {
+            return true;
+        }
+        // `failed[":,]?` `<n>` — handles JSON `"failed": 1` after stripping
+        // surrounding quotes, comma and trailing punctuation.
+        let key = w[0].trim_matches(|c: char| c == '"' || c == ',' || c == ':');
+        let val = w[1].trim_end_matches(',').trim_end_matches('}');
+        let count_second = val.parse::<u64>().unwrap_or(0);
+        if count_second > 0 && (key.starts_with("failed") || key.starts_with("errors")) {
+            return true;
+        }
+        false
+    })
 }
 
 #[cfg(test)]
@@ -390,5 +427,24 @@ mod tests {
         assert!(has_nonzero_failures("1 failed"));
         assert!(has_nonzero_failures("3 errors detected"));
         assert!(!has_nonzero_failures("0 failed, 0 errors"));
+        // JSON-style ordering — required by the MCP `test` envelope.
+        assert!(has_nonzero_failures("\"failed\": 1"));
+        assert!(has_nonzero_failures("\"errors\": 2,"));
+        assert!(!has_nonzero_failures("\"failed\": 0"));
+    }
+
+    #[test]
+    fn test_summary_failed_uses_embedded_json() {
+        // BT-2080: MCP `test` envelope (failure path).
+        let envelope = "TEST FAILURES:\n{\n  \"failed\": 1,\n  \"passed\": 0,\n  \"total\": 1\n}";
+        assert!(test_summary_failed(envelope));
+
+        // Success path with the same key but zero count.
+        let success = "{\n  \"failed\": 0,\n  \"passed\": 3,\n  \"total\": 3\n}";
+        assert!(!test_summary_failed(success));
+
+        // Plain prose text falls through to the token scan.
+        assert!(test_summary_failed("Tests: 0 passed, 2 failed"));
+        assert!(!test_summary_failed("Tests: 5 passed, 0 failed"));
     }
 }

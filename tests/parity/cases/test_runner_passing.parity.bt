@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case (BT-2080): a passing BUnit test must report `pass` on every
+// surface that exposes a test runner. Counterpart to the harder failure
+// cases in this directory — establishes the happy-path baseline.
+
+// @input
+PassingRunnerTest
+// @surfaces repl, mcp, cli
+// @op test
+// @expect pass

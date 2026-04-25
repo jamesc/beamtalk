@@ -40,6 +40,7 @@ async fn parity_suite() {
     // Stage the project fixture once for any case that needs it.
     let staged_project = stage_simple_project();
     let staged_bad_file = stage_diagnostic_file();
+    let staged_test_runner = stage_test_runner_project();
 
     let mut failures: Vec<String> = Vec::new();
     for path in &case_paths {
@@ -55,6 +56,7 @@ async fn parity_suite() {
                 &step.input,
                 staged_project.as_deref(),
                 staged_bad_file.as_deref(),
+                staged_test_runner.as_deref(),
             );
             let outcome = run_step(step, &resolved, &mut repl_driver, &mut mcp, &repl).await;
             if let Err(msg) = outcome {
@@ -185,8 +187,12 @@ async fn drive(
         (Surface::Cli, Op::Lint) => cli_driver::lint(Path::new(input)),
 
         (Surface::Repl, Op::Test) => {
-            // Make sure the test class is loaded before running it.
-            let project = std::env::temp_dir().join("beamtalk-parity-simple");
+            // Make sure the test class is loaded before running it. Each
+            // input class has exactly one fixture project; loading just
+            // that one keeps the workspace's class registry consistent
+            // (loading multiple projects back-to-back was observed to
+            // wipe earlier projects' classes on the REPL surface).
+            let project = fixture_project_for_class(input);
             if project.exists() {
                 let _ = repl
                     .load_project_with_tests(&project.to_string_lossy())
@@ -195,7 +201,7 @@ async fn drive(
             repl.test_class(input).await
         }
         (Surface::Mcp, Op::Test) => {
-            let project = std::env::temp_dir().join("beamtalk-parity-simple");
+            let project = fixture_project_for_class(input);
             if project.exists() {
                 let _ = mcp
                     .load_project_with_tests(&project.to_string_lossy())
@@ -204,8 +210,12 @@ async fn drive(
             mcp.test_class(input).await
         }
         (Surface::Cli, Op::Test) => {
-            let project = std::env::temp_dir().join("beamtalk-parity-simple");
-            cli_driver::test_project(&project)
+            // CLI has no class registry, so map the input class name to its
+            // staged test file. Falls back to the default `simple_project`
+            // dir when the input isn't a known test-runner class — that
+            // preserves the BT-2077 behaviour for `CounterTest`.
+            let path = cli_test_path_for_class(input);
+            cli_driver::test_project(&path)
         }
 
         (Surface::Cli, Op::Diagnose) => cli_driver::diagnose(Path::new(input)),
@@ -241,6 +251,66 @@ fn stage_simple_project() -> Option<PathBuf> {
     let _ = std::fs::remove_dir_all(&dst);
     copy_tree(&src, &dst).ok()?;
     Some(dst)
+}
+
+/// Stage `tests/parity/fixtures/test_runner_project/` (BT-2080).
+///
+/// Counterpart to [`stage_simple_project`] for the test-runner parity suite.
+/// Each fixture project lives in a stable temp directory so the harness can
+/// pre-load it on every `Op::Test` invocation without re-staging.
+fn stage_test_runner_project() -> Option<PathBuf> {
+    let src = parity_root().join("fixtures/test_runner_project");
+    if !src.exists() {
+        return None;
+    }
+    let dst = std::env::temp_dir().join("beamtalk-parity-test-runner");
+    let _ = std::fs::remove_dir_all(&dst);
+    copy_tree(&src, &dst).ok()?;
+    Some(dst)
+}
+
+/// Class-name → test-runner-project test file mapping.
+///
+/// Shared between [`cli_test_path_for_class`] and
+/// [`fixture_project_for_class`] so the two lookups cannot drift.
+const TEST_RUNNER_CLASSES: &[(&str, &str)] = &[
+    ("PassingRunnerTest", "passing_test.bt"),
+    ("AssertFailRunnerTest", "asserting_fail_test.bt"),
+    ("SetupErrorRunnerTest", "setup_error_test.bt"),
+    ("TeardownErrorRunnerTest", "teardown_error_test.bt"),
+    ("ActorStateRunnerTest", "actor_state_test.bt"),
+    ("TempDirRunnerTest", "temp_dir_test.bt"),
+];
+
+/// Map a `TestCase` class name to the staged test file that defines it.
+///
+/// CLI `beamtalk test` operates on a path, not a class name; this lookup
+/// gives the test-runner parity case (BT-2080) per-class CLI scoping that
+/// matches the REPL/MCP `:test ClassName` semantics. Unknown class names
+/// fall back to the BT-2077 `simple_project` directory so `CounterTest`
+/// keeps working unchanged.
+fn cli_test_path_for_class(class: &str) -> PathBuf {
+    let runner_root = std::env::temp_dir().join("beamtalk-parity-test-runner");
+    if let Some((_, file)) = TEST_RUNNER_CLASSES.iter().find(|(c, _)| *c == class) {
+        runner_root.join("test").join(file)
+    } else {
+        std::env::temp_dir().join("beamtalk-parity-simple")
+    }
+}
+
+/// Map a `TestCase` class name to the staged fixture project that defines it.
+///
+/// REPL/MCP `:test ClassName` requires the class to be loaded into the
+/// workspace; this lookup is the classifier the harness uses to load the
+/// correct project before each test op. Pre-loading both projects up
+/// front was tried and rejected — loading a second project on the same
+/// workspace evicted classes from the first.
+fn fixture_project_for_class(class: &str) -> PathBuf {
+    if TEST_RUNNER_CLASSES.iter().any(|(c, _)| *c == class) {
+        std::env::temp_dir().join("beamtalk-parity-test-runner")
+    } else {
+        std::env::temp_dir().join("beamtalk-parity-simple")
+    }
 }
 
 fn stage_diagnostic_file() -> Option<PathBuf> {
@@ -281,13 +351,21 @@ fn parity_root() -> PathBuf {
         .join("tests/parity")
 }
 
-fn resolve_placeholders(input: &str, project: Option<&Path>, bad_file: Option<&Path>) -> String {
+fn resolve_placeholders(
+    input: &str,
+    project: Option<&Path>,
+    bad_file: Option<&Path>,
+    test_runner_project: Option<&Path>,
+) -> String {
     let mut out = input.to_string();
     if let Some(p) = project {
         out = out.replace("<project>", &p.to_string_lossy());
     }
     if let Some(p) = bad_file {
         out = out.replace("<bad_file>", &p.to_string_lossy());
+    }
+    if let Some(p) = test_runner_project {
+        out = out.replace("<test_runner_project>", &p.to_string_lossy());
     }
     out
 }

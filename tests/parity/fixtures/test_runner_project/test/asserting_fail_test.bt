@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BUnit test that fails on a `self assert:equals:` mismatch — exercises the
+/// "real" failure path the test-runner parity case (BT-2080) wants every
+/// surface to agree on. The original BT-931 bug shrouded this kind of
+/// failure behind `setUp failed: error:undef` on MCP only.
+TestCase subclass: AssertFailRunnerTest
+
+  testIntentionalMismatch =>
+    // Deliberately wrong: 2 + 2 is 4, not 5. Each surface must report this
+    // as a genuine assertion failure, not as a setUp error.
+    self assert: 2 + 2 equals: 5
