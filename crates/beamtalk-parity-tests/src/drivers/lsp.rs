@@ -191,17 +191,19 @@ impl LspDriver {
         //   1. `MarkupContent { kind, value }`
         //   2. plain `String`
         //   3. `MarkedString[]` (deprecated but still emitted by some servers)
-        let contents = v.pointer("/result/contents").cloned().unwrap_or(Value::Null);
+        let contents = v
+            .pointer("/result/contents")
+            .cloned()
+            .unwrap_or(Value::Null);
         let text = match contents {
             Value::String(s) => s,
             Value::Array(items) => items
                 .iter()
                 .filter_map(|item| match item {
                     Value::String(s) => Some(s.as_str().to_owned()),
-                    Value::Object(obj) => obj
-                        .get("value")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
+                    Value::Object(obj) => {
+                        obj.get("value").and_then(Value::as_str).map(str::to_owned)
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>()
