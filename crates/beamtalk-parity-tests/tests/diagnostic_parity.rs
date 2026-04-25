@@ -23,11 +23,13 @@
 //! | `unreadable_target`          | BT-2067 — unreadable target file (Unix only) |
 //! | `unreadable_package`         | BT-2056 — unreadable extraction file (Unix only) |
 //!
-//! Each fixture is checked four ways. The expected diagnostic count is
+//! Each fixture is checked four ways. A minimum diagnostic count is
 //! locked in **per surface** so legitimate-but-bounded divergences (e.g.
 //! sealed-subclass errors are uncategorised, so they appear on LSP but are
-//! filtered out of CLI/MCP `lint`) don't make the test useless. Any drift
-//! away from the locked-in shape — in either direction — fails the test.
+//! filtered out of CLI/MCP `lint`) don't make the test useless. The test
+//! enforces non-regression: each surface must report at least the
+//! locked-in count. Increases are allowed (the expected value tracks the
+//! floor, not an exact total).
 //!
 //! The test is gated behind `#[ignore]` because it spawns real CLI/MCP/LSP
 //! child processes. Run via `just test-parity` (which already invokes every
@@ -278,8 +280,23 @@ fn stage_fixture(corpus_root: &Path, case: &CorpusCase) -> Result<StagedFixture,
     if !src.is_dir() {
         return Err(format!("fixture missing: {}", src.display()));
     }
-    let dst = std::env::temp_dir().join(format!("beamtalk-parity-diag-{}", case.name));
-    let _ = std::fs::remove_dir_all(&dst);
+    // Per-process + per-call unique suffix so concurrent runs (cargo test
+    // with multiple test binaries) and re-runs don't fight over the same
+    // staging directory. We still avoid bringing in the `tempfile` crate
+    // here; the StagedFixture::Drop on the locked_files path takes care of
+    // restoring permissions before remove_dir_all in tearDown elsewhere.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let suffix = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dst = std::env::temp_dir().join(format!(
+        "beamtalk-parity-diag-{}-{}-{suffix}",
+        case.name,
+        std::process::id()
+    ));
+    if dst.exists() {
+        std::fs::remove_dir_all(&dst)
+            .map_err(|e| format!("remove stale staging dir {}: {e}", dst.display()))?;
+    }
     copy_tree(&src, &dst).map_err(|e| format!("copy_tree {}: {e}", src.display()))?;
 
     let lsp_target = dst.join(case.lsp_target);

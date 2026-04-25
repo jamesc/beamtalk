@@ -1,10 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// A trivial value class referenced from a sibling test file. The BT-2027
+/// A trivial actor class referenced from a sibling test file. The BT-2027
 /// regression was that linting only `test/` would lose access to this
 /// definition and produce an "Unresolved class" diagnostic.
-Object subclass: MathBox
+Actor subclass: MathBox
   state: value :: Integer = 0
 
   current -> Integer => self.value
