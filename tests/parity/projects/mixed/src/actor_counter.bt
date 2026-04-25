@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ActorCounter — a plain Actor subclass.
+/// Class-shape flavour: plain Actor class.
+Actor subclass: ActorCounter
+  state: count = 0
+
+  current => self.count
+
+  increment =>
+    self.count := self.count + 1
+    self.count

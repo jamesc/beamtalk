@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SanityTest — minimal BUnit test for the mixed parity fixture so the
+/// project's `test/` directory is non-empty (matches the conventions of
+/// `tests/parity/fixtures/simple_project/`).
+TestCase subclass: SanityTest
+
+  testActorCounter =>
+    self assert: ActorCounter spawn current equals: 0
+
+  testValuePoint =>
+    p := ValuePoint x: 3 y: 4
+    self assert: p sum equals: 7

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Cylinder — deep hierarchy member (Cylinder < Circle < Shape).
+/// Class-shape flavour: deep cross-file subclass.
+Circle subclass: Cylinder
+  field: height = 1.0
+
+  volume => self area * self.height

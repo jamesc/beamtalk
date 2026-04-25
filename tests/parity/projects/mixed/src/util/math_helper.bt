@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// MathHelper — tiny helper Object in a subdirectory.
+/// Class-shape flavour: nested-subdirectory file (module-name edge case).
+Object subclass: MathHelper
+
+  class double: n => n * 2
+
+  class triple: n => n * 3

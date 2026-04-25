@@ -60,7 +60,12 @@ pub fn build_project(path: &Path) -> Result<SurfaceOutput, String> {
 /// Value subclass: Foo
 /// Actor subclass: Bar
 /// TestCase subclass: BazTest
+/// Protocol define: Bazable
 /// ```
+///
+/// `Protocol define:` is included so the CLI scanner agrees with REPL
+/// and MCP load-project responses, which list registered protocols
+/// alongside concrete classes (BT-1950).
 fn scan_classes(root: &Path) -> std::collections::BTreeSet<String> {
     let mut out = std::collections::BTreeSet::new();
     visit_bt_files(root, &mut |file| {
@@ -75,6 +80,16 @@ fn scan_classes(root: &Path) -> std::collections::BTreeSet<String> {
                 if let Some(first) = name.split_whitespace().next() {
                     if first.chars().next().is_some_and(char::is_uppercase) {
                         out.insert(first.to_string());
+                    }
+                }
+            }
+            // Match `Protocol define: <Name>` so cross-file protocols
+            // (BT-1950) are visible in the CLI's class set.
+            if let Some(rest) = t.strip_prefix("Protocol define: ") {
+                if let Some(first) = rest.split_whitespace().next() {
+                    let bare = first.split('(').next().unwrap_or(first);
+                    if bare.chars().next().is_some_and(char::is_uppercase) {
+                        out.insert(bare.to_string());
                     }
                 }
             }
@@ -212,5 +227,23 @@ mod tests {
     fn diagnostic_lines_counts_classic_formats() {
         let text = "warning: redundant\nerror: bad\nfoo.bt:1:1: warning: x\nok\n";
         assert_eq!(count_diagnostic_lines(text), 3);
+    }
+
+    #[test]
+    fn scan_classes_picks_up_subclasses_and_protocols() {
+        let dir = std::env::temp_dir().join("beamtalk-parity-cli-scan-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("a.bt"),
+            "Value subclass: Foo\nProtocol define: Barable\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("b.bt"), "Actor subclass: Baz\n").unwrap();
+        let classes = scan_classes(&dir);
+        assert!(classes.contains("Foo"));
+        assert!(classes.contains("Baz"));
+        assert!(classes.contains("Barable"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

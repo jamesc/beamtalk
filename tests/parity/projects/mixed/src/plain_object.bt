@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// PlainObject — a class-methods-only Object (FFI-namespace shape).
+/// Class-shape flavour: plain Object subclass (no instance data).
+Object subclass: PlainObject
+
+  class label -> String => "plain"

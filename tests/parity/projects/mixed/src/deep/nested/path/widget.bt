@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// DeepWidget — class declared deep in the source tree to exercise the
+/// directory-segment portion of the BT-1670 module-name derivation
+/// (`deep/nested/path/widget.bt` → module `deep@nested@path@widget`).
+///
+/// Class-shape flavour: module-name edge case (deeply nested file).
+Value subclass: DeepWidget
+  field: depth = 3
