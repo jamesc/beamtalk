@@ -12,7 +12,7 @@ use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module, StateDeclaration, TypeParamDecl,
+    MethodKind, Module, StateDeclaration, TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -1185,16 +1185,17 @@ impl CoreErlangGenerator {
         if body.len() != 1 {
             return false;
         }
+        // BT-2073: classify `error:` via the well-known enum so a future rename
+        // forces this site to update too.
         matches!(
             &body[0].expression,
             Expression::MessageSend {
                 receiver,
-                selector: MessageSelector::Keyword(parts),
+                selector,
                 arguments,
                 ..
             } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-                && parts.len() == 1
-                && parts[0].keyword == "error:"
+                && matches!(selector.well_known(), Some(WellKnownSelector::Error))
                 && arguments.len() == 1
                 && matches!(&arguments[0], Expression::Literal(Literal::String(_), _))
         )

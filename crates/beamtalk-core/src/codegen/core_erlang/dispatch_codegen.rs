@@ -1675,14 +1675,20 @@ impl CoreErlangGenerator {
     /// Since `erlang:error/1` never returns (always throws an exception),
     /// expressions ending with `error:` should not be wrapped in reply tuples.
     pub(super) fn is_error_message_send(expr: &Expression) -> bool {
-        matches!(
-            expr,
-            Expression::MessageSend {
-                selector: MessageSelector::Keyword(parts),
-                arguments,
-                ..
-            } if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1
-        )
+        // BT-2073: classify via the well-known enum so a future rename of the
+        // `Error` variant forces this site to update too. The classifier
+        // guarantees keyword/arity = 1, but we still gate on arguments.len()
+        // for the same defensive reason the original predicate did.
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            return matches!(selector.well_known(), Some(WellKnownSelector::Error))
+                && arguments.len() == 1;
+        }
+        false
     }
 
     /// Generates the opening part of a field assignment with state threading.
@@ -1767,17 +1773,18 @@ impl CoreErlangGenerator {
         }
         if let Expression::MessageSend {
             receiver,
-            selector: MessageSelector::Keyword(parts),
+            selector,
             arguments,
             ..
         } = expr
         {
             if let Expression::Identifier(id) = receiver.as_ref() {
+                // BT-2073: classify via the well-known enum. The classifier
+                // already guarantees the two-part keyword shape; arguments.len()
+                // is checked defensively for parser-shape consistency.
                 if id.name == "self"
                     && self.lookup_var("self").is_none()
-                    && parts.len() == 2
-                    && parts[0].keyword == "fieldAt:"
-                    && parts[1].keyword == "put:"
+                    && matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut))
                     && arguments.len() == 2
                 {
                     return true;
