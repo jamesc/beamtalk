@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// TypedAccount — typed Actor (ADR 0025).
+/// Class-shape flavour: typed class modifier with annotated fields and
+/// methods. Mirrors `examples/bank/src/typed_account.bt`.
+typed Actor subclass: TypedAccount
+  state: balance :: Integer = 0
+  state: owner :: String = ""
+
+  deposit: amount :: Integer -> Integer =>
+    self.balance := self.balance + amount
+    self.balance
+
+  balance -> Integer => self.balance

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// AnimalPuppy — third level of the animal hierarchy
+/// (AnimalPuppy < AnimalDog < AbstractAnimal).
+/// Class-shape flavour: deep concrete cross-file subclass.
+AnimalDog subclass: AnimalPuppy
+
+  speak => "yip"

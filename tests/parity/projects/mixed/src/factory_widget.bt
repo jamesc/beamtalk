@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// FactoryWidget — Value class with several class-side factory methods.
+/// Class-shape flavour: class with class methods.
+Value subclass: FactoryWidget
+  field: kind = "default"
+  field: weight = 1
+
+  class small => self new: #{#kind => "small", #weight => 1}
+
+  class large => self new: #{#kind => "large", #weight => 10}
+
+  class default => self new
