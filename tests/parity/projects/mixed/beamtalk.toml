@@ -1,0 +1,14 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Fixture for BT-2079 — load-project parity across REPL `:sync`,
+# MCP `load_project` and CLI `beamtalk build`. Files in this project
+# cover every class-shape flavour that has historically caused a
+# load-path divergence (BT-1670, BT-1950).
+
+[package]
+name = "parity_mixed"
+version = "0.1.0"
+description = "Mixed-shape project for BT-2079 load-project parity"
+
+[dependencies]

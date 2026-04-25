@@ -41,6 +41,7 @@ async fn parity_suite() {
     let staged_project = stage_simple_project();
     let staged_bad_file = stage_diagnostic_file();
     let staged_test_runner = stage_test_runner_project();
+    let staged_mixed = stage_mixed_project();
 
     let mut failures: Vec<String> = Vec::new();
     for path in &case_paths {
@@ -57,6 +58,7 @@ async fn parity_suite() {
                 staged_project.as_deref(),
                 staged_bad_file.as_deref(),
                 staged_test_runner.as_deref(),
+                staged_mixed.as_deref(),
             );
             let outcome = run_step(step, &resolved, &mut repl_driver, &mut mcp, &repl).await;
             if let Err(msg) = outcome {
@@ -273,6 +275,24 @@ fn stage_test_runner_project() -> Option<PathBuf> {
     Some(dst)
 }
 
+/// Stage `tests/parity/projects/mixed/` to a stable temp directory so the
+/// BT-2079 load-project parity case can drive `:sync` / `load_project` /
+/// `beamtalk build` against the same on-disk tree across surfaces.
+///
+/// The fixture lives under `tests/parity/projects/` (sibling of `fixtures/`)
+/// to keep the larger BT-2079 project tree separate from the small
+/// per-case fixtures used by the original BT-2077 cases.
+fn stage_mixed_project() -> Option<PathBuf> {
+    let src = parity_root().join("projects/mixed");
+    if !src.exists() {
+        return None;
+    }
+    let dst = std::env::temp_dir().join("beamtalk-parity-mixed");
+    let _ = std::fs::remove_dir_all(&dst);
+    copy_tree(&src, &dst).ok()?;
+    Some(dst)
+}
+
 /// Class-name → test-runner-project test file mapping.
 ///
 /// Shared between [`cli_test_path_for_class`] and
@@ -360,6 +380,7 @@ fn resolve_placeholders(
     project: Option<&Path>,
     bad_file: Option<&Path>,
     test_runner_project: Option<&Path>,
+    mixed_project: Option<&Path>,
 ) -> String {
     let mut out = input.to_string();
     if let Some(p) = project {
@@ -370,6 +391,9 @@ fn resolve_placeholders(
     }
     if let Some(p) = test_runner_project {
         out = out.replace("<test_runner_project>", &p.to_string_lossy());
+    }
+    if let Some(p) = mixed_project {
+        out = out.replace("<mixed_project>", &p.to_string_lossy());
     }
     out
 }

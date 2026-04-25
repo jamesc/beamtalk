@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// StringExtensionsHost — owns the file's `String >>` extensions so the
+/// fixture has a concrete top-level class for the parity harness to count.
+/// Class-shape flavour: file with extension methods on an existing class.
+Object subclass: StringExtensionsHost
+
+  class label -> String => "string-extensions-host"
+
+String >> shoutLouder => self uppercase ++ "!"
+
+String >> exclaimWith: suffix :: String -> String => self ++ "!" ++ suffix

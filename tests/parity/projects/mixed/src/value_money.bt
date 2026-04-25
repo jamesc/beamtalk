@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ValueMoney — a value-object with multiple typed fields and a derived view.
+/// Class-shape flavour: valueObject (Value subclass with several fields and
+/// auto-generated `with*` setters).
+Value subclass: ValueMoney
+  field: amount = 0
+  field: currency = "USD"
+
+  display => self.amount printString ++ " " ++ self.currency
