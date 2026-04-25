@@ -204,9 +204,7 @@ pub fn format_file_diagnostic(err: &serde_json::Value, mode: OutputMode) -> Opti
     // Non-object entries (raw strings or arbitrary JSON) — surface them rather
     // than silently dropping. They have no path/line/hint to attach.
     if !err.is_object() {
-        let raw = err
-            .as_str()
-            .map_or_else(|| err.to_string(), str::to_owned);
+        let raw = err.as_str().map_or_else(|| err.to_string(), str::to_owned);
         return Some(format!("  {}", paint(mode, RED, &format!("Error: {raw}"))));
     }
 
