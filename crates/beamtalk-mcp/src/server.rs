@@ -21,7 +21,12 @@ use rmcp::{
 };
 use sha2::{Digest, Sha256};
 
+use beamtalk_repl_protocol::format::{self as fmt, Diagnostic as FmtDiagnostic, OutputMode};
+
 use crate::client::ReplClient;
+
+/// MCP tool responses are plain text (no terminal escapes).
+const MCP_OUTPUT_MODE: OutputMode = OutputMode::Plain;
 
 /// Drop guard that logs MCP tool completion with duration and result status.
 ///
@@ -224,11 +229,16 @@ fn pretty_json(value: &serde_json::Value) -> String {
 /// Check a REPL response for errors and return early with a formatted error result.
 ///
 /// The `$fallback` string is used when the response has no error message.
+/// Uses the shared `format_diagnostic` helper (BT-2086) so MCP error rendering
+/// stays in lockstep with CLI output.
 macro_rules! check_response {
     ($response:expr, $fallback:expr) => {
         if $response.is_error() {
             let msg = $response.error_message().unwrap_or($fallback);
-            return Ok(error_result(format!("ERROR: {msg}")));
+            return Ok(error_result(fmt::format_diagnostic(
+                &FmtDiagnostic::new(msg),
+                MCP_OUTPUT_MODE,
+            )));
         }
     };
 }
@@ -560,16 +570,15 @@ impl BeamtalkMcp {
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         if response.is_error() {
-            use std::fmt::Write as _;
             let msg = response.error_message().unwrap_or("Unknown error");
-            let mut error_text = format!("ERROR: {msg}");
+            let mut diag = FmtDiagnostic::new(msg);
             if let Some(line) = response.line {
-                let _ = write!(error_text, "\nLine: {line}");
+                diag = diag.with_line(line);
             }
             if let Some(ref hint) = response.hint {
-                let _ = write!(error_text, "\nHint: {hint}");
+                diag = diag.with_hint(hint);
             }
-            return Ok(error_result(error_text));
+            return Ok(error_result(fmt::format_diagnostic(&diag, MCP_OUTPUT_MODE)));
         }
 
         let mut parts = Vec::new();
@@ -586,16 +595,7 @@ impl BeamtalkMcp {
                 parts.push(Content::text("(no steps)"));
             } else {
                 for step in &steps {
-                    let src = step.get("src").and_then(|v| v.as_str()).unwrap_or("?");
-                    let val = step
-                        .get("value")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null);
-                    let val_str = match &val {
-                        serde_json::Value::String(s) => s.clone(),
-                        v => v.to_string(),
-                    };
-                    parts.push(Content::text(format!("{src} => {val_str}")));
+                    parts.push(Content::text(fmt::format_trace_step(step, MCP_OUTPUT_MODE)));
                 }
             }
         } else {
@@ -855,15 +855,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to list actors");
 
         let actors = response.actors.unwrap_or_default();
-        let text = if actors.is_empty() {
-            "No actors running".to_string()
-        } else {
-            actors
-                .iter()
-                .map(|a| format!("{} — pid: {}", a.class, a.pid))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
+        let text = fmt::format_actor_list(&actors, MCP_OUTPUT_MODE);
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
@@ -888,44 +880,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to list classes");
 
         let classes = response.class_list.unwrap_or_default();
-        let text = if classes.is_empty() {
-            "No classes found".to_string()
-        } else {
-            classes
-                .iter()
-                .map(|c| {
-                    let super_str = c.superclass.as_deref().unwrap_or("(root)");
-                    let doc_str = c
-                        .doc
-                        .as_deref()
-                        .unwrap_or("")
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .trim();
-                    let modifiers = {
-                        let mut m = Vec::new();
-                        if c.sealed {
-                            m.push("sealed");
-                        }
-                        if c.is_abstract {
-                            m.push("abstract");
-                        }
-                        if m.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" [{}]", m.join(", "))
-                        }
-                    };
-                    if doc_str.is_empty() {
-                        format!("{} < {}{}", c.name, super_str, modifiers)
-                    } else {
-                        format!("{} < {}{} — {}", c.name, super_str, modifiers, doc_str)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
+        let text = fmt::format_class_list(&classes, MCP_OUTPUT_MODE);
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
@@ -1210,7 +1165,7 @@ impl BeamtalkMcp {
         let has_failures = response.has_test_error();
 
         let text = match response.results {
-            Some(results) => pretty_json(&results),
+            Some(results) => fmt::format_test_result(&results, MCP_OUTPUT_MODE),
             None => "Tests completed (no structured results)".to_string(),
         };
 
