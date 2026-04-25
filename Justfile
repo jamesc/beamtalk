@@ -22,10 +22,10 @@ default:
 #        + just test-integration test-mcp test-e2e (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-integration test-mcp test-parity test-e2e check-corpus
+ci: build lint test test-integration test-mcp test-parity test-e2e check-corpus check-surface-drift
 
 [windows]
-ci: build clippy fmt-check-rust test test-integration test-mcp test-parity test-e2e
+ci: build clippy fmt-check-rust test test-integration test-mcp test-parity test-e2e check-surface-drift
 
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]
@@ -192,6 +192,13 @@ check-corpus: build-rust
         exit 1
     fi
     echo "✅ corpus.json is up to date"
+
+# Check that REPL ops × CLI × MCP × LSP coverage matches docs/development/surface-parity.md (BT-2082).
+# Fails if a new REPL op landed without a parity-doc row, or a binding listed
+# in the doc has no corresponding code artifact (MCP tool / REPL meta-cmd / LSP capability).
+check-surface-drift:
+    @echo "🔎 Checking surface parity drift..."
+    @cargo run -p beamtalk-surface-drift --quiet
 
 # Evaluate search quality from structured MCP server logs (ADR 0062)
 # Usage: just search-eval /path/to/mcp-server.log
