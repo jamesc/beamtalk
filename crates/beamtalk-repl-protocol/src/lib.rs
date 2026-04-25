@@ -11,6 +11,7 @@
 //! backend. Having a single source of truth prevents the two clients from
 //! diverging when the protocol evolves.
 
+pub mod format;
 mod request;
 mod response;
 

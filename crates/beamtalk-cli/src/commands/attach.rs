@@ -14,6 +14,7 @@ use miette::{Result, miette};
 
 use super::repl::client::ReplClient;
 use super::repl::color;
+use super::repl::display::output_mode;
 use super::workspace::{self, get_node_info, read_workspace_cookie};
 
 /// Run the `beamtalk workspace attach` command.
@@ -109,8 +110,14 @@ fn connect_and_run(host: &str, port: u16, cookie: &str) -> Result<()> {
             if let Some(actors) = response.actors {
                 if !actors.is_empty() {
                     println!("\nAvailable actors:");
-                    for actor in actors {
-                        println!("  - {} ({})", actor.class, actor.pid);
+                    for actor in &actors {
+                        println!(
+                            "  - {}",
+                            beamtalk_repl_protocol::format::format_actor_summary(
+                                actor,
+                                output_mode(),
+                            )
+                        );
                     }
                 }
             }
