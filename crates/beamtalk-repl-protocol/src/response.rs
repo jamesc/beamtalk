@@ -195,6 +195,10 @@ impl ReplResponse {
     }
 
     /// Get the error message (either legacy `message` or current `error` field).
+    ///
+    /// Falls back to the first `errors[].message` entry when neither top-level
+    /// field is set — this matches load-project responses which surface
+    /// per-file failures only via the `errors` list.
     pub fn error_message(&self) -> Option<&str> {
         if let Some(ref msg) = self.message {
             return Some(msg.as_str());
@@ -202,7 +206,9 @@ impl ReplResponse {
         if let Some(ref err) = self.error {
             return Some(err.as_str());
         }
-        None
+        self.errors
+            .iter()
+            .find_map(|e| e.get("message").and_then(serde_json::Value::as_str))
     }
 
     /// Get the result value as a formatted string.

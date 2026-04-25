@@ -73,6 +73,34 @@ impl RequestBuilder {
         })
     }
 
+    /// Build a `complete` request with cursor position and an optional session ID.
+    #[must_use]
+    pub fn complete_with_session(
+        code: &str,
+        cursor: usize,
+        session: Option<&str>,
+    ) -> serde_json::Value {
+        let mut req = Self::complete_with_cursor(code, cursor);
+        if let Some(sid) = session {
+            req["session"] = serde_json::Value::String(sid.to_owned());
+        }
+        req
+    }
+
+    /// Build an `erlang-complete` request with optional module filter.
+    #[must_use]
+    pub fn erlang_complete(prefix: &str, module: Option<&str>) -> serde_json::Value {
+        let mut req = serde_json::json!({
+            "op": "erlang-complete",
+            "id": next_msg_id(),
+            "prefix": prefix,
+        });
+        if let Some(m) = module {
+            req["module"] = serde_json::Value::String(m.to_owned());
+        }
+        req
+    }
+
     /// Build an `info` request.
     #[must_use]
     pub fn info(symbol: &str) -> serde_json::Value {
