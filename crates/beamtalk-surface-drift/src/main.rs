@@ -728,6 +728,7 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "definition_provider" => vec!["textDocument/definition".into()],
         "references_provider" => vec!["textDocument/references".into()],
         "document_symbol_provider" => vec!["textDocument/documentSymbol".into()],
+        "workspace_symbol_provider" => vec!["workspace/symbol".into()],
         "document_formatting_provider" => vec!["textDocument/formatting".into()],
         "document_range_formatting_provider" => vec!["textDocument/rangeFormatting".into()],
         "code_action_provider" => vec!["textDocument/codeAction".into()],

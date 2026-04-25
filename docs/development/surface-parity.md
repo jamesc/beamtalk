@@ -77,9 +77,9 @@ When adding a new capability to any surface, update this table. If the capabilit
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `docs` | -- | -- | `docs` | -- | Class/method documentation (deprecated op, use `Beamtalk help:`) |
+| `docs` | -- | -- | `docs` | `textDocument/hover` | Class/method documentation (deprecated op, use `Beamtalk help:`); LSP exposes via hover (BT-2081) |
 | `methods` | -- | -- | -- | -- | List methods for a class |
-| `list-classes` | -- | -- | `list_classes` | -- | List available classes |
+| `list-classes` | -- | -- | `list_classes` | `workspace/symbol` | List available classes; LSP exposes via workspace symbol query (BT-2081) |
 | `erlang-help` | -- | -- | -- | -- | Erlang module documentation |
 | `erlang-complete` | -- | -- | -- | -- | Erlang module/function completion |
 
@@ -152,9 +152,8 @@ These LSP capabilities are editor-specific and have no direct REPL op.
 
 | LSP capability | Notes |
 |----------------|-------|
-| `textDocument/hover` | `surface-specific: editor hover information` |
 | `textDocument/signatureHelp` | `surface-specific: editor parameter hints` |
-| `textDocument/definition` | `surface-specific: editor go-to-definition` |
+| `textDocument/definition` | `surface-specific: editor go-to-definition; parity-tested (BT-2081) against the user-class set surfaced by MCP list_classes — every LSP-resolved location must point inside the loaded project tree` |
 | `textDocument/references` | `surface-specific: editor find-all-references` |
 | `textDocument/documentSymbol` | `surface-specific: editor outline/breadcrumbs` |
 | `textDocument/rangeFormatting` | `surface-specific: editor format-selection` |

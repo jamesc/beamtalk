@@ -136,6 +136,195 @@ impl LspDriver {
         }
     }
 
+    /// Open a file via `textDocument/didOpen` without waiting for diagnostics.
+    ///
+    /// Used by the LSP parity capability suite (BT-2081): hover, completion,
+    /// definition, and workspace/symbol all need the document to be indexed
+    /// before they can produce results, but unlike the diagnostic case they
+    /// don't need the harness to wait for `publishDiagnostics`.
+    pub async fn open_file(&mut self, path: &Path) -> Result<String, String> {
+        let text =
+            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let uri = path_to_uri(path);
+        let did_open = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": "beamtalk",
+                    "version": 1,
+                    "text": text
+                }
+            }
+        });
+        self.send(&did_open).await?;
+        // Drain the publishDiagnostics that follows didOpen so it doesn't
+        // confuse later requests. Best-effort with a short deadline; missing
+        // diagnostics for a syntactically valid file is fine.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.read_message(Duration::from_secs(5)),
+        )
+        .await;
+        Ok(uri)
+    }
+
+    /// Drive `textDocument/hover` at a position and return the markdown body.
+    ///
+    /// Returns the empty string when the server reports no hover info.
+    pub async fn hover(&mut self, uri: &str, line: u32, character: u32) -> Result<String, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character}
+            }
+        });
+        self.send(&req).await?;
+        let v = self.await_response(id).await?;
+        Ok(v.pointer("/result/contents/value")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// Drive `textDocument/completion` and return the completion labels.
+    pub async fn completion(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<String>, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character}
+            }
+        });
+        self.send(&req).await?;
+        let v = self.await_response(id).await?;
+        let mut out = Vec::new();
+        let result = v.pointer("/result").cloned().unwrap_or(Value::Null);
+        // CompletionResponse may be an array of items or an object with `items`.
+        let items = if let Some(arr) = result.as_array() {
+            arr.clone()
+        } else if let Some(arr) = result.get("items").and_then(Value::as_array) {
+            arr.clone()
+        } else {
+            Vec::new()
+        };
+        for item in items {
+            if let Some(label) = item.get("label").and_then(Value::as_str) {
+                out.push(label.to_string());
+            }
+        }
+        Ok(out)
+    }
+
+    /// Drive `textDocument/definition` and return `(uri, line)` of the resolved
+    /// location, or `None` when nothing resolves.
+    pub async fn definition(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Option<(String, u32)>, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character}
+            }
+        });
+        self.send(&req).await?;
+        let v = self.await_response(id).await?;
+        let result = v.pointer("/result").cloned().unwrap_or(Value::Null);
+        if result.is_null() {
+            return Ok(None);
+        }
+        // Result may be a single Location or an array of Locations.
+        let loc = if result.is_array() {
+            result
+                .as_array()
+                .and_then(|a| a.first())
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else {
+            result
+        };
+        let target_uri = loc
+            .get("uri")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let line = loc
+            .pointer("/range/start/line")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or(0);
+        if target_uri.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some((target_uri, line)))
+        }
+    }
+
+    /// Drive `workspace/symbol` and return the matching class names.
+    pub async fn workspace_symbol(&mut self, query: &str) -> Result<Vec<String>, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "workspace/symbol",
+            "params": {"query": query}
+        });
+        self.send(&req).await?;
+        let v = self.await_response(id).await?;
+        let mut out = Vec::new();
+        if let Some(arr) = v.pointer("/result").and_then(Value::as_array) {
+            for item in arr {
+                if let Some(name) = item.get("name").and_then(Value::as_str) {
+                    out.push(name.to_string());
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Wait until a JSON-RPC response with the given id arrives, skipping
+    /// any notifications that come in first.
+    async fn await_response(&mut self, want_id: i64) -> Result<Value, String> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!("timed out waiting for response id {want_id}"));
+            }
+            let remaining = deadline - tokio::time::Instant::now();
+            let v = self.read_message(remaining).await?;
+            if v.get("id") == Some(&Value::from(want_id)) {
+                if let Some(err) = v.get("error") {
+                    return Err(format!("lsp response error: {err}"));
+                }
+                return Ok(v);
+            }
+        }
+    }
+
     /// Send `shutdown` + `exit` and reap the child.
     pub async fn close(mut self) {
         let shutdown_id = self.next_id;
