@@ -1054,8 +1054,15 @@ Performance regression tests are planned but not yet implemented.
 
 ---
 
+## Surface Parity
+
+When adding or modifying operations across surfaces (CLI, REPL, MCP, LSP), consult the [Surface Parity Map](surface-parity.md) to ensure consistent coverage. Any operation not labelled `surface-specific` must produce equivalent output across all surfaces where it appears.
+
+---
+
 ## References
 
+- [Surface Parity Map](surface-parity.md) - Cross-surface operation coverage matrix
 - [ADR 0014: Beamtalk Test Framework](../ADR/0014-beamtalk-test-framework.md) - Architecture decision for the three-layer test strategy
 - [test-package-compiler/README.md](../../test-package-compiler/README.md) - Snapshot test details
 - [tests/e2e/README.md](../../tests/e2e/README.md) - E2E test framework details

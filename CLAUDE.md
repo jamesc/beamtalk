@@ -20,6 +20,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 - **REPL output:** Before changing any REPL display value, prompt format, or output behaviour, confirm with the user — existing output is usually intentional and covered by e2e tests. Do not "fix" output that looks wrong without checking first.
 - **Test assertions:** Every expression in test files MUST have a `// =>` assertion (even `// => _`). No assertion = no execution.
 - **Cross-platform temp paths:** Never hardcode `/tmp/` in tests. Use `File tempDirectory` (BT) or `beamtalk_file:'tempDirectory'()` (Erlang) when an absolute temp path is required, then concatenate: `tmp ++ "/my_file.txt"`. For runtime EUnit tests, prefer relative temp filenames in the rebar3 test working directory when possible. See `docs/development/testing-strategy.md` for details.
+- **Surface parity:** When adding or modifying operations on any surface (CLI, REPL, MCP, LSP), update `docs/development/surface-parity.md`. Any operation not labelled `surface-specific` must produce equivalent output across all surfaces where it appears.
 
 ## CI Commands
 
@@ -95,4 +96,5 @@ Fix inline: formatting/typos in files you're modifying, test failures from your 
 | Erlang guidelines | `docs/development/erlang-guidelines.md` |
 | Common tasks | `docs/development/common-tasks.md` |
 | Debugging | `docs/development/debugging.md` |
+| Surface parity | `docs/development/surface-parity.md` |
 | ADRs | `docs/ADR/` |
