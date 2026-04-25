@@ -1,0 +1,15 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: BT-2052 cross-file class extraction regression.
+#
+# `caller.bt` annotates a parameter with the type of `Greeter` (defined in a
+# sibling file). Without cross-file class extraction, lint surfaces would
+# falsely report "Unresolved class `Greeter`". With it, both files lint clean.
+
+[package]
+name = "parity_cross_file_class"
+version = "0.1.0"
+description = "BT-2052 regression: cross-file class extraction parity fixture"
+
+[dependencies]

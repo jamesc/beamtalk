@@ -412,12 +412,15 @@ test-e2e: build-stdlib
     @echo "🧪 Running E2E tests (slow - ~50s)..."
     cargo test --test e2e -- --ignored
 
-# Run cross-surface parity tests (BT-2077)
+# Run cross-surface parity tests (BT-2077, BT-2078)
 # Drives the same input through REPL / MCP / CLI / LSP and asserts agreement.
 # Single-threaded (--test-threads=1) because cases share one workspace.
+# `parity` is the value/load/lint/test corpus; `diagnostic_parity` is the
+# diagnostic-shape corpus added in BT-2078.
 test-parity: build
     @echo "🧪 Running parity tests (REPL / MCP / CLI / LSP)..."
     cargo test -p beamtalk-parity-tests --test parity -- --ignored --test-threads=1
+    cargo test -p beamtalk-parity-tests --test diagnostic_parity -- --ignored --test-threads=1
     @echo "✅ Parity tests complete"
 
 # Run workspace integration tests (requires Erlang/OTP runtime, ~10s)

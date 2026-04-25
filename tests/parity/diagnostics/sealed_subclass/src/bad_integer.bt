@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Subclassing `Integer` (sealed in builtins) must produce a `Cannot subclass
+/// sealed class` diagnostic on every surface.
+Integer subclass: BadInteger
+
+  zero -> Integer => 0

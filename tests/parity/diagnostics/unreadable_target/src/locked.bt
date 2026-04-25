@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// This file is the direct lint target whose mode is chmod'd to 000 by the
+/// parity harness. The on-disk content is irrelevant since every surface
+/// fails before reading it. See BT-2067.
+Object subclass: LockedTarget
+  hello -> String => "hi"
