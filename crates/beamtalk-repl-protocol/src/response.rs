@@ -177,8 +177,8 @@ pub struct ReplResponse {
 impl ReplResponse {
     /// Check if this is an error response (either legacy or current format).
     pub fn is_error(&self) -> bool {
-        if let Some(ref t) = self.response_type {
-            return t == "error";
+        if self.response_type.as_deref() == Some("error") {
+            return true;
         }
         if let Some(ref status) = self.status {
             return status.iter().any(|s| s == "error");
