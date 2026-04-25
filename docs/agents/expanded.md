@@ -600,7 +600,7 @@ Detailed coding standards are in `docs/development/`:
 ### CI Commands
 
 ```bash
-just ci                      # Run all CI checks (build, lint, test, test-stdlib, test-integration, test-mcp, test-repl-protocol)
+just ci                      # Run all CI checks (build, lint, test, test-integration, test-mcp, test-parity, test-repl-protocol, check-corpus, check-surface-drift)
 just build                   # Build Rust + Erlang runtime
 just test                    # Rust + stdlib + BUnit + runtime tests
 just test-stdlib             # Compiled language feature tests (~14s)
