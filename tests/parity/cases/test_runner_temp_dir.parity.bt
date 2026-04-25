@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case (BT-2080): a TestCase that round-trips a file via
+// `File tempDirectory` exercises the cross-platform temp-path policy
+// (CLAUDE.md) inside the test runner. All surfaces must agree on `pass`
+// — i.e. the temp file is reachable from each test runner regardless of
+// process working directory.
+
+// @input
+TempDirRunnerTest
+// @surfaces repl, mcp, cli
+// @op test
+// @expect pass

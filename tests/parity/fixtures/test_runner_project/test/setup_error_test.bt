@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BUnit test whose `setUp` raises an exception — direct counter to BT-931.
+///
+/// Before BT-931 was fixed the MCP `test` tool reported "setUp failed:
+/// error:undef" for *every* fixture (the runner mistook a normal class
+/// resolution path for an `undef`). The parity test (BT-2080) re-asserts
+/// that all three surfaces (REPL `:test`, MCP `test`, CLI `beamtalk test`)
+/// surface a real failure — not a phantom `error:undef` — when setUp
+/// genuinely raises.
+TestCase subclass: SetupErrorRunnerTest
+
+  setUp =>
+    // Deliberate failure inside setUp. The test runner must report this
+    // as a setUp failure, not as `error:undef`, on every surface.
+    Error signal: "intentional setup failure"
+
+  testNeverReached =>
+    // This test body must never execute because setUp aborts. The runner
+    // should surface a setUp failure for it across surfaces.
+    self assert: true

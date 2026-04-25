@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Always-pass BUnit test for the test-runner parity case (BT-2080).
+///
+/// Ensures every surface (REPL `:test`, MCP `test`, CLI `beamtalk test`)
+/// agrees on the trivial happy path before we exercise the harder cases.
+TestCase subclass: PassingRunnerTest
+
+  testTrivialEquality => self assert: 1 + 1 equals: 2
