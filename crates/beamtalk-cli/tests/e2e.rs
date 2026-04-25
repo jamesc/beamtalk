@@ -684,11 +684,10 @@ impl ReplClient {
             return Err(message.to_string());
         }
 
-        let value = response.value_string();
-        Ok(if value.is_empty() {
-            "null".to_string()
-        } else {
-            value
+        Ok(match &response.value {
+            None => "null".to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(v) => v.to_string(),
         })
     }
 
