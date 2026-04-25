@@ -30,5 +30,9 @@ tracing.workspace = true
 name = "parity"
 path = "tests/parity.rs"
 
+[[test]]
+name = "diagnostic_parity"
+path = "tests/diagnostic_parity.rs"
+
 [lints]
 workspace = true

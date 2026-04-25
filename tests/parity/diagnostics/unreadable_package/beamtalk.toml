@@ -1,0 +1,19 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: BT-2056 regression — when a sibling file in the
+# package's cross-file extraction set is unreadable, MCP `lint` and
+# `diagnostic_summary` must surface a warning so the caller knows the
+# extraction set is incomplete.
+#
+# The harness chmods `src/locked_sibling.bt` to 000 before driving the
+# surfaces. The actual lint target is `src/target.bt` (which references the
+# locked sibling via a type annotation); this exercises the case where the
+# target itself is readable but cross-file extraction is degraded.
+
+[package]
+name = "parity_unreadable_package"
+version = "0.1.0"
+description = "BT-2056 regression: unreadable package-extraction file parity fixture"
+
+[dependencies]
