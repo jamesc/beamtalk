@@ -171,14 +171,13 @@ impl CoreErlangGenerator {
             return self.try_generate_block_value_unary(receiver, arguments);
         }
 
-        match selector {
-            // `repeat` is not a well-known selector (not intrinsified outside block
-            // evaluation semantics), so it stays as a string match.
-            MessageSelector::Unary(name) if name == "repeat" => {
-                let doc = self.generate_repeat(receiver)?;
-                Ok(Some(doc))
-            }
+        // BT-2073: `repeat` is well-known; dispatch via the enum.
+        if matches!(selector.well_known(), Some(WellKnownSelector::Repeat)) {
+            let doc = self.generate_repeat(receiver)?;
+            return Ok(Some(doc));
+        }
 
+        match selector {
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                 self.try_generate_block_keyword_message(
@@ -253,10 +252,11 @@ impl CoreErlangGenerator {
     /// Generates code for keyword block messages (`value:`, `whileTrue:`, `timesRepeat:`, etc.).
     ///
     /// Well-known keyword selectors (`value:`/`value:value:`/`value:value:value:`,
-    /// `on:do:`) route through the `WellKnownSelector` enum so arity is checked
-    /// structurally by the classifier (see BT-1260 / BT-2065 epic). The remaining
-    /// keyword selectors (`whileTrue:`, `whileFalse:`, `timesRepeat:`, `to:do:`,
-    /// `to:by:do:`, `ensure:`) are not in the enum and stay as string matches.
+    /// `on:do:`, `whileTrue:`/`whileFalse:`, `ensure:`) route through the
+    /// `WellKnownSelector` enum so arity is checked structurally by the
+    /// classifier (see BT-1260 / BT-2065 epic / BT-2073). The remaining keyword
+    /// selectors (`timesRepeat:`, `to:do:`, `to:by:do:`) are class-specific
+    /// loop helpers and stay as string matches.
     fn try_generate_block_keyword_message(
         &mut self,
         receiver: &Expression,
@@ -264,7 +264,7 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
-        // Well-known block-application / exception-handling selectors.
+        // Well-known block-application / loop / exception selectors.
         // The classifier handles arity matching — intercept before the FFI path.
         match selector.well_known() {
             Some(
@@ -279,30 +279,30 @@ impl CoreErlangGenerator {
                 let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
                 return Ok(Some(doc));
             }
+            Some(WellKnownSelector::WhileTrue) => {
+                debug_assert_eq!(arguments.len(), 1);
+                let doc = self.generate_while_true(receiver, &arguments[0])?;
+                return Ok(Some(doc));
+            }
+            Some(WellKnownSelector::WhileFalse) => {
+                debug_assert_eq!(arguments.len(), 1);
+                let doc = self.generate_while_false(receiver, &arguments[0])?;
+                return Ok(Some(doc));
+            }
+            Some(WellKnownSelector::Ensure) => {
+                debug_assert_eq!(arguments.len(), 1);
+                let doc = self.generate_ensure(receiver, &arguments[0])?;
+                return Ok(Some(doc));
+            }
             _ => {}
         }
 
         match selector_name {
-            "whileTrue:" => {
-                let doc = self.generate_while_true(receiver, &arguments[0])?;
-                Ok(Some(doc))
-            }
-
-            "whileFalse:" => {
-                let doc = self.generate_while_false(receiver, &arguments[0])?;
-                Ok(Some(doc))
-            }
-
             "timesRepeat:" => self.try_generate_times_repeat(receiver, arguments),
 
             "to:do:" if arguments.len() == 2 => self.try_generate_to_do(receiver, arguments),
 
             "to:by:do:" if arguments.len() == 3 => self.try_generate_to_by_do(receiver, arguments),
-
-            "ensure:" => {
-                let doc = self.generate_ensure(receiver, &arguments[0])?;
-                Ok(Some(doc))
-            }
 
             _ => Ok(None),
         }
@@ -1064,80 +1064,77 @@ impl CoreErlangGenerator {
             ));
         }
 
-        match selector {
-            MessageSelector::Keyword(parts) => {
-                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-
-                match selector_name.as_str() {
-                    "perform:withArguments:" if arguments.len() == 2 => {
-                        // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
-                        let (preamble, mut docs) = self.capture_subexpr_sequence(
-                            &[receiver, &arguments[0], &arguments[1]],
-                            "Perf",
-                        )?;
-                        let recv_doc = docs.remove(0);
-                        let sel_doc = docs.remove(0);
-                        let args_doc = docs.remove(0);
-                        let call_doc = docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
-                            recv_doc,
-                            ", ",
-                            sel_doc,
-                            ", ",
-                            args_doc,
-                            ")",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble, call_doc, "PerfRes",
-                        )))
-                    }
-                    // BT-1664: Execute a class method in the caller's process,
-                    // bypassing the class object's gen_server.
-                    "performLocally:withArguments:" if arguments.len() == 2 => {
-                        // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
-                        let (preamble, mut docs) = self.capture_subexpr_sequence(
-                            &[receiver, &arguments[0], &arguments[1]],
-                            "PerfLoc",
-                        )?;
-                        let recv_doc = docs.remove(0);
-                        let sel_doc = docs.remove(0);
-                        let args_doc = docs.remove(0);
-                        let call_doc = docvec![
-                            "call 'beamtalk_object_class':'local_call'(",
-                            recv_doc,
-                            ", ",
-                            sel_doc,
-                            ", ",
-                            args_doc,
-                            ")",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble,
-                            call_doc,
-                            "PerfLocRes",
-                        )))
-                    }
-                    "perform:" if arguments.len() == 1 => {
-                        // BT-1942: Hoist open-scope receiver + selector arg.
-                        let (preamble, mut docs) =
-                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "Perf")?;
-                        let recv_doc = docs.remove(0);
-                        let sel_doc = docs.remove(0);
-                        let call_doc = docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
-                            recv_doc,
-                            ", ",
-                            sel_doc,
-                            ", [])",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble, call_doc, "PerfRes",
-                        )))
-                    }
-                    _ => Ok(None),
-                }
+        // BT-2073: `perform:` family routes through the `WellKnownSelector` enum;
+        // the classifier guarantees arity, so explicit `arguments.len()` guards
+        // become `debug_assert_eq!` for parser-shape invariants.
+        match selector.well_known() {
+            Some(WellKnownSelector::PerformWithArgs) => {
+                debug_assert_eq!(arguments.len(), 2);
+                // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
+                let (preamble, mut docs) = self
+                    .capture_subexpr_sequence(&[receiver, &arguments[0], &arguments[1]], "Perf")?;
+                let recv_doc = docs.remove(0);
+                let sel_doc = docs.remove(0);
+                let args_doc = docs.remove(0);
+                let call_doc = docvec![
+                    "call 'beamtalk_message_dispatch':'send'(",
+                    recv_doc,
+                    ", ",
+                    sel_doc,
+                    ", ",
+                    args_doc,
+                    ")",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble, call_doc, "PerfRes",
+                )))
             }
-            MessageSelector::Unary(_) | MessageSelector::Binary(_) => Ok(None),
+            // BT-1664: Execute a class method in the caller's process,
+            // bypassing the class object's gen_server.
+            Some(WellKnownSelector::PerformLocallyWithArgs) => {
+                debug_assert_eq!(arguments.len(), 2);
+                // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
+                let (preamble, mut docs) = self.capture_subexpr_sequence(
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "PerfLoc",
+                )?;
+                let recv_doc = docs.remove(0);
+                let sel_doc = docs.remove(0);
+                let args_doc = docs.remove(0);
+                let call_doc = docvec![
+                    "call 'beamtalk_object_class':'local_call'(",
+                    recv_doc,
+                    ", ",
+                    sel_doc,
+                    ", ",
+                    args_doc,
+                    ")",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble,
+                    call_doc,
+                    "PerfLocRes",
+                )))
+            }
+            Some(WellKnownSelector::Perform) => {
+                debug_assert_eq!(arguments.len(), 1);
+                // BT-1942: Hoist open-scope receiver + selector arg.
+                let (preamble, mut docs) =
+                    self.capture_subexpr_sequence(&[receiver, &arguments[0]], "Perf")?;
+                let recv_doc = docs.remove(0);
+                let sel_doc = docs.remove(0);
+                let call_doc = docvec![
+                    "call 'beamtalk_message_dispatch':'send'(",
+                    recv_doc,
+                    ", ",
+                    sel_doc,
+                    ", [])",
+                ];
+                Ok(Some(self.finalize_dispatch_with_preamble(
+                    preamble, call_doc, "PerfRes",
+                )))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -1427,62 +1424,57 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         // BT-1254: `error:` on a ClassReference is a class method call (e.g. `Result error: reason`),
         // not the Object#error: error-signaling intrinsic. Skip so class method dispatch handles it.
+        // Also covers `Logger error: "msg"` — see `WellKnownSelector::Error` rustdoc
+        // for the dual-use caveat (Object >> error: vs Logger class >> error:).
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        match selector {
-            MessageSelector::Keyword(parts) => {
-                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-
-                match selector_name.as_str() {
-                    "error:" if arguments.len() == 1 => {
-                        // BT-1942: Hoist open-scope receiver + message (e.g. class method self-sends).
-                        let (preamble, mut docs) =
-                            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "Err")?;
-                        let recv_doc = docs.remove(0);
-                        let msg_doc = docs.remove(0);
-                        let recv_var = self.fresh_temp_var("Obj");
-                        let msg_var = self.fresh_temp_var("Msg");
-                        let class_var = self.fresh_temp_var("Class");
-                        let err0 = self.fresh_temp_var("Err");
-                        let err1 = self.fresh_temp_var("Err");
-
-                        let call_doc = docvec![
-                            "let ",
-                            Document::String(recv_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            Document::String(msg_var.clone()),
-                            " = ",
-                            msg_doc,
-                            " in let ",
-                            Document::String(class_var.clone()),
-                            " = call 'beamtalk_primitive':'class_of'(",
-                            Document::String(recv_var),
-                            ") in let ",
-                            Document::String(err0.clone()),
-                            " = call 'beamtalk_error':'new'('user_error', ",
-                            Document::String(class_var),
-                            ") in let ",
-                            Document::String(err1.clone()),
-                            " = call 'beamtalk_error':'with_message'(",
-                            Document::String(err0),
-                            ", ",
-                            Document::String(msg_var),
-                            ") in call 'beamtalk_error':'raise'(",
-                            Document::String(err1),
-                            ")",
-                        ];
-                        Ok(Some(self.finalize_dispatch_with_preamble(
-                            preamble, call_doc, "ErrRes",
-                        )))
-                    }
-                    _ => Ok(None),
-                }
-            }
-            _ => Ok(None),
+        // BT-2073: `error:` is well-known; dispatch via the enum.
+        if !matches!(selector.well_known(), Some(WellKnownSelector::Error)) {
+            return Ok(None);
         }
+        debug_assert_eq!(arguments.len(), 1);
+        // BT-1942: Hoist open-scope receiver + message (e.g. class method self-sends).
+        let (preamble, mut docs) =
+            self.capture_subexpr_sequence(&[receiver, &arguments[0]], "Err")?;
+        let recv_doc = docs.remove(0);
+        let msg_doc = docs.remove(0);
+        let recv_var = self.fresh_temp_var("Obj");
+        let msg_var = self.fresh_temp_var("Msg");
+        let class_var = self.fresh_temp_var("Class");
+        let err0 = self.fresh_temp_var("Err");
+        let err1 = self.fresh_temp_var("Err");
+
+        let call_doc = docvec![
+            "let ",
+            Document::String(recv_var.clone()),
+            " = ",
+            recv_doc,
+            " in let ",
+            Document::String(msg_var.clone()),
+            " = ",
+            msg_doc,
+            " in let ",
+            Document::String(class_var.clone()),
+            " = call 'beamtalk_primitive':'class_of'(",
+            Document::String(recv_var),
+            ") in let ",
+            Document::String(err0.clone()),
+            " = call 'beamtalk_error':'new'('user_error', ",
+            Document::String(class_var),
+            ") in let ",
+            Document::String(err1.clone()),
+            " = call 'beamtalk_error':'with_message'(",
+            Document::String(err0),
+            ", ",
+            Document::String(msg_var),
+            ") in call 'beamtalk_error':'raise'(",
+            Document::String(err1),
+            ")",
+        ];
+        Ok(Some(self.finalize_dispatch_with_preamble(
+            preamble, call_doc, "ErrRes",
+        )))
     }
 
     /// Generates code for object identity and representation methods.
@@ -1497,6 +1489,27 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // BT-2073: `hash` (well-known) — dispatch via the enum so the
+        // classifier validates kind/arity.
+        if matches!(selector.well_known(), Some(WellKnownSelector::Hash)) {
+            debug_assert!(arguments.is_empty());
+            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
+            let recv_doc = docs.remove(0);
+            let recv_var = self.fresh_temp_var("Obj");
+            let call_doc = docvec![
+                "let ",
+                Document::String(recv_var.clone()),
+                " = ",
+                recv_doc,
+                " in call 'erlang':'phash2'(",
+                Document::String(recv_var),
+                ")",
+            ];
+            return Ok(Some(
+                self.finalize_dispatch_with_preamble(preamble, call_doc, "HashRes"),
+            ));
+        }
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
@@ -1511,24 +1524,6 @@ impl CoreErlangGenerator {
                         preamble,
                         recv_doc,
                         "YourselfRes",
-                    )))
-                }
-                "hash" if arguments.is_empty() => {
-                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                    let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "Obj")?;
-                    let recv_doc = docs.remove(0);
-                    let recv_var = self.fresh_temp_var("Obj");
-                    let call_doc = docvec![
-                        "let ",
-                        Document::String(recv_var.clone()),
-                        " = ",
-                        recv_doc,
-                        " in call 'erlang':'phash2'(",
-                        Document::String(recv_var),
-                        ")",
-                    ];
-                    Ok(Some(self.finalize_dispatch_with_preamble(
-                        preamble, call_doc, "HashRes",
                     )))
                 }
                 // BT-477: printString removed as intrinsic — now uses polymorphic
@@ -1557,65 +1552,64 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        match selector {
-            MessageSelector::Unary(name) => match name.as_str() {
-                "fieldNames" if arguments.is_empty() => {
-                    // BT-1321: Fast-path for `self` receiver in actor context.
-                    // `Self` is a `#beamtalk_object{..., pid: self()}` tuple, so the
-                    // normal is_tuple branch would call sync_send(self()) which is
-                    // gen_server:call(self(), ...) → deadlock.
-                    // Use beamtalk_primitive:send(State, ...) directly instead.
-                    if let Expression::Identifier(id) = receiver {
-                        if id.name == "self"
-                            && self.context == super::CodeGenContext::Actor
-                            && self.lookup_var("self").is_none()
-                        {
-                            let doc = docvec![
-                                "call 'beamtalk_primitive':'send'(",
-                                Document::String(self.current_state_var()),
-                                ", 'fieldNames', [])",
-                            ];
-                            return Ok(Some(doc));
-                        }
-                    }
-
-                    // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                    let (preamble, mut docs) =
-                        self.capture_subexpr_sequence(&[receiver], "FNames")?;
-                    let recv_doc = docs.remove(0);
-                    let receiver_var = self.fresh_var("Receiver");
-                    let pid_var = self.fresh_var("Pid");
-
-                    // BT-924: If receiver is a map (value object or stdlib tagged map),
-                    // delegate to beamtalk_primitive:send which routes through the
-                    // correct dispatch/3 for the receiver's class kind.
-                    // Actor (tuple) receivers use sync_send (ADR-0043).
-                    let call_doc = docvec![
-                        "let ",
-                        Document::String(receiver_var.clone()),
-                        " = ",
-                        recv_doc,
-                        " in case call 'erlang':'is_map'(",
-                        Document::String(receiver_var.clone()),
-                        ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
-                        Document::String(receiver_var.clone()),
-                        ", 'fieldNames', []) <_> when 'true' -> let ",
-                        Document::String(pid_var.clone()),
-                        " = call 'erlang':'element'(4, ",
-                        Document::String(receiver_var),
-                        ") in call 'beamtalk_actor':'sync_send'(",
-                        Document::String(pid_var),
-                        ", 'fieldNames', []) end",
+        // BT-2073: `fieldNames` (well-known unary). The classifier validates
+        // kind/arity, so explicit `arguments.is_empty()` becomes a `debug_assert!`.
+        if matches!(selector.well_known(), Some(WellKnownSelector::FieldNames)) {
+            debug_assert!(arguments.is_empty());
+            // BT-1321: Fast-path for `self` receiver in actor context.
+            // `Self` is a `#beamtalk_object{..., pid: self()}` tuple, so the
+            // normal is_tuple branch would call sync_send(self()) which is
+            // gen_server:call(self(), ...) → deadlock.
+            // Use beamtalk_primitive:send(State, ...) directly instead.
+            if let Expression::Identifier(id) = receiver {
+                if id.name == "self"
+                    && self.context == super::CodeGenContext::Actor
+                    && self.lookup_var("self").is_none()
+                {
+                    let doc = docvec![
+                        "call 'beamtalk_primitive':'send'(",
+                        Document::String(self.current_state_var()),
+                        ", 'fieldNames', [])",
                     ];
-                    Ok(Some(self.finalize_dispatch_with_preamble(
-                        preamble,
-                        call_doc,
-                        "FNamesRes",
-                    )))
+                    return Ok(Some(doc));
                 }
-                _ => Ok(None),
-            },
-            MessageSelector::Keyword(parts) => {
+            }
+
+            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "FNames")?;
+            let recv_doc = docs.remove(0);
+            let receiver_var = self.fresh_var("Receiver");
+            let pid_var = self.fresh_var("Pid");
+
+            // BT-924: If receiver is a map (value object or stdlib tagged map),
+            // delegate to beamtalk_primitive:send which routes through the
+            // correct dispatch/3 for the receiver's class kind.
+            // Actor (tuple) receivers use sync_send (ADR-0043).
+            let call_doc = docvec![
+                "let ",
+                Document::String(receiver_var.clone()),
+                " = ",
+                recv_doc,
+                " in case call 'erlang':'is_map'(",
+                Document::String(receiver_var.clone()),
+                ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
+                Document::String(receiver_var.clone()),
+                ", 'fieldNames', []) <_> when 'true' -> let ",
+                Document::String(pid_var.clone()),
+                " = call 'erlang':'element'(4, ",
+                Document::String(receiver_var),
+                ") in call 'beamtalk_actor':'sync_send'(",
+                Document::String(pid_var),
+                ", 'fieldNames', []) end",
+            ];
+            return Ok(Some(self.finalize_dispatch_with_preamble(
+                preamble,
+                call_doc,
+                "FNamesRes",
+            )));
+        }
+        match selector {
+            MessageSelector::Keyword(_) => {
                 // `respondsTo:` is well-known; dispatch via the enum first so arity
                 // correctness is guaranteed by the classifier.
                 if matches!(selector.well_known(), Some(WellKnownSelector::RespondsTo)) {
@@ -1650,10 +1644,12 @@ impl CoreErlangGenerator {
                     )));
                 }
 
-                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-
-                match selector_name.as_str() {
-                    "fieldAt:" if arguments.len() == 1 => {
+                // BT-2073: `fieldAt:` and `fieldAt:put:` route via the enum so
+                // the classifier validates kind/arity (`fieldAt:put:` requires
+                // exactly two keyword parts, not a flattened single part).
+                match selector.well_known() {
+                    Some(WellKnownSelector::FieldAt) => {
+                        debug_assert_eq!(arguments.len(), 1);
                         // BT-1321: Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         if let Expression::Identifier(id) = receiver {
@@ -1758,7 +1754,8 @@ impl CoreErlangGenerator {
                             preamble, call_doc, "FAtRes",
                         )))
                     }
-                    "fieldAt:put:" if arguments.len() == 2 => {
+                    Some(WellKnownSelector::FieldAtPut) => {
+                        debug_assert_eq!(arguments.len(), 2);
                         // BT-1321: Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         //
@@ -1883,7 +1880,7 @@ impl CoreErlangGenerator {
                     _ => Ok(None),
                 }
             }
-            MessageSelector::Binary(_) => Ok(None),
+            MessageSelector::Unary(_) | MessageSelector::Binary(_) => Ok(None),
         }
     }
     /// BT-915: Tries to generate inline code for Boolean conditionals with field mutation

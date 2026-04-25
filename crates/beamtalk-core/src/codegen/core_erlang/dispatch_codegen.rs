@@ -1605,13 +1605,17 @@ impl CoreErlangGenerator {
             if matches!(selector, MessageSelector::Binary(_)) {
                 return false;
             }
-            // BT-2065/BT-2071: Well-known selectors that the intrinsics layer
-            // **unconditionally** handles before `try_handle_self_dispatch`.
-            // Covers ProtoObject (`class`), Object reflection (`respondsTo:`),
-            // Nil protocol (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/
-            // `ifNil:ifNotNil:`/`ifNotNil:ifNil:`), exception handling (`on:do:`)
-            // and block application (`value`/`value:`/`value:value:`/
-            // `value:value:value:`).
+            // BT-2065/BT-2071/BT-2073: Well-known selectors that the intrinsics
+            // layer **unconditionally** handles before `try_handle_self_dispatch`.
+            // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
+            // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
+            // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
+            // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
+            // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
+            // block application (`value`/`value:`/`value:value:`/
+            // `value:value:value:`), block loops (`repeat`/`whileTrue:`/
+            // `whileFalse:`), object identity (`hash`) and error signaling
+            // (`error:`).
             //
             // NOTE: Boolean conditionals (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`)
             // are NOT included here — `try_generate_boolean_protocol` returns
@@ -1633,30 +1637,32 @@ impl CoreErlangGenerator {
                         | WellKnownSelector::ValueColon
                         | WellKnownSelector::ValueValue
                         | WellKnownSelector::ValueValueValue
+                        | WellKnownSelector::WhileTrue
+                        | WellKnownSelector::WhileFalse
+                        | WellKnownSelector::Repeat
+                        | WellKnownSelector::Ensure
+                        | WellKnownSelector::Hash
+                        | WellKnownSelector::Error
+                        | WellKnownSelector::FieldAt
+                        | WellKnownSelector::FieldAtPut
+                        | WellKnownSelector::FieldNames
+                        | WellKnownSelector::Perform
+                        | WellKnownSelector::PerformWithArgs
+                        | WellKnownSelector::PerformLocallyWithArgs
                 ) {
                     return false;
                 }
             }
-            // Remaining intrinsics not yet modelled as `WellKnownSelector`
-            // variants — these still need string matching for now.
+            // Remaining intrinsics not modelled as `WellKnownSelector` variants
+            // — these are class-specific or compile-time-only constructs that
+            // do not warrant universal selector classification.
             let name = selector.name();
             if matches!(
                 name.as_str(),
                 // asType: (compile-time erasure)
                 "asType:"
-                // ProtoObject — dynamic dispatch
-                | "perform:" | "perform:withArguments:" | "performLocally:withArguments:"
-                // Object reflection — slot access
-                | "fieldAt:" | "fieldAt:put:" | "fieldNames"
                 // Identity
-                | "yourself" | "hash"
-                // Error signaling
-                | "error:"
-                // Block loops (non-well-known)
-                | "repeat" | "whileTrue:" | "whileFalse:"
-                // Exception cleanup — intercepted by intrinsics.rs as a plain
-                // intrinsic expression, so it is not a dispatching self-send.
-                | "ensure:"
+                | "yourself"
             ) {
                 return false;
             }
@@ -1669,14 +1675,20 @@ impl CoreErlangGenerator {
     /// Since `erlang:error/1` never returns (always throws an exception),
     /// expressions ending with `error:` should not be wrapped in reply tuples.
     pub(super) fn is_error_message_send(expr: &Expression) -> bool {
-        matches!(
-            expr,
-            Expression::MessageSend {
-                selector: MessageSelector::Keyword(parts),
-                arguments,
-                ..
-            } if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1
-        )
+        // BT-2073: classify via the well-known enum so a future rename of the
+        // `Error` variant forces this site to update too. The classifier
+        // guarantees keyword/arity = 1, but we still gate on arguments.len()
+        // for the same defensive reason the original predicate did.
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            return matches!(selector.well_known(), Some(WellKnownSelector::Error))
+                && arguments.len() == 1;
+        }
+        false
     }
 
     /// Generates the opening part of a field assignment with state threading.
@@ -1761,17 +1773,18 @@ impl CoreErlangGenerator {
         }
         if let Expression::MessageSend {
             receiver,
-            selector: MessageSelector::Keyword(parts),
+            selector,
             arguments,
             ..
         } = expr
         {
             if let Expression::Identifier(id) = receiver.as_ref() {
+                // BT-2073: classify via the well-known enum. The classifier
+                // already guarantees the two-part keyword shape; arguments.len()
+                // is checked defensively for parser-shape consistency.
                 if id.name == "self"
                     && self.lookup_var("self").is_none()
-                    && parts.len() == 2
-                    && parts[0].keyword == "fieldAt:"
-                    && parts[1].keyword == "put:"
+                    && matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut))
                     && arguments.len() == 2
                 {
                     return true;

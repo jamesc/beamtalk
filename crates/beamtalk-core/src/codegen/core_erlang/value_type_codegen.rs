@@ -18,6 +18,7 @@ use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
+    WellKnownSelector,
 };
 use crate::docvec;
 
@@ -1450,13 +1451,16 @@ impl CoreErlangGenerator {
         }
         if let Expression::MessageSend {
             receiver,
-            selector: MessageSelector::Keyword(parts),
+            selector,
             arguments,
             ..
         } = expr
         {
-            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if sel == "whileTrue:" || sel == "whileFalse:" {
+            // BT-2073: Match `whileTrue:` / `whileFalse:` via the `WellKnownSelector` enum.
+            if matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
+            ) {
                 if let Some(Expression::Block(body)) = arguments.first() {
                     // Must match the same check used by generate_while_true/generate_while_false
                     let analysis = super::block_analysis::analyze_block(body);

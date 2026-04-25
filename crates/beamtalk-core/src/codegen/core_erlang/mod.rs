@@ -109,7 +109,7 @@ mod variable_context;
 // Re-export utility functions for IDE queries
 pub use util::to_module_name;
 
-use crate::ast::{Block, Expression, MessageSelector, Module};
+use crate::ast::{Block, Expression, MessageSelector, Module, WellKnownSelector};
 use crate::docvec;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use document::{Document, INDENT, line, nest};
@@ -2506,7 +2506,7 @@ impl CoreErlangGenerator {
     fn get_control_flow_threaded_vars(&self, expr: &Expression) -> Option<Vec<String>> {
         let Expression::MessageSend {
             receiver,
-            selector: MessageSelector::Keyword(parts),
+            selector,
             arguments,
             ..
         } = expr
@@ -2514,10 +2514,20 @@ impl CoreErlangGenerator {
             return None;
         };
 
+        // BT-2073: `whileTrue:` / `whileFalse:` are well-known; dispatch via the enum.
+        if matches!(
+            selector.well_known(),
+            Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
+        ) {
+            return self.threaded_vars_while(receiver, arguments);
+        }
+
+        let MessageSelector::Keyword(parts) = selector else {
+            return None;
+        };
         let selector_name: String = parts.iter().map(|kw| kw.keyword.as_str()).collect();
 
         match selector_name.as_str() {
-            "whileTrue:" | "whileFalse:" => self.threaded_vars_while(receiver, arguments),
             "timesRepeat:" => self.threaded_vars_times_repeat(arguments),
             "to:do:" if arguments.len() == 2 => self.threaded_vars_to_do(&arguments[1]),
             "to:by:do:" if arguments.len() == 3 => self.threaded_vars_to_do(&arguments[2]),

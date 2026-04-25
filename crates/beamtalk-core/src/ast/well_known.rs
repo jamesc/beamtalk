@@ -87,6 +87,46 @@ pub enum WellKnownSelector {
     IsOkColon,
     /// `isError:` — keyword form for result error testing (reserved for future use).
     IsErrorColon,
+
+    // --- Block loops (Block >> @intrinsic) ---
+    /// `whileTrue:` — evaluate the block argument while the receiver block returns `true`.
+    WhileTrue,
+    /// `whileFalse:` — evaluate the block argument while the receiver block returns `false`.
+    WhileFalse,
+    /// `repeat` — evaluate the receiver block in an infinite loop.
+    Repeat,
+
+    // --- Block cleanup (Block >> @intrinsic) ---
+    /// `ensure:` — evaluate the receiver block, then unconditionally run the cleanup block.
+    Ensure,
+
+    // --- Object universal ---
+    /// `hash` — return an integer hash of the receiver via `erlang:phash2/1`.
+    Hash,
+    /// `error:` — Smalltalk-style error signaling on the receiver.
+    ///
+    /// **Dual-use caveat:** `error:` is also a `Logger` class-side log-level method
+    /// (`Logger error: "boom"`). The well-known interpretation only applies when the
+    /// receiver is *not* a class literal that defines its own class-side `error:`.
+    /// `try_generate_error_signaling` already short-circuits on
+    /// `Expression::ClassReference { .. }`, leaving the `Logger` codegen path intact.
+    Error,
+
+    // --- Object reflection ---
+    /// `fieldAt:` — read an actor instance variable by name.
+    FieldAt,
+    /// `fieldAt:put:` — write an actor instance variable by name.
+    FieldAtPut,
+    /// `fieldNames` — return the list of instance variable names of the receiver.
+    FieldNames,
+
+    // --- ProtoObject dynamic dispatch ---
+    /// `perform:` — send the named selector to the receiver with no arguments.
+    Perform,
+    /// `perform:withArguments:` — send the named selector with an argument list.
+    PerformWithArgs,
+    /// `performLocally:withArguments:` — execute a class method in the caller's process.
+    PerformLocallyWithArgs,
 }
 
 impl WellKnownSelector {
@@ -115,6 +155,18 @@ impl WellKnownSelector {
             Self::IsError => "isError",
             Self::IsOkColon => "isOk:",
             Self::IsErrorColon => "isError:",
+            Self::WhileTrue => "whileTrue:",
+            Self::WhileFalse => "whileFalse:",
+            Self::Repeat => "repeat",
+            Self::Ensure => "ensure:",
+            Self::Hash => "hash",
+            Self::Error => "error:",
+            Self::FieldAt => "fieldAt:",
+            Self::FieldAtPut => "fieldAt:put:",
+            Self::FieldNames => "fieldNames",
+            Self::Perform => "perform:",
+            Self::PerformWithArgs => "perform:withArguments:",
+            Self::PerformLocallyWithArgs => "performLocally:withArguments:",
         }
     }
 
@@ -145,6 +197,18 @@ impl WellKnownSelector {
             "isError" => Some(Self::IsError),
             "isOk:" => Some(Self::IsOkColon),
             "isError:" => Some(Self::IsErrorColon),
+            "whileTrue:" => Some(Self::WhileTrue),
+            "whileFalse:" => Some(Self::WhileFalse),
+            "repeat" => Some(Self::Repeat),
+            "ensure:" => Some(Self::Ensure),
+            "hash" => Some(Self::Hash),
+            "error:" => Some(Self::Error),
+            "fieldAt:" => Some(Self::FieldAt),
+            "fieldAt:put:" => Some(Self::FieldAtPut),
+            "fieldNames" => Some(Self::FieldNames),
+            "perform:" => Some(Self::Perform),
+            "perform:withArguments:" => Some(Self::PerformWithArgs),
+            "performLocally:withArguments:" => Some(Self::PerformLocallyWithArgs),
             _ => None,
         }
     }
@@ -156,9 +220,15 @@ impl WellKnownSelector {
     #[must_use]
     pub fn arity(self) -> usize {
         match self {
-            Self::IsNil | Self::NotNil | Self::Class | Self::IsOk | Self::IsError | Self::Value => {
-                0
-            }
+            Self::IsNil
+            | Self::NotNil
+            | Self::Class
+            | Self::IsOk
+            | Self::IsError
+            | Self::Value
+            | Self::Repeat
+            | Self::Hash
+            | Self::FieldNames => 0,
             Self::IfNil
             | Self::IfNotNil
             | Self::IsKindOf
@@ -167,12 +237,21 @@ impl WellKnownSelector {
             | Self::IfFalse
             | Self::ValueColon
             | Self::IsOkColon
-            | Self::IsErrorColon => 1,
+            | Self::IsErrorColon
+            | Self::WhileTrue
+            | Self::WhileFalse
+            | Self::Ensure
+            | Self::Error
+            | Self::FieldAt
+            | Self::Perform => 1,
             Self::IfNilIfNotNil
             | Self::IfNotNilIfNil
             | Self::IfTrueIfFalse
             | Self::OnDo
-            | Self::ValueValue => 2,
+            | Self::ValueValue
+            | Self::FieldAtPut
+            | Self::PerformWithArgs
+            | Self::PerformLocallyWithArgs => 2,
             Self::ValueValueValue => 3,
         }
     }
@@ -233,6 +312,18 @@ mod tests {
         WellKnownSelector::IsError,
         WellKnownSelector::IsOkColon,
         WellKnownSelector::IsErrorColon,
+        WellKnownSelector::WhileTrue,
+        WellKnownSelector::WhileFalse,
+        WellKnownSelector::Repeat,
+        WellKnownSelector::Ensure,
+        WellKnownSelector::Hash,
+        WellKnownSelector::Error,
+        WellKnownSelector::FieldAt,
+        WellKnownSelector::FieldAtPut,
+        WellKnownSelector::FieldNames,
+        WellKnownSelector::Perform,
+        WellKnownSelector::PerformWithArgs,
+        WellKnownSelector::PerformLocallyWithArgs,
     ];
 
     #[test]
@@ -503,6 +594,109 @@ mod tests {
             KeywordPart::new("value:", Span::new(0, 1)),
         ]);
         assert_eq!(WellKnownSelector::from_selector(&keyword_4), None);
+    }
+
+    #[test]
+    fn from_selector_block_loops_and_cleanup() {
+        let span = Span::new(0, 1);
+
+        let sel = MessageSelector::Unary("repeat".into());
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::Repeat)
+        );
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", span)]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::WhileTrue)
+        );
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("whileFalse:", span)]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::WhileFalse)
+        );
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("ensure:", span)]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::Ensure)
+        );
+    }
+
+    #[test]
+    fn from_selector_object_universal_and_reflection() {
+        let span = Span::new(0, 1);
+
+        let sel = MessageSelector::Unary("hash".into());
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::Hash)
+        );
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("error:", span)]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::Error)
+        );
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("fieldAt:", span)]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::FieldAt)
+        );
+
+        let sel = MessageSelector::Keyword(vec![
+            KeywordPart::new("fieldAt:", span),
+            KeywordPart::new("put:", span),
+        ]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::FieldAtPut)
+        );
+
+        let sel = MessageSelector::Unary("fieldNames".into());
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::FieldNames)
+        );
+    }
+
+    #[test]
+    fn from_selector_perform_variants() {
+        let span = Span::new(0, 1);
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("perform:", span)]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::Perform)
+        );
+
+        let sel = MessageSelector::Keyword(vec![
+            KeywordPart::new("perform:", span),
+            KeywordPart::new("withArguments:", span),
+        ]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::PerformWithArgs)
+        );
+
+        let sel = MessageSelector::Keyword(vec![
+            KeywordPart::new("performLocally:", span),
+            KeywordPart::new("withArguments:", span),
+        ]);
+        assert_eq!(
+            WellKnownSelector::from_selector(&sel),
+            Some(WellKnownSelector::PerformLocallyWithArgs)
+        );
+
+        // Flattened single-part forms must NOT classify (parser would not produce these).
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("perform:withArguments:", span)]);
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
+
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("fieldAt:put:", span)]);
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
     }
 
     #[test]
