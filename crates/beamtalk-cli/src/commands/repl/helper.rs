@@ -23,7 +23,9 @@ use rustyline::{Context, Helper};
 
 use beamtalk_core::source_analysis::{TokenKind, Trivia, lex_with_eof};
 
-use crate::commands::protocol::{self, ProtocolClient};
+use beamtalk_repl_protocol::RequestBuilder;
+
+use crate::commands::protocol::ProtocolClient;
 
 use super::ReplResponse;
 use super::color;
@@ -146,14 +148,7 @@ impl ReplHelper {
     ///
     /// Used when completing `:h Erlang <TAB>` or `:h Erlang mod <TAB>`.
     fn backend_erlang_complete(&self, prefix: &str, module: Option<&str>) -> Vec<String> {
-        let mut request = serde_json::json!({
-            "op": "erlang-complete",
-            "id": protocol::next_msg_id(),
-            "prefix": prefix
-        });
-        if let Some(m) = module {
-            request["module"] = serde_json::Value::String(m.to_string());
-        }
+        let request = RequestBuilder::erlang_complete(prefix, module);
         self.send_completion_request(&request)
     }
 
@@ -167,15 +162,8 @@ impl ReplHelper {
         }
 
         let session_id = self.main_session_id.borrow();
-        let mut request = serde_json::json!({
-            "op": "complete",
-            "id": protocol::next_msg_id(),
-            "code": line_to_pos,
-            "cursor": cursor
-        });
-        if let Some(ref sid) = *session_id {
-            request["session"] = serde_json::Value::String(sid.clone());
-        }
+        let request =
+            RequestBuilder::complete_with_session(line_to_pos, cursor, session_id.as_deref());
         self.send_completion_request(&request)
     }
 }

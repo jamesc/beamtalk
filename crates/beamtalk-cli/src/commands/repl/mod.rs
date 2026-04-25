@@ -54,8 +54,13 @@ use miette::{IntoDiagnostic, Result, miette};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{CompletionType, Config, Editor};
-use serde::Deserialize;
 use tracing::warn;
+
+pub(crate) use beamtalk_repl_protocol::ReplResponse;
+
+// Re-export response payload types used in tests.
+#[cfg(test)]
+use beamtalk_repl_protocol::ActorInfo;
 
 use crate::commands::workspace;
 
@@ -84,138 +89,7 @@ use process::{
     resolve_node_name, resolve_port, start_beam_node,
 };
 
-/// Deserialize a JSON `null` or missing field as an empty `Vec`.
-fn deserialize_null_as_empty_vec<'de, D, T>(
-    deserializer: D,
-) -> std::result::Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
-{
-    Option::<Vec<T>>::deserialize(deserializer).map(Option::unwrap_or_default)
-}
-
-/// JSON response from the REPL backend.
-/// Supports both legacy format (type field) and new protocol format (status field).
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields populated by serde deserialization from REPL JSON protocol
-pub(crate) struct ReplResponse {
-    /// Legacy response type (result, error, bindings, loaded, actors)
-    #[serde(rename = "type")]
-    pub(crate) response_type: Option<String>,
-    /// New protocol: message correlation ID
-    pub(crate) id: Option<String>,
-    /// New protocol: session ID
-    pub(crate) session: Option<String>,
-    /// New protocol: status flags
-    pub(crate) status: Option<Vec<String>>,
-    /// Result value (both formats)
-    pub(crate) value: Option<serde_json::Value>,
-    /// Captured stdout from evaluation (BT-355)
-    pub(crate) output: Option<String>,
-    /// Legacy: error message
-    pub(crate) message: Option<String>,
-    /// New protocol: error message
-    pub(crate) error: Option<String>,
-    /// Bindings map (both formats)
-    pub(crate) bindings: Option<serde_json::Value>,
-    /// Loaded classes (both formats)
-    pub(crate) classes: Option<Vec<String>>,
-    /// Actor list (both formats)
-    pub(crate) actors: Option<Vec<ActorInfo>>,
-    /// Module list (legacy protocol — retained for backward-compatible deserialization)
-    pub(crate) modules: Option<Vec<ModuleInfo>>,
-    /// Session list (new protocol)
-    pub(crate) sessions: Option<Vec<SessionInfo>>,
-    /// Completion suggestions (new protocol)
-    pub(crate) completions: Option<Vec<String>>,
-    /// Symbol info (new protocol)
-    pub(crate) info: Option<serde_json::Value>,
-    /// Actor state (new protocol: inspect op)
-    pub(crate) state: Option<serde_json::Value>,
-    /// Compilation warnings (BT-407)
-    pub(crate) warnings: Option<Vec<String>>,
-    /// Documentation text (BT-500: :help command)
-    pub(crate) docs: Option<String>,
-    /// Generated Core Erlang source (BT-724: :show-codegen command)
-    pub(crate) core_erlang: Option<String>,
-    /// Number of actors affected by reload (BT-266)
-    pub(crate) affected_actors: Option<u32>,
-    /// Number of actors that failed code migration (BT-266)
-    pub(crate) migration_failures: Option<u32>,
-    /// Incremental load summary (BT-1707: :sync command)
-    pub(crate) summary: Option<String>,
-    /// Per-file load errors (BT-1707: :sync command)
-    #[serde(default, deserialize_with = "deserialize_null_as_empty_vec")]
-    pub(crate) errors: Vec<serde_json::Value>,
-}
-
-impl ReplResponse {
-    /// Check if this is an error response (either format).
-    pub(crate) fn is_error(&self) -> bool {
-        if let Some(ref t) = self.response_type {
-            return t == "error";
-        }
-        if let Some(ref status) = self.status {
-            return status.iter().any(|s| s == "error");
-        }
-        false
-    }
-
-    /// Get the error message (either format).
-    pub(crate) fn error_message(&self) -> Option<&str> {
-        if let Some(ref msg) = self.message {
-            return Some(msg.as_str());
-        }
-        if let Some(ref err) = self.error {
-            return Some(err.as_str());
-        }
-        None
-    }
-}
-
-/// Information about a running actor, deserialized from REPL JSON.
-#[derive(Debug, Deserialize)]
-pub(crate) struct ActorInfo {
-    /// Erlang process identifier string (e.g., `<0.123.0>`).
-    pub(crate) pid: String,
-    /// Beamtalk class name of the actor (e.g., `Counter`).
-    pub(crate) class: String,
-    /// BEAM module backing the actor.
-    #[allow(dead_code)] // deserialized from JSON, used in tests
-    pub(crate) module: String,
-    /// Unix timestamp when the actor was spawned.
-    #[allow(dead_code)] // deserialized from JSON, available for future use
-    spawned_at: i64,
-}
-
-/// Information about a loaded module, deserialized from REPL JSON.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)] // deserialized from JSON; fields retained for backward-compatible protocol handling
-pub(crate) struct ModuleInfo {
-    /// Module name as registered in the BEAM node.
-    pub(crate) name: String,
-    /// Path to the source `.bt` file that defined this module.
-    pub(crate) source_file: String,
-    /// Number of actors currently running from this module.
-    pub(crate) actor_count: u32,
-    /// Unix timestamp when the module was loaded.
-    #[allow(dead_code)] // deserialized from JSON, available for future use
-    load_time: i64,
-    /// Human-readable relative time since load (e.g., `2 minutes ago`).
-    pub(crate) time_ago: String,
-}
-
-/// Information about an active REPL session, deserialized from REPL JSON.
-#[derive(Debug, Deserialize)]
-pub(crate) struct SessionInfo {
-    /// Unique session identifier.
-    #[allow(dead_code)] // deserialized from JSON, available for future use
-    pub(crate) id: String,
-    /// Unix timestamp when the session was created.
-    #[allow(dead_code)] // deserialized from JSON, available for future use
-    created_at: Option<i64>,
-}
+// Response types re-exported from beamtalk-repl-protocol above.
 
 /// Auto-compile a package if `beamtalk.toml` is present in the project root.
 ///

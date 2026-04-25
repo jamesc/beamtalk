@@ -1,0 +1,22 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-repl-protocol"
+description = "Shared REPL protocol types (request/response) for beamtalk clients"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["repl", "protocol", "beam", "smalltalk"]
+categories = ["development-tools"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -20,6 +20,7 @@ repository = "https://github.com/jamesc/beamtalk"
 beamtalk-core = { path = "crates/beamtalk-core" }
 beamtalk-etf = { path = "crates/beamtalk-etf" }
 beamtalk-examples = { path = "crates/beamtalk-examples" }
+beamtalk-repl-protocol = { path = "crates/beamtalk-repl-protocol" }
 beamtalk-workspace = { path = "crates/beamtalk-workspace" }
 
 # CLI

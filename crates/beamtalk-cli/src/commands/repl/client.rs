@@ -11,8 +11,10 @@ use std::time::Duration;
 
 use miette::{Result, miette};
 
+use beamtalk_repl_protocol::RequestBuilder;
+
 use super::ReplResponse;
-use crate::commands::protocol::{self, ProtocolClient};
+use crate::commands::protocol::ProtocolClient;
 
 /// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
 pub(crate) struct ReplClient {
@@ -103,11 +105,7 @@ impl ReplClient {
     /// Send an eval request and receive the response.
     #[allow(dead_code)] // Used in non-interruptible mode or tests
     pub(crate) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "eval",
-            "id": protocol::next_msg_id(),
-            "code": expression
-        }))
+        self.send_request(&RequestBuilder::eval(expression))
     }
 
     /// Send an eval request that can be interrupted by Ctrl-C (BT-666).
@@ -125,11 +123,7 @@ impl ReplClient {
         interrupted: &Arc<AtomicBool>,
     ) -> Result<ReplResponse> {
         // Send the eval request
-        let request = serde_json::json!({
-            "op": "eval",
-            "id": protocol::next_msg_id(),
-            "code": expression
-        });
+        let request = RequestBuilder::eval(expression);
         self.inner.send_only(&request)?;
 
         // Set a short read timeout for polling
@@ -207,7 +201,7 @@ impl ReplClient {
         let req_id = parsed
             .get("id")
             .and_then(|v| v.as_str())
-            .map_or_else(protocol::next_msg_id, str::to_string);
+            .map_or_else(beamtalk_repl_protocol::next_msg_id, str::to_string);
 
         // Print the prompt
         print!("{prompt}");
@@ -219,26 +213,17 @@ impl ReplClient {
         match stdin.lock().read_line(&mut input) {
             Ok(0) => {
                 // EOF
-                self.inner.send_only(&serde_json::json!({
-                    "op": "stdin",
-                    "id": req_id,
-                    "value": "eof"
-                }))?;
+                self.inner
+                    .send_only(&RequestBuilder::stdin(&req_id, "eof"))?;
             }
             Ok(_) => {
-                self.inner.send_only(&serde_json::json!({
-                    "op": "stdin",
-                    "id": req_id,
-                    "value": input
-                }))?;
+                self.inner
+                    .send_only(&RequestBuilder::stdin(&req_id, &input))?;
             }
             Err(e) => {
                 eprintln!("Error reading stdin: {e}");
-                self.inner.send_only(&serde_json::json!({
-                    "op": "stdin",
-                    "id": req_id,
-                    "value": "eof"
-                }))?;
+                self.inner
+                    .send_only(&RequestBuilder::stdin(&req_id, "eof"))?;
             }
         }
         Ok(())
@@ -246,13 +231,10 @@ impl ReplClient {
 
     /// Send an interrupt request on a separate WebSocket connection (BT-666).
     fn send_interrupt(&self) {
-        let mut interrupt_req = serde_json::json!({
-            "op": "interrupt",
-            "id": protocol::next_msg_id()
-        });
-        if let Some(ref session) = self.session_id {
-            interrupt_req["session"] = serde_json::Value::String(session.clone());
-        }
+        let interrupt_req = match self.session_id {
+            Some(ref session) => RequestBuilder::interrupt_with_session(session),
+            None => RequestBuilder::interrupt(),
+        };
         // Open a new connection and send interrupt — best effort
         if let Ok(mut interrupt_client) = ProtocolClient::connect_with_resume(
             &self.host,
@@ -267,54 +249,34 @@ impl ReplClient {
 
     /// Send a clear bindings request.
     pub(crate) fn clear_bindings(&mut self) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "clear",
-            "id": protocol::next_msg_id()
-        }))
+        self.send_request(&RequestBuilder::clear())
     }
 
     /// Get current bindings.
     pub(crate) fn get_bindings(&mut self) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "bindings",
-            "id": protocol::next_msg_id()
-        }))
+        self.send_request(&RequestBuilder::bindings())
     }
 
     /// List running actors.
     pub(crate) fn list_actors(&mut self) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "actors",
-            "id": protocol::next_msg_id()
-        }))
+        self.send_request(&RequestBuilder::actors())
     }
 
     /// List active sessions.
     pub(crate) fn list_sessions(&mut self) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "sessions",
-            "id": protocol::next_msg_id()
-        }))
+        self.send_request(&RequestBuilder::sessions())
     }
 
     /// Inspect an actor's state.
     pub(crate) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "inspect",
-            "id": protocol::next_msg_id(),
-            "actor": pid_str
-        }))
+        self.send_request(&RequestBuilder::inspect(pid_str))
     }
 
     /// Get completions for a prefix.
     ///
     #[allow(dead_code)] // API completeness — completions use separate ProtocolClient with short timeout
     pub(crate) fn complete(&mut self, prefix: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "complete",
-            "id": protocol::next_msg_id(),
-            "code": prefix
-        }))
+        self.send_request(&RequestBuilder::complete(prefix))
     }
 
     /// Get documentation for a class or method.
@@ -324,18 +286,7 @@ impl ReplClient {
         class_side: bool,
         selector: Option<&str>,
     ) -> Result<ReplResponse> {
-        let mut req = serde_json::json!({
-            "op": "docs",
-            "id": protocol::next_msg_id(),
-            "class": class
-        });
-        if class_side {
-            req["class_side"] = serde_json::Value::Bool(true);
-        }
-        if let Some(sel) = selector {
-            req["selector"] = serde_json::Value::String(sel.to_string());
-        }
-        self.send_request(&req)
+        self.send_request(&RequestBuilder::docs(class, class_side, selector))
     }
 
     /// Get help for an Erlang module or function (BT-1852).
@@ -347,24 +298,12 @@ impl ReplClient {
         module: &str,
         function: Option<&str>,
     ) -> Result<ReplResponse> {
-        let mut req = serde_json::json!({
-            "op": "erlang-help",
-            "id": protocol::next_msg_id(),
-            "module": module
-        });
-        if let Some(func) = function {
-            req["function"] = serde_json::Value::String(func.to_string());
-        }
-        self.send_request(&req)
+        self.send_request(&RequestBuilder::erlang_help(module, function))
     }
 
     /// Show generated Core Erlang for an expression (BT-724).
     pub(crate) fn show_codegen(&mut self, code: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "show-codegen",
-            "id": protocol::next_msg_id(),
-            "code": code
-        }))
+        self.send_request(&RequestBuilder::show_codegen(code))
     }
 
     /// Load/sync a project from its `beamtalk.toml` (BT-1707).
@@ -383,22 +322,15 @@ impl ReplClient {
         path: &str,
         include_tests: bool,
     ) -> Result<ReplResponse> {
-        let raw = self.inner.send_raw(&serde_json::json!({
-            "op": "load-project",
-            "id": protocol::next_msg_id(),
-            "path": path,
-            "include_tests": include_tests
-        }))?;
+        let raw = self
+            .inner
+            .send_raw(&RequestBuilder::load_project(path, include_tests))?;
         serde_json::from_value(raw)
             .map_err(|e| miette::miette!("Failed to parse load-project response: {e}"))
     }
 
     /// Unload a class from the workspace by name (BT-1243).
     pub(crate) fn unload(&mut self, class_name: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "unload",
-            "id": protocol::next_msg_id(),
-            "module": class_name
-        }))
+        self.send_request(&RequestBuilder::unload(class_name))
     }
 }

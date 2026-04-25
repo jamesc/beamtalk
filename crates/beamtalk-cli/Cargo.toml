@@ -24,6 +24,7 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true, features = ["serde"] }
+beamtalk-repl-protocol.workspace = true
 beamtalk-workspace.workspace = true
 clap.workspace = true
 camino.workspace = true
