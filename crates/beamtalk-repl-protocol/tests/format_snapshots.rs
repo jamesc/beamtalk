@@ -165,6 +165,14 @@ fn snapshot_warning_bullet_plain() {
     );
 }
 
+#[test]
+fn snapshot_warning_bullet_ansi() {
+    insta::assert_snapshot!(
+        format::format_warning("partial match", OutputMode::Ansi, WarningStyle::Bullet),
+        @"\u{1b}[33m⚠ partial match\u{1b}[0m"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // format_trace_step
 // ---------------------------------------------------------------------------

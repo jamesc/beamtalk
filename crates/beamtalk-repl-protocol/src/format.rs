@@ -201,7 +201,21 @@ pub fn format_diagnostic(diag: &Diagnostic<'_>, mode: OutputMode) -> String {
 /// ```
 #[must_use]
 pub fn format_file_diagnostic(err: &serde_json::Value, mode: OutputMode) -> Option<String> {
-    let msg = err.get("message").and_then(|m| m.as_str())?;
+    // Non-object entries (raw strings or arbitrary JSON) — surface them rather
+    // than silently dropping. They have no path/line/hint to attach.
+    if !err.is_object() {
+        let raw = err
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| err.to_string());
+        return Some(format!("  {}", paint(mode, RED, &format!("Error: {raw}"))));
+    }
+
+    let msg = err
+        .get("message")
+        .and_then(|m| m.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| err.to_string());
     let path = err
         .get("path")
         .and_then(|p| p.as_str())
@@ -227,7 +241,7 @@ pub fn format_file_diagnostic(err: &serde_json::Value, mode: OutputMode) -> Opti
 pub fn format_warning(msg: &str, mode: OutputMode, style: WarningStyle) -> String {
     match style {
         WarningStyle::Prefixed => paint(mode, YELLOW, &format!("Warning: {msg}")),
-        WarningStyle::Bullet => format!("⚠ {msg}"),
+        WarningStyle::Bullet => paint(mode, YELLOW, &format!("⚠ {msg}")),
     }
 }
 
@@ -505,9 +519,18 @@ mod tests {
     }
 
     #[test]
-    fn file_diagnostic_no_message_returns_none() {
+    fn file_diagnostic_no_message_falls_back_to_raw_json() {
         let err = serde_json::json!({"path": "x.bt"});
-        assert!(format_file_diagnostic(&err, OutputMode::Plain).is_none());
+        let out = format_file_diagnostic(&err, OutputMode::Plain).unwrap();
+        assert!(out.contains("x.bt"));
+        assert!(out.contains("Error:"));
+    }
+
+    #[test]
+    fn file_diagnostic_string_entry_surfaces_text() {
+        let err = serde_json::json!("disk full");
+        let out = format_file_diagnostic(&err, OutputMode::Plain).unwrap();
+        assert_eq!(out, "  Error: disk full");
     }
 
     #[test]
