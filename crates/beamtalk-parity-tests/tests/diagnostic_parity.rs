@@ -44,9 +44,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::AtomicU64;
 
 use beamtalk_parity_tests::drivers::{lsp::LspDriver, mcp::McpDriver};
 use beamtalk_parity_tests::pool::{SharedRepl, beamtalk_binary, shared_repl};
+
+/// Per-process counter for unique staging directory names.
+static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "diagnostic parity corpus — run via `just test-parity`"]
@@ -282,12 +286,8 @@ fn stage_fixture(corpus_root: &Path, case: &CorpusCase) -> Result<StagedFixture,
     }
     // Per-process + per-call unique suffix so concurrent runs (cargo test
     // with multiple test binaries) and re-runs don't fight over the same
-    // staging directory. We still avoid bringing in the `tempfile` crate
-    // here; the StagedFixture::Drop on the locked_files path takes care of
-    // restoring permissions before remove_dir_all in tearDown elsewhere.
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let suffix = SEQ.fetch_add(1, Ordering::Relaxed);
+    // staging directory.
+    let suffix = STAGING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dst = std::env::temp_dir().join(format!(
         "beamtalk-parity-diag-{}-{}-{suffix}",
         case.name,
