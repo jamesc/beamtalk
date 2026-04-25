@@ -194,18 +194,22 @@ async fn drive(
             // wipe earlier projects' classes on the REPL surface).
             let project = fixture_project_for_class(input);
             if project.exists() {
-                let _ = repl
-                    .load_project_with_tests(&project.to_string_lossy())
-                    .await;
+                repl.load_project_with_tests(&project.to_string_lossy())
+                    .await
+                    .map_err(|e| {
+                        format!("repl load_project_with_tests({}): {e}", project.display())
+                    })?;
             }
             repl.test_class(input).await
         }
         (Surface::Mcp, Op::Test) => {
             let project = fixture_project_for_class(input);
             if project.exists() {
-                let _ = mcp
-                    .load_project_with_tests(&project.to_string_lossy())
-                    .await;
+                mcp.load_project_with_tests(&project.to_string_lossy())
+                    .await
+                    .map_err(|e| {
+                        format!("mcp load_project_with_tests({}): {e}", project.display())
+                    })?;
             }
             mcp.test_class(input).await
         }

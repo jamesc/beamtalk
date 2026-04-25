@@ -395,12 +395,16 @@ fn has_nonzero_failures(text: &str) -> bool {
             return true;
         }
         // `failed[":,]?` `<n>` — handles JSON `"failed": 1` after stripping
-        // surrounding quotes, comma and trailing punctuation.
-        let key = w[0].trim_matches(|c: char| c == '"' || c == ',' || c == ':');
-        let val = w[1].trim_end_matches(',').trim_end_matches('}');
-        let count_second = val.parse::<u64>().unwrap_or(0);
-        if count_second > 0 && (key.starts_with("failed") || key.starts_with("errors")) {
-            return true;
+        // surrounding quotes, comma and trailing punctuation. The key half
+        // MUST contain a `:` so prose like "failed, 1" doesn't match here
+        // (it's already covered by the count-first branch above).
+        if w[0].contains(':') {
+            let key = w[0].trim_matches(|c: char| c == '"' || c == ',' || c == ':');
+            let val = w[1].trim_end_matches(',').trim_end_matches('}');
+            let count_second = val.parse::<u64>().unwrap_or(0);
+            if count_second > 0 && (key.starts_with("failed") || key.starts_with("errors")) {
+                return true;
+            }
         }
         false
     })
