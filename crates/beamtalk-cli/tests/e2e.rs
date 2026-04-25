@@ -36,6 +36,7 @@
 
 use beamtalk_cli::repl_startup;
 use beamtalk_core::source_analysis::is_input_complete;
+use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -650,6 +651,13 @@ impl ReplClient {
         }
     }
 
+    /// Read and parse the next response into a typed `ReplResponse`.
+    fn read_repl_response(&mut self) -> Result<ReplResponse, String> {
+        let response_line = self.read_text()?;
+        serde_json::from_str(&response_line)
+            .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_line}"))
+    }
+
     /// Send a JSON message over WebSocket.
     fn write_json(&mut self, value: &serde_json::Value) -> Result<(), String> {
         self.ws
@@ -659,83 +667,29 @@ impl ReplClient {
 
     /// Evaluate an expression and return the result.
     fn eval(&mut self, expression: &str) -> Result<String, String> {
-        // Send JSON request using new protocol format
-        let request = serde_json::json!({
-            "op": "eval",
-            "id": format!("e2e-{}", std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_micros()),
-            "code": expression
-        });
-
+        let request = RequestBuilder::eval(expression);
         self.write_json(&request)?;
 
-        // Read response
-        let response_line = self.read_text()?;
-
-        // Parse JSON response (handles both legacy and new protocol)
-        let response: serde_json::Value = serde_json::from_str(&response_line)
-            .map_err(|e| format!("Failed to parse response: {e}"))?;
+        // Read and parse response using shared protocol types
+        let response = self.read_repl_response()?;
 
         // Extract warnings if present (BT-407)
         self.last_warnings.clear();
-        if let Some(warnings) = response.get("warnings").and_then(|w| w.as_array()) {
-            for warning in warnings {
-                if let Some(warn_str) = warning.as_str() {
-                    self.last_warnings.push(warn_str.to_string());
-                }
-            }
+        if let Some(ref warnings) = response.warnings {
+            self.last_warnings.clone_from(warnings);
         }
 
-        // New protocol: check status for errors
-        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
-            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
-            if is_error {
-                let message = response
-                    .get("error")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error");
-                return Err(message.to_string());
-            }
-            // Success - extract value
-            let value = response.get("value").map_or_else(
-                || "null".to_string(),
-                |v| {
-                    if v.is_string() {
-                        v.as_str().unwrap().to_string()
-                    } else {
-                        v.to_string()
-                    }
-                },
-            );
-            return Ok(value);
+        if response.is_error() {
+            let message = response.error_message().unwrap_or("Unknown error");
+            return Err(message.to_string());
         }
 
-        // Legacy protocol fallback
-        match response.get("type").and_then(|t| t.as_str()) {
-            Some("result") => {
-                let value = response.get("value").map_or_else(
-                    || "null".to_string(),
-                    |v| {
-                        if v.is_string() {
-                            v.as_str().unwrap().to_string()
-                        } else {
-                            v.to_string()
-                        }
-                    },
-                );
-                Ok(value)
-            }
-            Some("error") => {
-                let message = response
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error");
-                Err(message.to_string())
-            }
-            _ => Err(format!("Unexpected response: {response_line}")),
-        }
+        let value = response.value_string();
+        Ok(if value.is_empty() {
+            "null".to_string()
+        } else {
+            value
+        })
     }
 
     /// Clear REPL bindings between tests.
@@ -748,163 +702,59 @@ impl ReplClient {
     /// This compiles the file and loads its classes into the REPL session,
     /// making them available for spawning and messaging.
     fn load_file(&mut self, path: &str) -> Result<Vec<String>, String> {
-        let request = serde_json::json!({
-            "op": "load-file",
-            "id": "e2e-load",
-            "path": path
-        });
+        self.write_json(&RequestBuilder::load_file(path))?;
 
-        self.write_json(&request)?;
-
-        // Read response
-        let response_line = self.read_text()?;
-
-        // Parse JSON response (handles both legacy and new protocol)
-        let response: serde_json::Value = serde_json::from_str(&response_line)
-            .map_err(|e| format!("Failed to parse load response: {e}"))?;
+        let response = self.read_repl_response()?;
 
         // Extract warnings from load response (BT-737: class collision warnings)
         self.last_warnings.clear();
-        if let Some(warnings) = response.get("warnings").and_then(|w| w.as_array()) {
-            for warning in warnings {
-                if let Some(warn_str) = warning.as_str() {
-                    self.last_warnings.push(warn_str.to_string());
-                }
-            }
+        if let Some(ref warnings) = response.warnings {
+            self.last_warnings.clone_from(warnings);
         }
 
-        // New protocol: check status for errors
-        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
-            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
-            if is_error {
-                let message = response
-                    .get("error")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error");
-                return Err(message.to_string());
-            }
-            // Success - extract classes
-            let classes = response
-                .get("classes")
-                .and_then(|c| c.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            return Ok(classes);
+        if response.is_error() {
+            let message = response.error_message().unwrap_or("Unknown error");
+            return Err(message.to_string());
         }
 
-        // Legacy protocol fallback
-        match response.get("type").and_then(|t| t.as_str()) {
-            Some("loaded") => {
-                let classes = response
-                    .get("classes")
-                    .and_then(|c| c.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Ok(classes)
-            }
-            Some("error") => {
-                let message = response
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error");
-                Err(message.to_string())
-            }
-            _ => Err(format!("Unexpected load response: {response_line}")),
-        }
+        Ok(response.classes.unwrap_or_default())
     }
 
     /// Get documentation for a class or method via the docs op.
     fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<String, String> {
-        let mut request = serde_json::json!({
-            "op": "docs",
-            "id": "e2e-docs",
-            "class": class
-        });
-        if let Some(sel) = selector {
-            request["selector"] = serde_json::Value::String(sel.to_string());
-        }
-
-        self.send_docs_request(&request)
+        self.send_docs_request(&RequestBuilder::docs(class, false, selector))
     }
 
     /// Get help for an Erlang module or function via the erlang-help op (BT-1852).
     fn get_erlang_help(&mut self, module: &str, function: Option<&str>) -> Result<String, String> {
-        let mut request = serde_json::json!({
-            "op": "erlang-help",
-            "id": "e2e-erlang-help",
-            "module": module
-        });
-        if let Some(func) = function {
-            request["function"] = serde_json::Value::String(func.to_string());
-        }
-
-        self.send_docs_request(&request)
+        self.send_docs_request(&RequestBuilder::erlang_help(module, function))
     }
 
     /// Send a docs/erlang-help request and parse the response.
     fn send_docs_request(&mut self, request: &serde_json::Value) -> Result<String, String> {
         self.write_json(request)?;
 
-        let response_line = self.read_text()?;
+        let response = self.read_repl_response()?;
 
-        let response: serde_json::Value = serde_json::from_str(&response_line)
-            .map_err(|e| format!("Failed to parse docs response: {e}"))?;
-
-        // Check for errors (new protocol)
-        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
-            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
-            if is_error {
-                let message = response
-                    .get("error")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error");
-                return Err(message.to_string());
-            }
-        }
-
-        // Check for errors (legacy protocol)
-        if response.get("type").and_then(|t| t.as_str()) == Some("error") {
-            let message = response
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error");
+        if response.is_error() {
+            let message = response.error_message().unwrap_or("Unknown error");
             return Err(message.to_string());
         }
 
-        // Extract docs text
         response
-            .get("docs")
-            .and_then(|d| d.as_str())
-            .map(String::from)
-            .ok_or_else(|| format!("No docs field in response: {response_line}"))
+            .docs
+            .ok_or_else(|| "No docs field in response".to_string())
     }
 
-    /// Send a generic op request and return the raw JSON response.
-    fn send_op(&mut self, request: &serde_json::Value) -> Result<serde_json::Value, String> {
+    /// Send a generic op request and return the typed response.
+    fn send_op(&mut self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         self.write_json(request)?;
 
-        let response_line = self.read_text()?;
+        let response = self.read_repl_response()?;
 
-        let response: serde_json::Value = serde_json::from_str(&response_line)
-            .map_err(|e| format!("Failed to parse response: {e}"))?;
-
-        // Check for errors
-        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
-            if status.iter().any(|s| s.as_str() == Some("error")) {
-                let message = response
-                    .get("error")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error");
-                return Err(message.to_string());
-            }
+        if response.is_error() {
+            let message = response.error_message().unwrap_or("Unknown error");
+            return Err(message.to_string());
         }
 
         Ok(response)
@@ -912,27 +762,21 @@ impl ReplClient {
 
     /// Clear bindings and return "ok" (for use as a testable expression).
     fn clear_and_report(&mut self) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "clear",
-            "id": "e2e-clear"
-        }))?;
-        Ok(response
-            .get("value")
-            .and_then(|v| v.as_str())
-            .unwrap_or("ok")
-            .to_string())
+        let response = self.send_op(&RequestBuilder::clear())?;
+        let value = response.value_string();
+        Ok(if value.is_empty() {
+            "ok".to_string()
+        } else {
+            value
+        })
     }
 
     /// Get current bindings formatted as a readable string.
     fn get_bindings(&mut self) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "bindings",
-            "id": "e2e-bindings"
-        }))?;
+        let response = self.send_op(&RequestBuilder::bindings())?;
         let bindings = response
-            .get("bindings")
-            .and_then(|b| b.as_object())
-            .cloned()
+            .bindings
+            .and_then(|b| b.as_object().cloned())
             .unwrap_or_default();
         if bindings.is_empty() {
             return Ok("No bindings".to_string());
@@ -954,25 +798,14 @@ impl ReplClient {
 
     /// Get list of running actors formatted as a readable string.
     fn get_actors(&mut self) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "actors",
-            "id": "e2e-actors"
-        }))?;
-        let actors = response
-            .get("actors")
-            .and_then(|a| a.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let response = self.send_op(&RequestBuilder::actors())?;
+        let actors = response.actors.unwrap_or_default();
         if actors.is_empty() {
             return Ok("No actors".to_string());
         }
         let entries: Vec<String> = actors
             .iter()
-            .map(|a| {
-                let class = a.get("class").and_then(|c| c.as_str()).unwrap_or("?");
-                let pid = a.get("pid").and_then(|p| p.as_str()).unwrap_or("?");
-                format!("{class} ({pid})")
-            })
+            .map(|a| format!("{} ({})", a.class, a.pid))
             .collect();
         Ok(entries.join("\n"))
     }
@@ -987,21 +820,11 @@ impl ReplClient {
     fn get_completions(&mut self, code: &str) -> Result<String, String> {
         let code_with_space = format!("{code} ");
         let cursor = code_with_space.len();
-        let response = self.send_op(&serde_json::json!({
-            "op": "complete",
-            "id": format!("e2e-complete-{cursor}"),
-            "code": code_with_space,
-            "cursor": cursor
-        }))?;
-        let mut completions: Vec<String> = response
-            .get("completions")
-            .and_then(|c| c.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let response = self.send_op(&RequestBuilder::complete_with_cursor(
+            &code_with_space,
+            cursor,
+        ))?;
+        let mut completions = response.completions.unwrap_or_default();
         completions.sort();
         Ok(completions.join(","))
     }
@@ -1013,16 +836,11 @@ impl ReplClient {
     fn sync_project(&mut self) -> Result<String, String> {
         let root = workspace_root();
         let project_path = root.join("tests/e2e/fixtures/incremental_project");
-        let response = self.send_op(&serde_json::json!({
-            "op": "load-project",
-            "id": "e2e-sync",
-            "path": project_path.to_string_lossy()
-        }))?;
-        let summary = response
-            .get("summary")
-            .and_then(|s| s.as_str())
-            .unwrap_or("Synced");
-        Ok(summary.to_string())
+        let response = self.send_op(&RequestBuilder::load_project(
+            &project_path.to_string_lossy(),
+            false,
+        ))?;
+        Ok(response.summary.unwrap_or_else(|| "Synced".to_string()))
     }
 
     /// Load a file or directory and return a formatted string for test assertions.
@@ -1129,15 +947,8 @@ impl ReplClient {
 
     /// Inspect an actor's state by PID string.
     fn inspect_actor(&mut self, pid_str: &str) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "inspect",
-            "id": "e2e-inspect",
-            "actor": pid_str
-        }))?;
-        let state = response
-            .get("state")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
+        let response = self.send_op(&RequestBuilder::inspect(pid_str))?;
+        let state = response.state.unwrap_or(serde_json::Value::Null);
         match state {
             serde_json::Value::String(s) => Ok(s),
             other => Ok(other.to_string()),
@@ -1146,21 +957,13 @@ impl ReplClient {
 
     /// Kill an actor by PID string.
     fn kill_actor(&mut self, pid_str: &str) -> Result<String, String> {
-        self.send_op(&serde_json::json!({
-            "op": "kill",
-            "id": "e2e-kill",
-            "actor": pid_str
-        }))?;
+        self.send_op(&RequestBuilder::kill(pid_str))?;
         Ok("ok".to_string())
     }
 
     /// Unload a module by name.
     fn unload_module(&mut self, module: &str) -> Result<String, String> {
-        self.send_op(&serde_json::json!({
-            "op": "unload",
-            "id": "e2e-unload",
-            "module": module
-        }))?;
+        self.send_op(&RequestBuilder::unload(module))?;
         Ok("ok".to_string())
     }
 
@@ -1168,21 +971,11 @@ impl ReplClient {
     /// Note: actor ordering from the server is non-deterministic (map-based).
     /// This is acceptable for E2E tests where we need any valid actor of a class.
     fn get_first_actor_pid(&mut self, class_name: &str) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "actors",
-            "id": "e2e-actors-pid"
-        }))?;
-        let actors = response
-            .get("actors")
-            .and_then(|a| a.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let response = self.send_op(&RequestBuilder::actors())?;
+        let actors = response.actors.unwrap_or_default();
         for actor in &actors {
-            let class = actor.get("class").and_then(|c| c.as_str()).unwrap_or("");
-            if class == class_name {
-                if let Some(pid) = actor.get("pid").and_then(|p| p.as_str()) {
-                    return Ok(pid.to_string());
-                }
+            if actor.class == class_name {
+                return Ok(actor.pid.clone());
             }
         }
         Err(format!("No actor of class {class_name} found"))

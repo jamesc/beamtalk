@@ -668,7 +668,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to load project");
 
         let classes = response.classes.unwrap_or_default();
-        let errors = response.errors.unwrap_or_default();
+        let errors = response.errors;
 
         let mut parts = Vec::new();
 

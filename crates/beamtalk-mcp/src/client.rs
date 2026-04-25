@@ -9,11 +9,12 @@
 //! JSON messages over WebSocket with cookie authentication.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
+pub use beamtalk_repl_protocol::ReplResponse;
+use beamtalk_repl_protocol::RequestBuilder;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::{
     Error as WsError, Message, error::ProtocolError as WsProtocolError,
@@ -468,12 +469,7 @@ impl ReplClient {
     // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
     #[allow(dead_code)]
     pub async fn eval(&self, code: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "eval",
-            "id": next_msg_id(),
-            "code": code
-        });
-        self.send_once(&request).await
+        self.send_once(&RequestBuilder::eval(code)).await
     }
 
     /// Evaluate an expression with optional trace mode (BT-1238).
@@ -489,14 +485,7 @@ impl ReplClient {
         trace: bool,
     ) -> Result<ReplResponse, String> {
         tracing::debug!(op = "eval", code_len = code.len(), trace, "REPL request");
-        let mut request = serde_json::json!({
-            "op": "eval",
-            "id": next_msg_id(),
-            "code": code
-        });
-        if trace {
-            request["trace"] = serde_json::Value::Bool(true);
-        }
+        let request = RequestBuilder::eval_with_trace(code, trace);
         let result = self.send_once(&request).await;
         tracing::debug!(op = "eval", ok = result.is_ok(), "REPL response");
         result
@@ -511,13 +500,8 @@ impl ReplClient {
     /// rather than the legacy bare-prefix path. The cursor value itself is not
     /// used by the current REPL handler — only its presence matters.
     pub async fn complete(&self, code: &str, cursor: usize) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "complete",
-            "id": next_msg_id(),
-            "code": code,
-            "cursor": cursor
-        });
-        self.send(&request).await
+        self.send(&RequestBuilder::complete_with_cursor(code, cursor))
+            .await
     }
 
     /// Send a load-source operation to compile inline Beamtalk source.
@@ -527,24 +511,22 @@ impl ReplClient {
     // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
     #[allow(dead_code)]
     pub async fn load_source(&self, source: &str) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request_with_param("load-source", "source", source))
-            .await
+        self.send_once(&RequestBuilder::load_source(source)).await
     }
 
     /// Send an inspect operation.
     pub async fn inspect(&self, actor: &str) -> Result<ReplResponse, String> {
-        self.send(&Self::request_with_param("inspect", "actor", actor))
-            .await
+        self.send(&RequestBuilder::inspect(actor)).await
     }
 
     /// Send an actors operation.
     pub async fn actors(&self) -> Result<ReplResponse, String> {
-        self.send(&Self::request("actors")).await
+        self.send(&RequestBuilder::actors()).await
     }
 
     /// Send a bindings operation.
     pub async fn bindings(&self) -> Result<ReplResponse, String> {
-        self.send(&Self::request("bindings")).await
+        self.send(&RequestBuilder::bindings()).await
     }
 
     /// Send a clear operation to reset REPL bindings.
@@ -552,7 +534,7 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — clearing bindings is a mutating operation
     /// that could interleave badly with other operations on reconnect.
     pub async fn clear(&self) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request("clear")).await
+        self.send_once(&RequestBuilder::clear()).await
     }
 
     /// Send an unload operation to remove a class from the workspace.
@@ -560,8 +542,7 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — a retry after the class was already
     /// unloaded would produce a not-found error.
     pub async fn unload(&self, module: &str) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request_with_param("unload", "module", module))
-            .await
+        self.send_once(&RequestBuilder::unload(module)).await
     }
 
     /// Send an interrupt operation to cancel a running evaluation.
@@ -574,13 +555,12 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — a retry after reconnect could cancel
     /// a different evaluation that started after the session was resumed.
     pub async fn interrupt(&self) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request("interrupt")).await
+        self.send_once(&RequestBuilder::interrupt()).await
     }
 
     /// Send a show-codegen operation to inspect generated Core Erlang.
     pub async fn show_codegen(&self, code: &str) -> Result<ReplResponse, String> {
-        self.send(&Self::request_with_param("show-codegen", "code", code))
-            .await
+        self.send(&RequestBuilder::show_codegen(code)).await
     }
 
     /// Send a show-codegen operation for a loaded class (BT-1236).
@@ -589,15 +569,8 @@ impl ReplClient {
         class: &str,
         selector: Option<&str>,
     ) -> Result<ReplResponse, String> {
-        let mut request = serde_json::json!({
-            "op": "show-codegen",
-            "id": next_msg_id(),
-            "class": class
-        });
-        if let Some(sel) = selector {
-            request["selector"] = serde_json::Value::String(sel.to_owned());
-        }
-        self.send(&request).await
+        self.send(&RequestBuilder::show_codegen_class(class, selector))
+            .await
     }
 
     /// Send a test operation to run `BUnit` tests for a specific class.
@@ -608,45 +581,39 @@ impl ReplClient {
     /// `BEAMTALK_MCP_TEST_TIMEOUT`) since test suites can take much longer than
     /// the default 30 s I/O timeout.
     pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
-        self.send_once_with_timeout(
-            &Self::request_with_param("test", "class", class),
-            test_io_timeout(),
-        )
-        .await
+        self.send_once_with_timeout(&RequestBuilder::test_class(class), test_io_timeout())
+            .await
     }
 
     /// Send a test operation scoped to a specific source file path.
     ///
     /// Uses [`send_once_with_timeout`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_file(&self, file: &str) -> Result<ReplResponse, String> {
-        self.send_once_with_timeout(
-            &Self::request_with_param("test", "file", file),
-            test_io_timeout(),
-        )
-        .await
+        self.send_once_with_timeout(&RequestBuilder::test_file(file), test_io_timeout())
+            .await
     }
 
     /// Send a test-all operation to run all `BUnit` tests.
     ///
     /// Uses [`send_once_with_timeout`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_all(&self) -> Result<ReplResponse, String> {
-        self.send_once_with_timeout(&Self::request("test-all"), test_io_timeout())
+        self.send_once_with_timeout(&RequestBuilder::test_all(), test_io_timeout())
             .await
     }
 
     /// Send a describe operation for capability discovery.
     pub async fn describe(&self) -> Result<ReplResponse, String> {
-        self.send(&Self::request("describe")).await
+        self.send(&RequestBuilder::describe()).await
     }
 
     /// Send an enable-tracing operation (ADR 0069).
     pub async fn enable_tracing(&self) -> Result<ReplResponse, String> {
-        self.send(&Self::request("enable-tracing")).await
+        self.send(&RequestBuilder::enable_tracing()).await
     }
 
     /// Send a disable-tracing operation (ADR 0069).
     pub async fn disable_tracing(&self) -> Result<ReplResponse, String> {
-        self.send(&Self::request("disable-tracing")).await
+        self.send(&RequestBuilder::disable_tracing()).await
     }
 
     /// Send a get-traces operation with optional filtering (ADR 0069).
@@ -659,41 +626,20 @@ impl ReplClient {
         min_duration_ns: Option<u64>,
         limit: Option<u32>,
     ) -> Result<ReplResponse, String> {
-        let mut request = serde_json::json!({
-            "op": "get-traces",
-            "id": next_msg_id()
-        });
-        if let Some(a) = actor {
-            request["actor"] = serde_json::Value::String(a.to_owned());
-        }
-        if let Some(s) = selector {
-            request["selector"] = serde_json::Value::String(s.to_owned());
-        }
-        if let Some(c) = class {
-            request["class"] = serde_json::Value::String(c.to_owned());
-        }
-        if let Some(o) = outcome {
-            request["outcome"] = serde_json::Value::String(o.to_owned());
-        }
-        if let Some(d) = min_duration_ns {
-            request["min_duration_ns"] = serde_json::json!(d);
-        }
-        if let Some(l) = limit {
-            request["limit"] = serde_json::json!(l);
-        }
-        self.send(&request).await
+        self.send(&RequestBuilder::get_traces(
+            actor,
+            selector,
+            class,
+            outcome,
+            min_duration_ns,
+            limit,
+        ))
+        .await
     }
 
     /// Send an actor-stats operation with optional actor filter (ADR 0069).
     pub async fn actor_stats(&self, actor: Option<&str>) -> Result<ReplResponse, String> {
-        let mut request = serde_json::json!({
-            "op": "actor-stats",
-            "id": next_msg_id()
-        });
-        if let Some(a) = actor {
-            request["actor"] = serde_json::Value::String(a.to_owned());
-        }
-        self.send(&request).await
+        self.send(&RequestBuilder::actor_stats(actor)).await
     }
 
     /// Send an export-traces operation with optional filters and path (ADR 0069).
@@ -708,32 +654,16 @@ impl ReplClient {
         min_duration_ns: Option<u64>,
         limit: Option<u32>,
     ) -> Result<ReplResponse, String> {
-        let mut request = serde_json::json!({
-            "op": "export-traces",
-            "id": next_msg_id()
-        });
-        if let Some(p) = path {
-            request["path"] = serde_json::Value::String(p.to_owned());
-        }
-        if let Some(a) = actor {
-            request["actor"] = serde_json::Value::String(a.to_owned());
-        }
-        if let Some(s) = selector {
-            request["selector"] = serde_json::Value::String(s.to_owned());
-        }
-        if let Some(c) = class {
-            request["class"] = serde_json::Value::String(c.to_owned());
-        }
-        if let Some(o) = outcome {
-            request["outcome"] = serde_json::Value::String(o.to_owned());
-        }
-        if let Some(d) = min_duration_ns {
-            request["min_duration_ns"] = serde_json::json!(d);
-        }
-        if let Some(l) = limit {
-            request["limit"] = serde_json::json!(l);
-        }
-        self.send(&request).await
+        self.send(&RequestBuilder::export_traces(
+            path,
+            actor,
+            selector,
+            class,
+            outcome,
+            min_duration_ns,
+            limit,
+        ))
+        .await
     }
 
     /// Send a load-project operation.
@@ -748,14 +678,12 @@ impl ReplClient {
         include_tests: bool,
         force: bool,
     ) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "load-project",
-            "id": next_msg_id(),
-            "path": path,
-            "include_tests": include_tests,
-            "force": force
-        });
-        self.send_once(&request).await
+        self.send_once(&RequestBuilder::load_project_with_force(
+            path,
+            include_tests,
+            force,
+        ))
+        .await
     }
 
     /// Send a JSON request and receive a JSON response for non-idempotent operations.
@@ -894,141 +822,18 @@ impl ReplClient {
         unreachable!("send_once loop always returns on attempt 1")
     }
 
-    // --- Request builder helpers ---
-
-    /// Build a no-param request for the given operation.
-    fn request(op: &str) -> serde_json::Value {
-        serde_json::json!({"op": op, "id": next_msg_id()})
-    }
-
-    /// Build a single-param request for the given operation.
-    fn request_with_param(op: &str, key: &str, value: &str) -> serde_json::Value {
-        let mut req = serde_json::json!({"op": op, "id": next_msg_id()});
-        req[key] = serde_json::Value::String(value.to_string());
-        req
-    }
-
     /// Send a list-classes operation (BT-1404).
     ///
     /// Returns all available classes with one-line descriptions. The optional
     /// `filter` narrows results: `"stdlib"` for built-in classes, `"user"` for
     /// user-defined, or a superclass name like `"Value"` or `"Actor"`.
     pub async fn list_classes(&self, filter: Option<&str>) -> Result<ReplResponse, String> {
-        let mut request = serde_json::json!({
-            "op": "list-classes",
-            "id": next_msg_id()
-        });
-        if let Some(f) = filter {
-            request["filter"] = serde_json::Value::String(f.to_string());
-        }
-        self.send(&request).await
+        self.send(&RequestBuilder::list_classes(filter)).await
     }
 }
 
-/// JSON response from the REPL backend.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ReplResponse {
-    /// Message correlation ID.
-    pub id: Option<String>,
-    /// Session ID.
-    pub session: Option<String>,
-    /// Status flags: `["done"]`, `["done", "error"]`, or `["done", "test-error"]`.
-    pub status: Option<Vec<String>>,
-    /// Result value.
-    pub value: Option<serde_json::Value>,
-    /// Captured stdout from evaluation.
-    pub output: Option<String>,
-    /// Error message.
-    pub error: Option<String>,
-    /// Bindings map.
-    pub bindings: Option<serde_json::Value>,
-    /// Loaded classes (string names, from eval/load responses).
-    pub classes: Option<Vec<String>>,
-    /// Class info list with metadata (list-classes op, BT-1404).
-    pub class_list: Option<Vec<ClassInfo>>,
-    /// Actor list.
-    pub actors: Option<Vec<ActorInfo>>,
-    /// Completion suggestions.
-    pub completions: Option<Vec<String>>,
-    /// Symbol info.
-    pub info: Option<serde_json::Value>,
-    /// Actor state (inspect op).
-    pub state: Option<serde_json::Value>,
-    /// Compilation warnings.
-    pub warnings: Option<Vec<String>>,
-    /// Line number (1-based) of a compile error in the submitted snippet (BT-1235).
-    pub line: Option<u32>,
-    /// Hint text for a compile error, where available (BT-1235).
-    pub hint: Option<String>,
-    /// Documentation text.
-    pub docs: Option<String>,
-    /// Number of actors affected by reload.
-    pub affected_actors: Option<u32>,
-    /// Number of actors that failed code migration.
-    pub migration_failures: Option<u32>,
-    /// Generated Core Erlang source (show-codegen op).
-    pub core_erlang: Option<String>,
-    /// Per-file load errors (load-project op). Each entry is a structured map
-    /// with at least `path`, `kind`, and `message` fields.
-    pub errors: Option<Vec<serde_json::Value>>,
-    /// Test results (test / test-all ops).
-    pub results: Option<serde_json::Value>,
-    /// Per-statement trace steps (eval with trace=true, BT-1238).
-    /// Each entry is `{"src": "...", "value": ...}`.
-    pub steps: Option<Vec<serde_json::Value>>,
-    /// Supported operations and protocol info (describe op).
-    pub ops: Option<serde_json::Value>,
-    /// Protocol and language versions (describe op).
-    pub versions: Option<serde_json::Value>,
-    /// Incremental load summary (load-project op, BT-1685).
-    /// E.g. "Reloaded 2 of 7 files (5 unchanged)"
-    pub summary: Option<String>,
-}
-
-impl ReplResponse {
-    /// Check if this is an error response.
-    pub fn is_error(&self) -> bool {
-        if let Some(ref status) = self.status {
-            return status.iter().any(|s| s == "error");
-        }
-        false
-    }
-
-    /// Check if the response contains a test failure (`"test-error"` status).
-    pub fn has_test_error(&self) -> bool {
-        if let Some(ref status) = self.status {
-            return status.iter().any(|s| s == "test-error");
-        }
-        false
-    }
-
-    /// Get the error message if present.
-    pub fn error_message(&self) -> Option<&str> {
-        self.error.as_deref()
-    }
-
-    /// Get the result value as a formatted string.
-    pub fn value_string(&self) -> String {
-        match &self.value {
-            Some(serde_json::Value::String(s)) => s.clone(),
-            Some(v) => v.to_string(),
-            None => String::new(),
-        }
-    }
-}
-
-/// Actor information from the REPL.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ActorInfo {
-    /// Erlang process identifier as a string (e.g., `"<0.173.0>"`).
-    pub pid: String,
-    /// Beamtalk class name of the actor (e.g., `"Counter"`).
-    pub class: String,
-    /// Source module the actor was compiled from.
-    pub module: String,
-    /// Unix timestamp (seconds) when the actor was spawned.
-    pub spawned_at: i64,
-}
+// Response types (`ReplResponse`, `ActorInfo`, `ClassInfo`) are imported from
+// `beamtalk_repl_protocol` and re-exported at the top of this module.
 
 /// Spawn a background task that sends WebSocket Ping frames at [`KEEPALIVE_INTERVAL`].
 ///
@@ -1076,22 +881,6 @@ fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandl
             }
         }
     })
-}
-
-/// Class information from the list-classes op (BT-1404).
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ClassInfo {
-    /// Class name (e.g., `"String"`).
-    pub name: String,
-    /// Superclass name (e.g., `"Value"`) or `null` for root classes.
-    pub superclass: Option<String>,
-    /// One-line class description, or `null` if undocumented.
-    pub doc: Option<String>,
-    /// Whether the class is sealed (cannot be subclassed).
-    pub sealed: bool,
-    /// Whether the class is abstract (cannot be instantiated directly).
-    #[serde(rename = "abstract")]
-    pub is_abstract: bool,
 }
 
 /// Perform the ADR 0020 authentication handshake on a WebSocket connection.
@@ -1189,13 +978,6 @@ where
     tokio::time::timeout(timeout, read_text_message(ws))
         .await
         .map_err(|_| format!("WebSocket read timed out after {}s", timeout.as_secs()))?
-}
-
-/// Generate a unique message ID.
-fn next_msg_id() -> String {
-    static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
-    let n = MSG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("msg-{n:03}")
 }
 
 #[cfg(test)]

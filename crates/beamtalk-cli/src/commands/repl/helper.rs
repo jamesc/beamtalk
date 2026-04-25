@@ -23,7 +23,9 @@ use rustyline::{Context, Helper};
 
 use beamtalk_core::source_analysis::{TokenKind, Trivia, lex_with_eof};
 
-use crate::commands::protocol::{self, ProtocolClient};
+use beamtalk_repl_protocol::next_msg_id;
+
+use crate::commands::protocol::ProtocolClient;
 
 use super::ReplResponse;
 use super::color;
@@ -148,7 +150,7 @@ impl ReplHelper {
     fn backend_erlang_complete(&self, prefix: &str, module: Option<&str>) -> Vec<String> {
         let mut request = serde_json::json!({
             "op": "erlang-complete",
-            "id": protocol::next_msg_id(),
+            "id": next_msg_id(),
             "prefix": prefix
         });
         if let Some(m) = module {
@@ -169,7 +171,7 @@ impl ReplHelper {
         let session_id = self.main_session_id.borrow();
         let mut request = serde_json::json!({
             "op": "complete",
-            "id": protocol::next_msg_id(),
+            "id": next_msg_id(),
             "code": line_to_pos,
             "cursor": cursor
         });

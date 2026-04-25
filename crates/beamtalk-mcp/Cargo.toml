@@ -35,6 +35,9 @@ clap.workspace = true
 # Core compiler for lint passes in the lint MCP tool
 beamtalk-core.workspace = true
 
+# Shared REPL protocol types (request/response)
+beamtalk-repl-protocol.workspace = true
+
 # UTF-8 path handling for lint file collection
 camino.workspace = true
 
