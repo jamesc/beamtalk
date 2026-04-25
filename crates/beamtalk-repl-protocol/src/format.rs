@@ -206,16 +206,14 @@ pub fn format_file_diagnostic(err: &serde_json::Value, mode: OutputMode) -> Opti
     if !err.is_object() {
         let raw = err
             .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| err.to_string());
+            .map_or_else(|| err.to_string(), str::to_owned);
         return Some(format!("  {}", paint(mode, RED, &format!("Error: {raw}"))));
     }
 
     let msg = err
         .get("message")
         .and_then(|m| m.as_str())
-        .map(str::to_owned)
-        .unwrap_or_else(|| err.to_string());
+        .map_or_else(|| err.to_string(), str::to_owned);
     let path = err
         .get("path")
         .and_then(|p| p.as_str())
