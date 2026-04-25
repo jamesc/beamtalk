@@ -60,6 +60,9 @@ windows-sys.workspace = true
 [dev-dependencies]
 serial_test = "3"
 criterion.workspace = true
+# why: subprocess testing for the `beamtalk` CLI binary (BT-2084)
+assert_cmd = "2"
+predicates = "3"
 
 [[bench]]
 name = "build_bench"
