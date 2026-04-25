@@ -1,10 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for chat room demo (BT-431, BT-568)
+// REPL protocol tests for chat room demo (BT-431, BT-568)
 //
-// These tests require E2E because the demo exercises multi-actor message
-// passing with workspace variable persistence across many REPL turns. Multiple
+// These tests live in the REPL protocol suite (rather than BUnit) because the
+// demo exercises multi-actor message passing with workspace variable
+// persistence across many REPL turns. Multiple
 // actor references (room, alice, bob, mod) are stored in workspace variables
 // and reused across subsequent expressions. BUnit tests run within a single
 // compiled expression and cannot hold live actor references across turns.

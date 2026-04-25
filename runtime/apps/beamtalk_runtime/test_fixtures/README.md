@@ -82,4 +82,4 @@ Used by `beamtalk_codegen_simulation_tests.erl` super keyword tests to verify:
 
 - Runtime tests: `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
 - REPL-protocol fixtures: `tests/repl-protocol/fixtures/`
-- REPL-protocol test cases: `tests/repl-protocol/cases/*.bt`
+- REPL-protocol test cases: `tests/repl-protocol/cases/*.btscript`

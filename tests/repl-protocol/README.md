@@ -85,23 +85,23 @@ REPL TCP-protocol tests that validate the complete compilation and execution pip
 
 ## Directory Structure
 
-```
+```text
 tests/repl-protocol/
 ├── README.md              # This file
 ├── cases/                 # Test case files
-│   ├── actors.bt          # Actor documentation (syntax examples)
-│   ├── arithmetic.bt      # Arithmetic operations (+, -, *, /)
-│   ├── blocks.bt          # Block/closure tests
-│   ├── booleans.bt        # Boolean literals (true, false)
-│   ├── cascades.bt        # Cascade documentation (syntax examples)
-│   ├── control_flow.bt    # Control flow (block evaluation, variables)
-│   ├── errors.bt          # Error handling tests
-│   ├── semantic_diagnostics.bt # Semantic analysis error tests
-│   ├── semantic_scope.bt  # Variable scope and resolution tests
-│   ├── keyword_messages.bt # Keyword message sends
-│   ├── literals.bt        # Integer and string literals
-│   ├── unary_messages.bt  # Unary message sends
-│   └── variable_persistence.bt # Variable assignment and persistence
+│   ├── actors.btscript          # Actor documentation (syntax examples)
+│   ├── arithmetic.btscript      # Arithmetic operations (+, -, *, /)
+│   ├── blocks.btscript          # Block/closure tests
+│   ├── booleans.btscript        # Boolean literals (true, false)
+│   ├── cascades.btscript        # Cascade documentation (syntax examples)
+│   ├── control_flow.btscript    # Control flow (block evaluation, variables)
+│   ├── errors.btscript          # Error handling tests
+│   ├── semantic_diagnostics.btscript # Semantic analysis error tests
+│   ├── semantic_scope.btscript  # Variable scope and resolution tests
+│   ├── keyword_messages.btscript # Keyword message sends
+│   ├── literals.btscript        # Integer and string literals
+│   ├── unary_messages.btscript  # Unary message sends
+│   └── variable_persistence.btscript # Variable assignment and persistence
 └── fixtures/              # Actor/class definitions for stateful tests
     └── counter.bt         # Simple counter actor class
 ```
@@ -164,7 +164,7 @@ undefined_variable
 
 The test passes if the error message *contains* the specified text.
 
-See `tests/repl-protocol/cases/errors.bt` for examples of error test cases.
+See `tests/repl-protocol/cases/errors.btscript` for examples of error test cases.
 
 ### Compilation Error Testing (`@load-error`)
 
@@ -231,7 +231,7 @@ all expressions within that file. Loaded modules also persist for the file's dur
 
 ## Writing New Tests
 
-1. Create a new `.bt` file in `tests/repl-protocol/cases/`
+1. Create a new `.btscript` file in `tests/repl-protocol/cases/`
 2. Add expressions with `// =>` expected results
 3. Run `just test-repl-protocol` to verify
 

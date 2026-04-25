@@ -258,6 +258,7 @@ Expression tests for bootstrap-critical primitives that TestCase transitively de
 **With fixtures** (`@load` directive, used in bootstrap tests only):
 ```beamtalk
 // @load tests/repl-protocol/fixtures/counter.bt
+// (path is CWD-relative; the bootstrap suite resolves from the workspace root.)
 
 Counter spawn
 // => _
@@ -516,7 +517,7 @@ cargo test --test repl_protocol -- --ignored --nocapture
 ```
 
 **Adding a new REPL-protocol test case:**
-1. Create `tests/repl-protocol/cases/my_feature.bt`
+1. Create `tests/repl-protocol/cases/my_feature.btscript`
 2. Add expressions with `// =>` expected results
 3. Run `just test-repl-protocol`
 

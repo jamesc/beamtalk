@@ -84,7 +84,7 @@ beamtalk repl
 > c increment
 
 # 4. Check expected output in test file
-cat tests/repl-protocol/cases/actors.bt
+cat tests/repl-protocol/cases/actors.btscript
 # Look for // => expected output comments
 ```
 

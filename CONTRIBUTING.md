@@ -133,7 +133,7 @@ beamtalk/
 ├── examples/                 # Example Beamtalk programs
 ├── tests/
 │   ├── stdlib/               # Compiled expression tests
-│   └── e2e/                  # REPL integration tests
+│   └── repl-protocol/        # REPL TCP protocol tests
 └── test-package-compiler/    # Compiler snapshot tests
 ```
 
@@ -206,7 +206,7 @@ Look for issues labeled `agent-ready` with size `S` in Linear — these are well
 
 — **Standard library** — Implementing methods on core classes (`stdlib/src/`)
 - **Documentation** — Examples, tutorials, API docs
-- **Tests** — Expanding stdlib and E2E test coverage
+- **Tests** — Expanding stdlib and REPL protocol test coverage
 - **Examples** — Real-world Beamtalk programs in `examples/`
 
 ## Questions?

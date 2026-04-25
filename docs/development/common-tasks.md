@@ -130,7 +130,7 @@ When adding a new type to `spec_codegen.rs`:
 The REPL-protocol test infrastructure supports loading class definitions with the `@load` directive:
 
 ```beamtalk
-// tests/repl-protocol/cases/my_test.bt
+// tests/repl-protocol/cases/my_test.btscript
 // @load tests/repl-protocol/fixtures/my_class.bt
 
 instance := MyClass spawn

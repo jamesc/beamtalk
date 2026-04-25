@@ -3,7 +3,7 @@
 > **Last updated:** 2026-04-01
 > **Issue:** BT-247, BT-1808
 > **Methodology:** Audit of `stdlib/src/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
-> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and E2E test coverage (`tests/repl-protocol/cases/*.btscript`).
+> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and REPL protocol test coverage (`tests/repl-protocol/cases/*.btscript`).
 
 ## Executive Summary
 

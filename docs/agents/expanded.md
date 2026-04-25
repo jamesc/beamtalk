@@ -558,6 +558,7 @@ beamtalk_stdlib (compiled stdlib)
 - **Only use for tests that genuinely need the REPL**
 
 **When choosing between stdlib, BUnit, and REPL-protocol tests:**
+
 | Test needs... | Where |
 |---|---|
 | Pure language features (arithmetic, strings, blocks) | `stdlib/bootstrap-test/` |
