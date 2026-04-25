@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Parity case: a file that references an unknown class must produce at least
+// one diagnostic on every surface that reports diagnostics. The harness
+// stages `BadSyntax.bt` into a temp directory and rewrites `<bad_file>` to
+// its absolute path.
+//
+// This is the only case wired to the LSP surface — opening the file via
+// `textDocument/didOpen` should immediately yield a non-empty
+// `publishDiagnostics`.
+
+// @input
+<bad_file>
+// @surfaces cli, mcp, lsp
+// @op diagnose
+// @expect-diagnostics 1

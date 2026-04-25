@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BUnit tests for Counter — used by the parity-test harness.
+TestCase subclass: CounterTest
+
+  testStartsAtZero => self assert: Counter spawn current equals: 0
+
+  testIncrement =>
+    counter := Counter spawn
+    counter increment
+    self assert: counter current equals: 1
+
+  testReset =>
+    counter := Counter spawn
+    counter increment
+    counter increment
+    counter reset
+    self assert: counter current equals: 0
