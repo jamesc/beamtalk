@@ -79,7 +79,7 @@ fn test_script_runs_btscript_files() {
     cli_common::beamtalk()
         .current_dir(project.path())
         .args(["test-script", "--quiet"])
-        .arg(script.to_str().unwrap())
+        .arg(&script)
         .assert()
         .success()
         .stdout(contains("1 passed").or(contains("0 failed")));
@@ -104,7 +104,7 @@ fn test_script_fails_on_assertion_mismatch() {
     cli_common::beamtalk()
         .current_dir(project.path())
         .args(["test-script", "--quiet"])
-        .arg(script.to_str().unwrap())
+        .arg(&script)
         .assert()
         .failure();
 }
