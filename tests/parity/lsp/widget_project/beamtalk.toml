@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "parity_lsp"
+version = "0.1.0"
+description = "LSP parity fixture for hover/completion/definition/symbol (BT-2081)"
+
+[dependencies]

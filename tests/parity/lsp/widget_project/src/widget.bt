@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A sample widget used by the LSP parity suite.
+///
+/// Used to drive hover, completion, definition, and workspace/symbol cross
+/// surface checks (BT-2081).
+Value subclass: Widget
+  field: label :: String = ""
+
+  labelText -> String => self.label
+
+  describe -> String => "Widget(" ++ self.label ++ ")"

@@ -296,6 +296,85 @@ impl McpDriver {
         })
     }
 
+    /// Drive the `docs` MCP tool against a Beamtalk class (BT-2081).
+    ///
+    /// Returns the joined text content; the parity harness compares the
+    /// payload to the LSP `textDocument/hover` markdown semantically.
+    pub async fn docs_class(&mut self, class: &str) -> Result<String, String> {
+        let result = self.call_tool("docs", json!({"class": class})).await?;
+        Ok(extract_content_text(&result))
+    }
+
+    /// Drive the `docs` MCP tool against an Erlang FFI module (BT-2081).
+    pub async fn docs_erlang(&mut self, module: &str) -> Result<String, String> {
+        let result = self
+            .call_tool("docs", json!({"erlang_module": module}))
+            .await?;
+        Ok(extract_content_text(&result))
+    }
+
+    /// Drive the `complete` MCP tool and return one completion candidate per
+    /// line. The LSP reports completions as a list of items; this surface
+    /// returns newline-delimited labels which the parity harness splits.
+    pub async fn complete(&mut self, code: &str) -> Result<Vec<String>, String> {
+        let result = self.call_tool("complete", json!({"code": code})).await?;
+        let text = extract_content_text(&result);
+        if text.trim() == "No completions available" {
+            return Ok(Vec::new());
+        }
+        Ok(text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// Drive the `list_classes` MCP tool with an optional filter and return
+    /// just the class names. The MCP renderer prints "`ClassName` — summary"
+    /// lines; we strip the summary so the comparison matches LSP
+    /// `workspace/symbol` (which only emits names).
+    pub async fn list_classes(&mut self, filter: Option<&str>) -> Result<Vec<String>, String> {
+        let mut args = serde_json::Map::new();
+        if let Some(f) = filter {
+            args.insert("filter".to_string(), Value::String(f.to_string()));
+        }
+        let result = self.call_tool("list_classes", Value::Object(args)).await?;
+        let text = extract_content_text(&result);
+        let mut out = Vec::new();
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Lines look like `ClassName — short summary` or `ClassName`.
+            // Strip everything from the first em-dash or hyphen separator
+            // onwards. Also skip header / footer lines beginning with a
+            // capitalised word followed by a colon (e.g. "Showing 12 classes").
+            if trimmed.contains(':') && !trimmed.starts_with(char::is_lowercase) {
+                let upto_colon = trimmed.split(':').next().unwrap_or("");
+                if upto_colon
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == ' ')
+                    && upto_colon.contains(' ')
+                {
+                    continue;
+                }
+            }
+            let name = trimmed
+                .split(|c: char| c == '—' || c == '-' || c.is_whitespace())
+                .find(|seg| !seg.is_empty())
+                .unwrap_or(trimmed)
+                .trim()
+                .to_string();
+            // Beamtalk class names start with an uppercase ASCII letter.
+            if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                out.push(name);
+            }
+        }
+        Ok(out)
+    }
+
     /// Send `shutdown` and reap the child. Best-effort.
     pub async fn close(mut self) {
         // Sending a graceful exit notification is the polite thing to do; we
