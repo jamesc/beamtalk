@@ -20,7 +20,7 @@
 //! # Corpus Seeding
 //!
 //! The corpus in `fuzz/corpus/parse_arbitrary/` contains all `.bt` files
-//! from `examples/` and `tests/e2e/cases/`, providing realistic starting
+//! from `examples/` and `tests/repl-protocol/cases/`, providing realistic starting
 //! points for mutation.
 
 #![no_main]

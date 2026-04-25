@@ -8,7 +8,7 @@
 //
 // For now, test field mutations directly with setValue: method
 
-// @load tests/e2e/fixtures/field_mutation_counter.bt
+// @load tests/repl-protocol/fixtures/field_mutation_counter.bt
 counter := FieldMutationCounter spawn
 // => _
 counter getValue

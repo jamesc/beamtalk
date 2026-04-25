@@ -29,7 +29,7 @@
 //
 // Commented out until cascade REPL evaluation is fixed:
 //
-// // @load tests/e2e/fixtures/counter.bt
+// // @load tests/repl-protocol/fixtures/counter.bt
 // // counter := Counter spawn
 // // counter increment; increment; getValue
 // // // => 2

@@ -508,7 +508,7 @@ No migration needed. `beamtalk build file.bt` continues to work as before — no
 
 ### Stdlib and test suites
 
-The stdlib (`stdlib/src/*.bt`) and test suites (`stdlib/bootstrap-test/`, `tests/e2e/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-e2e`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
+The stdlib (`stdlib/src/*.bt`) and test suites (`stdlib/bootstrap-test/`, `tests/repl-protocol/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-repl-protocol`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
 
 ## Future Direction: Toward Workspace-as-Package (Option C)
 

@@ -8,7 +8,7 @@
 //! This module provides the canonical eval command, code-path arguments,
 //! and runtime directory discovery for starting a BEAM node with the
 //! Beamtalk REPL backend.  Both the production `beamtalk repl` command
-//! (`process.rs`) and the E2E test harness (`tests/e2e.rs`) consume
+//! (`process.rs`) and the REPL-protocol test harness (`tests/repl_protocol.rs`) consume
 //! these helpers so that any change to the startup sequence is
 //! automatically reflected in tests.
 

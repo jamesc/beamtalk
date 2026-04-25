@@ -7,7 +7,7 @@
 // via `maybe_await_future/1` (see runtime/apps/beamtalk_runtime/src/beamtalk_repl_eval.erl).
 // No explicit `await` keyword is needed for synchronous REPL interaction.
 
-// @load tests/e2e/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/counter.bt
 
 // Test actor spawn
 counter := Counter spawn

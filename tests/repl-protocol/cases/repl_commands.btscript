@@ -1,0 +1,161 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for REPL commands (BT-527).
+//
+// These tests require E2E because :bindings, :clear, and :reload are
+// REPL commands processed by the REPL session handler. BUnit tests execute
+// compiled Beamtalk code and cannot invoke REPL commands. Workspace variable
+// persistence across turns is also needed to verify that bindings survive
+// between expressions.
+//
+// Tests :bindings, :clear, and :reload commands routed through their
+// proper protocol operations.
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// ===========================================================================
+// :bindings — EMPTY STATE
+// ===========================================================================
+
+// Bindings should be empty at start (clear happens before each file)
+:bindings
+// => No bindings
+
+// ===========================================================================
+// :bindings — AFTER ASSIGNMENT
+// ===========================================================================
+
+// Assign a variable and check bindings
+x := 42
+// => 42
+
+// Bindings should show the variable
+:bindings
+// => x = 42
+
+// ===========================================================================
+// :clear — REMOVES BINDINGS
+// ===========================================================================
+
+// Clear all bindings
+:clear
+// => ok
+
+// Bindings should be empty after clear
+:bindings
+// => No bindings
+
+// Accessing cleared variable should error
+x
+// => ERROR: Undefined variable
+
+// ===========================================================================
+// :bindings — MULTIPLE VARIABLES (sorted alphabetically)
+// ===========================================================================
+
+a := 1
+// => 1
+
+b := 2
+// => 2
+
+// Multiple bindings (use wildcard since output is multi-line)
+:bindings
+// => _
+
+// Clean up for next section
+:clear
+// => ok
+
+// ===========================================================================
+// :load — LOAD A VALUE TYPE
+// ===========================================================================
+
+// Load point fixture via :load command (Counter already loaded via @load directive)
+:load tests/repl-protocol/fixtures/point.bt
+// => Loaded: Point
+
+// Verify loaded value type is usable
+p := Point new
+// => _
+
+p getX
+// => 0
+
+// ===========================================================================
+// :load — LOAD AN ACTOR AND USE IT
+// ===========================================================================
+
+// Load a different actor via :load
+:load tests/repl-protocol/fixtures/class_methods_fixture.bt
+// => Loaded: Calculator
+
+// Verify class methods work on the loaded class
+Calculator defaultValue
+// => 42
+
+Calculator add: 3 to: 7
+// => 10
+
+// ===========================================================================
+// Spawn a counter actor for metaclass operations
+c := Counter spawn
+// => #Actor<Counter,_>
+
+// :load — METACLASS OPERATIONS ON LOADED CLASSES
+// ===========================================================================
+
+// Class of a Counter instance
+c class
+// => Counter
+
+// Class introspection: respondsTo: on instances
+c respondsTo: #increment
+// => true
+
+c respondsTo: #nonExistent
+// => false
+
+// Class of a Point instance
+p class
+// => Point
+
+// Class introspection on Point instances
+p respondsTo: #getX
+// => true
+
+// ===========================================================================
+// :reload — RELOAD LOADED CLASS
+// ===========================================================================
+
+// Reload by class name (BT-848: :reload <ClassName> → ClassName reload)
+:reload Counter
+// => Counter
+
+// Counter should still work after reload
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 increment
+// => 1
+
+// ===========================================================================
+// :unload — UNLOAD A LOADED CLASS (BT-1243)
+// ===========================================================================
+
+// Load a fresh class to unload (reusing the point fixture)
+:load tests/repl-protocol/fixtures/point.bt
+// => Loaded: Point
+
+// Unload it — should succeed
+:unload Point
+// => ok
+
+// Unloading a stdlib class should return an error
+:unload Integer
+// => ERROR: Cannot remove stdlib class
+
+// Unloading a non-existent class should return an error
+:unload NonExistentClass99
+// => ERROR: Class not found

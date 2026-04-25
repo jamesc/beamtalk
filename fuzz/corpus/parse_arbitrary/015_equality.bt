@@ -65,7 +65,7 @@ true /= false
 // Actor Identity (Process PIDs)
 // ═══════════════════════════════════════════════════════════════════════════
 
-// @load tests/e2e/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/counter.bt
 
 // Actors are compared by pid - different spawns are not equal
 c1 := Counter spawn

@@ -102,6 +102,7 @@
 - Share package-root resolution between MCP lint and CLI lint via `project::package` module (BT-2060).
 - `WellKnownSelector` enum replaces fragile selector-name string comparisons across narrowing rules, codegen intrinsic dispatch, lint validators, and state-threading predicates (BT-2065 epic: BT-2069, BT-2070, BT-2071, BT-2072).
 - Generic `Visitor` trait with exhaustive `walk_expr` replaces hand-rolled AST walkers in narrowing and type inference (BT-2063).
+- Test layout cleanup: rename `tests/e2e/` to `tests/repl-protocol/` (and harness `crates/beamtalk-cli/tests/e2e.rs` to `repl_protocol.rs`) because these tests exercise the REPL TCP surface, not "end-to-end across surfaces". `just test-e2e` remains as a deprecated alias for one release; use `just test-repl-protocol` going forward (BT-2085).
 
 ## 0.3.1 — 2026-03-26
 

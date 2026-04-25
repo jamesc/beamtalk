@@ -81,14 +81,14 @@ const INPUTS: &[BenchInput] = &[
     BenchInput {
         name: "minimal",
         module_name: "bench_minimal",
-        fixture: "tests/e2e/fixtures/point.bt",
+        fixture: "tests/repl-protocol/fixtures/point.bt",
         analysable: true,
     },
     // Typical: Actor with state, control flow, error handling (≈35 lines)
     BenchInput {
         name: "typical",
         module_name: "bench_typical",
-        fixture: "tests/e2e/fixtures/bank_account.bt",
+        fixture: "tests/repl-protocol/fixtures/bank_account.bt",
         analysable: true,
     },
     // Large: SICP Scheme evaluator — complex pattern matching and recursion (≈238 lines)

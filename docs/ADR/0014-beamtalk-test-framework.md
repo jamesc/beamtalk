@@ -7,7 +7,7 @@ Implemented (2026-02-15)
 
 ### Problem Statement
 
-Beamtalk currently has **40 E2E test files** (~3,400 lines) in `tests/e2e/cases/` that test language features. These tests work by:
+Beamtalk currently has **40 E2E test files** (~3,400 lines) in `tests/repl-protocol/cases/` that test language features. These tests work by:
 
 1. Starting a REPL daemon (Erlang node + TCP server)
 2. Sending each expression over TCP to the REPL
@@ -31,7 +31,7 @@ This approach has served us well for validating the full compilation pipeline, b
 | Rust unit tests | `cargo test` | Fast (~5s) | Parser, AST, codegen |
 | Erlang unit tests | `rebar3 eunit` | Fast (~3s) | Runtime, primitives, object system |
 | Compiler snapshot tests | `cargo test` | Fast (~2s) | 51 codegen snapshots |
-| E2E tests | `just test-e2e` | **Slow (~90s)** | Language features via REPL |
+| E2E tests | `just test-repl-protocol` | **Slow (~90s)** | Language features via REPL |
 
 The testing pyramid is inverted for language feature testing — everything goes through E2E when most could be fast compiled tests.
 
@@ -185,10 +185,10 @@ FAIL CounterTest >> testMultipleIncrements
 
 ### E2E Tests: Kept for Integration
 
-The existing `tests/e2e/` suite continues to test REPL-specific behavior:
+The existing `tests/repl-protocol/` suite continues to test REPL-specific behavior:
 
 ```beamtalk
-// tests/e2e/cases/workspace_bindings.btscript
+// tests/repl-protocol/cases/workspace_bindings.btscript
 // These NEED the REPL because they test workspace state
 
 Transcript show: 'Hello from E2E'
@@ -424,10 +424,10 @@ testUnixOnlyFeature =>
 
 ### Moving E2E Tests to Compiled Tests
 
-1. **Classify** each `tests/e2e/cases/*.btscript` file:
+1. **Classify** each `tests/repl-protocol/cases/*.btscript` file:
    - No `@load`, no workspace bindings → move to `test/` (compiled)
    - Uses `@load` but no workspace bindings → move to `test/` with `@load` support
-   - Uses workspace bindings → keep in `tests/e2e/` (needs REPL)
+   - Uses workspace bindings → keep in `tests/repl-protocol/` (needs REPL)
 
 2. **Gradual migration** — move files one at a time, verify tests still pass
 
@@ -445,7 +445,7 @@ test/                    # Compiled Beamtalk tests (Phase 1 + 2)
 └── fixtures/
     └── counter.bt       # Shared test fixtures
 
-tests/e2e/               # REPL integration tests (keep existing)
+tests/repl-protocol/               # REPL integration tests (keep existing)
 ├── cases/
 │   ├── workspace_bindings.btscript
 │   └── repl_commands.btscript

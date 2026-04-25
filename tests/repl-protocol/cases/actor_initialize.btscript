@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for actor initialize protocol (BT-411 / ADR 0013 Phase 2)
+//
+// These tests require E2E because actor spawn and the automatic initialize
+// callback are part of the live REPL actor lifecycle. BUnit tests execute
+// compiled expressions but cannot drive the full spawn-then-initialize
+// sequence with workspace variable persistence across REPL turns.
+//
+// Tests that actor classes with an `initialize` method have it
+// automatically called after spawn.
+
+// @load tests/repl-protocol/fixtures/actor_initialize_fixture.bt
+
+// ===========================================================================
+// ACTOR INITIALIZE — BASIC
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Actor with initialize: derived state set after spawn
+// ---------------------------------------------------------------------------
+
+c := InitCounter spawn
+// => #Actor<InitCounter,_>
+
+c getValue
+// => 100
+
+// ===========================================================================
+// BACKWARD COMPATIBILITY — NO INITIALIZE
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Actor without initialize works as before
+// ---------------------------------------------------------------------------
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 increment
+// => 1
+
+c2 getValue
+// => 1
+
+// ===========================================================================
+// SUPERVISED ACTOR INITIALIZE (BT-1417)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Actor with initialize runs initialize when started by a supervisor
+// ---------------------------------------------------------------------------
+
+// @load tests/repl-protocol/fixtures/e2e_initialize_supervisor.bt
+
+initSup := (E2EInitializeSupervisor supervise) unwrap
+// => #Supervisor<E2EInitializeSupervisor,_>
+
+initSup count
+// => 1
+
+// The supervised InitCounter should have initialize called (value = 100, not 0)
+initChild := (initSup which: InitCounter) unwrap
+// => #Actor<InitCounter,_>
+
+initChild getValue
+// => 100
+
+// Clean up
+initSup stop
+// => nil

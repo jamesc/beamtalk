@@ -21,7 +21,7 @@
 // ```bash
 // $ cargo run -- repl
 // > :load examples/protoobject_proxy.bt
-// > :load tests/e2e/fixtures/counter.bt
+// > :load tests/repl-protocol/fixtures/counter.bt
 //
 // # Create a counter and increment it
 // > counter := Counter spawn

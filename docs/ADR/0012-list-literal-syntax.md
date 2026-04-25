@@ -357,11 +357,11 @@ numbers := List with: 1 with: 2 with: 3
 - Codegen already handles `Literal::Array` → Erlang list — rename and verify
 - Add expression-level list support (dynamic lists with non-literal elements)
 - Add unit tests for parser
-- Add E2E tests: `tests/e2e/cases/list_literals.bt`
+- Add REPL protocol tests: `tests/repl-protocol/cases/list_literals.btscript`
 
 **Files:**
 - `crates/beamtalk-core/src/codegen/core_erlang/expressions.rs` — `Expression::ListLiteral` support
-- `tests/e2e/cases/list_literals.bt` — New E2E test file
+- `tests/repl-protocol/cases/list_literals.btscript` — New REPL protocol test file
 
 ### Phase 3: Pattern Matching (M)
 - Enable `#(head | tail)` in pattern positions (AST `Pattern::List` already exists)

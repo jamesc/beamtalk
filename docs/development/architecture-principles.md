@@ -187,8 +187,8 @@ The beamtalk test suite follows the **testing pyramid** pattern: many fast unit 
 ### Test Layers
 
 ```
-        ╱ ╲  E2E Tests (tests/e2e/cases/*.btscript)
-       ╱   ╲  - Real Beamtalk → BEAM execution
+        ╱ ╲  REPL-Protocol Tests (tests/repl-protocol/cases/*.btscript)
+       ╱   ╲  - Real Beamtalk → BEAM execution via REPL TCP
       ╱ 10% ╲  - Slow, high confidence
      ╱───────╲  - User-facing scenarios
     ╱         ╲
@@ -255,9 +255,9 @@ mod tests {
 - `beamtalk_actor_tests.erl` - Actor spawn, message passing, state
 - `beamtalk_codegen_simulation_tests.erl` - Compiled `.bt` modules running in runtime
 
-### End-to-End Tests
+### REPL-Protocol Tests
 
-**Location:** `tests/e2e/cases/*.btscript` (real Beamtalk source files)
+**Location:** `tests/repl-protocol/cases/*.btscript` (real Beamtalk source files)
 
 **Characteristics:**
 - Slow (100ms-1s per test)
@@ -267,7 +267,7 @@ mod tests {
 
 **Example:**
 ```beamtalk
-// tests/e2e/cases/arithmetic.btscript
+// tests/repl-protocol/cases/arithmetic.btscript
 42 + 3
 // => 45
 

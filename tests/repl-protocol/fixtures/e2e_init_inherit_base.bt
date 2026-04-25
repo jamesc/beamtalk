@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Parent actor with a typed-no-default field set in initialize.
+// Used by tests/repl-protocol/cases/actor_initialize_inheritance.btscript (BT-1956).
+
+typed Actor subclass: E2EInitInheritBase
+  state: label :: String
+  state: count :: Integer = 0
+
+  initialize -> String => self.label := "parent-initialized"
+
+  getLabel -> String => self.label
+
+  getCount -> Integer => self.count

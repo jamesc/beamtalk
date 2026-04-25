@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1862: E2E tests for SupervisionSpec withClassMethod: — verifying that
+// supervision routes through the actor's keyword class method instead of
+// directly calling start_link/init.
+//
+// The class method `create:value:` transforms raw args into the actor's
+// `label` state field. Without the fix, the supervisor would merge raw args
+// directly into state, leaving `label` empty.
+
+// @load tests/repl-protocol/fixtures/e2e_class_method_actor.bt
+// @load tests/repl-protocol/fixtures/e2e_class_method_supervisor.bt
+
+// ===========================================================================
+// CLASS METHOD SUPERVISION — initial start
+// ===========================================================================
+
+// Start the supervisor which routes through the class method
+cmSup := (E2EClassMethodSupervisor supervise) unwrap
+// => #Supervisor<E2EClassMethodSupervisor,_>
+
+// The supervisor has one child
+cmSup count
+// => 1
+
+// The child was started via the class method which transforms args
+cmChild := (cmSup which: E2EClassMethodActor) unwrap
+// => #Actor<E2EClassMethodActor,_>
+
+// The class method combined #test + 99 into "test:99"
+cmChild label
+// => test:99
+
+// ===========================================================================
+// CLASS METHOD SUPERVISION — cleanup
+// ===========================================================================
+
+cmSup stop
+// => nil

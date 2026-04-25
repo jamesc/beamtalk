@@ -17,7 +17,7 @@ runtime/apps/beamtalk_runtime/test_fixtures/
 └── README.md           # This file
 ```
 
-**Note:** `counter.bt` fixture consolidated to `tests/e2e/fixtures/counter.bt` (BT-239)
+**Note:** `counter.bt` fixture consolidated to `tests/repl-protocol/fixtures/counter.bt` (BT-239)
 
 ## Building Fixtures
 
@@ -32,7 +32,7 @@ escript ./runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
 ```
 
 The script:
-1. Compiles `tests/e2e/fixtures/counter.bt` (unified fixture)
+1. Compiles `tests/repl-protocol/fixtures/counter.bt` (unified fixture)
 2. Compiles `runtime/apps/beamtalk_runtime/test_fixtures/logging_counter.bt`
 3. Copies resulting `.beam` files to `runtime/_build/*/test/`
 
@@ -40,7 +40,7 @@ The script:
 
 ### counter.bt (Unified Fixture - BT-239)
 
-**Source:** `tests/e2e/fixtures/counter.bt`  
+**Source:** `tests/repl-protocol/fixtures/counter.bt`  
 **Syntax:** Modern class syntax (`Actor subclass: Counter`)
 
 A simple counter actor with:
@@ -52,7 +52,7 @@ Used by `beamtalk_codegen_simulation_tests.erl` to test real compiled code gener
 including `spawn/0` and `spawn/1` that return `#beamtalk_object{}` records.
 
 **Consolidation:** Previously duplicated in `tests/fixtures/counter.bt`, now unified
-with E2E fixture to reduce maintenance and confusion (BT-239).
+with the REPL-protocol fixture to reduce maintenance and confusion (BT-239).
 
 ### logging_counter.bt (BT-108)
 
@@ -81,5 +81,5 @@ Used by `beamtalk_codegen_simulation_tests.erl` super keyword tests to verify:
 ## References
 
 - Runtime tests: `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
-- E2E fixtures: `tests/e2e/fixtures/`
-- E2E test cases: `tests/e2e/cases/*.bt`
+- REPL-protocol fixtures: `tests/repl-protocol/fixtures/`
+- REPL-protocol test cases: `tests/repl-protocol/cases/*.btscript`

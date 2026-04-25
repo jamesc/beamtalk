@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test basic reflection API (BT-97)
-// @load tests/e2e/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/counter.bt
 
 // Create counter instance
 c := Counter spawn

@@ -1,0 +1,240 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Supervisor and DynamicSupervisor supervision tree syntax (BT-1223).
+//
+// These tests require E2E because supervision trees manage live OTP processes.
+// BUnit tests run in compiled code without access to OTP process registration,
+// and cannot drive the full supervise → inspect → stop lifecycle with workspace
+// variable persistence across REPL turns.
+//
+// ADR: docs/ADR/0059-supervision-tree-syntax.md
+
+// @load tests/repl-protocol/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/e2e_app_supervisor.bt
+// @load tests/repl-protocol/fixtures/e2e_worker_pool.bt
+// @load tests/repl-protocol/fixtures/e2e_inner_supervisor.bt
+// @load tests/repl-protocol/fixtures/e2e_outer_supervisor.bt
+// @load tests/repl-protocol/fixtures/e2e_stop_supervisor.bt
+// @load tests/repl-protocol/fixtures/e2e_args_supervisor.bt
+
+// ===========================================================================
+// STATIC SUPERVISOR — DISPLAY FORMAT
+// ===========================================================================
+
+// supervise returns a human-readable #Supervisor<ClassName,Pid> object (not raw tuple)
+app := (E2EAppSupervisor supervise) unwrap
+// => #Supervisor<E2EAppSupervisor,_>
+
+// ===========================================================================
+// STATIC SUPERVISOR — current
+// ===========================================================================
+
+// current returns the running supervisor instance
+appCurrent := E2EAppSupervisor current
+// => #Supervisor<E2EAppSupervisor,_>
+
+// supervise is idempotent — returns the same running instance
+app2 := (E2EAppSupervisor supervise) unwrap
+// => #Supervisor<E2EAppSupervisor,_>
+
+// ===========================================================================
+// STATIC SUPERVISOR — child inspection
+// ===========================================================================
+
+// count returns the number of running children (Counter child started by OTP)
+app count
+// => 1
+
+// children returns the list of child ids (Counter class name atom by default)
+app children
+// => ["Counter"]
+
+// which: returns the running child actor instance (wrapped in Result)
+counterChild := (app which: Counter) unwrap
+// => #Actor<Counter,_>
+
+// the child actor responds to messages
+counterChild getValue
+// => 0
+
+// ===========================================================================
+// STATIC SUPERVISOR — stop and current after stop
+// ===========================================================================
+
+// stop stops the supervisor and all children, returns nil
+(E2EStopSupervisor supervise) unwrap
+// => #Supervisor<E2EStopSupervisor,_>
+
+E2EStopSupervisor current
+// => #Supervisor<E2EStopSupervisor,_>
+
+stopSup := E2EStopSupervisor current
+// => #Supervisor<E2EStopSupervisor,_>
+
+stopSup stop
+// => nil
+
+// current returns nil after the supervisor has been stopped
+E2EStopSupervisor current
+// => nil
+
+// ===========================================================================
+// DYNAMIC SUPERVISOR — start and display
+// ===========================================================================
+
+// supervise returns a human-readable #DynamicSupervisor<ClassName,Pid> object
+pool := (E2EWorkerPool supervise) unwrap
+// => #DynamicSupervisor<E2EWorkerPool,_>
+
+// count starts at 0 — no children yet
+pool count
+// => 0
+
+// ===========================================================================
+// DYNAMIC SUPERVISOR — startChild and terminateChild
+// ===========================================================================
+
+// startChild starts a new Counter worker under the supervisor
+w1 := pool startChild unwrap
+// => #Actor<Counter,_>
+
+// count is now 1
+pool count
+// => 1
+
+// start a second worker
+w2 := pool startChild unwrap
+// => #Actor<Counter,_>
+
+pool count
+// => 2
+
+// terminateChild removes a child from the supervisor
+(pool terminateChild: w1) unwrap
+// => nil
+
+pool count
+// => 1
+
+// terminate the second child too
+(pool terminateChild: w2) unwrap
+// => nil
+
+pool count
+// => 0
+
+// ===========================================================================
+// NESTED SUPERVISORS
+// ===========================================================================
+
+// E2EOuterSupervisor has E2EInnerSupervisor as its one child.
+// E2EInnerSupervisor has Counter as its one child.
+outer := (E2EOuterSupervisor supervise) unwrap
+// => #Supervisor<E2EOuterSupervisor,_>
+
+// outer has 1 child (the inner supervisor)
+outer count
+// => 1
+
+// which: returns the inner supervisor as a supervisor object (wrapped in Result)
+innerSup := (outer which: E2EInnerSupervisor) unwrap
+// => #Supervisor<E2EInnerSupervisor,_>
+
+// the inner supervisor has its own Counter child
+innerSup count
+// => 1
+
+// ===========================================================================
+// SUPERVISIONSPEC withArgs: — spawnWith: start path
+// ===========================================================================
+
+// E2EArgsSupervisor uses SupervisionSpec withArgs: to start a Counter with
+// initial value 42, exercising the spawnWith: code path in spec_to_otp.
+argsSup := (E2EArgsSupervisor supervise) unwrap
+// => #Supervisor<E2EArgsSupervisor,_>
+
+// The supervisor has one Counter child
+argsSup count
+// => 1
+
+// The child Counter was started with initial value 42 via spawnWith:
+argsChild := (argsSup which: Counter) unwrap
+// => #Actor<Counter,_>
+
+argsChild getValue
+// => 42
+
+// ===========================================================================
+// WORKSPACE SUPERVISOR LIFECYCLE — startSupervisor: / stopSupervisor: (BT-1341)
+// ===========================================================================
+
+// Stop the standalone supervisor before testing workspace attachment
+argsSup stop
+// => nil
+
+app stop
+// => nil
+
+pool stop
+// => nil
+
+outer stop
+// => nil
+
+// startSupervisor: attaches a supervisor to the workspace supervision tree
+wsSup := Workspace startSupervisor: E2EAppSupervisor
+// => #Supervisor<E2EAppSupervisor,_>
+
+// The attached supervisor has its Counter child running
+wsSup count
+// => 1
+
+wsSup children
+// => ["Counter"]
+
+// supervisors lists all user-attached supervisors
+Workspace supervisors size
+// => 1
+
+// startSupervisor: is idempotent — returns existing if already attached
+wsSup2 := Workspace startSupervisor: E2EAppSupervisor
+// => #Supervisor<E2EAppSupervisor,_>
+
+// stopSupervisor: cleanly shuts down and removes from workspace tree
+Workspace stopSupervisor: E2EAppSupervisor
+// => nil
+
+// supervisors is now empty
+Workspace supervisors size
+// => 0
+
+// Re-attaching after stopping works (iterative development)
+wsSup3 := Workspace startSupervisor: E2EAppSupervisor
+// => #Supervisor<E2EAppSupervisor,_>
+
+wsSup3 count
+// => 1
+
+// Also works with DynamicSupervisor
+wsPool := Workspace startSupervisor: E2EWorkerPool
+// => #DynamicSupervisor<E2EWorkerPool,_>
+
+wsPool count
+// => 0
+
+wsW1 := wsPool startChild unwrap
+// => #Actor<Counter,_>
+
+wsPool count
+// => 1
+
+// Clean up
+Workspace stopSupervisor: E2EWorkerPool
+// => nil
+
+Workspace stopSupervisor: E2EAppSupervisor
+// => nil
+
+Workspace supervisors size
+// => 0

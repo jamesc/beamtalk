@@ -19,13 +19,13 @@ default:
 
 # Run local CI checks (combination of GitHub Actions check + test jobs)
 # Matches: just build clippy fmt-check test (check job)
-#        + just test-integration test-mcp test-e2e (test job extras)
+#        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-integration test-mcp test-parity test-e2e check-corpus check-surface-drift
+ci: build lint test test-integration test-mcp test-parity test-repl-protocol check-corpus check-surface-drift
 
 [windows]
-ci: build clippy fmt-check-rust test test-integration test-mcp test-parity test-e2e check-surface-drift
+ci: build clippy fmt-check-rust test test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]
@@ -346,17 +346,17 @@ fmt-erlang:
 # Format all Beamtalk source files
 # stdlib/bootstrap-test/ uses identity formatting for .btscript files —
 # only parse errors are reported; file content is never rewritten (BT-1016).
-# tests/e2e/cases/ is excluded: those .btscript files contain REPL commands
+# tests/repl-protocol/cases/ is excluded: those .btscript files contain REPL commands
 # (e.g. :clear, :bindings) that are not valid Beamtalk syntax.
 fmt-beamtalk:
     @echo "✨ Formatting Beamtalk source files..."
-    @cargo run --bin beamtalk --quiet -- fmt stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/e2e/fixtures/
+    @cargo run --bin beamtalk --quiet -- fmt stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/repl-protocol/fixtures/
     @echo "✅ Beamtalk source files formatted"
 
 # Check Beamtalk source file formatting
 fmt-check-beamtalk:
     @echo "📋 Checking Beamtalk source formatting..."
-    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/e2e/fixtures/
+    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/repl-protocol/fixtures/
     @echo "✅ Beamtalk formatting check passed"
 
 # Run Dialyzer on Erlang runtime
@@ -414,10 +414,16 @@ test-rust:
     @$output = cargo test --all-targets --quiet 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
 
-# Run E2E tests (slow - full pipeline, ~50s)
-test-e2e: build-stdlib
-    @echo "🧪 Running E2E tests (slow - ~50s)..."
-    cargo test --test e2e -- --ignored
+# Run REPL protocol tests (slow - full pipeline, ~50s)
+test-repl-protocol: build-stdlib
+    @echo "🧪 Running REPL protocol tests (slow - ~50s)..."
+    cargo test --test repl_protocol -- --ignored
+
+# Deprecated alias for test-repl-protocol — kept for one release cycle (BT-2085).
+# Will be removed after the deprecation window.
+test-e2e:
+    @echo "⚠️  'just test-e2e' is deprecated; use 'just test-repl-protocol' instead."
+    @just test-repl-protocol
 
 # Run cross-surface parity tests (BT-2077, BT-2078, BT-2081)
 # Drives the same input through REPL / MCP / CLI / LSP and asserts agreement.
@@ -469,8 +475,8 @@ test-mcp: build
     @$output = cargo test -p beamtalk-mcp -- --ignored --test-threads=1 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ MCP integration tests complete"
 
-# Run ALL tests (unit + integration + E2E + Erlang runtime)
-test-all: test-rust test-stdlib test-bunit test-integration test-mcp test-e2e test-runtime
+# Run ALL tests (unit + integration + REPL protocol + Erlang runtime)
+test-all: test-rust test-stdlib test-bunit test-integration test-mcp test-repl-protocol test-runtime
 
 # Smoke test installed layout (install to temp dir, verify binary + compiler work)
 [unix]
@@ -683,7 +689,7 @@ coverage-e2e: build-stdlib
     echo "📊 Running E2E tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal E2E due to cover overhead)"
     # Allow test failures — coverdata is exported before BEAM shuts down
-    E2E_COVER=1 cargo test --test e2e -- --ignored || true
+    E2E_COVER=1 cargo test --test repl_protocol -- --ignored || true
     if [ -f runtime/_build/test/cover/e2e.coverdata ]; then
         SIZE=$(wc -c < runtime/_build/test/cover/e2e.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/e2e.coverdata (${SIZE} bytes)"

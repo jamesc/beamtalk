@@ -18,7 +18,7 @@ Beamtalk has rich content that could serve as an example corpus:
 | Source | Count | Description |
 |--------|-------|-------------|
 | `stdlib/test/fixtures/*.bt` | ~97 files | Complete class definitions — actors, value classes, NLR, coordination, error handling |
-| `tests/e2e/fixtures/*.bt` | ~52 files | Real-world patterns — bank accounts, chat rooms, supervision, hot reload |
+| `tests/repl-protocol/fixtures/*.bt` | ~52 files | Real-world patterns — bank accounts, chat rooms, supervision, hot reload |
 | `docs/learning/fixtures/*.bt` | ~50 files | Pedagogical examples — typed classes, destructuring, FFI, supervision |
 | `stdlib/test/*.bt` | ~151 files | BUnit test cases exercising the fixtures |
 | `docs/learning/*.md` | 27 files | Structured learning modules with prose explanations |
@@ -27,7 +27,7 @@ Beamtalk has rich content that could serve as an example corpus:
 | `crates/beamtalk-core/src/unparse/fixtures/*.bt` | 7 files | Parser round-trip fixtures showing valid syntax patterns |
 | `stdlib/bootstrap-test/*.btscript` | ~20 files | Bootstrap primitive tests (too low-level for agents) |
 
-The test fixtures are the most valuable source — they are complete, self-contained, tested class definitions that directly answer "how do I write X in Beamtalk?". For example, `stdlib/test/fixtures/counter.bt` is a 15-line actor with state, mutation, and accessors; `tests/e2e/fixtures/bank_account.bt` shows error handling, early returns, and string interpolation in a realistic domain.
+The test fixtures are the most valuable source — they are complete, self-contained, tested class definitions that directly answer "how do I write X in Beamtalk?". For example, `stdlib/test/fixtures/counter.bt` is a 15-line actor with state, mutation, and accessors; `tests/repl-protocol/fixtures/bank_account.bt` shows error handling, early returns, and string interpolation in a realistic domain.
 
 These are already maintained, tested, and current. The problem is making them accessible to agents that don't have the repo.
 
@@ -117,7 +117,7 @@ Not all source content is equally useful as a corpus entry. The strategy is cura
 | Source | Strategy | Granularity | Value |
 |--------|----------|-------------|-------|
 | `stdlib/test/fixtures/*.bt` | Include as whole-file examples | One entry per fixture file | **High** — complete class defs: actors, value classes, NLR, coordination, HOM |
-| `tests/e2e/fixtures/*.bt` | Include as whole-file examples | One entry per fixture file | **High** — real-world patterns: bank accounts, chat rooms, supervision, hot reload |
+| `tests/repl-protocol/fixtures/*.bt` | Include as whole-file examples | One entry per fixture file | **High** — real-world patterns: bank accounts, chat rooms, supervision, hot reload |
 | `docs/learning/fixtures/*.bt` | Include as whole-file examples | One entry per fixture file | **High** — pedagogical, tied to learning modules, typed classes, destructuring, FFI |
 | `stdlib/test/*.bt` | Extract individual test methods | One entry per test method (with class context) | **Medium** — shows how to *use* patterns, but test scaffolding adds noise |
 | `examples/**/*.bt` | Extract key patterns from each project | One entry per notable pattern | **Medium** — multi-file projects, harder to chunk into standalone entries |
@@ -401,7 +401,7 @@ Keep `CorpusEntry`, `Corpus`, and search logic as modules inside `beamtalk-mcp` 
 1. Create `crates/beamtalk-examples/` library crate with `CorpusEntry`, `Corpus`, `LazyLock` deserialization, and `search.rs`
 2. Create `crates/beamtalk-examples/build-corpus/` binary crate (depends on `beamtalk-examples` + `beamtalk-core`)
 3. Implement extractors for each content source:
-   - `.bt` fixture files (`stdlib/test/fixtures/`, `tests/e2e/fixtures/`, `docs/learning/fixtures/`): include as whole-file entries with auto-generated tags from class names, selectors, and file path
+   - `.bt` fixture files (`stdlib/test/fixtures/`, `tests/repl-protocol/fixtures/`, `docs/learning/fixtures/`): include as whole-file entries with auto-generated tags from class names, selectors, and file path
    - `.bt` test files (`stdlib/test/*.bt`): extract individual test methods with class context
    - `.bt` example files (`examples/**/*.bt`): extract notable patterns
    - `.md` learning modules: extract fenced `.bt` code blocks that pass parser validation, with surrounding prose (skip illustrative/non-working snippets)

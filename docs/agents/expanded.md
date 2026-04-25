@@ -49,7 +49,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to 
 
 ### Test File Rules
 
-In test files (`stdlib/bootstrap-test/*.btscript` and `tests/e2e/cases/*.btscript`):
+In test files (`stdlib/bootstrap-test/*.btscript` and `tests/repl-protocol/cases/*.btscript`):
 - **Every expression MUST have a `// =>` assertion** (even `// => _` for wildcard)
 - **No assertion = no execution** — expressions are silently skipped
 - **Missing assertions fail CI** (BT-249)
@@ -79,7 +79,7 @@ x
 Before using ANY Beamtalk syntax, verify it exists in at least one of:
 1. **Language spec:** [docs/beamtalk-language-features.md](../docs/beamtalk-language-features.md)
 2. **Examples:** `examples/*.bt`
-3. **Tests:** `stdlib/bootstrap-test/*.btscript`, `tests/e2e/cases/*.btscript`
+3. **Tests:** `stdlib/bootstrap-test/*.btscript`, `tests/repl-protocol/cases/*.btscript`
 4. **Parser tests:** `crates/beamtalk-core/src/source_analysis/parser/`
 
 **If it doesn't appear in any of these → it's likely hallucinated. Search the codebase or ask.**
@@ -522,19 +522,19 @@ beamtalk_stdlib (compiled stdlib)
 
 #### 3. Codegen Simulation Tests
 **Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
-- Tests using **real compiled Beamtalk code** from `tests/e2e/fixtures/counter.bt` (unified fixture - BT-239)
+- Tests using **real compiled Beamtalk code** from `tests/repl-protocol/fixtures/counter.bt` (unified fixture - BT-239)
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
-- Fixtures: `logging_counter.bt` stored in `runtime/apps/beamtalk_runtime/test_fixtures/`, `counter.bt` sourced from E2E fixtures
+- Fixtures: `logging_counter.bt` stored in `runtime/apps/beamtalk_runtime/test_fixtures/`, `counter.bt` sourced from REPL-protocol fixtures
 - Compiled by `runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript` (rebar3 pre-hook)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 4. Stdlib Tests (Compiled Expression Tests) — ADR 0014
 **Location:** `stdlib/bootstrap-test/*.btscript` (12 files)
 - **Pure language feature tests** compiled directly to EUnit (no REPL needed)
-- Uses same `// =>` assertion format as E2E tests
-- Runs via `just test-stdlib` (fast, ~14s vs ~50s for E2E)
+- Uses same `// =>` assertion format as REPL-protocol tests
+- Runs via `just test-stdlib` (fast, ~14s vs ~50s for REPL-protocol)
 - Tests arithmetic, strings, blocks, closures, collections, object protocol, etc.
 - Supports `@load` directives for fixture-dependent tests (actors, sealed classes)
 - **Use this for any new test that doesn't need REPL/workspace features**
@@ -549,15 +549,16 @@ beamtalk_stdlib (compiled stdlib)
 - Can also run interactively in REPL: `CounterTest runAll` or `CounterTest run: #testName`
 - **Use this for stateful tests, complex actor interactions, multi-assertion scenarios**
 
-#### 6. End-to-End Tests (REPL Integration)
-**Location:** `tests/e2e/cases/*.btscript` (54 files)
+#### 6. REPL-Protocol Tests (REPL Integration)
+**Location:** `tests/repl-protocol/cases/*.btscript` (54 files)
 - Require a running REPL daemon (started automatically by test harness)
 - Test workspace bindings, REPL commands, variable persistence, auto-await
 - Test `ERROR:` assertion patterns and `@load-error` directives
-- Runs via `just test-e2e` (~50s)
+- Runs via `just test-repl-protocol` (~50s)
 - **Only use for tests that genuinely need the REPL**
 
-**When choosing between stdlib, BUnit, and E2E tests:**
+**When choosing between stdlib, BUnit, and REPL-protocol tests:**
+
 | Test needs... | Where |
 |---|---|
 | Pure language features (arithmetic, strings, blocks) | `stdlib/bootstrap-test/` |
@@ -565,9 +566,9 @@ beamtalk_stdlib (compiled stdlib)
 | Actor spawn + messaging (with `@load`) | `stdlib/bootstrap-test/` |
 | Stateful tests with setUp/tearDown | `stdlib/test/*.bt` (BUnit) |
 | Complex actor interactions, multiple assertions | `stdlib/test/*.bt` (BUnit) |
-| Workspace bindings (Transcript, Beamtalk) | `tests/e2e/cases/` |
-| REPL commands, variable persistence | `tests/e2e/cases/` |
-| Auto-await, `ERROR:` assertions | `tests/e2e/cases/` |
+| Workspace bindings (Transcript, Beamtalk) | `tests/repl-protocol/cases/` |
+| REPL commands, variable persistence | `tests/repl-protocol/cases/` |
+| Auto-await, `ERROR:` assertions | `tests/repl-protocol/cases/` |
 
 #### Test Fixture Organization (BT-239)
 
@@ -575,10 +576,10 @@ beamtalk_stdlib (compiled stdlib)
 - Colocated with runtime tests for better locality
 - Compiled by `apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript` (rebar3 pre-hook)
 - Currently: `logging_counter.bt` (super keyword tests)
-- Note: `counter.bt` consolidated to E2E fixture
+- Note: `counter.bt` consolidated to REPL-protocol fixture
 
-**E2E fixtures:** `tests/e2e/fixtures/`
-- Used by E2E test cases
+**REPL-protocol fixtures:** `tests/repl-protocol/fixtures/`
+- Used by REPL-protocol test cases
 - `counter.bt` is the canonical Counter implementation
 - Also used by runtime tests (unified fixture)
 
@@ -599,12 +600,12 @@ Detailed coding standards are in `docs/development/`:
 ### CI Commands
 
 ```bash
-just ci                      # Run all CI checks (build, lint, test, test-stdlib, test-integration, test-mcp, test-e2e)
+just ci                      # Run all CI checks (build, lint, test, test-integration, test-mcp, test-parity, test-repl-protocol, check-corpus, check-surface-drift)
 just build                   # Build Rust + Erlang runtime
 just test                    # Rust + stdlib + BUnit + runtime tests
 just test-stdlib             # Compiled language feature tests (~14s)
 just test-bunit              # BUnit TestCase tests
-just test-e2e                # Run E2E tests (~50s)
+just test-repl-protocol      # Run REPL TCP-protocol tests (~50s)
 just fmt                     # Format all code
 just clippy                  # Lints (warnings = errors)
 just dialyzer                # Erlang type checking

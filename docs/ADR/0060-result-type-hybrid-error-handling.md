@@ -843,7 +843,7 @@ Ship Result and migrate all FFI modules in one step. Existing callers (including
 7. **Yaml/JSON parsing** — Parse errors return Result
 8. **`stdlib/test/result_test.bt`** — BUnit tests for all Result methods
 9. **Update stdlib tests** — file, regex, HTTP, subprocess tests for Result-returning methods
-10. **Update e2e tests** — `tests/e2e/cases/` for file-related cases
+10. **Update e2e tests** — `tests/repl-protocol/cases/` for file-related cases
 
 ### Phase 2: Language Features Documentation (S)
 

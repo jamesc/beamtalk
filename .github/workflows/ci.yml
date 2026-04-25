@@ -312,8 +312,8 @@ jobs:
       - name: Test MCP server integration
         run: just test-mcp
 
-      - name: Test E2E (full pipeline)
-        run: just test-e2e
+      - name: Test REPL protocol (full pipeline)
+        run: just test-repl-protocol
 
   coverage:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

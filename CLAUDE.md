@@ -30,7 +30,7 @@ just build       # Build Rust + Erlang runtime
 just test        # Rust + stdlib + BUnit + runtime tests
 just test-stdlib # Compiled language feature tests (~14s)
 just test-bunit  # BUnit TestCase tests
-just test-e2e    # REPL integration tests (~50s)
+just test-repl-protocol  # REPL TCP-protocol tests (~50s)
 just fmt         # Format all code
 just clippy      # Lints (warnings = errors)
 just dialyzer    # Erlang type checking
@@ -45,7 +45,7 @@ You may run `just`, `cargo`, `rustc`, `rustfmt`, and `git` without asking.
 | Bootstrap primitives (arithmetic, booleans, equality, strings) | `stdlib/bootstrap-test/*.btscript` |
 | Language features (collections, closures, regex, actors, etc.) | `stdlib/test/*.bt` (BUnit) |
 | Stateful tests with setUp/tearDown | `stdlib/test/*.bt` (BUnit) |
-| Workspace bindings, REPL commands, variable persistence | `tests/e2e/cases/*.btscript` |
+| Workspace bindings, REPL commands, variable persistence | `tests/repl-protocol/cases/*.btscript` |
 
 Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Only use `stdlib/bootstrap-test/` for bootstrap-critical primitives.
 

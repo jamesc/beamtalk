@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // SelfRefActor - Actor fixture for testing self-reference behavior
-// Used by tests/e2e/cases/self_reference.bt
+// Used by tests/repl-protocol/cases/self_reference.bt
 
 Actor subclass: SelfRefActor
   state: value = 0

@@ -426,7 +426,7 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 ### Phase 5: Verify
 
 1. `just test-runtime` — all existing tests pass
-2. `just test-e2e` — REPL integration works
+2. `just test-repl-protocol` — REPL integration works
 3. `just ci` — full CI green
 4. Manual REPL test: `:load`, `spawn`, `increment` flow
 

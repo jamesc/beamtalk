@@ -447,7 +447,7 @@ Replace daemon IPC in `beamtalk_repl_eval.erl` with calls through `beamtalk_comp
 - Modified: `crates/beamtalk-cli/src/commands/repl.rs` (remove daemon auto-start)
 
 **Testing:**
-- All existing E2E tests (`just test-e2e`) must pass with both Port and daemon backends
+- All existing REPL protocol tests (`just test-repl-protocol`) must pass with both Port and daemon backends
 - All stdlib tests (`just test-stdlib`) must pass with the Port backend
 - CI should run tests with `BEAMTALK_COMPILER=port` and `BEAMTALK_COMPILER=daemon` to verify identical behavior
 

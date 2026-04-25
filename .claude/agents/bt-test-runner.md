@@ -20,13 +20,13 @@ git rev-parse --show-toplevel 2>/dev/null || pwd
 |-------|---------|------|-------------|
 | Fast (unit + stdlib + bunit + runtime) | `just test` | ~10s | After most changes |
 | Stdlib only | `just test-stdlib` | ~14s | After stdlib .bt changes |
-| E2E (slow) | `just test-e2e` | ~50s | Before final commit only |
+| REPL protocol (slow) | `just test-repl-protocol` | ~50s | Before final commit only |
 | Full CI | `just ci` | ~2min | Pre-PR check |
 
 ## What to run
 
 - If called with no specific suite: run `just test`
-- If called with a suite name (e.g. "run e2e"): run that suite
+- If called with a suite name (e.g. "run repl-protocol"): run that suite
 - If called after specific file changes, infer the right suite
 
 ## Output rules

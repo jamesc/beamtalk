@@ -8080,8 +8080,8 @@
         "subclassing",
         "targetClass"
       ],
-      "source": "// =============================================================================\n// ProtoObject Example: Transparent Proxy Pattern\n// =============================================================================\n//\n// This example demonstrates ProtoObject's fundamental methods working together\n// to implement a transparent proxy that forwards unknown messages to a target.\n//\n// ## What This Demonstrates\n//\n// 1. **ProtoObject.class** - Every object can report its class\n// 2. **ProtoObject.doesNotUnderstand:args:** - Catch unknown messages\n// 3. **ProtoObject.perform:withArguments:** - Dynamic message dispatch\n// 4. **ProtoObject.== and /=** - Identity comparison\n// 5. **Transparent proxy pattern** - Proxy is indistinguishable from target\n//\n// ## How to Run\n//\n// ```bash\n// $ cargo run -- repl\n// > :load examples/protoobject_proxy.bt\n// > :load tests/e2e/fixtures/counter.bt\n//\n// # Create a counter and increment it\n// > counter := Counter spawn\n// > counter increment\n// => 1\n//\n// # Create a proxy and forward messages through it\n// > proxy := TransparentProxy spawn\n// > proxy setTarget: counter\n// > proxy increment              # Forwarded to counter!\n// => 2\n//\n// # Verify the counter was incremented\n// > counter getValue\n// => 2\n//\n// # The proxy looks just like the real object\n// > counter class\n// => Counter\n// > proxy targetClass\n// => Counter\n// ```\n//\n// ## Key Insight: Auto-Await in REPL\n//\n// Notice that both `counter increment` and `proxy increment` return the same\n// thing: `=> 2`. With sync-by-default dispatch, actor sends return values\n// directly (via gen_server:call), making the proxy completely transparent.\n//\n// =============================================================================\n\n/// TransparentProxy - Forwards all unknown messages to a target object\n///\n/// This demonstrates ProtoObject's doesNotUnderstand:args: and perform:withArguments:\n/// working together to create a proxy that's indistinguishable from the target.\nActor subclass: TransparentProxy\n  state: target = nil\n\n  // Set the target object that receives forwarded messages\n  setTarget: newTarget => self.target := newTarget\n\n  // Get the class of the target (for debugging)\n  targetClass => self.target class\n\n  // ProtoObject's doesNotUnderstand:args: catches unknown messages\n  // This is called when TransparentProxy receives a message it doesn't have\n  doesNotUnderstand: selector args: arguments =>\n    // Use ProtoObject's perform:withArguments: for dynamic dispatch\n    // This sends the message to the target as if we called it directly\n    self.target perform: selector withArguments: arguments\n\n// =============================================================================\n// What Happens When You Call: proxy increment\n// =============================================================================\n//\n// 1. Message Send: User types `proxy increment`\n//\n// 2. Compiler Generates:\n//    ```erlang\n//    gen_server:call(Pid, {\"increment\", []})  % Sync call, blocks until result\n//    ```\n//\n// 3. Runtime Dispatch:\n//    - TransparentProxy's gen_server receives {\"increment\", []}\n//    - Looks for \"increment\" in method table → NOT FOUND\n//    - Checks for \"doesNotUnderstand:args:\" → FOUND!\n//    - Calls: doesNotUnderstand(\"increment\", [])\n//\n// 4. doesNotUnderstand Executes:\n//    ```beamtalk\n//    self.target perform: \"increment\" withArguments: []\n//    ```\n//\n// 5. perform:withArguments: Generates:\n//    ```erlang\n//    gen_server:call(TargetPid, {\"increment\", []})  % Sync call to counter\n//    ```\n//\n// 6. Counter Receives Message:\n//    - Counter's \"increment\" method executes\n//    - Counter's value increments: 1 → 2\n//    - Counter returns result (2) to TransparentProxy\n//\n// 7. TransparentProxy Returns:\n//    - doesNotUnderstand returns 2 (the counter's result)\n//    - gen_server:call returns 2 to the caller\n//\n// 8. User Sees:\n//    ```beamtalk\n//    > proxy increment\n//    => 2          # Exactly like calling counter directly!\n//    ```\n//\n// =============================================================================\n// Why This Works: Sync-by-Default Dispatch\n// =============================================================================\n//\n// Both calls look IDENTICAL to the user:\n//\n// | User Action        | Generated Code | Runtime             | REPL Shows |\n// |--------------------|----------------|---------------------|------------|\n// | counter increment  | Integer        | Executes increment  | => 2       |\n// | proxy increment    | Integer        | Forwards to counter | => 2       |\n//\n// The proxy is completely transparent because:\n// 1. Both return the value directly (sync gen_server:call)\n// 2. REPL displays the result value\n// 3. User sees identical behavior for direct and proxied calls\n//\n// This is the power of ProtoObject's doesNotUnderstand:args: and\n// perform:withArguments: - you can intercept and forward messages\n// while maintaining complete transparency.\n//\n// =============================================================================\n// Testing ProtoObject Methods Directly\n// =============================================================================\n//\n// You can also test ProtoObject methods on primitives:\n//\n// ```beamtalk\n// # class works on all types\n// > 42 class\n// => Integer\n//\n// > \"hello\" class\n// => String\n//\n// > true class\n// => True\n//\n// # Identity comparison\n// > 42 == 42\n// => true\n//\n// > 42 /= 43\n// => true\n//\n// > \"hello\" == \"hello\"\n// => true\n// ```\n//\n// ProtoObject.class uses pattern matching in the compiler:\n//\n// ```erlang\n// case Receiver of\n//   <I> when is_integer(I) -> 'Integer'\n//   <S> when is_binary(S) -> 'String'\n//   <'true'> when 'true' -> 'True'\n//   <'false'> when 'true' -> 'False'\n//   <'nil'> when 'true' -> 'Nil'\n//   <Obj> when 'true' -> element(2, Obj)  % Extract class from actor record\n// end\n// ```\n//\n// This allows every object - primitive or actor - to respond to the class message.",
-      "explanation": "============================================================================= ProtoObject Example: Transparent Proxy Pattern =============================================================================  This example demonstrates ProtoObject's fundamental methods working together to implement a transparent proxy that forwards unknown messages to a target.  ## What This Demonstrates  1. **ProtoObject.class** - Every object can report its class 2. **ProtoObject.doesNotUnderstand:args:** - Catch unknown messages 3. **ProtoObject.perform:withArguments:** - Dynamic message dispatch 4. **ProtoObject.== and /=** - Identity comparison 5. **Transparent proxy pattern** - Proxy is indistinguishable from target  ## How to Run  ```bash $ cargo run -- repl > :load examples/protoobject_proxy.bt > :load tests/e2e/fixtures/counter.bt  # Create a counter and increment it > counter := Counter spawn > counter increment => 1  # Create a proxy and forward messages through it > proxy := TransparentProxy spawn > proxy setTarget: counter > proxy increment              # Forwarded to counter! => 2  # Verify the counter was incremented > counter getValue => 2  # The proxy looks just like the real object > counter class => Counter > proxy targetClass => Counter ```  ## Key Insight: Auto-Await in REPL  Notice that both `counter increment` and `proxy increment` return the same thing: `=> 2`. With sync-by-default dispatch, actor sends return values directly (via gen_server:call), making the proxy completely transparent.  ============================================================================="
+      "source": "// =============================================================================\n// ProtoObject Example: Transparent Proxy Pattern\n// =============================================================================\n//\n// This example demonstrates ProtoObject's fundamental methods working together\n// to implement a transparent proxy that forwards unknown messages to a target.\n//\n// ## What This Demonstrates\n//\n// 1. **ProtoObject.class** - Every object can report its class\n// 2. **ProtoObject.doesNotUnderstand:args:** - Catch unknown messages\n// 3. **ProtoObject.perform:withArguments:** - Dynamic message dispatch\n// 4. **ProtoObject.== and /=** - Identity comparison\n// 5. **Transparent proxy pattern** - Proxy is indistinguishable from target\n//\n// ## How to Run\n//\n// ```bash\n// $ cargo run -- repl\n// > :load examples/protoobject_proxy.bt\n// > :load tests/repl-protocol/fixtures/counter.bt\n//\n// # Create a counter and increment it\n// > counter := Counter spawn\n// > counter increment\n// => 1\n//\n// # Create a proxy and forward messages through it\n// > proxy := TransparentProxy spawn\n// > proxy setTarget: counter\n// > proxy increment              # Forwarded to counter!\n// => 2\n//\n// # Verify the counter was incremented\n// > counter getValue\n// => 2\n//\n// # The proxy looks just like the real object\n// > counter class\n// => Counter\n// > proxy targetClass\n// => Counter\n// ```\n//\n// ## Key Insight: Auto-Await in REPL\n//\n// Notice that both `counter increment` and `proxy increment` return the same\n// thing: `=> 2`. With sync-by-default dispatch, actor sends return values\n// directly (via gen_server:call), making the proxy completely transparent.\n//\n// =============================================================================\n\n/// TransparentProxy - Forwards all unknown messages to a target object\n///\n/// This demonstrates ProtoObject's doesNotUnderstand:args: and perform:withArguments:\n/// working together to create a proxy that's indistinguishable from the target.\nActor subclass: TransparentProxy\n  state: target = nil\n\n  // Set the target object that receives forwarded messages\n  setTarget: newTarget => self.target := newTarget\n\n  // Get the class of the target (for debugging)\n  targetClass => self.target class\n\n  // ProtoObject's doesNotUnderstand:args: catches unknown messages\n  // This is called when TransparentProxy receives a message it doesn't have\n  doesNotUnderstand: selector args: arguments =>\n    // Use ProtoObject's perform:withArguments: for dynamic dispatch\n    // This sends the message to the target as if we called it directly\n    self.target perform: selector withArguments: arguments\n\n// =============================================================================\n// What Happens When You Call: proxy increment\n// =============================================================================\n//\n// 1. Message Send: User types `proxy increment`\n//\n// 2. Compiler Generates:\n//    ```erlang\n//    gen_server:call(Pid, {\"increment\", []})  % Sync call, blocks until result\n//    ```\n//\n// 3. Runtime Dispatch:\n//    - TransparentProxy's gen_server receives {\"increment\", []}\n//    - Looks for \"increment\" in method table → NOT FOUND\n//    - Checks for \"doesNotUnderstand:args:\" → FOUND!\n//    - Calls: doesNotUnderstand(\"increment\", [])\n//\n// 4. doesNotUnderstand Executes:\n//    ```beamtalk\n//    self.target perform: \"increment\" withArguments: []\n//    ```\n//\n// 5. perform:withArguments: Generates:\n//    ```erlang\n//    gen_server:call(TargetPid, {\"increment\", []})  % Sync call to counter\n//    ```\n//\n// 6. Counter Receives Message:\n//    - Counter's \"increment\" method executes\n//    - Counter's value increments: 1 → 2\n//    - Counter returns result (2) to TransparentProxy\n//\n// 7. TransparentProxy Returns:\n//    - doesNotUnderstand returns 2 (the counter's result)\n//    - gen_server:call returns 2 to the caller\n//\n// 8. User Sees:\n//    ```beamtalk\n//    > proxy increment\n//    => 2          # Exactly like calling counter directly!\n//    ```\n//\n// =============================================================================\n// Why This Works: Sync-by-Default Dispatch\n// =============================================================================\n//\n// Both calls look IDENTICAL to the user:\n//\n// | User Action        | Generated Code | Runtime             | REPL Shows |\n// |--------------------|----------------|---------------------|------------|\n// | counter increment  | Integer        | Executes increment  | => 2       |\n// | proxy increment    | Integer        | Forwards to counter | => 2       |\n//\n// The proxy is completely transparent because:\n// 1. Both return the value directly (sync gen_server:call)\n// 2. REPL displays the result value\n// 3. User sees identical behavior for direct and proxied calls\n//\n// This is the power of ProtoObject's doesNotUnderstand:args: and\n// perform:withArguments: - you can intercept and forward messages\n// while maintaining complete transparency.\n//\n// =============================================================================\n// Testing ProtoObject Methods Directly\n// =============================================================================\n//\n// You can also test ProtoObject methods on primitives:\n//\n// ```beamtalk\n// # class works on all types\n// > 42 class\n// => Integer\n//\n// > \"hello\" class\n// => String\n//\n// > true class\n// => True\n//\n// # Identity comparison\n// > 42 == 42\n// => true\n//\n// > 42 /= 43\n// => true\n//\n// > \"hello\" == \"hello\"\n// => true\n// ```\n//\n// ProtoObject.class uses pattern matching in the compiler:\n//\n// ```erlang\n// case Receiver of\n//   <I> when is_integer(I) -> 'Integer'\n//   <S> when is_binary(S) -> 'String'\n//   <'true'> when 'true' -> 'True'\n//   <'false'> when 'true' -> 'False'\n//   <'nil'> when 'true' -> 'Nil'\n//   <Obj> when 'true' -> element(2, Obj)  % Extract class from actor record\n// end\n// ```\n//\n// This allows every object - primitive or actor - to respond to the class message.",
+      "explanation": "============================================================================= ProtoObject Example: Transparent Proxy Pattern =============================================================================  This example demonstrates ProtoObject's fundamental methods working together to implement a transparent proxy that forwards unknown messages to a target.  ## What This Demonstrates  1. **ProtoObject.class** - Every object can report its class 2. **ProtoObject.doesNotUnderstand:args:** - Catch unknown messages 3. **ProtoObject.perform:withArguments:** - Dynamic message dispatch 4. **ProtoObject.== and /=** - Identity comparison 5. **Transparent proxy pattern** - Proxy is indistinguishable from target  ## How to Run  ```bash $ cargo run -- repl > :load examples/protoobject_proxy.bt > :load tests/repl-protocol/fixtures/counter.bt  # Create a counter and increment it > counter := Counter spawn > counter increment => 1  # Create a proxy and forward messages through it > proxy := TransparentProxy spawn > proxy setTarget: counter > proxy increment              # Forwarded to counter! => 2  # Verify the counter was incremented > counter getValue => 2  # The proxy looks just like the real object > counter class => Counter > proxy targetClass => Counter ```  ## Key Insight: Auto-Await in REPL  Notice that both `counter increment` and `proxy increment` return the same thing: `=> 2`. With sync-by-default dispatch, actor sends return values directly (via gen_server:call), making the proxy completely transparent.  ============================================================================="
     },
     {
       "id": "examples-getting-started-test-counter-test",
@@ -10819,8 +10819,8 @@
         "transform",
         "unless"
       ],
-      "source": "// BT-916: Tests for self.slot := assignment in actor methods\n// Verifies that state is correctly threaded through:\n//   - multiple slot assignments in one method\n//   - slot assignment inside ifTrue:ifFalse: conditional\n//   - slot assignment inside block (do:, collect:)\n//   - slot assignment with early return (^)\n//\n// Compile-time checks (value type error, withSlot: bypass warning) are\n// validated by Rust unit tests in semantic_analysis/validators.rs (BT-914)\n// and by the E2E @load-error test in tests/e2e/cases/actor_slot.bt\n\nTestCase subclass: ActorSlotTest\n\n  testMultipleSlotAssignmentsInOneMethod =>\n    // Both count and total are updated and persist correctly\n    c := ActorSlotCounter spawn\n    result := c incrementBoth: 10\n    self assert: result equals: #{#count => 1, #total => 10}\n    result2 := c incrementBoth: 5\n    self assert: result2 equals: #{#count => 2, #total => 15}\n\n  testMultipleAssignmentsToSameSlot =>\n    // Three sequential assignments to the same slot accumulate correctly\n    c := ActorSlotCounter spawn\n    self assert: (c addThrice: 3) equals: 9\n    self assert: (c addThrice: 1) equals: 12\n\n  testSlotAssignmentInsideConditional =>\n    // Slot assignment inside ifTrue: is applied when condition is true\n    c := ConditionalMutationCounter spawn\n    self assert: (c conditionalIncrement: true) equals: 1\n    self assert: (c conditionalIncrement: true) equals: 2\n    // Slot assignment is NOT applied when condition is false\n    self assert: (c conditionalIncrement: false) equals: 2\n\n  testSlotAssignmentInsideIfTrueIfFalse =>\n    // Both branches of ifTrue:ifFalse: correctly thread state\n    c := ConditionalMutationCounter spawn\n    self assert: (c conditionalToggle: true) equals: 10\n    c reset\n    self assert: (c conditionalToggle: false) equals: -1\n\n  testSlotAssignmentInsideDoBlock =>\n    // do: with self.slot := accumulates correctly\n    c := ActorSlotCounter spawn\n    self assert: (c sumItems: #(1, 2, 3, 4, 5)) equals: 15\n    // State persists after the method completes\n    self assert: c getTotal equals: 15\n\n  testSlotAssignmentInsideDoBlockTwoSlots =>\n    // do: with mutations to two different slots both thread correctly\n    c := ActorSlotCounter spawn\n    result := c countAndSum: #(10, 20, 30)\n    self assert: result equals: #{#count => 3, #total => 60}\n    self assert: c getCount equals: 3\n    self assert: c getTotal equals: 60\n\n  testSlotAssignmentInsideCollectBlock =>\n    // collect: with self.slot := in block: result is correct and state is updated\n    c := ActorSlotCounter spawn\n    result := c collectDoubled: #(1, 2, 3)\n    self assert: result equals: #(2, 4, 6)\n    // count was incremented once per element\n    self assert: c getCount equals: 3\n\n  testSlotAssignmentWithEarlyReturn =>\n    // Slot assignment before ifTrue:[^value] preserves the updated state\n    c := ActorSlotCounter spawn\n    // count=0+1=1 >= 1, so early return fires\n    result := c addAndCheckLimit: 1\n    self assert: result equals: #reached\n    self assert: c getCount equals: 1\n\n  testSlotAssignmentWithEarlyReturnNotFired =>\n    // When the limit is not reached, normal path runs and state is still updated\n    c := ActorSlotCounter spawn\n    // count=0+1=1 < 5, so early return does NOT fire\n    result := c addAndCheckLimit: 5\n    self assert: result equals: #not_yet\n    self assert: c getCount equals: 1\n    // count=1+1=2 < 5, still not reached\n    result2 := c addAndCheckLimit: 5\n    self assert: result2 equals: #not_yet\n    self assert: c getCount equals: 2\n    // count=2+1=3 < 5, still not reached\n    result3 := c addAndCheckLimit: 5\n    self assert: result3 equals: #not_yet\n    self assert: c getCount equals: 3\n    // count=3+1=4 < 5, still not reached\n    result4 := c addAndCheckLimit: 5\n    self assert: result4 equals: #not_yet\n    self assert: c getCount equals: 4\n    // count=4+1=5 >= 5, early return fires\n    result5 := c addAndCheckLimit: 5\n    self assert: result5 equals: #reached\n    self assert: c getCount equals: 5\n\n  testSlotAssignmentBeforeEarlyReturnValue =>\n    // total is incremented before the ^ so the returned value reflects the new state\n    c := ActorSlotCounter spawn\n    // total=0+1=1 > 0, so returns total=1\n    result := c addAndReturnIfAbove: 0\n    self assert: result equals: 1\n    self assert: c getTotal equals: 1\n\n  testSlotAssignmentBeforeEarlyReturnFallthrough =>\n    // When threshold not exceeded, falls through to -1 but state is still updated\n    c := ActorSlotCounter spawn\n    // total=0+1=1, 1 > 100? No, returns -1\n    result := c addAndReturnIfAbove: 100\n    self assert: result equals: -1\n    self assert: c getTotal equals: 1\n\n  testStatePersistedAcrossMultipleCalls =>\n    // State accumulates correctly across independent method calls\n    c := ActorSlotCounter spawn\n    c incrementBoth: 10; incrementBoth: 20; incrementBoth: 30\n    self assert: c getCount equals: 3\n    self assert: c getTotal equals: 60\n\n  testResetClearsBothSlots =>\n    // reset clears both slots back to 0\n    c := ActorSlotCounter spawn\n    c incrementBoth: 42\n    c reset\n    self assert: c getCount equals: 0\n    self assert: c getTotal equals: 0",
-      "explanation": "BT-916: Tests for self.slot := assignment in actor methods Verifies that state is correctly threaded through:   - multiple slot assignments in one method   - slot assignment inside ifTrue:ifFalse: conditional   - slot assignment inside block (do:, collect:)   - slot assignment with early return (^)  Compile-time checks (value type error, withSlot: bypass warning) are validated by Rust unit tests in semantic_analysis/validators.rs (BT-914) and by the E2E @load-error test in tests/e2e/cases/actor_slot.bt"
+      "source": "// BT-916: Tests for self.slot := assignment in actor methods\n// Verifies that state is correctly threaded through:\n//   - multiple slot assignments in one method\n//   - slot assignment inside ifTrue:ifFalse: conditional\n//   - slot assignment inside block (do:, collect:)\n//   - slot assignment with early return (^)\n//\n// Compile-time checks (value type error, withSlot: bypass warning) are\n// validated by Rust unit tests in semantic_analysis/validators.rs (BT-914)\n// and by the E2E @load-error test in tests/repl-protocol/cases/actor_slot.bt\n\nTestCase subclass: ActorSlotTest\n\n  testMultipleSlotAssignmentsInOneMethod =>\n    // Both count and total are updated and persist correctly\n    c := ActorSlotCounter spawn\n    result := c incrementBoth: 10\n    self assert: result equals: #{#count => 1, #total => 10}\n    result2 := c incrementBoth: 5\n    self assert: result2 equals: #{#count => 2, #total => 15}\n\n  testMultipleAssignmentsToSameSlot =>\n    // Three sequential assignments to the same slot accumulate correctly\n    c := ActorSlotCounter spawn\n    self assert: (c addThrice: 3) equals: 9\n    self assert: (c addThrice: 1) equals: 12\n\n  testSlotAssignmentInsideConditional =>\n    // Slot assignment inside ifTrue: is applied when condition is true\n    c := ConditionalMutationCounter spawn\n    self assert: (c conditionalIncrement: true) equals: 1\n    self assert: (c conditionalIncrement: true) equals: 2\n    // Slot assignment is NOT applied when condition is false\n    self assert: (c conditionalIncrement: false) equals: 2\n\n  testSlotAssignmentInsideIfTrueIfFalse =>\n    // Both branches of ifTrue:ifFalse: correctly thread state\n    c := ConditionalMutationCounter spawn\n    self assert: (c conditionalToggle: true) equals: 10\n    c reset\n    self assert: (c conditionalToggle: false) equals: -1\n\n  testSlotAssignmentInsideDoBlock =>\n    // do: with self.slot := accumulates correctly\n    c := ActorSlotCounter spawn\n    self assert: (c sumItems: #(1, 2, 3, 4, 5)) equals: 15\n    // State persists after the method completes\n    self assert: c getTotal equals: 15\n\n  testSlotAssignmentInsideDoBlockTwoSlots =>\n    // do: with mutations to two different slots both thread correctly\n    c := ActorSlotCounter spawn\n    result := c countAndSum: #(10, 20, 30)\n    self assert: result equals: #{#count => 3, #total => 60}\n    self assert: c getCount equals: 3\n    self assert: c getTotal equals: 60\n\n  testSlotAssignmentInsideCollectBlock =>\n    // collect: with self.slot := in block: result is correct and state is updated\n    c := ActorSlotCounter spawn\n    result := c collectDoubled: #(1, 2, 3)\n    self assert: result equals: #(2, 4, 6)\n    // count was incremented once per element\n    self assert: c getCount equals: 3\n\n  testSlotAssignmentWithEarlyReturn =>\n    // Slot assignment before ifTrue:[^value] preserves the updated state\n    c := ActorSlotCounter spawn\n    // count=0+1=1 >= 1, so early return fires\n    result := c addAndCheckLimit: 1\n    self assert: result equals: #reached\n    self assert: c getCount equals: 1\n\n  testSlotAssignmentWithEarlyReturnNotFired =>\n    // When the limit is not reached, normal path runs and state is still updated\n    c := ActorSlotCounter spawn\n    // count=0+1=1 < 5, so early return does NOT fire\n    result := c addAndCheckLimit: 5\n    self assert: result equals: #not_yet\n    self assert: c getCount equals: 1\n    // count=1+1=2 < 5, still not reached\n    result2 := c addAndCheckLimit: 5\n    self assert: result2 equals: #not_yet\n    self assert: c getCount equals: 2\n    // count=2+1=3 < 5, still not reached\n    result3 := c addAndCheckLimit: 5\n    self assert: result3 equals: #not_yet\n    self assert: c getCount equals: 3\n    // count=3+1=4 < 5, still not reached\n    result4 := c addAndCheckLimit: 5\n    self assert: result4 equals: #not_yet\n    self assert: c getCount equals: 4\n    // count=4+1=5 >= 5, early return fires\n    result5 := c addAndCheckLimit: 5\n    self assert: result5 equals: #reached\n    self assert: c getCount equals: 5\n\n  testSlotAssignmentBeforeEarlyReturnValue =>\n    // total is incremented before the ^ so the returned value reflects the new state\n    c := ActorSlotCounter spawn\n    // total=0+1=1 > 0, so returns total=1\n    result := c addAndReturnIfAbove: 0\n    self assert: result equals: 1\n    self assert: c getTotal equals: 1\n\n  testSlotAssignmentBeforeEarlyReturnFallthrough =>\n    // When threshold not exceeded, falls through to -1 but state is still updated\n    c := ActorSlotCounter spawn\n    // total=0+1=1, 1 > 100? No, returns -1\n    result := c addAndReturnIfAbove: 100\n    self assert: result equals: -1\n    self assert: c getTotal equals: 1\n\n  testStatePersistedAcrossMultipleCalls =>\n    // State accumulates correctly across independent method calls\n    c := ActorSlotCounter spawn\n    c incrementBoth: 10; incrementBoth: 20; incrementBoth: 30\n    self assert: c getCount equals: 3\n    self assert: c getTotal equals: 60\n\n  testResetClearsBothSlots =>\n    // reset clears both slots back to 0\n    c := ActorSlotCounter spawn\n    c incrementBoth: 42\n    c reset\n    self assert: c getCount equals: 0\n    self assert: c getTotal equals: 0",
+      "explanation": "BT-916: Tests for self.slot := assignment in actor methods Verifies that state is correctly threaded through:   - multiple slot assignments in one method   - slot assignment inside ifTrue:ifFalse: conditional   - slot assignment inside block (do:, collect:)   - slot assignment with early return (^)  Compile-time checks (value type error, withSlot: bypass warning) are validated by Rust unit tests in semantic_analysis/validators.rs (BT-914) and by the E2E @load-error test in tests/repl-protocol/cases/actor_slot.bt"
     },
     {
       "id": "stdlib-test-actor-terminate-test",
@@ -11209,8 +11209,8 @@
         "testIncludesSelectorVersion",
         "testInheritsFromObject"
       ],
-      "source": "// BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Beamtalk workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/e2e/cases/workspace_native_api.bt\n//\n// Covers: version, allClasses, classNamed:, globals, help:, help:selector:\n\nTestCase subclass: BeamtalkInterfaceTest\n\n  testIncludesSelectorVersion =>\n    self assert: (BeamtalkInterface includesSelector: #version)\n\n  testIncludesSelectorAllClasses =>\n    self assert: (BeamtalkInterface includesSelector: #allClasses)\n\n  testIncludesSelectorClassNamed =>\n    self assert: (BeamtalkInterface includesSelector: #classNamed:)\n\n  testIncludesSelectorGlobals =>\n    self assert: (BeamtalkInterface includesSelector: #globals)\n\n  testIncludesSelectorHelp =>\n    self assert: (BeamtalkInterface includesSelector: #help:)\n\n  testIncludesSelectorHelpSelector =>\n    self assert: (BeamtalkInterface includesSelector: #help:selector:)\n\n  testInheritsFromObject =>\n    self assert: (BeamtalkInterface inheritsFrom: Object)",
-      "explanation": "BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Beamtalk workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/e2e/cases/workspace_native_api.bt  Covers: version, allClasses, classNamed:, globals, help:, help:selector:"
+      "source": "// BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Beamtalk workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_native_api.bt\n//\n// Covers: version, allClasses, classNamed:, globals, help:, help:selector:\n\nTestCase subclass: BeamtalkInterfaceTest\n\n  testIncludesSelectorVersion =>\n    self assert: (BeamtalkInterface includesSelector: #version)\n\n  testIncludesSelectorAllClasses =>\n    self assert: (BeamtalkInterface includesSelector: #allClasses)\n\n  testIncludesSelectorClassNamed =>\n    self assert: (BeamtalkInterface includesSelector: #classNamed:)\n\n  testIncludesSelectorGlobals =>\n    self assert: (BeamtalkInterface includesSelector: #globals)\n\n  testIncludesSelectorHelp =>\n    self assert: (BeamtalkInterface includesSelector: #help:)\n\n  testIncludesSelectorHelpSelector =>\n    self assert: (BeamtalkInterface includesSelector: #help:selector:)\n\n  testInheritsFromObject =>\n    self assert: (BeamtalkInterface inheritsFrom: Object)",
+      "explanation": "BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Beamtalk workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_native_api.bt  Covers: version, allClasses, classNamed:, globals, help:, help:selector:"
     },
     {
       "id": "stdlib-test-binary-patterns-test",
@@ -13267,8 +13267,8 @@
         "testDynSupWithInitializeIsSupervisor",
         "testDynamicSupervisorInitializeDefaultIsNil"
       ],
-      "source": "// BT-1542: Tests for DynamicSupervisor initialize: class-side default.\n//\n// Lifecycle tests (supervise → initialize: → startChild) are in\n// tests/e2e/cases/supervisor_initialize.btscript because they\n// require live OTP processes.\n\nTestCase subclass: DynamicSupervisorInitializeTest\n\n  // initialize: default is nil (no-op)\n  testDynamicSupervisorInitializeDefaultIsNil =>\n    self assert: (DynamicSupervisor initialize: nil) equals: nil\n\n  // DynSupWithInitialize inherits isSupervisor from DynamicSupervisor\n  testDynSupWithInitializeIsSupervisor =>\n    self assert: DynSupWithInitialize isSupervisor equals: true",
-      "explanation": "BT-1542: Tests for DynamicSupervisor initialize: class-side default.  Lifecycle tests (supervise → initialize: → startChild) are in tests/e2e/cases/supervisor_initialize.btscript because they require live OTP processes."
+      "source": "// BT-1542: Tests for DynamicSupervisor initialize: class-side default.\n//\n// Lifecycle tests (supervise → initialize: → startChild) are in\n// tests/repl-protocol/cases/supervisor_initialize.btscript because they\n// require live OTP processes.\n\nTestCase subclass: DynamicSupervisorInitializeTest\n\n  // initialize: default is nil (no-op)\n  testDynamicSupervisorInitializeDefaultIsNil =>\n    self assert: (DynamicSupervisor initialize: nil) equals: nil\n\n  // DynSupWithInitialize inherits isSupervisor from DynamicSupervisor\n  testDynSupWithInitializeIsSupervisor =>\n    self assert: DynSupWithInitialize isSupervisor equals: true",
+      "explanation": "BT-1542: Tests for DynamicSupervisor initialize: class-side default.  Lifecycle tests (supervise → initialize: → startChild) are in tests/repl-protocol/cases/supervisor_initialize.btscript because they require live OTP processes."
     },
     {
       "id": "stdlib-test-empty-method-self-test",
@@ -18621,8 +18621,8 @@
         "setValue:",
         "subclassing"
       ],
-      "source": "// SelfRefActor - Actor fixture for testing self-reference behavior\n// Used by tests/e2e/cases/self_reference.bt\n\nActor subclass: SelfRefActor\n  state: value = 0\n\n  // Returns self (the actor's object reference)\n  returnSelf => self\n\n  // Returns self's class from inside a block\n  classInBlock => [self class] value\n\n  // Keyword message setter\n  setValue: v => self.value := v\n\n  getValue => self.value",
-      "explanation": "SelfRefActor - Actor fixture for testing self-reference behavior Used by tests/e2e/cases/self_reference.bt"
+      "source": "// SelfRefActor - Actor fixture for testing self-reference behavior\n// Used by tests/repl-protocol/cases/self_reference.bt\n\nActor subclass: SelfRefActor\n  state: value = 0\n\n  // Returns self (the actor's object reference)\n  returnSelf => self\n\n  // Returns self's class from inside a block\n  classInBlock => [self class] value\n\n  // Keyword message setter\n  setValue: v => self.value := v\n\n  getValue => self.value",
+      "explanation": "SelfRefActor - Actor fixture for testing self-reference behavior Used by tests/repl-protocol/cases/self_reference.bt"
     },
     {
       "id": "stdlib-test-fixtures-server-handle-info",
@@ -22160,8 +22160,8 @@
         "testStdlibClassSourceFileIsNil",
         "testStdlibReloadRaisesNoSourceFile"
       ],
-      "source": "// Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2)\n//\n// Verifies:\n// - sourceFile returns nil for stdlib classes (never loaded from a user file)\n// - reload raises no_source_file for stdlib classes\n// - sourceFile is a sealed method on all classes (isBehaviour check)\n//\n// The positive case (sourceFile returns a path after :load) requires the REPL\n// context and is tested in tests/e2e/cases/source_file_reload.bt\n\nTestCase subclass: SourceFileReloadTest\n\n  testStdlibClassSourceFileIsNil =>\n    // Stdlib classes have no user-supplied source file\n    self assert: Integer sourceFile isNil\n    self assert: String sourceFile isNil\n    self assert: Object sourceFile isNil\n    self assert: Boolean sourceFile isNil\n    self assert: Actor sourceFile isNil\n\n  testBootstrapBehaviourSourceFileIsNil =>\n    // Behaviour itself is a stdlib class — no source file\n    self assert: Behaviour sourceFile isNil\n\n  testStdlibReloadRaisesNoSourceFile =>\n    // Reloading a stdlib class raises no_source_file\n    self should: [Integer reload] raise: #no_source_file\n    self should: [String reload] raise: #no_source_file\n    self should: [Object reload] raise: #no_source_file\n\n  testSourceFileMethodExists =>\n    // sourceFile is a sealed method defined in Behaviour (class protocol)\n    self assert: (Behaviour includesSelector: #sourceFile)\n    // Sending sourceFile to any class object returns nil or a path (no DNU)\n    self assert: Integer sourceFile isNil\n\n  testReloadMethodExists =>\n    // reload is a sealed method defined in Behaviour (class protocol)\n    self assert: (Behaviour includesSelector: #reload)\n    // Reloading a stdlib class (Behaviour itself) raises no_source_file\n    self should: [Behaviour reload] raise: #no_source_file",
-      "explanation": "Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2)  Verifies: - sourceFile returns nil for stdlib classes (never loaded from a user file) - reload raises no_source_file for stdlib classes - sourceFile is a sealed method on all classes (isBehaviour check)  The positive case (sourceFile returns a path after :load) requires the REPL context and is tested in tests/e2e/cases/source_file_reload.bt"
+      "source": "// Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2)\n//\n// Verifies:\n// - sourceFile returns nil for stdlib classes (never loaded from a user file)\n// - reload raises no_source_file for stdlib classes\n// - sourceFile is a sealed method on all classes (isBehaviour check)\n//\n// The positive case (sourceFile returns a path after :load) requires the REPL\n// context and is tested in tests/repl-protocol/cases/source_file_reload.bt\n\nTestCase subclass: SourceFileReloadTest\n\n  testStdlibClassSourceFileIsNil =>\n    // Stdlib classes have no user-supplied source file\n    self assert: Integer sourceFile isNil\n    self assert: String sourceFile isNil\n    self assert: Object sourceFile isNil\n    self assert: Boolean sourceFile isNil\n    self assert: Actor sourceFile isNil\n\n  testBootstrapBehaviourSourceFileIsNil =>\n    // Behaviour itself is a stdlib class — no source file\n    self assert: Behaviour sourceFile isNil\n\n  testStdlibReloadRaisesNoSourceFile =>\n    // Reloading a stdlib class raises no_source_file\n    self should: [Integer reload] raise: #no_source_file\n    self should: [String reload] raise: #no_source_file\n    self should: [Object reload] raise: #no_source_file\n\n  testSourceFileMethodExists =>\n    // sourceFile is a sealed method defined in Behaviour (class protocol)\n    self assert: (Behaviour includesSelector: #sourceFile)\n    // Sending sourceFile to any class object returns nil or a path (no DNU)\n    self assert: Integer sourceFile isNil\n\n  testReloadMethodExists =>\n    // reload is a sealed method defined in Behaviour (class protocol)\n    self assert: (Behaviour includesSelector: #reload)\n    // Reloading a stdlib class (Behaviour itself) raises no_source_file\n    self should: [Behaviour reload] raise: #no_source_file",
+      "explanation": "Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2)  Verifies: - sourceFile returns nil for stdlib classes (never loaded from a user file) - reload raises no_source_file for stdlib classes - sourceFile is a sealed method on all classes (isBehaviour check)  The positive case (sourceFile returns a path after :load) requires the REPL context and is tested in tests/repl-protocol/cases/source_file_reload.bt"
     },
     {
       "id": "stdlib-test-species-test",
@@ -23005,8 +23005,8 @@
         "testSupWithInitializeStrategyDefault",
         "testSupervisorInitializeDefaultIsNil"
       ],
-      "source": "// BT-1542: Tests for Supervisor initialize: class-side default.\n//\n// Lifecycle tests (supervise → initialize: → which:) are in\n// tests/e2e/cases/supervisor_initialize.btscript because they\n// require live OTP processes.\n\nTestCase subclass: SupervisorInitializeTest\n\n  // initialize: default is nil (no-op)\n  testSupervisorInitializeDefaultIsNil =>\n    self assert: (Supervisor initialize: nil) equals: nil\n\n  // SupWithInitialize inherits strategy from Supervisor\n  testSupWithInitializeStrategyDefault =>\n    self assert: SupWithInitialize strategy equals: #oneForOne\n\n  // SupWithInitialize responds to isSupervisor\n  testSupWithInitializeIsSupervisor =>\n    self assert: SupWithInitialize isSupervisor equals: true",
-      "explanation": "BT-1542: Tests for Supervisor initialize: class-side default.  Lifecycle tests (supervise → initialize: → which:) are in tests/e2e/cases/supervisor_initialize.btscript because they require live OTP processes."
+      "source": "// BT-1542: Tests for Supervisor initialize: class-side default.\n//\n// Lifecycle tests (supervise → initialize: → which:) are in\n// tests/repl-protocol/cases/supervisor_initialize.btscript because they\n// require live OTP processes.\n\nTestCase subclass: SupervisorInitializeTest\n\n  // initialize: default is nil (no-op)\n  testSupervisorInitializeDefaultIsNil =>\n    self assert: (Supervisor initialize: nil) equals: nil\n\n  // SupWithInitialize inherits strategy from Supervisor\n  testSupWithInitializeStrategyDefault =>\n    self assert: SupWithInitialize strategy equals: #oneForOne\n\n  // SupWithInitialize responds to isSupervisor\n  testSupWithInitializeIsSupervisor =>\n    self assert: SupWithInitialize isSupervisor equals: true",
+      "explanation": "BT-1542: Tests for Supervisor initialize: class-side default.  Lifecycle tests (supervise → initialize: → which:) are in tests/repl-protocol/cases/supervisor_initialize.btscript because they require live OTP processes."
     },
     {
       "id": "stdlib-test-supervisor-which-test",
@@ -23965,13 +23965,13 @@
         "testInheritsFromObject",
         "workspace_interface_test"
       ],
-      "source": "// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/e2e/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, globals, load:, test, test:, actors,\n//         actorAt:, actorsOf:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceInterfaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (WorkspaceInterface includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (WorkspaceInterface includesSelector: #testClasses)\n\n  testIncludesSelectorGlobals =>\n    self assert: (WorkspaceInterface includesSelector: #globals)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (WorkspaceInterface includesSelector: #load:)\n\n  testIncludesSelectorTest =>\n    self assert: (WorkspaceInterface includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (WorkspaceInterface includesSelector: #test:)\n\n  testIncludesSelectorActors =>\n    self assert: (WorkspaceInterface includesSelector: #actors)\n\n  testIncludesSelectorActorAt =>\n    self assert: (WorkspaceInterface includesSelector: #actorAt:)\n\n  testIncludesSelectorActorsOf =>\n    self assert: (WorkspaceInterface includesSelector: #actorsOf:)\n\n  testIncludesSelectorBindAs =>\n    self assert: (WorkspaceInterface includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (WorkspaceInterface includesSelector: #unbind:)\n\n  testInheritsFromObject =>\n    self assert: (WorkspaceInterface inheritsFrom: Object)",
-      "explanation": "BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/e2e/cases/workspace_load.bt, workspace_native_api.bt  Covers: classes, testClasses, globals, load:, test, test:, actors,         actorAt:, actorsOf:, bind:as:, unbind:"
+      "source": "// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, globals, load:, test, test:, actors,\n//         actorAt:, actorsOf:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceInterfaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (WorkspaceInterface includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (WorkspaceInterface includesSelector: #testClasses)\n\n  testIncludesSelectorGlobals =>\n    self assert: (WorkspaceInterface includesSelector: #globals)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (WorkspaceInterface includesSelector: #load:)\n\n  testIncludesSelectorTest =>\n    self assert: (WorkspaceInterface includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (WorkspaceInterface includesSelector: #test:)\n\n  testIncludesSelectorActors =>\n    self assert: (WorkspaceInterface includesSelector: #actors)\n\n  testIncludesSelectorActorAt =>\n    self assert: (WorkspaceInterface includesSelector: #actorAt:)\n\n  testIncludesSelectorActorsOf =>\n    self assert: (WorkspaceInterface includesSelector: #actorsOf:)\n\n  testIncludesSelectorBindAs =>\n    self assert: (WorkspaceInterface includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (WorkspaceInterface includesSelector: #unbind:)\n\n  testInheritsFromObject =>\n    self assert: (WorkspaceInterface inheritsFrom: Object)",
+      "explanation": "BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt  Covers: classes, testClasses, globals, load:, test, test:, actors,         actorAt:, actorsOf:, bind:as:, unbind:"
     },
     {
-      "id": "tests-e2e-fixtures-actor-initialize-fixture",
+      "id": "tests-repl-protocol-fixtures-actor-initialize-fixture",
       "title": "InitCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "InitCounter",
@@ -24003,9 +24003,9 @@
       "explanation": "Fixture for actor initialize E2E tests"
     },
     {
-      "id": "tests-e2e-fixtures-actor-slot-value-error",
+      "id": "tests-repl-protocol-fixtures-actor-slot-value-error",
       "title": "ImmutablePoint",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "ImmutablePoint",
         "Value",
@@ -24041,9 +24041,9 @@
       "explanation": "BT-916: Fixture that triggers a semantic compile error: self.slot := inside a value type (Value subclass) method is not allowed."
     },
     {
-      "id": "tests-e2e-fixtures-bank",
+      "id": "tests-repl-protocol-fixtures-bank",
       "title": "Bank",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "Bank",
@@ -24082,9 +24082,9 @@
       "explanation": "Bank fixture for E2E tests (BT-569) Registry and factory for Account actors using Dictionary"
     },
     {
-      "id": "tests-e2e-fixtures-bank-account",
+      "id": "tests-repl-protocol-fixtures-bank-account",
       "title": "Account",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Account",
         "Actor",
@@ -24131,9 +24131,9 @@
       "explanation": "Account fixture for E2E tests (BT-569) An actor managing a single bank balance with overdraft protection"
     },
     {
-      "id": "tests-e2e-fixtures-bank-transaction",
+      "id": "tests-repl-protocol-fixtures-bank-transaction",
       "title": "Transaction",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Transaction",
         "Value",
@@ -24157,9 +24157,9 @@
       "explanation": "Transaction fixture for E2E tests (BT-569) Immutable value type recording a completed transfer"
     },
     {
-      "id": "tests-e2e-fixtures-bank-transfer-agent",
+      "id": "tests-repl-protocol-fixtures-bank-transfer-agent",
       "title": "TransferAgent",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "TransferAgent",
@@ -24190,9 +24190,9 @@
       "explanation": "TransferAgent fixture for E2E tests (BT-569) Coordinates transfers between two Account actors  Note: Actor-to-actor messaging is asynchronous. The TransferAgent orchestrates the debit and credit as fire-and-forget messages. Each Account handles its own overdraft protection independently."
     },
     {
-      "id": "tests-e2e-fixtures-beverage",
+      "id": "tests-repl-protocol-fixtures-beverage",
       "title": "Beverage",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Beverage",
         "Value",
@@ -24215,9 +24215,9 @@
       "explanation": "Base value-object class for BT-908 fixture. Defines a class method (wrap:) that subclasses should inherit correctly."
     },
     {
-      "id": "tests-e2e-fixtures-chat-member",
+      "id": "tests-repl-protocol-fixtures-chat-member",
       "title": "ChatMember",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "ChatMember",
@@ -24259,9 +24259,9 @@
       "explanation": "Chat member fixture for E2E tests (BT-431, BT-568) Represents a chat participant with name, inbox, and room reference"
     },
     {
-      "id": "tests-e2e-fixtures-chat-room",
+      "id": "tests-repl-protocol-fixtures-chat-room",
       "title": "ChatRoom",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "ChatRoom",
@@ -24312,9 +24312,9 @@
       "explanation": "Chat room fixture for E2E tests (BT-431, BT-568) Demonstrates: actors, Set, List, blocks, string formatting"
     },
     {
-      "id": "tests-e2e-fixtures-circle",
+      "id": "tests-repl-protocol-fixtures-circle",
       "title": "Circle",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Circle",
         "Shape",
@@ -24345,9 +24345,9 @@
       "explanation": "Circle value object, extending Shape from a separate file (BT-905 fixture). This file exercises cross-file value-object inheritance: without the fix, the compiler defaults to Actor codegen because Shape is not defined here."
     },
     {
-      "id": "tests-e2e-fixtures-class-builder-counter",
+      "id": "tests-repl-protocol-fixtures-class-builder-counter",
       "title": "CBCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "CBCounter",
@@ -24378,9 +24378,9 @@
       "explanation": "Fixture for ClassBuilder compiled registration E2E test (BT-837)"
     },
     {
-      "id": "tests-e2e-fixtures-class-builder-counter-v2",
+      "id": "tests-repl-protocol-fixtures-class-builder-counter-v2",
       "title": "CBCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "CBCounter",
@@ -24411,9 +24411,9 @@
       "explanation": "V2 fixture for ClassBuilder compiled registration E2E test (BT-837) add now increments by 10 instead of 1"
     },
     {
-      "id": "tests-e2e-fixtures-class-method-help-fixture",
+      "id": "tests-repl-protocol-fixtures-class-method-help-fixture",
       "title": "HelpTestWidget",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "HelpTestWidget",
         "Object",
@@ -24432,9 +24432,9 @@
       "explanation": "Fixture for class method :help display (BT-990, BT-1634)"
     },
     {
-      "id": "tests-e2e-fixtures-class-method-help-sub-fixture",
+      "id": "tests-repl-protocol-fixtures-class-method-help-sub-fixture",
       "title": "HelpTestSubWidget",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "HelpTestSubWidget",
         "HelpTestWidget",
@@ -24449,9 +24449,9 @@
       "explanation": "Fixture for inherited class method :help display (BT-990)"
     },
     {
-      "id": "tests-e2e-fixtures-class-methods-delegator-fixture",
+      "id": "tests-repl-protocol-fixtures-class-methods-delegator-fixture",
       "title": "Delegator",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "Delegator",
@@ -24474,9 +24474,9 @@
       "explanation": "BT-891: Class method delegating to another class method via self"
     },
     {
-      "id": "tests-e2e-fixtures-class-methods-fixture",
+      "id": "tests-repl-protocol-fixtures-class-methods-fixture",
       "title": "Calculator",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Calculator",
         "Object",
@@ -24493,9 +24493,9 @@
       "explanation": "Fixture for class methods E2E tests"
     },
     {
-      "id": "tests-e2e-fixtures-coffee",
+      "id": "tests-repl-protocol-fixtures-coffee",
       "title": "Coffee",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Beverage",
         "Coffee",
@@ -24515,9 +24515,9 @@
       "explanation": "Coffee value-object subclass of Beverage for BT-908 fixture. Exercises class method inheritance: `wrap:` is defined in Beverage but should create a Coffee instance when called as `Coffee wrap:`."
     },
     {
-      "id": "tests-e2e-fixtures-collision-test-class",
+      "id": "tests-repl-protocol-fixtures-collision-test-class",
       "title": "CollisionTestClass",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "CollisionTestClass",
         "Value",
@@ -24533,9 +24533,9 @@
       "explanation": "Fixture for BT-737 class collision warning test. Defines CollisionTestClass — used to verify that loading this class after it has been registered with a different module atom emits a warning."
     },
     {
-      "id": "tests-e2e-fixtures-counter",
+      "id": "tests-repl-protocol-fixtures-counter",
       "title": "Counter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "Counter",
@@ -24567,9 +24567,9 @@
       "explanation": "Counter actor class for E2E testing A simple stateful actor that can increment, decrement, and return its value"
     },
     {
-      "id": "tests-e2e-fixtures-counter-test",
+      "id": "tests-repl-protocol-fixtures-counter-test",
       "title": "CounterTest",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "CounterTest",
         "TestCase",
@@ -24596,9 +24596,9 @@
       "explanation": "CounterTest — TestCase subclass for testing Counter actor (BT-440) Demonstrates BUnit REPL integration: runAll and run: class-side methods  Note: TestCase is a value type (immutable). Method bodies in value types treat := as field writes, so we use message chaining to avoid local vars."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-app-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-app-supervisor",
       "title": "E2EAppSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EAppSupervisor",
         "Supervisor",
@@ -24617,9 +24617,9 @@
       "explanation": "E2E fixture: static Supervisor subclass with one Counter child. Used by supervisor.btscript (BT-1223)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-args-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-args-supervisor",
       "title": "E2EArgsSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EArgsSupervisor",
         "Supervisor",
@@ -24643,9 +24643,9 @@
       "explanation": "E2E fixture: static Supervisor subclass that starts a Counter with initial args. Used to exercise the SupervisionSpec withArgs: / spawnWith: code path (BT-1223)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-class-method-actor",
+      "id": "tests-repl-protocol-fixtures-e2e-class-method-actor",
       "title": "E2EClassMethodActor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2EClassMethodActor",
@@ -24680,9 +24680,9 @@
       "explanation": "BT-1862: E2E fixture — actor with a keyword class method that transforms constructor args before building state. Used to verify supervision routes through the class method on both initial start and OTP restart."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-class-method-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-class-method-supervisor",
       "title": "E2EClassMethodSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EClassMethodSupervisor",
         "Supervisor",
@@ -24711,9 +24711,9 @@
       "explanation": "BT-1862: E2E fixture — supervisor that starts E2EClassMethodActor via its keyword class method. The child is permanent so OTP will restart it after a crash, routing through the class method again."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-child-a",
+      "id": "tests-repl-protocol-fixtures-e2e-init-child-a",
       "title": "E2EInitChildA",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2EInitChildA",
@@ -24747,9 +24747,9 @@
       "explanation": "E2E fixture: simple actor child for supervisor initialize: test (BT-1542)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-child-b",
+      "id": "tests-repl-protocol-fixtures-e2e-init-child-b",
       "title": "E2EInitChildB",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2EInitChildB",
@@ -24777,9 +24777,9 @@
       "explanation": "E2E fixture: simple actor child for supervisor initialize: test (BT-1542)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-deep-a",
+      "id": "tests-repl-protocol-fixtures-e2e-init-deep-a",
       "title": "E2EInitDeepA",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2EInitDeepA",
@@ -24814,9 +24814,9 @@
       "explanation": "Level 1 of a 3-level hierarchy used to verify auto-chained initialize order."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-deep-b",
+      "id": "tests-repl-protocol-fixtures-e2e-init-deep-b",
       "title": "E2EInitDeepB",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInitDeepA",
         "E2EInitDeepB",
@@ -24841,9 +24841,9 @@
       "explanation": "Level 2 of a 3-level hierarchy used to verify auto-chained initialize order."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-deep-c",
+      "id": "tests-repl-protocol-fixtures-e2e-init-deep-c",
       "title": "E2EInitDeepC",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInitDeepB",
         "E2EInitDeepC",
@@ -24868,9 +24868,9 @@
       "explanation": "Level 3 (leaf) of a 3-level hierarchy used to verify auto-chained initialize order: spawning the leaf should run A → B → C in order."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-dyn-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-init-dyn-supervisor",
       "title": "E2EInitDynSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "DynamicSupervisor",
         "E2EInitDynSupervisor",
@@ -24890,9 +24890,9 @@
       "explanation": "E2E fixture: DynamicSupervisor with initialize: hook that pre-populates (BT-1542). initialize: calls startChild — verifies supervisor is responsive during callback."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-inherit-base",
+      "id": "tests-repl-protocol-fixtures-e2e-init-inherit-base",
       "title": "E2EInitInheritBase",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2EInitInheritBase",
@@ -24920,13 +24920,13 @@
         "set",
         "subclassing"
       ],
-      "source": "// Parent actor with a typed-no-default field set in initialize.\n// Used by tests/e2e/cases/actor_initialize_inheritance.btscript (BT-1956).\n\ntyped Actor subclass: E2EInitInheritBase\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> String => self.label := \"parent-initialized\"\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count",
-      "explanation": "Parent actor with a typed-no-default field set in initialize. Used by tests/e2e/cases/actor_initialize_inheritance.btscript (BT-1956)."
+      "source": "// Parent actor with a typed-no-default field set in initialize.\n// Used by tests/repl-protocol/cases/actor_initialize_inheritance.btscript (BT-1956).\n\ntyped Actor subclass: E2EInitInheritBase\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> String => self.label := \"parent-initialized\"\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count",
+      "explanation": "Parent actor with a typed-no-default field set in initialize. Used by tests/repl-protocol/cases/actor_initialize_inheritance.btscript (BT-1956)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-inherit-child-no-init",
+      "id": "tests-repl-protocol-fixtures-e2e-init-inherit-child-no-init",
       "title": "E2EInitInheritChildNoInit",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInitInheritBase",
         "E2EInitInheritChildNoInit",
@@ -24951,9 +24951,9 @@
       "explanation": "Child actor with NO initialize of its own — inherits parent's initialize. Verifies BT-1951/ADR 0078 auto-chain runs the parent's initialize even when the child omits one."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-inherit-child-uses",
+      "id": "tests-repl-protocol-fixtures-e2e-init-inherit-child-uses",
       "title": "E2EInitInheritChildUses",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInitInheritBase",
         "E2EInitInheritChildUses",
@@ -24988,9 +24988,9 @@
       "explanation": "Child actor whose initialize reads a typed-no-default field set by the parent's auto-chained initialize."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-inherit-forgets",
+      "id": "tests-repl-protocol-fixtures-e2e-init-inherit-forgets",
       "title": "E2EInitInheritForgets",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2EInitInheritForgets",
@@ -25021,9 +25021,9 @@
       "explanation": "Parent actor that declares a typed-no-default field but its initialize fails to set it. Spawning (or spawning any subclass) must raise `UninitializedStateError in E2EInitInheritForgets` from the post-initialize check."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-init-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-init-supervisor",
       "title": "E2EInitSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInitSupervisor",
         "Supervisor",
@@ -25048,9 +25048,9 @@
       "explanation": "E2E fixture: Supervisor with initialize: hook that wires children (BT-1542). initialize: calls which: on a sibling — would deadlock without caller-side dispatch."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-initialize-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-initialize-supervisor",
       "title": "E2EInitializeSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInitializeSupervisor",
         "Supervisor",
@@ -25069,9 +25069,9 @@
       "explanation": "E2E fixture: Supervisor that starts an InitCounter (BT-1417). Tests that initialize runs for supervised children."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-inner-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-inner-supervisor",
       "title": "E2EInnerSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EInnerSupervisor",
         "Supervisor",
@@ -25090,9 +25090,9 @@
       "explanation": "E2E fixture: inner Supervisor for nested supervisor tests. Manages Counter workers as children. Used by supervisor.btscript (BT-1223)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-named-greeter",
+      "id": "tests-repl-protocol-fixtures-e2e-named-greeter",
       "title": "E2ENamedGreeter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "E2ENamedGreeter",
@@ -25117,9 +25117,9 @@
       "explanation": "E2E fixture for named-registration tests (BT-1991 / ADR 0079). Used alongside Counter to exercise the `wrong_class` branch of `T named:` when a name is registered to an actor of a different class."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-named-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-named-supervisor",
       "title": "E2ENamedSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2ENamedSupervisor",
         "Supervisor",
@@ -25148,9 +25148,9 @@
       "explanation": "E2E fixture: Supervisor that registers its Counter child under the name `#bt1991SupCounter` with a permanent restart policy. Used to verify that a name-resolving proxy (`Actor named:`) transparently survives supervised restarts (BT-1991 / ADR 0079)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-outer-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-outer-supervisor",
       "title": "E2EOuterSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EOuterSupervisor",
         "Supervisor",
@@ -25169,9 +25169,9 @@
       "explanation": "E2E fixture: outer Supervisor for nested supervisor tests. Has E2EInnerSupervisor as its one child. Used by supervisor.btscript (BT-1223)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-stop-supervisor",
+      "id": "tests-repl-protocol-fixtures-e2e-stop-supervisor",
       "title": "E2EStopSupervisor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "E2EStopSupervisor",
         "Supervisor",
@@ -25190,9 +25190,9 @@
       "explanation": "E2E fixture: empty Supervisor subclass used to test stop/current lifecycle. No children keeps the test focused on supervisor lifecycle, not child management. Used by supervisor.btscript (BT-1223)."
     },
     {
-      "id": "tests-e2e-fixtures-e2e-worker-pool",
+      "id": "tests-repl-protocol-fixtures-e2e-worker-pool",
       "title": "E2EWorkerPool",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "DynamicSupervisor",
         "E2EWorkerPool",
@@ -25211,9 +25211,9 @@
       "explanation": "E2E fixture: DynamicSupervisor subclass managing Counter workers. Used by supervisor.btscript (BT-1223)."
     },
     {
-      "id": "tests-e2e-fixtures-empty-test",
+      "id": "tests-repl-protocol-fixtures-empty-test",
       "title": "EmptyTest",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "EmptyTest",
         "TestCase",
@@ -25229,9 +25229,9 @@
       "explanation": "EmptyTest — TestCase subclass with no test methods (BT-440) Used to test \"no test methods found\" output path."
     },
     {
-      "id": "tests-e2e-fixtures-erlang-user",
+      "id": "tests-repl-protocol-fixtures-erlang-user",
       "title": "ErlangUser",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "ErlangUser",
@@ -25262,9 +25262,9 @@
       "explanation": "Test fixture: Actor that uses Erlang interop (BT-677)"
     },
     {
-      "id": "tests-e2e-fixtures-failing-test",
+      "id": "tests-repl-protocol-fixtures-failing-test",
       "title": "FailingTest",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "FailingTest",
         "TestCase",
@@ -25281,9 +25281,9 @@
       "explanation": "FailingTest — TestCase subclass with one passing and one failing test (BT-440) Used to test failure output formatting in BUnit REPL integration."
     },
     {
-      "id": "tests-e2e-fixtures-hanoi",
+      "id": "tests-repl-protocol-fixtures-hanoi",
       "title": "Hanoi",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Hanoi",
         "Value",
@@ -25309,9 +25309,9 @@
       "explanation": "Towers of Hanoi — e2e test fixture. Canonical source lives in examples/getting-started/src/hanoi.bt."
     },
     {
-      "id": "tests-e2e-fixtures-hot-counter",
+      "id": "tests-repl-protocol-fixtures-hot-counter",
       "title": "HotCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "HotCounter",
@@ -25342,9 +25342,9 @@
       "explanation": "Hot reload counter - initial version with increment method Used by hot_reload.bt E2E test to verify hot code reloading"
     },
     {
-      "id": "tests-e2e-fixtures-hot-counter-v2",
+      "id": "tests-repl-protocol-fixtures-hot-counter-v2",
       "title": "HotCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "HotCounter",
@@ -25379,9 +25379,9 @@
       "explanation": "Hot reload counter - version 2 with modified increment (adds 10) and new field 'step'"
     },
     {
-      "id": "tests-e2e-fixtures-incremental-project-src-adder",
+      "id": "tests-repl-protocol-fixtures-incremental-project-src-adder",
       "title": "Adder",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Adder",
         "Value",
@@ -25400,9 +25400,9 @@
       "explanation": "Adder value class for incremental load-project testing (BT-1685)"
     },
     {
-      "id": "tests-e2e-fixtures-incremental-project-src-greeter",
+      "id": "tests-repl-protocol-fixtures-incremental-project-src-greeter",
       "title": "Greeter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Greeter",
         "Value",
@@ -25425,9 +25425,9 @@
       "explanation": "Greeter value class for incremental load-project testing (BT-1685)"
     },
     {
-      "id": "tests-e2e-fixtures-lifecycle-test",
+      "id": "tests-repl-protocol-fixtures-lifecycle-test",
       "title": "LifecycleTest",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "LifecycleTest",
         "TestCase",
@@ -25450,9 +25450,9 @@
       "explanation": "LifecycleTest — TestCase subclass with setUp/tearDown (BT-440, BT-900) Verifies that setUp state flows into test methods. setUp assigns a field; tests verify the field is accessible. Value objects are immutable maps, so the runner must use setUp's return value."
     },
     {
-      "id": "tests-e2e-fixtures-load-dir-test-alpha",
+      "id": "tests-repl-protocol-fixtures-load-dir-test-alpha",
       "title": "Alpha",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Alpha",
         "Value",
@@ -25472,9 +25472,9 @@
       "explanation": "Alpha - simple value type for directory load testing (BT-784)"
     },
     {
-      "id": "tests-e2e-fixtures-load-dir-test-beta",
+      "id": "tests-repl-protocol-fixtures-load-dir-test-beta",
       "title": "Beta",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Beta",
         "Value",
@@ -25494,9 +25494,9 @@
       "explanation": "Beta - simple value type for directory load testing (BT-784)"
     },
     {
-      "id": "tests-e2e-fixtures-message",
+      "id": "tests-repl-protocol-fixtures-message",
       "title": "Message",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Message",
         "Value",
@@ -25528,9 +25528,9 @@
       "explanation": "Message value type fixture for E2E tests (BT-568) Demonstrates: value types (Value subclass), immutable data, new: initialization"
     },
     {
-      "id": "tests-e2e-fixtures-moderator",
+      "id": "tests-repl-protocol-fixtures-moderator",
       "title": "Moderator",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "ChatMember",
         "Moderator",
@@ -25572,9 +25572,9 @@
       "explanation": "Moderator actor fixture for E2E tests (BT-568) Demonstrates: Actor inheritance (ChatMember subclass), super calls"
     },
     {
-      "id": "tests-e2e-fixtures-multi-class",
+      "id": "tests-repl-protocol-fixtures-multi-class",
       "title": "Foo, Bar",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Bar",
         "Foo",
@@ -25591,9 +25591,9 @@
       "explanation": "Test fixture: multiple classes in a single file (should be rejected by compiler)"
     },
     {
-      "id": "tests-e2e-fixtures-multi-statement",
+      "id": "tests-repl-protocol-fixtures-multi-statement",
       "title": "MultiStatement",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "MultiStatement",
         "Value",
@@ -25613,9 +25613,9 @@
       "explanation": "Fixture for testing multi-statement method bodies (BT-360) Methods with newline-separated statements (no period required)"
     },
     {
-      "id": "tests-e2e-fixtures-native-counter",
+      "id": "tests-repl-protocol-fixtures-native-counter",
       "title": "NativeCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "NativeCounter",
@@ -25640,9 +25640,9 @@
       "explanation": ""
     },
     {
-      "id": "tests-e2e-fixtures-native-package-project-src-nativecalc",
+      "id": "tests-repl-protocol-fixtures-native-package-project-src-nativecalc",
       "title": "NativeCalc",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "NativeCalc",
         "Object",
@@ -25659,9 +25659,9 @@
       "explanation": ""
     },
     {
-      "id": "tests-e2e-fixtures-nested-dir-tag",
+      "id": "tests-repl-protocol-fixtures-nested-dir-tag",
       "title": "Tag",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Tag",
         "Value",
@@ -25681,9 +25681,9 @@
       "explanation": "Tag - value type at the root level of a nested fixture directory. Used by load_nested_directory.bt to verify that root-level classes still load correctly when a directory also contains subdirectory files."
     },
     {
-      "id": "tests-e2e-fixtures-nested-dir-workers-task-worker",
+      "id": "tests-repl-protocol-fixtures-nested-dir-workers-task-worker",
       "title": "TaskWorker",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "TaskWorker",
@@ -25714,9 +25714,9 @@
       "explanation": "TaskWorker - actor in a subdirectory of a nested fixture directory. Used by load_nested_directory.bt to regression-test that actors loaded from subdirectories generate the correct BEAM module name so that spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker)."
     },
     {
-      "id": "tests-e2e-fixtures-perform-locally-fixture",
+      "id": "tests-repl-protocol-fixtures-perform-locally-fixture",
       "title": "LocalDispatchHelper",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "LocalDispatchHelper",
         "Object",
@@ -25735,9 +25735,9 @@
       "explanation": "BT-1664: E2E fixture for performLocally:withArguments: tests"
     },
     {
-      "id": "tests-e2e-fixtures-point",
+      "id": "tests-repl-protocol-fixtures-point",
       "title": "Point",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Point",
         "Value",
@@ -25758,9 +25758,9 @@
       "explanation": "Point - a simple value type for testing BT-213"
     },
     {
-      "id": "tests-e2e-fixtures-protocol-loadable",
+      "id": "tests-repl-protocol-fixtures-protocol-loadable",
       "title": "Protocol Loadable",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "protocol_loadable"
       ],
@@ -25768,9 +25768,9 @@
       "explanation": "Test protocol definition for load-file e2e test (BT-1950)."
     },
     {
-      "id": "tests-e2e-fixtures-rectangle",
+      "id": "tests-repl-protocol-fixtures-rectangle",
       "title": "Rectangle",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Rectangle",
         "Shape",
@@ -25797,9 +25797,9 @@
       "explanation": "Rectangle value object, extending Shape from a separate file (BT-905 fixture). Used together with shape.bt and circle.bt to verify multi-level cross-file value-object inheritance works correctly."
     },
     {
-      "id": "tests-e2e-fixtures-reload-counter",
+      "id": "tests-repl-protocol-fixtures-reload-counter",
       "title": "ReloadCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "ReloadCounter",
@@ -25830,9 +25830,9 @@
       "explanation": "Fixture for source_file_reload E2E test (BT-845). ReloadCounter v1: increment adds 1."
     },
     {
-      "id": "tests-e2e-fixtures-semantic-field-error",
+      "id": "tests-repl-protocol-fixtures-semantic-field-error",
       "title": "BadStoredClosure",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "BadStoredClosure",
@@ -25865,9 +25865,9 @@
       "explanation": "Fixture that triggers semantic error: field assignment in stored closure A stored closure (assigned to variable) cannot modify fields"
     },
     {
-      "id": "tests-e2e-fixtures-semantic-primitive-error",
+      "id": "tests-repl-protocol-fixtures-semantic-primitive-error",
       "title": "BadPrimitive",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "BadPrimitive",
         "Object",
@@ -25886,9 +25886,9 @@
       "explanation": "Fixture that triggers semantic error: @primitive outside stdlib Primitives can only be declared in the standard library"
     },
     {
-      "id": "tests-e2e-fixtures-semantic-sealed-error",
+      "id": "tests-repl-protocol-fixtures-semantic-sealed-error",
       "title": "MyInteger",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Integer",
         "MyInteger",
@@ -25907,9 +25907,9 @@
       "explanation": "Fixture that triggers semantic error: subclassing a sealed class Integer is a sealed builtin — cannot be subclassed"
     },
     {
-      "id": "tests-e2e-fixtures-semantic-sealed-method",
+      "id": "tests-repl-protocol-fixtures-semantic-sealed-method",
       "title": "SealedParent, SealedChild",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Object",
         "SealedChild",
@@ -25929,9 +25929,9 @@
       "explanation": "Fixture that triggers semantic error: overriding a sealed method sealed methods in a parent class cannot be overridden by subclasses"
     },
     {
-      "id": "tests-e2e-fixtures-semantic-unknown-intrinsic",
+      "id": "tests-repl-protocol-fixtures-semantic-unknown-intrinsic",
       "title": "BadIntrinsic",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "BadIntrinsic",
         "Object",
@@ -25950,9 +25950,9 @@
       "explanation": "Fixture that triggers semantic error: unknown intrinsic name Unquoted @primitive names must be in the STRUCTURAL_INTRINSICS list"
     },
     {
-      "id": "tests-e2e-fixtures-shape",
+      "id": "tests-repl-protocol-fixtures-shape",
       "title": "Shape",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Shape",
         "Value",
@@ -25969,9 +25969,9 @@
       "explanation": "Abstract base class for geometric shapes (BT-905 fixture). Defined as a value class (Value subclass:) in its own file so that subclasses loaded from separate files exercise cross-file value inheritance."
     },
     {
-      "id": "tests-e2e-fixtures-slow-actor-fixture",
+      "id": "tests-repl-protocol-fixtures-slow-actor-fixture",
       "title": "SlowE2EActor",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "SlowE2EActor",
@@ -25997,9 +25997,9 @@
       "explanation": "SlowE2EActor — E2E fixture that sleeps before responding. Used by actor_timeout.btscript to verify timeout behavior."
     },
     {
-      "id": "tests-e2e-fixtures-tonel-counter",
+      "id": "tests-repl-protocol-fixtures-tonel-counter",
       "title": "TonelCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "TonelCounter",
@@ -26028,9 +26028,9 @@
       "explanation": "Tonel-style counter fixture (BT-571) Class declaration is separate from method definitions."
     },
     {
-      "id": "tests-e2e-fixtures-typed-counter",
+      "id": "tests-repl-protocol-fixtures-typed-counter",
       "title": "TypedCounter",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Actor",
         "TypedCounter",
@@ -26061,9 +26061,9 @@
       "explanation": "Typed counter actor for chain-resolution completion e2e tests (BT-1007). The getValue method has a return type annotation so REPL chain completion can resolve `tc getValue <TAB>` → Integer methods."
     },
     {
-      "id": "tests-e2e-fixtures-value-point",
+      "id": "tests-repl-protocol-fixtures-value-point",
       "title": "ValuePoint",
-      "category": "e2e-fixtures",
+      "category": "repl-protocol-fixtures",
       "tags": [
         "Value",
         "ValuePoint",

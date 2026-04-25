@@ -775,7 +775,7 @@ Adding a new method that delegates to Erlang/runtime code (e.g., `Integer>>facto
 | 1. Implement | Add `factorial` clause to dispatch function | `runtime/src/beamtalk_integer.erl` | Erlang |
 | 2. Register | Add `intFactorial` → dispatch mapping | Compiler intrinsic registry (one line) | Rust |
 | 3. Declare | `factorial => @primitive intFactorial` | `stdlib/src/Integer.bt` | Beamtalk |
-| 4. Test | Add E2E test, run `just test-e2e` | `tests/e2e/cases/` | Beamtalk |
+| 4. Test | Add E2E test, run `just test-repl-protocol` | `tests/repl-protocol/cases/` | Beamtalk |
 
 **No Rust compiler recompilation needed** — the intrinsic registry is a static lookup table. In practice, step 2 is adding one entry to a match arm. The runtime dispatch module provides type checking, error handling, and extension registry support automatically.
 
@@ -788,7 +788,7 @@ Adding a new code generation pattern (e.g., a new iteration construct, new insta
 | 1. Implement codegen | Write the code generation function | `crates/beamtalk-core/src/codegen/` | Rust |
 | 2. Register | Add intrinsic name → codegen function | Compiler intrinsic registry | Rust |
 | 3. Declare | `newMethod: arg => @primitive newIntrinsic` | `stdlib/src/*.bt` | Beamtalk |
-| 4. Test | Unit test for codegen + E2E test | `crates/*/tests/`, `tests/e2e/cases/` | Rust + Beamtalk |
+| 4. Test | Unit test for codegen + E2E test | `crates/*/tests/`, `tests/repl-protocol/cases/` | Rust + Beamtalk |
 
 This requires recompiling the Rust compiler, but it's rare — structural intrinsics are things like loop constructs, gen_server wrapping, and instantiation patterns. The set is small (~35 today) and grows slowly.
 
@@ -1110,7 +1110,7 @@ build-stdlib: build-rust build-erlang
     target/debug/beamtalk build-stdlib
 
 # CI: unchanged recipe name, now includes stdlib
-ci: build lint test test-e2e
+ci: build lint test test-repl-protocol
 ```
 
 #### `beamtalk build-stdlib` Command
@@ -1219,7 +1219,7 @@ steps:
     run: just lint
 
   - name: Test
-    run: just test test-e2e      # Stdlib .beam on path for E2E tests
+    run: just test test-repl-protocol      # Stdlib .beam on path for E2E tests
 ```
 
 No new CI jobs needed — `just build` already chains the three steps.

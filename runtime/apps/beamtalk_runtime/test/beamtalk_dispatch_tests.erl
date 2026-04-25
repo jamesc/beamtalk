@@ -14,7 +14,7 @@ Tests the method dispatch domain service including:
 
 ## Test Strategy
 
-Uses the real compiled Counter fixture (tests/e2e/fixtures/counter.bt)
+Uses the real compiled Counter fixture (tests/repl-protocol/fixtures/counter.bt)
 and beamtalk_object_class registry for realistic testing.
 """.
 
