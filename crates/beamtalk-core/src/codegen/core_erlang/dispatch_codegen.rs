@@ -1605,13 +1605,17 @@ impl CoreErlangGenerator {
             if matches!(selector, MessageSelector::Binary(_)) {
                 return false;
             }
-            // BT-2065/BT-2071: Well-known selectors that the intrinsics layer
-            // **unconditionally** handles before `try_handle_self_dispatch`.
-            // Covers ProtoObject (`class`), Object reflection (`respondsTo:`),
-            // Nil protocol (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/
-            // `ifNil:ifNotNil:`/`ifNotNil:ifNil:`), exception handling (`on:do:`)
-            // and block application (`value`/`value:`/`value:value:`/
-            // `value:value:value:`).
+            // BT-2065/BT-2071/BT-2073: Well-known selectors that the intrinsics
+            // layer **unconditionally** handles before `try_handle_self_dispatch`.
+            // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
+            // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
+            // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
+            // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
+            // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
+            // block application (`value`/`value:`/`value:value:`/
+            // `value:value:value:`), block loops (`repeat`/`whileTrue:`/
+            // `whileFalse:`), object identity (`hash`) and error signaling
+            // (`error:`).
             //
             // NOTE: Boolean conditionals (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`)
             // are NOT included here — `try_generate_boolean_protocol` returns
@@ -1633,30 +1637,32 @@ impl CoreErlangGenerator {
                         | WellKnownSelector::ValueColon
                         | WellKnownSelector::ValueValue
                         | WellKnownSelector::ValueValueValue
+                        | WellKnownSelector::WhileTrue
+                        | WellKnownSelector::WhileFalse
+                        | WellKnownSelector::Repeat
+                        | WellKnownSelector::Ensure
+                        | WellKnownSelector::Hash
+                        | WellKnownSelector::Error
+                        | WellKnownSelector::FieldAt
+                        | WellKnownSelector::FieldAtPut
+                        | WellKnownSelector::FieldNames
+                        | WellKnownSelector::Perform
+                        | WellKnownSelector::PerformWithArgs
+                        | WellKnownSelector::PerformLocallyWithArgs
                 ) {
                     return false;
                 }
             }
-            // Remaining intrinsics not yet modelled as `WellKnownSelector`
-            // variants — these still need string matching for now.
+            // Remaining intrinsics not modelled as `WellKnownSelector` variants
+            // — these are class-specific or compile-time-only constructs that
+            // do not warrant universal selector classification.
             let name = selector.name();
             if matches!(
                 name.as_str(),
                 // asType: (compile-time erasure)
                 "asType:"
-                // ProtoObject — dynamic dispatch
-                | "perform:" | "perform:withArguments:" | "performLocally:withArguments:"
-                // Object reflection — slot access
-                | "fieldAt:" | "fieldAt:put:" | "fieldNames"
                 // Identity
-                | "yourself" | "hash"
-                // Error signaling
-                | "error:"
-                // Block loops (non-well-known)
-                | "repeat" | "whileTrue:" | "whileFalse:"
-                // Exception cleanup — intercepted by intrinsics.rs as a plain
-                // intrinsic expression, so it is not a dispatching self-send.
-                | "ensure:"
+                | "yourself"
             ) {
                 return false;
             }
