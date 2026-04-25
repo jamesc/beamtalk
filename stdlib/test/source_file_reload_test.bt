@@ -9,7 +9,7 @@
 // - sourceFile is a sealed method on all classes (isBehaviour check)
 //
 // The positive case (sourceFile returns a path after :load) requires the REPL
-// context and is tested in tests/e2e/cases/source_file_reload.bt
+// context and is tested in tests/repl-protocol/cases/source_file_reload.bt
 
 TestCase subclass: SourceFileReloadTest
 

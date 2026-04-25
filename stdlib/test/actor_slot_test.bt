@@ -10,7 +10,7 @@
 //
 // Compile-time checks (value type error, withSlot: bypass warning) are
 // validated by Rust unit tests in semantic_analysis/validators.rs (BT-914)
-// and by the E2E @load-error test in tests/e2e/cases/actor_slot.bt
+// and by the E2E @load-error test in tests/repl-protocol/cases/actor_slot.bt
 
 TestCase subclass: ActorSlotTest
 

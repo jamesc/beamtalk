@@ -7,11 +7,11 @@
 Tests for compiler-generated code patterns using real compiled Beamtalk.
 
 These tests verify runtime behavior by using the counter module compiled
-from tests/e2e/fixtures/counter.bt (unified fixture - BT-239). This tests
+from tests/repl-protocol/fixtures/counter.bt (unified fixture - BT-239). This tests
 the actual code generation, not simulated patterns.
 
 **Note:** These are NOT true end-to-end tests. For real E2E tests that
-compile actual Beamtalk source files in full, see `tests/e2e/cases/*.bt`.
+compile actual Beamtalk source files in full, see `tests/repl-protocol/cases/*.bt`.
 
 Test categories:
 - spawn/0 tests (Counter spawn) - returns #beamtalk_object{}
@@ -38,7 +38,7 @@ See also: beamtalk_actor for the runtime implementation
 %%% ===========================================================================
 
 %% Note: For spawn/0 and spawn/1 tests, we use the real compiled counter module
-%% from tests/e2e/fixtures/counter.bt (unified fixture - BT-239) which generates
+%% from tests/repl-protocol/fixtures/counter.bt (unified fixture - BT-239) which generates
 %% actual #beamtalk_object{} records.
 %%
 %% For other tests that need manual state manipulation (async, cascade, etc.),
@@ -92,7 +92,7 @@ counter_divide([N], State) ->
 %%%
 %%% spawn/0 tests (Counter spawn)
 %%%
-%%% Tests use 'bt@counter':spawn() from compiled tests/e2e/fixtures/counter.bt
+%%% Tests use 'bt@counter':spawn() from compiled tests/repl-protocol/fixtures/counter.bt
 %%% which returns {beamtalk_object, 'Counter', 'bt@counter', Pid}
 %%% ===========================================================================
 
@@ -1746,7 +1746,7 @@ super_with_init_args_test() ->
 %%% Extension method tests (BT-229)
 %%%
 %%% Tests that extension methods work on compiled Actor classes.
-%%% Uses 'bt@counter':spawn() from compiled tests/e2e/fixtures/counter.bt.
+%%% Uses 'bt@counter':spawn() from compiled tests/repl-protocol/fixtures/counter.bt.
 %%% ===========================================================================
 
 %% Test: Extension method dispatches on compiled Actor

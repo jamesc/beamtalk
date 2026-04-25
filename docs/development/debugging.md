@@ -53,7 +53,7 @@ cargo test test_name -- --nocapture
 
 # 2. Check what the test expects
 # - Snapshot test: see tests/snapshots/*.snap
-# - E2E test: see tests/e2e/cases/*.btscript
+# - REPL-protocol test: see tests/repl-protocol/cases/*.btscript
 # - Unit test: read test source
 
 # 3. Update snapshots if intentional
@@ -65,26 +65,26 @@ cargo insta accept
 cargo test --test module_name
 ```
 
-## E2E Test Failures
+## REPL-Protocol Test Failures
 
 ```bash
 # 1. Check REPL daemon logs
-just test-e2e 2>&1 | tee e2e.log
-grep "ERROR\|Warning\|failed" e2e.log
+just test-repl-protocol 2>&1 | tee repl-protocol.log
+grep "ERROR\|Warning\|failed" repl-protocol.log
 
 # 2. Test fixture manually
-cd tests/e2e/fixtures
+cd tests/repl-protocol/fixtures
 ../../target/debug/beamtalk build counter.bt
 cat build/counter.core
 
 # 3. Run REPL interactively
 beamtalk repl
-> :load tests/e2e/fixtures/counter.bt
+> :load tests/repl-protocol/fixtures/counter.bt
 > Counter spawn
 > c increment
 
 # 4. Check expected output in test file
-cat tests/e2e/cases/actors.bt
+cat tests/repl-protocol/cases/actors.bt
 # Look for // => expected output comments
 ```
 

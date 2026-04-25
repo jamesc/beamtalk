@@ -33,11 +33,11 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    - Add intrinsic name mapping in the compiler's intrinsic registry (one line)
    - For pure Beamtalk methods, skip this step — the compiler handles them directly
 
-3. **Create test fixtures** in `tests/e2e/fixtures/`
+3. **Create test fixtures** in `tests/repl-protocol/fixtures/`
    - Create simple, reusable classes demonstrating the feature
    - Keep fixtures minimal and focused
 
-4. **Write E2E tests** in `tests/e2e/cases/`
+4. **Write REPL-protocol tests** in `tests/repl-protocol/cases/`
    - Test primitives first
    - Use `@load` directive to load fixtures for actor tests
    - Cover edge cases and error conditions
@@ -52,7 +52,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    ```bash
    just test-stdlib     # Bootstrap expression tests (~14s)
    just test-bunit      # BUnit TestCase tests
-   just test-e2e        # REPL integration tests (~50s)
+   just test-repl-protocol        # REPL integration tests (~50s)
    ```
 
 7. **Update `stdlib/src/README.md`**
@@ -114,24 +114,24 @@ When adding a new type to `spec_codegen.rs`:
 **When implementing new language features, ALWAYS follow this pattern:**
 
 1. **Create a runnable example** in `examples/` showing the feature in use
-2. **Create test fixtures** in `tests/e2e/fixtures/` if testing classes/actors
-3. **Write E2E tests** in `tests/e2e/cases/` that load and use the fixtures
-4. **Run E2E tests** to verify end-to-end functionality: `just test-e2e`
+2. **Create test fixtures** in `tests/repl-protocol/fixtures/` if testing classes/actors
+3. **Write REPL-protocol tests** in `tests/repl-protocol/cases/` that load and use the fixtures
+4. **Run REPL-protocol tests** to verify end-to-end functionality: `just test-repl-protocol`
 5. **Iterate** until all tests pass
 
 **Why this matters:**
 - Examples provide immediate validation that your feature actually works
-- E2E tests catch integration issues that unit tests miss
+- REPL-protocol tests catch integration issues that unit tests miss
 - Test fixtures can be reused across multiple test files
 - Users get working examples to learn from
 
 ## Using @load for Stateful Tests
 
-The E2E test infrastructure supports loading class definitions with the `@load` directive:
+The REPL-protocol test infrastructure supports loading class definitions with the `@load` directive:
 
 ```beamtalk
-// tests/e2e/cases/my_test.bt
-// @load tests/e2e/fixtures/my_class.bt
+// tests/repl-protocol/cases/my_test.bt
+// @load tests/repl-protocol/fixtures/my_class.bt
 
 instance := MyClass spawn
 instance someMethod
@@ -145,13 +145,13 @@ instance someMethod
 4. Test expressions can spawn and use those classes
 
 **Best practices:**
-- Put reusable classes in `tests/e2e/fixtures/`
+- Put reusable classes in `tests/repl-protocol/fixtures/`
 - Keep examples in `examples/` for user learning
 - Use `@load` for any test requiring actor/class definitions
-- Run E2E tests after every compiler change
+- Run REPL-protocol tests after every compiler change
 - **ALWAYS add `// =>` assertions** - Expressions without expected output are skipped!
 
-## E2E Response Verification Rules
+## REPL-Protocol Response Verification Rules
 
 **Rule 1: Every expression MUST have a `// =>` assertion**
 
@@ -196,7 +196,7 @@ x + 1
 
 **Rule 4: Use runtime tests for complex actor scenarios**
 
-E2E tests are best for:
+REPL-protocol tests are best for:
 - ✅ Primitive operations (arithmetic, strings, booleans)  
 - ✅ Class loading and compilation
 - ✅ Message syntax and parsing

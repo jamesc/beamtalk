@@ -7,7 +7,7 @@ Implemented (2026-02-15)
 
 Beamtalk's parser is designed for error recovery — it **must** produce a partial AST with diagnostics even when input is malformed (critical for IDE support). However, the current test suite has almost no coverage of this capability:
 
-- **Only 9 error test cases** exist in `tests/e2e/cases/errors.bt`
+- **Only 9 error test cases** exist in `tests/repl-protocol/cases/errors.bt`
 - **Zero fuzz testing** — no `cargo-fuzz`, `proptest`, or equivalent
 - **No property-based testing** — parser invariants (always returns AST, spans always valid, diagnostics non-empty for errors) are untested
 - **No near-miss syntax testing** — typos, wrong brackets, missing colons, misplaced keywords
@@ -60,7 +60,7 @@ fuzz_target!(|data: &[u8]| {
 });
 ```
 
-**Corpus seeding:** All `.bt` files from `examples/` and `tests/e2e/cases/` provide realistic starting points for mutation.
+**Corpus seeding:** All `.bt` files from `examples/` and `tests/repl-protocol/cases/` provide realistic starting points for mutation.
 
 **CI integration:** Run nightly (not per-PR — too slow). Store corpus in `fuzz/corpus/parse_arbitrary/`.
 
@@ -167,7 +167,7 @@ fn gen_near_valid_beamtalk() -> impl Strategy<Value = String> {
 
 Hand-written test cases covering common user mistakes, with pinned expected error messages.
 
-**Expand `tests/e2e/cases/errors.bt`** (or split into focused files):
+**Expand `tests/repl-protocol/cases/errors.bt`** (or split into focused files):
 
 ```beamtalk
 // === Near-miss syntax ===
@@ -223,7 +223,7 @@ counter🚀 := 0
 
 **Snapshot testing for error messages:** Use `insta` to pin exact error message text. Any change requires explicit `cargo insta accept`.
 
-**CI integration:** Run with `just test-e2e` (existing infrastructure).
+**CI integration:** Run with `just test-repl-protocol` (existing infrastructure).
 
 **What it catches:**
 - Error message regressions (text changes unexpectedly)
@@ -359,10 +359,10 @@ Just pin error messages with snapshot tests, no fuzzing.
 - **Files:** `Cargo.toml`, `crates/beamtalk-core/src/source_analysis/parser/property_tests.rs`
 
 ### Phase 3: Curated Error E2E Suite (M)
-- Expand `tests/e2e/cases/errors.bt` with near-miss, unicode, nesting, cascading categories
+- Expand `tests/repl-protocol/cases/errors.bt` with near-miss, unicode, nesting, cascading categories
 - Add snapshot pinning for error message text
 - Add REPL-specific edge cases (empty input, very long input)
-- **Files:** `tests/e2e/cases/errors.bt` (or split into `errors_syntax.bt`, `errors_runtime.bt`, etc.)
+- **Files:** `tests/repl-protocol/cases/errors.bt` (or split into `errors_syntax.bt`, `errors_runtime.bt`, etc.)
 
 ### Phase 4: REPL Round-Trip Properties (S)
 - proptest properties for REPL eval: compile errors return structured diagnostics, never crash daemon
@@ -374,7 +374,7 @@ Just pin error messages with snapshot tests, no fuzzing.
 | Component | Change | Phase |
 |-----------|--------|-------|
 | `crates/beamtalk-core` | proptest properties, fuzz targets | 1, 2 |
-| `tests/e2e/cases/` | Expanded error test suite | 3 |
+| `tests/repl-protocol/cases/` | Expanded error test suite | 3 |
 | `fuzz/` | New directory for cargo-fuzz | 1 |
 | `.github/workflows/` | Nightly fuzz CI job | 1 |
 | `crates/beamtalk-cli` | REPL round-trip property tests | 4 |

@@ -7,7 +7,7 @@
 // - Counter >> #selector returns a CompiledMethod object
 // - CompiledMethod responds to: selector, source, argumentCount, class
 
-// @load tests/e2e/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/counter.bt
 
 // ===========================================================================
 // METHOD LOOKUP WITH >>

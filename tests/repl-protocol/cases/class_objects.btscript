@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for first-class class objects (BT-246 / ADR 0013 Phase 1)
+//
+// These tests require E2E because they use the Beamtalk workspace binding
+// (an actor) via `Beamtalk classNamed:`, with workspace variable persistence
+// across REPL turns to hold the returned class objects. BUnit tests cannot
+// drive workspace binding dispatch with cross-turn variable persistence.
+//
+// Tests dynamic class dispatch: storing class objects in variables
+// and sending messages to them at runtime, rather than only supporting
+// literal class references like `Point new`.
+//
+// Key principle from ADR 0013: "runtime dispatch is the contract,
+// direct calls are the optimization."
+
+// @load tests/repl-protocol/fixtures/point.bt
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH — VALUE TYPES
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Store class in variable and send "new" dynamically
+// ---------------------------------------------------------------------------
+
+cls := Beamtalk classNamed: #Point
+// => Point
+
+cls new
+// => a Point
+
+// ---------------------------------------------------------------------------
+// Dynamic new: with initialization arguments
+// Map literal with bare identifier keys (#{x => 3}) now works (BT-591).
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Dynamic dispatch returns usable value (not a future)
+// ---------------------------------------------------------------------------
+
+cls := Beamtalk classNamed: #Point
+// => Point
+
+p := cls new
+// => a Point
+
+p getX
+// => 0
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH — REFLECTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Dynamic methods call
+// ---------------------------------------------------------------------------
+
+cls := Beamtalk classNamed: #Point
+// => Point
+
+// Dynamic methods call: keep wildcard since method list changes when methods are added
+cls methods
+// => _
+
+// ---------------------------------------------------------------------------
+// Dynamic superclass call
+// ---------------------------------------------------------------------------
+
+cls := Beamtalk classNamed: #Point
+// => Point
+
+cls superclass
+// => Value
+
+// ---------------------------------------------------------------------------
+// Dynamic name call
+// ---------------------------------------------------------------------------
+
+cls := Beamtalk classNamed: #Point
+// => Point
+
+cls name
+// => Point
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH — ACTORS
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Store actor class in variable and send "spawn" dynamically
+// ---------------------------------------------------------------------------
+
+actorCls := Beamtalk classNamed: #Counter
+// => Counter
+
+c := actorCls spawn
+// => #Actor<Counter,_>
+
+c increment
+// => 1
+
+c increment
+// => 2
+
+c getValue
+// => 2

@@ -102,7 +102,7 @@ nil /= nil  // => false
 //
 // NOTE: Requires actor spawn support. This documents expected behavior.
 //
-// // @load tests/e2e/fixtures/counter.bt
+// // @load tests/repl-protocol/fixtures/counter.bt
 //
 // a := Counter spawn
 // b := a

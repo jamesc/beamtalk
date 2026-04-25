@@ -535,7 +535,7 @@ TestCase subclass: CounterTest
 | Location | Files | Classes |
 |----------|-------|---------|
 | stdlib/test/fixtures/ | 8 | Point, ClassSelfDispatch, NlrFieldMutation, ValueTypeBuilder, NlrNestedHom, StringFormatter, ClassVarPoint, Shape |
-| tests/e2e/fixtures/ | 7 | Point, Transaction, Message, Alpha, Beta, Beverage, Tag |
+| tests/repl-protocol/fixtures/ | 7 | Point, Transaction, Message, Alpha, Beta, Beverage, Tag |
 | examples/gof-patterns/ | 6 | CelsiusThermometer, HtmlElement, HtmlBuilder, CommandHistory, TextBuffer, Sorter |
 
 **Collection reclassification** (1 file):

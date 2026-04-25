@@ -16,7 +16,7 @@ fn main() {
 
     // .bt fixture files — whole-file entries
     extract_bt_dir(&root, "stdlib/test/fixtures", None, &mut entries);
-    extract_bt_dir(&root, "tests/e2e/fixtures", None, &mut entries);
+    extract_bt_dir(&root, "tests/repl-protocol/fixtures", None, &mut entries);
     extract_bt_dir(&root, "docs/learning/fixtures", None, &mut entries);
 
     // .bt test files — whole-file entries (tests show how to *use* patterns)
@@ -175,8 +175,8 @@ fn title_from_stem(stem: &str) -> String {
 fn category_from_path(rel_path: &str) -> String {
     if rel_path.starts_with("stdlib/test/fixtures") {
         "stdlib-fixtures".to_string()
-    } else if rel_path.starts_with("tests/e2e/fixtures") {
-        "e2e-fixtures".to_string()
+    } else if rel_path.starts_with("tests/repl-protocol/fixtures") {
+        "repl-protocol-fixtures".to_string()
     } else if rel_path.starts_with("docs/learning/fixtures") {
         "learning-fixtures".to_string()
     } else if rel_path.starts_with("stdlib/test") {

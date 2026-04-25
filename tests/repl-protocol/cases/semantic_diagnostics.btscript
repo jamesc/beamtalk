@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for semantic analysis diagnostics
+//
+// These tests require E2E because @load-error directives (which compile a
+// file and assert a compilation error) are a REPL testing feature. BUnit
+// tests execute already-compiled code and cannot trigger compile-time errors
+// on new source files. The REPL's error output format matching (e.g.,
+// `// => ERROR: ...`) is also REPL-protocol-specific.
+//
+// Tests that the compiler's semantic analysis produces correct errors
+// for invalid code patterns detected at compile time.
+//
+// NOTE: Some acceptance criteria from BT-400 cannot be tested E2E:
+// - Duplicate pattern variable (pattern matching syntax not yet parseable)
+
+// --- Compilation errors in loaded files ---
+
+// Field assignment inside a stored closure is an error
+// @load-error tests/repl-protocol/fixtures/semantic_field_error.bt => cannot assign to field
+
+// Subclassing a sealed builtin class is an error
+// @load-error tests/repl-protocol/fixtures/semantic_sealed_error.bt => Cannot subclass sealed class
+
+// Overriding a sealed method from a parent class is an error
+// @load-error tests/repl-protocol/fixtures/semantic_sealed_method.bt => Cannot override sealed method
+
+// Using @primitive outside the standard library is an error
+// @load-error tests/repl-protocol/fixtures/semantic_primitive_error.bt => Primitives can only be declared in the standard library
+
+// Using an unknown intrinsic name with @primitive is an error
+// @load-error tests/repl-protocol/fixtures/semantic_unknown_intrinsic.bt => Unknown intrinsic
+
+// Multiple classes in one file is not supported (BT-349)
+// @load-error tests/repl-protocol/fixtures/multi_class.bt => Multiple classes in one file is not supported
+
+// --- Reflection method validators ---
+
+// BT-1168: respondsTo: now accepts variable (identifier) arguments
+myVar := #increment
+// => increment
+42 respondsTo: myVar
+// => false
+
+// --- Control flow blocks work without errors ---
+
+// Blocks with parameters execute correctly (no semantic errors)
+[:x | x * 2] value: 5
+// => 10
+
+// Nested blocks work without errors
+[:x | [:y | x + y] value: 3] value: 10
+// => 13
+
+// --- Semantic warnings (BT-407) ---
+
+// BT-851: Captured variable mutation in stored closure is now supported via Tier 2
+// stateful blocks. Stored closures with mutations now compile successfully and
+// propagate mutations back to the caller.
+count := 0
+// => 0
+myBlock := [count := count + 1]
+// => a Block/1
+
+// --- BT-665: New local definitions in stored closures ---
+
+// New local variable definition inside stored closure should work
+myBlock := [:x |
+  temp := x * 2
+  temp + 1
+]
+// => _
+myBlock value: 5
+// => 11

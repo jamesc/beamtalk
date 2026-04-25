@@ -47,15 +47,15 @@ main([]) ->
     end,
 
     %% Clean old artifacts
-    CounterBuildDir = filename:join([RepoRoot, "tests", "e2e", "fixtures", "build"]),
+    CounterBuildDir = filename:join([RepoRoot, "tests", "repl-protocol", "fixtures", "build"]),
     FixtureBuildDir = filename:join([FixturesDir, "build"]),
     delete_if_exists(filename:join(CounterBuildDir, "bt@counter.beam")),
     delete_if_exists(filename:join(CounterBuildDir, "bt@counter.core")),
     delete_if_exists(filename:join(FixtureBuildDir, "bt@logging_counter.beam")),
     delete_if_exists(filename:join(FixtureBuildDir, "bt@logging_counter.core")),
 
-    %% Build counter fixture (using E2E fixture - BT-239)
-    CounterSrc = filename:join([RepoRoot, "tests", "e2e", "fixtures", "counter.bt"]),
+    %% Build counter fixture (using REPL-protocol fixture - BT-239)
+    CounterSrc = filename:join([RepoRoot, "tests", "repl-protocol", "fixtures", "counter.bt"]),
     CounterBeam = filename:join(CounterBuildDir, "bt@counter.beam"),
     run_beamtalk(Beamtalk, CounterSrc),
     case filelib:is_regular(CounterBeam) of

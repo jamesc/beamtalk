@@ -911,7 +911,7 @@ Thin dispatch glue — no construction logic (that lives in `SupervisionSpec chi
 ### Phase 3 — Tests and Docs (M)
 
 - `stdlib/test/SupervisorTest.bt` — BUnit tests: static supervision (`Supervisor subclass:` with `class children => #(...)`), dynamic supervision (`DynamicSupervisor subclass:` with `class childClass =>`), `supervisionPolicy:` on Actor, `supervisionSpec` fluent overrides (`withId:`, `withRestart:`, `withArgs:`, `withId:withRestart:withArgs:`), `withArgs:` with multiple instances of same class, nested supervisors, conditional `children` method
-- `tests/e2e/cases/supervisor.bt` — REPL integration: `WebApp supervise`, `app children`, `app which: DatabasePool`, `pool startChild:`, `pool count`
+- `tests/repl-protocol/cases/supervisor.bt` — REPL integration: `WebApp supervise`, `app children`, `app which: DatabasePool`, `pool startChild:`, `pool count`
 - `docs/beamtalk-language-features.md` — add Supervision Tree section after Actor Message Passing
 - `docs/beamtalk-principles.md` — update Principle 10 from "planned but not available" to "available via `Supervisor subclass:`"
 

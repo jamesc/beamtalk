@@ -7,6 +7,6 @@ Quick reference
 - **Linear issues:** Follow the full guidance in [AGENTS.md](../AGENTS.md) — see the "Creating Issue Blocking Relationships" and "Writing Agent-Ready Issues" sections for details on labels, blocking relationships, and formatting.
 - **Syntax verification:** Always verify any Beamtalk syntax before using it (language spec, `examples/`, or `tests/`). See the "Syntax Verification - Preventing Hallucinations" section in [AGENTS.md](../AGENTS.md).
 - **Allowed commands (agent shortcuts):** `just`, `cargo`, `rustc`, `rustfmt`, `git` — use these without asking.
-- **Common CI commands:** `just ci`, `just build`, `just test`, `just test-stdlib`, `just test-e2e`.
+- **Common CI commands:** `just ci`, `just build`, `just test`, `just test-stdlib`, `just test-repl-protocol`.
 - **PR / comments:** When scripting GitHub interactions prefer `gh api` with `--paginate`; see examples in `AGENTS.md`.
 - **Docs in PRs:** When adding documentation notes to a PR, include which sections helped, what could improve, and one short actionable suggestion (see `AGENTS.md` example).

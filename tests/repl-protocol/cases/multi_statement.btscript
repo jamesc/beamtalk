@@ -1,0 +1,118 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for multi-statement method bodies (BT-360) and
+// top-level REPL multi-statement input (BT-780).
+//
+// These tests require E2E because BT-780 top-level multi-statement input
+// (e.g., `x := 1. y := 2.`) is a REPL-specific evaluation feature: the REPL
+// evaluates a period-separated sequence and binds all variables to the
+// workspace. BUnit evaluates single expressions and cannot test workspace
+// binding of multiple variables from a single multi-statement input.
+// Cross-turn variable persistence is also required for mutation tests.
+
+// @load tests/repl-protocol/fixtures/multi_statement.bt
+
+// ===========================================================================
+// MULTI-STATEMENT METHOD BODIES
+// ===========================================================================
+
+// Method with side effect then return value
+MultiStatement new sideEffectThenReturn
+// => 42
+
+// Method with multiple side effects then return
+MultiStatement new twoSideEffects
+// => 99
+
+// ===========================================================================
+// MULTI-STATEMENT BLOCKS
+// ===========================================================================
+
+// Block with period-separated expressions (backward compat)
+[1 + 1. 2 + 2. 3 + 3] value
+// => 6
+
+// ===========================================================================
+// BT-780: MULTI-STATEMENT TOP-LEVEL REPL INPUT
+// ===========================================================================
+
+// Two assignments: returns last value, binds both variables
+x := 1. y := 2.
+// => 2
+
+// Both bindings should be visible
+x
+// => 1
+
+y
+// => 2
+
+:clear
+// => ok
+
+// Cross-expression reference: second expression uses first's binding
+x := 10. y := x + 5.
+// => 15
+
+y
+// => 15
+
+:clear
+// => ok
+
+// Mix of assignment and expression: returns last result
+x := 1. x + 10
+// => 11
+
+x
+// => 1
+
+:clear
+// => ok
+
+// Pure expressions only: returns last result, no new bindings
+1 + 1. 2 + 2. 3 + 3
+// => 6
+
+:clear
+// => ok
+
+// Single expression still works unchanged
+42
+// => 42
+
+:clear
+// => ok
+
+// ===========================================================================
+// BT-790: LOOP MUTATIONS IN INTERMEDIATE POSITION
+// ===========================================================================
+
+// timesRepeat: in intermediate position threads state to final read
+x := 1. 5 timesRepeat: [x := x + 1]. x
+// => 6
+
+:clear
+// => ok
+
+// BT-800: starting from zero, mutations must accumulate (not repeat initial read)
+x := 0. 5 timesRepeat: [x := x + 1]. x
+// => 5
+
+:clear
+// => ok
+
+// whileTrue: in intermediate position threads state to final read
+x := 0. [x < 5] whileTrue: [x := x + 1]. x
+// => 5
+
+:clear
+// => ok
+
+// Loop in intermediate position doesn't corrupt final literal
+x := 1. 5 timesRepeat: [x := x + 1]. 42
+// => 42
+
+:clear
+// => ok

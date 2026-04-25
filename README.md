@@ -173,7 +173,7 @@ just repl
 # Run tests
 beamtalk test              # Run BUnit TestCase tests
 just test-stdlib           # Run compiled expression tests
-just test-e2e              # Run REPL integration tests
+just test-repl-protocol    # Run REPL TCP-protocol tests
 
 # Run full CI checks
 just ci

@@ -4,7 +4,7 @@
 // E2E tests for multi-statement method bodies (BT-360)
 // Verifies newline-separated statements in methods and blocks
 
-// @load tests/e2e/fixtures/multi_statement.bt
+// @load tests/repl-protocol/fixtures/multi_statement.bt
 
 // ===========================================================================
 // MULTI-STATEMENT METHOD BODIES

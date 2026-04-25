@@ -394,8 +394,8 @@ Both probes are small (<1 day each) and their outcomes determine the exact shape
 - **Effort:** S.
 
 ### Phase 3: e2e, examples, and docs
-- **E2E btscript tests** (`tests/e2e/cases/`): `supervisor.btscript`, `supervisor_class_method.btscript`, `supervisor_initialize.btscript`, `named-actors.btscript` — update expected REPL output. These tests exercise the full lifecycle and are the canonical migration reference.
-- **E2E fixtures** (`tests/e2e/fixtures/`): `e2e_init_dyn_supervisor.bt`, `e2e_named_supervisor.bt`, `e2e_initialize_supervisor.bt` — update `initialize:` hooks that call `sup startChild` to handle Result.
+- **E2E btscript tests** (`tests/repl-protocol/cases/`): `supervisor.btscript`, `supervisor_class_method.btscript`, `supervisor_initialize.btscript`, `named-actors.btscript` — update expected REPL output. These tests exercise the full lifecycle and are the canonical migration reference.
+- **E2E fixtures** (`tests/repl-protocol/fixtures/`): `e2e_init_dyn_supervisor.bt`, `e2e_named_supervisor.bt`, `e2e_initialize_supervisor.bt` — update `initialize:` hooks that call `sup startChild` to handle Result.
 - **`examples/otp-tree/`:** `src/worker_pool.bt`, `test/otp_tree_test.bt`, `README.md`, `AGENTS.md`, `.github/copilot-instructions.md` — update all raise-shaped examples to Result-shaped.
 - **Documentation:** `docs/beamtalk-language-features.md` (supervision chapter) — document the new signatures and the idempotent-startup convention; cross-link to ADR 0079's actor registration section for the parallel.
 - **CHANGELOG.md:** entry under "Standard Library" and "Runtime" subsections describing the breaking change and the mechanical migration (add `unwrap` / `ifOk:ifError:` at call sites).
@@ -411,7 +411,7 @@ Phase 1 → Phase 2 (blocks stdlib signatures on runtime returning Result) → P
 ### Affected components (summary)
 - Runtime: `beamtalk_supervisor.erl` only.
 - Stdlib: `Supervisor.bt`, `DynamicSupervisor.bt`.
-- Tests: 5 BUnit files (`supervisor_defaults_test`, `supervisor_initialize_test`, `dynamic_supervisor_defaults_test`, `dynamic_supervisor_initialize_test`, `supervision_class_method_test`), 4 e2e btscripts (`supervisor`, `supervisor_class_method`, `supervisor_initialize`, `named-actors`), ~10 e2e supervisor fixtures under `tests/e2e/fixtures/`.
+- Tests: 5 BUnit files (`supervisor_defaults_test`, `supervisor_initialize_test`, `dynamic_supervisor_defaults_test`, `dynamic_supervisor_initialize_test`, `supervision_class_method_test`), 4 e2e btscripts (`supervisor`, `supervisor_class_method`, `supervisor_initialize`, `named-actors`), ~10 e2e supervisor fixtures under `tests/repl-protocol/fixtures/`.
 - Docs: language-features supervision chapter + CHANGELOG.
 - External: out-of-tree projects (Exdura, symphony) via coordinated branches.
 

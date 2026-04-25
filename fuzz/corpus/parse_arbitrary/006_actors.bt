@@ -9,7 +9,7 @@
 //
 // Actors require a class definition to be loaded first. Use the @load directive:
 //
-//   // @load tests/e2e/fixtures/counter.bt
+//   // @load tests/repl-protocol/fixtures/counter.bt
 //
 //   // Spawn an actor
 //   counter := Counter spawn

@@ -16,14 +16,14 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
-| E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | REPL/workspace integration tests |
+| REPL Protocol Tests (Rust) | Rust + REPL | `tests/repl-protocol/` | REPL TCP-protocol integration tests |
 
 ## Running Tests
 
 ### Quick Check (CI equivalent)
 
 ```bash
-just ci                  # Build, lint, test, test-stdlib, test-e2e
+just ci                  # Build, lint, test, test-stdlib, test-repl-protocol
 ```
 
 Or individual steps:
@@ -34,7 +34,7 @@ cargo fmt --all -- --check
 cargo test --all-targets
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (~85 files)
-just test-e2e            # REPL integration tests (slower, ~50s)
+just test-repl-protocol  # REPL TCP-protocol tests (slower, ~50s)
 ```
 
 ### Code Coverage
@@ -257,7 +257,7 @@ Expression tests for bootstrap-critical primitives that TestCase transitively de
 
 **With fixtures** (`@load` directive, used in bootstrap tests only):
 ```beamtalk
-// @load tests/e2e/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/counter.bt
 
 Counter spawn
 // => _
@@ -435,7 +435,7 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 - Interaction between multiple actors
 
 **Test Fixtures:** Compiled automatically by rebar3 pre-hook
-- Source: `tests/e2e/fixtures/counter.bt` (canonical implementation - BT-239)
+- Source: `tests/repl-protocol/fixtures/counter.bt` (canonical implementation - BT-239)
 - Compiled by: `runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript` (runs automatically)
 - Output: `runtime/_build/*/test/bt@counter.beam`
 - **No manual compilation needed** - hook runs before every `rebar3 eunit`
@@ -445,12 +445,12 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 Developer runs: cargo test OR rebar3 eunit
   └─> cargo build (if needed) - creates ./target/debug/beamtalk
   └─> rebar3 pre-hook runs: escript runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
-      └─> Uses ./target/debug/beamtalk to compile tests/e2e/fixtures/counter.bt
+      └─> Uses ./target/debug/beamtalk to compile tests/repl-protocol/fixtures/counter.bt
       └─> Copies bt@counter.beam to runtime/_build/*/test/
   └─> Tests run with compiled fixtures available
 ```
 
-**Note:** For true E2E tests with full compilation pipeline, see `tests/e2e/`.
+**Note:** For REPL TCP-protocol tests with full compilation pipeline, see `tests/repl-protocol/`.
 
 **Example:**
 ```erlang
@@ -469,15 +469,15 @@ spawn_zero_uses_default_state_test() ->
 
 ---
 
-### 8. End-to-End Tests (REPL Integration)
+### 8. REPL Protocol Tests
 
-REPL and workspace integration tests that require a running REPL daemon.
+REPL TCP-protocol integration tests that require a running REPL daemon. (Previously called "E2E tests" — renamed in BT-2085 because they exercise one specific surface, not "end-to-end across surfaces". Cross-surface parity tests live under `tests/parity/`.)
 
-**Location:** `tests/e2e/`
+**Location:** `tests/repl-protocol/`
 
-**Test cases:** `tests/e2e/cases/*.btscript` (~23 files)
+**Test cases:** `tests/repl-protocol/cases/*.btscript` (~23 files)
 
-**Test harness:** `crates/beamtalk-cli/tests/e2e.rs`
+**Test harness:** `crates/beamtalk-cli/tests/repl_protocol.rs`
 
 **What they test:**
 - Workspace bindings (Transcript, Beamtalk globals)
@@ -486,7 +486,7 @@ REPL and workspace integration tests that require a running REPL daemon.
 - `ERROR:` assertion patterns
 - Integration between compiler daemon and runtime
 
-**When to use E2E tests:**
+**When to use REPL-protocol tests:**
 Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `stdlib/test/*.bt` as BUnit tests (see section 4b).
 
 **Test file format:**
@@ -505,22 +505,22 @@ x + 1
 
 **Running:**
 ```bash
-# Run E2E tests only
-just test-e2e
+# Run REPL protocol tests only
+just test-repl-protocol
 
 # Or via cargo directly
-cargo test --test e2e -- --ignored
+cargo test --test repl_protocol -- --ignored
 
 # Run with verbose output
-cargo test --test e2e -- --ignored --nocapture
+cargo test --test repl_protocol -- --ignored --nocapture
 ```
 
-**Adding a new E2E test case:**
-1. Create `tests/e2e/cases/my_feature.bt`
+**Adding a new REPL-protocol test case:**
+1. Create `tests/repl-protocol/cases/my_feature.bt`
 2. Add expressions with `// =>` expected results
-3. Run `just test-e2e`
+3. Run `just test-repl-protocol`
 
-**Note:** Before adding to E2E, consider whether the test needs the REPL. If it tests pure language features, add it to `stdlib/test/*.bt` as a BUnit test instead (see section 4b).
+**Note:** Before adding here, consider whether the test needs the REPL. If it tests pure language features, add it to `stdlib/test/*.bt` as a BUnit test instead (see section 4b).
 
 **Error testing:**
 ```smalltalk
@@ -528,7 +528,7 @@ undefined_var
 // => ERROR: Undefined variable
 ```
 
-See [tests/e2e/README.md](../../tests/e2e/README.md) for full documentation.
+See [tests/repl-protocol/README.md](../../tests/repl-protocol/README.md) for full documentation.
 
 ---
 
@@ -544,7 +544,7 @@ just ci
 #   just test            # Rust unit tests + runtime EUnit
 #   just test-stdlib     # Bootstrap expression tests (~14s)
 #   just test-bunit      # BUnit TestCase tests (~85 files)
-#   just test-e2e        # REPL integration tests (~50s)
+#   just test-repl-protocol  # REPL TCP-protocol tests (~50s)
 ```
 
 ### Testing Pyramid
@@ -765,11 +765,11 @@ TestCase subclass: MyFeatureTest
 
 **Use this for:** Stateful tests with setup/teardown, complex scenarios with multiple assertions, actor interaction tests.
 
-### Adding an E2E Test (REPL/Workspace Integration)
+### Adding a REPL Protocol Test (REPL/Workspace Integration)
 
-1. Create or edit a `.bt` file in `tests/e2e/cases/`
+1. Create or edit a `.bt` file in `tests/repl-protocol/cases/`
 2. Add expressions with `// => expected_result` annotations
-3. Run `just test-e2e`
+3. Run `just test-repl-protocol`
 
 **Use this for:** Workspace bindings, REPL commands, variable persistence, auto-await, `ERROR:` patterns.
 
@@ -843,7 +843,7 @@ Fuzzing tests the parser's robustness by feeding it random or mutated input to d
 
 **Location:** `fuzz/fuzz_targets/parse_arbitrary.rs`
 
-**Corpus:** `fuzz/corpus/parse_arbitrary/` (32 seed files from examples/ and tests/e2e/cases/)
+**Corpus:** `fuzz/corpus/parse_arbitrary/` (32 seed files from examples/ and tests/repl-protocol/cases/)
 
 ### Running Locally
 
@@ -929,7 +929,7 @@ cp my_new_test.bt fuzz/corpus/parse_arbitrary/033_my_new_test.bt
 just fuzz
 ```
 
-**Keep corpus in sync:** When adding new `.bt` files to `examples/` or `tests/e2e/cases/`, also copy them to `fuzz/corpus/parse_arbitrary/` so the fuzzer can use them as mutation seeds.
+**Keep corpus in sync:** When adding new `.bt` files to `examples/` or `tests/repl-protocol/cases/`, also copy them to `fuzz/corpus/parse_arbitrary/` so the fuzzer can use them as mutation seeds.
 
 **Corpus minimization:** `cargo +nightly fuzz cmin` rewrites the corpus directory in-place. Run it on a **temporary copy** to avoid deleting tracked seed files:
 ```bash
@@ -1065,7 +1065,7 @@ When adding or modifying operations across surfaces (CLI, REPL, MCP, LSP), consu
 - [Surface Parity Map](surface-parity.md) - Cross-surface operation coverage matrix
 - [ADR 0014: Beamtalk Test Framework](../ADR/0014-beamtalk-test-framework.md) - Architecture decision for the three-layer test strategy
 - [test-package-compiler/README.md](../../test-package-compiler/README.md) - Snapshot test details
-- [tests/e2e/README.md](../../tests/e2e/README.md) - E2E test framework details
+- [tests/repl-protocol/README.md](../../tests/repl-protocol/README.md) - REPL protocol test framework details
 - [runtime/README.md](../../runtime/README.md) - Erlang runtime test details
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
 - [insta documentation](https://insta.rs/) - Snapshot testing framework

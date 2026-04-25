@@ -3,7 +3,7 @@
 > **Last updated:** 2026-04-01
 > **Issue:** BT-247, BT-1808
 > **Methodology:** Audit of `stdlib/src/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
-> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and E2E test coverage (`tests/e2e/cases/*.btscript`).
+> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and E2E test coverage (`tests/repl-protocol/cases/*.btscript`).
 
 ## Executive Summary
 
@@ -791,7 +791,7 @@ All stdlib classes now have corresponding `stdlib/src/*.bt` definitions. `Collec
 
 ## Test Coverage Gaps
 
-Test coverage is now spread across both `stdlib/bootstrap-test/` (1046 assertions) and `tests/e2e/cases/` (213 assertions).
+Test coverage is now spread across both `stdlib/bootstrap-test/` (1046 assertions) and `tests/repl-protocol/cases/` (213 assertions).
 Many previously untested methods now have stdlib test coverage. The following gaps remain for methods
 with no coverage in either test suite:
 
@@ -828,7 +828,7 @@ with no coverage in either test suite:
 For each method, testing was performed in this priority order:
 
 1. **Stdlib tests** (`stdlib/bootstrap-test/*.btscript`) — compiled expression tests (ADR 0014)
-2. **E2E test files** (`tests/e2e/cases/*.btscript`) — REPL integration tests
+2. **E2E test files** (`tests/repl-protocol/cases/*.btscript`) — REPL integration tests
 3. **Compiler intrinsics** (`crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs`) — verified codegen handler exists
 4. **Primitive bindings** (`crates/beamtalk-core/src/codegen/core_erlang/primitive_bindings.rs`, `primitive_implementations.rs`) — verified selector-based dispatch codegen
 5. **Runtime dispatch** (`runtime/apps/beamtalk_runtime/src/beamtalk_*.erl`) — verified dispatch clause handles the selector

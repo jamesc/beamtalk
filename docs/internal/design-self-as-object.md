@@ -1236,7 +1236,7 @@ Error: 'self' has no associated process (object not spawned?)
 2. State includes `__class_mod__`
 3. Reflection methods are built-in
 
-#### E2E Tests (tests/e2e/cases/)
+#### REPL-Protocol Tests (tests/repl-protocol/cases/)
 
 1. `self-reference.bt` — Self works correctly in methods
 2. `reflection.bt` — Reflection API works

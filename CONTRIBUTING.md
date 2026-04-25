@@ -56,8 +56,8 @@ We use [Just](https://github.com/casey/just) as our task runner. Run `just --lis
 just build          # Build everything (Rust + Erlang + stdlib)
 just test           # Run Rust tests + Erlang runtime + stdlib tests
 just test-stdlib    # Compiled language feature tests (part of `just test`)
-just test-e2e       # REPL integration tests (slow, full language validation)
-just ci             # Full CI: build, lint, test, test-stdlib, test-integration, test-mcp, test-e2e
+just test-repl-protocol  # REPL TCP-protocol tests (slow, full language validation)
+just ci                  # Full CI: build, lint, test, test-stdlib, test-integration, test-mcp, test-repl-protocol
 
 just fmt            # Format all code
 just fmt-check      # Check formatting without changing files
@@ -75,7 +75,7 @@ just clean          # Clean build artifacts
 | **Rust unit/integration tests** | `just test-rust` | Parser, AST, codegen |
 | **Erlang unit tests** | `just test-runtime` | Runtime modules in isolation |
 | **Stdlib tests** | `just test-stdlib` | Language features via compiled expressions |
-| **E2E tests** | `just test-e2e` | Full REPL integration |
+| **REPL protocol tests** | `just test-repl-protocol` | Full REPL TCP-protocol integration |
 
 Run `just test` for fast feedback during development. Run `just ci` before submitting a PR.
 

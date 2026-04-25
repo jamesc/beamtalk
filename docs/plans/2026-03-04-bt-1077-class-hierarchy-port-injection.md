@@ -1077,7 +1077,7 @@ git commit -m "feat: inject class_hierarchy from compiler server into port reque
 just ci 2>&1 | tail -50
 ```
 
-Expected: all checks pass (build, clippy, fmt-check, test, test-stdlib, test-e2e).
+Expected: all checks pass (build, clippy, fmt-check, test, test-stdlib, test-repl-protocol).
 
 **Step 2: Fix any failures**
 
@@ -1103,7 +1103,7 @@ After all tests pass, verify the end-to-end behaviour works conceptually:
 
 1. The Erlang test `beamtalk_compiler_server_tests.erl` should have existing tests for `compile_expression/3` — confirm they still pass.
 2. The `get_classes/0` test-only API can be used to verify the class cache is populated after defining a class in a test.
-3. Confirm that `just test-e2e` passes — the REPL tests exercise the full compilation pipeline.
+3. Confirm that `just test-repl-protocol` passes — the REPL tests exercise the full compilation pipeline.
 
 ---
 

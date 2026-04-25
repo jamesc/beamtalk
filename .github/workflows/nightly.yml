@@ -122,8 +122,8 @@ jobs:
       - name: Test MCP server
         run: just test-mcp
 
-      - name: Test E2E
-        run: just test-e2e
+      - name: Test REPL protocol
+        run: just test-repl-protocol
 
       - name: Build distribution
         run: just install dist
@@ -201,8 +201,8 @@ jobs:
       - name: Test MCP server
         run: just test-mcp
 
-      - name: Test E2E
-        run: just test-e2e
+      - name: Test REPL protocol
+        run: just test-repl-protocol
 
       - name: Build Rust (release)
         run: cargo build --all-targets --release --quiet

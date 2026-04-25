@@ -10,8 +10,8 @@
 //
 // Related: BT-95 (beamtalk_object_class:super_dispatch/3), BT-203 (class hierarchy)
 
-// @load tests/e2e/fixtures/counter.bt
-// @load tests/e2e/fixtures/logging_counter.bt
+// @load tests/repl-protocol/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/logging_counter.bt
 
 // ===========================================================================
 // @LOAD VERIFICATION - FIXED IN BT-195

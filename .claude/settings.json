@@ -47,6 +47,7 @@
       "Bash(just test)",
       "Bash(just test-rust:*)",
       "Bash(just test-stdlib:*)",
+      "Bash(just test-repl-protocol:*)",
       "Bash(just test-e2e:*)",
       "Bash(just test-runtime:*)",
       "Bash(just test-integration:*)",
