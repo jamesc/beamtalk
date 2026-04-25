@@ -65,6 +65,7 @@
 - Fix MCP `lint` tool producing different diagnostics from CLI `beamtalk lint` for cross-file type/DNU issues (BT-2052).
 - MCP `lint` tool now surfaces warning diagnostics when package files are unreadable during cross-file class extraction (BT-2056).
 - Preserve `startup.log` on final workspace retry failure so error diagnostics referencing the file remain valid (BT-2057).
+- MCP `lint` tool now surfaces error diagnostics when direct target files are unreadable, instead of returning a deceptively clean zero-files-checked result (BT-2067).
 
 ### Documentation
 
@@ -99,6 +100,8 @@
 - Unify workspace retry helpers into single parameterized `retry_with_cleanup` wrapper (BT-2058).
 - Replace erlfmt inline Erlang eval strings with structured `ErlangEval` builder (BT-2059).
 - Share package-root resolution between MCP lint and CLI lint via `project::package` module (BT-2060).
+- `WellKnownSelector` enum replaces fragile selector-name string comparisons across narrowing rules, codegen intrinsic dispatch, lint validators, and state-threading predicates (BT-2065 epic: BT-2069, BT-2070, BT-2071, BT-2072).
+- Generic `Visitor` trait with exhaustive `walk_expr` replaces hand-rolled AST walkers in narrowing and type inference (BT-2063).
 
 ## 0.3.1 — 2026-03-26
 
