@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Circle — concrete subclass of Shape (cross-file inheritance).
+/// Class-shape flavour: subclass.
+Shape subclass: Circle
+  field: radius = 1.0
+
+  class withRadius: r => self new: #{#radius => r}
+
+  area => 3.14159 * self.radius * self.radius
+
+  perimeter => 2.0 * 3.14159 * self.radius

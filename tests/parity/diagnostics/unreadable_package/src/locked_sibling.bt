@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Sibling file in the package extraction set; chmod'd to 000 by the parity
+/// harness so cross-file class extraction has to handle the failure
+/// gracefully (BT-2056).
+Object subclass: LockedSibling
+  ping -> String => "pong"

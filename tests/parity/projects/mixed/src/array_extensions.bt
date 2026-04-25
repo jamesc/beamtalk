@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ArrayExtensionsHost — host class for the file's `Array >>` extensions.
+/// Class-shape flavour: file extending a stdlib class (`Array`).
+Object subclass: ArrayExtensionsHost
+
+  class label -> String => "array-extensions-host"
+
+Array >> doubled => self collect: [:e | e]
+
+Array >> isEmptyClone => self isEmpty

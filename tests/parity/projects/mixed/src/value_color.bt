@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ValueColor — three-channel immutable colour value.
+/// Class-shape flavour: another plain Value class (RGB shape).
+Value subclass: ValueColor
+  field: r = 0
+  field: g = 0
+  field: b = 0

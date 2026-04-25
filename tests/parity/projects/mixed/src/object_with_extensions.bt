@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ObjectWithExtensions — class plus extensions on the same class.
+/// Class-shape flavour: class declaration mixed with self-extensions.
+Value subclass: ObjectWithExtensions
+  field: name = ""
+
+  greet => "hello, " ++ self.name
+
+ObjectWithExtensions >> shoutGreet => self greet uppercase

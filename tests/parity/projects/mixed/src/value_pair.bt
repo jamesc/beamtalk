@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ValuePair — minimal two-field Value class.
+/// Class-shape flavour: another plain Value class, included to bring the
+/// fixture comfortably within the 25-30 file target.
+Value subclass: ValuePair
+  field: first = nil
+  field: second = nil

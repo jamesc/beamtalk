@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ProtoConsumer — uses MixedPrintable as a parameter type across files.
+/// Class-shape flavour: cross-file Protocol use (BT-1950 regression).
+Object subclass: ProtoConsumer
+
+  class show: thing :: MixedPrintable -> String =>
+    thing describe

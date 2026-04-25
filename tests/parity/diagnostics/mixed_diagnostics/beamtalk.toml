@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: a single file that mixes type, DNU, and lint
+# diagnostics. Every surface should report the same multi-category set.
+
+[package]
+name = "parity_mixed_diagnostics"
+version = "0.1.0"
+description = "Mixed diagnostic categories parity fixture"
+
+[dependencies]

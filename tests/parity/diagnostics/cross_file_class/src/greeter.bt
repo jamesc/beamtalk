@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A trivial greeter referenced by `caller.bt` via a cross-file type
+/// annotation. See BT-2052 for the regression this fixture pins down.
+Object subclass: Greeter
+
+  greet: name :: String -> String =>
+    "Hello, " ++ name

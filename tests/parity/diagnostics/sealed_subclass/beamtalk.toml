@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: subclassing a sealed stdlib class must produce
+# an error on every diagnostic surface.
+
+[package]
+name = "parity_sealed_subclass"
+version = "0.1.0"
+description = "Sealed subclass diagnostic parity fixture"
+
+[dependencies]

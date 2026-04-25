@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// StringUtil — second class under `src/util/`. Pairs with `math_helper.bt`
+/// to verify two files in the same nested subdirectory both reach the
+/// loaded class set across REPL, MCP and CLI surfaces.
+Object subclass: StringUtil
+
+  class echo: s -> String => s

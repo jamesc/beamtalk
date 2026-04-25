@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A trivial counter used by the parity-test harness.
+Actor subclass: Counter
+  state: count :: Integer = 0
+
+  current -> Integer => self.count
+
+  increment -> Integer => self.count := self.count + 1
+
+  reset -> Integer => self.count := 0

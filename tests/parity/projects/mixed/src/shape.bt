@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Shape — abstract Value base for the shape hierarchy.
+/// Class-shape flavour: subclass base (cross-file inheritance).
+Value subclass: Shape
+
+  area => self subclassResponsibility
+
+  perimeter => self subclassResponsibility
