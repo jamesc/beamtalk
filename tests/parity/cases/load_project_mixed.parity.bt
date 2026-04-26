@@ -20,19 +20,14 @@
 // edge-case files (CamelCase filename `HotSwap.bt`, deeply nested
 // `deep/nested/path/widget.bt`, sibling files in the same subdirectory).
 
-// The expected class set below covers the concrete classes defined by the
-// fixture. `MixedPrintable` (a `Protocol define:`) is intentionally OMITTED
-// from the assertion — the fixture still loads the protocol file on every
-// surface (so the BT-1950 regression scenario is reproduced), but second-
-// pass `force=true` reloads of `Protocol define:` files currently surface
-// a "namespace collision" diagnostic on whichever surface runs second
-// against the shared workspace. The fixture pins the regression scenario
-// so the parity assertion will tighten to require `MixedPrintable` once
-// the underlying hot-reload-of-protocols behaviour is stable across all
-// load paths.
+// The expected class set covers the concrete classes AND protocol classes
+// defined by the fixture. `MixedPrintable` (a `Protocol define:`) must
+// load successfully on every surface, including second-pass `force=true`
+// reloads against a workspace that already has the protocol registered
+// (BT-2088 fixed the namespace collision on hot-reload).
 
 // @input
 <mixed_project>
 // @surfaces repl, mcp, cli
 // @op load
-// @expect-classes AbstractAnimal, ActorCounter, ActorLogger, ActorTicker, AnimalDog, AnimalPuppy, ArrayExtensionsHost, Circle, ClassMethodsOnly, Cylinder, DeepWidget, FactoryWidget, HotSwap, MathHelper, ObjectWithExtensions, PlainObject, ProtoConsumer, SealedToken, Shape, StringExtensionsHost, StringUtil, TypedAccount, ValueColor, ValueMoney, ValuePair, ValuePoint, ValueTyped
+// @expect-classes AbstractAnimal, ActorCounter, ActorLogger, ActorTicker, AnimalDog, AnimalPuppy, ArrayExtensionsHost, Circle, ClassMethodsOnly, Cylinder, DeepWidget, FactoryWidget, HotSwap, MathHelper, MixedPrintable, ObjectWithExtensions, PlainObject, ProtoConsumer, SealedToken, Shape, StringExtensionsHost, StringUtil, TypedAccount, ValueColor, ValueMoney, ValuePair, ValuePoint, ValueTyped

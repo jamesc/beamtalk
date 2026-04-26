@@ -418,6 +418,22 @@ fn analyse_full_with_natives(
     // structural validator can decide whether unresolved-class warnings are useful.
     let has_cross_file_classes = !pre_loaded_classes.is_empty();
 
+    // BT-2088: Filter out pre-loaded class entries whose names match a protocol
+    // definition in the current module. The compiler server's class cache
+    // includes synthetic protocol class entries from prior loads; injecting
+    // them into the hierarchy would cause a spurious "namespace collision"
+    // error when `register_module` sees the protocol name as an existing class.
+    let pre_loaded_classes = if !module.protocols.is_empty() && !pre_loaded_classes.is_empty() {
+        let current_protocol_names: std::collections::HashSet<&ecow::EcoString> =
+            module.protocols.iter().map(|p| &p.name.name).collect();
+        pre_loaded_classes
+            .into_iter()
+            .filter(|ci| !current_protocol_names.contains(&ci.name))
+            .collect()
+    } else {
+        pre_loaded_classes
+    };
+
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
     if !pre_loaded_classes.is_empty() {
         result
