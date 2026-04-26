@@ -701,15 +701,25 @@ handle_load_after_native(Path) ->
             case file:read_file(Path) of
                 {ok, SourceBin} ->
                     SourceStr = binary_to_list(SourceBin),
+                    %% Defensive match: skip entries that don't follow the
+                    %% `#{name := ...}` shape (loaded_class_objects/1 already
+                    %% treats those as recoverable; we shouldn't crash on
+                    %% drifted reload payloads either).
                     lists:foreach(
-                        fun(#{name := ClassName}) ->
-                            NameBin =
-                                case ClassName of
-                                    A when is_atom(A) -> atom_to_binary(A, utf8);
-                                    B when is_binary(B) -> B;
-                                    L when is_list(L) -> list_to_binary(L)
-                                end,
-                            beamtalk_workspace_meta:set_class_source(NameBin, SourceStr)
+                        fun
+                            (#{name := ClassName}) ->
+                                NameBin =
+                                    case ClassName of
+                                        Atom when is_atom(Atom) ->
+                                            atom_to_binary(Atom, utf8);
+                                        Bin when is_binary(Bin) ->
+                                            Bin;
+                                        Str when is_list(Str) ->
+                                            list_to_binary(Str)
+                                    end,
+                                beamtalk_workspace_meta:set_class_source(NameBin, SourceStr);
+                            (_Other) ->
+                                ok
                         end,
                         ClassNames
                     );
