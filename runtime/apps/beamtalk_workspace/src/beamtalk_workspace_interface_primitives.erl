@@ -707,17 +707,18 @@ handle_load_after_native(Path) ->
                     %% drifted reload payloads either).
                     lists:foreach(
                         fun
-                            (#{name := ClassName}) ->
-                                NameBin =
-                                    case ClassName of
-                                        Atom when is_atom(Atom) ->
-                                            atom_to_binary(Atom, utf8);
-                                        Bin when is_binary(Bin) ->
-                                            Bin;
-                                        Str when is_list(Str) ->
-                                            list_to_binary(Str)
-                                    end,
-                                beamtalk_workspace_meta:set_class_source(NameBin, SourceStr);
+                            (#{name := Atom}) when is_atom(Atom) ->
+                                beamtalk_workspace_meta:set_class_source(
+                                    atom_to_binary(Atom, utf8), SourceStr
+                                );
+                            (#{name := Bin}) when is_binary(Bin) ->
+                                beamtalk_workspace_meta:set_class_source(Bin, SourceStr);
+                            (#{name := Str}) when is_list(Str) ->
+                                beamtalk_workspace_meta:set_class_source(
+                                    list_to_binary(Str), SourceStr
+                                );
+                            (#{name := _Unsupported}) ->
+                                ok;
                             (_Other) ->
                                 ok
                         end,
