@@ -66,6 +66,9 @@
 - MCP `lint` tool now surfaces warning diagnostics when package files are unreadable during cross-file class extraction (BT-2056).
 - Preserve `startup.log` on final workspace retry failure so error diagnostics referencing the file remain valid (BT-2057).
 - MCP `lint` tool now surfaces error diagnostics when direct target files are unreadable, instead of returning a deceptively clean zero-files-checked result (BT-2067).
+- LSP `workspace/symbol` search — find class definitions across the workspace from the editor's symbol picker (BT-2081).
+- `just test-repl-protocol` replaces `just test-e2e`; deprecated alias kept for one release cycle (BT-2085).
+- `just check-surface-drift` CI gate ensures documented surface parity stays in sync with code (BT-2082).
 
 ### Documentation
 
@@ -77,6 +80,10 @@
 
 ### Internal
 
+- Extract `beamtalk-repl-protocol` crate — shared REPL response types and `RequestBuilder` replacing duplicated structs in CLI and MCP (BT-2076).
+- Cross-surface parity test harness (`tests/parity/`) — drives identical input through REPL, MCP, CLI, and LSP and asserts equivalent output (BT-2077).
+- Shared output formatters for diagnostics, values, and trace steps — eliminates ~130 lines of duplicated rendering between CLI and MCP (BT-2086).
+- Extend `WellKnownSelector` to cover remaining selector-universal intrinsics: block loops, ensure, hash, error, field reflection, perform family (BT-2073).
 - ADR 0080: Migrate Supervisor Lifecycle to Result — proposed, accepted, and implemented across Phase 0 probes, Phase 1 runtime, Phase 2 stdlib, Phase 3 e2e + examples + docs (BT-1977, BT-1993..BT-2001).
 - Typechecker probe confirms class-level type parameter substitution through `Result(C, Error)` works without extension (BT-1995).
 - Unified LSP and CLI diagnostic pipelines into shared `compute_project_diagnostics` function (BT-2009).
