@@ -249,7 +249,9 @@ impl ReplClient {
             self.session_id.as_deref(),
         ) {
             Ok(mut int_client) => {
-                let _ = int_client.send_request::<serde_json::Value>(&interrupt_req);
+                int_client
+                    .send_request::<serde_json::Value>(&interrupt_req)
+                    .map_err(|e| miette!("Failed to send interrupt: {e}"))?;
                 Ok(())
             }
             Err(e) => Err(miette!("Failed to send interrupt: {e}")),
