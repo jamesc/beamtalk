@@ -648,20 +648,49 @@ handle_load(Path) when is_list(Path) ->
     %% wired into the deprecated `load-file` op handler; mirror the same
     %% pre-step here so `Workspace load: "path"` keeps native FFI working
     %% for package projects with `native/*.erl` sources.
+    %%
+    %% Native compile failures are surfaced as a structured `#beamtalk_error{}`
+    %% so callers see the FFI break at the `load:` boundary rather than a
+    %% silent log + downstream "function undefined" at runtime.
     case
         beamtalk_repl_ops_load:maybe_recompile_native_deps(
             Path, beamtalk_repl_ops_load:find_project_root(Path)
         )
     of
         {ok, _Count} ->
-            ok;
+            handle_load_after_native(Path);
         {error, NativeErrors} ->
             ?LOG_ERROR(
                 "Workspace load: native .erl compilation failed for ~s: ~p",
                 [Path, NativeErrors],
                 #{domain => [beamtalk, runtime]}
-            )
-    end,
+            ),
+            Err0 = beamtalk_error:new(native_compile_failed, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+            Err2 = beamtalk_error:with_message(
+                Err1,
+                iolist_to_binary([
+                    <<"Native .erl compilation failed for ">>,
+                    Path
+                ])
+            ),
+            Err3 = beamtalk_error:with_details(Err2, #{path => Path, errors => NativeErrors}),
+            {error, Err3}
+    end;
+handle_load(Other) ->
+    TypeName = value_type_name(Other),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+    {error,
+        beamtalk_error:with_message(
+            Err1,
+            iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
+        )}.
+
+%% BT-2091: Path post-step extracted so the native-compile error path
+%% short-circuits without falling through to reload_class_file/1.
+-spec handle_load_after_native(string()) -> term() | {error, #beamtalk_error{}}.
+handle_load_after_native(Path) ->
     case beamtalk_repl_eval:reload_class_file(Path) of
         {ok, ClassNames} ->
             %% BT-2091: record class source so subsequent `Class >> selector => body`
@@ -703,16 +732,7 @@ handle_load(Path) when is_list(Path) ->
             %% The migration target for the deprecated `load-file` op was already running
             %% through `ensure_structured_error/1`; mirror that here.
             {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
-    end;
-handle_load(Other) ->
-    TypeName = value_type_name(Other),
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
-    Err1 = beamtalk_error:with_selector(Err0, 'load:'),
-    {error,
-        beamtalk_error:with_message(
-            Err1,
-            iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
-        )}.
+    end.
 
 -doc "Return the full workspace globals snapshot.".
 -spec handle_globals(map()) -> map().

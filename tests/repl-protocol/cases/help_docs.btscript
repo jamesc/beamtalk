@@ -36,17 +36,25 @@
 :help Metaclass
 // => == Metaclass < Class ==_
 
+// :help Metaclass with a known class-side method (BT-618)
+:help Metaclass spawn
+// => == Metaclass >> spawn ==_
+
 // :help Metaclass with unknown method — should show error (BT-618)
 :help Metaclass nonExistentMethod
 // => ERROR: Metaclass does not understand nonExistentMethod
 
-// BT-2091: `:help <Class> <classSideMethod>` and `:help Metaclass <method>`
-// previously walked the metaclass hierarchy via the deprecated `docs` op's
-// `format_method_doc('Metaclass', ...)` / class-side path. The migration
-// target `Beamtalk help: ClassName selector: #sel` does not yet special-case
-// class-side resolution; rich class-side method help is a follow-up. The
-// removed `:help HelpTestWidget create:` and `:help Metaclass spawn` cases
-// covered that path.
+// BT-990: Class-side method signatures in :help
+// @load tests/repl-protocol/fixtures/class_method_help_fixture.bt
+// @load tests/repl-protocol/fixtures/class_method_help_sub_fixture.bt
+
+// :help with a user-defined class method should show typed signature and doc (BT-1634)
+:help HelpTestWidget create:
+// => == HelpTestWidget >> create: ==_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
+
+// :help with an inherited class method should show signature, inheritance, and doc (BT-1634)
+:help HelpTestSubWidget create:
+// => == HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
 
 // BT-1659: :help with a package-qualified class name
 :help stdlib@Integer

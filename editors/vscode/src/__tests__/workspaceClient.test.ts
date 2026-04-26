@@ -128,39 +128,37 @@ describe("WorkspaceClient auth flow", () => {
 // ─── Op: classes() ───────────────────────────────────────────────────────────
 
 describe("WorkspaceClient.classes()", () => {
-  // BT-2091: classes() now evaluates `(Workspace classes) collect: [:c | c name]`
-  // rather than calling the deprecated `modules` op. The eval value comes back
-  // as a JSON array of class-name strings; source_file/actor_count are no
-  // longer populated.
-  it("sends Workspace classes eval and maps response to ClassInfo[]", async () => {
+  // BT-2091: classes() now sends the `list-classes` op rather than the
+  // deprecated `modules` op. `list-classes` was extended in BT-2091 to
+  // include `source_file` and `actor_count` so editor class navigation
+  // continues to work.
+  it("sends list-classes op and maps response to ClassInfo[]", async () => {
     const { client, ws } = makeConnectedClient();
 
     const promise = client.classes();
     const req = ws.sent[ws.sent.length - 1];
-    expect(req.op).toBe("eval");
-    expect(req.code).toBe("(Workspace classes) collect: [:c | c name]");
+    expect(req.op).toBe("list-classes");
 
-    respondTo(ws, { value: ["Counter", "Stack"] });
+    respondTo(ws, {
+      class_list: [
+        { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
+        { name: "Stack", source_file: null, actor_count: 0 },
+      ],
+    });
 
     const result = await promise;
-    expect(result).toEqual([{ name: "Counter" }, { name: "Stack" }]);
+    expect(result).toEqual([
+      { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
+      { name: "Stack", source_file: undefined, actor_count: 0 },
+    ]);
     client.dispose();
   });
 
-  it("returns [] when value field is absent or not an array", async () => {
+  it("returns [] when class_list field is absent", async () => {
     const { client, ws } = makeConnectedClient();
     const promise = client.classes();
     respondTo(ws, {});
     expect(await promise).toEqual([]);
-    client.dispose();
-  });
-
-  it("filters out non-string entries", async () => {
-    const { client, ws } = makeConnectedClient();
-    const promise = client.classes();
-    respondTo(ws, { value: ["Foo", 42, null, "Bar"] });
-    const result = await promise;
-    expect(result).toEqual([{ name: "Foo" }, { name: "Bar" }]);
     client.dispose();
   });
 });

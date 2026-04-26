@@ -303,8 +303,12 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
             <<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]
         })
     );
-handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
+handle(<<"list-classes">>, Params, Msg, SessionPid) ->
     %% BT-1404: List all available classes with one-line descriptions.
+    %% BT-2091: Now also returns `source_file` and `actor_count` so editors
+    %% (VS Code, LSP) can drive class navigation without the deprecated
+    %% `modules` op. `source_file` is resolved from workspace metadata;
+    %% `actor_count` is session-scoped and is 0 when no session is provided.
     RawFilter = maps:get(<<"filter">>, Params, undefined),
     %% Validate filter upfront: resolve superclass name to atom if needed
     Filter = validate_list_classes_filter(RawFilter),
@@ -348,6 +352,12 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                         Error, Msg, fun beamtalk_repl_json:format_error_message/1
                     );
                 {ok, ClassPids} ->
+                    %% BT-2091: Fetch session-scoped data once for all classes.
+                    %% Falls back to an empty tracker when SessionPid is undefined
+                    %% or the session is gone, so list-classes still answers in
+                    %% editor / non-session contexts (actor_count = 0).
+                    Tracker = list_classes_session_tracker(SessionPid),
+                    RegistryPid = whereis(beamtalk_actor_registry),
                     ClassInfos = lists:filtermap(
                         fun(Pid) ->
                             try
@@ -371,6 +381,10 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                                     end,
                                 case should_include_class(Name, Super, ModName, Filter) of
                                     true ->
+                                        SourceFile = list_classes_source_file(ModName),
+                                        ActorCount = beamtalk_repl_modules:get_actor_count(
+                                            ModName, RegistryPid, Tracker
+                                        ),
                                         {true, #{
                                             <<"name">> => atom_to_binary(Name, utf8),
                                             <<"superclass">> =>
@@ -381,7 +395,9 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                                             <<"doc">> => Doc,
                                             <<"sealed">> => IsSealed,
                                             <<"abstract">> => IsAbstract,
-                                            <<"internal">> => IsInternal
+                                            <<"internal">> => IsInternal,
+                                            <<"source_file">> => SourceFile,
+                                            <<"actor_count">> => ActorCount
                                         }};
                                     false ->
                                         false
@@ -1913,6 +1929,41 @@ first_line(Bin) when is_binary(Bin) ->
         [First | _] -> First;
         _ -> Bin
     end.
+
+-doc """
+BT-2091: Resolve the per-class source file path for list-classes.
+
+Returns a binary path when workspace metadata knows the class's source,
+or `null` when it does not (e.g. bootstrap-only classes that haven't been
+file-loaded). `beamtalk_repl_modules:resolve_source_path/1` returns the
+literal string `"unknown"` in that case; we normalise to JSON null.
+""".
+-spec list_classes_source_file(atom()) -> binary() | null.
+list_classes_source_file(ModName) ->
+    case beamtalk_repl_modules:resolve_source_path(ModName) of
+        "unknown" -> null;
+        Path -> list_to_binary(Path)
+    end.
+
+-doc """
+BT-2091: Fetch a session module-tracker for list-classes if a session is
+available, falling back to an empty tracker otherwise.
+
+Editor / non-session callers don't have a SessionPid; in that case we
+return an empty tracker so `get_actor_count/3` reports 0 without crashing.
+""".
+-spec list_classes_session_tracker(pid() | undefined) ->
+    beamtalk_repl_modules:module_tracker().
+list_classes_session_tracker(SessionPid) when is_pid(SessionPid) ->
+    try beamtalk_repl_shell:get_module_tracker(SessionPid) of
+        {ok, Tracker} -> Tracker
+    catch
+        exit:{noproc, _} -> #{};
+        exit:{timeout, _} -> #{};
+        _:_ -> #{}
+    end;
+list_classes_session_tracker(_) ->
+    #{}.
 
 -doc """
 Validate and normalize the list-classes filter parameter.

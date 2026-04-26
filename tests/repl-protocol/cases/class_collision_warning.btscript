@@ -26,25 +26,27 @@ Erlang beamtalk_object_class start: #CollisionTestClass with: ci
 // (different from fake_other_pkg_collision_test) => warning is emitted to the
 // class-registry warning table.
 //
-// BT-2091: Routed through `Workspace load: "..."` since the deprecated
-// `load-file` op was hard-removed. The migration target does not yet pull
-// drained class-registry warnings into the eval response — that's tracked
-// as a follow-up. The load itself succeeds and the class is functional.
+// BT-2091: The deprecated `load-file` op pulled drained class-registry
+// warnings into its response (`WARNING: 'X' redefined`). The migration
+// target `Workspace load:` returns the loaded class object instead; the
+// drained warnings are not yet wired through the eval response. That's
+// tracked as a follow-up — the assertion below verifies the load succeeds
+// and the class object is returned by the eval.
 :load tests/repl-protocol/fixtures/collision_test_class.bt
-// => _
+// => Loaded: CollisionTestClass
 
 // The class is still functional after the reload
 CollisionTestClass new greet
 // => hello
 
 // ===========================================================================
-// SAME-MODULE HOT-RELOAD — NO WARNING
+// SAME-MODULE HOT-RELOAD — NO COLLISION
 // ===========================================================================
 //
-// Loading the same file again (same module bt@collision_test_class) should
-// not be considered a collision (same module).
+// Loading the same file again (same module bt@collision_test_class) is a
+// hot reload, not a collision.
 :load tests/repl-protocol/fixtures/collision_test_class.bt
-// => _
+// => Loaded: CollisionTestClass
 
 CollisionTestClass new greet
 // => hello

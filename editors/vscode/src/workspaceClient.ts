@@ -221,21 +221,24 @@ export class WorkspaceClient {
   /**
    * List all loaded classes in the workspace.
    *
-   * BT-2091: Routes through `Workspace classes` evaluation rather than the
-   * deprecated `modules` protocol op (which has been removed). The eval
-   * value comes back as a JSON array of class-name strings; `source_file`
-   * and `actor_count` metadata are no longer populated by this query.
+   * BT-2091: Routes through `list-classes` rather than the deprecated
+   * `modules` protocol op (which has been removed). `list-classes` was
+   * extended in BT-2091 to include `source_file` and `actor_count` so
+   * the editor's class navigation keeps working.
    */
   async classes(): Promise<ClassInfo[]> {
-    const resp = (await this._request({
-      op: "eval",
-      code: "(Workspace classes) collect: [:c | c name]",
-    })) as { value?: unknown };
-    const value = resp.value;
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value.filter((v): v is string => typeof v === "string").map((name) => ({ name }));
+    const resp = (await this._request({ op: "list-classes" })) as {
+      class_list?: Array<{
+        name: string;
+        source_file?: string | null;
+        actor_count?: number;
+      }>;
+    };
+    return (resp.class_list ?? []).map((c) => ({
+      name: c.name,
+      source_file: c.source_file ?? undefined,
+      actor_count: c.actor_count,
+    }));
   }
 
   /** Get the internal state of an actor process. */
