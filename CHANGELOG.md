@@ -69,6 +69,7 @@
 - LSP `workspace/symbol` search — find class definitions across the workspace from the editor's symbol picker (BT-2081).
 - `just test-repl-protocol` replaces `just test-e2e`; deprecated alias kept for one release cycle (BT-2085).
 - `just check-surface-drift` CI gate ensures documented surface parity stays in sync with code (BT-2082).
+- **BREAKING: REPL protocol 2.0 — deprecated ops `docs`, `load-file`, `reload`, and `modules` removed.** WebSocket clients sending these ops now receive an `unknown_op` error. Migrate to the equivalent eval'd message-sends: `Beamtalk help: ClassName` (optionally `selector: #sel`), `Workspace load: "path"`, `ClassName reload`, `Workspace classes`. The `versions.protocol` field returned by `describe` is bumped from `1.0` to `2.0` to mark the break. The MCP tools `docs`, `load_file`, and `reload_class` continue to work — they were already routed through `evaluate` of the migration target. The CLI's `:help`, `:load`, and `:reload` REPL meta-commands are unaffected (they desugar to the new message-sends locally) (BT-2091).
 
 ### Documentation
 

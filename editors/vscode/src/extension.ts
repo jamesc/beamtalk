@@ -978,13 +978,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await vscode.window.showInformationMessage("Not connected to a Beamtalk workspace.");
         return;
       }
-      const sourceFile = node?.info.source_file;
-      if (!sourceFile || sourceFile === "unknown") {
-        await vscode.window.showInformationMessage("Source not available for this class.");
+      const className = node?.info.name;
+      if (!className) {
+        await vscode.window.showInformationMessage("No class selected.");
         return;
       }
       try {
-        const result = await workspaceWsClient.reload(sourceFile);
+        // BT-2091: Reloads via `ClassName reload` (the deprecated `reload`
+        // protocol op has been removed). The runtime locates the source
+        // file via the class's recorded `source_file` attribute.
+        const result = await workspaceWsClient.reload(className);
         const names = result.classes.map((c) => c.name).filter(Boolean);
         const baseMessage =
           names.length > 0 ? `Reloaded: ${names.join(", ")}` : "Reload completed.";

@@ -644,6 +644,24 @@ On success, returns the loaded class object(s) so the REPL displays what was loa
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
 handle_load(Path) when is_list(Path) ->
+    %% BT-2091: BT-1719 demand-driven native .erl recompilation. Previously
+    %% wired into the deprecated `load-file` op handler; mirror the same
+    %% pre-step here so `Workspace load: "path"` keeps native FFI working
+    %% for package projects with `native/*.erl` sources.
+    case
+        beamtalk_repl_ops_load:maybe_recompile_native_deps(
+            Path, beamtalk_repl_ops_load:find_project_root(Path)
+        )
+    of
+        {ok, _Count} ->
+            ok;
+        {error, NativeErrors} ->
+            ?LOG_ERROR(
+                "Workspace load: native .erl compilation failed for ~s: ~p",
+                [Path, NativeErrors],
+                #{domain => [beamtalk, runtime]}
+            )
+    end,
     case beamtalk_repl_eval:reload_class_file(Path) of
         {ok, ClassNames} ->
             loaded_class_objects(ClassNames);
@@ -656,13 +674,12 @@ handle_load(Path) when is_list(Path) ->
                     iolist_to_binary([<<"File not found: ">>, Path])
                 )};
         {error, Reason} ->
-            Err0 = beamtalk_error:new(load_error, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_selector(Err0, 'load:'),
-            Err2 = beamtalk_error:with_message(
-                Err1,
-                iolist_to_binary([<<"Failed to load: ">>, Path])
-            ),
-            {error, beamtalk_error:with_details(Err2, #{reason => Reason})}
+            %% BT-2091: surface structured compile/semantic errors through `Workspace load:`
+            %% so e2e callers see specific error reasons (cannot subclass sealed class,
+            %% cannot assign to field, etc.) rather than a generic "Failed to load".
+            %% The migration target for the deprecated `load-file` op was already running
+            %% through `ensure_structured_error/1`; mirror that here.
+            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
     end;
 handle_load(Other) ->
     TypeName = value_type_name(Other),

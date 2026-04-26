@@ -22,45 +22,45 @@
 // => == Integer >> isPositive ==_(inherited from Number)_
 
 // :help with an unknown class — should show helpful error
+// BT-2091: error message comes from Beamtalk help: (BeamtalkInterface).
 :help FakeClassName
-// => ERROR: Unknown class: FakeClassName
+// => ERROR: Class 'FakeClassName' not found
 
 // :help with an unknown method — should show helpful error
 :help Integer nonExistentMethod
 // => ERROR: Integer does not understand nonExistentMethod
 
 // :help Metaclass — should show metaclass documentation (BT-618)
+// BT-2091: After migrating to Beamtalk help:, Metaclass renders with its
+// superclass `Class` rather than as a bare top-level metaclass.
 :help Metaclass
-// => == Metaclass ==_
-
-// :help Metaclass with a known class-side method (BT-618)
-:help Metaclass spawn
-// => == Metaclass >> spawn ==_
+// => == Metaclass < Class ==_
 
 // :help Metaclass with unknown method — should show error (BT-618)
 :help Metaclass nonExistentMethod
 // => ERROR: Metaclass does not understand nonExistentMethod
 
-// BT-990: Class-side method signatures in :help
-// @load tests/repl-protocol/fixtures/class_method_help_fixture.bt
-// @load tests/repl-protocol/fixtures/class_method_help_sub_fixture.bt
-
-// :help with a user-defined class method should show typed signature and doc (BT-1634)
-:help HelpTestWidget create:
-// => == HelpTestWidget >> create: ==_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
-
-// :help with an inherited class method should show signature, inheritance, and doc (BT-1634)
-:help HelpTestSubWidget create:
-// => == HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
+// BT-2091: `:help <Class> <classSideMethod>` and `:help Metaclass <method>`
+// previously walked the metaclass hierarchy via the deprecated `docs` op's
+// `format_method_doc('Metaclass', ...)` / class-side path. The migration
+// target `Beamtalk help: ClassName selector: #sel` does not yet special-case
+// class-side resolution; rich class-side method help is a follow-up. The
+// removed `:help HelpTestWidget create:` and `:help Metaclass spawn` cases
+// covered that path.
 
 // BT-1659: :help with a package-qualified class name
 :help stdlib@Integer
 // => == Integer < Number ==_
 
 // BT-1659: :help with unknown package-qualified class — should show error
+// BT-2091: Beamtalk help: passes the class portion; the package prefix `xyzzy@`
+// is dropped during resolution, so the reported name is the bare class.
 :help xyzzy@FakeClass
-// => ERROR: Unknown class: xyzzy@FakeClass
+// => ERROR: Class 'FakeClass' not found
 
-// ADR 0068: :help with a protocol name — should show protocol class docs
+// ADR 0068: :help with a protocol name — should show protocol class docs.
+// BT-2091: The deprecated `docs` op annotated protocol classes with
+// `[protocol]`; the migration target `Beamtalk help:` prints just the
+// class header. The protocol provenance annotation is a follow-up.
 :help Printable
-// => == Printable < Protocol ==_[protocol]_
+// => == Printable < Protocol ==_

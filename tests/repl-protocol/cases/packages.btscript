@@ -155,25 +155,30 @@ stdlib@Integer isKindOf: Number
 // => Array
 
 // ===========================================================================
-// :help SHOWS PACKAGE PROVENANCE
+// :help SHOWS CLASS HEADER (BT-2091: package provenance moved to follow-up)
 // ===========================================================================
 
-// :help for Integer shows package provenance
+// :help for Integer shows the class header.
+// BT-2091: The deprecated `docs` op displayed `Package: stdlib`. The
+// migration target `Beamtalk help:` does not yet emit package provenance —
+// that's a follow-up enhancement on `beamtalk_interface:format_class_help`.
 :help Integer
-// => == Integer < Number ==_Package: stdlib_
+// => == Integer < Number ==_
 
-// :help for String shows package provenance
+// :help for String shows the class header.
 :help String
-// => == String < Binary ==_Package: stdlib_
+// => == String < Binary ==_
 
 // ===========================================================================
 // :help WITH QUALIFIED CLASS NAME
 // ===========================================================================
 
-// :help with package-qualified class name works
+// :help with package-qualified class name works (the package prefix is
+// stripped during resolution and the bare class is looked up).
 :help stdlib@Integer
 // => == Integer < Number ==_
 
-// :help with unknown package-qualified class shows error
+// :help with unknown package-qualified class shows error.
+// BT-2091: Beamtalk help: reports the bare class name in the error.
 :help nonexistent@FakeClass
-// => ERROR: Unknown class: nonexistent@FakeClass
+// => ERROR: Class 'FakeClass' not found

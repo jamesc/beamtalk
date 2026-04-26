@@ -45,10 +45,8 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 | `stdin` | -- | *(implicit: interactive input)* | -- | -- | Provides input to a blocked eval; CLI handles interactively |
 | `complete` | -- | *(implicit: tab completion)* | `complete` | `completion` | Autocompletion suggestions |
 | `show-codegen` | -- | `:show-codegen` / `:sc` | `show_codegen` | -- | Show generated Core Erlang |
-| `load-file` | -- | `via Workspace load:` | `load_file` | -- | Load a single `.bt` file (deprecated op, scheduled for hard-removal in BT-2091) |
 | `load-source` | -- | `surface-specific: browser workspace internal` | -- | -- | Load inline source string |
 | `load-project` | -- | `:sync` / `:s` | `load_project` | -- | Sync project files from `beamtalk.toml` |
-| `reload` | -- | `via ClassName reload` | `reload_class` | -- | Hot-reload a class (deprecated op, scheduled for hard-removal in BT-2091) |
 
 ## Session Operations
 
@@ -73,7 +71,6 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `modules` | -- | `via Workspace classes` | -- | -- | List loaded modules (deprecated op, scheduled for hard-removal in BT-2091) |
 | `unload` | -- | `:unload <class>` | `unload` | -- | Unload a class from the workspace |
 
 ## Test Operations
@@ -87,7 +84,6 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `docs` | -- | `via Beamtalk help:` | `docs` | `textDocument/hover` | Class/method documentation (deprecated op, scheduled for hard-removal in BT-2091); LSP exposes via hover (BT-2081) |
 | `methods` | -- | `via aClass methods` | -- | -- | List methods for a class; reachable on any `Behaviour` |
 | `list-classes` | -- | `via Workspace classes` | `list_classes` | `workspace/symbol` | List available classes; LSP exposes via workspace symbol query (BT-2081) |
 | `erlang-help` | -- | `surface-specific: REPL completion helper` | -- | -- | Erlang module documentation; MCP coverage tracked in BT-1903 |
@@ -155,6 +151,9 @@ These MCP tools provide AI-assistant-specific capabilities that have no direct R
 | `search_classes` | `surface-specific: offline class discovery by keyword` |
 | `list_packages` | `surface-specific: list loaded Beamtalk packages` |
 | `package_classes` | `surface-specific: list classes in a named package` |
+| `docs` | Wraps `Beamtalk help: ClassName` — REPL `docs` op was hard-removed (BT-2091) |
+| `load_file` | Wraps `Workspace load: "path"` — REPL `load-file` op was hard-removed (BT-2091) |
+| `reload_class` | Wraps `ClassName reload` — REPL `reload` op was hard-removed (BT-2091) |
 
 ## LSP-Only Capabilities (no REPL op equivalent)
 
@@ -162,6 +161,7 @@ These LSP capabilities are editor-specific and have no direct REPL op.
 
 | LSP capability | Notes |
 |----------------|-------|
+| `textDocument/hover` | Class/method documentation in editor hover tooltips. Wires to `Beamtalk help: ClassName` (BT-2081). The REPL `docs` op was hard-removed in BT-2091; same capability is now reached via the `Beamtalk help:` message-send across CLI/REPL/MCP. |
 | `textDocument/signatureHelp` | `surface-specific: editor parameter hints` |
 | `textDocument/definition` | `surface-specific: editor go-to-definition; parity-tested (BT-2081) against the user-class set surfaced by MCP list_classes — every LSP-resolved location must point inside the loaded project tree` |
 | `textDocument/references` | `surface-specific: editor find-all-references` |

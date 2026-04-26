@@ -308,16 +308,6 @@ impl ReplClient {
         self.send_request(&RequestBuilder::complete(prefix))
     }
 
-    /// Get documentation for a class or method.
-    pub(crate) fn get_docs(
-        &mut self,
-        class: &str,
-        class_side: bool,
-        selector: Option<&str>,
-    ) -> Result<ReplResponse> {
-        self.send_request(&RequestBuilder::docs(class, class_side, selector))
-    }
-
     /// Get help for an Erlang module or function (BT-1852).
     ///
     /// Sends `erlang-help` op to the backend with `module` and optional `function`.

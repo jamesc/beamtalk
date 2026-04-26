@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Op handlers for complete, docs, describe, and show-codegen operations.
+Op handlers for complete, describe, and show-codegen operations.
 
 Extracted from beamtalk_repl_server (BT-705).
 """.
@@ -64,7 +64,7 @@ Extracted from beamtalk_repl_server (BT-705).
     'perform:withArguments:'
 ]).
 
--doc "Handle complete/docs/describe ops.".
+-doc "Handle complete/describe/show-codegen/methods/list-classes/test/test-all/erlang-help/erlang-complete ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"complete">>, Params, Msg, SessionPid) ->
     Code = maps:get(<<"code">>, Params, <<>>),
@@ -160,76 +160,6 @@ handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
             iolist_to_binary(
                 json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
             )
-    end;
-handle(<<"docs">>, Params, Msg, _SessionPid) ->
-    ClassBin = maps:get(<<"class">>, Params, <<>>),
-    ClassSide = maps:get(<<"class_side">>, Params, false),
-    %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
-    case resolve_qualified_class_name(ClassBin) of
-        {error, badarg} ->
-            beamtalk_repl_protocol:encode_error(
-                make_class_not_found_error(ClassBin),
-                Msg,
-                fun beamtalk_repl_json:format_error_message/1
-            );
-        {ok, ClassName} ->
-            Selector = maps:get(<<"selector">>, Params, undefined),
-            Result =
-                case {Selector, ClassSide} of
-                    {undefined, false} ->
-                        beamtalk_repl_docs:format_class_docs(ClassName);
-                    {undefined, true} ->
-                        beamtalk_repl_docs:format_class_docs_class_side(ClassName);
-                    {SelectorBin, false} ->
-                        beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin);
-                    {SelectorBin, true} ->
-                        beamtalk_repl_docs:format_method_doc_class_side(ClassName, SelectorBin)
-                end,
-            case Result of
-                {ok, DocText} ->
-                    beamtalk_repl_protocol:encode_docs(DocText, Msg);
-                {error, {class_not_found, _}} ->
-                    beamtalk_repl_protocol:encode_error(
-                        make_class_not_found_error(ClassName),
-                        Msg,
-                        fun beamtalk_repl_json:format_error_message/1
-                    );
-                {error, {method_not_found, _, _}} ->
-                    NameBin = to_binary(ClassName),
-                    SelectorBin2 = maps:get(<<"selector">>, Params, <<"?">>),
-                    MaybeSelectorAtom =
-                        try
-                            binary_to_existing_atom(SelectorBin2, utf8)
-                        catch
-                            error:badarg -> undefined
-                        end,
-                    HintClass =
-                        case ClassSide of
-                            true ->
-                                iolist_to_binary([NameBin, <<" class">>]);
-                            false ->
-                                NameBin
-                        end,
-                    Err0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Err1 =
-                        case MaybeSelectorAtom of
-                            undefined -> Err0;
-                            SelectorAtom -> beamtalk_error:with_selector(Err0, SelectorAtom)
-                        end,
-                    Err2 = beamtalk_error:with_message(
-                        Err1,
-                        iolist_to_binary([HintClass, <<" does not understand ">>, SelectorBin2])
-                    ),
-                    Err3 = beamtalk_error:with_hint(
-                        Err2,
-                        iolist_to_binary([
-                            <<"Use :help ">>, HintClass, <<" to see available methods.">>
-                        ])
-                    ),
-                    beamtalk_repl_protocol:encode_error(
-                        Err3, Msg, fun beamtalk_repl_json:format_error_message/1
-                    )
-            end
     end;
 handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
     %% BT-1852: `:help Erlang <module>` and `:help Erlang <module> <function>`
@@ -518,7 +448,8 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
             _ -> <<"unknown">>
         end,
     Versions = #{
-        <<"protocol">> => <<"1.0">>,
+        %% BT-2091: Bumped to 2.0 — removed deprecated ops docs/load-file/reload/modules.
+        <<"protocol">> => <<"2.0">>,
         <<"beamtalk">> => BeamtalkVsnBin
     },
     beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg).
@@ -1790,8 +1721,8 @@ builtin_keywords() ->
 -doc """
 Describe available protocol operations.
 
-Deprecated ops (BT-849 / ADR 0040 Phase 6) include a `deprecated` flag
-and a `migrate_to` hint so WebSocket clients can discover the migration path.
+The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
+in BT-2091 (protocol 2.0). See the module doc for migration guidance.
 """.
 -spec describe_ops() -> map().
 describe_ops() ->
@@ -1809,27 +1740,10 @@ base_ops() ->
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
-        <<"docs">> => #{
-            <<"params">> => [<<"class">>],
-            <<"optional">> => [<<"selector">>],
-            <<"deprecated">> => true,
-            <<"migrate_to">> => <<"eval: Beamtalk help: ClassName">>
-        },
-        <<"load-file">> => #{
-            <<"params">> => [<<"path">>],
-            <<"deprecated">> => true,
-            <<"migrate_to">> => <<"eval: Workspace load: \"path\"">>
-        },
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"load-project">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"path">>, <<"include_tests">>, <<"force">>]
-        },
-        <<"reload">> => #{
-            <<"params">> => [],
-            <<"optional">> => [<<"module">>, <<"path">>],
-            <<"deprecated">> => true,
-            <<"migrate_to">> => <<"eval: ClassName reload">>
         },
         <<"clear">> => #{<<"params">> => []},
         <<"bindings">> => #{<<"params">> => []},
@@ -1837,11 +1751,6 @@ base_ops() ->
         <<"clone">> => #{<<"params">> => []},
         <<"close">> => #{<<"params">> => []},
         <<"interrupt">> => #{<<"params">> => []},
-        <<"modules">> => #{
-            <<"params">> => [],
-            <<"deprecated">> => true,
-            <<"migrate_to">> => <<"eval: Workspace classes">>
-        },
         <<"actors">> => #{<<"params">> => []},
         <<"inspect">> => #{<<"params">> => [<<"actor">>]},
         <<"kill">> => #{<<"params">> => [<<"actor">>]},

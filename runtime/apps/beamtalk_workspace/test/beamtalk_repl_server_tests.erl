@@ -32,9 +32,14 @@ parse_request_bindings_test() ->
     Request = <<"{\"type\": \"bindings\"}">>,
     ?assertEqual({get_bindings}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_load_test() ->
+%% BT-2091: legacy "load" type maps to the removed `load-file` op; the parser
+%% reports it as an invalid type rather than dispatching it.
+parse_request_load_invalid_test() ->
     Request = <<"{\"type\": \"load\", \"path\": \"examples/counter.bt\"}">>,
-    ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {invalid_request, unknown_type}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_load_source_test() ->
     Request = <<"{\"op\": \"load-source\", \"source\": \"Object subclass: Foo\"}">>,
@@ -82,17 +87,26 @@ parse_request_op_bindings_test() ->
     Request = <<"{\"op\": \"bindings\"}">>,
     ?assertEqual({get_bindings}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_op_load_file_test() ->
+%% BT-2091: load-file and modules ops were removed; parse_request returns
+%% unknown_op for them. Their successors are `Workspace load:` and
+%% `Workspace classes` evaluated via the eval op.
+parse_request_op_load_file_unknown_test() ->
     Request = <<"{\"op\": \"load-file\", \"path\": \"examples/counter.bt\"}">>,
-    ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {unknown_op, <<"load-file">>}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_op_actors_test() ->
     Request = <<"{\"op\": \"actors\"}">>,
     ?assertEqual({list_actors}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_op_modules_test() ->
+parse_request_op_modules_unknown_test() ->
     Request = <<"{\"op\": \"modules\"}">>,
-    ?assertEqual({list_modules}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {unknown_op, <<"modules">>}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_op_kill_test() ->
     Request = <<"{\"op\": \"kill\", \"actor\": \"<0.123.0>\"}">>,
@@ -163,10 +177,12 @@ parse_request_json_with_extra_fields_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 1\", \"extra\": \"ignored\"}">>,
     ?assertEqual({eval, "1 + 1"}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_load_with_spaces_in_path_test() ->
+%% BT-2091: legacy "load" type maps to the removed `load-file` op.
+parse_request_load_with_spaces_in_path_invalid_test() ->
     Request = <<"{\"type\": \"load\", \"path\": \"/path/with spaces/file.bt\"}">>,
-    ?assertEqual(
-        {load_file, "/path/with spaces/file.bt"}, beamtalk_repl_server:parse_request(Request)
+    ?assertMatch(
+        {error, {invalid_request, unknown_type}},
+        beamtalk_repl_server:parse_request(Request)
     ).
 
 parse_request_string_literal_with_escaped_quotes_test() ->
@@ -238,7 +254,7 @@ parse_request_op_inspect_test() ->
     Result = beamtalk_repl_server:parse_request(Request),
     ?assertMatch({error, {unknown_op, <<"inspect">>}}, Result).
 
-%% Test that parse_request handles op "reload"
+%% BT-2091: reload op was hard-removed; legacy parse_request returns unknown_op.
 parse_request_op_reload_test() ->
     Request = <<"{\"op\": \"reload\", \"module\": \"Counter\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
@@ -250,21 +266,11 @@ parse_request_op_complete_test() ->
     Result = beamtalk_repl_server:parse_request(Request),
     ?assertMatch({error, {unknown_op, <<"complete">>}}, Result).
 
-%% Test that parse_request handles op "docs"
+%% BT-2091: docs op was hard-removed; legacy parse_request returns unknown_op.
 parse_request_op_docs_test() ->
     Request = <<"{\"op\": \"docs\", \"class\": \"Integer\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, undefined, false}, Result).
-
-parse_request_op_docs_with_selector_test() ->
-    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"selector\": \"+\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, <<"+">>, false}, Result).
-
-parse_request_op_docs_class_side_test() ->
-    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"class_side\": true}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, undefined, true}, Result).
+    ?assertMatch({error, {unknown_op, <<"docs">>}}, Result).
 
 %%% BT-520: Additional parse_request edge cases
 
@@ -283,9 +289,13 @@ parse_request_op_with_id_and_session_test() ->
     Request = <<"{\"op\": \"eval\", \"id\": \"msg-123\", \"session\": \"s1\", \"code\": \"42\"}">>,
     ?assertEqual({eval, "42"}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_op_load_file_missing_path_test() ->
+%% BT-2091: load-file op was hard-removed; legacy parse_request returns unknown_op.
+parse_request_op_load_file_missing_path_unknown_test() ->
     Request = <<"{\"op\": \"load-file\"}">>,
-    ?assertEqual({load_file, ""}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {unknown_op, <<"load-file">>}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_op_unload_missing_module_test() ->
     %% BT-1239: unload op restored — missing module defaults to empty binary.
@@ -302,9 +312,14 @@ parse_request_type_actors_test() ->
     Request = <<"{\"type\": \"actors\"}">>,
     ?assertEqual({list_actors}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_type_modules_test() ->
+%% BT-2091: legacy "modules" type maps to the removed `modules` op; the parser
+%% reports it as an invalid type rather than dispatching it.
+parse_request_type_modules_invalid_test() ->
     Request = <<"{\"type\": \"modules\"}">>,
-    ?assertEqual({list_modules}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {invalid_request, unknown_type}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_type_unload_test() ->
     %% BT-1239: legacy type "unload" is now supported again
@@ -783,7 +798,7 @@ tcp_kill_invalid_pid_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t14">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
-%% Test: reload module that hasn't been loaded returns error
+%% BT-2091: reload op was hard-removed; sending it returns an unknown_op error.
 tcp_reload_module_not_loaded_test(Port) ->
     Msg = iolist_to_binary(
         json:encode(#{
@@ -794,9 +809,9 @@ tcp_reload_module_not_loaded_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t15">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)),
     ErrorMsg = maps:get(<<"error">>, Resp),
-    ?assert(binary:match(ErrorMsg, <<"Module not loaded">>) =/= nomatch).
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% Test: docs for unknown class
+%% BT-2091: docs op was hard-removed; sending it returns an unknown_op error.
 tcp_docs_unknown_class_test(Port) ->
     Msg = iolist_to_binary(
         json:encode(#{
@@ -805,14 +820,18 @@ tcp_docs_unknown_class_test(Port) ->
     ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t16">>}, Resp),
-    ?assert(maps:is_key(<<"error">>, Resp)).
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    ErrorMsg = maps:get(<<"error">>, Resp),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% Test: modules op returns modules list
+%% BT-2091: modules op was hard-removed; sending it returns an unknown_op error.
 tcp_modules_test(Port) ->
     Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"modules">>, <<"id">> => <<"t17">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t17">>}, Resp),
-    ?assert(maps:is_key(<<"modules">>, Resp)).
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    ErrorMsg = maps:get(<<"error">>, Resp),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
 %% Test: clone op creates a new session
 tcp_clone_test(Port) ->
@@ -2555,12 +2574,16 @@ handle_op_complete_with_prefix_test() ->
     Decoded = json:decode(Result),
     ?assertMatch(#{<<"completions">> := _}, Decoded).
 
-handle_op_docs_unknown_class_test() ->
+%% BT-2091: docs op was hard-removed; handle_op now reports unknown_op.
+handle_op_docs_unknown_op_test() ->
     Msg = make_proto_msg(<<"docs">>, <<"d1">>, #{<<"class">> => <<"NonexistentClassXyz">>}),
     Params = #{<<"class">> => <<"NonexistentClassXyz">>},
     Result = beamtalk_repl_server:handle_op(<<"docs">>, Params, Msg, self()),
     Decoded = json:decode(Result),
-    ?assertMatch(#{<<"id">> := <<"d1">>}, Decoded).
+    ?assertMatch(#{<<"id">> := <<"d1">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
 handle_op_unload_empty_test() ->
     Msg = make_proto_msg(<<"unload">>, <<"ul1">>, #{<<"module">> => <<>>}),
@@ -2578,19 +2601,38 @@ handle_op_unload_nonexistent_test() ->
     Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"ul2">>}, Decoded).
 
-handle_op_reload_empty_test() ->
+%% BT-2091: reload op was hard-removed; handle_op now reports unknown_op.
+handle_op_reload_unknown_op_test() ->
     Msg = make_proto_msg(<<"reload">>, <<"r1">>, #{<<"module">> => <<>>}),
     Params = #{<<"module">> => <<>>},
     Result = beamtalk_repl_server:handle_op(<<"reload">>, Params, Msg, self()),
     Decoded = json:decode(Result),
-    ?assertMatch(#{<<"id">> := <<"r1">>}, Decoded).
+    ?assertMatch(#{<<"id">> := <<"r1">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-handle_op_reload_nonexistent_module_test() ->
-    Msg = make_proto_msg(<<"reload">>, <<"r2">>, #{<<"module">> => <<"never_existed_xyz_99">>}),
-    Params = #{<<"module">> => <<"never_existed_xyz_99">>},
-    Result = beamtalk_repl_server:handle_op(<<"reload">>, Params, Msg, self()),
+%% BT-2091: load-file op was hard-removed; handle_op reports unknown_op.
+handle_op_load_file_unknown_op_test() ->
+    Msg = make_proto_msg(<<"load-file">>, <<"lf1">>, #{<<"path">> => <<"foo.bt">>}),
+    Params = #{<<"path">> => <<"foo.bt">>},
+    Result = beamtalk_repl_server:handle_op(<<"load-file">>, Params, Msg, self()),
     Decoded = json:decode(Result),
-    ?assertMatch(#{<<"id">> := <<"r2">>}, Decoded).
+    ?assertMatch(#{<<"id">> := <<"lf1">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
+
+%% BT-2091: modules op was hard-removed; handle_op reports unknown_op.
+handle_op_modules_unknown_op_test() ->
+    Msg = make_proto_msg(<<"modules">>, <<"m1">>, #{}),
+    Params = #{},
+    Result = beamtalk_repl_server:handle_op(<<"modules">>, Params, Msg, self()),
+    Decoded = json:decode(Result),
+    ?assertMatch(#{<<"id">> := <<"m1">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
 handle_op_eval_empty_test() ->
     Msg = make_proto_msg(<<"eval">>, <<"e1">>, #{<<"code">> => <<>>}),

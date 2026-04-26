@@ -75,13 +75,10 @@ New code should use beamtalk_repl_protocol:decode/1 instead.
     {eval, string()}
     | {clear_bindings}
     | {get_bindings}
-    | {load_file, string()}
     | {load_source, binary()}
     | {list_actors}
     | {kill_actor, string()}
-    | {list_modules}
     | {unload, binary()}
-    | {get_docs, binary(), binary() | undefined, boolean()}
     | {health}
     | {shutdown, string()}
     | {error, term()}.
@@ -100,12 +97,8 @@ parse_request(Data) when is_binary(Data) ->
                 {clear_bindings};
             {ok, #{<<"type">> := <<"bindings">>}} ->
                 {get_bindings};
-            {ok, #{<<"type">> := <<"load">>, <<"path">> := Path}} ->
-                {load_file, binary_to_list(Path)};
             {ok, #{<<"type">> := <<"actors">>}} ->
                 {list_actors};
-            {ok, #{<<"type">> := <<"modules">>}} ->
-                {list_modules};
             {ok, #{<<"type">> := <<"unload">>} = Map} ->
                 {unload, maps:get(<<"module">>, Map, <<>>)};
             {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
@@ -130,13 +123,10 @@ parse_request(Data) when is_binary(Data) ->
     {eval, string()}
     | {clear_bindings}
     | {get_bindings}
-    | {load_file, string()}
     | {load_source, binary()}
     | {list_actors}
-    | {list_modules}
     | {unload, binary()}
     | {kill_actor, string()}
-    | {get_docs, binary(), binary() | undefined, boolean()}
     | {health}
     | {shutdown, string()}
     | {error, term()}.
@@ -147,24 +137,14 @@ op_to_request(<<"clear">>, _Map) ->
     {clear_bindings};
 op_to_request(<<"bindings">>, _Map) ->
     {get_bindings};
-op_to_request(<<"load-file">>, Map) ->
-    Path = maps:get(<<"path">>, Map, <<>>),
-    {load_file, binary_to_list(Path)};
 op_to_request(<<"load-source">>, Map) ->
     Source = maps:get(<<"source">>, Map, <<>>),
     {load_source, Source};
 op_to_request(<<"actors">>, _Map) ->
     {list_actors};
-op_to_request(<<"modules">>, _Map) ->
-    {list_modules};
 op_to_request(<<"kill">>, Map) ->
     Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
     {kill_actor, binary_to_list(Pid)};
-op_to_request(<<"docs">>, Map) ->
-    ClassName = maps:get(<<"class">>, Map, <<>>),
-    Selector = maps:get(<<"selector">>, Map, undefined),
-    ClassSide = maps:get(<<"class_side">>, Map, false),
-    {get_docs, ClassName, Selector, ClassSide};
 op_to_request(<<"health">>, _Map) ->
     {health};
 op_to_request(<<"shutdown">>, Map) ->
