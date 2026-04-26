@@ -664,6 +664,29 @@ handle_load(Path) when is_list(Path) ->
     end,
     case beamtalk_repl_eval:reload_class_file(Path) of
         {ok, ClassNames} ->
+            %% BT-2091: record class source so subsequent `Class >> selector => body`
+            %% method-patch syntax (which depends on workspace_meta:get_class_source/1)
+            %% keeps working. The deprecated `load-file` op's session-aware path
+            %% recorded sources via store_file_class_sources/3; the stateless
+            %% `Workspace load:` path now mirrors that.
+            case file:read_file(Path) of
+                {ok, SourceBin} ->
+                    SourceStr = binary_to_list(SourceBin),
+                    lists:foreach(
+                        fun(#{name := ClassName}) ->
+                            NameBin =
+                                case ClassName of
+                                    A when is_atom(A) -> atom_to_binary(A, utf8);
+                                    B when is_binary(B) -> B;
+                                    L when is_list(L) -> list_to_binary(L)
+                                end,
+                            beamtalk_workspace_meta:set_class_source(NameBin, SourceStr)
+                        end,
+                        ClassNames
+                    );
+                {error, _} ->
+                    ok
+            end,
             loaded_class_objects(ClassNames);
         {error, {file_not_found, _}} ->
             Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
