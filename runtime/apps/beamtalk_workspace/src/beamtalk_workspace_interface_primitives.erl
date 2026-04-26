@@ -663,7 +663,7 @@ handle_load(Path) when is_list(Path) ->
             ?LOG_ERROR(
                 "Workspace load: native .erl compilation failed for ~s: ~p",
                 [Path, NativeErrors],
-                #{domain => [beamtalk, runtime]}
+                #{domain => [beamtalk, workspace]}
             ),
             Err0 = beamtalk_error:new(native_compile_failed, 'WorkspaceInterface'),
             Err1 = beamtalk_error:with_selector(Err0, 'load:'),

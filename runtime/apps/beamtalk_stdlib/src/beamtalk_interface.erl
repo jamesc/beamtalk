@@ -361,7 +361,14 @@ handle_help_selector(ClassArg, SelectorArg) ->
         {error, Err} ->
             {error, Err};
         {ok, 'Metaclass'} ->
-            handle_metaclass_help_selector(SelectorArg);
+            %% Normalise via ensure_atom/1 so a binary selector becomes an
+            %% atom before the not_found error path interpolates it.
+            case ensure_atom(SelectorArg) of
+                {error, Err} ->
+                    {error, Err};
+                SelectorAtom ->
+                    handle_metaclass_help_selector(SelectorAtom)
+            end;
         {ok, ClassName} ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 undefined ->
@@ -445,15 +452,13 @@ find_defining_class_method(ClassPid, Selector, Depth) ->
     end.
 
 %% BT-2091: Hardcoded Metaclass method docs (mirrors beamtalk_repl_docs').
--spec handle_metaclass_help_selector(atom() | binary()) ->
+%% Caller must normalise SelectorArg via ensure_atom/1 first so a binary
+%% selector cannot reach this path; that keeps make_method_not_found_error
+%% unable to crash on a binary input.
+-spec handle_metaclass_help_selector(atom()) ->
     binary() | {error, #beamtalk_error{}}.
-handle_metaclass_help_selector(SelectorArg) ->
-    SelectorBin =
-        case SelectorArg of
-            SA when is_atom(SA) -> atom_to_binary(SA, utf8);
-            SB when is_binary(SB) -> SB;
-            _ -> <<>>
-        end,
+handle_metaclass_help_selector(SelectorAtom) ->
+    SelectorBin = atom_to_binary(SelectorAtom, utf8),
     case metaclass_method_doc(SelectorBin) of
         {ok, Doc} ->
             iolist_to_binary([
@@ -466,13 +471,7 @@ handle_metaclass_help_selector(SelectorArg) ->
                 Doc
             ]);
         not_found ->
-            SelectorReport =
-                try binary_to_existing_atom(SelectorBin, utf8) of
-                    Atom -> Atom
-                catch
-                    _:_ -> SelectorBin
-                end,
-            {error, make_method_not_found_error('Metaclass', SelectorReport)}
+            {error, make_method_not_found_error('Metaclass', SelectorAtom)}
     end.
 
 -spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
