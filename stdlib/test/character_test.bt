@@ -31,6 +31,8 @@ TestCase subclass: CharacterTest
     self deny: $A isLowercase
     self assert: $\n isWhitespace
     self assert: $\t isWhitespace
+    self assert: $\r isWhitespace
+    self assert: 32 isWhitespace
     self deny: $A isWhitespace
     self assert: ($A + 1) equals: 66
     self assert: ($z - $a) equals: 25
