@@ -288,10 +288,24 @@ fn parse_cell(cell: &str) -> CellState {
         return CellState::SurfaceSpecific;
     }
     if let Some(code) = extract_first_code(trimmed) {
+        if is_non_binding_code(&code) {
+            return CellState::SurfaceSpecific;
+        }
         CellState::Bound(code)
     } else {
         CellState::NotApplicable
     }
+}
+
+/// Code spans that document the cell rather than naming a code artifact.
+/// `via X` (e.g. `via Workspace classes`) means the capability is reached
+/// as a message-send on `X`, not via a meta-cmd / tool. `MISSING (BT-…)`
+/// flags an intentionally unbound cell with a tracking issue. Both are
+/// treated as `SurfaceSpecific` for drift purposes — there is no code
+/// artifact to verify here.
+fn is_non_binding_code(code: &str) -> bool {
+    let lower = code.trim().to_ascii_lowercase();
+    lower.starts_with("via ") || lower.starts_with("missing (") || lower.starts_with("missing(")
 }
 
 /// REPL meta-cells often list aliases (e.g. ``:test`` / ``:t``) and
@@ -307,6 +321,9 @@ fn parse_meta_cell(cell: &str) -> CellState {
         return CellState::SurfaceSpecific;
     }
     if let Some(first) = extract_first_code(trimmed) {
+        if is_non_binding_code(&first) {
+            return CellState::SurfaceSpecific;
+        }
         let token = first.split_whitespace().next().unwrap_or("").to_string();
         if token.is_empty() {
             CellState::NotApplicable
@@ -816,6 +833,40 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_cell_treats_via_and_missing_as_surface_specific() {
+        assert!(matches!(
+            parse_cell("`via Workspace classes`"),
+            CellState::SurfaceSpecific
+        ));
+        assert!(matches!(
+            parse_cell("`MISSING (BT-2090)`"),
+            CellState::SurfaceSpecific
+        ));
+    }
+
+    #[test]
+    fn parse_meta_cell_treats_via_and_missing_as_surface_specific() {
+        assert!(matches!(
+            parse_meta_cell("`via Workspace test`"),
+            CellState::SurfaceSpecific
+        ));
+        assert!(matches!(
+            parse_meta_cell("`MISSING (BT-2090)`"),
+            CellState::SurfaceSpecific
+        ));
+    }
+
+    #[test]
+    fn is_non_binding_code_does_not_match_legitimate_names() {
+        assert!(!is_non_binding_code("missingPlugin"));
+        assert!(!is_non_binding_code("missingness"));
+        assert!(!is_non_binding_code("viable"));
+        assert!(is_non_binding_code("via Workspace classes"));
+        assert!(is_non_binding_code("MISSING (BT-2090)"));
+        assert!(is_non_binding_code("missing(BT-1)"));
+    }
 
     #[test]
     fn extracts_repl_ops_only_within_describe_ops() {

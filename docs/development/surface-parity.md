@@ -8,11 +8,21 @@ Any operation **not** labelled `surface-specific` must produce equivalent output
 
 When adding a new capability to any surface, update this table. If the capability maps to an existing REPL op, add it to the corresponding row. If it is surface-specific, add the reason.
 
+### REPL surface — meta-commands vs. message-sends
+
+The REPL exposes capability through two surfaces:
+
+1. **Message-sends** (`Workspace …`, `Beamtalk …`, or any object) — the primary surface. Object-level capability is reached this way, not through meta-commands.
+2. **Meta-commands** (`:cmd`) — reserved for **client-side** concerns (`:exit`, `:help`) or **transport-out-of-band** ops that cannot be expressed as a normal eval (e.g. `:interrupt`, since you cannot send an eval while one is blocking the session).
+
+Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstrap the REPL before the object model was rich enough. Now that `Workspace` and `Beamtalk` express most capability, the REPL column in this map cites the message-send (`via Workspace classes`, `via Beamtalk help:`) rather than treating absent meta-commands as gaps.
+
 ## Legend
 
 | Symbol | Meaning |
 |--------|---------|
 | **name** | Binding exists (tool/command/handler name shown) |
+| `via X` | Reachable as a message-send on `X` (e.g. `via Workspace classes`) — counts as parity for the REPL surface |
 | `--` | Not applicable for this surface |
 | `surface-specific: reason` | Intentionally present only on this surface |
 | `MISSING` | Should exist but does not yet |
@@ -35,35 +45,35 @@ When adding a new capability to any surface, update this table. If the capabilit
 | `stdin` | -- | *(implicit: interactive input)* | -- | -- | Provides input to a blocked eval; CLI handles interactively |
 | `complete` | -- | *(implicit: tab completion)* | `complete` | `completion` | Autocompletion suggestions |
 | `show-codegen` | -- | `:show-codegen` / `:sc` | `show_codegen` | -- | Show generated Core Erlang |
-| `load-file` | -- | -- | `load_file` | -- | Load a single `.bt` file (deprecated op, use `Workspace load:`) |
-| `load-source` | -- | -- | -- | -- | Load inline source string (used by browser workspace) |
+| `load-file` | -- | `via Workspace load:` | `load_file` | -- | Load a single `.bt` file (deprecated op, scheduled for hard-removal in BT-2091) |
+| `load-source` | -- | `surface-specific: browser workspace internal` | -- | -- | Load inline source string |
 | `load-project` | -- | `:sync` / `:s` | `load_project` | -- | Sync project files from `beamtalk.toml` |
-| `reload` | -- | -- | `reload_class` | -- | Hot-reload a class (deprecated op, use `ClassName reload`) |
+| `reload` | -- | `via ClassName reload` | `reload_class` | -- | Hot-reload a class (deprecated op, scheduled for hard-removal in BT-2091) |
 
 ## Session Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `clear` | -- | `:clear` | `clear` | -- | Clear session bindings (deprecated op) |
-| `bindings` | -- | `:bindings` / `:b` | `get_bindings` | -- | List session variable bindings (deprecated op) |
-| `sessions` | -- | -- | -- | -- | List active REPL sessions |
-| `clone` | -- | -- | -- | -- | Create a new session |
+| `clear` | -- | `:clear` | `clear` | -- | Clear session locals; meta-cmd retained — session-locals layer has no object-side accessor (BT-2092 considers a first-class session object) |
+| `bindings` | -- | `:bindings` / `:b` | `get_bindings` | -- | View session locals merged with workspace globals; meta-cmd retained for the same reason as `clear` |
+| `sessions` | -- | `surface-specific: transport handshake` | -- | -- | List active REPL sessions |
+| `clone` | -- | `surface-specific: transport handshake` | -- | -- | Create a new session |
 | `close` | -- | `:exit` / `:quit` / `:q` | -- | -- | Close session; `:exit` exits the CLI REPL |
-| `interrupt` | -- | -- | `interrupt` | -- | Cancel a running evaluation |
+| `interrupt` | -- | `MISSING (BT-2090)` | `interrupt` | -- | Cancel a running evaluation; only true REPL gap — out-of-band by definition |
 
 ## Actor Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `actors` | -- | -- | `list_actors` | -- | List running actors |
-| `inspect` | -- | -- | `inspect` | -- | Inspect actor state |
-| `kill` | -- | -- | -- | -- | Terminate an actor |
+| `actors` | -- | `via Workspace actors` | `list_actors` | -- | List running actors |
+| `inspect` | -- | `surface-specific: agent-only typed introspection` | `inspect` | -- | Inspect actor state. Locked: structured-JSON view is for agents; humans use `Transcript show: actorRef` or send messages directly |
+| `kill` | -- | `via anActor stop` | -- | -- | Terminate an actor; MCP can `evaluate` the same send |
 
 ## Module Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `modules` | -- | -- | -- | -- | List loaded modules (deprecated op, use `Workspace classes`) |
+| `modules` | -- | `via Workspace classes` | -- | -- | List loaded modules (deprecated op, scheduled for hard-removal in BT-2091) |
 | `unload` | -- | `:unload <class>` | `unload` | -- | Unload a class from the workspace |
 
 ## Test Operations
@@ -71,35 +81,35 @@ When adding a new capability to any surface, update this table. If the capabilit
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
 | `test` | `test` | `:test` / `:t` | `test` | -- | Run BUnit tests (single class or file) |
-| `test-all` | -- | -- | -- | -- | Run all loaded tests |
+| `test-all` | -- | `via Workspace test` | -- | -- | Run all loaded tests; MCP `test` covers the all-tests case via empty params |
 
 ## Dev / Introspection Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `docs` | -- | -- | `docs` | `textDocument/hover` | Class/method documentation (deprecated op, use `Beamtalk help:`); LSP exposes via hover (BT-2081) |
-| `methods` | -- | -- | -- | -- | List methods for a class |
-| `list-classes` | -- | -- | `list_classes` | `workspace/symbol` | List available classes; LSP exposes via workspace symbol query (BT-2081) |
-| `erlang-help` | -- | -- | -- | -- | Erlang module documentation |
-| `erlang-complete` | -- | -- | -- | -- | Erlang module/function completion |
+| `docs` | -- | `via Beamtalk help:` | `docs` | `textDocument/hover` | Class/method documentation (deprecated op, scheduled for hard-removal in BT-2091); LSP exposes via hover (BT-2081) |
+| `methods` | -- | `via aClass methods` | -- | -- | List methods for a class; reachable on any `Behaviour` |
+| `list-classes` | -- | `via Workspace classes` | `list_classes` | `workspace/symbol` | List available classes; LSP exposes via workspace symbol query (BT-2081) |
+| `erlang-help` | -- | `surface-specific: REPL completion helper` | -- | -- | Erlang module documentation; MCP coverage tracked in BT-1903 |
+| `erlang-complete` | -- | `surface-specific: REPL completion helper` | -- | -- | Erlang module/function completion |
 
 ## Performance / Tracing Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `enable-tracing` | -- | -- | `enable_tracing` | -- | Enable actor trace capture |
-| `disable-tracing` | -- | -- | `disable_tracing` | -- | Disable actor trace capture |
-| `get-traces` | -- | -- | `get_traces` | -- | Retrieve captured traces |
-| `actor-stats` | -- | -- | `actor_stats` | -- | Per-actor/method aggregate stats |
-| `export-traces` | -- | -- | `export_traces` | -- | Export traces to JSON file |
+| `enable-tracing` | -- | `surface-specific: agent-only workflow (BT-1606)` | `enable_tracing` | -- | Enable actor trace capture |
+| `disable-tracing` | -- | `surface-specific: agent-only workflow (BT-1606)` | `disable_tracing` | -- | Disable actor trace capture |
+| `get-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `get_traces` | -- | Retrieve captured traces |
+| `actor-stats` | -- | `surface-specific: agent-only workflow (BT-1606)` | `actor_stats` | -- | Per-actor/method aggregate stats |
+| `export-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `export_traces` | -- | Export traces to JSON file |
 
 ## Server Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `describe` | -- | -- | `describe` | -- | Capability discovery (list supported ops) |
-| `health` | -- | -- | -- | -- | Workspace health probe |
-| `shutdown` | `workspace stop` | -- | -- | -- | Graceful workspace shutdown |
+| `describe` | -- | `surface-specific: transport handshake` | `describe` | -- | Capability discovery (list supported ops) |
+| `health` | -- | `surface-specific: operator probe` | -- | -- | Workspace health probe |
+| `shutdown` | `workspace stop` | `surface-specific: lifecycle command` | -- | -- | Graceful workspace shutdown |
 
 ## CLI-Only Commands (no REPL op equivalent)
 
