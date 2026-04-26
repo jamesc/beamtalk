@@ -725,22 +725,34 @@ impl ReplClient {
         }
 
         // The eval value is a JSON array of class name strings (e.g. ["Counter"]).
-        let classes = match response.value {
-            Some(serde_json::Value::Array(items)) => items
+        // BT-2091: Fail loudly on unexpected response shapes so future protocol
+        // drift surfaces in the test suite rather than being papered over by an
+        // empty Vec.
+        match response.value {
+            Some(serde_json::Value::Array(items)) => Ok(items
                 .into_iter()
                 .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect(),
-            _ => Vec::new(),
-        };
-        Ok(classes)
+                .collect()),
+            Some(other) => Err(format!(
+                "Workspace load: expected array result, got {other}"
+            )),
+            None => Err("Workspace load: missing result value".to_string()),
+        }
     }
 
     /// Get documentation for a class or method via `Beamtalk help:` evaluation.
     ///
     /// BT-2091: Migrated from the deprecated `docs` op to `Beamtalk help:`.
+    /// A leading `#` on the selector is stripped before interpolation so
+    /// callers passing either `foo:` or `#foo:` produce the same expression
+    /// (`Beamtalk help: Class selector: #foo:`) rather than an invalid
+    /// `##foo:`.
     fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<String, String> {
         let expr = match selector {
-            Some(sel) => format!("Beamtalk help: {class} selector: #{sel}"),
+            Some(sel) => {
+                let sel = sel.trim().trim_start_matches('#');
+                format!("Beamtalk help: {class} selector: #{sel}")
+            }
             None => format!("Beamtalk help: {class}"),
         };
         self.eval_to_string(&expr)
