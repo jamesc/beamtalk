@@ -1831,14 +1831,8 @@ base_ops() ->
             <<"deprecated">> => true,
             <<"migrate_to">> => <<"eval: ClassName reload">>
         },
-        <<"clear">> => #{
-            <<"params">> => [],
-            <<"deprecated">> => true
-        },
-        <<"bindings">> => #{
-            <<"params">> => [],
-            <<"deprecated">> => true
-        },
+        <<"clear">> => #{<<"params">> => []},
+        <<"bindings">> => #{<<"params">> => []},
         <<"sessions">> => #{<<"params">> => []},
         <<"clone">> => #{<<"params">> => []},
         <<"close">> => #{<<"params">> => []},
