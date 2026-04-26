@@ -289,6 +289,7 @@ Incrementally compile and load all `.bt` and native `.erl` files in a Beamtalk p
 | `classes` | string[] | Names of classes that were (re)loaded |
 | `errors` | object[] | Structured per-file errors (empty on full success) |
 | `summary` | string | Human-readable one-line summary |
+| `warnings` | string[] | (Optional) Class collision warnings — emitted when `load-project` redefines a class that was already registered from a different module (e.g., when loading a second project that defines a class of the same name). Only present when there is at least one warning. |
 
 **Response (no `beamtalk.toml`):**
 ```json

@@ -309,6 +309,83 @@ classify_files_mixed_test() ->
     end.
 
 %%====================================================================
+%% filter_mtimes_under_project/2 (BT-2089)
+%%====================================================================
+
+filter_mtimes_under_project_basic_test() ->
+    %% Files under the project root are kept; files outside are dropped.
+    Mtimes = #{
+        "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
+        "/projects/foo/src/b.bt" => {{2026, 4, 26}, {0, 0, 0}},
+        "/projects/bar/src/c.bt" => {{2026, 4, 26}, {0, 0, 0}}
+    },
+    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+        Mtimes, "/projects/foo"
+    ),
+    ?assertEqual(2, maps:size(Filtered)),
+    ?assert(maps:is_key("/projects/foo/src/a.bt", Filtered)),
+    ?assert(maps:is_key("/projects/foo/src/b.bt", Filtered)),
+    ?assertNot(maps:is_key("/projects/bar/src/c.bt", Filtered)).
+
+filter_mtimes_under_project_prefix_boundary_test() ->
+    %% A path that shares a string prefix with the project root but lies in
+    %% a different directory must NOT match — `/projects/foobar` is not a
+    %% child of `/projects/foo`.
+    Mtimes = #{
+        "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
+        "/projects/foobar/src/c.bt" => {{2026, 4, 26}, {0, 0, 0}}
+    },
+    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+        Mtimes, "/projects/foo"
+    ),
+    ?assertEqual(1, maps:size(Filtered)),
+    ?assert(maps:is_key("/projects/foo/src/a.bt", Filtered)),
+    ?assertNot(maps:is_key("/projects/foobar/src/c.bt", Filtered)).
+
+filter_mtimes_under_project_trailing_slash_test() ->
+    %% A trailing slash on the project root must be tolerated.
+    Mtimes = #{
+        "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
+        "/projects/bar/src/b.bt" => {{2026, 4, 26}, {0, 0, 0}}
+    },
+    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+        Mtimes, "/projects/foo/"
+    ),
+    ?assertEqual(1, maps:size(Filtered)),
+    ?assert(maps:is_key("/projects/foo/src/a.bt", Filtered)).
+
+filter_mtimes_under_project_empty_test() ->
+    %% Empty input map yields empty output.
+    ?assertEqual(
+        #{},
+        beamtalk_repl_ops_load:filter_mtimes_under_project(#{}, "/projects/foo")
+    ).
+
+filter_mtimes_under_project_no_matches_test() ->
+    %% No files under the root → empty result.
+    Mtimes = #{
+        "/other/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
+        "/elsewhere/b.bt" => {{2026, 4, 26}, {0, 0, 0}}
+    },
+    ?assertEqual(
+        #{},
+        beamtalk_repl_ops_load:filter_mtimes_under_project(Mtimes, "/projects/foo")
+    ).
+
+filter_mtimes_under_project_keeps_test_dir_test() ->
+    %% Test files under the project root are still scoped in.
+    %% (BT-2089: scoping out test/ when include_tests=false is the
+    %% caller's responsibility — this helper only filters by project root.)
+    Mtimes = #{
+        "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
+        "/projects/foo/test/b.bt" => {{2026, 4, 26}, {0, 0, 0}}
+    },
+    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+        Mtimes, "/projects/foo"
+    ),
+    ?assertEqual(2, maps:size(Filtered)).
+
+%%====================================================================
 %% get_file_mtime/1 (BT-1685)
 %%====================================================================
 

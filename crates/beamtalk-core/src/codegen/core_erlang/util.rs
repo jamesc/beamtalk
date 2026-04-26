@@ -15,6 +15,14 @@ use super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Expression, ExpressionStatement};
 use crate::docvec;
 
+/// Escapes a string for use inside a Core Erlang double-quoted string literal.
+///
+/// Replaces `\` with `\\` and `"` with `\"` so the result is safe to embed
+/// between `"..."` in generated `.core` source.
+pub(super) fn escape_core_erlang_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
 /// module attributes section. Returns `Document::Nil` when classes is empty.
 pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
@@ -58,7 +66,7 @@ impl CoreErlangGenerator {
     pub(super) fn file_attr(&self) -> Document<'static> {
         match &self.source_path {
             Some(path) => {
-                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = escape_core_erlang_string(path);
                 docvec![", 'file' = [{\"", Document::String(escaped), "\", 1}]"]
             }
             None => Document::Nil,
@@ -239,7 +247,7 @@ impl CoreErlangGenerator {
         }
         match &self.source_path {
             Some(path) => {
-                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = escape_core_erlang_string(path);
                 docvec![
                     ", 'beamtalk_source' = [\"",
                     Document::String(escaped),
@@ -382,5 +390,28 @@ mod tests {
     #[test]
     fn test_user_package_prefix_bt_only() {
         assert_eq!(user_package_prefix("bt@counter"), None);
+    }
+
+    #[test]
+    fn test_escape_core_erlang_string_plain() {
+        assert_eq!(escape_core_erlang_string("hello"), "hello");
+    }
+
+    #[test]
+    fn test_escape_core_erlang_string_backslash() {
+        assert_eq!(escape_core_erlang_string("a\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn test_escape_core_erlang_string_double_quote() {
+        assert_eq!(escape_core_erlang_string("say \"hi\""), "say \\\"hi\\\"");
+    }
+
+    #[test]
+    fn test_escape_core_erlang_string_windows_path() {
+        assert_eq!(
+            escape_core_erlang_string("C:\\Users\\foo\\bar.bt"),
+            "C:\\\\Users\\\\foo\\\\bar.bt"
+        );
     }
 }

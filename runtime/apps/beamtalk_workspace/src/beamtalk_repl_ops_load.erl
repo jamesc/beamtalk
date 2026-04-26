@@ -38,7 +38,8 @@ respectively.
     extract_package_from_module/1,
     classify_files_by_change/2,
     get_file_mtime/1,
-    extract_native_refs/1
+    extract_native_refs/1,
+    filter_mtimes_under_project/2
 ]).
 -endif.
 
@@ -133,15 +134,41 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
             {ok, Mtimes} -> Mtimes;
             {error, _} -> #{}
         end,
+    %% BT-2089: Scope previous-mtime tracking to the project being synced.
+    %% The workspace meta table accumulates mtimes for every project ever
+    %% loaded into this workspace, so unfiltered classification would treat
+    %% every other project's files as "deleted" and unload their classes.
+    %% Only files whose path lies under AbsPath belong to this project sync.
+    ProjectMtimes = filter_mtimes_under_project(PreviousMtimes, AbsPath),
+    %% BT-2089: When include_tests=false, also drop previously-tracked test
+    %% files from the baseline. Otherwise an `Op::Load` (which defaults to
+    %% include_tests=false) classifies the test files loaded by an earlier
+    %% `:test`/include_tests=true sync as "deleted" and unregisters them.
+    TestDirPrefix = filename:join(AbsPath, "test") ++ "/",
+    BaselineMtimes =
+        case IncludeTests of
+            true ->
+                ProjectMtimes;
+            false ->
+                maps:filter(
+                    fun
+                        (P, _M) when is_list(P) ->
+                            not lists:prefix(TestDirPrefix, P);
+                        (_NonString, _M) ->
+                            false
+                    end,
+                    ProjectMtimes
+                )
+        end,
     PrevErlMtimes =
         maps:filter(
             fun(P, _Mtime) -> filename:extension(P) =:= ".erl" end,
-            PreviousMtimes
+            BaselineMtimes
         ),
     PrevBtMtimes =
         maps:filter(
             fun(P, _Mtime) -> filename:extension(P) =:= ".bt" end,
-            PreviousMtimes
+            BaselineMtimes
         ),
     {ChangedErl, UnchangedErl, DeletedErl} =
         case Force of
@@ -226,6 +253,9 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
             end
          || C <- AllClasses
         ],
+    %% BT-2089: Drain class collision warnings so cross-project class
+    %% redefinitions produce a clear diagnostic instead of silent eviction.
+    CollisionWarnings = collect_load_warnings(AllClasses),
     TotalFiles = length(AllFiles) + DeletedCount,
     ChangedCount = length(ChangedBt) + length(ChangedErl),
     UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
@@ -234,6 +264,7 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         classes => ClassNames,
         errors => Errors,
         dep_errors => DepErrorMsgs,
+        warnings => CollisionWarnings,
         summary => build_incremental_summary(
             ChangedCount, TotalFiles, UnchangedCount, DeletedCount
         ),
@@ -263,12 +294,21 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
         {ok, Result} ->
             Base = beamtalk_repl_protocol:base_response(Msg),
             DepErrors = maps:get(dep_errors, Result, []),
-            Response = Base#{
+            %% BT-2089: Surface collision warnings to the load-project caller
+            %% so that cross-project class collisions produce a clear
+            %% diagnostic instead of silent eviction.
+            Warnings = maps:get(warnings, Result, []),
+            Response0 = Base#{
                 <<"status">> => [<<"done">>],
                 <<"classes">> => maps:get(classes, Result),
                 <<"errors">> => maps:get(errors, Result) ++ DepErrors,
                 <<"summary">> => maps:get(summary, Result)
             },
+            Response =
+                case Warnings of
+                    [] -> Response0;
+                    _ -> Response0#{<<"warnings">> => Warnings}
+                end,
             iolist_to_binary(json:encode(Response))
     end;
 handle(<<"load-source">>, Params, Msg, SessionPid) ->
@@ -1056,6 +1096,38 @@ classify_files_by_change(CurrentFiles, PreviousMtimes) ->
         not sets:is_element(P, CurrentSet)
     ],
     {Changed, Unchanged, Deleted}.
+
+-doc """
+Filter previously-tracked file mtimes to only those under the given project root.
+
+BT-2089: Multiple `load-project` calls against the same workspace should
+accumulate, not evict. The workspace meta table accumulates mtimes across
+every project loaded into the workspace, so unfiltered "deleted file"
+detection treats files from sibling projects as deleted and unloads
+their classes. Scoping by project root keeps each sync responsible only
+for its own files.
+
+The `ProjectRoot` is expected to be an absolute path. Files under it are
+matched by string prefix on the directory boundary; the path
+`/p/foo/src/a.bt` matches root `/p/foo` but `/p/foobar/src/a.bt` does not.
+""".
+-spec filter_mtimes_under_project(
+    #{string() => calendar:datetime()}, string()
+) -> #{string() => calendar:datetime()}.
+filter_mtimes_under_project(Mtimes, ProjectRoot) ->
+    %% Normalise the project root so the prefix check is unambiguous.
+    %% Trim any trailing separator to avoid double-slash artefacts.
+    Root = string:trim(ProjectRoot, trailing, "/"),
+    Prefix = Root ++ "/",
+    maps:filter(
+        fun
+            (Path, _Mtime) when is_list(Path) ->
+                Path =:= Root orelse lists:prefix(Prefix, Path);
+            (_NonString, _Mtime) ->
+                false
+        end,
+        Mtimes
+    ).
 
 -doc """
 Get the mtime of a file.

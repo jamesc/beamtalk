@@ -54,6 +54,7 @@
 - Fix deadlock when calling `self class spawnAs:` / `self class spawnWith:as:` inside a class factory method — metaclass dispatch now short-circuits spawn selectors to avoid re-entering the class gen_server (BT-2005).
 - Fix `undef` crash for `self spawnAs:` / `self spawnWith:as:` in class methods — new runtime helpers read class metadata from the process dictionary to avoid the gen_server deadlock (BT-2004).
 - Fix `undef` crash for inherited class-method self-sends — a new `class_self_dispatch/4` runtime helper walks the superclass chain and threads class-var state correctly (BT-2007).
+- **Workspace project loads accumulate** — loading project A then project B on the same REPL/MCP workspace no longer evicts project A's classes. Previous-mtime tracking is now scoped per-project root, so each `:sync` / `load_project` only treats files under its own tree as candidates for "deleted" classification. Cross-project class collisions surface as `warnings` in the load-project response instead of silently overwriting earlier classes (BT-2089).
 
 ### Tooling
 

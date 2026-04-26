@@ -1665,7 +1665,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         match &self.source_path {
             Some(path) => {
-                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = util::escape_core_erlang_string(path);
                 docvec![
                     "( ",
                     doc,
