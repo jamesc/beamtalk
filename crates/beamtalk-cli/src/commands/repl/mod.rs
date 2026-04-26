@@ -660,6 +660,10 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             handle_show_codegen(line, client);
             return CommandResult::Handled;
         }
+        ":interrupt" | ":int" => {
+            handle_interrupt(client);
+            return CommandResult::Handled;
+        }
         _ => {}
     }
 
@@ -886,6 +890,19 @@ fn handle_show_codegen(line: &str, client: &mut ReplClient) {
                 }
             }
         }
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Handle `:interrupt` -- send an interrupt op to cancel a running evaluation.
+///
+/// The interrupt is sent on a **separate** connection (out-of-band) so it
+/// works even when the main session connection is blocked waiting for an
+/// eval response. This is the manual counterpart to the automatic Ctrl-C
+/// interrupt that fires during `eval_interruptible` (BT-2090).
+fn handle_interrupt(client: &mut ReplClient) {
+    match client.interrupt() {
+        Ok(()) => println!("Interrupt sent."),
         Err(e) => eprintln!("Error: {e}"),
     }
 }

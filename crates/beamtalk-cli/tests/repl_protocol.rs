@@ -966,6 +966,12 @@ impl ReplClient {
         Ok("ok".to_string())
     }
 
+    /// Send an interrupt op to cancel a running evaluation (BT-2090).
+    fn send_interrupt(&mut self) -> Result<String, String> {
+        self.send_op(&RequestBuilder::interrupt())?;
+        Ok("Interrupt sent.".to_string())
+    }
+
     /// Get the PID of the first actor of a given class from the actors list.
     /// Note: actor ordering from the server is non-deterministic (map-based).
     /// This is acceptable for E2E tests where we need any valid actor of a class.
@@ -1247,6 +1253,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                     Err(e) => Err(e),
                 }
             }
+        } else if case.expression == ":interrupt" || case.expression == ":int" {
+            client.send_interrupt()
         } else if case.expression.starts_with(":unload ") {
             let module = case.expression.strip_prefix(":unload ").unwrap().trim();
             client.unload_module(module)

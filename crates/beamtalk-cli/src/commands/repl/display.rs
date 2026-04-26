@@ -72,6 +72,7 @@ pub(crate) fn print_help() {
     println!("  :test <Class>   Run a test class (→ Workspace test: ClassName)");
     println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
     println!("  :sc <expr>      Short alias for :show-codegen");
+    println!("  :interrupt, :int  Cancel a running evaluation (sends out-of-band interrupt)");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");

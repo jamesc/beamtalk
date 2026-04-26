@@ -229,6 +229,35 @@ impl ReplClient {
         Ok(())
     }
 
+    /// Send an interrupt op, for use from the `:interrupt` meta-command (BT-2090).
+    ///
+    /// Like the internal [`send_interrupt`] (used by Ctrl-C during eval), this
+    /// opens a **separate** connection so it works even when the main connection
+    /// is blocked. Unlike `send_interrupt`, this variant reports errors to the
+    /// caller instead of swallowing them (best-effort is fine for Ctrl-C, but
+    /// the user typing `:interrupt` deserves feedback).
+    pub(crate) fn interrupt(&self) -> Result<()> {
+        let interrupt_req = match self.session_id {
+            Some(ref session) => RequestBuilder::interrupt_with_session(session),
+            None => RequestBuilder::interrupt(),
+        };
+        match ProtocolClient::connect_with_resume(
+            &self.host,
+            self.port,
+            &self.cookie,
+            Some(Duration::from_secs(5)),
+            self.session_id.as_deref(),
+        ) {
+            Ok(mut int_client) => {
+                int_client
+                    .send_request::<serde_json::Value>(&interrupt_req)
+                    .map_err(|e| miette!("Failed to send interrupt: {e}"))?;
+                Ok(())
+            }
+            Err(e) => Err(miette!("Failed to send interrupt: {e}")),
+        }
+    }
+
     /// Send an interrupt request on a separate WebSocket connection (BT-666).
     fn send_interrupt(&self) {
         let interrupt_req = match self.session_id {

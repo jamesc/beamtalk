@@ -390,6 +390,29 @@ Close the current session and clean up resources.
 {"id": "msg-014", "value": "ok", "status": ["done"]}
 ```
 
+#### `interrupt` — Cancel Running Evaluation (BT-2090)
+
+Cancel a running evaluation on the session. Because the main connection is
+blocked waiting for the eval response, the interrupt **must** be sent on a
+separate connection (out-of-band). The REPL CLI exposes this as the
+`:interrupt` / `:int` meta-command and also sends it automatically on Ctrl-C
+during an eval (BT-666).
+
+**Request:**
+```json
+{"op": "interrupt", "id": "msg-015"}
+```
+
+To target a specific session, include the `session` field:
+```json
+{"op": "interrupt", "id": "msg-015", "session": "sess-42"}
+```
+
+**Response:**
+```json
+{"id": "msg-015", "value": "ok", "status": ["done"]}
+```
+
 ### Actor Operations
 
 #### `actors` — List Actors
