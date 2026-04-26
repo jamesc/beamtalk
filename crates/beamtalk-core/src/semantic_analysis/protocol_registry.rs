@@ -255,22 +255,31 @@ impl ProtocolRegistry {
         let mut diagnostics = Vec::new();
         for info in protocols {
             if hierarchy.has_class(&info.name) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Pre-loaded protocol `{}` collides with class of the same name — \
-                             protocols and classes share a namespace",
+                // BT-2088: Skip collision when the existing "class" is a synthetic
+                // protocol class entry (superclass is Protocol) — this is just the
+                // class-side representation of the same protocol from a prior load.
+                let is_protocol_class = hierarchy
+                    .get_class(&info.name)
+                    .and_then(|ci| ci.superclass.as_deref())
+                    .is_some_and(|sc| sc == "Protocol");
+                if !is_protocol_class {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            format!(
+                                "Pre-loaded protocol `{}` collides with class of the same name — \
+                                 protocols and classes share a namespace",
+                                info.name
+                            ),
+                            info.span,
+                        )
+                        .with_hint(format!(
+                            "Rename the protocol in its defining file to avoid conflicting with class `{}`",
                             info.name
-                        ),
-                        info.span,
-                    )
-                    .with_hint(format!(
-                        "Rename the protocol in its defining file to avoid conflicting with class `{}`",
-                        info.name
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
-                continue;
+                        ))
+                        .with_category(DiagnosticCategory::Type),
+                    );
+                    continue;
+                }
             }
             self.protocols.entry(info.name.clone()).or_insert(info);
         }
@@ -293,22 +302,34 @@ impl ProtocolRegistry {
         for protocol_def in &module.protocols {
             let name = &protocol_def.name.name;
 
-            // Namespace collision: protocol name matches a class name
+            // Namespace collision: protocol name matches a class name.
+            // BT-2088: Allow re-registration when the existing "class" is actually
+            // a synthetic protocol class entry from a previous load (superclass is
+            // `Protocol`). This happens during hot-reload when the compiler server's
+            // class cache still contains the protocol from the first surface that
+            // loaded it. Real class vs. protocol collisions (superclass != Protocol)
+            // remain errors.
             if hierarchy.has_class(name) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "`{name}` is already defined as a class — \
-                             protocols and classes share a namespace"
-                        ),
-                        protocol_def.name.span,
-                    )
-                    .with_hint(format!(
-                        "Rename the protocol to avoid conflicting with class `{name}`"
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
-                continue;
+                let is_protocol_class = hierarchy
+                    .get_class(name)
+                    .and_then(|info| info.superclass.as_deref())
+                    .is_some_and(|sc| sc == "Protocol");
+                if !is_protocol_class {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            format!(
+                                "`{name}` is already defined as a class — \
+                                 protocols and classes share a namespace"
+                            ),
+                            protocol_def.name.span,
+                        )
+                        .with_hint(format!(
+                            "Rename the protocol to avoid conflicting with class `{name}`"
+                        ))
+                        .with_category(DiagnosticCategory::Type),
+                    );
+                    continue;
+                }
             }
 
             // Duplicate protocol definition
@@ -1163,5 +1184,123 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("collides with class"));
         assert!(!registry.has_protocol("Integer"));
+    }
+
+    // ---- BT-2088: Protocol hot-reload with synthetic protocol class ----
+
+    #[test]
+    fn register_module_allows_protocol_when_hierarchy_has_protocol_class() {
+        // Simulate hot-reload: the hierarchy already contains a synthetic
+        // protocol class entry (superclass = Protocol) from a previous load.
+        // Registering the same protocol name should succeed — it's not a
+        // real namespace collision.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.classes_mut().insert(
+            "Printable".into(),
+            crate::semantic_analysis::class_hierarchy::ClassInfo {
+                name: "Printable".into(),
+                superclass: Some("Protocol".into()),
+                is_sealed: true,
+                is_abstract: true,
+                is_typed: true,
+                is_internal: false,
+                package: None,
+                is_value: false,
+                is_native: false,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        );
+
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Printable",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert!(
+            diags.is_empty(),
+            "Re-registering a protocol whose class entry has superclass Protocol \
+             should not produce namespace collision diagnostics, got: {diags:?}"
+        );
+        assert!(registry.has_protocol("Printable"));
+    }
+
+    #[test]
+    fn register_module_still_rejects_real_class_collision() {
+        // A real class (not superclass Protocol) should still collide.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Integer",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("already defined as a class"));
+        assert!(!registry.has_protocol("Integer"));
+    }
+
+    #[test]
+    fn add_pre_loaded_allows_protocol_class_entry() {
+        // BT-2088: Pre-loaded protocol should not collide with a synthetic
+        // protocol class entry in the hierarchy.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.classes_mut().insert(
+            "Tickable".into(),
+            crate::semantic_analysis::class_hierarchy::ClassInfo {
+                name: "Tickable".into(),
+                superclass: Some("Protocol".into()),
+                is_sealed: true,
+                is_abstract: true,
+                is_typed: true,
+                is_internal: false,
+                package: None,
+                is_value: false,
+                is_native: false,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        );
+
+        let mut registry = ProtocolRegistry::new();
+        let protocol = ProtocolInfo {
+            name: "Tickable".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            span: span(),
+        };
+
+        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
+        assert!(
+            diags.is_empty(),
+            "Pre-loaded protocol should not collide with synthetic protocol class, got: {diags:?}"
+        );
+        assert!(registry.has_protocol("Tickable"));
     }
 }
