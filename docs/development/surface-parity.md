@@ -59,7 +59,7 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 | `sessions` | -- | `surface-specific: transport handshake` | -- | -- | List active REPL sessions |
 | `clone` | -- | `surface-specific: transport handshake` | -- | -- | Create a new session |
 | `close` | -- | `:exit` / `:quit` / `:q` | -- | -- | Close session; `:exit` exits the CLI REPL |
-| `interrupt` | -- | `MISSING (BT-2090)` | `interrupt` | -- | Cancel a running evaluation; only true REPL gap — out-of-band by definition |
+| `interrupt` | -- | `:interrupt` / `:int` | `interrupt` | -- | Cancel a running evaluation; out-of-band by definition (BT-2090) |
 
 ## Actor Operations
 
@@ -221,3 +221,4 @@ For completeness, the full list of REPL meta-commands and their corresponding RE
 | `:unload <class>` | -- | `unload` |
 | `:test` | `:t` | `test` / `test-all` |
 | `:show-codegen` | `:sc` | `show-codegen` |
+| `:interrupt` | `:int` | `interrupt` |
