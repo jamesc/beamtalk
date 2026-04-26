@@ -43,6 +43,36 @@ async fn parity_suite() {
     let staged_test_runner = stage_test_runner_project();
     let staged_mixed = stage_mixed_project();
 
+    // BT-2089: pre-load every test-fixture project on the REPL and MCP
+    // workspaces so all `Op::Test` cases see every class regardless of
+    // load order. Workspace loads now accumulate across projects, so this
+    // is a one-time setup rather than the per-class workaround that BT-2080
+    // used to need.
+    if let Some(p) = staged_project.as_deref() {
+        let path = p.to_string_lossy();
+        repl_driver
+            .load_project_with_tests(&path)
+            .await
+            .map_err(|e| format!("repl preload {}: {e}", p.display()))
+            .expect("preload simple_project on repl");
+        mcp.load_project_with_tests(&path)
+            .await
+            .map_err(|e| format!("mcp preload {}: {e}", p.display()))
+            .expect("preload simple_project on mcp");
+    }
+    if let Some(p) = staged_test_runner.as_deref() {
+        let path = p.to_string_lossy();
+        repl_driver
+            .load_project_with_tests(&path)
+            .await
+            .map_err(|e| format!("repl preload {}: {e}", p.display()))
+            .expect("preload test_runner_project on repl");
+        mcp.load_project_with_tests(&path)
+            .await
+            .map_err(|e| format!("mcp preload {}: {e}", p.display()))
+            .expect("preload test_runner_project on mcp");
+    }
+
     let mut failures: Vec<String> = Vec::new();
     for path in &case_paths {
         let case = match Case::from_path(path) {
@@ -189,30 +219,15 @@ async fn drive(
         (Surface::Cli, Op::Lint) => cli_driver::lint(Path::new(input)),
 
         (Surface::Repl, Op::Test) => {
-            // Make sure the test class is loaded before running it. Each
-            // input class has exactly one fixture project; loading just
-            // that one keeps the workspace's class registry consistent
-            // (loading multiple projects back-to-back was observed to
-            // wipe earlier projects' classes on the REPL surface).
-            let project = fixture_project_for_class(input);
-            if project.exists() {
-                repl.load_project_with_tests(&project.to_string_lossy())
-                    .await
-                    .map_err(|e| {
-                        format!("repl load_project_with_tests({}): {e}", project.display())
-                    })?;
-            }
+            // BT-2089: workspace project loads now accumulate, so we no
+            // longer need the per-class pre-load workaround. Both
+            // `simple_project` and `test_runner_project` are loaded once
+            // at the start of `parity_suite`; this branch just runs the
+            // test against the already-loaded workspace.
             repl.test_class(input).await
         }
         (Surface::Mcp, Op::Test) => {
-            let project = fixture_project_for_class(input);
-            if project.exists() {
-                mcp.load_project_with_tests(&project.to_string_lossy())
-                    .await
-                    .map_err(|e| {
-                        format!("mcp load_project_with_tests({}): {e}", project.display())
-                    })?;
-            }
+            // BT-2089: see Repl branch above.
             mcp.test_class(input).await
         }
         (Surface::Cli, Op::Test) => {
@@ -295,8 +310,10 @@ fn stage_mixed_project() -> Option<PathBuf> {
 
 /// Class-name → test-runner-project test file mapping.
 ///
-/// Shared between [`cli_test_path_for_class`] and
-/// [`fixture_project_for_class`] so the two lookups cannot drift.
+/// Used by [`cli_test_path_for_class`] to map a class name to the
+/// staged test file. (BT-2089: REPL/MCP no longer need a class→project
+/// lookup because both fixture projects are pre-loaded at the start of
+/// the parity suite.)
 const TEST_RUNNER_CLASSES: &[(&str, &str)] = &[
     ("PassingRunnerTest", "passing_test.bt"),
     ("AssertFailRunnerTest", "asserting_fail_test.bt"),
@@ -317,21 +334,6 @@ fn cli_test_path_for_class(class: &str) -> PathBuf {
     let runner_root = std::env::temp_dir().join("beamtalk-parity-test-runner");
     if let Some((_, file)) = TEST_RUNNER_CLASSES.iter().find(|(c, _)| *c == class) {
         runner_root.join("test").join(file)
-    } else {
-        std::env::temp_dir().join("beamtalk-parity-simple")
-    }
-}
-
-/// Map a `TestCase` class name to the staged fixture project that defines it.
-///
-/// REPL/MCP `:test ClassName` requires the class to be loaded into the
-/// workspace; this lookup is the classifier the harness uses to load the
-/// correct project before each test op. Pre-loading both projects up
-/// front was tried and rejected — loading a second project on the same
-/// workspace evicted classes from the first.
-fn fixture_project_for_class(class: &str) -> PathBuf {
-    if TEST_RUNNER_CLASSES.iter().any(|(c, _)| *c == class) {
-        std::env::temp_dir().join("beamtalk-parity-test-runner")
     } else {
         std::env::temp_dir().join("beamtalk-parity-simple")
     }
