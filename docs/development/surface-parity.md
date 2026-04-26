@@ -97,11 +97,11 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `enable-tracing` | -- | `surface-specific: agent-only workflow (ADR 0069)` | `enable_tracing` | -- | Enable actor trace capture |
-| `disable-tracing` | -- | `surface-specific: agent-only workflow (ADR 0069)` | `disable_tracing` | -- | Disable actor trace capture |
-| `get-traces` | -- | `surface-specific: agent-only workflow (ADR 0069)` | `get_traces` | -- | Retrieve captured traces |
-| `actor-stats` | -- | `surface-specific: agent-only workflow (ADR 0069)` | `actor_stats` | -- | Per-actor/method aggregate stats |
-| `export-traces` | -- | `surface-specific: agent-only workflow (ADR 0069)` | `export_traces` | -- | Export traces to JSON file |
+| `enable-tracing` | -- | `surface-specific: agent-only workflow (BT-1606)` | `enable_tracing` | -- | Enable actor trace capture |
+| `disable-tracing` | -- | `surface-specific: agent-only workflow (BT-1606)` | `disable_tracing` | -- | Disable actor trace capture |
+| `get-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `get_traces` | -- | Retrieve captured traces |
+| `actor-stats` | -- | `surface-specific: agent-only workflow (BT-1606)` | `actor_stats` | -- | Per-actor/method aggregate stats |
+| `export-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `export_traces` | -- | Export traces to JSON file |
 
 ## Server Operations
 

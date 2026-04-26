@@ -305,7 +305,7 @@ fn parse_cell(cell: &str) -> CellState {
 /// artifact to verify here.
 fn is_non_binding_code(code: &str) -> bool {
     let lower = code.trim().to_ascii_lowercase();
-    lower.starts_with("via ") || lower.starts_with("missing")
+    lower.starts_with("via ") || lower.starts_with("missing (") || lower.starts_with("missing(")
 }
 
 /// REPL meta-cells often list aliases (e.g. ``:test`` / ``:t``) and
@@ -833,6 +833,40 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_cell_treats_via_and_missing_as_surface_specific() {
+        assert!(matches!(
+            parse_cell("`via Workspace classes`"),
+            CellState::SurfaceSpecific
+        ));
+        assert!(matches!(
+            parse_cell("`MISSING (BT-2090)`"),
+            CellState::SurfaceSpecific
+        ));
+    }
+
+    #[test]
+    fn parse_meta_cell_treats_via_and_missing_as_surface_specific() {
+        assert!(matches!(
+            parse_meta_cell("`via Workspace test`"),
+            CellState::SurfaceSpecific
+        ));
+        assert!(matches!(
+            parse_meta_cell("`MISSING (BT-2090)`"),
+            CellState::SurfaceSpecific
+        ));
+    }
+
+    #[test]
+    fn is_non_binding_code_does_not_match_legitimate_names() {
+        assert!(!is_non_binding_code("missingPlugin"));
+        assert!(!is_non_binding_code("missingness"));
+        assert!(!is_non_binding_code("viable"));
+        assert!(is_non_binding_code("via Workspace classes"));
+        assert!(is_non_binding_code("MISSING (BT-2090)"));
+        assert!(is_non_binding_code("missing(BT-1)"));
+    }
 
     #[test]
     fn extracts_repl_ops_only_within_describe_ops() {
