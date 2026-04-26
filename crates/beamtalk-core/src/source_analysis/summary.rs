@@ -152,6 +152,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ArityMismatch => "ArityMismatch",
         DiagnosticCategory::ShadowedClass => "ShadowedClass",
         DiagnosticCategory::TypeAnnotation => "TypeAnnotation",
+        DiagnosticCategory::Inheritance => "Inheritance",
     }
 }
 

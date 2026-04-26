@@ -533,6 +533,9 @@ pub enum DiagnosticCategory {
     /// Separate from `Type` so that `@expect type_annotation` suppresses
     /// only missing-annotation warnings without hiding real type mismatches.
     TypeAnnotation,
+    /// Inheritance constraint violation (BT-2087) — subclassing a sealed class
+    /// or overriding a sealed method.
+    Inheritance,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).

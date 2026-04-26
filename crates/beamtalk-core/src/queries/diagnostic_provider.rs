@@ -390,6 +390,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::ShadowedClass,
                     Some(DiagnosticCategory::ShadowedClass)
                 )
+                | (
+                    ExpectCategory::Inheritance,
+                    Some(DiagnosticCategory::Inheritance)
+                )
         )
 }
 

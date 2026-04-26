@@ -152,19 +152,17 @@ fn corpus_cases() -> Vec<CorpusCase> {
             name: "sealed_subclass",
             lsp_target: "src/bad_integer.bt",
             lint_target: "",
-            // Sealed-subclass diagnostics are uncategorised in the analyser,
-            // so they only surface on LSP (which publishes every diagnostic)
-            // — CLI / MCP lint and diagnostic_summary filter to categorised
-            // diagnostics. This expected shape is locked in deliberately so
-            // any drift (in either direction) is caught.
+            // BT-2087: Sealed-subclass diagnostics now carry the `Inheritance`
+            // category, so they pass through the `category.is_some()` filter
+            // on every lint surface.
             expected: ExpectedCounts {
-                cli_lint: 0,
-                mcp_lint: 0,
-                mcp_summary: 0,
+                cli_lint: 1,
+                mcp_lint: 1,
+                mcp_summary: 1,
                 lsp: 1,
             },
             unreadable_files: &[],
-            why: "Sealed-subclass errors surface on LSP but are filtered out of lint surfaces",
+            why: "Sealed-subclass errors must surface on every diagnostic surface",
         },
         CorpusCase {
             name: "stdlib_mode",
