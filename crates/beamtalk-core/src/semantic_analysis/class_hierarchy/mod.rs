@@ -588,7 +588,8 @@ impl ClassHierarchy {
             .with_hint(format!(
                 "Class `{}` is sealed and cannot be extended — use composition instead",
                 superclass.name
-            )),
+            ))
+            .with_category(DiagnosticCategory::Inheritance),
         )
     }
     /// Add classes from a parsed module. Returns diagnostics for errors.
@@ -661,7 +662,8 @@ impl ClassHierarchy {
                                     "Cannot override sealed method `{selector}` from class `{sealed_class}`"
                                 ),
                                 method.span,
-                            ).with_hint(format!("Method `{selector}` is sealed in `{sealed_class}` — use a different method name")));
+                            ).with_hint(format!("Method `{selector}` is sealed in `{sealed_class}` — use a different method name"))
+                            .with_category(DiagnosticCategory::Inheritance));
                         }
                     }
                 }
@@ -683,7 +685,8 @@ impl ClassHierarchy {
                                     "Cannot override sealed method `{selector}` from class `{sealed_class}`"
                                 ),
                                 method.span,
-                            ).with_hint(format!("Method `{selector}` is sealed in `{sealed_class}` — use a different method name")));
+                            ).with_hint(format!("Method `{selector}` is sealed in `{sealed_class}` — use a different method name"))
+                            .with_category(DiagnosticCategory::Inheritance));
                         }
                     }
                 }

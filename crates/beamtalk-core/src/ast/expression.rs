@@ -39,6 +39,8 @@ pub enum ExpectCategory {
     ShadowedClass,
     /// Suppress missing type annotation warnings in typed classes (BT-1918).
     TypeAnnotation,
+    /// Suppress inheritance constraint errors — sealed subclass/method (BT-2087).
+    Inheritance,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -60,6 +62,7 @@ impl ExpectCategory {
             "arity_mismatch" => Some(Self::ArityMismatch),
             "shadowed_class" => Some(Self::ShadowedClass),
             "type_annotation" => Some(Self::TypeAnnotation),
+            "inheritance" => Some(Self::Inheritance),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -81,6 +84,7 @@ impl ExpectCategory {
             Self::ArityMismatch => "arity_mismatch",
             Self::ShadowedClass => "shadowed_class",
             Self::TypeAnnotation => "type_annotation",
+            Self::Inheritance => "inheritance",
             Self::All => "all",
         }
     }
@@ -101,6 +105,7 @@ impl ExpectCategory {
             "arity_mismatch",
             "shadowed_class",
             "type_annotation",
+            "inheritance",
             "all",
         ]
     }

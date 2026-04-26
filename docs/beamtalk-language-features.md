@@ -3349,6 +3349,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `dnu` | Does-not-understand hints |
 | `type` | Type mismatch warnings *and* method-not-found (DNU) hints |
 | `unused` | Unused variable warnings |
+| `inheritance` | Sealed-class/sealed-method constraint errors |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
 
 **`@expect type` for method-not-found diagnostics:**
