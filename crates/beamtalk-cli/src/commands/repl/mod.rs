@@ -671,6 +671,9 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
 }
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
+///
+/// BT-2091: Routes through `Beamtalk help: ClassName` evaluation rather
+/// than the deprecated `docs` protocol op (which has been removed).
 fn handle_help_topic(line: &str, client: &mut ReplClient) {
     let args = extract_command_arg(line, ":help ", Some(":h "));
 
@@ -690,22 +693,32 @@ fn handle_help_topic(line: &str, client: &mut ReplClient) {
         return;
     }
 
-    let (class_name, class_side, selector) = match tokens.as_slice() {
-        [cls] => (*cls, false, None),
-        [cls, sel] if *sel == "class" => (*cls, true, None),
-        [cls, mid, sel, ..] if *mid == "class" => (*cls, true, Some(*sel)),
-        [cls, sel, ..] => (*cls, false, Some(*sel)),
-        _ => (args, false, None),
+    // Build the receiver expression: either `ClassName` (instance side) or
+    // `ClassName class` (class side, sends to the metaclass).
+    let (receiver, selector) = match tokens.as_slice() {
+        [cls] => (cls.to_string(), None),
+        [cls, sel] if *sel == "class" => (format!("{cls} class"), None),
+        [cls, mid, sel, ..] if *mid == "class" => (format!("{cls} class"), Some(*sel)),
+        [cls, sel, ..] => (cls.to_string(), Some(*sel)),
+        _ => (args.to_string(), None),
     };
 
-    match client.get_docs(class_name, class_side, selector) {
+    let expr = match selector {
+        Some(sel) => format!("Beamtalk help: {receiver} selector: #{sel}"),
+        None => format!("Beamtalk help: {receiver}"),
+    };
+
+    match client.eval(&expr) {
         Ok(response) => {
             if response.is_error() {
                 if let Some(msg) = response.error_message() {
                     eprintln!("{msg}");
                 }
-            } else if let Some(docs) = &response.docs {
-                println!("{docs}");
+            } else {
+                let text = response.value_string();
+                if !text.is_empty() {
+                    println!("{text}");
+                }
             }
         }
         Err(e) => eprintln!("Error: {e}"),

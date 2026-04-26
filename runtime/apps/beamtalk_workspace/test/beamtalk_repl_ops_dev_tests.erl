@@ -585,18 +585,10 @@ resolve_chain_type_binary_chain_no_registry_test() ->
     Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"counter value + 1">>, #{}),
     ?assertEqual(undefined, Result).
 
-%%====================================================================
-%% handle/4 -- docs with non-existing class (badarg path)
-%%====================================================================
-
-handle_docs_unknown_class_returns_error_test() ->
-    Msg = make_msg(<<"docs">>, <<"doc-1">>, undefined, false),
-    Result = beamtalk_repl_ops_dev:handle(
-        <<"docs">>, #{<<"class">> => <<"NonExistentDocClass999">>}, Msg, self()
-    ),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)),
-    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+%% BT-2091: the `docs` op was hard-removed from `beamtalk_repl_ops_dev:handle/4`.
+%% Migration target: `Beamtalk help: ClassName` (or `selector: #sel`).
+%% See `beamtalk_repl_server_tests:handle_op_docs_unknown_op_test/0` for the
+%% surface-level confirmation that sending `op: "docs"` returns `unknown_op`.
 
 %%====================================================================
 %% parse_receiver_and_prefix/1 -- additional edge cases
@@ -652,17 +644,23 @@ parse_keyword_send_inject_into_returns_expression_test() ->
     ?assertEqual(<<"pr">>, Prefix).
 
 %%====================================================================
-%% handle/4 -- describe deprecated ops
+%% handle/4 -- describe omits hard-removed ops (BT-2091)
 %%====================================================================
 
-handle_describe_deprecated_ops_have_migrate_to_test() ->
+handle_describe_omits_removed_ops_test() ->
+    %% BT-2091: the deprecated ops `docs`, `load-file`, `reload`, and `modules`
+    %% were removed; describe must no longer advertise them.
     Msg = make_msg(<<"describe">>, <<"d-dep">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
-    DocsOp = maps:get(<<"docs">>, Ops),
-    ?assertEqual(true, maps:get(<<"deprecated">>, DocsOp)),
-    ?assert(maps:is_key(<<"migrate_to">>, DocsOp)).
+    ?assertEqual(false, maps:is_key(<<"docs">>, Ops)),
+    ?assertEqual(false, maps:is_key(<<"load-file">>, Ops)),
+    ?assertEqual(false, maps:is_key(<<"reload">>, Ops)),
+    ?assertEqual(false, maps:is_key(<<"modules">>, Ops)),
+    %% Protocol version was bumped to 2.0 to mark the breaking change.
+    Versions = maps:get(<<"versions">>, Decoded),
+    ?assertEqual(<<"2.0">>, maps:get(<<"protocol">>, Versions)).
 
 handle_describe_contains_actors_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined, false),

@@ -128,42 +128,37 @@ describe("WorkspaceClient auth flow", () => {
 // ─── Op: classes() ───────────────────────────────────────────────────────────
 
 describe("WorkspaceClient.classes()", () => {
-  it("sends modules op and maps response to ClassInfo[]", async () => {
+  // BT-2091: classes() now sends the `list-classes` op rather than the
+  // deprecated `modules` op. `list-classes` was extended in BT-2091 to
+  // include `source_file` and `actor_count` so editor class navigation
+  // continues to work.
+  it("sends list-classes op and maps response to ClassInfo[]", async () => {
     const { client, ws } = makeConnectedClient();
 
     const promise = client.classes();
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("list-classes");
+
     respondTo(ws, {
-      modules: [
-        { name: "Counter", source_file: "/src/counter.bt", actor_count: 2 },
-        { name: "Stack", source_file: "/src/stack.bt", actor_count: 0 },
+      class_list: [
+        { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
+        { name: "Stack", source_file: null, actor_count: 0 },
       ],
     });
 
     const result = await promise;
     expect(result).toEqual([
-      { name: "Counter", source_file: "/src/counter.bt", actor_count: 2 },
-      { name: "Stack", source_file: "/src/stack.bt", actor_count: 0 },
+      { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
+      { name: "Stack", source_file: undefined, actor_count: 0 },
     ]);
-    const req = ws.sent.find((m) => m.op === "modules");
-    expect(req).toBeDefined();
     client.dispose();
   });
 
-  it("returns [] when modules field is absent", async () => {
+  it("returns [] when class_list field is absent", async () => {
     const { client, ws } = makeConnectedClient();
     const promise = client.classes();
     respondTo(ws, {});
     expect(await promise).toEqual([]);
-    client.dispose();
-  });
-
-  it("includes source_file: undefined when omitted by server", async () => {
-    const { client, ws } = makeConnectedClient();
-    const promise = client.classes();
-    respondTo(ws, { modules: [{ name: "Foo" }] });
-    const result = await promise;
-    expect(result[0].name).toBe("Foo");
-    expect(result[0].source_file).toBeUndefined();
     client.dispose();
   });
 });
@@ -198,23 +193,20 @@ describe("WorkspaceClient.actors()", () => {
 // ─── Op: reload() ────────────────────────────────────────────────────────────
 
 describe("WorkspaceClient.reload()", () => {
-  it("sends reload op with path and returns reloaded classes", async () => {
+  // BT-2091: reload() now evaluates `<className> reload` rather than calling
+  // the deprecated `reload` op. The class name (not source path) is the input.
+  it("sends `<class> reload` eval and returns the reloaded class", async () => {
     const { client, ws } = makeConnectedClient();
 
-    const promise = client.reload("/workspace/src/counter.bt");
+    const promise = client.reload("Counter");
     const req = ws.sent[ws.sent.length - 1];
-    expect(req.op).toBe("reload");
-    expect(req.path).toBe("/workspace/src/counter.bt");
+    expect(req.op).toBe("eval");
+    expect(req.code).toBe("Counter reload");
 
-    respondTo(ws, {
-      classes: [{ name: "Counter", source_file: "/workspace/src/counter.bt", actor_count: 1 }],
-      warnings: [],
-    });
+    respondTo(ws, { value: "Counter", warnings: [] });
 
     const result = await promise;
-    expect(result.classes).toEqual([
-      { name: "Counter", source_file: "/workspace/src/counter.bt", actor_count: 1 },
-    ]);
+    expect(result.classes).toEqual([{ name: "Counter" }]);
     expect(result.warnings).toEqual([]);
     client.dispose();
   });
@@ -222,9 +214,9 @@ describe("WorkspaceClient.reload()", () => {
   it("includes warnings when server reports class collisions", async () => {
     const { client, ws } = makeConnectedClient();
 
-    const promise = client.reload("/workspace/src/counter.bt");
+    const promise = client.reload("Counter");
     respondTo(ws, {
-      classes: [{ name: "Counter", source_file: "/workspace/src/counter.bt" }],
+      value: "Counter",
       warnings: ["Class 'Counter' redefined (was counter@v1, now counter@v2)"],
     });
 
@@ -235,8 +227,8 @@ describe("WorkspaceClient.reload()", () => {
 
   it("returns empty warnings when server omits the field", async () => {
     const { client, ws } = makeConnectedClient();
-    const promise = client.reload("/workspace/src/stack.bt");
-    respondTo(ws, { classes: [{ name: "Stack" }] });
+    const promise = client.reload("Stack");
+    respondTo(ws, { value: "Stack" });
     const result = await promise;
     expect(result.warnings).toEqual([]);
     client.dispose();
@@ -244,14 +236,14 @@ describe("WorkspaceClient.reload()", () => {
 
   it("rejects when server returns an error response", async () => {
     const { client, ws } = makeConnectedClient();
-    const promise = client.reload("/workspace/src/bad.bt");
+    const promise = client.reload("Bad");
     const req = ws.sent[ws.sent.length - 1];
     ws.receive({
       id: req.id,
       status: ["done", "error"],
-      error: "file not found: /workspace/src/bad.bt",
+      error: "class not found: Bad",
     });
-    await expect(promise).rejects.toThrow("file not found");
+    await expect(promise).rejects.toThrow("class not found");
     client.dispose();
   });
 

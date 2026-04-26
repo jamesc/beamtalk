@@ -15,16 +15,19 @@ This module manages the listener lifecycle, port/nonce discovery,
 and protocol request dispatch.
 
 Op handlers are delegated to domain-specific modules (BT-705):
-- beamtalk_repl_ops_eval: eval, clear (deprecated), bindings (deprecated)
-- beamtalk_repl_ops_load: load-file (deprecated), load-source, reload (deprecated), modules (deprecated)
+- beamtalk_repl_ops_eval: eval, clear, bindings
+- beamtalk_repl_ops_load: load-source, load-project, unload
 - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
-- beamtalk_repl_ops_dev: complete, docs (deprecated), describe, show-codegen
+- beamtalk_repl_ops_dev: complete, describe, show-codegen
 - beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats, export-traces (ADR 0069)
 
-Deprecated ops (BT-849 / ADR 0040 Phase 6) are superseded by Beamtalk-native
-message sends but remain functional for WebSocket client backward compatibility.
-See ADR 0040 for migration guidance.
+The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
+in BT-2091. Use the Beamtalk-native message sends instead:
+- `docs` → `Beamtalk help: ClassName` (optionally `selector: #sel`)
+- `load-file` → `Workspace load: "path"`
+- `reload` → `ClassName reload`
+- `modules` → `Workspace classes`
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -386,44 +389,22 @@ handle_protocol_request(Msg, SessionPid) ->
 -doc """
 Dispatch protocol ops to domain-specific handler modules (BT-705).
 
-Deprecated ops (BT-849 / ADR 0040 Phase 6): load-file, reload, modules,
-bindings, clear, docs. These ops remain functional for WebSocket client
-backward compatibility (ADR 0017) but are superseded by Beamtalk-native
-message sends. WebSocket clients should migrate to sending eval requests.
+The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
+in BT-2091 (protocol 2.0); sending them now returns `unknown_op`. The
+`bindings` and `clear` ops remain — they surface the session-locals layer
+which has no Beamtalk-native equivalent today (see BT-2099 for the
+first-class session object follow-up).
 """.
 handle_op(<<"eval">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_eval:handle(<<"eval">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindings">> ->
-    %% DEPRECATED: Use `:clear` and `:bindings` REPL shortcuts (session-local only).
-    ?LOG_NOTICE(
-        "Deprecated protocol op '~s' used by WebSocket client. "
-        "These ops are session-local only and cannot be replaced by "
-        "Beamtalk-native message sends.",
-        [Op],
-        #{domain => [beamtalk, runtime]}
-    ),
+    %% Session-local: no Beamtalk-native message-send equivalent yet (BT-2099
+    %% considers a first-class session object). Kept as protocol ops.
     beamtalk_repl_ops_eval:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_load:handle(<<"load-source">>, Params, Msg, SessionPid);
 handle_op(<<"load-project">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_load:handle(<<"load-project">>, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"load-file">>; Op =:= <<"reload">>; Op =:= <<"modules">>
-->
-    %% DEPRECATED: Use Beamtalk-native API instead:
-    %%   load-file → Workspace load: "path"
-    %%   reload    → ClassName reload
-    %%   modules   → Workspace classes
-    ?LOG_NOTICE(
-        "Deprecated protocol op '~s' used by WebSocket client. "
-        "Migrate to Beamtalk-native API: "
-        "load-file → Workspace load: \"path\", "
-        "reload → ClassName reload, "
-        "modules → Workspace classes.",
-        [Op],
-        #{domain => [beamtalk, runtime]}
-    ),
-    beamtalk_repl_ops_load:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"actors">>;
     Op =:= <<"inspect">>;
@@ -451,17 +432,6 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"erlang-complete">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
-handle_op(<<"docs">>, Params, Msg, SessionPid) ->
-    %% DEPRECATED: Use Beamtalk help: instead.
-    %%   docs → Beamtalk help: ClassName
-    %%   docs with selector → Beamtalk help: ClassName selector: #selector
-    ?LOG_NOTICE(
-        "Deprecated protocol op 'docs' used by WebSocket client. "
-        "Migrate to: Beamtalk help: ClassName or Beamtalk help: ClassName selector: #selector.",
-        [],
-        #{domain => [beamtalk, runtime]}
-    ),
-    beamtalk_repl_ops_dev:handle(<<"docs">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->
     %% BT-1239: Restored — fully removes class from the system (actors, gen_server,
     %% BEAM module, workspace_meta, session tracker). Previously returned a deprecation
@@ -497,12 +467,9 @@ Implementation lives in beamtalk_repl_protocol (extracted BT-865).
     {eval, string()}
     | {clear_bindings}
     | {get_bindings}
-    | {load_file, string()}
     | {load_source, binary()}
     | {list_actors}
     | {kill_actor, string()}
-    | {list_modules}
-    | {get_docs, binary(), binary() | undefined, boolean()}
     | {health}
     | {shutdown, string()}
     | {error, term()}.

@@ -220,16 +220,24 @@ export class WorkspaceClient {
 
   /**
    * List all loaded classes in the workspace.
-   * Calls the `modules` protocol op and maps results to `ClassInfo`.
+   *
+   * BT-2091: Routes through `list-classes` rather than the deprecated
+   * `modules` protocol op (which has been removed). `list-classes` was
+   * extended in BT-2091 to include `source_file` and `actor_count` so
+   * the editor's class navigation keeps working.
    */
   async classes(): Promise<ClassInfo[]> {
-    const resp = (await this._request({ op: "modules" })) as {
-      modules?: Array<{ name: string; source_file?: string; actor_count?: number }>;
+    const resp = (await this._request({ op: "list-classes" })) as {
+      class_list?: Array<{
+        name: string;
+        source_file?: string | null;
+        actor_count?: number;
+      }>;
     };
-    return (resp.modules ?? []).map((m) => ({
-      name: m.name,
-      source_file: m.source_file,
-      actor_count: m.actor_count,
+    return (resp.class_list ?? []).map((c) => ({
+      name: c.name,
+      source_file: c.source_file ?? undefined,
+      actor_count: c.actor_count,
     }));
   }
 
@@ -264,24 +272,21 @@ export class WorkspaceClient {
   }
 
   /**
-   * Reload a class from its source file.
+   * Reload a class by name.
    *
-   * Sends `{ op: "reload", path }` which recompiles the file and hot-reloads
-   * any running actors of the affected class(es).
+   * BT-2091: Routes through `ClassName reload` evaluation rather than the
+   * deprecated `reload` protocol op (which has been removed). Recompiles
+   * the class's source file and hot-swaps any running actors.
    *
-   * @param sourcePath  Absolute path to the `.bt` source file.
+   * @param className  Beamtalk class name (e.g. `"Counter"`).
    */
-  async reload(sourcePath: string): Promise<{ classes: ClassInfo[]; warnings: string[] }> {
-    const resp = (await this._request({ op: "reload", path: sourcePath })) as {
-      classes?: Array<{ name: string; source_file?: string; actor_count?: number }>;
-      warnings?: string[];
-    };
+  async reload(className: string): Promise<{ classes: ClassInfo[]; warnings: string[] }> {
+    const resp = (await this._request({
+      op: "eval",
+      code: `${className} reload`,
+    })) as { warnings?: string[] };
     return {
-      classes: (resp.classes ?? []).map((c) => ({
-        name: c.name,
-        source_file: c.source_file,
-        actor_count: c.actor_count,
-      })),
+      classes: [{ name: className }],
       warnings: resp.warnings ?? [],
     };
   }

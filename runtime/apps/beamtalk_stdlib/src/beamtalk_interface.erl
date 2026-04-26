@@ -341,12 +341,34 @@ handle_help(ClassArg) ->
             end
     end.
 
--doc "Format method documentation for help:selector:.".
+-doc """
+Format method documentation for help:selector:.
+
+BT-2091: Walks both the instance-side and class-side method tables, mirroring
+the deprecated `docs` op's behaviour so `:help ClassName <classSideMethod>`
+keeps working after that op was removed. The lookup order is:
+
+  1. Metaclass — answered from the hardcoded metaclass method dictionary.
+  2. Instance-side method (via beamtalk_method_resolver:resolve/2).
+  3. Class-side method (via {class_method, Selector} on the class object).
+  4. Class protocol fallback (resolve/2 against the `Class` class).
+
+If none match, returns method_not_found.
+""".
 -spec handle_help_selector(term(), atom()) -> binary() | {error, #beamtalk_error{}}.
 handle_help_selector(ClassArg, SelectorArg) ->
     case resolve_class_name(ClassArg) of
         {error, Err} ->
             {error, Err};
+        {ok, 'Metaclass'} ->
+            %% Normalise via ensure_atom/1 so a binary selector becomes an
+            %% atom before the not_found error path interpolates it.
+            case ensure_atom(SelectorArg) of
+                {error, Err} ->
+                    {error, Err};
+                SelectorAtom ->
+                    handle_metaclass_help_selector(SelectorAtom)
+            end;
         {ok, ClassName} ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 undefined ->
@@ -357,16 +379,7 @@ handle_help_selector(ClassArg, SelectorArg) ->
                             {error, Err};
                         SelectorAtom ->
                             try
-                                case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
-                                    nil ->
-                                        {error,
-                                            make_method_not_found_error(ClassName, SelectorAtom)};
-                                    MethodObj when is_map(MethodObj) ->
-                                        DefiningClass = find_defining_class(ClassPid, SelectorAtom),
-                                        format_method_help(
-                                            ClassName, SelectorAtom, DefiningClass, MethodObj
-                                        )
-                                end
+                                resolve_help_method(ClassName, ClassPid, SelectorAtom)
                             catch
                                 exit:{noproc, _} ->
                                     {error, make_class_not_found_error(ClassName)};
@@ -376,6 +389,100 @@ handle_help_selector(ClassArg, SelectorArg) ->
                     end
             end
     end.
+
+%% BT-2091: Walk instance side first, then class side, then Class protocol.
+-spec resolve_help_method(atom(), pid(), atom()) -> binary() | {error, #beamtalk_error{}}.
+resolve_help_method(ClassName, ClassPid, SelectorAtom) ->
+    case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
+        MethodObj when is_map(MethodObj) ->
+            DefiningClass = find_defining_class(ClassPid, SelectorAtom),
+            format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj);
+        nil ->
+            case gen_server:call(ClassPid, {class_method, SelectorAtom}, 5000) of
+                ClassMethodObj when is_map(ClassMethodObj) ->
+                    DefiningClass = find_defining_class_method(ClassPid, SelectorAtom),
+                    format_method_help(
+                        ClassName, SelectorAtom, DefiningClass, ClassMethodObj
+                    );
+                nil ->
+                    %% Final fallback: methods inherited from the `Class` class
+                    %% (the class object's protocol — e.g. `name`, `superclass`).
+                    case beamtalk_class_registry:whereis_class('Class') of
+                        undefined ->
+                            {error, make_method_not_found_error(ClassName, SelectorAtom)};
+                        _ ->
+                            case beamtalk_method_resolver:resolve('Class', SelectorAtom) of
+                                ProtoObj when is_map(ProtoObj) ->
+                                    format_method_help(
+                                        ClassName, SelectorAtom, 'Class', ProtoObj
+                                    );
+                                nil ->
+                                    {error, make_method_not_found_error(ClassName, SelectorAtom)}
+                            end
+                    end
+            end
+    end.
+
+%% BT-2091: Walk the class hierarchy looking at *class-side* method tables
+%% so the help header attributes the method to the class that actually
+%% defines it (mirrors find_defining_class/3 for the instance side).
+-spec find_defining_class_method(pid(), atom()) -> atom().
+find_defining_class_method(ClassPid, Selector) ->
+    find_defining_class_method(ClassPid, Selector, 0).
+
+-spec find_defining_class_method(pid(), atom(), non_neg_integer()) -> atom().
+find_defining_class_method(ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    beamtalk_object_class:class_name(ClassPid);
+find_defining_class_method(ClassPid, Selector, Depth) ->
+    Name = beamtalk_object_class:class_name(ClassPid),
+    LocalClassMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
+    case maps:is_key(Selector, LocalClassMethods) of
+        true ->
+            Name;
+        false ->
+            case gen_server:call(ClassPid, superclass, 5000) of
+                none ->
+                    Name;
+                SuperName ->
+                    case beamtalk_class_registry:whereis_class(SuperName) of
+                        undefined -> Name;
+                        SuperPid -> find_defining_class_method(SuperPid, Selector, Depth + 1)
+                    end
+            end
+    end.
+
+%% BT-2091: Hardcoded Metaclass method docs (mirrors beamtalk_repl_docs').
+%% Caller must normalise SelectorArg via ensure_atom/1 first so a binary
+%% selector cannot reach this path; that keeps make_method_not_found_error
+%% unable to crash on a binary input.
+-spec handle_metaclass_help_selector(atom()) ->
+    binary() | {error, #beamtalk_error{}}.
+handle_metaclass_help_selector(SelectorAtom) ->
+    SelectorBin = atom_to_binary(SelectorAtom, utf8),
+    case metaclass_method_doc(SelectorBin) of
+        {ok, Doc} ->
+            iolist_to_binary([
+                <<"== Metaclass >> ">>,
+                SelectorBin,
+                <<" ==">>,
+                <<"\n  ">>,
+                SelectorBin,
+                <<"\n\n">>,
+                Doc
+            ]);
+        not_found ->
+            {error, make_method_not_found_error('Metaclass', SelectorAtom)}
+    end.
+
+-spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
+metaclass_method_doc(<<"new">>) ->
+    {ok, <<"Create a new instance of the class.">>};
+metaclass_method_doc(<<"spawn">>) ->
+    {ok, <<"Create a new actor instance. Returns an actor reference.">>};
+metaclass_method_doc(<<"spawnWith:">>) ->
+    {ok, <<"Create a new actor with initial state from a Dictionary.">>};
+metaclass_method_doc(_) ->
+    not_found.
 
 -doc "Resolve a class argument to an atom class name.".
 -spec resolve_class_name(term()) -> {ok, atom()} | {error, #beamtalk_error{}}.

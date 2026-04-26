@@ -135,16 +135,6 @@ impl RequestBuilder {
         req
     }
 
-    /// Build a `load-file` request.
-    #[must_use]
-    pub fn load_file(path: &str) -> serde_json::Value {
-        serde_json::json!({
-            "op": "load-file",
-            "id": next_msg_id(),
-            "path": path
-        })
-    }
-
     /// Build a `load-source` request.
     #[must_use]
     pub fn load_source(source: &str) -> serde_json::Value {
@@ -179,17 +169,6 @@ impl RequestBuilder {
             "path": path,
             "include_tests": include_tests,
             "force": force
-        })
-    }
-
-    /// Build a `reload` request.
-    #[must_use]
-    pub fn reload(module: &str, path: &str) -> serde_json::Value {
-        serde_json::json!({
-            "op": "reload",
-            "id": next_msg_id(),
-            "module": module,
-            "path": path
         })
     }
 
@@ -269,12 +248,6 @@ impl RequestBuilder {
 
     // --- Module operations ---
 
-    /// Build a `modules` request.
-    #[must_use]
-    pub fn modules() -> serde_json::Value {
-        Self::no_param("modules")
-    }
-
     /// Build an `unload` request.
     #[must_use]
     pub fn unload(module: &str) -> serde_json::Value {
@@ -325,23 +298,6 @@ impl RequestBuilder {
     }
 
     // --- Documentation operations ---
-
-    /// Build a `docs` request.
-    #[must_use]
-    pub fn docs(class: &str, class_side: bool, selector: Option<&str>) -> serde_json::Value {
-        let mut req = serde_json::json!({
-            "op": "docs",
-            "id": next_msg_id(),
-            "class": class
-        });
-        if class_side {
-            req["class_side"] = serde_json::Value::Bool(true);
-        }
-        if let Some(sel) = selector {
-            req["selector"] = serde_json::Value::String(sel.to_owned());
-        }
-        req
-    }
 
     /// Build an `erlang-help` request (BT-1852).
     #[must_use]
@@ -549,19 +505,6 @@ mod tests {
         assert_eq!(req["path"], ".");
         assert_eq!(req["include_tests"], true);
         assert_eq!(req["force"], true);
-    }
-
-    #[test]
-    fn docs_request_optional_params() {
-        let req = RequestBuilder::docs("Integer", false, None);
-        assert_eq!(req["op"], "docs");
-        assert_eq!(req["class"], "Integer");
-        assert!(req.get("class_side").is_none());
-        assert!(req.get("selector").is_none());
-
-        let req2 = RequestBuilder::docs("Integer", true, Some("+"));
-        assert_eq!(req2["class_side"], true);
-        assert_eq!(req2["selector"], "+");
     }
 
     #[test]

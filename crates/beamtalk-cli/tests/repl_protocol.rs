@@ -700,8 +700,16 @@ impl ReplClient {
     ///
     /// This compiles the file and loads its classes into the REPL session,
     /// making them available for spawning and messaging.
+    ///
+    /// BT-2091: Routes through `Workspace load: "path"` evaluation rather than
+    /// the deprecated `load-file` protocol op (which has been removed). The
+    /// returned value is a Beamtalk list of class objects which renders as a
+    /// JSON array of class-name strings.
     fn load_file(&mut self, path: &str) -> Result<Vec<String>, String> {
-        self.write_json(&RequestBuilder::load_file(path))?;
+        // Escape backslashes and double quotes for embedding in a Beamtalk string literal.
+        let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+        let expr = format!("Workspace load: \"{escaped}\"");
+        self.write_json(&RequestBuilder::eval(&expr))?;
 
         let response = self.read_repl_response()?;
 
@@ -716,17 +724,57 @@ impl ReplClient {
             return Err(message.to_string());
         }
 
-        Ok(response.classes.unwrap_or_default())
+        // The eval value is a JSON array of class name strings (e.g. ["Counter"]).
+        // BT-2091: Fail loudly on unexpected response shapes so future protocol
+        // drift surfaces in the test suite rather than being papered over by an
+        // empty Vec.
+        match response.value {
+            Some(serde_json::Value::Array(items)) => Ok(items
+                .into_iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()),
+            Some(other) => Err(format!(
+                "Workspace load: expected array result, got {other}"
+            )),
+            None => Err("Workspace load: missing result value".to_string()),
+        }
     }
 
-    /// Get documentation for a class or method via the docs op.
+    /// Get documentation for a class or method via `Beamtalk help:` evaluation.
+    ///
+    /// BT-2091: Migrated from the deprecated `docs` op to `Beamtalk help:`.
+    /// A leading `#` on the selector is stripped before interpolation so
+    /// callers passing either `foo:` or `#foo:` produce the same expression
+    /// (`Beamtalk help: Class selector: #foo:`) rather than an invalid
+    /// `##foo:`.
     fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<String, String> {
-        self.send_docs_request(&RequestBuilder::docs(class, false, selector))
+        let expr = match selector {
+            Some(sel) => {
+                let sel = sel.trim().trim_start_matches('#');
+                format!("Beamtalk help: {class} selector: #{sel}")
+            }
+            None => format!("Beamtalk help: {class}"),
+        };
+        self.eval_to_string(&expr)
     }
 
     /// Get help for an Erlang module or function via the erlang-help op (BT-1852).
     fn get_erlang_help(&mut self, module: &str, function: Option<&str>) -> Result<String, String> {
         self.send_docs_request(&RequestBuilder::erlang_help(module, function))
+    }
+
+    /// Evaluate an expression and return the result as a string.
+    fn eval_to_string(&mut self, expr: &str) -> Result<String, String> {
+        self.write_json(&RequestBuilder::eval(expr))?;
+
+        let response = self.read_repl_response()?;
+
+        if response.is_error() {
+            let message = response.error_message().unwrap_or("Unknown error");
+            return Err(message.to_string());
+        }
+
+        Ok(response.value_string())
     }
 
     /// Send a docs/erlang-help request and parse the response.

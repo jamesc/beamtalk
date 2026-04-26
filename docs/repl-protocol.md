@@ -239,20 +239,6 @@ Compile a Beamtalk expression and return the generated Core Erlang source withou
 |-------|------|----------|-------------|
 | `code` | string | **yes** | Beamtalk expression to compile |
 
-#### `load-file` — Load Source File
-
-Compile and load a `.bt` source file.
-
-**Request:**
-```json
-{"op": "load-file", "id": "msg-004", "path": "examples/counter.bt"}
-```
-
-**Response:**
-```json
-{"id": "msg-004", "classes": ["Counter"], "status": ["done"]}
-```
-
 #### `load-source` — Load Inline Source
 
 Compile and load Beamtalk source from an inline string (no file path needed). Used by the browser workspace Editor pane.
@@ -308,15 +294,6 @@ Incrementally compile and load all `.bt` and native `.erl` files in a Beamtalk p
 **Response (no `beamtalk.toml`):**
 ```json
 {"id": "msg-006", "error": "file_not_found: No beamtalk.toml found in: /tmp/foo", "status": ["done", "error"]}
-```
-
-#### `reload` — Hot Reload Module
-
-Reload a previously loaded module (requires `path` parameter).
-
-**Request:**
-```json
-{"op": "reload", "id": "msg-005", "module": "Counter", "path": "examples/counter.bt"}
 ```
 
 ### Session Operations
@@ -466,26 +443,6 @@ Terminate an actor process.
 
 ### Module Operations
 
-#### `modules` — List Modules
-
-List loaded modules in the workspace.
-
-**Request:**
-```json
-{"op": "modules", "id": "msg-030"}
-```
-
-**Response:**
-```json
-{
-  "id": "msg-030",
-  "modules": [
-    {"name": "Counter", "source_file": "counter.bt", "actor_count": 1, "load_time": 0, "time_ago": "2m ago"}
-  ],
-  "status": ["done"]
-}
-```
-
 #### `unload` — Unload Module
 
 Unload a module from the workspace. Uses `code:soft_purge/1` and `code:delete/1`.
@@ -621,16 +578,17 @@ Returns the list of supported operations with their parameters, protocol version
     "eval": {"params": ["code"]},
     "complete": {"params": ["code"]},
     "info": {"params": ["symbol"]},
-    "docs": {"params": ["class"], "optional": ["selector"]},
     "describe": {"params": []},
     "health": {"params": []}
   },
-  "versions": {"protocol": "1.0", "beamtalk": "0.3.1"},
+  "versions": {"protocol": "2.0", "beamtalk": "0.3.1"},
   "status": ["done"]
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `docs`, `load-file`, `load-source`, `load-project`, `reload`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `modules`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+
+> **BT-2091 (protocol 2.0):** The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed. Use `Beamtalk help: ClassName`, `Workspace load: "path"`, `ClassName reload`, and `Workspace classes` via the `eval` op instead.
 
 #### `health` — Health Probe
 
@@ -740,11 +698,12 @@ Legacy format is auto-detected by the presence of a `type` field instead of `op`
 | `eval` | `eval` | `expression` → `code` |
 | `clear` | `clear` | |
 | `bindings` | `bindings` | |
-| `load` | `load-file` | |
 | `actors` | `actors` | |
-| `modules` | `modules` | |
 | `kill` | `kill` | `pid` → `actor` |
 | `unload` | `unload` | |
+
+> Legacy `load` and `modules` types previously mapped to the `load-file` and
+> `modules` ops, both of which were removed in protocol 2.0 (BT-2091).
 
 ## Error Handling
 
@@ -772,7 +731,7 @@ The protocol is implemented in:
 |------|-------------|
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | WebSocket server and request dispatch |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | Load/reload/unload/modules/load-project op handlers |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | `load-source`, `load-project`, `unload` op handlers |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl` | Session state bridge |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |

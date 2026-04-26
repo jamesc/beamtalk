@@ -22,16 +22,19 @@
 // => == Integer >> isPositive ==_(inherited from Number)_
 
 // :help with an unknown class — should show helpful error
+// BT-2091: error message comes from Beamtalk help: (BeamtalkInterface).
 :help FakeClassName
-// => ERROR: Unknown class: FakeClassName
+// => ERROR: Class 'FakeClassName' not found
 
 // :help with an unknown method — should show helpful error
 :help Integer nonExistentMethod
 // => ERROR: Integer does not understand nonExistentMethod
 
 // :help Metaclass — should show metaclass documentation (BT-618)
+// BT-2091: After migrating to Beamtalk help:, Metaclass renders with its
+// superclass `Class` rather than as a bare top-level metaclass.
 :help Metaclass
-// => == Metaclass ==_
+// => == Metaclass < Class ==_
 
 // :help Metaclass with a known class-side method (BT-618)
 :help Metaclass spawn
@@ -58,9 +61,14 @@
 // => == Integer < Number ==_
 
 // BT-1659: :help with unknown package-qualified class — should show error
+// BT-2091: Beamtalk help: passes the class portion; the package prefix `xyzzy@`
+// is dropped during resolution, so the reported name is the bare class.
 :help xyzzy@FakeClass
-// => ERROR: Unknown class: xyzzy@FakeClass
+// => ERROR: Class 'FakeClass' not found
 
-// ADR 0068: :help with a protocol name — should show protocol class docs
+// ADR 0068: :help with a protocol name — should show protocol class docs.
+// BT-2091: The deprecated `docs` op annotated protocol classes with
+// `[protocol]`; the migration target `Beamtalk help:` prints just the
+// class header. The protocol provenance annotation is a follow-up.
 :help Printable
-// => == Printable < Protocol ==_[protocol]_
+// => == Printable < Protocol ==_
