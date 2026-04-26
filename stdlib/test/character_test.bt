@@ -31,8 +31,35 @@ TestCase subclass: CharacterTest
     self deny: $A isLowercase
     self assert: $\n isWhitespace
     self assert: $\t isWhitespace
+    self assert: $\r isWhitespace
+    self assert: (Character value: 32) isWhitespace
     self deny: $A isWhitespace
     self assert: ($A + 1) equals: 66
     self assert: ($z - $a) equals: 25
-    self assert: $A asString equals: "65"
+    self assert: $A asString equals: "A"
     self assert: $A asFloat equals: 65 asFloat
+
+  testAsIntegerAndPrintString =>
+    self assert: $A asInteger equals: 65
+    self assert: $a asInteger equals: 97
+    self assert: $0 asInteger equals: 48
+    self assert: $A printString equals: "$A"
+    self assert: $0 printString equals: "$0"
+    self assert: $z printString equals: "$z"
+
+  testUppercaseLowercase =>
+    self assert: $a uppercase equals: 65
+    self assert: $A uppercase equals: 65
+    self assert: $z uppercase equals: 90
+    self assert: $A lowercase equals: 97
+    self assert: $a lowercase equals: 97
+    self assert: $Z lowercase equals: 122
+
+  testCharacterValue =>
+    self assert: (Character value: 65) equals: 65
+    self assert: ((Character value: 65) =:= $A)
+    self assert: (Character value: 0) equals: 0
+    self assert: (Character value: 1114111) equals: 1114111
+    self should: [Character value: -1] raise: #type_error
+    self should: [Character value: 55296] raise: #type_error
+    self should: [Character value: 1114112] raise: #type_error
