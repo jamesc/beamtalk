@@ -54,7 +54,7 @@ config := #{#host => "localhost", #port => 8080}
 
 - **Type system grows teeth.** Mark a class `typed` and the compiler flows types through generics, unions, narrowing predicates, FFI calls, and method-local type variables. `beamtalk type-coverage` reports per-file coverage, and the LSP "Dynamic with reason" hover shows *why* a chain decayed.
 - **Real package manager.** `[dependencies]` in `beamtalk.toml` (path / git / hex), `beamtalk.lock` for reproducibility, `beamtalk deps add`, and qualified `pkg@Class` names with cross-package collision detection.
-- **Native Erlang inside packages.** Drop `.erl` files in `native/` and they compile via a vendored `rebar3`; `beamtalk test` runs both BUnit and EUnit; `:h Erlang <module>` hovers on user-defined modules.
+- **Native Erlang inside packages.** Drop `.erl` files in `native/` and they compile via a vendored `rebar3`; `beamtalk test` runs both `BUnit` and `EUnit`; `:h Erlang <module>` hovers on user-defined modules.
 - **Result-shaped FFI.** Erlang functions specced as `{ok, T} | {error, R}` are coerced to typed `Result(T, E)` at the boundary ([ADR 0076](docs/ADR/0076-ok-error-tuple-to-result-at-ffi-boundary.md)).
 - **Result-shaped supervisors.** `Supervisor>>supervise / terminate: / which:` and `DynamicSupervisor>>startChild` return `Result` instead of raising, with idempotent-startup semantics ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md)).
 - **Named actor registration.** `Class spawnAs: name`, `Class named: name`, supervised re-registration on restart ([ADR 0079](docs/ADR/0079-named-actor-registration.md)).
@@ -440,12 +440,12 @@ Automatically installed in devcontainer:
 - ✅ **Hot code reloading** — Redefine classes/methods on running actors via `>>`; class crash recovery preserves dispatch tables
 - ✅ **Type system** — `typed` classes, generics, protocols, unions, control-flow narrowing, FFI inference, `Never`, `Self class`, local annotations
 - ✅ **Package manager** — `beamtalk.toml` `[dependencies]` (path/git/hex), `beamtalk.lock`, qualified `pkg@Class` names, `beamtalk deps`
-- ✅ **Native Erlang in packages** — `native/*.erl` compiled via vendored rebar3; EUnit runs through `beamtalk test`
+- ✅ **Native Erlang in packages** — `native/*.erl` compiled via vendored rebar3; `EUnit` runs through `beamtalk test`
 - ✅ **Standard library** — Boolean, Block, Integer, Float, String, Character, Collections, Result, Printable, Package, Tracing
 - ✅ **Class system** — Inheritance, `super`, `sealed`, `internal` access control, class-side methods, abstract classes, auto-chained `initialize`
 - ✅ **Cascades, map literals, comprehensions, exception handling**
 - ✅ **LSP** — Completions (incl. FFI), hover with type/Dynamic-reason, go-to-definition, find references, workspace symbols, diagnostics
-- ✅ **Testing** — SUnit-style `TestCase`, parallel runner, BUnit + EUnit integration
+- ✅ **Testing** — SUnit-style `TestCase`, parallel runner, `BUnit` + `EUnit` integration
 - ✅ **Tooling** — `beamtalk doctor`, `beamtalk type-coverage`, `beamtalk gen-native`, `beamtalk generate stubs`, MCP server, VS Code extension
 
 ### Planned
