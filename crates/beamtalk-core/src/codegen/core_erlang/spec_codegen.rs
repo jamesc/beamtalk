@@ -68,7 +68,7 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
             ]
         }
         TypeAnnotation::Singleton { name, .. } => {
-            Document::String(format!("{{'atom', 0, '{name}'}}"))
+            docvec!["{'atom', 0, '", Document::String(name.to_string()), "'}"]
         }
         TypeAnnotation::Generic {
             base, parameters, ..
@@ -231,7 +231,11 @@ pub fn generate_method_spec(
     };
 
     Some(docvec![
-        Document::String(format!("{{'{erlang_name}', {arity}}}")),
+        "{'",
+        Document::String(erlang_name),
+        "', ",
+        Document::String(arity.to_string()),
+        "}",
         ", [{'type', 0, 'fun', [",
         product,
         ", ",
@@ -288,7 +292,11 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
     ];
 
     Some(docvec![
-        Document::String(format!("{{'{erlang_name}', {arity}}}")),
+        "{'",
+        Document::String(erlang_name),
+        "', ",
+        Document::String(arity.to_string()),
+        "}",
         ", [{'type', 0, 'fun', [",
         product,
         ", ",
