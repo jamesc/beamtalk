@@ -41,9 +41,30 @@ config := #{#host => "localhost", #port => 8080}
 | **Interactive-first** | REPL and live workspace, not batch compilation |
 | **Hot code reload** | Edit and reload modules in running systems |
 | **Actor model** | Actors are BEAM processes with independent fault isolation |
+| **Gradual typing** | Opt-in `typed` classes with inference through generics, unions, FFI, and narrowing |
 | **Reflection** | Inspect any actor's state and methods at runtime |
 | **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
+| **Native Erlang FFI** | Call any OTP function with typed specs and Result-shaped error coercion |
+| **Package manager** | Path / git / hex deps with lockfile, qualified `pkg@Class` names |
 | **Testing built-in** | SUnit-style `TestCase` framework with `beamtalk test` |
+
+---
+
+## What's New in 0.4
+
+- **Type system grows teeth.** Mark a class `typed` and the compiler flows types through generics, unions, narrowing predicates, FFI calls, and method-local type variables. `beamtalk type-coverage` reports per-file coverage, and the LSP "Dynamic with reason" hover shows *why* a chain decayed.
+- **Real package manager.** `[dependencies]` in `beamtalk.toml` (path / git / hex), `beamtalk.lock` for reproducibility, `beamtalk deps add`, and qualified `pkg@Class` names with cross-package collision detection.
+- **Native Erlang inside packages.** Drop `.erl` files in `native/` and they compile via a vendored `rebar3`; `beamtalk test` runs both BUnit and EUnit; `:h Erlang <module>` hovers on user-defined modules.
+- **Result-shaped FFI.** Erlang functions specced as `{ok, T} | {error, R}` are coerced to typed `Result(T, E)` at the boundary ([ADR 0076](docs/ADR/0076-ok-error-tuple-to-result-at-ffi-boundary.md)).
+- **Result-shaped supervisors.** `Supervisor>>supervise / terminate: / which:` and `DynamicSupervisor>>startChild` return `Result` instead of raising, with idempotent-startup semantics ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md)).
+- **Named actor registration.** `Class spawnAs: name`, `Class named: name`, supervised re-registration on restart ([ADR 0079](docs/ADR/0079-named-actor-registration.md)).
+- **`internal` modifier** for package-scoped access control ([ADR 0071](docs/ADR/0071-class-visibility-internal-modifier.md)).
+- **Local variable type annotations** — `name :: Type := expr`.
+- **Auto-chained `initialize`** across the actor hierarchy ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md)).
+- **REPL `:sync`** replaces `:load`/`:reload`; `:interrupt` cancels a running eval out-of-band; parallel `:test`.
+- **Class crash recovery** via ETS `heir` so live actors keep dispatching after a class process restart.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ---
 
@@ -225,7 +246,7 @@ If your stdlib source files are outside the project root, set:
 **New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!
 
 ```text
-Beamtalk v0.3.1
+Beamtalk v0.4.0
 Type :help for available commands, :exit to quit.
 
 > message := "Hello, Beamtalk!"
@@ -409,25 +430,26 @@ Automatically installed in devcontainer:
 
 ### What Works Now
 
-- ✅ **REPL** — Interactive evaluation with variable persistence
+- ✅ **REPL** — Interactive evaluation with variable persistence, `:sync`, `:interrupt`, parallel `:test`
 - ✅ **Lexer & Parser** — Full expression parsing with error recovery
 - ✅ **Core Erlang codegen** — Compiles to BEAM bytecode via `erlc`
-- ✅ **Actors** — Spawn actors with state, send sync or async messages, futures with `await`
+- ✅ **Actors & Supervision** — Spawn actors with state, sync/async messages, futures, OTP supervision with Result-shaped lifecycle, named registration
 - ✅ **Field assignments** — Actor state mutations via `:=`
 - ✅ **Method dispatch** — Full message routing (unary, binary, keyword)
-- ✅ **Pattern matching** — `match:` expressions with literal and variable patterns
-- ✅ **Hot code reloading** — Redefine classes/methods on running actors via `>>`
-- ✅ **Standard library** — Boolean, Block, Integer, Float, String, Character, Collections
-- ✅ **Collections** — List, Dictionary, Set, Tuple, Association
-- ✅ **Class system** — Inheritance, `super`, `sealed`, class-side methods, abstract classes
-- ✅ **Cascades** — Multiple messages to same receiver
-- ✅ **Map literals** — `#{key => value}` syntax with Dictionary codegen
-- ✅ **LSP** — Language server with completions, hover, go-to-definition, diagnostics
-- ✅ **Testing** — SUnit-style `TestCase` framework (`beamtalk test`)
+- ✅ **Pattern matching** — `match:` expressions with literal, variable, and constructor patterns
+- ✅ **Hot code reloading** — Redefine classes/methods on running actors via `>>`; class crash recovery preserves dispatch tables
+- ✅ **Type system** — `typed` classes, generics, protocols, unions, control-flow narrowing, FFI inference, `Never`, `Self class`, local annotations
+- ✅ **Package manager** — `beamtalk.toml` `[dependencies]` (path/git/hex), `beamtalk.lock`, qualified `pkg@Class` names, `beamtalk deps`
+- ✅ **Native Erlang in packages** — `native/*.erl` compiled via vendored rebar3; EUnit runs through `beamtalk test`
+- ✅ **Standard library** — Boolean, Block, Integer, Float, String, Character, Collections, Result, Printable, Package, Tracing
+- ✅ **Class system** — Inheritance, `super`, `sealed`, `internal` access control, class-side methods, abstract classes, auto-chained `initialize`
+- ✅ **Cascades, map literals, comprehensions, exception handling**
+- ✅ **LSP** — Completions (incl. FFI), hover with type/Dynamic-reason, go-to-definition, find references, workspace symbols, diagnostics
+- ✅ **Testing** — SUnit-style `TestCase`, parallel runner, BUnit + EUnit integration
+- ✅ **Tooling** — `beamtalk doctor`, `beamtalk type-coverage`, `beamtalk gen-native`, `beamtalk generate stubs`, MCP server, VS Code extension
 
 ### Planned
 
-- 📋 **Supervision trees** — OTP supervision as language-level constructs
 - 📋 **Live browser** — Smalltalk-style class browser (Phoenix `LiveView`)
 
 ---
@@ -444,7 +466,7 @@ Automatically installed in devcontainer:
 - [Language Features](docs/beamtalk-language-features.md) — Syntax, semantics, and examples
 - [Syntax Rationale](docs/beamtalk-syntax-rationale.md) — Why we keep/change Smalltalk conventions
 - [Object Model](docs/ADR/0005-beam-object-model-pragmatic-hybrid.md) — How Smalltalk objects map to BEAM
-- [Known Limitations](docs/known-limitations.md) — What's not yet supported in v0.1
+- [Known Limitations](docs/known-limitations.md) — Current limitations
 
 ### Architecture
 
@@ -493,16 +515,19 @@ See [stdlib/src/README.md](stdlib/src/README.md) for full documentation.
 ```text
 beamtalk/
 ├── crates/
-│   ├── beamtalk-core/       # Lexer, parser, AST, codegen
+│   ├── beamtalk-core/       # Lexer, parser, AST, codegen, type checker
 │   ├── beamtalk-cli/        # Command-line interface & REPL
-│   └── beamtalk-lsp/        # Language server (LSP)
-├── stdlib/src/                # Standard library (.bt files)
-├── runtime/                  # Erlang runtime (actors, REPL backend)
-├── stdlib/test/               # BUnit test cases (TestCase classes)
-├── tests/                    # Stdlib & E2E tests
-├── docs/                     # Design documents
-├── examples/                 # Example programs
-└── editors/vscode/           # VS Code extension
+│   ├── beamtalk-lsp/        # Language server (LSP)
+│   └── beamtalk-repl-protocol/ # Shared REPL response types
+├── stdlib/src/              # Standard library (.bt files)
+├── runtime/                 # Erlang runtime (actors, REPL backend)
+├── stdlib/test/             # BUnit test cases (TestCase classes)
+├── tests/
+│   ├── repl-protocol/       # REPL TCP-protocol tests
+│   └── parity/              # Cross-surface parity tests
+├── docs/                    # Design documents & ADRs
+├── examples/                # Example programs
+└── editors/vscode/          # VS Code extension
 ```
 
 The compiler is written in **Rust** and generates **Core Erlang**, which compiles to BEAM bytecode via `erlc`.

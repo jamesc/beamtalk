@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-04-27
+
+The headline of 0.4 is a **type system that finally has teeth**: classes can opt into a `typed` modifier, the inferencer flows types through generics, unions, narrowing predicates, FFI calls, block parameters, and method-local type variables, and a new `beamtalk type-coverage` CLI plus LSP "Dynamic with reason" hover make typing visible end-to-end. Around it: a real **package manager** (path / git / hex deps with lockfile, qualified `pkg@Class` names, cross-package collision detection), **native Erlang sources inside Beamtalk packages** (compiled via vendored rebar3, EUnit run from `beamtalk test`), **Result-shaped FFI and supervisor lifecycles** (ADR 0076 + 0080), **named actor registration** (ADR 0079), and an `internal` access-control modifier (ADR 0071).
 
 ### Language
 
@@ -20,6 +22,17 @@
 - Deep-descendant `Never` detection in diverging guard blocks — nested `Never`-typed expressions (e.g., `[Sink log: (self error: "...")]`) correctly trigger nil-check narrowing (BT-2051).
 - Fix false-positive "Unused variable" warning from typed block parameters — block parameters with `:: Type` annotations are now parsed correctly (BT-2043).
 - Fix spurious `Dynamic` inference on block parameters when iterating a `Dynamic`-typed receiver in a typed class (BT-2042).
+- **`Never` bottom type** — divergent expressions (`self error: ...`, `^expr`, infinite loops) infer as `Never`, so branch-union return types like `cond ifTrue: [^x] ifFalse: [y]` collapse cleanly to `typeof(y)` instead of `Dynamic` (BT-1945).
+- **`Self class` metatype** — `Self class` annotations on class-side return types correctly substitute through inheritance, enabling typed `new`-style factories on subclasses (BT-1952).
+- **Auto-chain `initialize` across the actor hierarchy** — subclasses no longer need to call `super initialize` manually; the runtime walks the class chain and inherited typed-no-default fields are validated at construction ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md), BT-1951, BT-1976).
+- **One class or protocol per file** — enforced at parse time so cross-file class resolution and per-class hot reload have a single source of truth (BT-1666).
+- **Strict inequality `=/=`** — first-class stdlib method declaration alongside `=` and `~=` (BT-1563).
+- **Match-arm pattern variables are bound into the arm's type environment** — `match: [Foo(x) -> ...]` types `x` correctly inside the arm instead of falling back to `Dynamic` (BT-1946).
+- Allow omitting the default value on typed `state:`/`field:` declarations — `state: counter :: Integer` is now legal in typed actors (BT-1947).
+- Fix type annotation on a method parameter changing the runtime dispatch behaviour (BT-1944).
+- Parser: nested keyword messages inside map literals now parse correctly (BT-1854).
+- Fix unterminated block comments and stale `@expect type` directives that previously crashed or silently passed.
+- Remove deprecated `trace:` / `traceCr:` from Object (replaced by `show:` / `showCr:` in 0.3.1) (BT-1767).
 
 ### Standard Library
 
@@ -38,10 +51,113 @@
 - **`Supervisor>>which:` now returns `Result(Object, Error)`** — migrated to ADR 0080 Phase 2 Result signature, consistent with `supervise` and `terminate:`. Callers must `unwrap` or use Result combinators; returns `Result ok: nil` when the class is not in the supervision tree, `Result error: (beamtalk_error stale_handle)` when the supervisor is stopped (BT-2041).
 - **`Collection(E)` parametrized** — `Collection` is now `Collection(E)` with typed block parameters on `do:`, `collect:`, `select:`, `reject:`, `detect:`, `inject:into:`, `anySatisfy:`, `allSatisfy:`, and `includes:`. `Bag` is now `Bag(E)` with typed `add:`, `remove:`, `occurrencesOf:`. Enables type-safe iteration and better IDE support (BT-2036).
 - `Float>>min:/max:` and `Integer>>min:/max:` return type corrected from `Float`/`Integer` to `Number` (BT-2020).
+- **`Printable` protocol** — formal protocol abstracting `printString`/`displayString`; stdlib classes opt in and the type checker uses it to type generic display chains (BT-1766).
+- **`Package` stdlib class** — first-class reflection over loaded packages (`name`, `classes`, `dependencies`, `version`); `packageName` on `Metaclass` resolves a class's owning package (BT-1657).
+- **Protocol definitions are first-class class objects** — `Foo isProtocol`, `Foo conformingClasses`, `Foo methods` work uniformly with class reflection (BT-1928).
+- **`Result fromTuple:`** — bridge from raw `{ok, V}` / `{error, R}` Erlang tuples into typed `Result` values (BT-1865).
+- **Typed `Ets(K, V)`** — Ets table API gains key/value type parameters that flow through `insert:`, `lookup:`, etc. (BT-1860).
+- **All stdlib classes carry the `typed` modifier** — every state declaration has a type annotation, every public method has a return type, FFI specs are filled in, and the build runs with 0 untyped-FFI warnings (BT-1827, BT-1828, BT-1829, BT-1836, BT-1825, BT-1826, BT-1933, BT-1952).
+- **HTTP and YAML extracted to standalone packages** — `beamtalk-http` and `beamtalk-yaml` are now cross-repo packages consuming the public package API; the monorepo's `packages/http` was removed once the cross-repo CI build was green (BT-1718, BT-1741, BT-1742).
+- `Workspace sync` expression — Beamtalk-level handle on `:sync` so scripts and tests can drive workspace reload without dropping into the meta-command surface (BT-1723).
+- `Object` no longer overrides `module_for_value` for `FileHandle`, `Erlang`, `ErlangModule`, `StackFrame` — these are dispatched through the canonical class table now (BT-1761, BT-1762, BT-1763).
+
+### Type System
+
+The biggest theme of 0.4. The compiler now flows types through the full surface of the language and warns when inference falls back to `Dynamic` in a class that asked to be checked.
+
+- **`typed` class modifier** — `Object subclass: Foo typed` opts a class into stricter checking: untyped state, untyped FFI calls, missing return types, and `Dynamic` inference all become diagnostics scoped to typed classes (BT-1829, BT-1913, BT-1914). Annotation completion is tracked across the stdlib and 178 → 12 untyped-FFI warnings cleared in one pass (BT-1952).
+- **`DynamicReason` enum + LSP "Dynamic with reason" hover** — every `Dynamic` inference now records *why* (untyped FFI return, unresolved class, narrowing dropout, missing annotation, …); the LSP hover surface displays it inline so you can see why a chain "decayed" (BT-1911, BT-1912).
+- **`beamtalk type-coverage` CLI** — per-file and per-class typed-vs-Dynamic ratios, gateable in CI ([ADR 0077](docs/ADR/0077-type-coverage-visibility.md), BT-1915).
+- **Erlang → Beamtalk type mapping + `NativeTypeRegistry`** — Erlang spec atoms (`atom()`, `binary()`, `[T]`, `{ok, T} | {error, R}`, …) are translated into the Beamtalk type lattice at FFI boundaries, so calling an OTP function gives back a typed value ([ADR 0075](docs/ADR/0075-erlang-ffi-type-definitions.md), BT-1842).
+- **FFI call inference + keyword-mismatch warning** — typed FFI calls now infer return type from the resolved spec and warn when the keyword form mismatches the underlying Erlang arity (BT-1843).
+- **Generic type parameter resolution in return types** — `MyClass(T)>>foo: x -> List(T)` resolves `T` at the use site so chains of typed generic methods stop dropping to `Dynamic` (BT-1834, BT-1818).
+- **Singleton type inference** — `#ok` and similar atom literals infer as singleton types and are checked against parameter declarations (BT-1830, BT-1878).
+- **Union type validation everywhere** — fields, parameters, return types, locals; union-typed receivers resolve methods by intersecting member responses (BT-1832, BT-1857). Non-responding union members produce a single warning instead of widening the result with `Dynamic` (BT-1871, BT-1872).
+- **`respondsTo:` narrows to a protocol type** — `obj respondsTo: #foo` inside an `ifTrue:` branch lets the checker infer `obj` as a synthesized "responds to `foo`" protocol instead of `Dynamic` (BT-1833).
+- **`isOk` / `isError` narrowing on `Result(T, E)`** — both arms get the appropriate concrete branch type (BT-1859).
+- **Typed state validation** — assignment to a typed `state:` is checked against its declaration; uninitialized typed-no-default fields warn at first use (BT-1831, BT-1947).
+- **Block parameter type propagation from method signatures** — typed `Block(T, R)` parameters propagate `T` into the block body (#1970).
+- **`@expect` reasons + `TypeAnnotation` diagnostic category** — `@expect type "<reason>"` records *why* a suppression exists, surfaced by lint and visible in the diagnostic summary (BT-1918, BT-1921, BT-1922).
+- **Diagnostic deduplication** — repeated identical warnings on the same span are coalesced (BT-1921), and warning/hint diagnostics carry `.with_hint()` text consistently (BT-1922, BT-1923).
+- **Self type metatype** — `Self`-typed return values now substitute correctly through inheritance and through generic positions like `Result(Self, Error)` (BT-1952, BT-1986, BT-1992).
+- **Generic unification** — fixes for nested type args, union shapes, FFI shapes, super sends, and class-method-call-bound locals (BT-2017, BT-2018, BT-2019, BT-2021, BT-2022, BT-2023, BT-2025).
+- **Method-local type parameters** — `infer_method_local_params` generalised over arbitrary parametric types and gated on identifier validity (BT-1818, BT-1820, BT-1895).
+- Class literals are accepted as `Behaviour` / `Class` arguments without a synthetic `class` send (BT-2038).
+- `Foo class` (metatype) annotations work in any type position; nil-check narrowing clears DNU warnings on class-side methods (BT-2034).
+- Conditional return type unification: `ifTrue:ifFalse:` declares `Block(R), Block(R) -> R` so both arms unify to a common return type (BT-2020).
+- Warn when a method declared `-> Never` has a body that returns a known type (BT-2033).
 
 ### Compiler
 
 - Fix `Self` type substitution in generic return types on parameterised receivers — e.g., `Result(Self, Error)` on `Box(Integer)` now correctly resolves to `Result(Box(Integer), Error)` instead of bare `Result(Box, Error)` (BT-1992).
+- **Compile-time structural validation** — unresolved class names, FFI module names, and arity mismatches are now diagnostics surfaced before codegen, not opaque runtime errors (BT-1726).
+- **Topological compilation ordering for dependencies** — packages compile in dependency order so cross-package class resolution succeeds on a clean build (BT-1647).
+- **Fixture protocols thread through the BUnit compile path** — eliminates false `Unresolved class` warnings for protocols defined in test fixtures (BT-2006).
+- Cross-file inherited typed-no-default field validation (BT-1976).
+- Lint reduces false positives for uninitialized-field warnings (BT-1837).
+- Warn when type args are supplied for a class with no type parameters (BT-1861).
+- Codegen: route inherited class-method self-sends via a runtime helper so the superclass chain resolves correctly without re-entering the class gen_server (BT-2007).
+- Codegen: route `self spawnAs:` / `self spawnWith:as:` in class methods through metaclass dispatch helpers to avoid `undef` (BT-2004).
+- Fix codegen for class-method call results in sub-expression positions, including class-var mutations from sub-expression class-method self-sends (BT-1935, BT-1937, BT-1942).
+- Codegen: emit visibility metadata in `__beamtalk_meta/0` (BT-1699).
+- Codegen: emit qualified `bt@{package}@{class}` references for cross-package classes (BT-1652).
+- Codegen: define `>>` as a `@primitive` method on `Behaviour` instead of a special case in the emitter (BT-1735).
+- Wire stacktraces through `safe_dispatch` so actor callback errors carry full trace + source location (BT-1822).
+- **Build performance** — Pass-2 builds are now incremental with file-level change detection, persisted class-metadata cache, and cached built-in `ClassHierarchy` via `OnceLock`; parser `advance()` no longer clones tokens; the Document renderer is faster on hot paths (BT-1677, BT-1678, BT-1680, BT-1682, BT-1683, BT-1684, BT-1685). Criterion benchmarks land in CI (BT-1674, BT-1686).
+- **Dialyzer-friendly stdlib** — `beamtalk_result:t()` and `beamtalk_error:t()` exported types so user packages can write valid `-spec`s against the FFI surface (BT-1908).
+- Singleton-union assignability fix; charlist coercion regression fix (a8ad07a9).
+- Block-scoped variable mutation lint, dead-assignment `@expect` annotation, and other lint quality-of-life from the late-cycle batch.
+
+### FFI
+
+The FFI boundary stops being a `Dynamic` cliff. Most of this lives behind two ADRs.
+
+- **Erlang FFI Type Definitions** ([ADR 0075](docs/ADR/0075-erlang-ffi-type-definitions.md)) — Erlang `-spec` attributes are read out of `.beam` abstract code (including dependency `.beam` files, not just OTP), translated through `NativeTypeRegistry`, and applied at the call site (BT-1840, BT-1841, BT-1842, BT-1906). `user_type` and `remote_type` references resolve transparently (BT-1902).
+- **`ok`/`error` tuples → `Result` at the FFI boundary** ([ADR 0076](docs/ADR/0076-ok-error-tuple-to-result-at-ffi-boundary.md)) — calls to typed Erlang functions whose spec is `{ok, T} | {error, R}` are coerced into typed `Result` values automatically; the spec reader recognises the union shape and synthesises a `Result(T, E)` return type (BT-1864, BT-1867, BT-1868).
+- **`beamtalk gen-native` / `beamtalk generate stubs`** — generate Beamtalk-side stub classes for Erlang modules from their EEP-48 docs and specs (BT-1214, BT-1850).
+- **Native Erlang docs surface** — `:h Erlang <module>` lookup, REPL tab completion, MCP `docs` tool integration; `beamtalk_native_docs` reads EEP-48 attributes from `.beam`, supporting both EDoc-converted and EEP-59 attribute forms (BT-1851, BT-1852, BT-1903).
+- **LSP for FFI** — hover, signature help, and go-to-definition on FFI calls (BT-1853).
+- **EEP-59 doc attributes for native Erlang modules** — runtime modules migrated from EDoc to EEP-59; `:h` shows the original Erlang spec and supports type-definition lookup (BT-1900, BT-1901, BT-1905, BT-1960).
+- Hardened FFI boundary validation and defensive patterns (BT-1927); resolve `binary_to_term` from untrusted `.beam` data with `[safe]` (BT-1876).
+- Fix charlist coercion regression and bypassed coercion in `Result` wrapping (a8ad07a9, BT-1879).
+- Fix false-positive "untyped FFI" warnings in typed classes (BT-1926, BT-2039).
+- Filter hidden functions from `:h Erlang` and elide `Dynamic` in Result types (9b8c505c).
+- Replace triple-fallback FFI spec lookup with a canonical selector-to-function mapping (BT-1925).
+- Migration guide and ADR companion docs for the Result-at-FFI conversion (BT-1869).
+
+### Packages
+
+Beamtalk gains a real package manager. Builds, testing, and the REPL all flow through it.
+
+- **`[dependencies]` in `beamtalk.toml`** — path, git, and hex (via vendored hex bridge) dependency declarations parsed by the build (BT-1644).
+- **`beamtalk deps add | list | update`** — CLI surface that mutates `beamtalk.toml` and `beamtalk.lock` (BT-1649).
+- **Implicit dependency fetch on `build` / `test` / `repl`** so first-run experiences "just work" (BT-1648).
+- **Lockfile** — `beamtalk.lock` for both Beamtalk and `[[native_package]]` Erlang deps; lockfile entries replay across machines (BT-1715).
+- **Path / git / hex resolution** — git dependencies clone into `_build/deps/` with revision pinning; hex packages flow through the vendored hex bridge; auto-clone on build; transitive native deps detected and compiled (BT-1645, BT-1646, BT-1648).
+- **Qualified `pkg@Class` names** — lexer + parser + AST + semantic analysis support `mypkg@Foo` qualified references; codegen emits `bt@{package}@{class}` module names; collisions are detected at build time (BT-1650, BT-1651, BT-1652, BT-1653, BT-1659).
+- **Cross-package class collision detection** — diagnostics fire when two dependencies export the same class without a qualifier; a transitive-dependency warning fires when a class flows through two non-direct hops; a `--strict-deps` mode upgrades these to errors (BT-1653, BT-1654).
+- **`Package` reflection in REPL/MCP/LSP** — `:browse`, `:doc`, completions, and the MCP class index all show package provenance and filter internal classes/methods from cross-package completions (BT-1658, BT-1703, BT-1704).
+- **Per-package `corpus.json`** — MCP discovery now serves per-package corpora rather than a monorepo-only file (BT-1722).
+- **Generated `beamtalk_classes.hrl`** — native Erlang code includes generated header instead of hardcoding module references (BT-1730).
+- Fix Package and Workspace dependency discovery for user packages, error propagation, and Package as a proper Value object (BT-1724, BT-1798, BT-1809).
+- Cross-repo CI: pushes that touch the compiler trigger a downstream `beamtalk-http` build to catch surface breaks before release (BT-1742).
+- `beamtalk new --app` ships a Justfile template alongside the project skeleton (BT-1738).
+
+### Native Erlang in Packages
+
+Beamtalk packages can now contain Erlang sources alongside `.bt` files ([ADR 0072](docs/ADR/0072-user-erlang-sources-in-packages.md)).
+
+- **`native/*.erl` files compile as part of `beamtalk build`** via a vendored `rebar3` escript shipped in `runtime/tools/` (BT-1709, BT-1712, BT-1714, BT-1717).
+- **`[native.dependencies]` in `beamtalk.toml`** — Erlang/OTP application dependencies parsed and threaded into a generated `rebar.config` (BT-1713).
+- **`native_modules` in the `.app` file** — runtime knows which Erlang modules belong to which package, enabling per-package application start at workspace boot (BT-1710, BT-1724).
+- **EUnit tests in the package test pipeline** — `beamtalk test` discovers and runs `native/test/*.erl` EUnit suites alongside BUnit tests (#1785).
+- **EEP-48 doc generation for native modules** — `.beam` files compile with doc chunks so `:h Erlang <module>` works against user-defined modules too (BT-1900, BT-1905).
+- **Native module collision detection across packages** — same module name across two deps is a build error with a useful diagnostic (BT-1711).
+- **Demand-driven native compilation on single-file reload** — touching `native/foo.erl` rebuilds only that module on REPL `:sync` (BT-1717).
+- **Include headers shipped in dist bundles** for native compilation outside the source tree (BT-1731).
+- **Dynamic OTP app discovery in dist packaging** — Windows root walk, no hardcoded paths (BT-1779, BT-1784).
+- **`beamtalk fmt` / `lint` cover `.erl` files** in addition to `.bt` (BT-1909, BT-2054).
+- **ELP (Erlang LSP) configuration** lands so editor lint matches CI (#1958, #1959, #1962).
 
 ### Runtime
 
@@ -56,8 +172,70 @@
 - Fix `undef` crash for inherited class-method self-sends — a new `class_self_dispatch/4` runtime helper walks the superclass chain and threads class-var state correctly (BT-2007).
 - **Workspace project loads accumulate** — loading project A then project B on the same REPL/MCP workspace no longer evicts project A's classes. Previous-mtime tracking is now scoped per-project root, so each `:sync` / `load_project` only treats files under its own tree as candidates for "deleted" classification. Cross-project class collisions surface as `warnings` in the load-project response instead of silently overwriting earlier classes (BT-2089).
 - Fix spurious namespace collision error when hot-reloading a `Protocol define:` file across surfaces (e.g., MCP after REPL) — the compiler now filters pre-loaded protocol class entries before hierarchy injection, and protocol re-registration is allowed when the existing class has superclass `Protocol` (BT-2088).
+- **Class crash recovery via ETS heir** — class processes that crash are detected and restarted; ETS class metadata survives via the `heir` option so live actors keep their dispatch table (BT-1768, BT-1888).
+- **Self-send detection and cycle detection for actors** — runtime watchdog catches the common deadlock of `self foo` (synchronous self-send to a busy mailbox) and reports it as a structured error rather than hanging (BT-1325).
+- **Auto-chained `initialize`** ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md)) — supervisor / dynamic supervisor / actor base class run inherited `initialize` automatically up the chain; uninitialized typed-no-default fields are validated at construction (BT-1949, BT-1951).
+- **`UninitializedStateError`** when a typed-no-default state field is read before being set (BT-1949).
+- **`safe_dispatch` preserves stacktraces** and propagates the original exception class instead of collapsing to a generic error (BT-1822, BT-1889).
+- **Auto-cloning git deps during build** with transitive-dep tracking (BT-1788).
+- **`code:lib_dir/2` deprecation cleanup** in beamtalk_stdlib for OTP 27+ (49bac205).
+- Backward-compat error path no longer discards exception class (BT-1889).
+- Class registry / protocol registry / dispatch pipeline coverage raised to ≥85% with new EUnit suites (BT-1958..BT-1984).
+- Replace `jsx` with the OTP 27+ built-in `json` module (BT-1671).
 
-### Tooling
+### REPL & Tooling
+
+- **`:sync` REPL meta-command replaces `:load` / `:reload`** — single command does the right thing per file (load if new, reload if changed, drop if deleted), with auto-sync of test files when running `:test` / `:t` (BT-1707, #1803).
+- **`:test` / `:t` parallel execution + failure detail** — REPL test runner uses parallel workers and prints failure detail per test, matching `beamtalk test` output (BT-1668, BT-1669, BT-1673).
+- **`:browse` and `:doc` filter internal entries** and annotate dependency provenance (BT-1704).
+- **`:help Erlang <module>` + tab completion** — discoverable native FFI from inside the REPL (BT-1852).
+- **`beamtalk type-coverage` CLI command** — per-file and per-class typed/Dynamic ratios (BT-1915).
+- **`beamtalk gen-native` and `beamtalk generate stubs` subcommands** (BT-1214, BT-1849, BT-1850).
+- **`beamtalk deps` subcommand group** (`add` / `list` / `update`) (BT-1649).
+- **`beamtalk logs` --log-level CLI option** for actor initialize error reporting (#1792).
+- **`beamtalk doctor`** environment verification surface stays current with new dependencies.
+- **Justfile template + `--app` flag for `beamtalk new`** (BT-1738).
+- **MCP `load_project` reports failed file paths** when individual files don't compile (BT-1855).
+- **Surface parity test harness** (`tests/parity/`) drives identical input through REPL, MCP, CLI, and LSP and asserts equivalent output (BT-2077).
+- **`docs/development/surface-parity.md`** + `just check-surface-drift` CI gate keep documented operations aligned with code (BT-2075, BT-2082).
+- **Surface-only audit and promote-or-lock decisions** for asymmetric ops (BT-2083).
+- **LSP improvements**:
+  - Workspace symbol search (BT-2081).
+  - Go-to-Definition on method headers navigates to overridden parent (BT-1939).
+  - Find-refs / goto-def on constructor pattern class names (BT-1940).
+  - Goto-def and find-refs for protocol names (BT-1936).
+  - Find All References on method definition headers (BT-1938).
+  - Local variable + `self.field` completions (#1956).
+  - Completions for protocol class objects (BT-1933).
+  - Hover, signature help, and goto-def for FFI (BT-1853).
+  - Single-pass `find_overridden_method_definition` perf fix (BT-1943).
+  - Filter internal entries from cross-package completions (BT-1703).
+  - Build cache integration + typed completions (BT-1844).
+  - Typed completions emit FFI return-type hints (BT-1844).
+- **VS Code extension fixes** — init flow, binary discovery, esbuild ^0.28 to satisfy vite peer (#1947, #1948).
+- **MCP**:
+  - Native EEP-48 doc lookup wired through MCP `docs`.
+  - `load_project` activates dependency classes during bootstrap (#1796).
+  - Lint surface unreadable target files (BT-2056, BT-2067).
+  - REPL diagnostics parity audit and unification with CLI (BT-2009, BT-2052).
+  - MCP `test` tool timeout raised for large suites (BT-1668).
+- Improve error messages for dependency and native compilation failures (BT-1732).
+- Use `print_string` instead of `~p` for user-facing error messages (#1791).
+- BUnit `--quiet` flag and per-class test output cleanup (#1932); Beamtalk class names + source line numbers in stack traces (preserved from 0.3.1, hardened in this cycle).
+- Fix `beamtalk lint` / `fmt` test-fixture handling and stale `_build/deps` cleanup after dep resolution (BT-1907).
+- Cross-platform CI: `beamtalk-exec` Job Objects on Windows; consistent temp-dir handling across macOS/Linux/Windows (BT-1133, #1783, #1896).
+
+### Visibility & Access Control
+
+New language modifier ([ADR 0071](docs/ADR/0071-class-visibility-internal-modifier.md)).
+
+- **`internal` modifier** for classes and methods — package-scoped access; cross-package use is a compile-time error (E0401, E0402, E0403) with method-level warning (W0401) for borderline cases (BT-1698, BT-1700, BT-1701, BT-1702, BT-1705).
+- **Codegen emits visibility in `__beamtalk_meta/0`** so reflection and the LSP can mirror the source-level rule (BT-1699).
+- **Formatter preserves `internal` modifier** on classes and methods (#1731).
+- **REPL `:browse` / `:doc` and LSP completions filter internal entries** when crossing a package boundary (BT-1703, BT-1704).
+- E2E coverage for internal-visibility scenarios (BT-1705).
+
+### Diagnostics, Lint & Build Tooling
 
 - **Diagnostic summary** — `beamtalk build` and `beamtalk lint` print an aggregated diagnostic summary (category × severity) at end of run; `beamtalk lint --format json` emits a `summary` JSON object for CI diffing; new `diagnostic_summary` MCP tool for agent use (BT-2014).
 - Fix `beamtalk lint` diagnostic summary accounting — `files_checked` count, error surfacing, and `--format json` buffered output now report correctly (BT-2031).
@@ -77,11 +255,22 @@
 
 ### Documentation
 
-- ADR 0079: Named Actor Registration.
-- ADR 0080: Migrate Supervisor Lifecycle to Result — Implementation Tracking section lists the full BT-1993 epic breakdown (8 child issues across Phase 0 probes, Phase 1 runtime, Phase 2 stdlib, Phase 3 e2e + docs).
+- **ADR 0071**: Class Visibility — Internal Modifier.
+- **ADR 0072**: User Erlang Sources in Beamtalk Packages.
+- **ADR 0073**: Package Distribution and Discovery.
+- **ADR 0074**: Deferred Metaprogramming (BT-303).
+- **ADR 0075**: Erlang FFI Type Definitions (BT-1823).
+- **ADR 0076**: Convert Erlang `ok`/`error` Tuples to `Result` at FFI Boundary (BT-1838).
+- **ADR 0077**: Type Coverage Visibility.
+- **ADR 0078**: Actor Initialize Inheritance.
+- **ADR 0079**: Named Actor Registration.
+- **ADR 0080**: Migrate Supervisor Lifecycle to Result — Implementation Tracking section lists the full BT-1993 epic breakdown (8 child issues across Phase 0 probes, Phase 1 runtime, Phase 2 stdlib, Phase 3 e2e + docs).
 - Language features: supervision chapter rewritten to document the Result-shaped lifecycle API, the idempotent-startup convention ("target end state holds = `Ok`"), and boot-style vs recoverable call-site patterns; cross-linked to Actor Named Registration for the parallel registry/boundary pattern (BT-2001).
-- Language features: new "Named Actor Registration" chapter covering the API surface, proxy semantics caveats (monitors don't re-arm across restarts; equality rules; unregister makes proxy dead), reserved-name policy, BEAM mapping, and a before/after migration example from `Supervisor which:` + `initialize:` to named registration (BT-1991).
+- Language features: new "Named Actor Registration" chapter (BT-1991).
 - Language features: new "Local Variable Type Annotations" section; updated `@expect` documentation to reflect block-body support.
+- Language features: type-coverage visibility, package management system, native Erlang integration, REPL commands and interactive development, build system / incremental compilation, visibility and access control, stdlib updates (Printable protocol and new APIs) (BT-1804, BT-1805, BT-1806, BT-1807, BT-1808, BT-1809, BT-1810).
+- FFI Result conversion + migration guide (BT-1869).
+- Refresh of stale docs: known limitations, installation, version refs (BT-1810).
 
 ### Internal
 
