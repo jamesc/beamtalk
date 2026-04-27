@@ -29,7 +29,7 @@ The headline of 0.4 is a **type system that finally has teeth**: classes can opt
 - **Strict inequality `=/=`** — first-class stdlib method declaration alongside `=` and `~=` (BT-1563).
 - **Match-arm pattern variables are bound into the arm's type environment** — `match: [Foo(x) -> ...]` types `x` correctly inside the arm instead of falling back to `Dynamic` (BT-1946).
 - Allow omitting the default value on typed `state:`/`field:` declarations — `state: counter :: Integer` is now legal in typed actors (BT-1947).
-- Fix type annotation on a method parameter changing the runtime dispatch behaviour (BT-1944).
+- Fix type annotation on a method parameter changing the runtime dispatch behavior (BT-1944).
 - Parser: nested keyword messages inside map literals now parse correctly (BT-1854).
 - Fix unterminated block comments and stale `@expect type` directives that previously crashed or silently passed.
 - Remove deprecated `trace:` / `traceCr:` from Object (replaced by `show:` / `showCr:` in 0.3.1) (BT-1767).
@@ -79,9 +79,9 @@ The biggest theme of 0.4. The compiler now flows types through the full surface 
 - **Block parameter type propagation from method signatures** — typed `Block(T, R)` parameters propagate `T` into the block body (#1970).
 - **`@expect` reasons + `TypeAnnotation` diagnostic category** — `@expect type "<reason>"` records *why* a suppression exists, surfaced by lint and visible in the diagnostic summary (BT-1918, BT-1921, BT-1922).
 - **Diagnostic deduplication** — repeated identical warnings on the same span are coalesced (BT-1921), and warning/hint diagnostics carry `.with_hint()` text consistently (BT-1922, BT-1923).
-- **Self type metatype** — `Self`-typed return values now substitute correctly through inheritance and through generic positions like `Result(Self, Error)` (BT-1952, BT-1986, BT-1992).
+- **Self-type metatype** — `Self`-typed return values now substitute correctly through inheritance and through generic positions like `Result(Self, Error)` (BT-1952, BT-1986, BT-1992).
 - **Generic unification** — fixes for nested type args, union shapes, FFI shapes, super sends, and class-method-call-bound locals (BT-2017, BT-2018, BT-2019, BT-2021, BT-2022, BT-2023, BT-2025).
-- **Method-local type parameters** — `infer_method_local_params` generalised over arbitrary parametric types and gated on identifier validity (BT-1818, BT-1820, BT-1895).
+- **Method-local type parameters** — `infer_method_local_params` generalized over arbitrary parametric types and gated on identifier validity (BT-1818, BT-1820, BT-1895).
 - Class literals are accepted as `Behaviour` / `Class` arguments without a synthetic `class` send (BT-2038).
 - `Foo class` (metatype) annotations work in any type position; nil-check narrowing clears DNU warnings on class-side methods (BT-2034).
 - Conditional return type unification: `ifTrue:ifFalse:` declares `Block(R), Block(R) -> R` so both arms unify to a common return type (BT-2020).
@@ -113,7 +113,7 @@ The biggest theme of 0.4. The compiler now flows types through the full surface 
 The FFI boundary stops being a `Dynamic` cliff. Most of this lives behind two ADRs.
 
 - **Erlang FFI Type Definitions** ([ADR 0075](docs/ADR/0075-erlang-ffi-type-definitions.md)) — Erlang `-spec` attributes are read out of `.beam` abstract code (including dependency `.beam` files, not just OTP), translated through `NativeTypeRegistry`, and applied at the call site (BT-1840, BT-1841, BT-1842, BT-1906). `user_type` and `remote_type` references resolve transparently (BT-1902).
-- **`ok`/`error` tuples → `Result` at the FFI boundary** ([ADR 0076](docs/ADR/0076-ok-error-tuple-to-result-at-ffi-boundary.md)) — calls to typed Erlang functions whose spec is `{ok, T} | {error, R}` are coerced into typed `Result` values automatically; the spec reader recognises the union shape and synthesises a `Result(T, E)` return type (BT-1864, BT-1867, BT-1868).
+- **`ok`/`error` tuples → `Result` at the FFI boundary** ([ADR 0076](docs/ADR/0076-ok-error-tuple-to-result-at-ffi-boundary.md)) — calls to typed Erlang functions whose spec is `{ok, T} | {error, R}` are coerced into typed `Result` values automatically; the spec reader recognizes the union shape and synthesizes a `Result(T, E)` return type (BT-1864, BT-1867, BT-1868).
 - **`beamtalk gen-native` / `beamtalk generate stubs`** — generate Beamtalk-side stub classes for Erlang modules from their EEP-48 docs and specs (BT-1214, BT-1850).
 - **Native Erlang docs surface** — `:h Erlang <module>` lookup, REPL tab completion, MCP `docs` tool integration; `beamtalk_native_docs` reads EEP-48 attributes from `.beam`, supporting both EDoc-converted and EEP-59 attribute forms (BT-1851, BT-1852, BT-1903).
 - **LSP for FFI** — hover, signature help, and go-to-definition on FFI calls (BT-1853).
@@ -166,7 +166,7 @@ Beamtalk packages can now contain Erlang sources alongside `.bt` files ([ADR 007
 - Fix `'spawnAs'/2` defaulting to `[]` instead of `#{}`, which crashed supervised named children in `init/1` with `{badmap, []}` (BT-1991).
 - Fix REPL JSON formatter crashing when displaying a name-resolving proxy: `#beamtalk_object{pid = {registered, Name}}` now renders as `#Actor<Class,registered,Name>` instead of calling `pid_to_list/1` on a non-pid term (BT-1991).
 - **Supervisor lifecycle Result migration** ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md), BT-1993 epic) — runtime functions in `beamtalk_supervisor.erl` (`startLink/1`, `startChild/1,2`, `terminateChild/2` in both arities, `with_live_supervisor/3`) now return `{ok, V} | {error, #beamtalk_error{}}` instead of raising. FFI coercion (ADR 0076) lifts these to `Result` values at the Beamtalk boundary. The `beamtalk_class_dispatch` post-dispatch hook was extended to match both the bare `{beamtalk_supervisor_new, ...}` tuple and a `Result` tagged map wrapping it, preserving the ADR 0059 / BT-1285 guarantee that `class initialize:` runs in the caller's process (BT-1994, BT-1996, BT-1997, BT-1998).
-- `terminateChild` is now idempotent across both static and dynamic supervisor paths — terminating an already-terminated child returns `{ok, nil}` instead of raising. Previously only the dynamic path had this behaviour (BT-1998).
+- `terminateChild` is now idempotent across both static and dynamic supervisor paths — terminating an already-terminated child returns `{ok, nil}` instead of raising. Previously only the dynamic path had this behavior (BT-1998).
 - Fix deadlock when calling `self class spawnAs:` / `self class spawnWith:as:` inside a class factory method — metaclass dispatch now short-circuits spawn selectors to avoid re-entering the class gen_server (BT-2005).
 - Fix `undef` crash for `self spawnAs:` / `self spawnWith:as:` in class methods — new runtime helpers read class metadata from the process dictionary to avoid the gen_server deadlock (BT-2004).
 - Fix `undef` crash for inherited class-method self-sends — dispatch now walks the superclass chain correctly while preserving class-var state (BT-2007).
