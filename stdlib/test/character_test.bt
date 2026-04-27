@@ -56,3 +56,13 @@ TestCase subclass: CharacterTest
     self assert: $0 printString equals: "$0"
     self assert: (Character value: 65) equals: $A
     self assert: (Character value: 97) equals: $a
+
+  // BT-2095: Reflective sends on a Character literal must also dispatch
+  // against the Character method table, not Integer's. Without the
+  // perform-family bypass these would route through the runtime
+  // `class_of/1 == 'Integer'` path and miss the Character primitives.
+  testCharacterLiteralPerform =>
+    self assert: ($A perform: #asInteger) equals: 65
+    self assert: ($a perform: #uppercase) equals: 65
+    self assert: ($A perform: #lowercase) equals: 97
+    self assert: ($A perform: #printString) equals: "$A"

@@ -427,6 +427,27 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
+        // BT-2095: Reflective sends (`perform:` / `perform:withArguments:`) on a
+        // Character literal must reach the Character dispatch, not the default
+        // `beamtalk_message_dispatch:send/3` path that the protoobject handler
+        // emits — at runtime an integer would be classified as `Integer` and the
+        // reflected message would resolve against the wrong method table.
+        // The Character module's compiled `dispatch/3` re-dispatches `perform:`
+        // through itself, so routing the whole call there preserves both the
+        // reflective semantics and the static-type targeting.
+        if matches!(receiver, Expression::Literal(Literal::Character(_), _))
+            && matches!(
+                selector.well_known(),
+                Some(
+                    WellKnownSelector::Perform
+                        | WellKnownSelector::PerformWithArgs
+                        | WellKnownSelector::PerformLocallyWithArgs
+                )
+            )
+        {
+            return self.generate_character_literal_dispatch(receiver, selector, arguments);
+        }
+
         // Special case: ProtoObject methods - fundamental operations on all objects
         // class returns the class name for any object (primitives or actors)
         if let Some(doc) = self.try_generate_protoobject_message(receiver, selector, arguments)? {
