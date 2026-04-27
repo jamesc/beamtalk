@@ -427,25 +427,56 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // BT-2095: Reflective sends (`perform:` / `perform:withArguments:`) on a
-        // Character literal must reach the Character dispatch, not the default
-        // `beamtalk_message_dispatch:send/3` path that the protoobject handler
-        // emits — at runtime an integer would be classified as `Integer` and the
-        // reflected message would resolve against the wrong method table.
-        // The Character module's compiled `dispatch/3` re-dispatches `perform:`
-        // through itself, so routing the whole call there preserves both the
-        // reflective semantics and the static-type targeting.
-        if matches!(receiver, Expression::Literal(Literal::Character(_), _))
-            && matches!(
-                selector.well_known(),
+        // BT-2095: Reflective and class-introspection sends on a Character literal
+        // must honour the static type, not fall into the protoobject/object
+        // handlers that key on runtime `class_of/1` (which returns `'Integer'`
+        // for any integer receiver):
+        //   * `$A class`            → must return `'Character'`
+        //   * `$A respondsTo: #foo` → must consult Character's `has_method/1`
+        //   * `$A perform: #foo`    → must dispatch through Character
+        // The protoobject/object handlers run earlier than the general
+        // Character-literal fallback below, so intercept them here.
+        if matches!(receiver, Expression::Literal(Literal::Character(_), _)) {
+            match selector.well_known() {
+                Some(WellKnownSelector::Class) => {
+                    // BT-1937: Hoist any side effects in the receiver expression
+                    // (none for a literal, but capture preserves the contract).
+                    let (preamble, _) = self.capture_subexpr_sequence(&[receiver], "CharCls")?;
+                    // Resolve to the Character class object so equality with
+                    // the `Character` class reference holds — `class_of_object`
+                    // for raw integer 65 would otherwise return Integer's
+                    // class object via `class_of/1 == 'Integer'`.
+                    let call_doc = Document::Str(
+                        "call 'beamtalk_primitive':'class_of_object_by_name'('Character')",
+                    );
+                    return Ok(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "CharClsRes",
+                    ));
+                }
+                Some(WellKnownSelector::RespondsTo) => {
+                    let exprs: [&Expression; 2] = [receiver, &arguments[0]];
+                    let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "CharResp")?;
+                    let _recv = docs.remove(0);
+                    let sel_doc = docs.remove(0);
+                    let call_doc =
+                        docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
+                    return Ok(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "CharRespRes",
+                    ));
+                }
                 Some(
                     WellKnownSelector::Perform
-                        | WellKnownSelector::PerformWithArgs
-                        | WellKnownSelector::PerformLocallyWithArgs
-                )
-            )
-        {
-            return self.generate_character_literal_dispatch(receiver, selector, arguments);
+                    | WellKnownSelector::PerformWithArgs
+                    | WellKnownSelector::PerformLocallyWithArgs,
+                ) => {
+                    return self.generate_character_literal_dispatch(receiver, selector, arguments);
+                }
+                _ => {}
+            }
         }
 
         // Special case: ProtoObject methods - fundamental operations on all objects
