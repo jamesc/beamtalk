@@ -346,6 +346,15 @@ impl CoreErlangGenerator {
         if Self::is_erlang_ffi_receiver(receiver) {
             return Ok(None);
         }
+        // BT-2095: A bare class name as receiver (e.g. `Character value: 65`)
+        // is a class-method send, not block application. Fall through so the
+        // class-reference handler routes to `class_send` instead of generating
+        // a runtime is_function guard that ends up calling
+        // `beamtalk_primitive:send(ClassObject, 'value:', [65])` and hitting
+        // the actor-style `sync_send` path with no matching handle_call clause.
+        if matches!(receiver, Expression::ClassReference { .. }) {
+            return Ok(None);
+        }
         // BT-1260: Unknown receiver → runtime is_function guard with fallback
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
         Ok(Some(doc))

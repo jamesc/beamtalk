@@ -3,7 +3,8 @@
 
 // BT-339: Tests for the Character class — integer codes, equality, comparison,
 // predicates (isLetter, isDigit, isUppercase, isLowercase, isWhitespace),
-// arithmetic on char codes, and conversions (asString, asFloat)
+// arithmetic on char codes, and conversions (asString, asFloat).
+// BT-2095: Character-literal receivers dispatch to Character primitives.
 
 TestCase subclass: CharacterTest
 
@@ -36,5 +37,22 @@ TestCase subclass: CharacterTest
     self deny: $A isWhitespace
     self assert: ($A + 1) equals: 66
     self assert: ($z - $a) equals: 25
-    self assert: $A asString equals: "65"
+    self assert: $A asString equals: "A"
     self assert: $A asFloat equals: 65 asFloat
+
+  // BT-2095: Character-literal receivers dispatch to Character primitives,
+  // not Integer primitives. Without specialization, $A would land in the
+  // Integer method table at runtime and these would either return integer
+  // codepoints with the wrong shape (printString: "65") or DNU.
+  testCharacterLiteralDispatch =>
+    self assert: $A asInteger equals: 65
+    self assert: $a asInteger equals: 97
+    self assert: $a uppercase equals: 65
+    self assert: $A uppercase equals: 65
+    self assert: $A lowercase equals: 97
+    self assert: $a lowercase equals: 97
+    self assert: $A printString equals: "$A"
+    self assert: $a printString equals: "$a"
+    self assert: $0 printString equals: "$0"
+    self assert: (Character value: 65) equals: $A
+    self assert: (Character value: 97) equals: $a
