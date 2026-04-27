@@ -2,7 +2,7 @@
 
 Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
-**Status:** v0.3.1 — implemented features are stable, including generics, protocols, union types, and control flow narrowing. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the type system design.
+**Status:** v0.4.0 — implemented features are stable, including generics, protocols, union types, control flow narrowing, the `typed` class modifier, FFI type inference, package management with qualified `pkg@Class` names, native Erlang sources in packages, named actor registration, and Result-shaped supervisor lifecycles. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the type system design.
 
 **Syntax note:** Beamtalk uses a modernised Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
@@ -2427,7 +2427,7 @@ Analogous to Pharo's `Smalltalk` image facade.
 
 ```beamtalk
 Beamtalk version
-// => "0.3.1"
+// => "0.4.0"
 
 Beamtalk allClasses includes: Integer
 // => true

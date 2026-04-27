@@ -195,7 +195,7 @@ beamtalk repl --node mynode  # Use a specific node name
 On startup, the REPL prints the version and a help hint:
 
 ```
-Beamtalk v0.3.1
+Beamtalk v0.4.0
 Type :help for available commands, :exit to quit.
 
 >
@@ -563,7 +563,7 @@ Two global singleton objects provide introspection and project operations. These
 
 ```beamtalk
 > Beamtalk version
-0.3.1
+0.4.0
 
 > Beamtalk allClasses
 #(Integer, String, Array, ...)
