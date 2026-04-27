@@ -407,6 +407,7 @@ Running 1 test class...
 | Command | Description |
 |---------|-------------|
 | `:clear` | Clear all variable bindings |
+| `:interrupt` / `:int` | Cancel a running evaluation (out-of-band) |
 | `:exit` / `:quit` / `:q` | Exit the REPL (Ctrl+D also works) |
 
 **`:clear`** removes all session-local variable bindings:
@@ -420,6 +421,13 @@ ok
 
 > x
 ERROR: Undefined variable
+```
+
+**`:interrupt`** cancels a running evaluation. Because the main connection is blocked while an eval is in progress, the interrupt is sent out-of-band on a separate connection. Ctrl-C during an eval sends an interrupt automatically.
+
+```beamtalk
+> :interrupt
+ok
 ```
 
 ### Multi-line Input

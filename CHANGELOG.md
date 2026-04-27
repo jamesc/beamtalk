@@ -55,6 +55,7 @@
 - Fix `undef` crash for `self spawnAs:` / `self spawnWith:as:` in class methods — new runtime helpers read class metadata from the process dictionary to avoid the gen_server deadlock (BT-2004).
 - Fix `undef` crash for inherited class-method self-sends — a new `class_self_dispatch/4` runtime helper walks the superclass chain and threads class-var state correctly (BT-2007).
 - **Workspace project loads accumulate** — loading project A then project B on the same REPL/MCP workspace no longer evicts project A's classes. Previous-mtime tracking is now scoped per-project root, so each `:sync` / `load_project` only treats files under its own tree as candidates for "deleted" classification. Cross-project class collisions surface as `warnings` in the load-project response instead of silently overwriting earlier classes (BT-2089).
+- Fix spurious namespace collision error when hot-reloading a `Protocol define:` file across surfaces (e.g., MCP after REPL) — the compiler now filters pre-loaded protocol class entries before hierarchy injection, and protocol re-registration is allowed when the existing class has superclass `Protocol` (BT-2088).
 
 ### Tooling
 
@@ -71,6 +72,8 @@
 - `just test-repl-protocol` replaces `just test-e2e`; deprecated alias kept for one release cycle (BT-2085).
 - `just check-surface-drift` CI gate ensures documented surface parity stays in sync with code (BT-2082).
 - **BREAKING: REPL protocol 2.0 — deprecated ops `docs`, `load-file`, `reload`, and `modules` removed.** WebSocket clients sending these ops now receive an `unknown_op` error. Migrate to the equivalent eval'd message-sends: `Beamtalk help: ClassName` (optionally `selector: #sel`), `Workspace load: "path"`, `ClassName reload`, `Workspace classes`. The `versions.protocol` field returned by `describe` is bumped from `1.0` to `2.0` to mark the break. The MCP tools `docs`, `load_file`, and `reload_class` continue to work — they were already routed through `evaluate` of the migration target. The CLI's `:help`, `:load`, and `:reload` REPL meta-commands are unaffected (they desugar to the new message-sends locally) (BT-2091).
+- `:interrupt` / `:int` REPL meta-command — sends an out-of-band interrupt to cancel a running evaluation. Because the main connection is blocked during eval, the interrupt is sent on a separate connection. Also fires automatically on Ctrl-C during eval (BT-2090).
+- Sealed-class and sealed-method constraint diagnostics now reach CLI and MCP lint surfaces — new `inheritance` diagnostic category ensures these are no longer silently dropped (BT-2087).
 
 ### Documentation
 
