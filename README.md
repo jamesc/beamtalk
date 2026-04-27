@@ -61,7 +61,7 @@ config := #{#host => "localhost", #port => 8080}
 - **`internal` modifier** for package-scoped access control ([ADR 0071](docs/ADR/0071-class-visibility-internal-modifier.md)).
 - **Local variable type annotations** — `name :: Type := expr`.
 - **Auto-chained `initialize`** across the actor hierarchy ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md)).
-- **REPL `:sync`** replaces `:load`/`:reload`; `:interrupt` cancels a running eval out-of-band; parallel `:test`.
+- **REPL `:sync`** supersedes `:load`/`:reload` for project-wide reloads; `:interrupt` cancels a running eval out-of-band; parallel `:test`.
 - **Class crash recovery** via ETS `heir` so live actors keep dispatching after a class process restart.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.

@@ -225,8 +225,6 @@ Beamtalk REPL Commands:
 Error: Undefined variable: x
 ```
 
-<<<<<<< HEAD
-=======
 ### Workspace classes - List Loaded Classes
 
 ```beamtalk
