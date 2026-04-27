@@ -107,7 +107,11 @@ ensure_structured_error_eval_error_unknown_reason_test() ->
 %%% ============================================================================
 
 ensure_structured_error_compile_error_diagnostic_with_binary_hint_test() ->
-    Diag = #{message => <<"Unused variable `x`">>, hint => <<"Remove or prefix with `_`">>, line => 3},
+    Diag = #{
+        message => <<"Unused variable `x`">>,
+        hint => <<"Remove or prefix with `_`">>,
+        line => 3
+    },
     Result = beamtalk_repl_errors:ensure_structured_error({compile_error, [Diag]}),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
     ?assertEqual(<<"Unused variable `x`">>, Result#beamtalk_error.message),
@@ -135,7 +139,9 @@ ensure_structured_error_compile_error_diagnostic_multiple_entries_test() ->
     ?assertEqual(<<"first error">>, Result#beamtalk_error.message).
 
 ensure_structured_error_compile_error_binary_test() ->
-    Result = beamtalk_repl_errors:ensure_structured_error({compile_error, <<"syntax error near `+`">>}),
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {compile_error, <<"syntax error near `+`">>}
+    ),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
     ?assertEqual(<<"syntax error near `+`">>, Result#beamtalk_error.message).
 
@@ -192,7 +198,9 @@ ensure_structured_error_parse_error_test() ->
     ?assert(binary:match(Result#beamtalk_error.message, <<"Parse error">>) =/= nomatch).
 
 ensure_structured_error_invalid_request_test() ->
-    Result = beamtalk_repl_errors:ensure_structured_error({invalid_request, <<"missing op field">>}),
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {invalid_request, <<"missing op field">>}
+    ),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
     ?assert(binary:match(Result#beamtalk_error.message, <<"Invalid request">>) =/= nomatch).
 
