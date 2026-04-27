@@ -27,12 +27,17 @@
 %%   1 — validation errors found
 
 main(Args) ->
+    %% escript's standard_io defaults to latin1, so non-Latin-1 codepoints
+    %% (e.g. the em dash U+2014 in user-facing messages) print as `\x{2014}`.
+    %% Switch to unicode so messages render as written.
+    io:setopts([{encoding, unicode}]),
     CoreDir = parse_args(Args),
     case filelib:is_dir(CoreDir) of
         false ->
             io:format(standard_error, "Error: directory not found: ~s~n", [CoreDir]),
             halt(1);
-        true -> ok
+        true ->
+            ok
     end,
 
     CoreFiles = filelib:wildcard(filename:join(CoreDir, "*.core")),
@@ -55,25 +60,32 @@ main(Args) ->
             fun(CoreFile, {Specs, Mods, Errs}) ->
                 case process_core_file(CoreFile, BeamDir) of
                     {ok, N} when N > 0 -> {Specs + N, Mods + 1, Errs};
-                    {ok, _} -> {Specs, Mods, Errs};
+                    {ok, _} ->
+                        {Specs, Mods, Errs};
                     {error, Reason} ->
-                        io:format(standard_error,
-                                  "Error processing ~s: ~p~n",
-                                  [filename:basename(CoreFile), Reason]),
+                        io:format(
+                            standard_error,
+                            "Error processing ~s: ~p~n",
+                            [filename:basename(CoreFile), Reason]
+                        ),
                         {Specs, Mods, Errs + 1}
                 end
             end,
             {0, 0, 0},
-            CoreFiles),
+            CoreFiles
+        ),
 
     case CompileErrors > 0 of
         true ->
-            io:format(standard_error,
-                      "~p file(s) had errors during spec extraction/compilation.~n",
-                      [CompileErrors]),
+            io:format(
+                standard_error,
+                "~p file(s) had errors during spec extraction/compilation.~n",
+                [CompileErrors]
+            ),
             cleanup(TmpDir),
             halt(1);
-        false -> ok
+        false ->
+            ok
     end,
 
     case TotalSpecs of
@@ -82,8 +94,10 @@ main(Args) ->
             cleanup(TmpDir),
             halt(0);
         _ ->
-            io:format("Extracted ~p spec(s) from ~p module(s)~n",
-                       [TotalSpecs, ModulesWithSpecs])
+            io:format(
+                "Extracted ~p spec(s) from ~p module(s)~n",
+                [TotalSpecs, ModulesWithSpecs]
+            )
     end,
 
     %% Run Dialyzer on the generated BEAMs
@@ -92,16 +106,24 @@ main(Args) ->
 
     case run_dialyzer(BeamFiles) of
         ok ->
-            io:format("Dialyzer: no warnings — all ~p spec(s) are valid.~n",
-                       [TotalSpecs]),
+            io:format(
+                "Dialyzer: no warnings — all ~p spec(s) are valid.~n",
+                [TotalSpecs]
+            ),
             cleanup(TmpDir),
             halt(0);
         {warnings, Warnings} ->
-            io:format(standard_error,
-                      "~nDialyzer found ~p warning(s):~n", [length(Warnings)]),
-            lists:foreach(fun(W) ->
-                io:format(standard_error, "  ~s~n", [dialyzer:format_warning(W)])
-            end, Warnings),
+            io:format(
+                standard_error,
+                "~nDialyzer found ~p warning(s):~n",
+                [length(Warnings)]
+            ),
+            lists:foreach(
+                fun(W) ->
+                    io:format(standard_error, "  ~s~n", [dialyzer:format_warning(W)])
+                end,
+                Warnings
+            ),
             cleanup(TmpDir),
             halt(1);
         {error, Msg} ->
@@ -115,8 +137,11 @@ main(Args) ->
 parse_args([CoreDir]) ->
     CoreDir;
 parse_args(_) ->
-    io:format(standard_error,
-              "Usage: validate_specs.escript <core-dir>~n", []),
+    io:format(
+        standard_error,
+        "Usage: validate_specs.escript <core-dir>~n",
+        []
+    ),
     halt(1).
 
 %% ── Core file processing ────────────────────────────────────────────────
@@ -132,17 +157,25 @@ process_core_file(CoreFile, BeamDir) ->
                     case extract_spec_term(Content) of
                         {ok, SpecEntries} when length(SpecEntries) > 0 ->
                             Forms = build_abstract_forms(ModName, SpecEntries),
-                            case compile:forms(Forms, [debug_info,
-                                                       {outdir, BeamDir},
-                                                       return_errors]) of
+                            case
+                                compile:forms(Forms, [
+                                    debug_info,
+                                    {outdir, BeamDir},
+                                    return_errors
+                                ])
+                            of
                                 {ok, ModName, BeamBin} ->
-                                    BeamFile = filename:join(BeamDir,
-                                        atom_to_list(ModName) ++ ".beam"),
+                                    BeamFile = filename:join(
+                                        BeamDir,
+                                        atom_to_list(ModName) ++ ".beam"
+                                    ),
                                     ok = file:write_file(BeamFile, BeamBin),
                                     {ok, length(SpecEntries)};
                                 {ok, ModName, BeamBin, _Warnings} ->
-                                    BeamFile = filename:join(BeamDir,
-                                        atom_to_list(ModName) ++ ".beam"),
+                                    BeamFile = filename:join(
+                                        BeamDir,
+                                        atom_to_list(ModName) ++ ".beam"
+                                    ),
                                     ok = file:write_file(BeamFile, BeamBin),
                                     {ok, length(SpecEntries)};
                                 {error, Errors, _} ->
@@ -162,8 +195,13 @@ process_core_file(CoreFile, BeamDir) ->
 
 %% Extract module name from: module 'name' [...]
 extract_module_name(Content) ->
-    case re:run(Content, "^module\\s+'([^']+)'",
-                [{capture, [1], list}, multiline]) of
+    case
+        re:run(
+            Content,
+            "^module\\s+'([^']+)'",
+            [{capture, [1], list}, multiline]
+        )
+    of
         {match, [Name]} -> {ok, list_to_atom(Name)};
         nomatch -> error
     end.
@@ -180,8 +218,13 @@ extract_spec_term(Content) ->
     %%
     %% We find ALL 'spec' = positions and extract the balanced [...] value
     %% using bracket counting (regex can't handle nested brackets).
-    case re:run(Content, "'spec'\\s*=\\s*",
-                [global, {capture, first, index}]) of
+    case
+        re:run(
+            Content,
+            "'spec'\\s*=\\s*",
+            [global, {capture, first, index}]
+        )
+    of
         {match, Matches} ->
             extract_all_specs(Content, Matches, []);
         nomatch ->
@@ -206,8 +249,11 @@ extract_all_specs(Content, [[{Start, Len}] | Rest], Acc) ->
                                 {ok, [Entry]} ->
                                     extract_all_specs(Content, Rest, [Entry | Acc]);
                                 {ok, Entries} when is_list(Entries) ->
-                                    extract_all_specs(Content, Rest,
-                                                      lists:reverse(Entries) ++ Acc);
+                                    extract_all_specs(
+                                        Content,
+                                        Rest,
+                                        lists:reverse(Entries) ++ Acc
+                                    );
                                 {error, Reason} ->
                                     {error, {parse_term, Reason, SpecStr}}
                             end;
@@ -271,23 +317,26 @@ build_abstract_forms(ModName, SpecEntries) ->
         fun({{FunName, Arity}, TypeInfo}) ->
             {attribute, Line, spec, {{FunName, Arity}, TypeInfo}}
         end,
-        SpecEntries),
+        SpecEntries
+    ),
 
     %% Function stubs — body is erlang:nif_error(undef) so Dialyzer
     %% infers no_return(), avoiding false spec/body mismatches.
     FunDecls = lists:map(
         fun({FunName, Arity}) ->
-            Params = [{var, Line, list_to_atom("_A" ++ integer_to_list(I))}
-                      || I <- lists:seq(1, Arity)],
-            Body = [{call, Line,
-                     {remote, Line,
-                      {atom, Line, erlang},
-                      {atom, Line, nif_error}},
-                     [{atom, Line, undef}]}],
-            {function, Line, FunName, Arity,
-             [{clause, Line, Params, [], Body}]}
+            Params = [
+                {var, Line, list_to_atom("_A" ++ integer_to_list(I))}
+             || I <- lists:seq(1, Arity)
+            ],
+            Body = [
+                {call, Line, {remote, Line, {atom, Line, erlang}, {atom, Line, nif_error}}, [
+                    {atom, Line, undef}
+                ]}
+            ],
+            {function, Line, FunName, Arity, [{clause, Line, Params, [], Body}]}
         end,
-        FunArities),
+        FunArities
+    ),
 
     %% Eof
     Eof = {eof, Line},
@@ -302,9 +351,15 @@ run_dialyzer(BeamFiles) ->
         %% Use {warnings, []} to suppress return-type mismatch warnings
         %% from the nif_error stubs. Dialyzer still validates that all type
         %% expressions in specs are well-formed (unknown types cause a crash).
-        case dialyzer:run([{files, BeamFiles},
-                           {warnings, []},
-                           {analysis_type, succ_typings}] ++ PltOpts) of
+        case
+            dialyzer:run(
+                [
+                    {files, BeamFiles},
+                    {warnings, []},
+                    {analysis_type, succ_typings}
+                ] ++ PltOpts
+            )
+        of
             [] -> ok;
             Warnings -> {warnings, Warnings}
         end
@@ -326,45 +381,60 @@ ensure_plt() ->
             Apps = [erts, kernel, stdlib],
             Dirs = [code:lib_dir(A, ebin) || A <- Apps],
             ok = filelib:ensure_dir(DefaultPlt),
-            dialyzer:run([{analysis_type, plt_build},
-                          {output_plt, DefaultPlt},
-                          {files_rec, Dirs}]),
+            dialyzer:run([
+                {analysis_type, plt_build},
+                {output_plt, DefaultPlt},
+                {files_rec, Dirs}
+            ]),
             io:format("PLT built at ~s~n", [DefaultPlt]),
             []
     end.
 
 default_plt_path() ->
-    Home = case os:getenv("HOME") of
-        false -> os:getenv("USERPROFILE", "/tmp");
-        H -> H
-    end,
+    Home =
+        case os:getenv("HOME") of
+            false -> os:getenv("USERPROFILE", "/tmp");
+            H -> H
+        end,
     filename:join([Home, ".cache", "erlang", ".dialyzer_plt"]).
 
 %% ── Utilities ───────────────────────────────────────────────────────────
 
 make_tmp_dir() ->
-    TmpBase = case os:getenv("TMPDIR") of
-        false ->
-            case os:type() of
-                {win32, _} -> os:getenv("TEMP", "C:\\Temp");
-                _ -> "/tmp"
-            end;
-        Dir -> Dir
-    end,
-    TmpDir = filename:join(TmpBase,
-        "bt_spec_validate_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    TmpBase =
+        case os:getenv("TMPDIR") of
+            false ->
+                case os:type() of
+                    {win32, _} -> os:getenv("TEMP", "C:\\Temp");
+                    _ -> "/tmp"
+                end;
+            Dir ->
+                Dir
+        end,
+    TmpDir = filename:join(
+        TmpBase,
+        "bt_spec_validate_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
     ok = filelib:ensure_dir(filename:join(TmpDir, "x")),
     TmpDir.
 
 cleanup(TmpDir) ->
-    lists:foreach(fun(F) -> file:delete(F) end,
-                  filelib:wildcard(filename:join([TmpDir, "**", "*"]))),
-    SubDirs = lists:reverse(lists:sort(
-        filelib:wildcard(filename:join([TmpDir, "**"])))),
-    lists:foreach(fun(D) ->
-        case filelib:is_dir(D) of
-            true -> file:del_dir(D);
-            false -> ok
-        end
-    end, SubDirs),
+    lists:foreach(
+        fun(F) -> file:delete(F) end,
+        filelib:wildcard(filename:join([TmpDir, "**", "*"]))
+    ),
+    SubDirs = lists:reverse(
+        lists:sort(
+            filelib:wildcard(filename:join([TmpDir, "**"]))
+        )
+    ),
+    lists:foreach(
+        fun(D) ->
+            case filelib:is_dir(D) of
+                true -> file:del_dir(D);
+                false -> ok
+            end
+        end,
+        SubDirs
+    ),
     file:del_dir(TmpDir).
