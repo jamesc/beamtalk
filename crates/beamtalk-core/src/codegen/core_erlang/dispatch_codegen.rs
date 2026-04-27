@@ -38,7 +38,7 @@
 
 use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{Expression, MessageSelector, WellKnownSelector};
+use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -427,6 +427,58 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
+        // BT-2095: Reflective and class-introspection sends on a Character literal
+        // must honour the static type, not fall into the protoobject/object
+        // handlers that key on runtime `class_of/1` (which returns `'Integer'`
+        // for any integer receiver):
+        //   * `$A class`            → must return `'Character'`
+        //   * `$A respondsTo: #foo` → must consult Character's `has_method/1`
+        //   * `$A perform: #foo`    → must dispatch through Character
+        // The protoobject/object handlers run earlier than the general
+        // Character-literal fallback below, so intercept them here.
+        if matches!(receiver, Expression::Literal(Literal::Character(_), _)) {
+            match selector.well_known() {
+                Some(WellKnownSelector::Class) => {
+                    // BT-1937: Hoist any side effects in the receiver expression
+                    // (none for a literal, but capture preserves the contract).
+                    let (preamble, _) = self.capture_subexpr_sequence(&[receiver], "CharCls")?;
+                    // Resolve to the Character class object so equality with
+                    // the `Character` class reference holds — `class_of_object`
+                    // for raw integer 65 would otherwise return Integer's
+                    // class object via `class_of/1 == 'Integer'`.
+                    let call_doc = Document::Str(
+                        "call 'beamtalk_primitive':'class_of_object_by_name'('Character')",
+                    );
+                    return Ok(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "CharClsRes",
+                    ));
+                }
+                Some(WellKnownSelector::RespondsTo) => {
+                    let exprs: [&Expression; 2] = [receiver, &arguments[0]];
+                    let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "CharResp")?;
+                    let _recv = docs.remove(0);
+                    let sel_doc = docs.remove(0);
+                    let call_doc =
+                        docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
+                    return Ok(self.finalize_dispatch_with_preamble(
+                        preamble,
+                        call_doc,
+                        "CharRespRes",
+                    ));
+                }
+                Some(
+                    WellKnownSelector::Perform
+                    | WellKnownSelector::PerformWithArgs
+                    | WellKnownSelector::PerformLocallyWithArgs,
+                ) => {
+                    return self.generate_character_literal_dispatch(receiver, selector, arguments);
+                }
+                _ => {}
+            }
+        }
+
         // Special case: ProtoObject methods - fundamental operations on all objects
         // class returns the class name for any object (primitives or actors)
         if let Some(doc) = self.try_generate_protoobject_message(receiver, selector, arguments)? {
@@ -495,8 +547,54 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
+        // BT-2095: Character literals have static type Character, but at the BEAM
+        // level they are integers — runtime `class_of/1` returns `'Integer'` and
+        // routes them to `bt@stdlib@integer:dispatch/3`. Specialize at codegen so
+        // `$A asInteger`, `$A printString`, `$A uppercase`, etc. reach the
+        // Character module's dispatch (which delegates to Integer for inherited
+        // methods like `+`, `-`, `bitAnd:`).
+        if matches!(receiver, Expression::Literal(Literal::Character(_), _)) {
+            return self.generate_character_literal_dispatch(receiver, selector, arguments);
+        }
+
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         self.generate_runtime_dispatch(receiver, selector, arguments)
+    }
+
+    /// BT-2095: Routes a non-binary message to the Character module's `dispatch/3`.
+    ///
+    /// At the BEAM level, character literals are plain integers, so the default
+    /// runtime dispatch path (keyed on `is_integer/1`) sends them to the Integer
+    /// module. This codegen specialization restores the static type by emitting
+    /// a direct call to `bt@stdlib@character:dispatch/3` instead.
+    fn generate_character_literal_dispatch(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let selector_atom = selector.to_erlang_atom();
+
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
+        all_exprs.push(receiver);
+        for arg in arguments {
+            all_exprs.push(arg);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "CharDisp")?;
+        let actual_receiver = docs.remove(0);
+        let args_doc = Self::join_docs_with_commas(docs);
+
+        let call_doc = docvec![
+            "call 'bt@stdlib@character':'dispatch'('",
+            Document::String(selector_atom),
+            "', [",
+            args_doc,
+            "], ",
+            actual_receiver,
+            ")"
+        ];
+
+        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "CharDispRes"))
     }
 
     /// Generates a cast (fire-and-forget) message send (BT-920).
