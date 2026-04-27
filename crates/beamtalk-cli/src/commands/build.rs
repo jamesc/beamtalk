@@ -689,7 +689,7 @@ fn execute_build_passes(
     // native compilation so freshly compiled native modules are included.
     // Results are cached in _build/type_cache/ — incremental builds read zero
     // .beam files when the cache is fresh.
-    let native_type_registry = extract_type_specs(env).map(std::sync::Arc::new);
+    let native_type_registry = extract_type_specs(env, options).map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
@@ -838,15 +838,25 @@ fn post_process_package_artifacts(
 /// succeeds without type information. The LSP will still provide untyped
 /// completions in that case.
 ///
-/// Only runs in package mode (when `beamtalk.toml` exists) — single-file builds
-/// don't create the `_build/` directory.
+/// Runs in package mode (when `beamtalk.toml` exists) and in `--stdlib-mode`
+/// (used by `dialyzer-specs` and the build-stdlib pipeline, which compile a
+/// directory of stdlib `.bt` files without a manifest). Single-file builds
+/// without either signal return `None`.
 fn extract_type_specs(
     env: &BuildEnvironment,
+    options: &beamtalk_core::CompilerOptions,
 ) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
     use crate::beam_compiler;
 
-    // Skip in single-file mode — no _build/ directory to cache into.
-    env.pkg_manifest()?;
+    // No manifest: only continue when compiling the stdlib (which has its own
+    // FFI surface in runtime/stdlib/workspace ebins). Otherwise nothing to do.
+    if env.pkg_manifest().is_none() {
+        return if options.stdlib_mode {
+            super::build_stdlib::extract_stdlib_type_specs()
+        } else {
+            None
+        };
+    }
 
     let cache_dir = env.layout.type_cache_dir();
 
