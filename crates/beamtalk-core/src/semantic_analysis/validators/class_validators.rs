@@ -155,9 +155,9 @@ fn actor_must_spawn_error(class_name: &str, selector: &str, span: Span) -> Diagn
 }
 
 /// Creates a diagnostic for using `new`/`new:` on an Object-kind class (BT-1540).
-fn object_kind_new_error(class_name: &str, sel: &str, span: Span) -> Diagnostic {
+fn object_kind_new_error(class_name: &str, selector: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
-        format!("Object-kind class `{class_name}` cannot be instantiated with `{sel}`"),
+        format!("Object-kind class `{class_name}` cannot be instantiated with `{selector}`"),
         span,
     )
     .with_hint("Object subclasses are not instantiable. Use `Value subclass:` for data types")
