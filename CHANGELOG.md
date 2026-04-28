@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Language
+
+- **Character literal dispatch** — character literals (`$A`, `$a`, etc.) now dispatch through the Character method table instead of Integer's. `$A asString` returns `"A"` (not `"65"`), `$A class` returns `Character`, and methods like `uppercase`, `lowercase`, `printString` work correctly on character literals. `Character value: 65` class-method sends also work (BT-2095).
+
+### Internal
+
+- Fix `build --stdlib-mode` to resolve FFI types via `NativeTypeRegistry` — eliminates 202 spurious untyped-FFI warnings from `just dialyzer-specs` (#2138).
+
 ## 0.4.0 — 2026-04-27
 
 The headline of 0.4 is a **type system that finally has teeth**: classes can opt into a `typed` modifier, the inferencer flows types through generics, unions, narrowing predicates, FFI calls, block parameters, and method-local type variables, and a new `beamtalk type-coverage` CLI plus LSP "Dynamic with reason" hover make typing visible end-to-end. Around it: a real **package manager** (path / git / hex deps with lockfile, qualified `pkg@Class` names, cross-package collision detection), **native Erlang sources inside Beamtalk packages** (compiled via vendored rebar3, EUnit run from `beamtalk test`), **Result-shaped FFI and supervisor lifecycles** (ADR 0076 + 0080), **named actor registration** (ADR 0079), and an `internal` access-control modifier (ADR 0071).

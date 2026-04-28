@@ -72,6 +72,21 @@ dialog := "She said ""hello"""  // → She said "hello"
 | Grapheme cluster | Via `:string` module | `"👨‍👩‍👧‍👦"` is one grapheme, multiple codepoints |
 | `$a` | `97` (codepoint) | Character literal = Unicode codepoint |
 
+### Character Literal Methods
+
+Character literals dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values:
+
+```beamtalk
+$A asInteger              // => 65
+$A asString               // => "A"
+$A printString            // => "$A"
+$A uppercase              // => 65
+$A lowercase              // => 97
+$A class                  // => Character
+$A respondsTo: #uppercase // => true
+Character value: 65       // => $A
+```
+
 ### String Operations (Grapheme-Aware)
 
 String operations respect Unicode grapheme clusters (user-perceived characters):
