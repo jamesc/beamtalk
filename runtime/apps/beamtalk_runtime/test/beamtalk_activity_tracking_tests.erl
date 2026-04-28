@@ -20,6 +20,9 @@ their respective test modules.
 %% Helpers
 %%====================================================================
 
+test_project_path() ->
+    iolist_to_binary([beamtalk_file:'tempDirectory'(), "/bt-activity-test"]).
+
 %% Stop any pre-existing beamtalk_workspace_meta process to ensure
 %% a clean slate for each test.
 stop_if_running() ->
@@ -41,7 +44,7 @@ session_connect_updates_activity_test() ->
     stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_session">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         created_at => erlang:system_time(second)
     }),
 
@@ -69,7 +72,7 @@ actor_spawn_updates_activity_test() ->
     stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_actor">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         created_at => erlang:system_time(second)
     }),
 
@@ -97,7 +100,7 @@ code_reload_updates_activity_test() ->
     stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_reload">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         created_at => erlang:system_time(second)
     }),
 
@@ -125,7 +128,7 @@ multiple_activity_updates_test() ->
     stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_multiple">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         created_at => erlang:system_time(second)
     }),
 
@@ -160,7 +163,7 @@ mark_activity_delegates_to_workspace_meta_test() ->
     stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_mark">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         created_at => erlang:system_time(second)
     }),
 
