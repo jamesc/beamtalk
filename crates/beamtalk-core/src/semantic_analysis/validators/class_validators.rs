@@ -154,6 +154,16 @@ fn actor_must_spawn_error(class_name: &str, selector: &str, span: Span) -> Diagn
     .with_category(DiagnosticCategory::ActorNew)
 }
 
+/// Creates a diagnostic for using `new`/`new:` on an Object-kind class (BT-1540).
+fn object_kind_new_error(class_name: &str, sel: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        format!("Object-kind class `{class_name}` cannot be instantiated with `{sel}`"),
+        span,
+    )
+    .with_hint("Object subclasses are not instantiable. Use `Value subclass:` for data types")
+    .with_category(DiagnosticCategory::Type)
+}
+
 fn visit_actor_new(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
@@ -234,18 +244,7 @@ fn visit_object_new(
         if let Some(class_name) = receiver_class_name(receiver) {
             let sel = selector.name();
             if is_object_new_error(class_name, &sel, hierarchy) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Object-kind class `{class_name}` cannot be instantiated with `{sel}`"
-                        ),
-                        *span,
-                    )
-                    .with_hint(
-                        "Object subclasses are not instantiable. Use `Value subclass:` for data types",
-                    )
-                    .with_category(DiagnosticCategory::Type),
-                );
+                diagnostics.push(object_kind_new_error(class_name, &sel, *span));
             }
         }
     }
@@ -258,18 +257,7 @@ fn visit_object_new(
             for msg in messages {
                 let sel = msg.selector.name();
                 if is_object_new_error(class_name, &sel, hierarchy) {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "Object-kind class `{class_name}` cannot be instantiated with `{sel}`"
-                            ),
-                            msg.span,
-                        )
-                        .with_hint(
-                            "Object subclasses are not instantiable. Use `Value subclass:` for data types",
-                        )
-                        .with_category(DiagnosticCategory::Type),
-                    );
+                    diagnostics.push(object_kind_new_error(class_name, &sel, msg.span));
                 }
             }
         }
