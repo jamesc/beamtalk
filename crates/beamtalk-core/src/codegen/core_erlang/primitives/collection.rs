@@ -40,3 +40,36 @@ pub(crate) fn generate_collection_bif(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::doc_to_string;
+    use super::*;
+
+    #[test]
+    fn test_inject_into_with_params() {
+        let result = doc_to_string(generate_collection_bif(
+            "inject:into:",
+            &["Initial".to_string(), "Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_collection':'inject_into'(Self, Initial, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_inject_into_uses_defaults_when_no_params() {
+        let result = doc_to_string(generate_collection_bif("inject:into:", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_collection':'inject_into'(Self, _Initial, _Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_unknown_selector_returns_none() {
+        assert!(generate_collection_bif("do:", &[]).is_none());
+        assert!(generate_collection_bif("collect:", &[]).is_none());
+    }
+}
