@@ -39,6 +39,7 @@ from urllib.parse import urlsplit, unquote
 
 LISTEN_PORT = int(os.environ.get("HEX_BRIDGE_PORT", "18081"))
 TARGET_HOST = os.environ.get("HEX_BRIDGE_TARGET", "repo.hex.pm")
+MAX_CONNECT_HEADER_BYTES = 64 * 1024
 
 # Parse upstream proxy from HTTP_PROXY env var using a proper URL parser
 # to handle percent-encoded credentials and IPv6 addresses correctly.
@@ -76,6 +77,8 @@ def _open_tls(path):
                 if not chunk:
                     raise ConnectionError("Upstream proxy closed connection")
                 resp += chunk
+                if len(resp) > MAX_CONNECT_HEADER_BYTES:
+                    raise ConnectionError("CONNECT response headers too large")
             status_line = resp.split(b"\r\n", 1)[0]
             try:
                 status_code = int(status_line.split(b" ", 2)[1])
