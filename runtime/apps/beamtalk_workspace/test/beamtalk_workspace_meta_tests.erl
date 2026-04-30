@@ -19,7 +19,7 @@ Tests workspace metadata tracking and activity updates.
 test_metadata() ->
     #{
         workspace_id => <<"test123">>,
-        project_path => <<"/tmp/test">>,
+        project_path => <<"/bt_test/workspace">>,
         % Use seconds, not milliseconds
         created_at => erlang:system_time(second),
         last_activity => erlang:system_time(second)
@@ -135,7 +135,7 @@ get_metadata_includes_all_fields_test() ->
 
     %% Verify values
     ?assertEqual(<<"test123">>, maps:get(workspace_id, M)),
-    ?assertEqual(<<"/tmp/test">>, maps:get(project_path, M)),
+    ?assertEqual(<<"/bt_test/workspace">>, maps:get(project_path, M)),
     ?assertEqual(9001, maps:get(repl_port, M)),
     ?assertEqual([], maps:get(supervised_actors, M)),
     ?assert(is_atom(maps:get(node_name, M))),
@@ -442,11 +442,11 @@ persist_and_restore_modules_test() ->
     %% Start server, register a module, then stop (triggers terminate persist)
     {ok, Pid1} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
-        project_path => <<"/tmp/persist_test">>,
+        project_path => <<"/bt_test/persist">>,
         created_at => 1000000
     }),
     ok = beamtalk_workspace_meta:register_module(lists),
-    ok = beamtalk_workspace_meta:register_module(maps, "/tmp/src/maps_test.bt"),
+    ok = beamtalk_workspace_meta:register_module(maps, "/bt_test/src/maps_test.bt"),
     %% Wait for debounce timer to fire
     timer:sleep(2500),
     gen_server:stop(Pid1),
@@ -458,14 +458,14 @@ persist_and_restore_modules_test() ->
     %% Start a new server with same workspace - modules should be restored
     {ok, Pid2} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
-        project_path => <<"/tmp/persist_test">>,
+        project_path => <<"/bt_test/persist">>,
         created_at => 1000000
     }),
 
     {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
     ?assert(lists:keymember(lists, 1, Modules)),
     %% Source path should survive the persist/restore round-trip
-    ?assertEqual({maps, "/tmp/src/maps_test.bt"}, lists:keyfind(maps, 1, Modules)),
+    ?assertEqual({maps, "/bt_test/src/maps_test.bt"}, lists:keyfind(maps, 1, Modules)),
     %% Module registered without source should have undefined
     ?assertEqual({lists, undefined}, lists:keyfind(lists, 1, Modules)),
 
@@ -481,9 +481,9 @@ load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
     Home =
-        case os:getenv("HOME") of
-            false -> os:getenv("USERPROFILE", "/tmp");
-            H -> H
+        case beamtalk_platform:home_dir() of
+            false -> filename:basedir(user_cache, "beamtalk");
+            HomeDir -> HomeDir
         end,
     MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
     MetaFile = filename:join(MetaDir, "metadata.json"),
@@ -503,13 +503,13 @@ load_corrupt_json_falls_back_test() ->
     %% Should start successfully despite corrupt file
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
-        project_path => <<"/tmp/corrupt_test">>,
+        project_path => <<"/bt_test/corrupt">>,
         created_at => 2000000
     }),
 
     %% Should have default state (not crash)
     {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
-    ?assertEqual(<<"/tmp/corrupt_test">>, maps:get(project_path, Meta)),
+    ?assertEqual(<<"/bt_test/corrupt">>, maps:get(project_path, Meta)),
     ?assertEqual([], maps:get(supervised_actors, Meta)),
     ?assertEqual(2000000, maps:get(created_at, Meta)),
 
@@ -595,7 +595,7 @@ debounce_coalesces_rapid_changes_test() ->
 
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
-        project_path => <<"/tmp/debounce_test">>,
+        project_path => <<"/bt_test/debounce">>,
         created_at => 3000000
     }),
 
@@ -658,7 +658,7 @@ run_mode_no_disk_write_test() ->
 
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
-        project_path => <<"/tmp/run_mode_test">>,
+        project_path => <<"/bt_test/run_mode">>,
         created_at => erlang:system_time(second),
         repl => false
     }),
@@ -686,14 +686,14 @@ run_mode_metadata_accessible_test() ->
 
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
-        project_path => <<"/tmp/run_meta_test">>,
+        project_path => <<"/bt_test/run_meta">>,
         created_at => erlang:system_time(second),
         repl => false
     }),
 
     {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
     ?assertEqual(WsId, maps:get(workspace_id, Meta)),
-    ?assertEqual(<<"/tmp/run_meta_test">>, maps:get(project_path, Meta)),
+    ?assertEqual(<<"/bt_test/run_meta">>, maps:get(project_path, Meta)),
 
     gen_server:stop(Pid).
 
