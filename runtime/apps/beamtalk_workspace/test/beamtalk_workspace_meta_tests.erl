@@ -420,13 +420,8 @@ unregister_module_when_not_started_test() ->
 persist_and_restore_modules_test() ->
     %% Use a unique workspace ID so we control the metadata file
     WsId = <<"persist_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home =
-        case beamtalk_platform:home_dir() of
-            false -> filename:basedir(user_cache, "beamtalk");
-            HomeDir -> HomeDir
-        end,
-    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
-    MetaFile = filename:join(MetaDir, "metadata.json"),
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
 
     %% Clean up any leftover file
     _ = file:delete(MetaFile),
@@ -480,13 +475,8 @@ persist_and_restore_modules_test() ->
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home =
-        case beamtalk_platform:home_dir() of
-            false -> filename:basedir(user_cache, "beamtalk");
-            HomeDir -> HomeDir
-        end,
-    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
-    MetaFile = filename:join(MetaDir, "metadata.json"),
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
 
     %% Write corrupt JSON
     filelib:ensure_dir(MetaFile),
@@ -574,13 +564,8 @@ get_class_source_when_not_started_test() ->
 debounce_coalesces_rapid_changes_test() ->
     %% Use a unique workspace ID to control the metadata file
     WsId = <<"debounce_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home =
-        case beamtalk_platform:home_dir() of
-            false -> filename:basedir(user_cache, "beamtalk");
-            HomeDir -> HomeDir
-        end,
-    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
-    MetaFile = filename:join(MetaDir, "metadata.json"),
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
 
     %% Clean up any leftover file
     _ = file:delete(MetaFile),
