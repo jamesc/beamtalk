@@ -406,7 +406,7 @@ Running 1 test class...
 
 | Command | Description |
 |---------|-------------|
-| `:interrupt` / `:int` | Cancel a running evaluation (out-of-band) |
+| `:interrupt` / `:int` | Cancel a running evaluation (out-of-band interrupt over a separate connection) |
 | `:clear` | Clear all variable bindings |
 | `:exit` / `:quit` / `:q` | Exit the REPL (Ctrl+D also works) |
 
