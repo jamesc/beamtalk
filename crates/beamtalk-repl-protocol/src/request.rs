@@ -491,11 +491,109 @@ mod tests {
     }
 
     #[test]
+    fn eval_with_trace_true_includes_field() {
+        let req = RequestBuilder::eval_with_trace("1 + 2", true);
+        assert_eq!(req["op"], "eval");
+        assert_eq!(req["code"], "1 + 2");
+        assert_eq!(req["trace"], true);
+    }
+
+    #[test]
+    fn eval_with_trace_false_omits_field() {
+        let req = RequestBuilder::eval_with_trace("1 + 2", false);
+        assert_eq!(req["op"], "eval");
+        assert!(req["trace"].is_null());
+    }
+
+    #[test]
+    fn complete_request_has_correct_shape() {
+        let req = RequestBuilder::complete("Arr");
+        assert_eq!(req["op"], "complete");
+        assert_eq!(req["code"], "Arr");
+    }
+
+    #[test]
     fn complete_with_cursor_includes_cursor() {
         let req = RequestBuilder::complete_with_cursor("foo ", 4);
         assert_eq!(req["op"], "complete");
         assert_eq!(req["code"], "foo ");
         assert_eq!(req["cursor"], 4);
+    }
+
+    #[test]
+    fn complete_with_session_some_includes_session() {
+        let req = RequestBuilder::complete_with_session("Arr", 3, Some("sess-1"));
+        assert_eq!(req["op"], "complete");
+        assert_eq!(req["session"], "sess-1");
+    }
+
+    #[test]
+    fn complete_with_session_none_omits_session() {
+        let req = RequestBuilder::complete_with_session("Arr", 3, None);
+        assert_eq!(req["op"], "complete");
+        assert!(req["session"].is_null());
+    }
+
+    #[test]
+    fn erlang_complete_without_module() {
+        let req = RequestBuilder::erlang_complete("ets:", None);
+        assert_eq!(req["op"], "erlang-complete");
+        assert_eq!(req["prefix"], "ets:");
+        assert!(req["module"].is_null());
+    }
+
+    #[test]
+    fn erlang_complete_with_module() {
+        let req = RequestBuilder::erlang_complete("insert", Some("ets"));
+        assert_eq!(req["op"], "erlang-complete");
+        assert_eq!(req["prefix"], "insert");
+        assert_eq!(req["module"], "ets");
+    }
+
+    #[test]
+    fn info_request_has_correct_shape() {
+        let req = RequestBuilder::info("Counter");
+        assert_eq!(req["op"], "info");
+        assert_eq!(req["symbol"], "Counter");
+    }
+
+    #[test]
+    fn show_codegen_request_has_correct_shape() {
+        let req = RequestBuilder::show_codegen("1 + 2");
+        assert_eq!(req["op"], "show-codegen");
+        assert_eq!(req["code"], "1 + 2");
+    }
+
+    #[test]
+    fn show_codegen_class_without_selector() {
+        let req = RequestBuilder::show_codegen_class("Counter", None);
+        assert_eq!(req["op"], "show-codegen");
+        assert_eq!(req["class"], "Counter");
+        assert!(req["selector"].is_null());
+    }
+
+    #[test]
+    fn show_codegen_class_with_selector() {
+        let req = RequestBuilder::show_codegen_class("Counter", Some("increment"));
+        assert_eq!(req["op"], "show-codegen");
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["selector"], "increment");
+    }
+
+    #[test]
+    fn load_source_request_has_correct_shape() {
+        let req = RequestBuilder::load_source("class Foo\n  x => 42");
+        assert_eq!(req["op"], "load-source");
+        assert_eq!(req["source"], "class Foo\n  x => 42");
+    }
+
+    #[test]
+    fn load_project_request_has_correct_shape() {
+        let req = RequestBuilder::load_project("/my/project", false);
+        assert_eq!(req["op"], "load-project");
+        assert_eq!(req["path"], "/my/project");
+        assert_eq!(req["include_tests"], false);
+        assert!(req["force"].is_null());
     }
 
     #[test]
@@ -508,9 +606,241 @@ mod tests {
     }
 
     #[test]
+    fn clear_request_has_correct_op() {
+        let req = RequestBuilder::clear();
+        assert_eq!(req["op"], "clear");
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
+    }
+
+    #[test]
+    fn bindings_request_has_correct_op() {
+        let req = RequestBuilder::bindings();
+        assert_eq!(req["op"], "bindings");
+    }
+
+    #[test]
+    fn sessions_request_has_correct_op() {
+        let req = RequestBuilder::sessions();
+        assert_eq!(req["op"], "sessions");
+    }
+
+    #[test]
+    fn clone_session_request_has_correct_op() {
+        let req = RequestBuilder::clone_session();
+        assert_eq!(req["op"], "clone");
+    }
+
+    #[test]
+    fn close_request_has_correct_op() {
+        let req = RequestBuilder::close();
+        assert_eq!(req["op"], "close");
+    }
+
+    #[test]
+    fn actors_request_has_correct_op() {
+        let req = RequestBuilder::actors();
+        assert_eq!(req["op"], "actors");
+    }
+
+    #[test]
+    fn inspect_request_has_correct_shape() {
+        let req = RequestBuilder::inspect("Counter@pid");
+        assert_eq!(req["op"], "inspect");
+        assert_eq!(req["actor"], "Counter@pid");
+    }
+
+    #[test]
+    fn kill_request_has_correct_shape() {
+        let req = RequestBuilder::kill("Counter@pid");
+        assert_eq!(req["op"], "kill");
+        assert_eq!(req["actor"], "Counter@pid");
+    }
+
+    #[test]
+    fn interrupt_request_has_correct_op() {
+        let req = RequestBuilder::interrupt();
+        assert_eq!(req["op"], "interrupt");
+        assert!(req["session"].is_null());
+    }
+
+    #[test]
     fn interrupt_with_session() {
         let req = RequestBuilder::interrupt_with_session("sess-42");
         assert_eq!(req["op"], "interrupt");
         assert_eq!(req["session"], "sess-42");
+    }
+
+    #[test]
+    fn unload_request_has_correct_shape() {
+        let req = RequestBuilder::unload("bt@counter");
+        assert_eq!(req["op"], "unload");
+        assert_eq!(req["module"], "bt@counter");
+    }
+
+    #[test]
+    fn test_class_request_has_correct_shape() {
+        let req = RequestBuilder::test_class("CounterTest");
+        assert_eq!(req["op"], "test");
+        assert_eq!(req["class"], "CounterTest");
+    }
+
+    #[test]
+    fn test_file_request_has_correct_shape() {
+        let req = RequestBuilder::test_file("stdlib/test/counter_test.bt");
+        assert_eq!(req["op"], "test");
+        assert_eq!(req["file"], "stdlib/test/counter_test.bt");
+    }
+
+    #[test]
+    fn test_method_request_has_correct_shape() {
+        let req = RequestBuilder::test_method("CounterTest", "testIncrement");
+        assert_eq!(req["op"], "test");
+        assert_eq!(req["class"], "CounterTest");
+        assert_eq!(req["method"], "testIncrement");
+    }
+
+    #[test]
+    fn test_all_request_has_correct_op() {
+        let req = RequestBuilder::test_all();
+        assert_eq!(req["op"], "test-all");
+    }
+
+    #[test]
+    fn erlang_help_without_function() {
+        let req = RequestBuilder::erlang_help("ets", None);
+        assert_eq!(req["op"], "erlang-help");
+        assert_eq!(req["module"], "ets");
+        assert!(req["function"].is_null());
+    }
+
+    #[test]
+    fn erlang_help_with_function() {
+        let req = RequestBuilder::erlang_help("ets", Some("insert"));
+        assert_eq!(req["op"], "erlang-help");
+        assert_eq!(req["module"], "ets");
+        assert_eq!(req["function"], "insert");
+    }
+
+    #[test]
+    fn describe_request_has_correct_op() {
+        let req = RequestBuilder::describe();
+        assert_eq!(req["op"], "describe");
+    }
+
+    #[test]
+    fn health_request_has_correct_op() {
+        let req = RequestBuilder::health();
+        assert_eq!(req["op"], "health");
+    }
+
+    #[test]
+    fn shutdown_request_has_correct_shape() {
+        let req = RequestBuilder::shutdown("secret-cookie");
+        assert_eq!(req["op"], "shutdown");
+        assert_eq!(req["cookie"], "secret-cookie");
+    }
+
+    #[test]
+    fn list_classes_without_filter() {
+        let req = RequestBuilder::list_classes(None);
+        assert_eq!(req["op"], "list-classes");
+        assert!(req["filter"].is_null());
+    }
+
+    #[test]
+    fn list_classes_with_filter() {
+        let req = RequestBuilder::list_classes(Some("Counter"));
+        assert_eq!(req["op"], "list-classes");
+        assert_eq!(req["filter"], "Counter");
+    }
+
+    #[test]
+    fn enable_tracing_request_has_correct_op() {
+        let req = RequestBuilder::enable_tracing();
+        assert_eq!(req["op"], "enable-tracing");
+    }
+
+    #[test]
+    fn disable_tracing_request_has_correct_op() {
+        let req = RequestBuilder::disable_tracing();
+        assert_eq!(req["op"], "disable-tracing");
+    }
+
+    #[test]
+    fn get_traces_all_none_has_only_op() {
+        let req = RequestBuilder::get_traces(None, None, None, None, None, None);
+        assert_eq!(req["op"], "get-traces");
+        assert!(req["actor"].is_null());
+        assert!(req["selector"].is_null());
+        assert!(req["class"].is_null());
+        assert!(req["outcome"].is_null());
+        assert!(req["min_duration_ns"].is_null());
+        assert!(req["limit"].is_null());
+    }
+
+    #[test]
+    fn get_traces_all_some_includes_all_fields() {
+        let req = RequestBuilder::get_traces(
+            Some("Counter@pid"),
+            Some("increment"),
+            Some("Counter"),
+            Some("ok"),
+            Some(1_000_000),
+            Some(50),
+        );
+        assert_eq!(req["op"], "get-traces");
+        assert_eq!(req["actor"], "Counter@pid");
+        assert_eq!(req["selector"], "increment");
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["outcome"], "ok");
+        assert_eq!(req["min_duration_ns"], 1_000_000u64);
+        assert_eq!(req["limit"], 50u32);
+    }
+
+    #[test]
+    fn actor_stats_without_actor() {
+        let req = RequestBuilder::actor_stats(None);
+        assert_eq!(req["op"], "actor-stats");
+        assert!(req["actor"].is_null());
+    }
+
+    #[test]
+    fn actor_stats_with_actor() {
+        let req = RequestBuilder::actor_stats(Some("Counter@pid"));
+        assert_eq!(req["op"], "actor-stats");
+        assert_eq!(req["actor"], "Counter@pid");
+    }
+
+    #[test]
+    fn export_traces_all_none_has_only_op() {
+        let req = RequestBuilder::export_traces(None, None, None, None, None, None, None);
+        assert_eq!(req["op"], "export-traces");
+        assert!(req["path"].is_null());
+        assert!(req["actor"].is_null());
+    }
+
+    #[test]
+    fn export_traces_with_path_and_actor() {
+        let req = RequestBuilder::export_traces(
+            Some("/var/traces.json"),
+            Some("Counter@pid"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(req["op"], "export-traces");
+        assert_eq!(req["path"], "/var/traces.json");
+        assert_eq!(req["actor"], "Counter@pid");
+        assert!(req["selector"].is_null());
+    }
+
+    #[test]
+    fn stdin_request_preserves_id() {
+        let req = RequestBuilder::stdin("msg-007", "hello\n");
+        assert_eq!(req["op"], "stdin");
+        assert_eq!(req["id"], "msg-007");
+        assert_eq!(req["value"], "hello\n");
     }
 }
