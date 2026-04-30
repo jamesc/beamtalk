@@ -75,6 +75,8 @@ logs/
 .rebar3/
 rebar.lock
 rebar3.crashdump
+# rebar3 checkout deps (local development overrides, not committed)
+runtime/_checkouts/
 
 # Erlang crash dumps
 erl_crash.dump
