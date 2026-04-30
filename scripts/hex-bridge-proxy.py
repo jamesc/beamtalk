@@ -56,41 +56,59 @@ else:
     UPSTREAM_PORT = 0
 
 
-def https_get(path):
-    """Perform HTTPS GET through the upstream proxy's CONNECT tunnel."""
-    sock = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=30)
-    tls = None
-    try:
-        # Establish CONNECT tunnel with proxy auth
-        connect_req = (
-            f"CONNECT {TARGET_HOST}:443 HTTP/1.1\r\n"
-            f"Host: {TARGET_HOST}:443\r\n"
-            f"Proxy-Authorization: Basic {PROXY_AUTH}\r\n"
-            f"\r\n"
-        )
-        sock.sendall(connect_req.encode())
-        resp = b""
-        while b"\r\n\r\n" not in resp:
-            chunk = sock.recv(4096)
-            if not chunk:
-                raise ConnectionError("Upstream proxy closed connection")
-            resp += chunk
-        status_line = resp.split(b"\r\n", 1)[0]
-        # Parse numeric status code
+def _open_tls(path):
+    """Open a TLS connection to TARGET_HOST, via upstream proxy or directly.
+
+    Returns the connected TLS socket; caller is responsible for closing it.
+    """
+    if UPSTREAM_HOST:
+        # Route through upstream proxy via CONNECT tunnel
+        sock = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=30)
         try:
-            status_code = int(status_line.split(b" ", 2)[1])
-        except (IndexError, ValueError):
-            status_code = 0
-        if status_code != 200:
-            raise ConnectionError(f"CONNECT failed: {status_line.decode()}")
+            connect_req = (
+                f"CONNECT {TARGET_HOST}:443 HTTP/1.1\r\n"
+                f"Host: {TARGET_HOST}:443\r\n"
+                f"Proxy-Authorization: Basic {PROXY_AUTH}\r\n"
+                f"\r\n"
+            )
+            sock.sendall(connect_req.encode())
+            resp = b""
+            while b"\r\n\r\n" not in resp:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    raise ConnectionError("Upstream proxy closed connection")
+                resp += chunk
+            status_line = resp.split(b"\r\n", 1)[0]
+            try:
+                status_code = int(status_line.split(b" ", 2)[1])
+            except (IndexError, ValueError):
+                status_code = 0
+            if status_code != 200:
+                raise ConnectionError(f"CONNECT failed: {status_line.decode()}")
 
-        # Wrap in TLS (verify_mode=NONE to accept MITM certs)
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        tls = ctx.wrap_socket(sock, server_hostname=TARGET_HOST)
+            # Wrap in TLS (verify_mode=NONE to accept MITM certs)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            return ctx.wrap_socket(sock, server_hostname=TARGET_HOST)
+        except Exception:
+            sock.close()
+            raise
+    else:
+        # Direct connection — use Python ssl which works where Erlang's httpc fails
+        sock = socket.create_connection((TARGET_HOST, 443), timeout=30)
+        try:
+            ctx = ssl.create_default_context()
+            return ctx.wrap_socket(sock, server_hostname=TARGET_HOST)
+        except Exception:
+            sock.close()
+            raise
 
-        # Send HTTP/1.1 request inside the tunnel
+
+def https_get(path):
+    """Perform HTTPS GET, either directly or through an upstream proxy's CONNECT tunnel."""
+    tls = _open_tls(path)
+    try:
         http_req = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {TARGET_HOST}\r\n"
@@ -101,7 +119,6 @@ def https_get(path):
         )
         tls.sendall(http_req.encode())
 
-        # Read full response
         data = b""
         while True:
             try:
@@ -113,16 +130,10 @@ def https_get(path):
                 break
         return data
     finally:
-        if tls is not None:
-            try:
-                tls.close()
-            except OSError:
-                pass
-        else:
-            try:
-                sock.close()
-            except OSError:
-                pass
+        try:
+            tls.close()
+        except OSError:
+            pass
 
 
 def _dechunk(data):
@@ -218,14 +229,13 @@ class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    if not UPSTREAM_HOST:
-        print("No HTTP_PROXY set — hex-bridge not needed, exiting.", flush=True)
-        sys.exit(0)
-
     server = http.server.HTTPServer(("127.0.0.1", LISTEN_PORT), HexBridgeHandler)
+    if UPSTREAM_HOST:
+        via = f"via {UPSTREAM_HOST}:{UPSTREAM_PORT}"
+    else:
+        via = "direct"
     print(
-        f"hex-bridge listening on 127.0.0.1:{LISTEN_PORT} -> {TARGET_HOST} "
-        f"(via {UPSTREAM_HOST}:{UPSTREAM_PORT})",
+        f"hex-bridge listening on 127.0.0.1:{LISTEN_PORT} -> {TARGET_HOST} ({via})",
         flush=True,
     )
     server.serve_forever()
