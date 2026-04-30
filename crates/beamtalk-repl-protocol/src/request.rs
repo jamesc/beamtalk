@@ -502,7 +502,7 @@ mod tests {
     fn eval_with_trace_false_omits_field() {
         let req = RequestBuilder::eval_with_trace("1 + 2", false);
         assert_eq!(req["op"], "eval");
-        assert!(req["trace"].is_null());
+        assert!(req.get("trace").is_none());
     }
 
     #[test]
@@ -531,7 +531,7 @@ mod tests {
     fn complete_with_session_none_omits_session() {
         let req = RequestBuilder::complete_with_session("Arr", 3, None);
         assert_eq!(req["op"], "complete");
-        assert!(req["session"].is_null());
+        assert!(req.get("session").is_none());
     }
 
     #[test]
@@ -539,7 +539,7 @@ mod tests {
         let req = RequestBuilder::erlang_complete("ets:", None);
         assert_eq!(req["op"], "erlang-complete");
         assert_eq!(req["prefix"], "ets:");
-        assert!(req["module"].is_null());
+        assert!(req.get("module").is_none());
     }
 
     #[test]
@@ -569,7 +569,7 @@ mod tests {
         let req = RequestBuilder::show_codegen_class("Counter", None);
         assert_eq!(req["op"], "show-codegen");
         assert_eq!(req["class"], "Counter");
-        assert!(req["selector"].is_null());
+        assert!(req.get("selector").is_none());
     }
 
     #[test]
@@ -593,7 +593,7 @@ mod tests {
         assert_eq!(req["op"], "load-project");
         assert_eq!(req["path"], "/my/project");
         assert_eq!(req["include_tests"], false);
-        assert!(req["force"].is_null());
+        assert!(req.get("force").is_none());
     }
 
     #[test]
@@ -660,7 +660,7 @@ mod tests {
     fn interrupt_request_has_correct_op() {
         let req = RequestBuilder::interrupt();
         assert_eq!(req["op"], "interrupt");
-        assert!(req["session"].is_null());
+        assert!(req.get("session").is_none());
     }
 
     #[test]
@@ -710,7 +710,7 @@ mod tests {
         let req = RequestBuilder::erlang_help("ets", None);
         assert_eq!(req["op"], "erlang-help");
         assert_eq!(req["module"], "ets");
-        assert!(req["function"].is_null());
+        assert!(req.get("function").is_none());
     }
 
     #[test]
@@ -744,7 +744,7 @@ mod tests {
     fn list_classes_without_filter() {
         let req = RequestBuilder::list_classes(None);
         assert_eq!(req["op"], "list-classes");
-        assert!(req["filter"].is_null());
+        assert!(req.get("filter").is_none());
     }
 
     #[test]
@@ -770,12 +770,12 @@ mod tests {
     fn get_traces_all_none_has_only_op() {
         let req = RequestBuilder::get_traces(None, None, None, None, None, None);
         assert_eq!(req["op"], "get-traces");
-        assert!(req["actor"].is_null());
-        assert!(req["selector"].is_null());
-        assert!(req["class"].is_null());
-        assert!(req["outcome"].is_null());
-        assert!(req["min_duration_ns"].is_null());
-        assert!(req["limit"].is_null());
+        assert!(req.get("actor").is_none());
+        assert!(req.get("selector").is_none());
+        assert!(req.get("class").is_none());
+        assert!(req.get("outcome").is_none());
+        assert!(req.get("min_duration_ns").is_none());
+        assert!(req.get("limit").is_none());
     }
 
     #[test]
@@ -801,7 +801,7 @@ mod tests {
     fn actor_stats_without_actor() {
         let req = RequestBuilder::actor_stats(None);
         assert_eq!(req["op"], "actor-stats");
-        assert!(req["actor"].is_null());
+        assert!(req.get("actor").is_none());
     }
 
     #[test]
@@ -815,8 +815,13 @@ mod tests {
     fn export_traces_all_none_has_only_op() {
         let req = RequestBuilder::export_traces(None, None, None, None, None, None, None);
         assert_eq!(req["op"], "export-traces");
-        assert!(req["path"].is_null());
-        assert!(req["actor"].is_null());
+        assert!(req.get("path").is_none());
+        assert!(req.get("actor").is_none());
+        assert!(req.get("selector").is_none());
+        assert!(req.get("class").is_none());
+        assert!(req.get("outcome").is_none());
+        assert!(req.get("min_duration_ns").is_none());
+        assert!(req.get("limit").is_none());
     }
 
     #[test]
@@ -833,7 +838,28 @@ mod tests {
         assert_eq!(req["op"], "export-traces");
         assert_eq!(req["path"], "/var/traces.json");
         assert_eq!(req["actor"], "Counter@pid");
-        assert!(req["selector"].is_null());
+        assert!(req.get("selector").is_none());
+    }
+
+    #[test]
+    fn export_traces_all_some_includes_all_fields() {
+        let req = RequestBuilder::export_traces(
+            Some("/var/traces.json"),
+            Some("Counter@pid"),
+            Some("increment"),
+            Some("Counter"),
+            Some("ok"),
+            Some(1_000_000),
+            Some(50),
+        );
+        assert_eq!(req["op"], "export-traces");
+        assert_eq!(req["path"], "/var/traces.json");
+        assert_eq!(req["actor"], "Counter@pid");
+        assert_eq!(req["selector"], "increment");
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["outcome"], "ok");
+        assert_eq!(req["min_duration_ns"], 1_000_000u64);
+        assert_eq!(req["limit"], 50u32);
     }
 
     #[test]

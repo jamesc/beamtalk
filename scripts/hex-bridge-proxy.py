@@ -44,16 +44,14 @@ TARGET_HOST = os.environ.get("HEX_BRIDGE_TARGET", "repo.hex.pm")
 # to handle percent-encoded credentials and IPv6 addresses correctly.
 _http_proxy = os.environ.get("HTTP_PROXY", os.environ.get("http_proxy", ""))
 _parsed_proxy = urlsplit(_http_proxy)
-if _parsed_proxy.username:
+UPSTREAM_HOST = _parsed_proxy.hostname or ""
+UPSTREAM_PORT = _parsed_proxy.port or (3128 if UPSTREAM_HOST else 0)
+if _parsed_proxy.username is not None:
     _user = unquote(_parsed_proxy.username)
     _pass = unquote(_parsed_proxy.password or "")
     PROXY_AUTH = base64.b64encode(f"{_user}:{_pass}".encode()).decode()
-    UPSTREAM_HOST = _parsed_proxy.hostname or ""
-    UPSTREAM_PORT = _parsed_proxy.port or 3128
 else:
     PROXY_AUTH = ""
-    UPSTREAM_HOST = ""
-    UPSTREAM_PORT = 0
 
 
 def _open_tls(path):
@@ -68,8 +66,8 @@ def _open_tls(path):
             connect_req = (
                 f"CONNECT {TARGET_HOST}:443 HTTP/1.1\r\n"
                 f"Host: {TARGET_HOST}:443\r\n"
-                f"Proxy-Authorization: Basic {PROXY_AUTH}\r\n"
-                f"\r\n"
+                + (f"Proxy-Authorization: Basic {PROXY_AUTH}\r\n" if PROXY_AUTH else "")
+                + "\r\n"
             )
             sock.sendall(connect_req.encode())
             resp = b""
