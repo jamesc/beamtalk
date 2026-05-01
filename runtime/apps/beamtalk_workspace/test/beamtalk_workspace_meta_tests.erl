@@ -18,7 +18,7 @@ Tests workspace metadata tracking and activity updates.
 
 test_metadata() ->
     #{
-        workspace_id => <<"test123">>,
+        workspace_id => <<"meta-test123">>,
         project_path => <<"/bt_test/workspace">>,
         % Use seconds, not milliseconds
         created_at => erlang:system_time(second),
@@ -134,7 +134,7 @@ get_metadata_includes_all_fields_test() ->
     ?assert(maps:is_key(loaded_modules, M)),
 
     %% Verify values
-    ?assertEqual(<<"test123">>, maps:get(workspace_id, M)),
+    ?assertEqual(<<"meta-test123">>, maps:get(workspace_id, M)),
     ?assertEqual(<<"/bt_test/workspace">>, maps:get(project_path, M)),
     ?assertEqual(9001, maps:get(repl_port, M)),
     ?assertEqual([], maps:get(supervised_actors, M)),
