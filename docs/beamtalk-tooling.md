@@ -195,7 +195,7 @@ beamtalk repl --node mynode  # Use a specific node name
 On startup, the REPL prints the version and a help hint:
 
 ```
-Beamtalk v0.3.1
+Beamtalk v0.4.0
 Type :help for available commands, :exit to quit.
 
 >
@@ -423,6 +423,13 @@ ok
 ERROR: Undefined variable
 ```
 
+**`:interrupt`** cancels a running evaluation. Because the main connection is blocked while an eval is in progress, the interrupt is sent out-of-band on a separate connection. Ctrl-C during an eval sends an interrupt automatically.
+
+```beamtalk
+> :interrupt
+ok
+```
+
 ### Multi-line Input
 
 The REPL automatically detects incomplete input (unclosed brackets, trailing operators, etc.) and shows a `..>` continuation prompt. For constructs where the REPL cannot determine completeness from syntax alone — protocol definitions and class definitions without methods — press **Enter on a blank line** to submit the accumulated input.
@@ -556,7 +563,7 @@ Two global singleton objects provide introspection and project operations. These
 
 ```beamtalk
 > Beamtalk version
-0.3.1
+0.4.0
 
 > Beamtalk allClasses
 #(Integer, String, Array, ...)

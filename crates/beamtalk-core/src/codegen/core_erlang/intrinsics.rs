@@ -202,6 +202,16 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // BT-2095: A bare class name as receiver (e.g. `Foo value`) is a
+        // class-method send, not block application. Fall through so the
+        // class-reference handler routes to `class_send` instead of generating
+        // a runtime is_function guard that would call
+        // `beamtalk_primitive:send(ClassObject, 'value', [])` and crash on a
+        // non-matching `handle_call` clause. (Mirror of the keyword `value:`
+        // bypass below.)
+        if matches!(receiver, Expression::ClassReference { .. }) {
+            return Ok(None);
+        }
         // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
         if let Expression::Identifier(id) = receiver {
             if self.tier2_block_params.contains(id.name.as_str()) {
@@ -344,6 +354,15 @@ impl CoreErlangGenerator {
         }
         // BT-1260: Compile-time Erlang FFI receiver → fall through
         if Self::is_erlang_ffi_receiver(receiver) {
+            return Ok(None);
+        }
+        // BT-2095: A bare class name as receiver (e.g. `Character value: 65`)
+        // is a class-method send, not block application. Fall through so the
+        // class-reference handler routes to `class_send` instead of generating
+        // a runtime is_function guard that ends up calling
+        // `beamtalk_primitive:send(ClassObject, 'value:', [65])` and hitting
+        // the actor-style `sync_send` path with no matching handle_call clause.
+        if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
         // BT-1260: Unknown receiver → runtime is_function guard with fallback

@@ -348,7 +348,7 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 /// Discovers `.beam` files from the runtime and stdlib Erlang ebin directories
 /// and extracts their `-spec` attributes. Returns `None` if no specs could be
 /// extracted (e.g., runtime not yet compiled).
-fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
+pub(crate) fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
     use crate::beam_compiler;
     use beamtalk_cli::repl_startup;
 

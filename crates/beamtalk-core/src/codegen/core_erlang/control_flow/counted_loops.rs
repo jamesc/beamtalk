@@ -30,11 +30,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("BodyFun");
         let body_code = self.expression_doc(body)?;
         Ok(docvec![
-            format!("letrec '{loop_fn}'/0 = fun () -> "),
-            format!("let {body_var} = "),
+            "letrec '",
+            Document::String(loop_fn.clone()),
+            "'/0 = fun () -> let ",
+            Document::String(body_var.clone()),
+            " = ",
             body_code,
-            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
-            format!("in apply '{loop_fn}'/0 ()"),
+            " in let _ = apply ",
+            Document::String(body_var),
+            " () in apply '",
+            Document::String(loop_fn.clone()),
+            "'/0 () in apply '",
+            Document::String(loop_fn),
+            "'/0 ()",
         ])
     }
 
@@ -50,10 +58,18 @@ impl CoreErlangGenerator {
         let receiver_code = self.expression_doc(receiver)?;
 
         let frame = CountedLoopFrame {
-            preamble: docvec![format!("let {n_var} = "), receiver_code, " in"],
+            preamble: docvec![
+                "let ",
+                Document::String(n_var.clone()),
+                " = ",
+                receiver_code,
+                " in"
+            ],
             fn_name: "repeat".to_string(),
             continue_header: docvec![
-                format!("case call 'erlang':'=<'(I, {n_var}) of "),
+                "case call 'erlang':'=<'(I, ",
+                Document::String(n_var),
+                ") of ",
                 "<'true'> when 'true' -> ",
             ],
             next_counter: "call 'erlang':'+'(I, 1)".to_string(),
@@ -84,15 +100,21 @@ impl CoreErlangGenerator {
 
         let frame = CountedLoopFrame {
             preamble: docvec![
-                format!("let {start_var} = "),
+                "let ",
+                Document::String(start_var.clone()),
+                " = ",
                 receiver_code,
-                format!(" in let {end_var} = "),
+                " in let ",
+                Document::String(end_var.clone()),
+                " = ",
                 limit_code,
                 " in",
             ],
             fn_name: "loop".to_string(),
             continue_header: docvec![
-                format!("case call 'erlang':'=<'(I, {end_var}) of "),
+                "case call 'erlang':'=<'(I, ",
+                Document::String(end_var),
+                ") of ",
                 "<'true'> when 'true' -> ",
             ],
             next_counter: "call 'erlang':'+'(I, 1)".to_string(),
@@ -125,21 +147,35 @@ impl CoreErlangGenerator {
 
         let frame = CountedLoopFrame {
             preamble: docvec![
-                format!("let {start_var} = "),
+                "let ",
+                Document::String(start_var.clone()),
+                " = ",
                 receiver_code,
-                format!(" in let {end_var} = "),
+                " in let ",
+                Document::String(end_var.clone()),
+                " = ",
                 limit_code,
-                format!(" in let {step_var} = "),
+                " in let ",
+                Document::String(step_var.clone()),
+                " = ",
                 step_code,
                 " in",
             ],
             fn_name: "loop".to_string(),
             continue_header: docvec![
-                format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
-                format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
+                "let Continue = case call 'erlang':'>'(",
+                Document::String(step_var.clone()),
+                ", 0) of ",
+                "<'true'> when 'true' -> call 'erlang':'=<'(I, ",
+                Document::String(end_var.clone()),
+                ") ",
                 "<'false'> when 'true' -> ",
-                format!("case call 'erlang':'<'({step_var}, 0) of "),
-                format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
+                "case call 'erlang':'<'(",
+                Document::String(step_var.clone()),
+                ", 0) of ",
+                "<'true'> when 'true' -> call 'erlang':'>='(I, ",
+                Document::String(end_var),
+                ") ",
                 "<'false'> when 'true' -> 'false' ",
                 "end ",
                 "end in case Continue of ",
