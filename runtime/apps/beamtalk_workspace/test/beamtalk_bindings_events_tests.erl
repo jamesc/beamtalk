@@ -106,7 +106,8 @@ unsubscribe_when_not_subscribed_is_safe_test() ->
         sys:get_state(Pid),
         ?assert(is_process_alive(Pid))
     after
-        gen_server:stop(Pid)
+        gen_server:stop(Pid),
+        flush_messages()
     end.
 
 %%% ===========================================================================
@@ -121,6 +122,8 @@ multiple_subscribers_all_notified_test() ->
     try
         Sub1 = spawn(fun() ->
             beamtalk_bindings_events:subscribe(),
+            %% Same-sender sync: subscribe cast is processed before this returns
+            sys:get_state(beamtalk_bindings_events),
             Self ! sub1_subscribed,
             receive
                 {bindings_changed, _} = Msg -> Self ! {sub1, Msg}
@@ -129,6 +132,7 @@ multiple_subscribers_all_notified_test() ->
         end),
         Sub2 = spawn(fun() ->
             beamtalk_bindings_events:subscribe(),
+            sys:get_state(beamtalk_bindings_events),
             Self ! sub2_subscribed,
             receive
                 {bindings_changed, _} = Msg -> Self ! {sub2, Msg}
@@ -137,14 +141,12 @@ multiple_subscribers_all_notified_test() ->
         end),
         receive
             sub1_subscribed -> ok
-        after 500 -> ok
+        after 500 -> ?assert(false)
         end,
         receive
             sub2_subscribed -> ok
-        after 500 -> ok
+        after 500 -> ?assert(false)
         end,
-        %% Sync: both subscribe casts processed
-        sys:get_state(Pid),
 
         beamtalk_bindings_events:on_bindings_changed(<<"sess-broadcast">>),
         sys:get_state(Pid),
@@ -178,6 +180,8 @@ dead_subscriber_auto_removed_test() ->
     try
         SubPid = spawn(fun() ->
             beamtalk_bindings_events:subscribe(),
+            %% Same-sender sync: subscribe cast is processed before notifying parent
+            sys:get_state(beamtalk_bindings_events),
             Self ! subscribed,
             receive
                 stop -> ok
@@ -185,14 +189,21 @@ dead_subscriber_auto_removed_test() ->
         end),
         receive
             subscribed -> ok
-        after 500 -> ok
+        after 500 -> ?assert(false)
         end,
-        sys:get_state(Pid),
+
+        %% Subscriber should be present in the map before kill
+        {state, SubsBefore} = sys:get_state(Pid),
+        ?assert(maps:is_key(SubPid, SubsBefore)),
 
         exit(SubPid, kill),
-        timer:sleep(50),
-        %% Sync: DOWN message processed
-        sys:get_state(Pid),
+        %% Wait for DOWN to be processed; sys:get_state alone races with the
+        %% DOWN message because they originate from different senders.
+        wait_until_removed(Pid, SubPid, 20),
+
+        %% Subscriber should be gone from the map
+        {state, SubsAfter} = sys:get_state(Pid),
+        ?assertNot(maps:is_key(SubPid, SubsAfter)),
 
         %% Server should still be alive and handle events without crashing
         beamtalk_bindings_events:on_bindings_changed(<<"sess-after-dead">>),
@@ -248,4 +259,19 @@ flush_messages() ->
     receive
         _ -> flush_messages()
     after 0 -> ok
+    end.
+
+%% Poll the server state until Pid is no longer in the subscribers map.
+%% Needed because the DOWN message and our sys:get_state come from different
+%% senders, so ordering between them is not guaranteed.
+wait_until_removed(_Server, _Pid, 0) ->
+    ?assert(false);
+wait_until_removed(Server, Pid, N) ->
+    {state, Subs} = sys:get_state(Server),
+    case maps:is_key(Pid, Subs) of
+        false ->
+            ok;
+        true ->
+            timer:sleep(10),
+            wait_until_removed(Server, Pid, N - 1)
     end.
