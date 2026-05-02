@@ -14,12 +14,16 @@ Tests workspace supervisor behavior, child specifications, and startup.
 %% Tests
 %%====================================================================
 
-%%% Test helper
+%%% Test helpers
+
+test_project_path() ->
+    TmpDir = beamtalk_file:'tempDirectory'(),
+    <<TmpDir/binary, "/bt-sup-test">>.
 
 test_config() ->
     #{
         workspace_id => <<"test123">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         tcp_port => 49152,
         % Disable for testing
         auto_cleanup => false
@@ -192,9 +196,9 @@ bootstrap_spec_test() ->
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_bootstrap],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    %% ProjectPath from test_config is <<"/tmp/test">> — passed for BT-739 module activation
+    %% ProjectPath from test_config is propagated to bootstrap start args (BT-739 module activation)
     ?assertEqual(
-        {beamtalk_workspace_bootstrap, start_link, [<<"/tmp/test">>]}, maps:get(start, Spec)
+        {beamtalk_workspace_bootstrap, start_link, [test_project_path()]}, maps:get(start, Spec)
     ).
 
 bootstrap_after_singletons_before_repl_test() ->
@@ -295,7 +299,7 @@ default_auto_cleanup_test() ->
     %% Config without auto_cleanup should default to true
     Config = #{
         workspace_id => <<"test-defaults">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         tcp_port => 49152
     },
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
@@ -308,7 +312,7 @@ default_max_idle_seconds_test() ->
     %% Config without max_idle_seconds should default to 4 hours
     Config = #{
         workspace_id => <<"test-defaults">>,
-        project_path => <<"/tmp/test">>,
+        project_path => test_project_path(),
         tcp_port => 49152
     },
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
@@ -460,7 +464,7 @@ workspace_meta_config_test() ->
 run_mode_config() ->
     #{
         workspace_id => <<"run-mode-test">>,
-        project_path => <<"/tmp/run-test">>,
+        project_path => test_project_path(),
         repl => false
         %% tcp_port intentionally omitted — not required in run mode
     }.
@@ -512,7 +516,7 @@ run_mode_no_tcp_port_required_test() ->
     %% Starting with repl=false and no tcp_port should succeed (return child specs without error)
     Config = #{
         workspace_id => <<"no-port-test">>,
-        project_path => <<"/tmp/no-port">>,
+        project_path => test_project_path(),
         repl => false
     },
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
@@ -531,7 +535,7 @@ repl_mode_missing_tcp_port_fails_fast_test() ->
     %% undefined into the REPL server child spec.
     Config = #{
         workspace_id => <<"fail-fast-test">>,
-        project_path => <<"/tmp/test">>
+        project_path => test_project_path()
         %% tcp_port intentionally omitted, repl defaults to true
     },
     ?assertError(
