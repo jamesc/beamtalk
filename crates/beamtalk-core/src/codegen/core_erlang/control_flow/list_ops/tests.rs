@@ -499,3 +499,199 @@ fn test_drop_while_pure_generates_dropwhile() {
         "Pure dropWhile: should use lists:dropwhile. Got:\n{code}"
     );
 }
+
+// ── Search ops: anySatisfy:, allSatisfy:, detect:, detect:ifNone: ──────
+
+#[test]
+fn test_any_satisfy_pure_generates_lists_any() {
+    // BT-1481: Pure anySatisfy: (no mutations) delegates to lists:any/2 with an
+    // is_list guard so non-list receivers fall back to beamtalk_primitive:send.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [:item | item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'any'"),
+        "Pure anySatisfy: should generate lists:any. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure anySatisfy: should NOT use lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_all_satisfy_pure_generates_lists_all() {
+    // BT-1481: Pure allSatisfy: (no mutations) delegates to lists:all/2.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [:item | item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'all'"),
+        "Pure allSatisfy: should generate lists:all. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure allSatisfy: should NOT use lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_pure_generates_beamtalk_list_detect() {
+    // BT-1486: Pure detect: (no mutations) delegates to beamtalk_list:detect/2
+    // with an is_list guard for non-list fallback via beamtalk_primitive:send.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'beamtalk_list':'detect'"),
+        "Pure detect: should generate beamtalk_list:detect. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure detect: should NOT use lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_if_none_pure_dispatches_to_runtime() {
+    // BT-1486: Pure detect:ifNone: (no mutations) dispatches to runtime via
+    // beamtalk_primitive:send with the predicate and ifNone block as arguments.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0] ifNone: [42]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'detect:ifNone:'"),
+        "Pure detect:ifNone: should dispatch with selector 'detect:ifNone:'. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'"),
+        "Pure detect:ifNone: should use beamtalk_primitive:send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_any_satisfy_with_field_mutation_threads_state() {
+    // BT-1481: anySatisfy: with a field mutation in its body cannot short-circuit
+    // (mutations must run for every element), so it uses lists:foldl with a bool
+    // accumulator starting false.
+    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items anySatisfy: [:item | self.count := self.count + 1. item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "anySatisfy: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'any'"),
+        "anySatisfy: with field mutation must NOT use short-circuiting lists:any. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "anySatisfy: body should update 'count' field via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_all_satisfy_with_field_mutation_threads_state() {
+    // BT-1481: allSatisfy: with field mutation uses foldl with bool accumulator
+    // starting true (all-satisfy assumption, set to false on first failure).
+    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items allSatisfy: [:item | self.count := self.count + 1. item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "allSatisfy: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'all'"),
+        "allSatisfy: with field mutation must NOT use short-circuiting lists:all. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "allSatisfy: body should update 'count' field via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_with_field_mutation_threads_state() {
+    // BT-1486: detect: with field mutation uses foldl with a {FoundItem, FoundFlag, State...}
+    // accumulator so that mutations execute for every element (no short-circuit).
+    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "detect: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FoundFlag"),
+        "detect: with field mutation should use FoundFlag accumulator. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "detect: body should update 'count' field via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_if_none_with_field_mutation_threads_state() {
+    // BT-1486: detect:ifNone: with field mutation uses foldl + FoundFlag to distinguish
+    // "found nil" from "nothing matched", then evaluates the ifNone block when unmatched.
+    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0] ifNone: [42]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "detect:ifNone: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FoundFlag"),
+        "detect:ifNone: with mutation should use FoundFlag to distinguish no-match. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "detect:ifNone: body should update 'count' field via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
+    // BT-1481 + BT-1276: anySatisfy: with only a local variable mutation uses the
+    // tuple-accumulator path (element/N reads threaded locals) instead of maps:get.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    items anySatisfy: [:item | count := count + 1. item > 0]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("'erlang':'element'("),
+        "anySatisfy: with local mutation should use element/N for tuple-acc. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("maps':'get'('__local__count'"),
+        "anySatisfy: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_with_local_mutation_uses_tuple_acc() {
+    // BT-1486 + BT-1276: detect: with only a local variable mutation uses the
+    // tuple-accumulator path and still tracks FoundFlag for the found-item result.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    items detect: [:item | count := count + 1. item > 0]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("'erlang':'element'("),
+        "detect: with local mutation should use element/N for tuple-acc. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FoundFlag"),
+        "detect: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("maps':'get'('__local__count'"),
+        "detect: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+    );
+}
