@@ -3,6 +3,8 @@
 
 -module(beamtalk_bindings_events_tests).
 
+%%% **DDD Context:** REPL Session Context
+
 -moduledoc "Tests for beamtalk_bindings_events pub/sub gen_server.".
 -include_lib("eunit/include/eunit.hrl").
 
@@ -240,14 +242,14 @@ unknown_call_returns_error_test() ->
 unknown_cast_is_ignored_test() ->
     {ok, Pid} = gen_server:start_link(beamtalk_bindings_events, [], []),
     gen_server:cast(Pid, some_unknown_cast),
-    timer:sleep(10),
+    sys:get_state(Pid),
     ?assert(is_process_alive(Pid)),
     gen_server:stop(Pid).
 
 unknown_info_is_ignored_test() ->
     {ok, Pid} = gen_server:start_link(beamtalk_bindings_events, [], []),
     Pid ! {some_unknown, message},
-    timer:sleep(10),
+    sys:get_state(Pid),
     ?assert(is_process_alive(Pid)),
     gen_server:stop(Pid).
 
