@@ -177,9 +177,9 @@ fn test_list_do_multi_stmt_first_is_pure_generates_let_underscore() {
     let code = codegen(src);
     // The first expression (item + 1) is non-last; it must be bound as `let _ = ... in`
     // not emitted bare as `<expr> in` which is invalid Core Erlang.
-    let has_bare_expr_in = code.contains("call 'erlang':'+'") && {
+    let has_bare_expr_in = code.contains("call 'erlang':'%2B'") && {
         // Find the position of the '+' call and check what precedes it
-        if let Some(pos) = code.find("call 'erlang':'+'") {
+        if let Some(pos) = code.find("call 'erlang':'%2B'") {
             // Look for "let _ = " immediately before the + call (within 20 chars)
             let before = &code[pos.saturating_sub(20)..pos];
             !before.contains("let _ = ") && !before.contains("let _")
@@ -199,8 +199,8 @@ fn test_list_collect_multi_stmt_first_is_pure_generates_let_underscore() {
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items collect: [:item | item + 1. self.n := self.n + 1. item * 2]\n";
     let code = codegen(src);
     // item + 1 is first and non-last — must be wrapped with let _ = ... in
-    let has_bare_expr_in = code.contains("call 'erlang':'+'") && {
-        if let Some(pos) = code.find("call 'erlang':'+'") {
+    let has_bare_expr_in = code.contains("call 'erlang':'%2B'") && {
+        if let Some(pos) = code.find("call 'erlang':'%2B'") {
             let before = &code[pos.saturating_sub(20)..pos];
             !before.contains("let _ = ") && !before.contains("let _")
         } else {
@@ -562,6 +562,10 @@ fn test_detect_if_none_pure_dispatches_to_runtime() {
     assert!(
         code.contains("'beamtalk_primitive':'send'"),
         "Pure detect:ifNone: should use beamtalk_primitive:send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure detect:ifNone: should NOT use lists:foldl. Got:\n{code}"
     );
 }
 
