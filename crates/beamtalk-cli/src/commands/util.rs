@@ -8,6 +8,8 @@
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
+use std::fs;
+use std::time::SystemTime;
 
 /// What a test assertion expects: a value or an error.
 ///
@@ -18,6 +20,11 @@ pub(crate) enum Expected {
     Value(String),
     /// Match `#beamtalk_error{kind = Kind}` on error.
     Error { kind: String },
+}
+
+/// Read the modification time of a file, returning `None` on any error.
+pub(super) fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
+    fs::metadata(path).ok()?.modified().ok()
 }
 
 /// Find files matching the given extensions in a path.

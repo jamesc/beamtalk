@@ -20,6 +20,8 @@ use std::fs;
 use std::time::SystemTime;
 use tracing::{debug, info, warn};
 
+use super::util::mtime_of;
+
 /// Name of the cache file stored inside the build directory.
 const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 
@@ -403,11 +405,6 @@ fn build_cache_entries(
     }
 
     entries
-}
-
-/// Read the modification time of a file, returning `None` on any error.
-fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
-    fs::metadata(path).ok()?.modified().ok()
 }
 
 /// Serde support for `SystemTime` (required field) via duration-since-epoch.
