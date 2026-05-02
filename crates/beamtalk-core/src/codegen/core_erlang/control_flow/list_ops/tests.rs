@@ -513,6 +513,14 @@ fn test_any_satisfy_pure_generates_lists_any() {
         "Pure anySatisfy: should generate lists:any. Got:\n{code}"
     );
     assert!(
+        code.contains("'erlang':'is_list'("),
+        "Pure anySatisfy: should guard with erlang:is_list. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'("),
+        "Pure anySatisfy: should fall back to beamtalk_primitive:send for non-lists. Got:\n{code}"
+    );
+    assert!(
         !code.contains("'lists':'foldl'"),
         "Pure anySatisfy: should NOT use lists:foldl. Got:\n{code}"
     );
@@ -653,7 +661,8 @@ fn test_detect_if_none_with_field_mutation_threads_state() {
 #[test]
 fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
     // BT-1481 + BT-1276: anySatisfy: with only a local variable mutation uses the
-    // tuple-accumulator path (element/N reads threaded locals) instead of maps:get.
+    // tuple-accumulator path: {BoolAcc, Var1, ...}. Locals are unpacked via
+    // element(N, AccSt) inside the lambda — not via maps:get.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -663,20 +672,23 @@ fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
         "    count\n",
     );
     let code = codegen(src);
+    // BoolAcc is at position 1; 'count' is the first threaded local so it lives at
+    // position 2 inside the lambda accumulator tuple.
     assert!(
-        code.contains("'erlang':'element'("),
-        "anySatisfy: with local mutation should use element/N for tuple-acc. Got:\n{code}"
+        code.contains("let Count = call 'erlang':'element'(2, "),
+        "anySatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
     assert!(
         !code.contains("maps':'get'('__local__count'"),
-        "anySatisfy: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+        "anySatisfy: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
     );
 }
 
 #[test]
 fn test_detect_with_local_mutation_uses_tuple_acc() {
     // BT-1486 + BT-1276: detect: with only a local variable mutation uses the
-    // tuple-accumulator path and still tracks FoundFlag for the found-item result.
+    // tuple-accumulator path: {FoundItem, FoundFlag, Var1, ...}. Locals are
+    // unpacked via element(N, AccSt) inside the lambda — not via maps:get.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -686,9 +698,10 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
         "    count\n",
     );
     let code = codegen(src);
+    // FoundItem=1, FoundFlag=2; 'count' is the first threaded local at position 3.
     assert!(
-        code.contains("'erlang':'element'("),
-        "detect: with local mutation should use element/N for tuple-acc. Got:\n{code}"
+        code.contains("let Count = call 'erlang':'element'(3, "),
+        "detect: with local mutation should extract 'count' via element(3, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
     assert!(
         code.contains("FoundFlag"),
@@ -696,6 +709,6 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
     );
     assert!(
         !code.contains("maps':'get'('__local__count'"),
-        "detect: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+        "detect: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
     );
 }
