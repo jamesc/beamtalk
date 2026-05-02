@@ -14,12 +14,12 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
-use std::time::SystemTime;
 use tracing::{debug, error, info, instrument, warn};
 
 use super::app_file;
 use super::manifest;
 use super::manifest::NativeDependencyMap;
+use super::util::mtime_of;
 
 /// Result of per-file change detection.
 ///
@@ -126,11 +126,6 @@ pub(crate) fn detect_changes(
         unchanged_files,
         orphaned_beam_files,
     }
-}
-
-/// Read the modification time of a file, returning `None` on any error.
-fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
-    fs::metadata(path).ok()?.modified().ok()
 }
 
 /// Find `bt@*` `.beam` files in the build directory that are not in the expected set.
