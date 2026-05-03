@@ -1201,6 +1201,51 @@ pub fn extract_beam_specs(
     Ok(registry)
 }
 
+/// Reads every `<module>_<hash>.json` file in `cache_dir` and replays the
+/// cached `specs_line` into a new [`NativeTypeRegistry`].
+///
+/// Used by `beamtalk lint` (BT-2134) to populate the same FFI type registry
+/// `beamtalk build` uses, so the type checker's "Dynamic in typed class"
+/// warning agrees with build on whether an FFI call is typed. Without this,
+/// lint sees every `(Erlang m) f:` call as `Dynamic(UntypedFfi)` even when
+/// the build cache has typed signatures.
+///
+/// Cache freshness is not checked here — build is responsible for updating
+/// stale cache entries against `.beam` mtimes. Lint reads whatever build
+/// produced; if the user has not run build (or has deleted the cache), the
+/// registry is empty and lint behaves as it did before.
+///
+/// Returns `None` if `cache_dir` is not a directory or contains no entries.
+pub fn load_type_cache_registry(cache_dir: &Utf8Path) -> Option<NativeTypeRegistry> {
+    if !cache_dir.is_dir() {
+        return None;
+    }
+
+    let entries = std::fs::read_dir(cache_dir.as_std_path()).ok()?;
+    let mut registry = NativeTypeRegistry::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(entry) = serde_json::from_str::<TypeCacheEntry>(&content) else {
+            continue;
+        };
+        if !entry.specs_line.is_empty() {
+            parse_specs_line(&entry.specs_line, &mut registry);
+        }
+    }
+
+    if registry.module_count() == 0 {
+        None
+    } else {
+        Some(registry)
+    }
+}
+
 /// Sanitizes a module name derived from a beam file path by stripping any
 /// directory components (path separators). This prevents path traversal when
 /// the module name is used in cache filenames.
