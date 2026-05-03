@@ -432,18 +432,12 @@ init([]) ->
     %% Initialise persistent_term defaults
     init_persistent_terms(),
 
-    %% Ensure telemetry apps are started (not in app.src to avoid breaking
-    %% environments where telemetry isn't on the code path, e.g. stdlib tests).
-    %% If telemetry is not available, the trace store still works for direct
-    %% record_dispatch/record_trace_event calls — just no automatic handler attachment.
-    case application:ensure_all_started(telemetry) of
-        {ok, _} ->
-            attach_telemetry_handlers(),
-            configure_poller();
-        {error, _} ->
-            ?LOG_INFO("telemetry not available, skipping handler attachment", #{}),
-            ok
-    end,
+    %% telemetry and telemetry_poller are declared in beamtalk_runtime.app.src,
+    %% so OTP guarantees they have started by the time this init/1 runs.
+    %% Attach handlers unconditionally — silent attachment failures previously
+    %% manifested as flaky lifecycle-event tests (BT-2116).
+    attach_telemetry_handlers(),
+    configure_poller(),
 
     %% Start periodic sweep timer
     TimerRef = start_sweep_timer(),
@@ -808,10 +802,9 @@ detach_telemetry_handlers() ->
 
 -doc "Configure telemetry_poller for periodic VM measurements.".
 configure_poller() ->
-    %% telemetry_poller is started by the telemetry_poller application.
-    %% It emits [vm, memory], [vm, total_run_queue_lengths], etc. by default.
-    %% We just need to ensure the application is started.
-    _ = application:ensure_all_started(telemetry_poller),
+    %% telemetry_poller is declared as a dependency in beamtalk_runtime.app.src
+    %% and started automatically by OTP. It emits [vm, memory],
+    %% [vm, total_run_queue_lengths], etc. by default.
     ok.
 
 %%====================================================================
