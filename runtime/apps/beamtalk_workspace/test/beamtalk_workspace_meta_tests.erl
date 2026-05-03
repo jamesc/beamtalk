@@ -14,7 +14,7 @@ Tests workspace metadata tracking and activity updates.
 %% Tests
 %%====================================================================
 
-%%% Test helper
+%%% Test helpers
 
 test_metadata() ->
     #{
@@ -24,6 +24,27 @@ test_metadata() ->
         created_at => erlang:system_time(second),
         last_activity => erlang:system_time(second)
     }.
+
+stop_if_running() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid),
+            timer:sleep(10)
+    end.
+
+%% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
+%% the same file the module would write to.
+metadata_path_for(WsId) ->
+    Base =
+        case beamtalk_platform:home_dir() of
+            false ->
+                filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
+            Home ->
+                filename:join([Home, ".beamtalk", "workspaces"])
+        end,
+    filename:join([Base, binary_to_list(WsId), "metadata.json"]).
 
 %%% Metadata initialization tests
 
@@ -37,14 +58,7 @@ init_state_test() ->
 %%% Activity tracking tests
 
 update_activity_updates_timestamp_test() ->
-    %% Ensure no previous process
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Start the server
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
@@ -75,14 +89,7 @@ update_activity_updates_timestamp_test() ->
     gen_server:stop(Pid).
 
 get_last_activity_test() ->
-    %% Ensure no previous process
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Start the server
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
@@ -107,14 +114,7 @@ get_last_activity_test() ->
 %%% Metadata retrieval tests
 
 get_metadata_includes_all_fields_test() ->
-    %% Ensure no previous process
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Start the server with repl_port
     Meta = (test_metadata())#{repl_port => 9001},
@@ -149,27 +149,13 @@ get_metadata_includes_all_fields_test() ->
 %%% Public API correctness tests
 
 get_metadata_when_not_started_test() ->
-    %% Ensure no server is running
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Should return error when not started
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:get_metadata()).
 
 get_last_activity_when_not_started_test() ->
-    %% Ensure no server is running
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Should return error when not started
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:get_last_activity()).
@@ -177,13 +163,7 @@ get_last_activity_when_not_started_test() ->
 %%% Alias test
 
 get_alias_returns_same_as_get_metadata_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     ?assertEqual(
         beamtalk_workspace_meta:get_metadata(),
@@ -194,13 +174,7 @@ get_alias_returns_same_as_get_metadata_test() ->
 %%% Actor tracking tests
 
 register_actor_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     %% Initially no actors
@@ -230,13 +204,7 @@ register_actor_test() ->
     gen_server:stop(Pid).
 
 unregister_actor_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     ActorPid = spawn(fun() ->
@@ -256,13 +224,7 @@ unregister_actor_test() ->
     gen_server:stop(Pid).
 
 actor_down_cleanup_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     %% Spawn and register an actor that will exit
@@ -287,13 +249,7 @@ actor_down_cleanup_test() ->
 %%% Module tracking tests
 
 register_module_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     %% Get initial module count
@@ -321,56 +277,26 @@ register_module_test() ->
 %%% Not-started behavior tests for new APIs
 
 supervised_actors_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:supervised_actors()).
 
 loaded_modules_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:loaded_modules()).
 
 register_actor_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     %% Should not crash
     ?assertEqual(ok, beamtalk_workspace_meta:register_actor(self())).
 
 register_module_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     %% Should not crash
     ?assertEqual(ok, beamtalk_workspace_meta:register_module(some_module)).
 
 %% BT-1239: unregister_module removes a module from the loaded_modules map.
 unregister_module_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     % elp:fixme W0023 intentional atom creation
@@ -390,13 +316,7 @@ unregister_module_test() ->
     gen_server:stop(Pid).
 
 unregister_module_nonexistent_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     %% Unregistering a module that was never registered should not crash.
     ?assertEqual(ok, beamtalk_workspace_meta:unregister_module(never_registered_xyz)),
@@ -405,13 +325,7 @@ unregister_module_nonexistent_test() ->
     gen_server:stop(Pid).
 
 unregister_module_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     %% Should not crash when server is not running.
     ?assertEqual(ok, beamtalk_workspace_meta:unregister_module(some_module)).
 
@@ -426,13 +340,7 @@ persist_and_restore_modules_test() ->
     %% Clean up any leftover file
     _ = file:delete(MetaFile),
 
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Start server, register a module, then stop (triggers terminate persist)
     {ok, Pid1} = beamtalk_workspace_meta:start_link(#{
@@ -482,13 +390,7 @@ load_corrupt_json_falls_back_test() ->
     filelib:ensure_dir(MetaFile),
     ok = file:write_file(MetaFile, <<"not valid json {{{{">>),
 
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     %% Should start successfully despite corrupt file
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
@@ -510,13 +412,7 @@ load_corrupt_json_falls_back_test() ->
 %%% Class source storage tests (BT-1174)
 
 set_get_class_source_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     %% Unknown class returns undefined
@@ -538,24 +434,12 @@ set_get_class_source_test() ->
     gen_server:stop(Pid).
 
 set_class_source_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     %% Should not crash
     ?assertEqual(ok, beamtalk_workspace_meta:set_class_source(<<"Foo">>, "source")).
 
 get_class_source_when_not_started_test() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        Pid ->
-            gen_server:stop(Pid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     %% Should return undefined gracefully
     ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Foo">>)).
 
@@ -570,13 +454,7 @@ debounce_coalesces_rapid_changes_test() ->
     %% Clean up any leftover file
     _ = file:delete(MetaFile),
 
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
@@ -633,13 +511,7 @@ run_mode_no_disk_write_test() ->
     %% Ensure no leftover file
     _ = file:delete(MetaFile),
 
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
@@ -661,13 +533,7 @@ run_mode_metadata_accessible_test() ->
     %% Even in run mode, get_metadata/0 must work normally
     WsId = <<"run_meta_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
 
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
 
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
@@ -687,13 +553,7 @@ run_mode_metadata_accessible_test() ->
 class_removed_cast_unregisters_module_test() ->
     %% Verify that casting {unregister_module, Module} to beamtalk_workspace_meta
     %% (which is what publish_class_removed/2 does) removes the module entry.
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            ok;
-        OldPid ->
-            gen_server:stop(OldPid),
-            timer:sleep(10)
-    end,
+    stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
 
     % elp:fixme W0023 intentional atom creation
@@ -712,17 +572,3 @@ class_removed_cast_unregisters_module_test() ->
     ?assertNot(lists:keymember(ModuleName, 1, Modules2)),
 
     gen_server:stop(Pid).
-
-%%% Test helpers
-
-%% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
-%% the same file the module would write to.
-metadata_path_for(WsId) ->
-    Base =
-        case beamtalk_platform:home_dir() of
-            false ->
-                filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
-            Home ->
-                filename:join([Home, ".beamtalk", "workspaces"])
-        end,
-    filename:join([Base, binary_to_list(WsId), "metadata.json"]).
