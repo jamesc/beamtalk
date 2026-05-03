@@ -20,6 +20,54 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
 }
 
+/// Asserts that the given Core Erlang source compiles successfully through `erlc`.
+///
+/// Uses `tempfile::tempdir()` for an isolated temp directory per invocation,
+/// avoiding filename collisions when tests run in parallel. The temp dir and
+/// all its contents are automatically cleaned up on drop.
+///
+/// If `erlc` is not found in PATH, prints a skip notice and returns without
+/// failing.
+///
+/// # Panics
+///
+/// Panics if `erlc` exits with a non-zero status, including the full Core
+/// Erlang source in the panic message to aid debugging.
+#[cfg(test)]
+pub fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str) {
+    use std::fs;
+    use std::process::Command;
+
+    let tmp_dir = tempfile::tempdir().expect("failed to create temp dir for erlc test");
+    let core_file = tmp_dir.path().join(format!("{module_name}.core"));
+    fs::write(&core_file, core_erlang).expect("should write core erlang file");
+
+    let output = Command::new("erlc")
+        .arg("+from_core")
+        .arg("-o")
+        .arg(tmp_dir.path())
+        .arg(&core_file)
+        .output();
+
+    match output {
+        Ok(output) => {
+            assert!(
+                output.status.success(),
+                "erlc compilation failed for module '{module_name}':\nstdout: {}\nstderr: {}\n\nGenerated Core Erlang:\n{core_erlang}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!("Skipping erlc compilation test for '{module_name}' - erlc not in PATH");
+        }
+        Err(e) => {
+            panic!("failed to invoke erlc for module '{module_name}': {e}");
+        }
+    }
+    // tmp_dir is dropped here, auto-cleaning .core and .beam files
+}
+
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///
 /// Gated on `#[cfg(any(test, feature = "test"))]` to avoid prod binary

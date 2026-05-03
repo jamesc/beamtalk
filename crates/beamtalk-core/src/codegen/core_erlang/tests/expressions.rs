@@ -288,9 +288,6 @@ fn test_class_name_to_module_name() {
 
 #[test]
 fn test_generated_core_erlang_compiles() {
-    use std::fs;
-    use std::process::Command;
-
     // Test a self-contained Core Erlang module to verify syntax is valid
     // This specifically tests that:
     // 1. Empty map syntax ~{}~ compiles correctly
@@ -308,46 +305,11 @@ fn test_generated_core_erlang_compiles() {
 end
 ";
 
-    // Write to temporary file
-    let temp_dir = std::env::temp_dir();
-    let core_file = temp_dir.join("test_module.core");
-    fs::write(&core_file, core_erlang).expect("should write core erlang file");
-
-    // Try to compile with erlc
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg(&core_file)
-        .current_dir(&temp_dir)
-        .output();
-
-    // Clean up
-    let _ = fs::remove_file(&core_file);
-    let beam_file = temp_dir.join("test_module.beam");
-    let _ = fs::remove_file(&beam_file);
-
-    // Check compilation result
-    match output {
-        Ok(output) => {
-            assert!(
-                output.status.success(),
-                "erlc compilation failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-                core_erlang
-            );
-        }
-        Err(_) => {
-            // erlc not available, skip test
-            println!("Skipping test - erlc not installed in CI environment");
-        }
-    }
+    crate::test_helpers::assert_compiles_through_erlc("test_module", core_erlang);
 }
 
 #[test]
 fn test_string_literal_core_erlang_compiles() {
-    use std::fs;
-    use std::process::Command;
-
     // Test that string literals compile correctly through the full pipeline
     // This tests the new binary syntax: #{#<value>(8,1,'integer',['unsigned'|['big']]),...}#
     let core_erlang = r"module 'test_string' ['get_greeting'/0]
@@ -359,39 +321,7 @@ fn test_string_literal_core_erlang_compiles() {
 end
 ";
 
-    // Write to temporary file
-    let temp_dir = std::env::temp_dir();
-    let core_file = temp_dir.join("test_string.core");
-    fs::write(&core_file, core_erlang).expect("should write core erlang file");
-
-    // Try to compile with erlc
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg(&core_file)
-        .current_dir(&temp_dir)
-        .output();
-
-    // Clean up
-    let _ = fs::remove_file(&core_file);
-    let beam_file = temp_dir.join("test_string.beam");
-    let _ = fs::remove_file(&beam_file);
-
-    // Check compilation result
-    match output {
-        Ok(output) => {
-            assert!(
-                output.status.success(),
-                "erlc compilation of string literal failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-                core_erlang
-            );
-        }
-        Err(_) => {
-            // erlc not available, skip test
-            println!("Skipping test - erlc not installed in CI environment");
-        }
-    }
+    crate::test_helpers::assert_compiles_through_erlc("test_string", core_erlang);
 }
 
 #[test]
@@ -484,9 +414,6 @@ fn test_generate_map_literal_with_atoms() {
 
 #[test]
 fn test_generate_map_literal_compiles() {
-    use std::fs;
-    use std::process::Command;
-
     let pairs = vec![MapPair::new(
         Expression::Literal(Literal::Symbol("key".into()), Span::new(2, 6)),
         Expression::Literal(Literal::String("value".into()), Span::new(10, 17)),
@@ -513,32 +440,8 @@ fn test_generate_map_literal_compiles() {
         "String should be represented as binary"
     );
 
-    // Try to compile with erlc if available
-    let temp_dir = std::env::temp_dir();
-    let core_file = temp_dir.join("test_map_lit.core");
-    if let Ok(()) = fs::write(&core_file, &code) {
-        let output = Command::new("erlc")
-            .arg("+from_core")
-            .arg(&core_file)
-            .current_dir(&temp_dir)
-            .output();
-
-        // Clean up
-        let _ = fs::remove_file(&core_file);
-        let beam_file = temp_dir.join("test_map_lit.beam");
-        let _ = fs::remove_file(&beam_file);
-
-        // Check compilation result if erlc is available
-        if let Ok(output) = output {
-            assert!(
-                output.status.success(),
-                "erlc compilation of map literal failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-                code
-            );
-        }
-    }
+    // Verify the generated code compiles through erlc
+    crate::test_helpers::assert_compiles_through_erlc("test_map_lit", &code);
 }
 
 #[test]
