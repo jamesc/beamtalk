@@ -196,8 +196,19 @@ required_methods_unknown_protocol_test() ->
 
 conforms_to_unknown_protocol_test() ->
     setup(),
-    %% Unknown protocol — conservative, returns true
-    ?assert(beamtalk_protocol_registry:conforms_to('Integer', 'Unknown')).
+    %% Unknown protocol — cannot conform to something that isn't a protocol
+    ?assertNot(beamtalk_protocol_registry:conforms_to('Integer', 'Unknown')).
+
+conforms_to_nonexistent_protocol_test() ->
+    setup(),
+    %% A completely made-up protocol name (typo scenario)
+    ?assertNot(beamtalk_protocol_registry:conforms_to('Dictionary', 'Printable2')).
+
+conforms_to_class_name_as_protocol_test() ->
+    setup(),
+    %% A class name passed where a protocol name is expected (e.g. #Integer)
+    %% Integer is a class, not a protocol — should return false
+    ?assertNot(beamtalk_protocol_registry:conforms_to('Dictionary', 'Integer')).
 
 %%% ============================================================================
 %%% Empty Registry Edge Cases

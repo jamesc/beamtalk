@@ -1321,8 +1321,8 @@ class_conforms_to_unknown_protocol_test_() ->
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1792BiConformsTo', #{}, #{}),
                 try
-                    %% Unknown protocol returns true (conservative)
-                    ?assert(
+                    %% Unknown protocol returns false (BT-2136)
+                    ?assertNot(
                         beamtalk_behaviour_intrinsics:classConformsTo(
                             ClassObj, 'NoSuchProtocol'
                         )
