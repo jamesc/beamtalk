@@ -16,6 +16,7 @@ use std::ffi::OsString;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
+use beamtalk_core::codegen::core_erlang::escape_atom_chars;
 use miette::{Result, miette};
 
 /// OTP kernel logger configuration that redirects the default handler to stderr.
@@ -160,7 +161,7 @@ pub fn build_eval_cmd_with_node(
     otp_app_name: Option<&str>,
     hex_dep_names: &[String],
 ) -> String {
-    let safe_name = escape_erlang_atom(node_name);
+    let safe_name = escape_atom_chars(node_name);
     let hex_deps_start = hex_deps_start_fragment(hex_dep_names);
     let otp_app_start = otp_app_start_fragment(otp_app_name);
     format!(
@@ -276,11 +277,6 @@ pub fn startup_prelude(
              auto_cleanup => false, \
              max_idle_seconds => 14400}})"
     )
-}
-
-/// Escape characters that are special inside Erlang single-quoted atoms.
-fn escape_erlang_atom(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 /// Collect `-pa` paths as `OsString` arguments for passing to `Command::args`.

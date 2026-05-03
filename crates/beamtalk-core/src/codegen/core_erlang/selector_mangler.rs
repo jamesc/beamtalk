@@ -154,24 +154,6 @@ pub fn requires_quoting(name: &str) -> bool {
     false
 }
 
-/// Escapes special characters in an atom name for Core Erlang.
-///
-/// This handles characters that have special meaning in Erlang strings/atoms:
-/// - Single quotes → `\'`
-/// - Backslashes → `\\`
-#[must_use]
-pub fn escape_atom_chars(name: &str) -> String {
-    let mut result = String::with_capacity(name.len());
-    for c in name.chars() {
-        match c {
-            '\'' => result.push_str("\\'"),
-            '\\' => result.push_str("\\\\"),
-            _ => result.push(c),
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,13 +196,6 @@ mod tests {
         assert!(requires_quoting(""));
         assert!(requires_quoting("123"));
         assert!(requires_quoting("Uppercase"));
-    }
-
-    #[test]
-    fn escape_special_chars() {
-        assert_eq!(escape_atom_chars("normal"), "normal");
-        assert_eq!(escape_atom_chars("it's"), "it\\'s");
-        assert_eq!(escape_atom_chars("back\\slash"), "back\\\\slash");
     }
 
     #[test]

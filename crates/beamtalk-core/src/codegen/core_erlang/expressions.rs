@@ -20,7 +20,7 @@
 use std::collections::HashSet;
 
 use super::document::Document;
-use super::selector_mangler::escape_atom_chars;
+use super::escape_atom_chars;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,

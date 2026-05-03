@@ -23,6 +23,23 @@ pub(super) fn escape_core_erlang_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Escapes special characters in an atom name for Core Erlang.
+///
+/// Replaces `\` with `\\` and `'` with `\'` so the result is safe to embed
+/// between `'...'` in generated `.core` source.
+#[must_use]
+pub fn escape_atom_chars(name: &str) -> String {
+    let mut result = String::with_capacity(name.len());
+    for c in name.chars() {
+        match c {
+            '\'' => result.push_str("\\'"),
+            '\\' => result.push_str("\\\\"),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
 /// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
 /// module attributes section. Returns `Document::Nil` when classes is empty.
 pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
@@ -390,6 +407,21 @@ mod tests {
     #[test]
     fn test_user_package_prefix_bt_only() {
         assert_eq!(user_package_prefix("bt@counter"), None);
+    }
+
+    #[test]
+    fn test_escape_atom_chars_normal() {
+        assert_eq!(escape_atom_chars("normal"), "normal");
+    }
+
+    #[test]
+    fn test_escape_atom_chars_quote() {
+        assert_eq!(escape_atom_chars("it's"), "it\\'s");
+    }
+
+    #[test]
+    fn test_escape_atom_chars_backslash() {
+        assert_eq!(escape_atom_chars("back\\slash"), "back\\\\slash");
     }
 
     #[test]
