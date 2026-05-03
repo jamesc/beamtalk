@@ -1318,9 +1318,12 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     // test-to-src reference until the user touched the src file manually.
     //
     // BT-2137: Also preload `_build/deps/<name>/src/` for each fetched
-    // dependency so references to classes from declared beamtalk-toml
+    // dependency so references to classes from declared `beamtalk.toml`
     // dependencies (e.g. `HTTPClient` from the `http` package) resolve
-    // without spurious `Unresolved class` warnings.
+    // without spurious `Unresolved class` warnings. Dep dirs are walked
+    // *after* every workspace root's `src/`/`test/` so that in a multi-root
+    // workspace one root's deps cannot exhaust the shared preload budget
+    // before later roots' user files are considered.
     for root in &roots {
         for subdir in ["src", "test"] {
             if remaining_budget == 0 {
@@ -1338,7 +1341,9 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
                 }
             }
         }
+    }
 
+    for root in &roots {
         for dep_src in dependency_src_dirs(root) {
             if remaining_budget == 0 {
                 break;
@@ -2204,7 +2209,7 @@ mod tests {
     }
 
     /// BT-2137: Preload must walk every `_build/deps/<name>/src/` so classes
-    /// from declared beamtalk-toml dependencies resolve without spurious
+    /// from declared `beamtalk.toml` dependencies resolve without spurious
     /// `Unresolved class` warnings.
     #[test]
     fn collect_preload_files_walks_dependency_src_dirs() {
@@ -2284,6 +2289,55 @@ mod tests {
 
         assert_eq!(loaded.user_files.len(), 1);
         assert!(loaded.user_files[0].0.ends_with("App.bt"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2137: In a multi-root workspace, every root's own `src/`/`test/`
+    /// must be preloaded before *any* root's dependency `src/` directories.
+    /// Otherwise deps from an earlier root could exhaust the shared
+    /// `PRELOAD_MAX_FILES` budget and leave a later root's user files
+    /// unindexed — exactly the unresolved-class noise this change fights.
+    #[test]
+    fn collect_preload_files_prioritizes_user_files_across_multi_root_workspace() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_multi_root");
+        let root_a = temp.join("root_a");
+        let root_b = temp.join("root_b");
+        let src_a = root_a.join("src");
+        let src_b = root_b.join("src");
+        let dep_a_src = root_a.join("_build").join("deps").join("dep_a").join("src");
+
+        fs::create_dir_all(&src_a).expect("create root_a src");
+        fs::create_dir_all(&src_b).expect("create root_b src");
+        fs::create_dir_all(&dep_a_src).expect("create root_a dep src");
+
+        fs::write(src_a.join("AppA.bt"), "Object subclass: AppA").expect("write src_a file");
+        fs::write(src_b.join("AppB.bt"), "Object subclass: AppB").expect("write src_b file");
+        fs::write(dep_a_src.join("DepA.bt"), "Object subclass: DepA").expect("write dep file");
+
+        let config = PreloadConfig {
+            roots: vec![root_a, root_b],
+            stdlib_dirs: vec![],
+        };
+        let loaded = collect_preload_files(config);
+
+        // The ordering contract: every workspace user file appears in
+        // `user_paths` *before* any dependency file. We can observe that by
+        // confirming root_b's `AppB.bt` is loaded before root_a's `DepA.bt`.
+        let app_b_pos = loaded
+            .user_files
+            .iter()
+            .position(|(p, _)| p.ends_with("AppB.bt"))
+            .expect("AppB.bt must be preloaded");
+        let dep_a_pos = loaded
+            .user_files
+            .iter()
+            .position(|(p, _)| p.ends_with("DepA.bt"))
+            .expect("DepA.bt must be preloaded");
+        assert!(
+            app_b_pos < dep_a_pos,
+            "root_b user file must be walked before root_a dep file (got AppB at {app_b_pos}, DepA at {dep_a_pos})"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
