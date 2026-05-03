@@ -218,3 +218,272 @@ fn test_non_self_field_assignment_produces_warning_not_error() {
         "Non-self field assignment should be a warning, not an error"
     );
 }
+
+// --- BT-2135: is_protocol_type returns true even when protocol classes are registered ---
+
+/// After `register_protocol_classes` adds synthetic class entries for protocols,
+/// `is_protocol_type` must still recognise them as protocols (not real classes).
+#[test]
+fn test_is_protocol_type_with_registered_protocol_classes() {
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+
+    // Create a protocol and register it
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("Printable", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::simple("String", span())),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&proto_module, &hierarchy);
+    assert!(diags.is_empty());
+
+    // Register protocol classes (this is what BT-1933 added — previously broke is_protocol_type)
+    hierarchy.register_protocol_classes(&proto_module);
+
+    // After registering protocol classes, hierarchy.has_class("Printable") is true
+    assert!(
+        hierarchy.has_class("Printable"),
+        "Printable should be in the class hierarchy as a synthetic protocol class"
+    );
+    assert!(
+        hierarchy.is_protocol_class("Printable"),
+        "Printable should be marked as a protocol class"
+    );
+
+    // The bug: is_protocol_type used to return false because of the `!hierarchy.has_class()`
+    // clause. With the fix, it correctly returns true for synthetic protocol class entries.
+    assert!(
+        TypeChecker::is_protocol_type("Printable", &hierarchy, &registry),
+        "is_protocol_type must return true for a protocol even when registered as a protocol class"
+    );
+}
+
+/// A real class with the same name as a protocol should NOT be recognised as a protocol type.
+#[test]
+fn test_is_protocol_type_real_class_not_protocol() {
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let registry = ProtocolRegistry::new();
+
+    // "Integer" is a real class and not in the protocol registry
+    assert!(
+        !TypeChecker::is_protocol_type("Integer", &hierarchy, &registry),
+        "Real class Integer should not be reported as a protocol type"
+    );
+}
+
+/// End-to-end: passing Dictionary to a method expecting Printable should NOT produce
+/// a type-mismatch diagnostic, because Dictionary conforms to the Printable protocol.
+#[test]
+fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+
+    // Define a protocol requiring `asString`
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("Printable", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::simple("String", span())),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&proto_module, &hierarchy);
+    assert!(diags.is_empty());
+
+    // Register protocol classes (this triggers the pre-fix bug)
+    hierarchy.register_protocol_classes(&proto_module);
+
+    // Add a class "Json" with a class method "generate:" that expects Printable
+    let json_info = ClassInfo {
+        name: "Json".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: true,
+        is_native: false,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![],
+        class_methods: vec![MethodInfo {
+            selector: "generate:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Json".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("String".into()),
+            param_types: vec![Some("Printable".into())],
+            doc: None,
+        }],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    hierarchy.add_from_beam_meta(vec![json_info]);
+
+    // Build a module that calls `Json generate: someDictionary`
+    // We use a class with a method that calls Json generate: with a Dictionary
+    let test_method = make_keyword_method(
+        &["run:"],
+        vec![("dict", Some("Dictionary"))],
+        vec![msg_send(
+            class_ref("Json"),
+            MessageSelector::Keyword(vec![KeywordPart::new("generate:", span())]),
+            vec![var("dict")],
+        )],
+    );
+    let test_class = ClassDefinition::new(
+        ident("TestRunner"),
+        ident("Object"),
+        vec![],
+        vec![test_method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![test_class]);
+
+    // Run type checking with protocols
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    // There should be NO "does not conform" warning — Dictionary has asString
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert!(
+        conformance_warnings.is_empty(),
+        "Dictionary conforms to Printable (has asString) — no warning expected, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// When a class genuinely does NOT conform to a protocol (missing required methods),
+/// the structural conformance check should still fire, even after protocol classes
+/// are registered in the hierarchy.
+#[test]
+fn test_protocol_typed_param_non_conforming_still_warns() {
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+
+    // Define a protocol requiring `serialize` — Integer does NOT have this method
+    let proto_module = Module {
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("Serializable", span()),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("serialize".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::simple("String", span())),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            class_method_signatures: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        ..Module::new(vec![], span())
+    };
+
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&proto_module, &hierarchy);
+    assert!(diags.is_empty());
+
+    // Register protocol classes (same as production code does)
+    hierarchy.register_protocol_classes(&proto_module);
+
+    // Verify is_protocol_type works for this protocol
+    assert!(
+        TypeChecker::is_protocol_type("Serializable", &hierarchy, &registry),
+        "Serializable should be recognised as a protocol type"
+    );
+
+    // Directly test conformance checking: Integer does NOT have `serialize`
+    let mut checker = TypeChecker::new();
+    checker.check_protocol_argument_conformance(
+        &InferredType::Known {
+            class_name: "Integer".into(),
+            type_args: vec![],
+            provenance: super::super::TypeProvenance::Inferred(span()),
+        },
+        "Serializable",
+        span(),
+        &hierarchy,
+        &registry,
+    );
+
+    // There SHOULD be a "does not conform" warning — Integer lacks `serialize`
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert_eq!(
+        conformance_warnings.len(),
+        1,
+        "Integer does not conform to Serializable (missing `serialize`) — expected 1 warning, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        conformance_warnings[0].message.contains("Integer"),
+        "Warning should mention Integer, got: {}",
+        conformance_warnings[0].message
+    );
+    assert!(
+        conformance_warnings[0].message.contains("Serializable"),
+        "Warning should mention Serializable, got: {}",
+        conformance_warnings[0].message
+    );
+}
