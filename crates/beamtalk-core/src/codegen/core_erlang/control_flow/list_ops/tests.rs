@@ -712,3 +712,58 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
         "detect: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
+    // BT-1481 + BT-1276: allSatisfy: with only a local variable mutation uses the
+    // tuple-accumulator path: {BoolAcc, Var1, ...}. Locals are unpacked via
+    // element(N, AccSt) inside the lambda — not via maps:get.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    items allSatisfy: [:item | count := count + 1. item > 0]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    // BoolAcc is at position 1; 'count' is the first threaded local so it lives at
+    // position 2 inside the lambda accumulator tuple.
+    assert!(
+        code.contains("let Count = call 'erlang':'element'(2, "),
+        "allSatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("maps':'get'('__local__count'"),
+        "allSatisfy: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
+    // BT-1486 + BT-1276: detect:ifNone: with only a local variable mutation uses the
+    // tuple-accumulator path: {FoundItem, FoundFlag, Var1, ...}. Locals are
+    // unpacked via element(N, AccSt) inside the lambda — not via maps:get.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    items detect: [:item | count := count + 1. item > 0] ifNone: [42]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    // FoundItem=1, FoundFlag=2; 'count' is the first threaded local at position 3.
+    assert!(
+        code.contains("let Count = call 'erlang':'element'(3, "),
+        "detect:ifNone: with local mutation should extract 'count' via element(3, AccSt) in tuple-acc lambda. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FoundFlag"),
+        "detect:ifNone: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("maps':'get'('__local__count'"),
+        "detect:ifNone: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
+    );
+}
