@@ -134,17 +134,17 @@ selectors of the protocol (including inherited requirements from
 Returns `true` if:
 - The class responds to all required instance selectors
 - The class responds to all required class method selectors
-- The protocol is not registered (unknown protocols — conservative)
 
 Returns `false` if:
+- The protocol is not registered (unknown or non-protocol names)
 - The class is missing one or more required selectors (instance or class)
 """.
 -spec conforms_to(atom(), atom()) -> boolean().
 conforms_to(ClassName, ProtocolName) ->
     case protocol_info(ProtocolName) of
         undefined ->
-            %% Unknown protocol — conservative, assume true
-            true;
+            %% Unknown protocol — cannot conform to something that isn't a protocol
+            false;
         Info ->
             AllMethods = all_required_methods(Info),
             AllClassMethods = all_required_class_methods(Info),
