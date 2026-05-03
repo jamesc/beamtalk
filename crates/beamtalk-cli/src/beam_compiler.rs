@@ -996,14 +996,14 @@ struct TypeCacheEntry {
     /// Combined with `beam_mtime_secs` to avoid cache collisions on rapid rewrites.
     #[serde(default)]
     beam_mtime_nanos: u32,
-    /// Absolute (canonicalised) path to the `.beam` file at the time specs
-    /// were extracted. Used by [`load_type_cache_registry`] to re-stat the
-    /// file and skip the entry if the live mtime no longer matches what was
-    /// cached. Canonicalising at write time means `beamtalk lint` can
-    /// validate the cache regardless of which cwd it is invoked from. Empty
-    /// for legacy entries written before BT-2139, and for the fallback case
-    /// where canonicalisation failed at write time — those are tolerated as
-    /// fresh until the next build rewrites them with a canonical path.
+    /// Absolute path to the `.beam` file at the time specs were extracted —
+    /// canonicalised when possible, otherwise resolved against the build's
+    /// cwd. Used by [`load_type_cache_registry`] to re-stat the file and
+    /// skip the entry if the live mtime no longer matches what was cached.
+    /// Persisting an absolute path means `beamtalk lint` can validate the
+    /// cache regardless of which cwd it is invoked from. Empty only for
+    /// legacy entries written before BT-2139 — those are tolerated as fresh
+    /// until the next build rewrites them with a path.
     #[serde(default)]
     beam_path: String,
     /// The raw `beamtalk-specs-module:...` protocol line (without newline).
@@ -1081,13 +1081,28 @@ impl TypeCache {
         // BT-2139: persist an absolute (canonicalised) path so freshness
         // validation in `load_type_cache_registry` works when `beamtalk lint`
         // runs from a different working directory than the build that wrote
-        // the cache. If canonicalisation fails (e.g. the file vanished
-        // mid-build), fall back to an empty string so the entry takes the
-        // legacy/permissive path on next lint — better than persisting a
-        // possibly-relative path that would resolve against the wrong cwd.
-        let canonical_beam_path = beam_path
-            .canonicalize_utf8()
-            .map_or_else(|_| String::new(), Utf8PathBuf::into_string);
+        // the cache. If `canonicalize_utf8` fails (typically because the
+        // `.beam` vanished or moved mid-build), fall back to a manually-built
+        // absolute path: if `beam_path` is already absolute, use it as-is;
+        // otherwise resolve it against the current working directory. We
+        // intentionally do *not* leave `beam_path` empty here — that would
+        // make `is_cache_entry_fresh` treat the entry as legacy/fresh, so
+        // lint would keep replaying stale specs instead of detecting that
+        // the underlying `.beam` is gone.
+        let canonical_beam_path = beam_path.canonicalize_utf8().map_or_else(
+            |_| {
+                if beam_path.is_absolute() {
+                    beam_path.as_str().to_string()
+                } else {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| Utf8PathBuf::from_path_buf(cwd).ok())
+                        .map(|cwd| cwd.join(beam_path).into_string())
+                        .unwrap_or_default()
+                }
+            },
+            Utf8PathBuf::into_string,
+        );
         let entry = TypeCacheEntry {
             beam_mtime_secs,
             beam_mtime_nanos,
