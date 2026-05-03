@@ -58,8 +58,11 @@ pub fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str) {
                 String::from_utf8_lossy(&output.stderr),
             );
         }
-        Err(_) => {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             println!("Skipping erlc compilation test for '{module_name}' - erlc not in PATH");
+        }
+        Err(e) => {
+            panic!("failed to invoke erlc for module '{module_name}': {e}");
         }
     }
     // tmp_dir is dropped here, auto-cleaning .core and .beam files
