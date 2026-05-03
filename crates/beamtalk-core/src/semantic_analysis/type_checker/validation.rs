@@ -1653,8 +1653,10 @@ impl TypeChecker {
         // Extract base name for generic types
         let base_name = super::type_resolver::base_name_of_string(type_name);
 
-        // A protocol type is one that's in the registry and NOT a class name
-        protocol_registry.has_protocol(base_name) && !hierarchy.has_class(base_name)
+        // A protocol type is one that's in the registry and either not a class name,
+        // or only present as a synthetic protocol class entry (added by register_protocol_classes)
+        protocol_registry.has_protocol(base_name)
+            && (!hierarchy.has_class(base_name) || hierarchy.is_protocol_class(base_name))
     }
 
     /// Check type parameter bounds for a generic type application (ADR 0068 Phase 2d).
