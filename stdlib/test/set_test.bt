@@ -5,9 +5,7 @@
 
 TestCase subclass: SetTest
 
-  testCreationClass =>
-    Set new
-    self assert: (Set new) class equals: Set
+  testCreationClass => self assert: (Set new) class equals: Set
 
   testIsemptySize =>
     self assert: (Set new) isEmpty
@@ -86,5 +84,5 @@ TestCase subclass: SetTest
     self deny: (s4 respondsTo: #nonExistent)
 
   testPrintstring =>
-    self assert: (((Set new) fromList: #(1, 2, 3)) printString) notNil
-    self assert: ((Set new) printString) notNil
+    self assert: (((Set new) fromList: #(1, 2, 3)) printString) equals: "Set(1, 2, 3)"
+    self assert: ((Set new) printString) equals: "Set()"
