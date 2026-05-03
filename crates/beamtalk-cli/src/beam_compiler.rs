@@ -1201,6 +1201,93 @@ pub fn extract_beam_specs(
     Ok(registry)
 }
 
+/// Reads `<module>_<hash>.json` files from `cache_dir` and replays the
+/// freshest cached `specs_line` per module into a new [`NativeTypeRegistry`].
+///
+/// Used by `beamtalk lint` (BT-2134) to populate the same FFI type registry
+/// `beamtalk build` uses, so the type checker's "Dynamic in typed class"
+/// warning agrees with build on whether an FFI call is typed. Without this,
+/// lint sees every `(Erlang m) f:` call as `Dynamic(UntypedFfi)` even when
+/// the build cache has typed signatures.
+///
+/// `TypeCache::cache_path` keys filenames by the BEAM path hash, so multiple
+/// `<module>_<hash>.json` entries can accumulate after dependency upgrades or
+/// BEAM path changes. Replaying every file would let `read_dir` order pick a
+/// stale signature, reintroducing the lint/build disagreement BT-2134 fixed.
+/// Instead, group by module name and pick the entry with the latest file
+/// mtime — that's the one the most recent build wrote, and it matches what
+/// build's `extract_beam_specs` resolved for the current BEAM set.
+///
+/// Cache freshness against the `.beam` itself is not checked here — build is
+/// responsible for updating cache entries against `.beam` mtimes. Lint reads
+/// whatever the most recent build produced; if the user has not run build
+/// (or has deleted the cache), the registry is empty and lint behaves as it
+/// did before.
+///
+/// Returns `None` if `cache_dir` is not a directory or contains no entries.
+pub fn load_type_cache_registry(cache_dir: &Utf8Path) -> Option<NativeTypeRegistry> {
+    if !cache_dir.is_dir() {
+        return None;
+    }
+
+    // Group cache files by module name, keeping the latest-mtime entry per
+    // module so a stale `<module>_<old_hash>.json` doesn't shadow the fresh
+    // one when `read_dir` happens to yield it second.
+    let entries = std::fs::read_dir(cache_dir.as_std_path()).ok()?;
+    let mut latest_by_module: std::collections::HashMap<String, (SystemTime, std::path::PathBuf)> =
+        std::collections::HashMap::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(stem) = filename.strip_suffix(".json") else {
+            continue;
+        };
+        // Cache filenames are exactly `<module>_<16-hex>`. Anything else is
+        // foreign and must be ignored, including `<module>_socket_<hash>`
+        // (where the module name itself ends in an underscore segment).
+        let Some((module, hash)) = stem.rsplit_once('_') else {
+            continue;
+        };
+        if hash.len() != 16 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let mtime = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        latest_by_module
+            .entry(module.to_string())
+            .and_modify(|(prev_mtime, prev_path)| {
+                if mtime > *prev_mtime {
+                    *prev_mtime = mtime;
+                    prev_path.clone_from(&path);
+                }
+            })
+            .or_insert((mtime, path));
+    }
+
+    let mut registry = NativeTypeRegistry::new();
+    for (_, path) in latest_by_module.values() {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(entry) = serde_json::from_str::<TypeCacheEntry>(&content) else {
+            continue;
+        };
+        if !entry.specs_line.is_empty() {
+            parse_specs_line(&entry.specs_line, &mut registry);
+        }
+    }
+
+    if registry.module_count() == 0 {
+        None
+    } else {
+        Some(registry)
+    }
+}
+
 /// Sanitizes a module name derived from a beam file path by stripping any
 /// directory components (path separators). This prevents path traversal when
 /// the module name is used in cache filenames.
