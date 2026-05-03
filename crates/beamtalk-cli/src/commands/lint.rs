@@ -1078,6 +1078,152 @@ mod tests {
         );
     }
 
+    /// BT-2139: When a cache entry records a `beam_path` and the live `.beam`
+    /// at that path has a newer mtime than the cached one — e.g. `cargo build`
+    /// rebuilt a NIF module between `beamtalk build` and `beamtalk lint` — the
+    /// loader must drop the entry so lint does not warn off stale signatures.
+    #[test]
+    fn load_type_cache_registry_skips_entry_when_beam_mtime_changed() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        // Stand-in `.beam` file. We don't need real BEAM bytes here — the
+        // loader only stats mtime, not contents.
+        let beam_path = temp.path().join("gen_tcp.beam");
+        std::fs::write(&beam_path, b"placeholder").unwrap();
+        let live = std::fs::metadata(&beam_path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+
+        // Cache an mtime far in the past so the live file looks newer.
+        // Use serde_json to avoid Windows backslash-escaping pitfalls when
+        // interpolating a temp path into a JSON string literal.
+        let stale_secs = live.as_secs().saturating_sub(3600);
+        let entry_json = serde_json::json!({
+            "beam_mtime_secs": stale_secs,
+            "beam_mtime_nanos": 0,
+            "beam_path": beam_path.to_str().unwrap(),
+            "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
+        })
+        .to_string();
+        std::fs::write(
+            cache_dir
+                .join("gen_tcp_0123456789abcdef.json")
+                .as_std_path(),
+            entry_json,
+        )
+        .unwrap();
+
+        // Stale entry is skipped — no other entries, so the loader returns None.
+        assert!(
+            load_type_cache_registry(&cache_dir).is_none(),
+            "stale-mtime entry must be skipped, leaving registry empty"
+        );
+    }
+
+    /// BT-2139: When a cache entry's `beam_path` no longer exists — the BEAM
+    /// file was deleted, the project moved, an OTP version was uninstalled —
+    /// the entry must be skipped rather than replayed against a registry
+    /// that may now be wrong.
+    #[test]
+    fn load_type_cache_registry_skips_entry_when_beam_missing() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        let missing_beam = temp.path().join("never_existed.beam");
+        let entry_json = serde_json::json!({
+            "beam_mtime_secs": 1,
+            "beam_mtime_nanos": 0,
+            "beam_path": missing_beam.to_str().unwrap(),
+            "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
+        })
+        .to_string();
+        std::fs::write(
+            cache_dir
+                .join("gen_tcp_0123456789abcdef.json")
+                .as_std_path(),
+            entry_json,
+        )
+        .unwrap();
+
+        assert!(
+            load_type_cache_registry(&cache_dir).is_none(),
+            "entry pointing at a missing .beam must be skipped"
+        );
+    }
+
+    /// BT-2139: Legacy entries written before BT-2139 do not carry a
+    /// `beam_path`. Those must continue to load — pessimistically treated as
+    /// fresh — so a `lint` immediately after upgrading does not blank out
+    /// every FFI signature until the user re-runs `build`.
+    #[test]
+    fn load_type_cache_registry_loads_legacy_entry_without_beam_path() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        // No `beam_path` field at all — what BT-2134 wrote.
+        std::fs::write(
+            cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
+            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+        )
+        .unwrap();
+
+        let registry = load_type_cache_registry(&cache_dir).expect("legacy entry must load");
+        assert!(
+            registry.lookup("gen_tcp", "connect", 2).is_some(),
+            "legacy entry without beam_path must be tolerated as fresh"
+        );
+    }
+
+    /// BT-2139: When a cache entry records a `beam_path` *and* the live file
+    /// at that path matches the cached mtime, the entry must be loaded — this
+    /// is the steady-state case after a fresh `beamtalk build`.
+    #[test]
+    fn load_type_cache_registry_loads_entry_when_beam_mtime_matches() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        let beam_path = temp.path().join("gen_tcp.beam");
+        std::fs::write(&beam_path, b"placeholder").unwrap();
+        let modified = std::fs::metadata(&beam_path).unwrap().modified().unwrap();
+        let dur = modified.duration_since(std::time::UNIX_EPOCH).unwrap();
+        let entry_json = serde_json::json!({
+            "beam_mtime_secs": dur.as_secs(),
+            "beam_mtime_nanos": dur.subsec_nanos(),
+            "beam_path": beam_path.to_str().unwrap(),
+            "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+        })
+        .to_string();
+        std::fs::write(
+            cache_dir
+                .join("gen_tcp_0123456789abcdef.json")
+                .as_std_path(),
+            entry_json,
+        )
+        .unwrap();
+
+        let registry = load_type_cache_registry(&cache_dir).expect("registry must load");
+        assert!(
+            registry.lookup("gen_tcp", "connect", 2).is_some(),
+            "fresh entry with matching mtime must be loaded"
+        );
+    }
+
     /// BT-2134 (`CodeRabbit` follow-up): Module names that themselves contain
     /// underscores (e.g. `gen_tcp_socket`) must not be confused with a
     /// hash-suffixed entry for `gen_tcp`. The filename parser splits on the
