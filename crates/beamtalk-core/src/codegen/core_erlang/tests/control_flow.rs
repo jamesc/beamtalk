@@ -152,9 +152,6 @@ fn test_block_repeat_infinite_loop() {
 
 #[test]
 fn test_while_true_compiles_through_erlc() {
-    use std::io::Write;
-    use std::process::Command;
-
     // Generate a complete module with a whileTrue: expression
     let mut generator = CoreErlangGenerator::new("test_while_loop");
 
@@ -192,40 +189,7 @@ fn test_while_true_compiles_through_erlc() {
 
     full_output.push_str("\n\nend\n");
 
-    // Write to temp file
-    let temp_dir = std::env::temp_dir();
-    let core_file = temp_dir.join("test_while_loop.core");
-    let mut file = std::fs::File::create(&core_file).expect("Failed to create temp file");
-    file.write_all(full_output.as_bytes())
-        .expect("Failed to write Core Erlang");
-
-    // Try to compile with erlc
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg("-o")
-        .arg(&temp_dir)
-        .arg(&core_file)
-        .output();
-
-    // Clean up temp files regardless of result
-    let _ = std::fs::remove_file(&core_file);
-    let beam_file = temp_dir.join("test_while_loop.beam");
-    let _ = std::fs::remove_file(&beam_file);
-
-    match output {
-        Ok(result) => {
-            if !result.status.success() {
-                let stderr = String::from_utf8_lossy(&result.stderr);
-                panic!(
-                    "erlc compilation failed.\n\nGenerated Core Erlang:\n{full_output}\n\nerlc error:\n{stderr}",
-                );
-            }
-        }
-        Err(e) => {
-            // erlc not available, skip this test with a message
-            eprintln!("Skipping erlc compilation test: {e}");
-        }
-    }
+    crate::test_helpers::assert_compiles_through_erlc("test_while_loop", &full_output);
 }
 
 #[test]
