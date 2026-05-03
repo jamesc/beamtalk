@@ -1102,11 +1102,16 @@ mod tests {
             .unwrap();
 
         // Cache an mtime far in the past so the live file looks newer.
+        // Use serde_json to avoid Windows backslash-escaping pitfalls when
+        // interpolating a temp path into a JSON string literal.
         let stale_secs = live.as_secs().saturating_sub(3600);
-        let beam_path_str = beam_path.to_str().unwrap();
-        let entry_json = format!(
-            r#"{{"beam_mtime_secs":{stale_secs},"beam_mtime_nanos":0,"beam_path":"{beam_path_str}","specs_line":"beamtalk-specs-module:gen_tcp:[#{{arity => 2,line => 1,name => <<\"connect\">>,params => [#{{name => <<\"sockaddr\">>,type => <<\"Symbol\">>}},#{{name => <<\"port\">>,type => <<\"Integer\">>}}],return_type => <<\"Symbol\">>}}]"}}"#
-        );
+        let entry_json = serde_json::json!({
+            "beam_mtime_secs": stale_secs,
+            "beam_mtime_nanos": 0,
+            "beam_path": beam_path.to_str().unwrap(),
+            "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
+        })
+        .to_string();
         std::fs::write(
             cache_dir
                 .join("gen_tcp_0123456789abcdef.json")
@@ -1135,10 +1140,13 @@ mod tests {
         std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
 
         let missing_beam = temp.path().join("never_existed.beam");
-        let beam_path_str = missing_beam.to_str().unwrap();
-        let entry_json = format!(
-            r#"{{"beam_mtime_secs":1,"beam_mtime_nanos":0,"beam_path":"{beam_path_str}","specs_line":"beamtalk-specs-module:gen_tcp:[#{{arity => 1,line => 1,name => <<\"close\">>,params => [#{{name => <<\"sock\">>,type => <<\"Object\">>}}],return_type => <<\"Symbol\">>}}]"}}"#
-        );
+        let entry_json = serde_json::json!({
+            "beam_mtime_secs": 1,
+            "beam_mtime_nanos": 0,
+            "beam_path": missing_beam.to_str().unwrap(),
+            "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
+        })
+        .to_string();
         std::fs::write(
             cache_dir
                 .join("gen_tcp_0123456789abcdef.json")
@@ -1194,12 +1202,13 @@ mod tests {
         std::fs::write(&beam_path, b"placeholder").unwrap();
         let modified = std::fs::metadata(&beam_path).unwrap().modified().unwrap();
         let dur = modified.duration_since(std::time::UNIX_EPOCH).unwrap();
-        let beam_path_str = beam_path.to_str().unwrap();
-        let entry_json = format!(
-            r#"{{"beam_mtime_secs":{secs},"beam_mtime_nanos":{nanos},"beam_path":"{beam_path_str}","specs_line":"beamtalk-specs-module:gen_tcp:[#{{arity => 2,line => 1,name => <<\"connect\">>,params => [#{{name => <<\"sockaddr\">>,type => <<\"Symbol\">>}},#{{name => <<\"port\">>,type => <<\"Integer\">>}}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}}]"}}"#,
-            secs = dur.as_secs(),
-            nanos = dur.subsec_nanos(),
-        );
+        let entry_json = serde_json::json!({
+            "beam_mtime_secs": dur.as_secs(),
+            "beam_mtime_nanos": dur.subsec_nanos(),
+            "beam_path": beam_path.to_str().unwrap(),
+            "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+        })
+        .to_string();
         std::fs::write(
             cache_dir
                 .join("gen_tcp_0123456789abcdef.json")
