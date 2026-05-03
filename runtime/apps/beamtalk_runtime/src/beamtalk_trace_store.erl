@@ -432,17 +432,19 @@ init([]) ->
     %% Initialise persistent_term defaults
     init_persistent_terms(),
 
-    %% Ensure telemetry apps are started (not in app.src to avoid breaking
-    %% environments where telemetry isn't on the code path, e.g. stdlib tests).
-    %% If telemetry is not available, the trace store still works for direct
-    %% record_dispatch/record_trace_event calls — just no automatic handler attachment.
-    case application:ensure_all_started(telemetry) of
-        {ok, _} ->
+    %% telemetry and telemetry_poller are declared in beamtalk_runtime.app.src,
+    %% so OTP starts and loads their modules before this init/1 runs in normal
+    %% application startup. Guard the attach call with a function_exported
+    %% check anyway, mirroring the maybe_span/3 and maybe_execute_telemetry/3
+    %% pattern in beamtalk_actor.erl, so the trace store still degrades
+    %% gracefully if it's started outside its OTP application context (e.g.
+    %% direct gen_server:start_link/3 in a partial test harness).
+    case erlang:function_exported(telemetry, attach, 4) of
+        true ->
             attach_telemetry_handlers(),
             configure_poller();
-        {error, _} ->
-            ?LOG_INFO("telemetry not available, skipping handler attachment", #{}),
-            ok
+        false ->
+            ?LOG_INFO("telemetry not loaded, skipping handler attachment", #{})
     end,
 
     %% Start periodic sweep timer
@@ -808,10 +810,9 @@ detach_telemetry_handlers() ->
 
 -doc "Configure telemetry_poller for periodic VM measurements.".
 configure_poller() ->
-    %% telemetry_poller is started by the telemetry_poller application.
-    %% It emits [vm, memory], [vm, total_run_queue_lengths], etc. by default.
-    %% We just need to ensure the application is started.
-    _ = application:ensure_all_started(telemetry_poller),
+    %% telemetry_poller is declared as a dependency in beamtalk_runtime.app.src
+    %% and started automatically by OTP. It emits [vm, memory],
+    %% [vm, total_run_queue_lengths], etc. by default.
     ok.
 
 %%====================================================================

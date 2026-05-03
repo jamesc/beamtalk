@@ -5,9 +5,13 @@
 // lifecycle (enable/disable/isEnabled/clear), configuration (maxEvents/maxEvents:),
 // error behavior (empty results), live health queries, and systemHealth VM overview.
 //
-// Note: telemetry is not available in BUnit, so dispatch-based aggregates
-// and trace events are not auto-populated. We test the API surface, error
-// behavior, and live health rather than trace data content.
+// Telemetry is available in the BUnit harness (declared as a dependency of
+// beamtalk_runtime, so OTP starts it before the trace store gen_server's init/1
+// runs). Lifecycle events from compiled actors are therefore captured here.
+// Method-dispatch traces remain empty in these tests because no method
+// dispatches are performed against an actor while tracing is enabled — the
+// API-surface tests focus on Tracing's query and configuration behaviour, not
+// on dispatch-trace content.
 
 TestCase subclass: TracingTest
 
@@ -104,14 +108,14 @@ TestCase subclass: TracingTest
     // Reset to default
     Tracing maxEvents: 100000
 
-  // === Traces (empty when not enabled / no telemetry) ===
+  // === Traces (empty when not enabled / no dispatches) ===
   testTracesReturnsEmptyList =>
     // traces returns [] when not enabled
     self assert: Tracing traces equals: #()
 
   testTracesReturnsEmptyListWhenEnabled =>
-    // traces returns [] when enabled but no dispatches recorded
-    // (telemetry not available in BUnit)
+    // traces returns [] when enabled but no dispatches/lifecycle events
+    // have been recorded since the last clear
     Tracing enable
     self assert: Tracing traces equals: #()
 
