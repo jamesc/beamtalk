@@ -433,11 +433,19 @@ init([]) ->
     init_persistent_terms(),
 
     %% telemetry and telemetry_poller are declared in beamtalk_runtime.app.src,
-    %% so OTP guarantees they have started by the time this init/1 runs.
-    %% Attach handlers unconditionally — silent attachment failures previously
-    %% manifested as flaky lifecycle-event tests (BT-2116).
-    attach_telemetry_handlers(),
-    configure_poller(),
+    %% so OTP starts and loads their modules before this init/1 runs in normal
+    %% application startup. Guard the attach call with a function_exported
+    %% check anyway, mirroring the maybe_span/3 and maybe_execute_telemetry/3
+    %% pattern in beamtalk_actor.erl, so the trace store still degrades
+    %% gracefully if it's started outside its OTP application context (e.g.
+    %% direct gen_server:start_link/3 in a partial test harness).
+    case erlang:function_exported(telemetry, attach, 4) of
+        true ->
+            attach_telemetry_handlers(),
+            configure_poller();
+        false ->
+            ?LOG_INFO("telemetry not loaded, skipping handler attachment", #{})
+    end,
 
     %% Start periodic sweep timer
     TimerRef = start_sweep_timer(),

@@ -8,9 +8,10 @@
 // Telemetry is available in the BUnit harness (declared as a dependency of
 // beamtalk_runtime, so OTP starts it before the trace store gen_server's init/1
 // runs). Lifecycle events from compiled actors are therefore captured here.
-// Method-dispatch telemetry is opt-in per actor and not exercised by these
-// tests — the API-surface tests still assert empty results when no dispatches
-// have been recorded.
+// Method-dispatch traces remain empty in these tests because no method
+// dispatches are performed against an actor while tracing is enabled — the
+// API-surface tests focus on Tracing's query and configuration behaviour, not
+// on dispatch-trace content.
 
 TestCase subclass: TracingTest
 
