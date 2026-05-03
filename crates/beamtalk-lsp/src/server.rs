@@ -1276,6 +1276,33 @@ fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
 }
 
+/// Enumerate `_build/deps/<name>/src/` directories for every fetched
+/// dependency under `root`.
+///
+/// Filesystem-driven rather than manifest-driven: any directory under
+/// `_build/deps/` with a `src/` subdirectory is treated as a dep. This avoids
+/// adding a `beamtalk-cli` dependency on the LSP just to parse `beamtalk.toml`,
+/// and matches the layout the build system writes.
+fn dependency_src_dirs(root: &Path) -> Vec<PathBuf> {
+    let deps_dir = root.join("_build").join("deps");
+    let Ok(entries) = fs::read_dir(&deps_dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let dep_path = entry.path();
+        if !dep_path.is_dir() {
+            continue;
+        }
+        let src = dep_path.join("src");
+        if src.is_dir() {
+            out.push(src);
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
 fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     use beamtalk_core::file_walker::FileWalker;
 
@@ -1289,6 +1316,14 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     // `test/` immediately sees classes defined in `src/` (and vice versa).
     // Before this, the LSP would report spurious `Unresolved class` for every
     // test-to-src reference until the user touched the src file manually.
+    //
+    // BT-2137: Also preload `_build/deps/<name>/src/` for each fetched
+    // dependency so references to classes from declared `beamtalk.toml`
+    // dependencies (e.g. `HTTPClient` from the `http` package) resolve
+    // without spurious `Unresolved class` warnings. Dep dirs are walked
+    // *after* every workspace root's `src/`/`test/` so that in a multi-root
+    // workspace one root's deps cannot exhaust the shared preload budget
+    // before later roots' user files are considered.
     for root in &roots {
         for subdir in ["src", "test"] {
             if remaining_budget == 0 {
@@ -1304,6 +1339,22 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
                     remaining_budget = remaining_budget.saturating_sub(found.len());
                     user_paths.extend(found);
                 }
+            }
+        }
+    }
+
+    for root in &roots {
+        for dep_src in dependency_src_dirs(root) {
+            if remaining_budget == 0 {
+                break;
+            }
+            if let Ok(found) = preload_walker
+                .clone()
+                .max_files(remaining_budget)
+                .walk_pathbuf(&dep_src)
+            {
+                remaining_budget = remaining_budget.saturating_sub(found.len());
+                user_paths.extend(found);
             }
         }
     }
@@ -2152,6 +2203,140 @@ mod tests {
                 .user_files
                 .iter()
                 .any(|(p, _)| p.ends_with("FooTest.bt"))
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2137: Preload must walk every `_build/deps/<name>/src/` so classes
+    /// from declared `beamtalk.toml` dependencies resolve without spurious
+    /// `Unresolved class` warnings.
+    #[test]
+    fn collect_preload_files_walks_dependency_src_dirs() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_deps");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        let dep_src = project_root
+            .join("_build")
+            .join("deps")
+            .join("http")
+            .join("src");
+        let other_dep_src = project_root
+            .join("_build")
+            .join("deps")
+            .join("json")
+            .join("src");
+
+        fs::create_dir_all(&src_dir).expect("create src dir");
+        fs::create_dir_all(&dep_src).expect("create dep src dir");
+        fs::create_dir_all(&other_dep_src).expect("create other dep src dir");
+
+        fs::write(src_dir.join("App.bt"), "Object subclass: App").expect("write src file");
+        fs::write(dep_src.join("HTTPClient.bt"), "Object subclass: HTTPClient")
+            .expect("write dep file");
+        fs::write(
+            other_dep_src.join("JSONParser.bt"),
+            "Object subclass: JSONParser",
+        )
+        .expect("write other dep file");
+
+        let config = PreloadConfig {
+            roots: vec![project_root],
+            stdlib_dirs: vec![],
+        };
+        let loaded = collect_preload_files(config);
+
+        assert_eq!(loaded.user_files.len(), 3);
+        assert!(loaded.user_files.iter().any(|(p, _)| p.ends_with("App.bt")));
+        assert!(
+            loaded
+                .user_files
+                .iter()
+                .any(|(p, _)| p.ends_with("HTTPClient.bt")),
+            "dependency class HTTPClient must be preloaded, got {:?}",
+            loaded.user_files
+        );
+        assert!(
+            loaded
+                .user_files
+                .iter()
+                .any(|(p, _)| p.ends_with("JSONParser.bt")),
+            "dependency class JSONParser must be preloaded, got {:?}",
+            loaded.user_files
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2137: A dep checkout without a `src/` subdirectory must be skipped
+    /// silently rather than causing a walk failure.
+    #[test]
+    fn collect_preload_files_tolerates_dep_without_src_dir() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_deps_no_src");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        let dep_dir = project_root.join("_build").join("deps").join("oddball");
+
+        fs::create_dir_all(&src_dir).expect("create src dir");
+        fs::create_dir_all(&dep_dir).expect("create bare dep dir");
+        fs::write(src_dir.join("App.bt"), "Object subclass: App").expect("write src file");
+
+        let config = PreloadConfig {
+            roots: vec![project_root],
+            stdlib_dirs: vec![],
+        };
+        let loaded = collect_preload_files(config);
+
+        assert_eq!(loaded.user_files.len(), 1);
+        assert!(loaded.user_files[0].0.ends_with("App.bt"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2137: In a multi-root workspace, every root's own `src/`/`test/`
+    /// must be preloaded before *any* root's dependency `src/` directories.
+    /// Otherwise deps from an earlier root could exhaust the shared
+    /// `PRELOAD_MAX_FILES` budget and leave a later root's user files
+    /// unindexed — exactly the unresolved-class noise this change fights.
+    #[test]
+    fn collect_preload_files_prioritizes_user_files_across_multi_root_workspace() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_multi_root");
+        let root_a = temp.join("root_a");
+        let root_b = temp.join("root_b");
+        let src_a = root_a.join("src");
+        let src_b = root_b.join("src");
+        let dep_a_src = root_a.join("_build").join("deps").join("dep_a").join("src");
+
+        fs::create_dir_all(&src_a).expect("create root_a src");
+        fs::create_dir_all(&src_b).expect("create root_b src");
+        fs::create_dir_all(&dep_a_src).expect("create root_a dep src");
+
+        fs::write(src_a.join("AppA.bt"), "Object subclass: AppA").expect("write src_a file");
+        fs::write(src_b.join("AppB.bt"), "Object subclass: AppB").expect("write src_b file");
+        fs::write(dep_a_src.join("DepA.bt"), "Object subclass: DepA").expect("write dep file");
+
+        let config = PreloadConfig {
+            roots: vec![root_a, root_b],
+            stdlib_dirs: vec![],
+        };
+        let loaded = collect_preload_files(config);
+
+        // The ordering contract: every workspace user file appears in
+        // `user_paths` *before* any dependency file. We can observe that by
+        // confirming root_b's `AppB.bt` is loaded before root_a's `DepA.bt`.
+        let app_b_pos = loaded
+            .user_files
+            .iter()
+            .position(|(p, _)| p.ends_with("AppB.bt"))
+            .expect("AppB.bt must be preloaded");
+        let dep_a_pos = loaded
+            .user_files
+            .iter()
+            .position(|(p, _)| p.ends_with("DepA.bt"))
+            .expect("DepA.bt must be preloaded");
+        assert!(
+            app_b_pos < dep_a_pos,
+            "root_b user file must be walked before root_a dep file (got AppB at {app_b_pos}, DepA at {dep_a_pos})"
         );
 
         let _ = fs::remove_dir_all(&temp);
