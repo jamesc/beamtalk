@@ -996,6 +996,16 @@ struct TypeCacheEntry {
     /// Combined with `beam_mtime_secs` to avoid cache collisions on rapid rewrites.
     #[serde(default)]
     beam_mtime_nanos: u32,
+    /// Absolute path to the `.beam` file at the time specs were extracted —
+    /// canonicalised when possible, otherwise resolved against the build's
+    /// cwd. Used by [`load_type_cache_registry`] to re-stat the file and
+    /// skip the entry if the live mtime no longer matches what was cached.
+    /// Persisting an absolute path means `beamtalk lint` can validate the
+    /// cache regardless of which cwd it is invoked from. Empty only for
+    /// legacy entries written before BT-2139 — those are tolerated as fresh
+    /// until the next build rewrites them with a path.
+    #[serde(default)]
+    beam_path: String,
     /// The raw `beamtalk-specs-module:...` protocol line (without newline).
     /// Empty string if the module had no specs or an error occurred.
     specs_line: String,
@@ -1068,9 +1078,35 @@ impl TypeCache {
             debug!("Failed to create type cache dir: {e}");
             return;
         }
+        // BT-2139: persist an absolute (canonicalised) path so freshness
+        // validation in `load_type_cache_registry` works when `beamtalk lint`
+        // runs from a different working directory than the build that wrote
+        // the cache. If `canonicalize_utf8` fails (typically because the
+        // `.beam` vanished or moved mid-build), fall back to a manually-built
+        // absolute path: if `beam_path` is already absolute, use it as-is;
+        // otherwise resolve it against the current working directory. We
+        // intentionally do *not* leave `beam_path` empty here — that would
+        // make `is_cache_entry_fresh` treat the entry as legacy/fresh, so
+        // lint would keep replaying stale specs instead of detecting that
+        // the underlying `.beam` is gone.
+        let canonical_beam_path = beam_path.canonicalize_utf8().map_or_else(
+            |_| {
+                if beam_path.is_absolute() {
+                    beam_path.as_str().to_string()
+                } else {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| Utf8PathBuf::from_path_buf(cwd).ok())
+                        .map(|cwd| cwd.join(beam_path).into_string())
+                        .unwrap_or_default()
+                }
+            },
+            Utf8PathBuf::into_string,
+        );
         let entry = TypeCacheEntry {
             beam_mtime_secs,
             beam_mtime_nanos,
+            beam_path: canonical_beam_path,
             specs_line: specs_line.to_string(),
         };
         let path = self.cache_path(module_name, beam_path);
@@ -1218,11 +1254,13 @@ pub fn extract_beam_specs(
 /// mtime — that's the one the most recent build wrote, and it matches what
 /// build's `extract_beam_specs` resolved for the current BEAM set.
 ///
-/// Cache freshness against the `.beam` itself is not checked here — build is
-/// responsible for updating cache entries against `.beam` mtimes. Lint reads
-/// whatever the most recent build produced; if the user has not run build
-/// (or has deleted the cache), the registry is empty and lint behaves as it
-/// did before.
+/// Each entry's `beam_path` is re-stat'd against the live filesystem (BT-2139).
+/// If the underlying `.beam` has changed since the build wrote the cache —
+/// e.g. `cargo build` rebuilt a NIF module, or an OTP upgrade replaced
+/// `gen_tcp.beam` — the entry is skipped so lint does not warn off stale FFI
+/// signatures. Entries written before BT-2139 carry an empty `beam_path`;
+/// those are pessimistically accepted as fresh until the next build rewrites
+/// them with a path.
 ///
 /// Returns `None` if `cache_dir` is not a directory or contains no entries.
 pub fn load_type_cache_registry(cache_dir: &Utf8Path) -> Option<NativeTypeRegistry> {
@@ -1276,6 +1314,9 @@ pub fn load_type_cache_registry(cache_dir: &Utf8Path) -> Option<NativeTypeRegist
         let Ok(entry) = serde_json::from_str::<TypeCacheEntry>(&content) else {
             continue;
         };
+        if !is_cache_entry_fresh(&entry) {
+            continue;
+        }
         if !entry.specs_line.is_empty() {
             parse_specs_line(&entry.specs_line, &mut registry);
         }
@@ -1297,6 +1338,25 @@ fn sanitize_module_name(name: &str) -> &str {
     after_slash
         .rfind('\\')
         .map_or(after_slash, |i| &after_slash[i + 1..])
+}
+
+/// Returns `true` if the cache entry still describes the live `.beam` file —
+/// i.e. the file at `beam_path` exists and its mtime matches what was cached.
+///
+/// Legacy entries written before BT-2139 carry an empty `beam_path`; we have
+/// no way to validate them, so they are pessimistically accepted as fresh.
+/// The next `beamtalk build` rewrites them with a path, which then enables
+/// validation on subsequent lint runs.
+fn is_cache_entry_fresh(entry: &TypeCacheEntry) -> bool {
+    if entry.beam_path.is_empty() {
+        return true;
+    }
+    let path = Utf8Path::new(&entry.beam_path);
+    if !path.exists() {
+        return false;
+    }
+    let (secs, nanos) = beam_mtime(path);
+    secs == entry.beam_mtime_secs && nanos == entry.beam_mtime_nanos
 }
 
 /// Returns the modification time of a `.beam` file as `(seconds, nanoseconds)`
