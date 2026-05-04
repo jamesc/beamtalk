@@ -381,3 +381,184 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn codegen(src: &str) -> String {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed")
+    }
+
+    #[test]
+    fn test_dict_do_with_field_mutation_uses_maps_values_foldl() {
+        // Map-literal do: with a field mutation generates maps:values + lists:foldl
+        // for state threading (not a simple foreach, because the field must be updated).
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: n = 0\n\n",
+            "  run: dict =>\n",
+            "    #{#a => 1, #b => 2} do: [:v | self.n := self.n + v]\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'maps':'values'"),
+            "dict do: with field mutation should use maps:values for iteration list. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "dict do: with field mutation should use lists:foldl for state threading. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "dict do: body should update 'n' field via maps:put. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_local_mutation_uses_tuple_acc() {
+        // Map-literal do: with only a local variable mutation uses the tuple-accumulator
+        // path (BT-1276): the threaded local is packed into a flat tuple {Total} as the
+        // foldl accumulator instead of a StateAcc map, so element/2 reads it inside the
+        // lambda. One maps:get appears outside the loop for the final extraction.
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: x = 0\n\n",
+            "  run: dict =>\n",
+            "    total := 0\n",
+            "    #{#a => 1, #b => 2} do: [:v | total := total + v]\n",
+            "    total\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'maps':'values'"),
+            "dict do: with local mutation should still use maps:values. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "dict do: with local mutation should use lists:foldl. Got:\n{code}"
+        );
+        // Tuple-accumulator: element(1, ...) reads the threaded local inside the lambda.
+        assert!(
+            code.contains("'erlang':'element'(1,"),
+            "dict do: tuple-acc path should use element(1, ...) to read the threaded local. Got:\n{code}"
+        );
+        // Exactly one maps:get for the outer extraction after the loop (not inside the lambda).
+        let get_count = code.matches("maps':'get'('__local__total'").count();
+        let put_count = code.matches("maps':'put'('__local__total'").count();
+        assert_eq!(
+            get_count, 1,
+            "dict do: tuple-acc path should have exactly 1 maps:get (outer extraction after loop). Got:\n{code}"
+        );
+        assert_eq!(
+            put_count, 1,
+            "dict do: tuple-acc path should have exactly 1 maps:put (repack after loop). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_key_field_mutation_uses_maps_to_list_foldl() {
+        // doWithKey: with a field mutation generates maps:to_list + lists:foldl.
+        // The foldl lambda receives {K, V} pairs extracted from the list.
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: n = 0\n\n",
+            "  run: dict =>\n",
+            "    dict doWithKey: [:k :v | self.n := self.n + v]\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'maps':'to_list'"),
+            "doWithKey: with field mutation should use maps:to_list to iterate pairs. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "doWithKey: with field mutation should use lists:foldl for state threading. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "doWithKey: body should update 'n' field via maps:put. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_key_destructures_pair_into_key_and_value() {
+        // The doWithKey: lambda receives {K, V} pairs from maps:to_list.
+        // Each pair is destructured: key = element(1, Pair), value = element(2, Pair).
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: n = 0\n\n",
+            "  run: dict =>\n",
+            "    dict doWithKey: [:k :v | self.n := self.n + v]\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("call 'erlang':'element'(1,"),
+            "doWithKey: lambda should extract the key via element(1, Pair). Got:\n{code}"
+        );
+        assert!(
+            code.contains("call 'erlang':'element'(2,"),
+            "doWithKey: lambda should extract the value via element(2, Pair). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_key_local_mutation_compiles_with_foldl() {
+        // doWithKey: with a local variable mutation generates maps:to_list + lists:foldl
+        // and the lambda destructs each {K, V} pair via element/2 calls.
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: x = 0\n\n",
+            "  run: dict =>\n",
+            "    total := 0\n",
+            "    dict doWithKey: [:k :v | total := total + v]\n",
+            "    total\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'maps':'to_list'"),
+            "doWithKey: with local mutation should use maps:to_list. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "doWithKey: with local mutation should use lists:foldl. Got:\n{code}"
+        );
+        // Pair destructuring: element(1, Pair) for key, element(2, Pair) for value.
+        assert!(
+            code.contains("'erlang':'element'"),
+            "doWithKey: lambda should use element/2 for {{K,V}} pair destructuring. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_keys_and_values_do_is_alias_for_do_with_key() {
+        // keysAndValuesDo: is handled by the same code path as doWithKey:.
+        // Both selectors must trigger maps:to_list + lists:foldl for mutation blocks.
+        let src_dwk = concat!(
+            "Actor subclass: Srv\n",
+            "  state: n = 0\n\n",
+            "  run: dict =>\n",
+            "    dict doWithKey: [:k :v | self.n := self.n + v]\n",
+        );
+        let src_kavd = concat!(
+            "Actor subclass: Srv\n",
+            "  state: n = 0\n\n",
+            "  run: dict =>\n",
+            "    dict keysAndValuesDo: [:k :v | self.n := self.n + v]\n",
+        );
+        let code_dwk = codegen(src_dwk);
+        let code_kavd = codegen(src_kavd);
+        assert!(
+            code_kavd.contains("'maps':'to_list'"),
+            "keysAndValuesDo: should use the same maps:to_list path as doWithKey:. Got:\n{code_kavd}"
+        );
+        assert!(
+            code_dwk.contains("'maps':'to_list'") && code_kavd.contains("'maps':'to_list'"),
+            "Both doWithKey: and keysAndValuesDo: must use maps:to_list. dwk:\n{code_dwk}\nkavd:\n{code_kavd}"
+        );
+    }
+}
