@@ -768,7 +768,7 @@ All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the R
 The [Beamtalk VS Code extension](https://github.com/jamesc/beamtalk/tree/main/editors/vscode) connects to the live workspace and provides:
 
 - **Syntax highlighting** for `.bt` files
-- **LSP integration** — diagnostics, completions, go-to-definition, workspace symbol search. The LSP preloads classes from `_build/deps/*/src/` so dependency classes resolve without false-positive `Unresolved class` warnings.
+- **LSP integration** — diagnostics, completions, go-to-definition, workspace symbol search. The LSP preloads classes from `_build/deps/*/src/` on a best-effort basis (bounded by the preload budget), reducing most false-positive `Unresolved class` warnings for dependency types.
 - **Workspace tree view** — live actors, loaded classes, and session bindings in the sidebar
 - **Transcript view** — real-time output from the workspace
 - **Inspector panels** — inspect live actor state

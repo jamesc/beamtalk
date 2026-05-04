@@ -1231,20 +1231,20 @@ Actor subclass: Logger(T :: Printable)
 ### Runtime Protocol Queries
 
 ```beamtalk
-> Integer conformsTo: Printable
+> Integer conformsTo: #Printable
 => true
 
 > Integer conformsTo: #NonExistentProtocol
 => false
 
 > Integer protocols
-=> #(Printable, Comparable)
+=> [#Printable, #Comparable]
 
-> Printable requiredMethods
-=> #(#asString, #printString)
+> Protocol requiredMethods: #Printable
+=> [#asString, #printString]
 
-> Printable conformingClasses
-=> #(Integer, Float, String, Boolean, Symbol, Array, ...)
+> Protocol conformingClasses: #Printable
+=> [Integer, Float, String, Boolean, Symbol, Array, ...]
 ```
 
 `conformsTo:` returns `false` for unknown or non-protocol names — a class cannot conform to something that is not a registered protocol.
