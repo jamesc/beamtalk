@@ -16,7 +16,7 @@ categories = ["encoding"]
 
 [dependencies]
 # why: encode/decode Erlang External Term Format — the shared term type
-eetf = "0.11"
+eetf = "0.12"
 
 [lints]
 workspace = true
