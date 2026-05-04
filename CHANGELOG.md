@@ -10,15 +10,22 @@
 ### Runtime
 
 - Fix namespace collision diagnostic when hot-reloading a `Protocol define:` file on a second surface (e.g., MCP after REPL) — the compiler's class cache now filters pre-loaded protocol entries before hierarchy injection, and `register_module` accepts protocol re-registration when the existing class has superclass `Protocol` (BT-2088).
+- Fix `conformsTo:` returning `true` for unknown or non-protocol names — now correctly returns `false` when the protocol name is not registered (BT-2136).
+- Fix telemetry handler attachment race in `beamtalk_trace_store` — declare `telemetry` and `telemetry_poller` as OTP application dependencies so handler attachment is deterministic (BT-2116).
 
 ### Tooling
 
 - **REPL `:interrupt` / `:int` meta-command** — sends an out-of-band interrupt over a separate connection to cancel a running evaluation. This is the one REPL operation that cannot be expressed as a normal message-send (the session is blocked while an eval is in-flight) (BT-2090).
+- `beamtalk lint` now loads the FFI type cache from `_build/type_cache/`, so lint and build agree on FFI return types — previously lint always inferred untyped-FFI for Erlang calls (BT-2134).
+- `beamtalk lint` validates cache entries against live `.beam` file mtimes, skipping stale entries when the underlying module has been recompiled (BT-2139).
+- Fix false-positive `Unresolved class` warnings in the LSP for classes defined in fetched dependencies — the LSP now preloads `.bt` files from `_build/deps/*/src/` (BT-2137).
+- Fix LSP `is_protocol_type` always returning `false` for registered protocols, causing false-positive type warnings on protocol-typed parameters (BT-2135).
 
 ### Internal
 
 - Fix `build --stdlib-mode` to resolve FFI types via `NativeTypeRegistry` — eliminates 202 spurious untyped-FFI warnings from `just dialyzer-specs` (#2138).
 - Replace 16 `format!()` calls with `Document` API in `counted_loops.rs` codegen — continues the BT-875 cleanup (BT-2102).
+- Deduplicate atom-char escape helper into `beamtalk-core::util` (BT-2113).
 
 ## 0.4.0 — 2026-04-27
 

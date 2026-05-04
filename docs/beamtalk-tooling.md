@@ -99,6 +99,8 @@ The summary is suppressed when `--no-warnings` is passed.
 
 `beamtalk lint` prints the same summary at end of run. In `--format json` mode, a `summary` JSON object is emitted as the last line with `totals_by_severity`, `totals_by_category`, `files_checked`, and `total` fields for CI diffing.
 
+`beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes — if the underlying module has been recompiled since the cache was written, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
+
 ### Build Artifact Layout (`BuildLayout`)
 
 All build output goes under `_build/` in the project root. The `BuildLayout` struct centralises path construction so all commands (build, test, run, repl, deps) use consistent locations.
@@ -766,7 +768,7 @@ All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the R
 The [Beamtalk VS Code extension](https://github.com/jamesc/beamtalk/tree/main/editors/vscode) connects to the live workspace and provides:
 
 - **Syntax highlighting** for `.bt` files
-- **LSP integration** — diagnostics, completions, go-to-definition, workspace symbol search
+- **LSP integration** — diagnostics, completions, go-to-definition, workspace symbol search. The LSP preloads classes from `_build/deps/*/src/` so dependency classes resolve without false-positive `Unresolved class` warnings.
 - **Workspace tree view** — live actors, loaded classes, and session bindings in the sidebar
 - **Transcript view** — real-time output from the workspace
 - **Inspector panels** — inspect live actor state

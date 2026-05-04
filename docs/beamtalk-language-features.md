@@ -1234,6 +1234,9 @@ Actor subclass: Logger(T :: Printable)
 > Integer conformsTo: Printable
 => true
 
+> Integer conformsTo: #NonExistentProtocol
+=> false
+
 > Integer protocols
 => #(Printable, Comparable)
 
@@ -1243,6 +1246,8 @@ Actor subclass: Logger(T :: Printable)
 > Printable conformingClasses
 => #(Integer, Float, String, Boolean, Symbol, Array, ...)
 ```
+
+`conformsTo:` returns `false` for unknown or non-protocol names — a class cannot conform to something that is not a registered protocol.
 
 ### Diagnostic Philosophy
 
