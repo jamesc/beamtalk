@@ -2139,10 +2139,11 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!(
-                        "call 'gen_server':'start_link'('{}', InitArgs, [])",
-                        self.module_name
-                    ),
+                    docvec![
+                        "call 'gen_server':'start_link'('",
+                        Document::Eco(self.module_name.clone()),
+                        "', InitArgs, [])",
+                    ],
                 ]
             ),
             "\n\n",
@@ -2420,54 +2421,61 @@ impl CoreErlangGenerator {
             let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
-                format!("case call 'maps':'find'('{class_name}', {state_var}) of "),
+                "case call 'maps':'find'('",
+                Document::String(class_name.to_string()),
+                "', ",
+                Document::String(state_var),
+                ") of ",
                 "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
                 "<'error'> when 'true' -> ",
-                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
+                "case call 'beamtalk_class_registry':'whereis_class'('",
+                Document::String(class_name.to_string()),
+                "') of ",
                 error_doc,
-                format!("<{class_pid_var}> when 'true' -> "),
-                format!(
-                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
-                ),
-                format!(
-                    "{{'beamtalk_object', '{display_name} class', {class_mod_var}, {class_pid_var}}} "
-                ),
+                "<",
+                Document::String(class_pid_var.clone()),
+                "> when 'true' -> ",
+                "let ",
+                Document::String(class_mod_var.clone()),
+                " = call 'beamtalk_object_class':'module_name'(",
+                Document::String(class_pid_var.clone()),
+                ") in ",
+                "{'beamtalk_object', '",
+                Document::String(display_name),
+                " class', ",
+                Document::String(class_mod_var),
+                ", ",
+                Document::String(class_pid_var),
+                "} ",
                 "end end",
             ])
-        } else if self.workspace_mode() {
-            // Actor/ValueType methods in workspace mode: try class lookup.
-            // ADR 0019 Phase 4: No persistent_term fallback — use class registry only.
-            let class_pid_var = self.fresh_var("ClassPid");
-            let class_mod_var = self.fresh_var("ClassModName");
-            let error_doc = self.class_not_found_error_doc(class_name);
-
-            Ok(docvec![
-                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
-                error_doc,
-                format!("<{class_pid_var}> when 'true' -> "),
-                format!(
-                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
-                ),
-                format!(
-                    "{{'beamtalk_object', '{display_name} class', {class_mod_var}, {class_pid_var}}} "
-                ),
-                "end",
-            ])
         } else {
+            // Actor/ValueType methods in workspace mode and batch mode both use
+            // registry-only lookup. ADR 0019 Phase 4: No persistent_term fallback.
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
             let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
-                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
+                "case call 'beamtalk_class_registry':'whereis_class'('",
+                Document::String(class_name.to_string()),
+                "') of ",
                 error_doc,
-                format!("<{class_pid_var}> when 'true' -> "),
-                format!(
-                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
-                ),
-                format!(
-                    "{{'beamtalk_object', '{display_name} class', {class_mod_var}, {class_pid_var}}} "
-                ),
+                "<",
+                Document::String(class_pid_var.clone()),
+                "> when 'true' -> ",
+                "let ",
+                Document::String(class_mod_var.clone()),
+                " = call 'beamtalk_object_class':'module_name'(",
+                Document::String(class_pid_var.clone()),
+                ") in ",
+                "{'beamtalk_object', '",
+                Document::String(display_name),
+                " class', ",
+                Document::String(class_mod_var),
+                ", ",
+                Document::String(class_pid_var),
+                "} ",
                 "end",
             ])
         }
@@ -2483,13 +2491,21 @@ impl CoreErlangGenerator {
         let hint_binary = Self::binary_string_literal(&hint);
 
         docvec![
-            format!(
-                "<'undefined'> when 'true' -> let {err0_var} = call 'beamtalk_error':'new'('class_not_found', '{class_name}') in "
-            ),
-            format!(
-                "let {err1_var} = call 'beamtalk_error':'with_hint'({err0_var}, {hint_binary}) in "
-            ),
-            format!("call 'beamtalk_error':'raise'({err1_var}) "),
+            "<'undefined'> when 'true' -> let ",
+            Document::String(err0_var.clone()),
+            " = call 'beamtalk_error':'new'('class_not_found', '",
+            Document::String(class_name.to_string()),
+            "') in ",
+            "let ",
+            Document::String(err1_var.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            Document::String(err0_var),
+            ", ",
+            Document::String(hint_binary),
+            ") in ",
+            "call 'beamtalk_error':'raise'(",
+            Document::String(err1_var),
+            ") ",
         ]
     }
 
