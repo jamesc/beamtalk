@@ -565,4 +565,283 @@ mod tests {
             Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
         );
     }
+
+    // Array primitive tests (BT-822)
+
+    #[test]
+    fn test_array_size() {
+        let result = doc_to_string(generate_primitive_bif("Array", "size", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'size'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_is_empty() {
+        let result = doc_to_string(generate_primitive_bif("Array", "isEmpty", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'is_empty'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_do() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "do:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'do'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_at() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "at:",
+            &["Index".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'at'(Self, Index)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_at_put() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "at:put:",
+            &["Index".to_string(), "Value".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'at_put'(Self, Index, Value)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_with_all() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "withAll:",
+            &["List".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'from_list'(List)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_collect() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "collect:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'collect'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_select() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "select:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'select'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_inject_into() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "inject:into:",
+            &["Init".to_string(), "Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'inject_into'(Self, Init, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_includes() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Array",
+            "includes:",
+            &["Elem".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'includes'(Self, Elem)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_print_string() {
+        let result = doc_to_string(generate_primitive_bif("Array", "printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_array':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_unknown_selector() {
+        let result = doc_to_string(generate_primitive_bif("Array", "notAMethod", &[]));
+        assert!(result.is_none());
+    }
+
+    // Dictionary primitive tests (BT-418)
+
+    #[test]
+    fn test_dictionary_size() {
+        let result = doc_to_string(generate_primitive_bif("Dictionary", "size", &[]));
+        assert_eq!(result, Some("call 'erlang':'map_size'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_keys() {
+        let result = doc_to_string(generate_primitive_bif("Dictionary", "keys", &[]));
+        assert_eq!(result, Some("call 'maps':'keys'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_values() {
+        let result = doc_to_string(generate_primitive_bif("Dictionary", "values", &[]));
+        assert_eq!(result, Some("call 'maps':'values'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_at() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "at:",
+            &["Key".to_string()],
+        ));
+        assert_eq!(result, Some("call 'maps':'get'(Key, Self)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_at_if_absent() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "at:ifAbsent:",
+            &["Key".to_string(), "Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_map':'at_if_absent'(Self, Key, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_at_put() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "at:put:",
+            &["Key".to_string(), "Value".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'maps':'put'(Key, Value, Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_includes_key() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "includesKey:",
+            &["Key".to_string()],
+        ));
+        assert_eq!(result, Some("call 'maps':'is_key'(Key, Self)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_remove_key() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "removeKey:",
+            &["Key".to_string()],
+        ));
+        assert_eq!(result, Some("call 'maps':'remove'(Key, Self)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_merge() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "merge:",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'maps':'merge'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_dictionary_do_with_key() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "doWithKey:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_map':'do_with_key'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_do() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "do:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_map':'do'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_includes() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "includes:",
+            &["Elem".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_map':'includes'(Self, Elem)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_print_string() {
+        let result = doc_to_string(generate_primitive_bif("Dictionary", "printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_map':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_unknown_selector() {
+        let result = doc_to_string(generate_primitive_bif("Dictionary", "notAMethod", &[]));
+        assert!(result.is_none());
+    }
 }
