@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
-use super::{generate_comparison_bif, param};
+use super::{call_self_p0, generate_comparison_bif, param};
 use crate::docvec;
 
 /// String primitive implementations.
@@ -45,11 +45,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
             "])"
         ]),
         "length" => Some(Document::Str("call 'string':'length'(Self)")),
-        "at:" => Some(docvec![
-            "call 'beamtalk_string':'at'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "at:" => Some(call_self_p0("beamtalk_string", "at", p0)),
         "uppercase" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'uppercase'(Self))",
         )),
@@ -74,41 +70,17 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
 fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
-        "includes:" => Some(docvec![
-            "call 'beamtalk_string':'includes'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "startsWith:" => Some(docvec![
-            "call 'beamtalk_string':'starts_with'(Self, ",
-            p0.to_string(),
-            ")",
-        ]),
-        "endsWith:" => Some(docvec![
-            "call 'beamtalk_string':'ends_with'(Self, ",
-            p0.to_string(),
-            ")",
-        ]),
-        "indexOf:" => Some(docvec![
-            "call 'beamtalk_string':'index_of'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "includes:" => Some(call_self_p0("beamtalk_string", "includes", p0)),
+        "startsWith:" => Some(call_self_p0("beamtalk_string", "starts_with", p0)),
+        "endsWith:" => Some(call_self_p0("beamtalk_string", "ends_with", p0)),
+        "indexOf:" => Some(call_self_p0("beamtalk_string", "index_of", p0)),
         "split:" => Some(docvec![
             "call 'binary':'split'(Self, ",
             p0.to_string(),
             ", ['global'])"
         ]),
-        "splitOn:" => Some(docvec![
-            "call 'beamtalk_string':'split_on'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "repeat:" => Some(docvec![
-            "call 'beamtalk_string':'repeat'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "splitOn:" => Some(call_self_p0("beamtalk_string", "split_on", p0)),
+        "repeat:" => Some(call_self_p0("beamtalk_string", "repeat", p0)),
         "lines" => Some(Document::Str("call 'beamtalk_string':'lines'(Self)")),
         "words" => Some(Document::Str("call 'beamtalk_string':'words'(Self)")),
         "replaceAll:with:" => {
@@ -131,16 +103,8 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
                 ", [])"
             ])
         }
-        "take:" => Some(docvec![
-            "call 'beamtalk_string':'take'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "drop:" => Some(docvec![
-            "call 'beamtalk_string':'drop'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "take:" => Some(call_self_p0("beamtalk_string", "take", p0)),
+        "drop:" => Some(call_self_p0("beamtalk_string", "drop", p0)),
         "padLeft:" => Some(docvec![
             "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
             p0.to_string(),
@@ -184,26 +148,10 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             "call 'erlang':'binary_to_atom'(Self, 'utf8')",
         )),
         "asList" => Some(Document::Str("call 'beamtalk_string':'as_list'(Self)")),
-        "each:" => Some(docvec![
-            "call 'beamtalk_string':'each'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "collect:" => Some(docvec![
-            "call 'beamtalk_string':'collect'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "select:" => Some(docvec![
-            "call 'beamtalk_string':'select'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "reject:" => Some(docvec![
-            "call 'beamtalk_string':'reject'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "each:" => Some(call_self_p0("beamtalk_string", "each", p0)),
+        "collect:" => Some(call_self_p0("beamtalk_string", "collect", p0)),
+        "select:" => Some(call_self_p0("beamtalk_string", "select", p0)),
+        "reject:" => Some(call_self_p0("beamtalk_string", "reject", p0)),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         // Class-side factory: String class withAll: list joins grapheme list into a String
         "withAll:" => Some(docvec![
@@ -240,11 +188,7 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
 fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
-        "matchesRegex:" => Some(docvec![
-            "call 'beamtalk_regex':'matches_regex'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "matchesRegex:" => Some(call_self_p0("beamtalk_regex", "matches_regex", p0)),
         "matchesRegex:options:" => {
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
@@ -255,16 +199,8 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
                 ")",
             ])
         }
-        "firstMatch:" => Some(docvec![
-            "call 'beamtalk_regex':'first_match'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "allMatches:" => Some(docvec![
-            "call 'beamtalk_regex':'all_matches'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "firstMatch:" => Some(call_self_p0("beamtalk_regex", "first_match", p0)),
+        "allMatches:" => Some(call_self_p0("beamtalk_regex", "all_matches", p0)),
         "replaceRegex:with:" => {
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
@@ -285,11 +221,7 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
                 ")",
             ])
         }
-        "splitRegex:" => Some(docvec![
-            "call 'beamtalk_regex':'split_regex'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
+        "splitRegex:" => Some(call_self_p0("beamtalk_regex", "split_regex", p0)),
         _ => None,
     }
 }
