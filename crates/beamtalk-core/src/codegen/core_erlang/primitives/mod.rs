@@ -148,6 +148,45 @@ pub(crate) fn param<'a>(params: &'a [String], index: usize, default: &'static st
     params.get(index).map_or(default, String::as_str)
 }
 
+/// Returns a single-arg call document with Self as the first argument:
+/// `call 'module':'function'(Self, p0)`
+pub(crate) fn call_self_p0(
+    module: &'static str,
+    function: &'static str,
+    p0: &str,
+) -> Document<'static> {
+    docvec![
+        "call '",
+        module,
+        "':'",
+        function,
+        "'(Self, ",
+        p0.to_string(),
+        ")",
+    ]
+}
+
+/// Returns a single-arg call document with the argument first, Self second:
+/// `call 'module':'function'(p0, Self)`
+///
+/// Used for functional-style Erlang APIs (e.g. `lists:map/2`, `lists:filter/2`)
+/// where the function argument precedes the list.
+pub(crate) fn call_p0_self(
+    module: &'static str,
+    function: &'static str,
+    p0: &str,
+) -> Document<'static> {
+    docvec![
+        "call '",
+        module,
+        "':'",
+        function,
+        "'(",
+        p0.to_string(),
+        ", Self)",
+    ]
+}
+
 /// Returns power implementation: `call 'math':'pow'(Self, Param0)`
 pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
     let p0 = params.first()?;
