@@ -241,7 +241,7 @@ format_modules_test() ->
     Modules = [
         {counter, #{
             name => <<"Counter">>,
-            source_file => "/tmp/counter.bt",
+            source_file => "counter.bt",
             actor_count => 2,
             load_time => 1000,
             time_ago => "5 seconds ago"
@@ -252,7 +252,7 @@ format_modules_test() ->
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     [Mod] = maps:get(<<"modules">>, Decoded),
     ?assertEqual(<<"Counter">>, maps:get(<<"name">>, Mod)),
-    ?assertEqual(<<"/tmp/counter.bt">>, maps:get(<<"source_file">>, Mod)),
+    ?assertEqual(<<"counter.bt">>, maps:get(<<"source_file">>, Mod)),
     ?assertEqual(2, maps:get(<<"actor_count">>, Mod)).
 
 %%% ============================================================================
@@ -994,7 +994,7 @@ format_modules_single_test() ->
     Info =
         {counter, #{
             name => <<"Counter">>,
-            source_file => "/tmp/counter.bt",
+            source_file => "counter.bt",
             actor_count => 3,
             load_time => 1234567890,
             time_ago => "2 minutes ago"
@@ -1005,7 +1005,7 @@ format_modules_single_test() ->
     ?assertEqual(1, length(Modules)),
     [Mod] = Modules,
     ?assertEqual(<<"Counter">>, maps:get(<<"name">>, Mod)),
-    ?assertEqual(<<"/tmp/counter.bt">>, maps:get(<<"source_file">>, Mod)),
+    ?assertEqual(<<"counter.bt">>, maps:get(<<"source_file">>, Mod)),
     ?assertEqual(3, maps:get(<<"actor_count">>, Mod)).
 
 %%% format_response edge cases
@@ -1203,14 +1203,14 @@ format_modules_multiple_test() ->
     Modules = [
         {counter, #{
             name => <<"Counter">>,
-            source_file => "/tmp/counter.bt",
+            source_file => "counter.bt",
             actor_count => 2,
             load_time => 100,
             time_ago => "5 seconds ago"
         }},
         {point, #{
             name => <<"Point">>,
-            source_file => "/tmp/point.bt",
+            source_file => "point.bt",
             actor_count => 0,
             load_time => 200,
             time_ago => "10 seconds ago"
