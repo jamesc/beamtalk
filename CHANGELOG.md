@@ -26,6 +26,7 @@
 - Fix `build --stdlib-mode` to resolve FFI types via `NativeTypeRegistry` — eliminates 202 spurious untyped-FFI warnings from `just dialyzer-specs` (#2138).
 - Replace 16 `format!()` calls with `Document` API in `counted_loops.rs` codegen — continues the BT-875 cleanup (BT-2102).
 - Deduplicate atom-char escape helper into `beamtalk-core::util` (BT-2113).
+- Replace 3 `format!()` calls with `docvec!` in `generate_start_link_doc`, `generate_class_reference`, and `class_not_found_error_doc` — continues the BT-875 cleanup (BT-2143).
 
 ## 0.4.0 — 2026-04-27
 
