@@ -148,7 +148,7 @@ pub(crate) fn param<'a>(params: &'a [String], index: usize, default: &'static st
     params.get(index).map_or(default, String::as_str)
 }
 
-/// Returns a single-arg call document with Self as the first argument:
+/// Returns a call document with Self as the first argument and one extra parameter:
 /// `call 'module':'function'(Self, p0)`
 pub(crate) fn call_self_p0(
     module: &'static str,
@@ -166,11 +166,11 @@ pub(crate) fn call_self_p0(
     ]
 }
 
-/// Returns a single-arg call document with the argument first, Self second:
+/// Returns a call document with one extra parameter first, Self second:
 /// `call 'module':'function'(p0, Self)`
 ///
 /// Used for functional-style Erlang APIs (e.g. `lists:map/2`, `lists:filter/2`)
-/// where the function argument precedes the list.
+/// where the function argument precedes the collection.
 pub(crate) fn call_p0_self(
     module: &'static str,
     function: &'static str,
@@ -603,5 +603,20 @@ mod tests {
             result,
             Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
         );
+    }
+
+    #[test]
+    fn test_call_self_p0_renders_correctly() {
+        let doc = call_self_p0("beamtalk_list", "detect", "Block");
+        assert_eq!(
+            doc.to_pretty_string(),
+            "call 'beamtalk_list':'detect'(Self, Block)"
+        );
+    }
+
+    #[test]
+    fn test_call_p0_self_renders_correctly() {
+        let doc = call_p0_self("lists", "map", "Block");
+        assert_eq!(doc.to_pretty_string(), "call 'lists':'map'(Block, Self)");
     }
 }
