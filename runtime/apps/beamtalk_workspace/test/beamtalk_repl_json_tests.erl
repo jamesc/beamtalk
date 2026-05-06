@@ -1223,8 +1223,10 @@ format_modules_multiple_test() ->
     ?assertEqual(2, length(ModList)),
     [First, Second] = ModList,
     ?assertEqual(<<"Counter">>, maps:get(<<"name">>, First)),
+    ?assertEqual(<<"counter.bt">>, maps:get(<<"source_file">>, First)),
     ?assertEqual(2, maps:get(<<"actor_count">>, First)),
     ?assertEqual(<<"Point">>, maps:get(<<"name">>, Second)),
+    ?assertEqual(<<"point.bt">>, maps:get(<<"source_file">>, Second)),
     ?assertEqual(0, maps:get(<<"actor_count">>, Second)).
 
 %%% format_error_message additional coverage
