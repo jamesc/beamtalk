@@ -19,6 +19,16 @@ use std::path::{Path, PathBuf};
 
 use crate::file_walker::FileWalker;
 
+/// Canonicalize `path`, falling back to the original path on any I/O error.
+///
+/// This is a best-effort helper: on success it returns the resolved absolute
+/// path; on failure (e.g. the path does not yet exist on disk) it returns a
+/// clone of the input unchanged.  Callers that need the error should call
+/// `std::fs::canonicalize` directly.
+fn try_canonicalize(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Walk ancestors from `start` to find the package root — the first ancestor
 /// directory containing a `beamtalk.toml` manifest.
 ///
@@ -29,7 +39,7 @@ use crate::file_walker::FileWalker;
 /// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
 #[must_use]
 pub fn find_package_root(start: &Path) -> Option<PathBuf> {
-    let canonical = std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    let canonical = try_canonicalize(start);
     let start_dir = if canonical.is_file() {
         canonical.parent()?.to_path_buf()
     } else {
@@ -85,7 +95,7 @@ pub fn collect_package_source_files_with_errors(
             match FileWalker::source_files().walk_pathbuf(&dir) {
                 Ok(files) => {
                     for f in files {
-                        let key = std::fs::canonicalize(&f).unwrap_or_else(|_| f.clone());
+                        let key = try_canonicalize(&f);
                         if seen.insert(key) {
                             out.push(f);
                         }
@@ -121,25 +131,20 @@ pub fn resolve_extraction_files(
 ) -> (Vec<PathBuf>, HashSet<PathBuf>) {
     let package_root = find_package_root(source_path);
 
-    let target_set: HashSet<PathBuf> = source_files
-        .iter()
-        .map(|f| std::fs::canonicalize(f).unwrap_or_else(|_| f.clone()))
-        .collect();
+    let target_set: HashSet<PathBuf> = source_files.iter().map(|f| try_canonicalize(f)).collect();
 
     let extraction_files = match &package_root {
         Some(root) => {
             let mut pkg_files = collect_package_source_files(root);
             // Build a canonical set of already-included package files so the
             // dedup lookup is O(1) per target rather than O(n) linear.
-            let pkg_canonical: HashSet<PathBuf> = pkg_files
-                .iter()
-                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()))
-                .collect();
+            let mut pkg_canonical: HashSet<PathBuf> =
+                pkg_files.iter().map(|p| try_canonicalize(p)).collect();
             // Ensure explicitly-targeted files are always included even when
             // they live outside the conventional src/ and test/ directories.
             for f in source_files {
-                let key = std::fs::canonicalize(f).unwrap_or_else(|_| f.clone());
-                if !pkg_canonical.contains(&key) {
+                let key = try_canonicalize(f);
+                if pkg_canonical.insert(key) {
                     pkg_files.push(f.clone());
                 }
             }
