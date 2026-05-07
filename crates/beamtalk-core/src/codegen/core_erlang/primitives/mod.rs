@@ -898,4 +898,747 @@ mod tests {
         let result = doc_to_string(generate_primitive_bif("Dictionary", "notAMethod", &[]));
         assert!(result.is_none());
     }
+
+    // String primitive tests — transform group
+
+    #[test]
+    fn test_string_at() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "at:",
+            &["Index".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'at'(Self, Index)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_uppercase() {
+        let result = doc_to_string(generate_primitive_bif("String", "uppercase", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'uppercase'(Self))"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_string_lowercase() {
+        let result = doc_to_string(generate_primitive_bif("String", "lowercase", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_string_capitalize() {
+        let result = doc_to_string(generate_primitive_bif("String", "capitalize", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'capitalize'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_trim() {
+        let result = doc_to_string(generate_primitive_bif("String", "trim", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'both'))"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_string_trim_left() {
+        let result = doc_to_string(generate_primitive_bif("String", "trimLeft", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'leading'))"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_string_trim_right() {
+        let result = doc_to_string(generate_primitive_bif("String", "trimRight", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'trailing'))"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_string_reverse() {
+        let result = doc_to_string(generate_primitive_bif("String", "reverse", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'reverse'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_comma_concat() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            ",",
+            &["Other".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("iolist_to_binary"));
+        assert!(output.contains("Other"));
+    }
+
+    // String primitive tests — search group
+
+    #[test]
+    fn test_string_includes() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "includes:",
+            &["Sub".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'includes'(Self, Sub)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_starts_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "startsWith:",
+            &["Prefix".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'starts_with'(Self, Prefix)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_ends_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "endsWith:",
+            &["Suffix".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'ends_with'(Self, Suffix)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_index_of() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "indexOf:",
+            &["Sub".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'index_of'(Self, Sub)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_split() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "split:",
+            &["Sep".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("binary':'split'"));
+        assert!(output.contains("'global'"));
+        assert!(output.contains("Sep"));
+    }
+
+    #[test]
+    fn test_string_split_on() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "splitOn:",
+            &["Sep".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'split_on'(Self, Sep)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_repeat() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "repeat:",
+            &["N".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'repeat'(Self, N)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_lines() {
+        let result = doc_to_string(generate_primitive_bif("String", "lines", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'lines'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_words() {
+        let result = doc_to_string(generate_primitive_bif("String", "words", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'words'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_replace_all_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "replaceAll:with:",
+            &["Pat".to_string(), "Repl".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("binary':'replace'"));
+        assert!(output.contains("'global'"));
+        assert!(output.contains("Pat"));
+        assert!(output.contains("Repl"));
+    }
+
+    #[test]
+    fn test_string_replace_first_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "replaceFirst:with:",
+            &["Pat".to_string(), "Repl".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("binary':'replace'"));
+        assert!(!output.contains("'global'"));
+        assert!(output.contains("Pat"));
+        assert!(output.contains("Repl"));
+    }
+
+    #[test]
+    fn test_string_take() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "take:",
+            &["N".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'take'(Self, N)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_drop() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "drop:",
+            &["N".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'drop'(Self, N)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_pad_left() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "padLeft:",
+            &["N".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("string':'pad'"));
+        assert!(output.contains("'leading'"));
+        assert!(output.contains('N'));
+    }
+
+    #[test]
+    fn test_string_pad_right() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "padRight:",
+            &["N".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("string':'pad'"));
+        assert!(output.contains("'trailing'"));
+        assert!(output.contains('N'));
+    }
+
+    #[test]
+    fn test_string_pad_left_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "padLeft:with:",
+            &["N".to_string(), "Ch".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("string':'pad'"));
+        assert!(output.contains("'leading'"));
+        assert!(output.contains("Ch"));
+    }
+
+    #[test]
+    fn test_string_pad_right_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "padRight:with:",
+            &["N".to_string(), "Ch".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("string':'pad'"));
+        assert!(output.contains("'trailing'"));
+        assert!(output.contains("Ch"));
+    }
+
+    // String primitive tests — misc group
+
+    #[test]
+    fn test_string_is_blank() {
+        let result = doc_to_string(generate_primitive_bif("String", "isBlank", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'is_blank'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_is_digit() {
+        let result = doc_to_string(generate_primitive_bif("String", "isDigit", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'is_digit'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_is_alpha() {
+        let result = doc_to_string(generate_primitive_bif("String", "isAlpha", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'is_alpha'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_as_integer() {
+        let result = doc_to_string(generate_primitive_bif("String", "asInteger", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'binary_to_integer'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_as_float() {
+        let result = doc_to_string(generate_primitive_bif("String", "asFloat", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'binary_to_float'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_as_atom() {
+        let result = doc_to_string(generate_primitive_bif("String", "asAtom", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'binary_to_atom'(Self, 'utf8')".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_as_list() {
+        let result = doc_to_string(generate_primitive_bif("String", "asList", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'as_list'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_each() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "each:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'each'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_collect() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "collect:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'collect'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_select() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "select:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'select'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_reject() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "reject:",
+            &["Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'reject'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_stream() {
+        let result = doc_to_string(generate_primitive_bif("String", "stream", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_stream':'on'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_with_all_factory() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "withAll:",
+            &["List".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_string':'join'"));
+        assert!(output.contains("List"));
+    }
+
+    #[test]
+    fn test_string_from_code_point_factory() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "fromCodePoint:",
+            &["CP".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_string':'from_code_point'"));
+        assert!(output.contains("CP"));
+    }
+
+    #[test]
+    fn test_string_from_code_points_factory() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "fromCodePoints:",
+            &["CPs".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_string':'from_code_points'"));
+        assert!(output.contains("CPs"));
+    }
+
+    #[test]
+    fn test_string_from_iolist_factory() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "fromIolist:",
+            &["IoList".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_string':'from_iolist'"));
+        assert!(output.contains("IoList"));
+    }
+
+    #[test]
+    fn test_string_unknown_selector() {
+        let result = doc_to_string(generate_primitive_bif("String", "notAStringMethod", &[]));
+        assert!(result.is_none());
+    }
+
+    // String primitive tests — comparison group
+
+    #[test]
+    fn test_string_equality() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "=:=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_string_not_equal() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "/=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_string_strict_not_equal() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "=/=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'=/='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_string_less_than() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "<",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_string_greater_than() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            ">",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'>'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_string_less_than_or_equal() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "<=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'=<'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_string_greater_than_or_equal() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            ">=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
+    }
+
+    // String primitive tests — regex group (BT-709)
+
+    #[test]
+    fn test_string_matches_regex() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "matchesRegex:",
+            &["Pat".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'matches_regex'(Self, Pat)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_matches_regex_options() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "matchesRegex:options:",
+            &["Pat".to_string(), "Opts".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_regex':'matches_regex_options'"));
+        assert!(output.contains("Pat"));
+        assert!(output.contains("Opts"));
+    }
+
+    #[test]
+    fn test_string_first_match() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "firstMatch:",
+            &["Pat".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'first_match'(Self, Pat)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_all_matches() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "allMatches:",
+            &["Pat".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'all_matches'(Self, Pat)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_replace_regex_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "replaceRegex:with:",
+            &["Pat".to_string(), "Repl".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_regex':'replace_regex'"));
+        assert!(output.contains("Pat"));
+        assert!(output.contains("Repl"));
+    }
+
+    #[test]
+    fn test_string_replace_all_regex_with() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "replaceAllRegex:with:",
+            &["Pat".to_string(), "Repl".to_string()],
+        ));
+        let output = result.unwrap();
+        assert!(output.contains("beamtalk_regex':'replace_all_regex'"));
+        assert!(output.contains("Pat"));
+        assert!(output.contains("Repl"));
+    }
+
+    #[test]
+    fn test_string_split_regex() {
+        let result = doc_to_string(generate_primitive_bif(
+            "String",
+            "splitRegex:",
+            &["Pat".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'split_regex'(Self, Pat)".to_string())
+        );
+    }
+
+    // CompiledMethod primitive tests
+
+    #[test]
+    fn test_compiled_method_selector() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "selector", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_compiled_method_ops':'dispatch'('selector', [], Self)".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_compiled_method_source() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "source", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_compiled_method_ops':'dispatch'('source', [], Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_compiled_method_doc() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "doc", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_compiled_method_ops':'dispatch'('doc', [], Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_compiled_method_argument_count() {
+        let result = doc_to_string(generate_primitive_bif(
+            "CompiledMethod",
+            "argumentCount",
+            &[],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_compiled_method_ops':'dispatch'('argumentCount', [], Self)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_compiled_method_print_string() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "printString", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_compiled_method_ops':'dispatch'('printString', [], Self)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_compiled_method_as_string() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "asString", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_compiled_method_ops':'dispatch'('asString', [], Self)".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_compiled_method_unknown_selector() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "notAMethod", &[]));
+        assert!(result.is_none());
+    }
 }
