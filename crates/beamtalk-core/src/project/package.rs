@@ -138,13 +138,13 @@ pub fn resolve_extraction_files(
             let mut pkg_files = collect_package_source_files(root);
             // Build a canonical set of already-included package files so the
             // dedup lookup is O(1) per target rather than O(n) linear.
-            let pkg_canonical: HashSet<PathBuf> =
+            let mut pkg_canonical: HashSet<PathBuf> =
                 pkg_files.iter().map(|p| try_canonicalize(p)).collect();
             // Ensure explicitly-targeted files are always included even when
             // they live outside the conventional src/ and test/ directories.
             for f in source_files {
                 let key = try_canonicalize(f);
-                if !pkg_canonical.contains(&key) {
+                if pkg_canonical.insert(key) {
                     pkg_files.push(f.clone());
                 }
             }
