@@ -21,9 +21,10 @@ test_config() ->
     #{enabled => false, max_idle_seconds => 14400}.
 
 test_metadata() ->
+    TmpDir = beamtalk_file:'tempDirectory'(),
     #{
         workspace_id => <<"test123">>,
-        project_path => <<"/tmp/test">>,
+        project_path => <<TmpDir/binary, "/bt_idle_test">>,
         % Use seconds, not milliseconds
         created_at => erlang:system_time(second),
         last_activity => erlang:system_time(second)
