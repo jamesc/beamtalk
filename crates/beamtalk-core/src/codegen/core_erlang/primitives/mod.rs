@@ -999,9 +999,10 @@ mod tests {
             ",",
             &["Other".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("iolist_to_binary"));
-        assert!(output.contains("Other"));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'iolist_to_binary'([Self, Other])".to_string())
+        );
     }
 
     // String primitive tests — search group
@@ -1065,10 +1066,10 @@ mod tests {
             "split:",
             &["Sep".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("binary':'split'"));
-        assert!(output.contains("'global'"));
-        assert!(output.contains("Sep"));
+        assert_eq!(
+            result,
+            Some("call 'binary':'split'(Self, Sep, ['global'])".to_string())
+        );
     }
 
     #[test]
@@ -1122,11 +1123,10 @@ mod tests {
             "replaceAll:with:",
             &["Pat".to_string(), "Repl".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("binary':'replace'"));
-        assert!(output.contains("'global'"));
-        assert!(output.contains("Pat"));
-        assert!(output.contains("Repl"));
+        assert_eq!(
+            result,
+            Some("call 'binary':'replace'(Self, Pat, Repl, ['global'])".to_string())
+        );
     }
 
     #[test]
@@ -1136,11 +1136,10 @@ mod tests {
             "replaceFirst:with:",
             &["Pat".to_string(), "Repl".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("binary':'replace'"));
-        assert!(!output.contains("'global'"));
-        assert!(output.contains("Pat"));
-        assert!(output.contains("Repl"));
+        assert_eq!(
+            result,
+            Some("call 'binary':'replace'(Self, Pat, Repl, [])".to_string())
+        );
     }
 
     #[test]
@@ -1176,10 +1175,13 @@ mod tests {
             "padLeft:",
             &["N".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("string':'pad'"));
-        assert!(output.contains("'leading'"));
-        assert!(output.contains('N'));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'leading'))"
+                    .to_string()
+            )
+        );
     }
 
     #[test]
@@ -1189,10 +1191,13 @@ mod tests {
             "padRight:",
             &["N".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("string':'pad'"));
-        assert!(output.contains("'trailing'"));
-        assert!(output.contains('N'));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'trailing'))"
+                    .to_string()
+            )
+        );
     }
 
     #[test]
@@ -1202,10 +1207,13 @@ mod tests {
             "padLeft:with:",
             &["N".to_string(), "Ch".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("string':'pad'"));
-        assert!(output.contains("'leading'"));
-        assert!(output.contains("Ch"));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'leading', Ch))"
+                    .to_string()
+            )
+        );
     }
 
     #[test]
@@ -1215,10 +1223,13 @@ mod tests {
             "padRight:with:",
             &["N".to_string(), "Ch".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("string':'pad'"));
-        assert!(output.contains("'trailing'"));
-        assert!(output.contains("Ch"));
+        assert_eq!(
+            result,
+            Some(
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'trailing', Ch))"
+                    .to_string()
+            )
+        );
     }
 
     // String primitive tests — misc group
@@ -1354,9 +1365,10 @@ mod tests {
             "withAll:",
             &["List".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_string':'join'"));
-        assert!(output.contains("List"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'join'(List)".to_string())
+        );
     }
 
     #[test]
@@ -1366,9 +1378,10 @@ mod tests {
             "fromCodePoint:",
             &["CP".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_string':'from_code_point'"));
-        assert!(output.contains("CP"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'from_code_point'(CP)".to_string())
+        );
     }
 
     #[test]
@@ -1378,9 +1391,10 @@ mod tests {
             "fromCodePoints:",
             &["CPs".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_string':'from_code_points'"));
-        assert!(output.contains("CPs"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'from_code_points'(CPs)".to_string())
+        );
     }
 
     #[test]
@@ -1390,9 +1404,10 @@ mod tests {
             "fromIolist:",
             &["IoList".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_string':'from_iolist'"));
-        assert!(output.contains("IoList"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'from_iolist'(IoList)".to_string())
+        );
     }
 
     #[test]
@@ -1495,10 +1510,10 @@ mod tests {
             "matchesRegex:options:",
             &["Pat".to_string(), "Opts".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_regex':'matches_regex_options'"));
-        assert!(output.contains("Pat"));
-        assert!(output.contains("Opts"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'matches_regex_options'(Self, Pat, Opts)".to_string())
+        );
     }
 
     #[test]
@@ -1534,10 +1549,10 @@ mod tests {
             "replaceRegex:with:",
             &["Pat".to_string(), "Repl".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_regex':'replace_regex'"));
-        assert!(output.contains("Pat"));
-        assert!(output.contains("Repl"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'replace_regex'(Self, Pat, Repl)".to_string())
+        );
     }
 
     #[test]
@@ -1547,10 +1562,10 @@ mod tests {
             "replaceAllRegex:with:",
             &["Pat".to_string(), "Repl".to_string()],
         ));
-        let output = result.unwrap();
-        assert!(output.contains("beamtalk_regex':'replace_all_regex'"));
-        assert!(output.contains("Pat"));
-        assert!(output.contains("Repl"));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_regex':'replace_all_regex'(Self, Pat, Repl)".to_string())
+        );
     }
 
     #[test]
