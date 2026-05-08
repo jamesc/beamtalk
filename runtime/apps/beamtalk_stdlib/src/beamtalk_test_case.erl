@@ -1101,7 +1101,8 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
                         selector => Selector,
                         error_class => C,
                         error => E,
-                        stacktrace => ST
+                        stacktrace => ST,
+                        domain => [beamtalk, stdlib]
                     }
                 ),
                 gen_server:reply(From, {error, Error})
