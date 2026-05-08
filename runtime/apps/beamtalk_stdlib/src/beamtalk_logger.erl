@@ -63,7 +63,10 @@ maybe_emit_deprecation_warning() ->
             ok;
         false ->
             persistent_term:put(Key, true),
-            ?LOG_WARNING("Logger setLevel: is deprecated. Use Beamtalk logLevel: instead.")
+            ?LOG_WARNING(
+                "Logger setLevel: is deprecated. Use Beamtalk logLevel: instead.",
+                #{domain => [beamtalk, stdlib]}
+            )
     end.
 
 -doc "Raise a type error for the Logger class.".

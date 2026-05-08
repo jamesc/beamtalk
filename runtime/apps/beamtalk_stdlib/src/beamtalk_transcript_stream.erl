@@ -129,6 +129,7 @@ unsubscribe(TranscriptRef) ->
 -doc "Initialize the TranscriptStream gen_server with the given buffer size.".
 -spec init([max_buffer()]) -> {ok, state()} | {stop, term()}.
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
+    logger:set_process_metadata(#{domain => [beamtalk, stdlib]}),
     SelfRef = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()},
     {ok, #state{
         buffer = queue:new(),
@@ -189,7 +190,11 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args)
         catch
             Class:Reason:Stack ->
                 ?LOG_ERROR("TranscriptStream dispatch handler crashed", #{
-                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                    selector => Selector,
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stack,
+                    domain => [beamtalk, stdlib]
                 }),
                 Err = beamtalk_error:new(runtime_error, 'TranscriptStream'),
                 gen_server:reply(
@@ -275,7 +280,11 @@ handle_cast({Selector, Args, FuturePid}, State) when
         catch
             Class:Reason:Stack ->
                 ?LOG_ERROR("TranscriptStream dispatch handler crashed", #{
-                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                    selector => Selector,
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stack,
+                    domain => [beamtalk, stdlib]
                 }),
                 Err = beamtalk_error:new(runtime_error, 'TranscriptStream'),
                 beamtalk_future:reject(

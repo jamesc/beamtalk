@@ -952,7 +952,9 @@ make_line_gen_no_close(Fd) ->
             eof ->
                 done;
             {error, Reason} ->
-                ?LOG_WARNING("File stream read error", #{reason => Reason}),
+                ?LOG_WARNING("File stream read error", #{
+                    reason => Reason, domain => [beamtalk, stdlib]
+                }),
                 done
         end
     end.
