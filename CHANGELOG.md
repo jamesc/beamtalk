@@ -28,6 +28,7 @@
 - Deduplicate atom-char escape helper into `beamtalk-core::util` (BT-2113).
 - Replace 3 `format!()` calls with `docvec!` in `generate_start_link_doc`, `generate_class_reference`, and `class_not_found_error_doc` — continues the BT-875 cleanup (BT-2143).
 - Extract `call_self_p0`/`call_p0_self` helpers in primitives codegen — deduplicates ~56 matching arms across `string.rs`, `list.rs`, and `dictionary.rs` (BT-2146).
+- Extract `try_canonicalize` helper in `package.rs` — deduplicates 5 identical inline `canonicalize`-with-fallback patterns (BT-2149).
 
 ## 0.4.0 — 2026-04-27
 
