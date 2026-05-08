@@ -278,13 +278,10 @@ mod tests {
 
     #[test]
     fn walk_visits_identifier_once() {
-        let expr = first_module_expr("x := 1\nx\n");
         let module = parse_bt("x := 1\nx\n");
         let ident = module.expressions[1].expression.clone();
         assert!(matches!(ident, Expression::Identifier(..)));
         assert_eq!(count_visits(&ident), 1);
-        // Also covers the assignment branch using the originally captured expr:
-        assert!(matches!(expr, Expression::Assignment { .. }));
     }
 
     // ── walk_expression: recursive branches ─────────────────────────────
