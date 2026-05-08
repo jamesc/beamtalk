@@ -190,7 +190,11 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args)
         catch
             Class:Reason:Stack ->
                 ?LOG_ERROR("TranscriptStream dispatch handler crashed", #{
-                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                    selector => Selector,
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stack,
+                    domain => [beamtalk, stdlib]
                 }),
                 Err = beamtalk_error:new(runtime_error, 'TranscriptStream'),
                 gen_server:reply(
@@ -276,7 +280,11 @@ handle_cast({Selector, Args, FuturePid}, State) when
         catch
             Class:Reason:Stack ->
                 ?LOG_ERROR("TranscriptStream dispatch handler crashed", #{
-                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                    selector => Selector,
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stack,
+                    domain => [beamtalk, stdlib]
                 }),
                 Err = beamtalk_error:new(runtime_error, 'TranscriptStream'),
                 beamtalk_future:reject(
