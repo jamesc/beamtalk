@@ -106,3 +106,125 @@ pub(crate) fn generate_file_handle_bif(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::doc_to_string;
+    use super::*;
+
+    // pid_extra tests
+
+    #[test]
+    fn test_pid_extra_unknown_returns_none() {
+        assert_eq!(doc_to_string(pid_extra("unknown", &[])), None);
+    }
+
+    // reference_extra tests
+
+    #[test]
+    fn test_reference_demonitor() {
+        let result = doc_to_string(reference_extra("demonitor", &[]));
+        assert_eq!(result, Some("call 'erlang':'demonitor'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_reference_extra_unknown_returns_none() {
+        assert_eq!(doc_to_string(reference_extra("unknown", &[])), None);
+    }
+
+    // no_extra tests
+
+    #[test]
+    fn test_no_extra_returns_none() {
+        assert_eq!(doc_to_string(no_extra("anything", &[])), None);
+    }
+
+    // generate_future_bif tests
+
+    #[test]
+    fn test_future_await() {
+        let result = doc_to_string(generate_future_bif("await", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_future':'await'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_future_await_forever() {
+        let result = doc_to_string(generate_future_bif("awaitForever", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_future':'await_forever'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_future_await_with_timeout() {
+        let result = doc_to_string(generate_future_bif("await:", &["Timeout".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_future':'await'(Self, Timeout)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_future_when_resolved() {
+        let result = doc_to_string(generate_future_bif("whenResolved:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_future':'when_resolved'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_future_when_rejected() {
+        let result = doc_to_string(generate_future_bif("whenRejected:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_future':'when_rejected'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_future_print_string() {
+        let result = doc_to_string(generate_future_bif("printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_future_unknown_returns_none() {
+        assert_eq!(doc_to_string(generate_future_bif("unknown", &[])), None);
+    }
+
+    // generate_file_handle_bif tests
+
+    #[test]
+    fn test_file_handle_lines() {
+        let result = doc_to_string(generate_file_handle_bif("lines", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_file':'handle_lines'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_file_handle_print_string() {
+        let result = doc_to_string(generate_file_handle_bif("printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_file_handle_unknown_returns_none() {
+        assert_eq!(
+            doc_to_string(generate_file_handle_bif("unknown", &[])),
+            None
+        );
+    }
+}
