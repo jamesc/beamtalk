@@ -38,26 +38,25 @@ The CLI REPL has one session. WebSocket and MCP clients can have many — `beamt
 - **Hot reload safety.** Session locals must persist across `Workspace sync` and class reloads (current behaviour).
 - **Existing infrastructure.** `beamtalk_session_table`, `beamtalk_session_sup`, and the `sessions` protocol op already exist — the design should build on them rather than replace.
 - **Surface parity.** `:bindings` / `:clear` work in the REPL surface only; the object-level replacement must be reachable from MCP `evaluate`, LSP eval, and any future client.
+- **Call safety.** Session primitives call back to the shell gen_server via `gen_server:call`. This is safe from eval worker processes (the shell is in `noreply` state, processing its mailbox). It is NOT safe from `handle_call`/`handle_cast` handlers running directly on the shell process (would deadlock). Session methods must only be called from eval context, never from shell-internal dispatch.
 
 ## Decision
 
 Introduce a new `Session` class — a lightweight `Object subclass` that wraps a session shell PID — and make it accessible via two paths:
 
 1. **Per-session binding `Session`**, injected into the shell's binding map at startup (alongside `Transcript`, `Beamtalk`, `Workspace`). Each shell sees a `Session` binding pointing to *its own* session object.
-2. **`Workspace currentSession`**, a method on the existing `WorkspaceInterface` singleton that resolves the current eval's session via process context. Returns `nil` outside a REPL eval context.
+2. **`Workspace currentSession`**, a method on the existing `WorkspaceInterface` singleton that resolves the current eval's session via process context. Returns `nil` outside a REPL eval context. A companion **`Workspace hasSession`** predicate returns `true` or `false`, allowing library code to guard session-dependent logic without nil-checking.
 
-`Session` is **not** an Actor (gen_server). It is a value-shaped handle holding the shell PID, with primitive methods that delegate to the shell process via `gen_server:call`. This mirrors the `Supervisor` pattern (a Beamtalk object wrapping an OTP supervisor PID).
+`Session` is **not** an Actor (gen_server). It is a handle object whose methods delegate to the shell process via `gen_server:call`. Similar to how `Ets` wraps a table reference without exposing it as a Beamtalk field, Session's internal shell PID is managed by the primitives module, not stored in a user-visible `field:`.
 
 ### API
 
 ```beamtalk
 sealed typed Object subclass: Session
-  field: pid :: Pid
-  field: id :: String
 
   /// Session-local bindings only (the `x := 42` layer).
   bindings -> Dictionary(Symbol, Object) =>
-    (Erlang beamtalk_session_primitives) bindings: self.pid
+    (Erlang beamtalk_session_primitives) bindings
 
   /// Workspace globals visible to this session (singletons + bind:as:).
   globals -> Dictionary(Symbol, Object) =>
@@ -66,18 +65,22 @@ sealed typed Object subclass: Session
   /// Walk binding layers, return first match or nil.
   /// Lookup order: session locals → workspace globals.
   resolve: aName :: Symbol -> Object =>
-    (Erlang beamtalk_session_primitives) resolve: aName for: self.pid
+    (Erlang beamtalk_session_primitives) resolve: aName
 
   /// Clear session-local bindings. Workspace globals remain.
   clear -> Nil =>
-    (Erlang beamtalk_session_primitives) clear: self.pid
+    (Erlang beamtalk_session_primitives) clear
 
   /// Layer name symbols, in resolution order.
-  layers -> List(Symbol) => #(#session #workspace)
+  layers -> List(Symbol) => #(#session, #workspace)
 
   /// Stable session identifier (matches the protocol session ID).
-  id -> String => self.id
+  id -> String => (Erlang beamtalk_session_primitives) id
 ```
+
+The shell PID is not stored in Beamtalk-level fields. Primitives resolve the calling session from process context (process dictionary seeded during eval worker spawn), matching the pattern used by `Ets` and other runtime-backed objects.
+
+**`Session` itself is a system-injected binding.** It does not appear in `Session bindings` (that shows user-typed locals only) and does not appear in `Session globals` (that shows workspace-level globals from ETS). It is part of the `injected_ws_keys` set — visible during normal name resolution, but excluded from the per-layer introspection views. `Session resolve: #Session` returns the Session object (it walks the merged binding map). This is consistent with how `Transcript`, `Beamtalk`, and `Workspace` are treated by the existing `:bindings` meta-command, which already strips system bindings from its output.
 
 ### REPL Examples
 
@@ -87,15 +90,15 @@ beamtalk> x := 42
 beamtalk> Session bindings
 #{#x => 42}
 beamtalk> Session globals keys
-#(#Transcript #Beamtalk #Workspace #Session)
+#(#Transcript, #Beamtalk, #Workspace)
 beamtalk> Session resolve: #x
 42
 beamtalk> Session resolve: #Transcript
-#TranscriptStream<default>
+#<TranscriptStream>
 beamtalk> Session resolve: #notDefined
 nil
 beamtalk> Session layers
-#(#session #workspace)
+#(#session, #workspace)
 beamtalk> Workspace currentSession id
 "abc123-..."
 beamtalk> Session clear
@@ -103,7 +106,7 @@ nil
 beamtalk> Session bindings
 #{}
 beamtalk> Session globals keys
-#(#Transcript #Beamtalk #Workspace #Session)
+#(#Transcript, #Beamtalk, #Workspace)
 ```
 
 ### Error Examples
@@ -144,6 +147,8 @@ Session bindings
 | **Newspeak** | Lexical nesting only; no global namespace; capability passing via constructor parameter. | The principle that scope is explicit, not magic. | Beamtalk has Smalltalk-style globals (`Transcript`, classes); a fully-lexical model would invalidate the existing namespace design. |
 | **Self** | Parent slot chain; scope walks via `parent*` slots. | Layer ordering as a first-class concept (`layers` returns the resolution order). | Recursive `parent` chains overstate the complexity for two layers. |
 | **IPython `get_ipython()`** | Shell singleton with `user_ns` dict, `who_ls()`, `reset()`. | The "current session is reachable through a global accessor" pattern (`Workspace currentSession`). | A single mutable dict obscures layer ownership; we keep layers separate. |
+| **Ruby `Binding`** | First-class scope object. `binding` returns the current scope; `Binding#local_variables` lists names. Can be passed for scoped expression execution. Closest prior art to the `Session` design. | A scope object that can be inspected and passed around. | Ruby's Binding captures lexical scope (closures); Beamtalk's Session wraps a session process, not a lexical frame. |
+| **Erlang shell `b()` / `f()`** | `b()` lists shell bindings; `f()` clears all; `f(X)` clears one. Shell-only built-in commands, not callable from program code. | Demonstrates the universal need to inspect REPL state. | Shell commands, not values — cannot be composed, stored, or called from non-shell code. Exactly the problem this ADR solves. |
 | **Elixir `binding()`** | Macro returning current bindings as a keyword list. | Treating bindings as inspectable data. | A macro/keyword-list shape is non-Smalltalk; we use Dictionary returns and explicit objects. |
 
 ## User Impact
@@ -237,8 +242,8 @@ Rejected because it locks in the violation of Principle 6 (messages all the way 
 
 ### Negative
 
-- **One more top-level binding name.** `Session` joins `Transcript`, `Beamtalk`, `Workspace` as an injected per-session global. Users could shadow it with a local; the runtime should warn when that happens (covered by existing `bind:as:` conflict checks).
-- **`Session clear` during eval has subtle semantics.** The eval worker has a state snapshot; mutations propagate via the worker's returned state. The implementation must ensure `Session clear` clears in a way that survives the worker's state writeback, either by routing through the worker's state thread or by post-eval reconciliation. This is an implementation detail, not a design flaw, but it requires care.
+- **One more top-level binding name.** `Session` joins `Transcript`, `Beamtalk`, `Workspace` as an injected per-session global. Users could shadow it via `Session := MyThing new` in the shell — the existing `bind:as:` conflict checks only protect workspace-level assignments, not shell-level `:=`. The implementation should add a guard in `beamtalk_repl_eval` that emits a compiler warning (not an error) when a user assignment shadows an injected system binding, consistent with the project's footgun-warning philosophy (emit a compiler warning whenever we detect a footgun, rather than leaving it as a known limitation).
+- **`Session clear` during eval has ordering constraints.** The eval worker has a state snapshot; when it completes, the shell merges the worker's state back. A naive `gen_server:call(ShellPid, clear_bindings)` during eval would be overwritten by the worker's stale snapshot. The implementation must add a `clear_requested` flag to `beamtalk_repl_state`: `clear` sets the flag via the shell; eval-result processing checks the flag and applies the clear after merging the worker's state. This ensures `Session clear` followed by more expressions in the same eval works correctly (the clear takes effect for the *next* eval, not mid-expression).
 - **Outside-REPL `nil`.** `Workspace currentSession` returns `nil` in compiled program code, which means `Workspace currentSession bindings` raises `does_not_understand` (correct DNU semantics, but a footgun if users assume the API is always available). Documentation must call this out.
 
 ### Neutral
@@ -251,30 +256,37 @@ Rejected because it locks in the violation of Principle 6 (messages all the way 
 
 The implementation breaks down into four phases. Each is independently shippable.
 
-### Phase 1: Runtime primitives module
+### Phase 1: Runtime primitives module (S)
 
-Create `beamtalk_session_primitives.erl` with the four primitive operations:
-- `bindings/1` — gen_server:call to the shell, returning session-locals only (with workspace-injected keys removed via `injected_ws_keys` tracking already present in `beamtalk_repl_state`).
+Create `beamtalk_session_primitives.erl` in `runtime/apps/beamtalk_workspace/src/` with the four primitive operations. Each primitive reads the calling process's session PID from process dictionary (seeded during eval worker spawn in Phase 2):
+
+- `bindings/0` — reads the process dictionary session PID, calls `beamtalk_repl_shell:get_bindings/1`, then strips workspace-injected keys using the `injected_ws_keys` tracking already present in `beamtalk_repl_state`. Returns session-locals only.
 - `globals/0` — calls `beamtalk_workspace_interface_primitives:get_session_bindings/0`, the existing workspace-globals accessor.
-- `resolve/2` — combines the two; session locals first, workspace globals second.
-- `clear/1` — gen_server:call to the shell's existing `clear_bindings` handler.
+- `resolve/1` — combines the two; session locals first, workspace globals second. Returns `nil` if name not found.
+- `clear/0` — calls `beamtalk_repl_shell:clear_bindings/1` on the session PID. Note: during eval, this clears the shell's state via gen_server:call. The eval worker's snapshot is stale after clear, but clear is typically the final expression in an eval. If the cleared state is overwritten by the worker's return, the shell must reconcile by checking a `clear_requested` flag (set by the clear handler) during eval-result processing.
+- `id/0` — reads the session ID from process dictionary.
 
-EUnit tests for each. Existing infrastructure (`beamtalk_repl_shell`, `beamtalk_session_table`) is reused.
+EUnit tests for each primitive. Existing infrastructure (`beamtalk_repl_shell`, `beamtalk_session_table`) is reused.
 
-### Phase 2: Stdlib `Session` class and binding injection
+### Phase 2: Stdlib `Session` class and binding injection (M)
 
-Add `stdlib/src/Session.bt` with the API defined above. Extend `beamtalk_workspace_config:singletons/0` and shell init (`beamtalk_repl_shell:init/1`) to inject a `Session` binding pointing to a Session object constructed with the shell's PID and session ID. Update `beamtalk_workspace_interface_primitives:handle_session_bindings/1` to include `Session` in the workspace-injected keys (so it propagates correctly through `clear` and refresh paths).
+Add `stdlib/src/Session.bt` with the API defined above. Session is NOT a workspace singleton (it varies per shell), so it cannot be added to `beamtalk_workspace_config:singletons/0`.
 
-### Phase 3: `Workspace currentSession` and process-context resolution
+Injection path: modify `beamtalk_repl_shell:init/1` to construct a Session object (via `beamtalk_object:create/2`) with the shell's PID and session ID, and inject it as a binding alongside workspace globals. Add `'Session'` to the `injected_ws_keys` set so that `clear` preserves it and `Session bindings` excludes it from user-locals.
+
+Seed process dictionary: modify the eval worker spawn (`handle_call({eval, ...})`) to set `beamtalk_session_pid` and `beamtalk_session_id` in the worker's process dictionary before calling `do_eval`. This allows Phase 1 primitives to resolve the session context.
+
+Add `'Session'` to `is_protected_name/1` in `beamtalk_workspace_interface_primitives.erl` so `bind:as:` cannot shadow it.
+
+### Phase 3: `Workspace currentSession` and process-context resolution (S)
 
 Add `currentSession` to `WorkspaceInterface` (Beamtalk class) with an Erlang primitive that:
-1. Reads the calling process's session PID from process dictionary, or
-2. Walks up to find the shell PID via `$ancestors` if direct lookup fails, or
-3. Returns `nil` if no session is in scope.
+1. Reads `beamtalk_session_pid` from the calling process's dictionary, or
+2. Returns `nil` if no session marker is set (compiled program code, non-REPL contexts).
 
-Eval worker spawn must seed the worker's process dictionary with the shell PID for the lookup to work.
+This uses the same process dictionary key seeded in Phase 2 — no additional plumbing needed.
 
-### Phase 4: Migration and meta-command deprecation
+### Phase 4: Migration and meta-command deprecation (M)
 
 Re-deprecate `:bindings` and `:clear` in `beamtalk_repl_ops_dev.erl` with `migrate_to` hints pointing at `Session bindings` and `Session clear`. Update `surface-parity.md` rows for `bindings` and `clear` to cite `via Session bindings` / `via Session clear`. Add an e2e btscript test under `tests/repl-protocol/cases/` covering the full Session API. Hard removal of the meta-commands is a separate follow-up issue once the new API has been validated in real use.
 
