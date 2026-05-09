@@ -99,7 +99,7 @@ sealed typed Object subclass: Session
     (Erlang beamtalk_session_primitives) resolve: aName for: self
   clear -> Nil =>
     (Erlang beamtalk_session_primitives) clearFor: self
-  id -> String => self.id
+  id -> String => (Erlang beamtalk_session_primitives) idOf: self
 ```
 
 `BindingsView` is a small Dictionary-protocol-compatible class backed by primitives that read/write session or workspace state. It implements `at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, and `do:`. Mutations via `at:put:` / `removeKey:` are write-through.
@@ -231,7 +231,7 @@ Session globals at: #Workspace put: nil
 | **Pharo / Squeak Workspace** | `Dictionary` of bindings on the workspace, mutable via `at:put:`, with fallback to `Smalltalk globals`. Methods: `bindings`, `bindingOf:`, `removeBinding:`, `resetBindings`. | The mutable-Dictionary shape (`Session bindings at:put:` writes through, matching `Smalltalk globals at:put:`). | Pharo merges workspace and session — Beamtalk has separate workspace (shared) and session (per-PID) layers because of multi-client BEAM hosting. |
 | **Pharo Environment** | Wraps a `Dictionary` of globals; multiple Environments allowed. | Layer reification via named accessors. | Beamtalk does not need user-creatable environments — workspace is bootstrapped once per BEAM node. |
 | **Newspeak** | Lexical nesting only; no global namespace; capability passing via constructor parameter. | The principle that scope is explicit, not magic. | Beamtalk has Smalltalk-style globals (`Transcript`, classes); a fully-lexical model would invalidate the existing namespace design. |
-| **Self** | Parent slot chain; scope walks via `parent*` slots. | Layer ordering as a first-class concept (`layers` returns the resolution order). | Recursive `parent` chains overstate the complexity for two layers. |
+| **Self** | Parent slot chain; scope walks via `parent*` slots. | Explicit layer separation (`bindings` vs `globals`), inspired by Self's transparent parent hierarchy. | Recursive `parent` chains overstate the complexity for two layers. |
 | **IPython `get_ipython()`** | Shell singleton with `user_ns` dict, `who_ls()`, `reset()`. | The "current session is reachable through a global accessor" pattern (`Workspace currentSession`). | A single mutable dict obscures layer ownership; we keep layers separate. |
 | **Ruby `Binding`** | First-class scope object. `binding` returns the current scope; `Binding#local_variables` lists names. Can be passed for scoped expression execution. Closest prior art to the `Session` design. | A scope object that can be inspected and passed around. | Ruby's Binding captures lexical scope (closures); Beamtalk's Session wraps a session process, not a lexical frame. |
 | **Erlang shell `b()` / `f()`** | `b()` lists shell bindings; `f()` clears all; `f(X)` clears one. Shell-only built-in commands, not callable from program code. | Demonstrates the universal need to inspect REPL state. | Shell commands, not values — cannot be composed, stored, or called from non-shell code. Exactly the problem this ADR solves. |
@@ -240,13 +240,13 @@ Session globals at: #Workspace put: nil
 ## User Impact
 
 **Newcomer (Python/JS background).**
-`Session` joins `Transcript`, `Beamtalk`, `Workspace` as a small, discoverable set of always-available objects. Tab-completion on `Session` lists every session operation. Discovering "how do I see my variables" via `Session bindings` is more direct than memorising a `:b` meta-command.
+`Session` is discoverable via tab-completion on the class name — type `Ses<TAB>` and the class-side methods appear. Discovering "how do I see my variables" via `Session bindings` is more direct than memorising a `:b` meta-command. The live-mutation pattern (`Session bindings at: #x put: 42`) matches how Dictionary works everywhere else in the language.
 
 **Smalltalk developer.**
 The session-as-object model is recognisably Smalltalk: `Session` is to a Beamtalk shell what `Smalltalk` is to a Pharo image. The two-layer split (session vs. workspace) is more honest about multi-client BEAM hosting than Pharo's single-image model.
 
 **Erlang/BEAM developer.**
-`Session` maps cleanly to the existing `beamtalk_repl_shell` gen_server. The PID-handle pattern is familiar from `gen_server:call/2` and matches the `Supervisor` wrapper. Multi-session debugging (MCP, WebSocket) gets a first-class object to work with.
+Class-side methods that use process-context resolution match how BEAM convention works — the "calling process determines context" pattern is idiomatic (e.g. `self()`, process dictionary, `$ancestors`). `Session withId:` for cross-session access maps directly to the existing `beamtalk_session_table:lookup/1`. Multi-session debugging (MCP, WebSocket) gets a first-class object to work with.
 
 **Production operator.**
 `Workspace sessions` (a follow-up extension) can return a list of `Session` objects, each individually inspectable. Compared to opaque PIDs in `supervisor:which_children`, this gives operators a structured view of who is connected and what they have bound.
@@ -262,7 +262,7 @@ The MCP server can call `Session bindings` and `Session globals` via `evaluate` 
 
 **Smalltalk purist:** "Adding methods to `Workspace` matches how `Smalltalk` accumulates introspection in Pharo — `Smalltalk globals`, `Smalltalk allClasses`, `Smalltalk current`. Why is sessions special enough to warrant its own class?"
 
-**BEAM veteran:** "`Workspace sessionBindings` could use the same process-context resolution that `Workspace currentSession` uses anyway. The dispatch cost is identical; you're just spelling it differently. For the 99% case — introspecting your own session — Option B is shorter and avoids the shadowing-via-`:=` footgun entirely (no injected binding, nothing to shadow)."
+**BEAM veteran:** "`Workspace sessionBindings` could use the same process-context resolution that `Session bindings` uses anyway. The dispatch cost is identical; you're just spelling it differently. For the 99% case — introspecting your own session — adding methods to an existing object is simpler than introducing a whole new class. No new Erlang module, no new class registry entry."
 
 **Operator:** "Fewer object types in the system means fewer surfaces to learn for postmortem debugging. `Workspace` is already the operator's entry point — keep it that way."
 
@@ -331,7 +331,6 @@ Rejected because:
 Accept the surface asymmetry permanently and document `bindings` / `clear` as REPL-specific.
 
 Rejected because it locks in the violation of Principle 6 (messages all the way down) and ADR 0040 (workspace-native commands), and leaves the session layer permanently invisible to MCP and other clients.
-
 
 ## Consequences
 
@@ -420,7 +419,7 @@ The meta-commands existed only on the REPL surface. Removing them is a small los
 - [BT-2092](https://linear.app/beamtalk/issue/BT-2092/first-class-session-object-walkable-binding-layers-smalltalk-style) — driving issue
 - [BT-2083](https://linear.app/beamtalk/issue/BT-2083/surface-only-audit-decide-promote-or-lock-for-asymmetric-ops) — surface audit that un-deprecated `:bindings` / `:clear` and filed BT-2092
 - ADR 0040 — Workspace-Native REPL Commands (the precedent for moving meta-commands onto Beamtalk objects)
-- ADR 0010 — Global Objects and Singleton Dispatch (the singleton injection mechanism `Session` reuses)
+- ADR 0010 — Global Objects and Singleton Dispatch (established the `Beamtalk` / `Workspace` / `Transcript` bindings that form the workspace globals layer)
 - ADR 0004 — Persistent Workspace Management (workspace lifecycle context)
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_eval.erl:62-77` — current `:bindings` / `:clear` handlers
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl:155-244` — shell init and binding lifecycle
