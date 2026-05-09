@@ -191,7 +191,7 @@ The MCP server can call `Session bindings` and `Session globals` via `evaluate` 
 **Why not adopted:** The BEAM-veteran argument is the strongest — Option B *works* for the common case and avoids the injected-binding shadowing problem. Two factors push us to A despite this:
 
 1. **Pass-by-reference.** `Session` as a value can be stored, passed to library code, or returned from `Workspace sessions`. Option B cannot express `analyzer analyze: aSession` — there's no first-class session value to pass.
-2. **Namespace coherence.** `Workspace` already mixes actors, classes, supervisors, packages, sync, test, bind:as:, and load. Adding `sessionBindings`, `sessionGlobals`, `clearSession`, `resolveBinding:` would push it past discoverable scale. A dedicated `Session` class keeps each surface focused.
+2. **Workspace's role.** `Workspace` is a navigation entry point — `Workspace actors`, `Workspace classes`, `Workspace supervisor`, `Workspace dependencies` — each method *finds you something*. Session bindings are not something you navigate to from the workspace; they belong to a session, which has its own identity. Loading session-state methods directly onto `Workspace` would be the same category error as putting `Counter increment` on `Workspace`. Four new session-state methods on `Workspace` is too much.
 
 The shadowing footgun (Option B's genuine advantage) is mitigated by the proposed shadowing warning. The ergonomic loss in Option B (no first-class session value) is permanent and not mitigable.
 
@@ -241,6 +241,17 @@ Rejected because:
 Accept the surface asymmetry permanently and document `bindings` / `clear` as REPL-specific.
 
 Rejected because it locks in the violation of Principle 6 (messages all the way down) and ADR 0040 (workspace-native commands), and leaves the session layer permanently invisible to MCP and other clients.
+
+### Alternative E: Hybrid — Session class with no injected binding
+
+Define the `Session` class (as in Option A) so that `Workspace currentSession` can return one, but skip the per-shell `Session` binding injection. Users always type `Workspace currentSession bindings` — never the shorter `Session bindings`.
+
+This was considered as a way to capture A's composability (pass-by-reference, multi-session enumeration) while eliminating the shadowing footgun (no injected binding to overwrite via `:=`).
+
+Rejected because:
+- The 99% interactive case becomes verbose: `Workspace currentSession bindings` four words long for an operation users will type repeatedly.
+- It miscategorises `Workspace`'s role. `Workspace` is a navigation entry point — methods on `Workspace` *find you something*. `currentSession` fits that pattern; making it the *only* path to session ops loses the directness of `Session bindings`.
+- The shadowing footgun is mitigable via the proposed compiler warning. The verbosity cost of E is permanent and not mitigable.
 
 ## Consequences
 
