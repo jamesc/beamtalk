@@ -523,6 +523,10 @@ fn analyse_full_with_natives(
     result.diagnostics.extend(type_checker.take_diagnostics());
     let type_map = type_checker.take_type_map();
 
+    // BT-2140: Lint redundant local-variable type annotations using the
+    // populated TypeMap. Must run before the Analyser consumes `type_map`.
+    validators::check_redundant_local_type_annotation(module, &type_map, &mut result.diagnostics);
+
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
     // Receive scope from NameResolver and TypeMap from TypeChecker
     let mut analyser = Analyser::with_scope(scope, type_map);

@@ -11,10 +11,14 @@
 //! - Empty method bodies (BT-859)
 //! - Effect-free statements (BT-951)
 
-use crate::ast::{Expression, Identifier, MessageSelector, Module, WellKnownSelector};
+use crate::ast::{
+    Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
+};
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::type_checker::{InferredType, TypeMap};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use std::collections::HashMap;
 
 // ── BT-950: Redundant assignment ─────────────────────────────────────────────
 
@@ -516,6 +520,118 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
     )
     .with_hint("Remove this line — Beamtalk auto-chains initialize up the hierarchy")
     .with_category(DiagnosticCategory::Lint)
+}
+
+// ── BT-2140: Redundant local-variable type annotation ────────────────────────
+
+/// BT-2140: Lint when a local-variable assignment carries a `:: T` annotation
+/// whose resolved type exactly matches the inferred type of the right-hand
+/// side.
+///
+/// Triggers on `name :: T := <expr>` when the static type of `<expr>` is
+/// exactly `T` (not a subtype, not narrowed via union). Skips:
+///
+/// - Union and false-or annotations (`T | nil`, `T?`) — load-bearing for widening.
+/// - RHS whose inferred type is `Dynamic`, `Never`, or `Union` — the annotation
+///   is supplying real information the inferer could not derive.
+/// - Field assignments (`self.x := ...`), destructuring assignments, and any
+///   non-`Identifier` target — those don't carry user-written type annotations
+///   in this lint's scope.
+/// - Block parameters / state declarations / method params — those use their
+///   own AST nodes, not [`Expression::Assignment`].
+///
+/// Suppressed by `@expect type_annotation` on the enclosing statement.
+pub(crate) fn check_redundant_local_type_annotation(
+    module: &Module,
+    type_map: &TypeMap,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // A future refinement could thread the surrounding method's type-param
+    // subst, but for the common cases (`Counter`, `List(Foo)`) the resolved
+    // form matches the inferer's symbolic placeholders without a subst.
+    // Hoisted out of the walker so we don't re-allocate per assignment.
+    let empty_subst: HashMap<ecow::EcoString, InferredType> = HashMap::new();
+    walk_module(module, &mut |expr| {
+        let Expression::Assignment {
+            target,
+            value,
+            type_annotation: Some(annotation),
+            span,
+        } = expr
+        else {
+            return;
+        };
+        // Only flag plain local-variable targets. `self.x :: T := ...` is not
+        // valid Beamtalk syntax for fields, but guard defensively.
+        if !matches!(target.as_ref(), Expression::Identifier(_)) {
+            return;
+        }
+        // Widening annotations are load-bearing: keep them.
+        if matches!(
+            annotation,
+            TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. }
+        ) {
+            return;
+        }
+
+        let Some(rhs_ty) = type_map.get(value.span()) else {
+            return;
+        };
+
+        // Only flag when the RHS resolves to a single Known type. Dynamic,
+        // Never, and Union RHS types mean the annotation is doing real work.
+        let InferredType::Known {
+            class_name: rhs_class,
+            type_args: rhs_args,
+            ..
+        } = rhs_ty
+        else {
+            return;
+        };
+
+        let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
+            annotation,
+            &empty_subst,
+        );
+        let InferredType::Known {
+            class_name: ann_class,
+            type_args: ann_args,
+            ..
+        } = resolved
+        else {
+            return;
+        };
+
+        // Exact match — annotation adds no information.
+        // Type-arg equality also catches narrowing cases like
+        // `List(Foo) := List new`, where the RHS's `Dynamic` element type
+        // doesn't equal the annotation's concrete `Foo`.
+        if ann_class != *rhs_class || ann_args != *rhs_args {
+            return;
+        }
+
+        let ann_str = InferredType::Known {
+            class_name: ann_class.clone(),
+            type_args: ann_args.clone(),
+            provenance: crate::semantic_analysis::type_checker::TypeProvenance::Declared(*span),
+        }
+        .display_for_diagnostic()
+        .unwrap_or_else(|| ann_class.clone());
+
+        diagnostics.push(
+            Diagnostic::lint(
+                format!(
+                    "Redundant type annotation: `:: {ann_str}` matches the inferred type of the right-hand side",
+                ),
+                annotation.span(),
+            )
+            .with_hint(format!(
+                "Drop the `:: {ann_str}` annotation — the right-hand side already has this type. \
+                 Suppress with `@expect type_annotation` if the explicit annotation is intentional.",
+            ))
+            .with_category(DiagnosticCategory::TypeAnnotation),
+        );
+    });
 }
 
 #[cfg(test)]
@@ -1201,6 +1317,170 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no warnings for class-side keyword initialize, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-2140: Redundant local-variable type annotation tests ───────────────
+
+    /// Helper: parse, type-check, and run the redundant-annotation lint.
+    fn redundant_local_type_lints(src: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        let hard_errs: Vec<_> = parse_diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.expect("hierarchy build failed");
+        let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy);
+        let mut diagnostics = Vec::new();
+        check_redundant_local_type_annotation(&module, &type_map, &mut diagnostics);
+        diagnostics
+    }
+
+    /// Top-level: `x :: Counter := Counter new` — annotation is redundant.
+    #[test]
+    fn redundant_simple_annotation_with_new_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nx :: Counter := Counter new";
+        let diags = redundant_local_type_lints(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "Expected 1 redundant-annotation lint, got: {diags:?}"
+        );
+        assert_eq!(diags[0].severity, Severity::Lint);
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::TypeAnnotation));
+        assert!(
+            diags[0].message.contains("Redundant type annotation"),
+            "Expected 'Redundant type annotation' in message, got: {}",
+            diags[0].message
+        );
+        assert!(
+            diags[0].message.contains("Counter"),
+            "Expected 'Counter' in message, got: {}",
+            diags[0].message
+        );
+    }
+
+    /// Inside a method: `c :: Counter := Counter new` — flagged.
+    #[test]
+    fn redundant_annotation_inside_method_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nObject subclass: Foo\n  build =>\n    c :: Counter := Counter new.\n    c";
+        let diags = redundant_local_type_lints(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "Expected 1 redundant-annotation lint inside method, got: {diags:?}"
+        );
+    }
+
+    /// `x :: Counter | Nil := nil` — Union annotation is load-bearing, NOT flagged.
+    #[test]
+    fn union_annotation_with_nil_rhs_not_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nx :: Counter | Nil := nil";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "Union annotation (T | Nil) must never be flagged, got: {diags:?}"
+        );
+    }
+
+    /// `x :: SuperType := SubType new` — annotation widens, NOT flagged.
+    #[test]
+    fn widening_annotation_not_flagged() {
+        let src = "Object subclass: Animal\n  name => \"animal\"\n\nAnimal subclass: Dog\n  bark => \"woof\"\n\nx :: Animal := Dog new";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "Widening annotation (Super := Sub) must not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// `self.x := Counter new` — field assignment has no user-facing annotation
+    /// in this lint's scope and must not be flagged.
+    #[test]
+    fn field_assignment_not_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nObject subclass: Foo\n  state: c = nil\n  build =>\n    self.c := Counter new.\n    self";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "Field assignment must not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// `x := Counter new` (no annotation) — nothing to flag.
+    #[test]
+    fn no_annotation_not_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nx := Counter new";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "Bare `x := ...` (no annotation) must never be flagged, got: {diags:?}"
+        );
+    }
+
+    /// State declarations carry their own annotation form (`state: x :: T = ...`)
+    /// and are not flagged by this local-variable lint.
+    #[test]
+    fn state_declaration_not_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nObject subclass: Foo\n  state: c :: Counter = nil\n  build => self";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "State declarations are not local-variable assignments, got: {diags:?}"
+        );
+    }
+
+    /// Method/block parameters with annotations are not local-variable
+    /// assignments — never flagged.
+    #[test]
+    fn method_parameter_annotation_not_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nObject subclass: Foo\n  with: c :: Counter => c";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "Method parameter annotation must not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// Hint should be present and mention `@expect type_annotation` for suppression.
+    #[test]
+    fn redundant_annotation_has_suppressible_hint() {
+        let src = "Object subclass: Counter\n  count => 0\n\nx :: Counter := Counter new";
+        let diags = redundant_local_type_lints(src);
+        assert_eq!(diags.len(), 1);
+        let hint = diags[0]
+            .hint
+            .as_ref()
+            .expect("expected hint on redundant-annotation lint");
+        assert!(
+            hint.contains("@expect type_annotation"),
+            "hint should mention @expect type_annotation, got: {hint}"
+        );
+    }
+
+    /// `x :: Integer := 42` — literal RHS already has the matching type, flagged.
+    #[test]
+    fn redundant_annotation_with_literal_rhs_flagged() {
+        let src = "x :: Integer := 42";
+        let diags = redundant_local_type_lints(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "Expected 1 lint for `x :: Integer := 42`, got: {diags:?}"
+        );
+    }
+
+    /// Multiple redundant assignments in the same method each trigger their own lint.
+    #[test]
+    fn multiple_redundant_annotations_each_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nObject subclass: Foo\n  build =>\n    a :: Counter := Counter new.\n    b :: Counter := Counter new.\n    a";
+        let diags = redundant_local_type_lints(src);
+        assert_eq!(
+            diags.len(),
+            2,
+            "Expected one lint per redundant annotation, got: {diags:?}"
         );
     }
 }
