@@ -711,16 +711,16 @@ pub(crate) enum CodeGenContext {
 /// `wrap_actor_body_with_nlr_catch`, `wrap_class_method_body_with_nlr_catch`, and
 /// `wrap_value_type_body_with_nlr_catch`.
 #[allow(clippy::struct_field_names)]
-pub(super) struct NlrCatchVars {
-    pub result_var: String,
-    pub cls_var: String,
-    pub err_var: String,
-    pub stk_var: String,
-    pub ctk_var: String,
-    pub val_var: String,
+struct NlrCatchVars {
+    result_var: String,
+    cls_var: String,
+    err_var: String,
+    stk_var: String,
+    ctk_var: String,
+    val_var: String,
     /// BT-854: State variable captured from the 4-tuple NLR throw.
-    pub state_var: String,
-    pub ot_pair_var: String,
+    state_var: String,
+    ot_pair_var: String,
 }
 
 /// BT-764: Variable names for value type NLR try/catch wrapping.
