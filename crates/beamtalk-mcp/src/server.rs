@@ -1746,6 +1746,43 @@ fn offset_to_line(source: &str, offset: usize) -> u32 {
     line
 }
 
+/// BT-2152: Run the shared three-step lint analysis pipeline for a single
+/// module. Callers pre-filter `parse_diags` per their severity requirements
+/// and pass them in; this helper appends lint-pass results, runs semantic
+/// analysis with cross-file class context, filters analysis diagnostics by
+/// `category.is_some()`, applies `@expect` directives, and returns the
+/// resulting diagnostics together with the `ClassHierarchy` (used by
+/// `compute_diagnostic_summary` for type inference).
+fn run_module_analysis(
+    module: &beamtalk_core::ast::Module,
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+) -> (
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+    beamtalk_core::semantic_analysis::ClassHierarchy,
+) {
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+
+    diags.extend(beamtalk_core::lint::run_lint_passes(module));
+
+    let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+        module,
+        &beamtalk_core::CompilerOptions::default(),
+        cross_file_classes,
+    );
+    diags.extend(
+        analysis_result
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.category.is_some()),
+    );
+
+    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
+
+    (diags, analysis_result.class_hierarchy)
+}
+
 /// BT-2014: Compute a diagnostic summary (counts + type coverage) for a path.
 ///
 /// Runs the same two-pass parse + semantic-analysis pipeline as `beamtalk lint`,
@@ -1828,39 +1865,22 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     };
 
     for (file_str, _source, module, parse_diags) in &parsed_files {
-        let cross_file_classes = ClassHierarchy::cross_file_class_infos(&all_class_infos, module);
-
-        // Collect lint-level diagnostics.
-        let mut file_diags: Vec<_> = parse_diags
+        // Pre-filter to lint-severity parse diagnostics (compute_diagnostic_summary
+        // intentionally drops parse errors/warnings here — they're surfaced via
+        // other channels).
+        let initial_diags: Vec<_> = parse_diags
             .iter()
             .filter(|d| d.severity == Severity::Lint)
             .cloned()
             .collect();
-        file_diags.extend(beamtalk_core::lint::run_lint_passes(module));
 
-        // Semantic analysis.
-        let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
-            module,
-            &beamtalk_core::CompilerOptions::default(),
-            cross_file_classes,
-        );
-        file_diags.extend(
-            analysis_result
-                .diagnostics
-                .into_iter()
-                .filter(|d| d.category.is_some()),
-        );
-
-        // Apply @expect directives.
-        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(
-            module,
-            &mut file_diags,
-        );
+        let (file_diags, class_hierarchy) =
+            run_module_analysis(module, &all_class_infos, initial_diags);
 
         all_diags.extend(file_diags);
 
         // Type coverage.
-        let type_map = infer_types(module, &analysis_result.class_hierarchy);
+        let type_map = infer_types(module, &class_hierarchy);
         let file_report = CoverageReport::from_module(module, &type_map, file_str, false);
         coverage.merge(file_report);
     }
@@ -2062,7 +2082,7 @@ fn run_lint_structured(path: &str) -> LintResult {
         // broken syntax or parser-emitted warnings don't silently appear clean.
         // Hint-severity diagnostics (DNU hints) are excluded as they are
         // informational and belong to the check/compile workflow.
-        let mut lint_diags: Vec<_> = parse_diags
+        let initial_diags: Vec<_> = parse_diags
             .into_iter()
             .filter(|d| {
                 matches!(
@@ -2071,30 +2091,11 @@ fn run_lint_structured(path: &str) -> LintResult {
                 )
             })
             .collect();
-        lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
-        // BT-1587 / BT-2052: Run semantic analysis with cross-file class
-        // context, mirroring CLI `beamtalk lint`. Without cross-file classes,
-        // type/DNU diagnostics from cross-file references are missed, causing
-        // `@expect type` annotations to be falsely reported as stale.
-        let cross_file_classes = ClassHierarchy::cross_file_class_infos(&all_class_infos, &module);
-        let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
-            &module,
-            &beamtalk_core::CompilerOptions::default(),
-            cross_file_classes,
-        );
-        lint_diags.extend(
-            analysis_result
-                .diagnostics
-                .into_iter()
-                .filter(|d| d.category.is_some()),
-        );
-
-        // Apply @expect directives to suppress matching diagnostics (BT-1476).
-        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(
-            &module,
-            &mut lint_diags,
-        );
+        // BT-1587 / BT-2052: run_module_analysis runs lint passes, semantic
+        // analysis with cross-file class context (mirroring CLI `beamtalk lint`),
+        // and applies @expect directives (BT-1476).
+        let (lint_diags, _) = run_module_analysis(&module, &all_class_infos, initial_diags);
 
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
