@@ -15,9 +15,10 @@ Tests the workspace API (status/0).
 %%====================================================================
 
 test_metadata() ->
+    TmpDir = beamtalk_file:'tempDirectory'(),
     #{
         workspace_id => <<"test-ws-123">>,
-        project_path => <<"/tmp/test-project">>,
+        project_path => <<TmpDir/binary, "/test-project">>,
         created_at => erlang:system_time(second),
         last_activity => erlang:system_time(second)
     }.
@@ -38,11 +39,12 @@ status_returns_error_when_meta_not_started_test() ->
 
 status_returns_ok_map_when_meta_started_test() ->
     ensure_meta_stopped(),
-    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    Meta = test_metadata(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(Meta),
     try
         {ok, Status} = beamtalk_workspace:status(),
         ?assertEqual(<<"test-ws-123">>, maps:get(workspace_id, Status)),
-        ?assertEqual(<<"/tmp/test-project">>, maps:get(project_path, Status)),
+        ?assertEqual(maps:get(project_path, Meta), maps:get(project_path, Status)),
         ?assert(is_integer(maps:get(created_at, Status))),
         ?assert(is_integer(maps:get(last_activity, Status))),
         ?assertEqual(0, maps:get(actor_count, Status)),
