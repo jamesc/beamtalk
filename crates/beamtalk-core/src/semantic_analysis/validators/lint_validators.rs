@@ -603,19 +603,10 @@ pub(crate) fn check_redundant_local_type_annotation(
         };
 
         // Exact match — annotation adds no information.
+        // Type-arg equality also catches narrowing cases like
+        // `List(Foo) := List new`, where the RHS's `Dynamic` element type
+        // doesn't equal the annotation's concrete `Foo`.
         if ann_class != *rhs_class || ann_args != *rhs_args {
-            return;
-        }
-
-        // Reject when any RHS type-arg is Dynamic but the annotation pins a
-        // concrete type at the same position — `List(Foo) := List new` style,
-        // where the annotation legitimately narrows. Equality above already
-        // rejects this case (Dynamic ≠ Foo), but keep the explicit guard
-        // defensive in case the equality semantics ever change.
-        if rhs_args
-            .iter()
-            .any(|t| matches!(t, InferredType::Dynamic(_)))
-        {
             return;
         }
 

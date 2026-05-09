@@ -9,17 +9,20 @@ TestCase subclass: LocalTypeAnnotationTest
 
   testSimpleAnnotation =>
     // Type annotation on a simple local variable
+    @expect type_annotation
     x :: Integer := 42
     self assert: x equals: 42
 
   testAnnotationDoesNotChangeRuntime =>
     // The annotation is erased at runtime — value is whatever the RHS produces
+    @expect type_annotation
     x :: Integer := 10 + 5
     self assert: x equals: 15
 
   testAnnotationInBlock =>
     // Type annotation inside a block body
     result := [
+      @expect type_annotation
       name :: String := "hello"
       name ++ " world"
     ] value
