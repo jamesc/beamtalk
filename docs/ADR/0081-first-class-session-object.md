@@ -27,7 +27,7 @@ This violates the architectural pattern established by ADR 0040 (workspace-nativ
 
 ### Current State
 
-Each REPL connection gets a `beamtalk_repl_shell` gen_server, supervised under `beamtalk_session_sup` and tracked in the `beamtalk_sessions` ETS table (`beamtalk_session_table`). The shell holds session-local bindings in `beamtalk_repl_state`, refreshed with workspace globals before each eval (`refresh_ws_bindings/1` in `beamtalk_repl_shell.erl:441`). Eval workers spawn from the shell with a snapshot of state, returning updated state when they complete.
+Each REPL connection gets a `beamtalk_repl_shell` gen_server, supervised under `beamtalk_session_sup` and tracked in the `beamtalk_sessions` ETS table (`beamtalk_session_table`). The shell holds session-local bindings in `beamtalk_repl_state`, reconciled with workspace globals after each eval (`refresh_ws_bindings/1` in `beamtalk_repl_shell.erl:441`, called during eval-result processing to pick up `bind:as:`/`unbind:` changes). Eval workers spawn from the shell with a snapshot of state, returning updated state when they complete.
 
 The CLI REPL has one session. WebSocket and MCP clients can have many — `beamtalk_session_sup` already supports multi-session, and `beamtalk_repl_ops_session.erl` exposes a `sessions` protocol op listing live shells. But no Beamtalk class represents an individual session.
 
@@ -84,7 +84,7 @@ The shell PID is not stored in Beamtalk-level fields. Primitives resolve the cal
 
 ### REPL Examples
 
-```
+```text
 beamtalk> x := 42
 42
 beamtalk> Session bindings
