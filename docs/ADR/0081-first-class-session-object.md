@@ -38,63 +38,106 @@ The CLI REPL has one session. WebSocket and MCP clients can have many — `beamt
 - **Hot reload safety.** Session locals must persist across `Workspace sync` and class reloads (current behaviour).
 - **Existing infrastructure.** `beamtalk_session_table`, `beamtalk_session_sup`, and the `sessions` protocol op already exist — the design should build on them rather than replace.
 - **Surface parity.** `:bindings` / `:clear` work in the REPL surface only; the object-level replacement must be reachable from MCP `evaluate`, LSP eval, and any future client.
-- **Call safety.** Session primitives call back to the shell gen_server via `gen_server:call`. This is safe from eval worker processes (the shell is in `noreply` state, processing its mailbox). It is NOT safe from `handle_call`/`handle_cast` handlers running directly on the shell process (would deadlock). Session methods must only be called from eval context, never from shell-internal dispatch.
+- **Call safety.** Session primitives call back to the shell gen_server via `gen_server:call`. This is safe from eval worker processes (the shell is in `noreply` state, processing its mailbox), but unsafe from `handle_call`/`handle_cast` handlers running directly on the shell process (would deadlock). Session methods are intended for eval context, not shell-internal dispatch.
 
 ## Decision
 
-Introduce a new `Session` class — a lightweight `Object subclass` that wraps a session shell PID — and make it accessible via two paths:
+Introduce a new `Session` class with a **class-side API** as the primary interface. The class itself is the entry point — `Session bindings` is a class-side message send, mirroring Smalltalk patterns like `Date today`, `Time now`, and `Smalltalk current`. There is **no injected `Session` binding** at the shell level; the class is reachable because it is loaded, not because it was singled out.
 
-1. **Per-session binding `Session`**, injected into the shell's binding map at startup (alongside `Transcript`, `Beamtalk`, `Workspace`). Each shell sees a `Session` binding pointing to *its own* session object.
-2. **`Workspace currentSession`**, a method on the existing `WorkspaceInterface` singleton that resolves the current eval's session via process context. Returns `nil` outside a REPL eval context. A companion **`Workspace hasSession`** predicate returns `true` or `false`, allowing library code to guard session-dependent logic without nil-checking.
+`Session` is **not** an Actor (gen_server). It is a Beamtalk class whose class-side methods delegate to `beamtalk_session_primitives`, which uses process-context resolution (process dictionary seeded during eval worker spawn) to find the calling session.
 
-`Session` is **not** an Actor (gen_server). It is a handle object whose methods delegate to the shell process via `gen_server:call`. Similar to how `Ets` wraps a table reference without exposing it as a Beamtalk field, Session's internal shell PID is managed by the primitives module, not stored in a user-visible `field:`.
+`Session bindings` and `Session globals` return **live binding views** — mutating them writes through to the underlying state. `view at: #x put: 42` sets a session-local; `view removeKey: #x` removes it. Globals mutations route through the existing `bind:as:` / `unbind:` machinery and inherit those conflict checks.
 
 ### API
 
 ```beamtalk
 sealed typed Object subclass: Session
 
-  /// Session-local bindings only (the `x := 42` layer).
-  bindings -> Dictionary(Symbol, Object) =>
-    (Erlang beamtalk_session_primitives) bindings
+  /// Live view of session-local bindings. Reads return current values;
+  /// `at:put:` and `removeKey:` mutate session state directly.
+  class bindings -> BindingsView =>
+    (Erlang beamtalk_session_primitives) bindingsView
 
-  /// Workspace globals visible to this session (singletons + bind:as:).
-  globals -> Dictionary(Symbol, Object) =>
-    (Erlang beamtalk_session_primitives) globals
+  /// Live view of workspace globals (singletons + bind:as: entries).
+  /// Mutations route through `Workspace bind:as:` / `unbind:`, including
+  /// the existing protected-name conflict checks for system singletons.
+  class globals -> BindingsView =>
+    (Erlang beamtalk_session_primitives) globalsView
 
   /// Walk binding layers, return first match or nil.
   /// Lookup order: session locals → workspace globals.
   /// Primarily a REPL debugging tool: answers "where does this name
-  /// resolve from?" interactively. Compiled code uses normal scope
-  /// resolution; this method is for introspection, not dispatch.
-  resolve: aName :: Symbol -> Object =>
+  /// resolve from?" interactively.
+  class resolve: aName :: Symbol -> Object =>
     (Erlang beamtalk_session_primitives) resolve: aName
 
-  /// Clear session-local bindings. Workspace globals remain.
-  clear -> Nil =>
+  /// Clear all session-local bindings. Workspace globals remain.
+  class clear -> Nil =>
     (Erlang beamtalk_session_primitives) clear
 
-  /// Layer name symbols, in resolution order. Stable — Beamtalk's binding
-  /// model has exactly two layers (session locals over workspace globals)
-  /// and no plan for additional layers. Package-level encapsulation
-  /// (ADR 0070) is class-scoped, not a binding-resolution layer.
-  layers -> List(Symbol) => #(#session, #workspace)
-
   /// Stable session identifier (matches the protocol session ID).
-  id -> String => (Erlang beamtalk_session_primitives) id
+  class id -> String =>
+    (Erlang beamtalk_session_primitives) id
+
+  /// Return the calling process's session as a value, for pass-by-reference.
+  /// Returns `nil` outside a REPL eval context.
+  class current -> Session | Nil =>
+    (Erlang beamtalk_session_primitives) current
+
+  /// Look up a session by its protocol session ID (returns nil if no
+  /// such session). Used for cross-session access — see "Cross-session
+  /// access (LSP, VS Code)" below.
+  class withId: aSessionId :: String -> Session | Nil =>
+    (Erlang beamtalk_session_primitives) withId: aSessionId
+
+  // Instance-side methods (used when a Session value is passed around):
+  bindings -> BindingsView =>
+    (Erlang beamtalk_session_primitives) bindingsViewFor: self
+  globals -> BindingsView =>
+    (Erlang beamtalk_session_primitives) globalsView
+  resolve: aName :: Symbol -> Object =>
+    (Erlang beamtalk_session_primitives) resolve: aName for: self
+  clear -> Nil =>
+    (Erlang beamtalk_session_primitives) clearFor: self
+  id -> String => self.id
 ```
 
-The shell PID is not stored in Beamtalk-level fields. Primitives resolve the calling session from process context (process dictionary seeded during eval worker spawn), matching the pattern used by `Ets` and other runtime-backed objects.
+`BindingsView` is a small Dictionary-protocol-compatible class backed by primitives that read/write session or workspace state. It implements `at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, and `do:`. Mutations via `at:put:` / `removeKey:` are write-through.
 
-**`Session` itself is a system-injected binding.** It does not appear in `Session bindings` (that shows user-typed locals only) and does not appear in `Session globals` (that shows workspace-level globals from ETS). It is part of the `injected_ws_keys` set — visible during normal name resolution, but excluded from the per-layer introspection views. `Session resolve: #Session` returns the Session object (it walks the merged binding map). This is consistent with how `Transcript`, `Beamtalk`, and `Workspace` are treated by the existing `:bindings` meta-command, which already strips system bindings from its output.
+**No injected binding.** `Session` is a class name resolved through the class registry, like `Counter` or `Integer`. It cannot be shadowed by a user `:=` assignment because class names are not in the binding map; assigning `Session := foo` creates a local binding that shadows the class reference *only in that local scope*, the same way assigning `Counter := foo` works. This is normal Smalltalk behaviour and not a footgun specific to Session.
+
+`Workspace currentSession` is **also** retained on `WorkspaceInterface` as a navigation method — Workspace is a discovery entry point, and "find the current session" fits the pattern of `Workspace actors`, `Workspace supervisor`, etc. It returns the same value as `Session current`. A companion `Workspace hasSession` predicate returns true/false, useful for library code that conditionally uses session state.
+
+### Cross-session access (LSP, VS Code)
+
+The VS Code extension and LSP open their own protocol sessions for completion queries, but need to read bindings from the *user's* REPL session. This is currently handled at the protocol layer (BT-1045): the `bindings` op carries a `session` parameter and `beamtalk_session_table:resolve_pid/2` looks up the target shell.
+
+The new Session API supports this cleanly:
+
+```beamtalk
+// On the LSP completion session:
+userSession := Session withId: "user-repl-abc-123"  // returns Session | Nil
+userSession ifNotNil: [
+  candidates := userSession bindings keys
+]
+
+// Or for full search across all sessions (future):
+Workspace sessions collect: [:s | s id]
+```
+
+The class-side methods (`Session bindings`) operate on the calling process's session — semantically "my session". The instance-side methods (`aSession bindings`) operate on whichever session the value represents, including ones owned by other connections. This is the load-bearing reason for instance methods on `Session`: cross-session access from tooling.
+
+The LSP and any other client that previously called the `bindings` / `clear` protocol ops moves to `Session withId:` + instance methods in the same release.
 
 ### REPL Examples
 
 ```text
 beamtalk> x := 42
 42
-beamtalk> Session bindings
-#{#x => 42}
+beamtalk> Session bindings keys
+#(#x)
+beamtalk> Session bindings at: #x
+42
 beamtalk> Session globals keys
 #(#Transcript, #Beamtalk, #Workspace)
 beamtalk> Session resolve: #x
@@ -103,52 +146,89 @@ beamtalk> Session resolve: #Transcript
 #<TranscriptStream>
 beamtalk> Session resolve: #notDefined
 nil
-beamtalk> Session layers
-#(#session, #workspace)
+
+// Live mutations write through:
+beamtalk> Session bindings at: #y put: 99
+99
+beamtalk> y
+99
+beamtalk> Session bindings removeKey: #x
+nil
+beamtalk> x
+// => #beamtalk_error{kind: undefined_variable, name: #x}
+
+// Globals mutations route through bind:as: / unbind:
+beamtalk> Session globals at: #MyTool put: someActor
+nil
+beamtalk> MyTool
+#<Counter @ <0.123.0>>
+beamtalk> Session globals removeKey: #MyTool
+nil
+
+// Pass-by-reference (cross-session access from LSP / tooling):
+beamtalk> userSession := Session withId: "user-repl-abc-123"
+#<Session: "user-repl-abc-123">
+beamtalk> userSession bindings keys
+#(#x, #y, #counter)
+
 beamtalk> Workspace currentSession id
 "abc123-..."
 beamtalk> Session clear
 nil
-beamtalk> Session bindings
-#{}
-beamtalk> Session globals keys
-#(#Transcript, #Beamtalk, #Workspace)
+beamtalk> Session bindings keys
+#()
 ```
 
 ### Error Examples
 
-Outside a REPL eval (compiled program code), `Workspace currentSession` returns `nil`:
+Outside a REPL eval, `Session current` and `Workspace currentSession` return `nil`:
 
 ```beamtalk
 // In a .bt file run via `beamtalk run`:
+Session current        // => nil
 Workspace currentSession  // => nil
-Workspace currentSession bindings
-// => #beamtalk_error{kind: does_not_understand, selector: #bindings, receiver: nil}
+Workspace hasSession   // => false
 ```
 
-Calling `Session` from a context where it is not bound:
+Class-side `Session bindings` outside a REPL session raises a structured error:
 
 ```beamtalk
-// In compiled program code, Session is not in scope:
 Session bindings
-// => #beamtalk_error{kind: undefined_variable, name: #Session}
+// => #beamtalk_error{kind: no_session, message: "no session in scope"}
+```
+
+Cross-session `withId:` for an unknown session ID returns nil:
+
+```beamtalk
+Session withId: "nonexistent"  // => nil
+```
+
+Globals mutations that violate protected-name rules raise the existing `bind:as:` error:
+
+```beamtalk
+Session globals at: #Workspace put: nil
+// => #beamtalk_error{kind: name_conflict, selector: #'bind:as:',
+//    message: "Workspace is a system name and cannot be shadowed"}
 ```
 
 ### Open Design Questions — Resolved
 
 | Question | Decision | Rationale |
 |----------|----------|-----------|
-| Singleton or per-PID? | **Per-PID** | CLI has one session, but WebSocket/MCP clients have many. Each shell injects its own `Session` binding; `Workspace currentSession` resolves from eval context. |
-| What outside REPL eval? | **`nil`** for `Workspace currentSession`; `Session` binding not present. | Compiled program code has no session. Returning a stub object would mask the meaningful absence. |
+| Singleton or per-PID? | **Per-PID** | CLI has one session, WebSocket/MCP clients can have many. Class-side methods use process-context resolution to find the calling session; instance methods carry their own session ID for cross-session access. |
+| What outside REPL eval? | **`Session current` returns `nil`**; class-side methods like `Session bindings` raise a structured `no_session` error. | Compiled program code has no session. Returning a stub or nil from `bindings` would mask the meaningful absence; an error is louder. |
 | Persist across `:sync` / reload? | **Yes** — unchanged from current behaviour. | Session locals are shell-process state, owned independently of class definitions. Sync rebuilds modules; the session keeps its bindings. |
-| Expose `parent` for layer walking? | **No, not initially.** | Two layers; `bindings` and `globals` cover both. Parent links can be added later if a third layer (e.g. per-module scope) appears. Keeps the initial surface small. |
-| `bind:as:` interaction? | **Unchanged.** `Workspace bind:value as:#name` continues to write to the workspace ETS layer. Visible via `Session globals`. | `bind:as:` is workspace-scoped (shared across sessions). Confirms the layer separation: session = per-PID, workspace = shared. |
+| Are bindings/globals views live or snapshots? | **Live views.** Mutations write through. | Matches Pharo semantics (`Smalltalk globals at:put:`). A snapshot would force a parallel setter API (`Session at:put:`); the live view collapses both into one Dictionary protocol. |
+| Layer-walking abstraction? | **Dropped.** No `layers` method, no recursive `parent`. | Beamtalk has settled on exactly two layers; package encapsulation (ADR 0070) is class-scoped, not a binding-resolution layer. A `layers` constant would be pure decoration. |
+| `bind:as:` interaction? | **Unchanged.** `Session globals at:put:` is equivalent to `Workspace bind:as:`, including conflict checks. | One write path through the existing primitives; the new view is sugar over the established API. |
+| Cross-session access? | **Instance methods + `Session withId:`** | LSP/VS Code completion sessions need to query the user's session. Class-side methods are "my session"; instance methods are "that session". |
 
 ## Prior Art
 
 | System | Binding model | What we adopt | What we reject |
 |--------|---------------|---------------|----------------|
-| **Pharo / Squeak Workspace** | `Dictionary` of bindings on the workspace, with fallback to `Smalltalk globals`. Methods: `bindings`, `bindingOf:`, `removeBinding:`, `resetBindings`. | The flat-Dictionary shape and the `bindings` accessor name. | Pharo merges workspace and session — Beamtalk has separate workspace (shared) and session (per-PID) layers because of multi-client BEAM hosting. |
+| **Pharo `Smalltalk current` / `Date today` / `Time now`** | Class-side methods that return a "current" instance — the class itself is the entry point. | The class-as-entry-point pattern (`Session bindings` is a class-side message, like `Date today`). | None — this is the load-bearing prior art for Option F. |
+| **Pharo / Squeak Workspace** | `Dictionary` of bindings on the workspace, mutable via `at:put:`, with fallback to `Smalltalk globals`. Methods: `bindings`, `bindingOf:`, `removeBinding:`, `resetBindings`. | The mutable-Dictionary shape (`Session bindings at:put:` writes through, matching `Smalltalk globals at:put:`). | Pharo merges workspace and session — Beamtalk has separate workspace (shared) and session (per-PID) layers because of multi-client BEAM hosting. |
 | **Pharo Environment** | Wraps a `Dictionary` of globals; multiple Environments allowed. | Layer reification via named accessors. | Beamtalk does not need user-creatable environments — workspace is bootstrapped once per BEAM node. |
 | **Newspeak** | Lexical nesting only; no global namespace; capability passing via constructor parameter. | The principle that scope is explicit, not magic. | Beamtalk has Smalltalk-style globals (`Transcript`, classes); a fully-lexical model would invalidate the existing namespace design. |
 | **Self** | Parent slot chain; scope walks via `parent*` slots. | Layer ordering as a first-class concept (`layers` returns the resolution order). | Recursive `parent` chains overstate the complexity for two layers. |
@@ -188,12 +268,12 @@ The MCP server can call `Session bindings` and `Session globals` via `evaluate` 
 
 **Language designer:** "Adding methods is cheaper than adding classes. The composability argument for first-class Session is partly speculative — today nobody writes `Workspace sessions collect: [:s | s bindings]`. YAGNI."
 
-**Why not adopted:** The BEAM-veteran argument is the strongest — Option B *works* for the common case and avoids the injected-binding shadowing problem. Two factors push us to A despite this:
+**Why not adopted:** Option B *works* for the common case and is genuinely simpler. Two factors push us to F (class-side Session) despite this:
 
-1. **Pass-by-reference.** `Session` as a value can be stored, passed to library code, or returned from `Workspace sessions`. Option B cannot express `analyzer analyze: aSession` — there's no first-class session value to pass.
-2. **Workspace's role.** `Workspace` is a navigation entry point — `Workspace actors`, `Workspace classes`, `Workspace supervisor`, `Workspace dependencies` — each method *finds you something*. Session bindings are not something you navigate to from the workspace; they belong to a session, which has its own identity. Loading session-state methods directly onto `Workspace` would be the same category error as putting `Counter increment` on `Workspace`. Four new session-state methods on `Workspace` is too much.
+1. **Pass-by-reference.** `Session` as a value can be stored, passed to library code, or used for cross-session access — `Session withId:` for LSP completion against the user's session, `Workspace sessions collect: [:s | s id]` for multi-session enumeration. Option B cannot express any of these without inventing per-call session-id parameters.
+2. **Workspace's role.** `Workspace` is a navigation entry point — `Workspace actors`, `Workspace classes`, `Workspace supervisor`, `Workspace dependencies` — each method *finds you something*. Session bindings are not something you navigate to from the workspace; they belong to a session, which has its own identity. Loading four session-state methods (`sessionBindings`, `sessionGlobals`, `clearSession`, `resolveBinding:`) directly onto `Workspace` would be the same category error as putting `Counter increment` on `Workspace`. The class-side `Session` API keeps the surface focused.
 
-The shadowing footgun (Option B's genuine advantage) is mitigated by the proposed shadowing warning. The ergonomic loss in Option B (no first-class session value) is permanent and not mitigable.
+Option F gives us almost all of B's simplicity (no injection, no shadowing, no `injected_ws_keys` plumbing) plus pass-by-reference for the cross-session and multi-session cases that B cannot express.
 
 ### Option C: Recursive Scope Chain (rejected)
 
@@ -211,12 +291,22 @@ The shadowing footgun (Option B's genuine advantage) is mitigated by the propose
 
 ### Tension Points
 
-- **Common-case ergonomics vs. composability.** Option B genuinely wins for the introspect-your-own-session case (no injected binding to shadow, no new class to learn). Option A wins when sessions need to be passed as values or enumerated. The decision turns on whether composability matters enough to pay the shadowing-warning cost.
-- **`Session` as injected binding** is the load-bearing footgun. Without it, Option A loses much of its ergonomic advantage (you'd always type `Workspace currentSession bindings`). With it, we add a name that can be shadowed by `:=`. The shadowing warning is the bridge.
-- **Speculative future use.** `Workspace sessions collect: [:s | s bindings]` is not exercised by any current caller. We're paying class-design complexity for a use case that today only appears in the Consequences section. Honest assessment: if this stays unused for 12 months, the value of a first-class Session over Option B is substantially weaker.
-- **Two layers is settled.** Option C's strongest argument (future layer flexibility) requires bet-against-settled-design. Both A and C agree the current need is two layers; A says "two named accessors", C says "n-arity chain". Given Beamtalk's commitment to two layers, A is the right level of generality.
+- **Class-side vs. injected-binding ergonomics.** Both are two words to type (`Session bindings` either way). The class-side approach wins on principled grounds — Pharo's `Date today` / `Smalltalk current` pattern is the right precedent for a per-PID "current" value. The injected-binding approach (Alternative A) was the original sketch but pretends Session is a singleton when it isn't.
+- **The LSP cross-session case is real, not speculative.** BT-1045 already established the protocol-level cross-session pattern; the LSP runs its own completion session and queries the user's session for bindings. Option B has no Beamtalk-native expression of this; Option F's `Session withId:` does.
+- **Live mutation cost.** Pharo-style `Smalltalk globals at:put:` write-through is genuinely useful, but adds a `pending_mutations` queue to `beamtalk_repl_state` to handle eval-ordering. This complexity is paid regardless of class-side vs. injected-binding — it's a property of the live-view decision, not the entry-point decision.
+- **Two layers is settled.** Option C's strongest argument (future layer flexibility) requires bet-against-settled-design. Beamtalk has committed to exactly two binding layers; package encapsulation (ADR 0070) is class-scoped, not a binding-resolution layer.
 
 ## Alternatives Considered
+
+### Alternative A: Per-session injected `Session` binding
+
+The original sketch in BT-2092 — inject `Session` as a per-shell binding (alongside `Transcript`, `Beamtalk`, `Workspace`) so `Session bindings` resolves to an instance method on the injected value.
+
+Rejected because:
+- **Less Smalltalk than the class-side approach.** Pharo's pattern for "the current X" is class-side (`Date today`, `Time now`, `Smalltalk current`), not a top-level singleton binding. Sessions are per-PID, not singular — injecting them as if they were singletons is dishonest.
+- **Shadowing footgun.** `Session := MyThing new` in the shell silently overwrites the injected binding. The existing `bind:as:` conflict checks don't catch shell-level `:=`. Mitigating this requires a new compiler warning, which is cost we don't pay if there is no injected binding.
+- **Implementation complexity.** Requires extending `injected_ws_keys`, modifying `inject_workspace_bindings`, adding `Session` to `is_protected_name/1`, and a clear-and-reinject loop. The class-side approach skips all of this.
+- **Tooling parity is messier.** Cross-session access (LSP completion against the user's session) doesn't fit naturally — the LSP's session sees its own injected `Session`, not the user's. Class-side methods plus `Session withId:` separate "my session" from "that session" cleanly.
 
 ### Alternative B: Workspace extension methods (no new class)
 
@@ -242,16 +332,6 @@ Accept the surface asymmetry permanently and document `bindings` / `clear` as RE
 
 Rejected because it locks in the violation of Principle 6 (messages all the way down) and ADR 0040 (workspace-native commands), and leaves the session layer permanently invisible to MCP and other clients.
 
-### Alternative E: Hybrid — Session class with no injected binding
-
-Define the `Session` class (as in Option A) so that `Workspace currentSession` can return one, but skip the per-shell `Session` binding injection. Users always type `Workspace currentSession bindings` — never the shorter `Session bindings`.
-
-This was considered as a way to capture A's composability (pass-by-reference, multi-session enumeration) while eliminating the shadowing footgun (no injected binding to overwrite via `:=`).
-
-Rejected because:
-- The 99% interactive case becomes verbose: `Workspace currentSession bindings` four words long for an operation users will type repeatedly.
-- It miscategorises `Workspace`'s role. `Workspace` is a navigation entry point — methods on `Workspace` *find you something*. `currentSession` fits that pattern; making it the *only* path to session ops loses the directness of `Session bindings`.
-- The shadowing footgun is mitigable via the proposed compiler warning. The verbosity cost of E is permanent and not mitigable.
 
 ## Consequences
 
@@ -265,66 +345,75 @@ Rejected because:
 
 ### Negative
 
-- **One more top-level binding name.** `Session` joins `Transcript`, `Beamtalk`, `Workspace` as an injected per-session global. Users could shadow it via `Session := MyThing new` in the shell — the existing `bind:as:` conflict checks only protect workspace-level assignments, not shell-level `:=`. The implementation should add a guard in `beamtalk_repl_eval` that emits a compiler warning (not an error) when a user assignment shadows an injected system binding, consistent with the project's footgun-warning philosophy (emit a compiler warning whenever we detect a footgun, rather than leaving it as a known limitation).
-- **`Session clear` during eval has ordering constraints.** The eval worker has a state snapshot; when it completes, the shell merges the worker's state back. A naive `gen_server:call(ShellPid, clear_bindings)` during eval would be overwritten by the worker's stale snapshot. The implementation must add a `clear_requested` flag to `beamtalk_repl_state`: `clear` sets the flag via the shell; eval-result processing checks the flag and applies the clear after merging the worker's state. This ensures `Session clear` followed by more expressions in the same eval works correctly (the clear takes effect for the *next* eval, not mid-expression).
-- **Outside-REPL `nil`.** `Workspace currentSession` returns `nil` in compiled program code, which means `Workspace currentSession bindings` raises `does_not_understand` (correct DNU semantics, but a footgun if users assume the API is always available). Documentation must call this out.
+- **New `BindingsView` class.** A small Dictionary-protocol class is required to support live read/write views. Implementation cost is moderate (one class plus primitives for read/write/iterate). The class is simple — every method delegates to a primitive — but it is a new public surface that has to be documented and tested.
+- **Mutation during eval has ordering constraints.** Both `Session clear` and `Session bindings at:put:` mutate shell state via gen_server calls. The eval worker holds a state snapshot; without reconciliation the worker's writeback would overwrite the mutation. The implementation must add a `pending_mutations` queue to `beamtalk_repl_state`: mutations append to the queue (instead of being applied directly); the eval-result handler drains the queue after merging the worker's state. This ensures `Session bindings at: #x put: 99. x + 1` evaluates `x + 1` against the original `x` (the mutation takes effect for the *next* eval), which matches user expectations that an expression sees its own pre-state.
+- **Outside-REPL behaviour.** `Session current` returns `nil`; class-side methods like `Session bindings` raise a structured `no_session` error. Library code that wants graceful degradation must check `Workspace hasSession` first.
+- **`Session clear` is asymmetric with the view.** `Session bindings removeKey: #x` removes one binding; `Session clear` removes all. There is no `Session bindings clear` because the view's protocol is generic Dictionary semantics — `Session bindings` returns a *view*, not a Dictionary the user owns, so a `clear` on the view would be ambiguous (clear-the-view or clear-the-state). Keeping `Session clear` as a top-level method avoids this ambiguity.
 
 ### Neutral
 
 - **`bind:as:` semantics unchanged.** Continues to write to the workspace ETS layer. `Session bindings` will not include `bind:as:` entries (those appear in `Session globals`). This is a clarification, not a behaviour change.
 - **Session persistence across sync unchanged.** Existing behaviour preserved: session locals survive `Workspace sync`.
-- **Protocol surface unchanged initially.** The existing `bindings` and `clear` ops continue to work, redirected to `Session bindings` / `Session clear` semantics. Hard removal is a follow-up after the new API has soaked.
+- **Protocol `bindings` / `clear` ops are removed** in Phase 5, alongside the rest of the work. The Session API ships first (Phases 1–4), so when the meta-commands disappear the replacement is already in place. There is no deprecation window — single coordinated release.
 
 ## Implementation
 
-The implementation breaks down into four phases. Each is independently shippable.
+The implementation breaks down into five phases. Each is independently shippable.
 
-### Phase 1: Runtime primitives module (S)
+### Phase 1: Process-context plumbing (S)
 
-Create `beamtalk_session_primitives.erl` in `runtime/apps/beamtalk_workspace/src/` with the four primitive operations. Each primitive reads the calling process's session PID from process dictionary (seeded during eval worker spawn in Phase 2):
+Modify `beamtalk_repl_shell:handle_call({eval, _}, ...)` to seed the eval worker's process dictionary with `beamtalk_session_pid` (the shell's `self()`) and `beamtalk_session_id` (the protocol session ID) before calling `do_eval`. This makes the calling session reachable from any primitive without explicit threading.
 
-- `bindings/0` — reads the process dictionary session PID, calls `beamtalk_repl_shell:get_bindings/1`, then strips workspace-injected keys using the `injected_ws_keys` tracking already present in `beamtalk_repl_state`. Returns session-locals only.
-- `globals/0` — calls `beamtalk_workspace_interface_primitives:get_session_bindings/0`, the existing workspace-globals accessor.
-- `resolve/1` — combines the two; session locals first, workspace globals second. Returns `nil` if name not found.
-- `clear/0` — calls `beamtalk_repl_shell:clear_bindings/1` on the session PID. Note: during eval, this clears the shell's state via gen_server:call. The eval worker's snapshot is stale after clear, but clear is typically the final expression in an eval. If the cleared state is overwritten by the worker's return, the shell must reconcile by checking a `clear_requested` flag (set by the clear handler) during eval-result processing.
-- `id/0` — reads the session ID from process dictionary.
+Add `pending_mutations` to `beamtalk_repl_state` — a queue of `{op, key, value}` tuples. Add an applicator that drains the queue at eval-result time, after merging the worker's returned state. This is the foundation for `Session clear` and `Session bindings at:put:` correctness during eval.
 
-EUnit tests for each primitive. Existing infrastructure (`beamtalk_repl_shell`, `beamtalk_session_table`) is reused.
+EUnit tests for the worker spawn seeding and the pending-mutation drain ordering.
 
-### Phase 2: Stdlib `Session` class and binding injection (M)
+### Phase 2: Runtime primitives module (M)
 
-Add `stdlib/src/Session.bt` with the API defined above. Session is NOT a workspace singleton (it varies per shell), so it cannot be added to `beamtalk_workspace_config:singletons/0`.
+Create `beamtalk_session_primitives.erl` in `runtime/apps/beamtalk_workspace/src/`. Each primitive resolves the session via `get(beamtalk_session_pid)` (or the explicit Session instance for the `*For:` variants):
 
-Injection path: modify `beamtalk_repl_shell:init/1` to construct a Session object (via `beamtalk_object:create/2`) with the shell's PID and session ID, and inject it as a binding alongside workspace globals. Add `'Session'` to the `injected_ws_keys` set so that `clear` preserves it and `Session bindings` excludes it from user-locals.
+- `current/0` — returns a Session value with the calling session's PID and ID, or `nil`.
+- `withId/1` — looks up a session by protocol ID via `beamtalk_session_table:lookup/1`, returns Session or nil.
+- `bindingsView/0` — returns a `BindingsView` value tagged for session-local scope, bound to the calling session.
+- `globalsView/0` — returns a `BindingsView` value tagged for workspace scope (shared across sessions).
+- `bindingsViewFor/1`, `clearFor/1` — instance variants (target a specific Session value).
+- `resolve/1`, `resolve/2` — walk session locals first, then workspace globals; return value or nil.
+- `clear/0`, `clearFor/1` — enqueue a clear mutation via the shell's pending-mutations API (Phase 1).
+- `id/0` — reads `beamtalk_session_id` from process dictionary.
 
-Seed process dictionary: modify the eval worker spawn (`handle_call({eval, ...})`) to set `beamtalk_session_pid` and `beamtalk_session_id` in the worker's process dictionary before calling `do_eval`. This allows Phase 1 primitives to resolve the session context.
+Plus the BindingsView read/write primitives: `view_at/2`, `view_at_put/3`, `view_remove/2`, `view_keys/1`, `view_size/1`. Session-scope writes enqueue against the shell's pending-mutations queue; workspace-scope writes route through `beamtalk_workspace_interface_primitives:bind/2` and `unbind/1`, inheriting protected-name conflict checks.
 
-Add `'Session'` to `is_protected_name/1` in `beamtalk_workspace_interface_primitives.erl` so `bind:as:` cannot shadow it.
+EUnit tests for each primitive, including cross-session access via `withId/1`.
 
-### Phase 3: `Workspace currentSession` and process-context resolution (S)
+### Phase 3: Stdlib `Session` and `BindingsView` classes (M)
 
-Add `currentSession` to `WorkspaceInterface` (Beamtalk class) with an Erlang primitive that:
-1. Reads `beamtalk_session_pid` from the calling process's dictionary, or
-2. Returns `nil` if no session marker is set (compiled program code, non-REPL contexts).
+Add `stdlib/src/Session.bt` with the class-side and instance-side methods defined in the API. Add `stdlib/src/BindingsView.bt` implementing the Dictionary protocol (`at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, `do:`, `printOn:`).
 
-This uses the same process dictionary key seeded in Phase 2 — no additional plumbing needed.
+No binding injection: `Session` is reachable as a class name through the class registry, no special-case handling. No protected-name additions, no `injected_ws_keys` changes.
 
-### Phase 4: Migration and meta-command deprecation (M)
+### Phase 4: `Workspace currentSession` / `hasSession` (S)
 
-Re-deprecate `:bindings` and `:clear` in `beamtalk_repl_ops_dev.erl` with `migrate_to` hints pointing at `Session bindings` and `Session clear`. Update `surface-parity.md` rows for `bindings` and `clear` to cite `via Session bindings` / `via Session clear`. Add an e2e btscript test under `tests/repl-protocol/cases/` covering the full Session API. Hard removal of the meta-commands is a separate follow-up issue once the new API has been validated in real use.
+Add `currentSession` and `hasSession` to `WorkspaceInterface` (Beamtalk class), each delegating to a one-line primitive that reads the same `beamtalk_session_pid` process dictionary key seeded in Phase 1. Returns the same value as `Session current` (or its boolean).
+
+### Phase 5: Remove `:bindings` and `:clear` meta-commands (S)
+
+Delete the `<<"bindings">>` and `<<"clear">>` op handlers in `beamtalk_repl_ops_eval.erl` and remove their entries from `beamtalk_repl_ops_dev.erl`'s op map. Update `surface-parity.md` rows for `bindings` and `clear` to cite `via Session bindings` / `via Session clear`. Update any existing e2e tests that exercised the meta-commands to use the new Session API. Add an e2e btscript test under `tests/repl-protocol/cases/` covering the full Session API including cross-session access (`Session withId:`).
 
 ## Migration Path
 
-For users of `:bindings` and `:clear`:
+The `:bindings` and `:clear` meta-commands are removed in Phase 5; the replacement API is shipped in Phases 1–4 first so they land in the same release.
 
 | Before | After |
 |--------|-------|
-| `:bindings` | `Session bindings` (session locals only) <br> `Session globals` (workspace globals) |
+| `:bindings` | `Session bindings keys` (session locals only) <br> `Session globals keys` (workspace globals) |
 | `:clear` | `Session clear` |
-| (no equivalent) | `Session resolve: #name` |
-| (no equivalent) | `Workspace currentSession` |
+| (no equivalent) | `Session bindings at: #x put: 99` (live mutation) |
+| (no equivalent) | `Session bindings removeKey: #x` |
+| (no equivalent) | `Session resolve: #name` (REPL debugging tool) |
+| (no equivalent) | `Workspace currentSession` / `Session current` |
+| (no equivalent) | `Session withId: aSessionId` (LSP cross-session) |
 
-The meta-commands continue to work during the deprecation window. CLI users see a `migrate_to` hint in the deprecated-op response. MCP and WebSocket clients gain a new capability (the meta-commands were REPL-only; the object API works on every surface).
+The meta-commands existed only on the REPL surface. Removing them is a small loss for muscle-memory CLI users (one `migrate_to` shell-side error message in the release notes is sufficient) and a strict gain for MCP and WebSocket clients, which now have a Beamtalk-native path to per-session state with both reads and write-through mutations.
 
 ## References
 
