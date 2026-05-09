@@ -178,37 +178,43 @@ The MCP server can call `Session bindings` and `Session globals` via `evaluate` 
 
 ### Option B: Workspace Extension (rejected)
 
-**Newcomer:** "I already know `Workspace` from `Workspace classes` and `Workspace actors`; adding `Workspace sessionBindings` is one more method on a familiar object. No new concept to learn."
+**Newcomer:** "I already know `Workspace` from `Workspace classes` and `Workspace actors`; adding `Workspace sessionBindings` is one more method on a familiar object. No new concept to learn, no new top-level binding to discover."
 
-**Smalltalk purist:** "`Workspace` is the natural place for workspace-state operations. Splitting Session out is a needless ontological commitment."
+**Smalltalk purist:** "Adding methods to `Workspace` matches how `Smalltalk` accumulates introspection in Pharo — `Smalltalk globals`, `Smalltalk allClasses`, `Smalltalk current`. Why is sessions special enough to warrant its own class?"
 
-**BEAM veteran:** "Function calls on a singleton are simpler than navigating to a per-PID object. Less indirection in the dispatch path."
+**BEAM veteran:** "`Workspace sessionBindings` could use the same process-context resolution that `Workspace currentSession` uses anyway. The dispatch cost is identical; you're just spelling it differently. For the 99% case — introspecting your own session — Option B is shorter and avoids the shadowing-via-`:=` footgun entirely (no injected binding, nothing to shadow)."
 
-**Operator:** "Fewer object types to debug. `Workspace` is already the operator's entry point."
+**Operator:** "Fewer object types in the system means fewer surfaces to learn for postmortem debugging. `Workspace` is already the operator's entry point — keep it that way."
 
-**Language designer:** "Adding methods is cheaper than adding classes. YAGNI applies."
+**Language designer:** "Adding methods is cheaper than adding classes. The composability argument for first-class Session is partly speculative — today nobody writes `Workspace sessions collect: [:s | s bindings]`. YAGNI."
 
-**Why not adopted:** Single-session ergonomics break in multi-session deployments. `Workspace sessionBindings` cannot answer "which session?" without extra parameters or context-aware lookup. The first-class object generalises naturally to `Workspace sessions collect: [:s | s bindings]`, which Option B cannot express.
+**Why not adopted:** The BEAM-veteran argument is the strongest — Option B *works* for the common case and avoids the injected-binding shadowing problem. Two factors push us to A despite this:
+
+1. **Pass-by-reference.** `Session` as a value can be stored, passed to library code, or returned from `Workspace sessions`. Option B cannot express `analyzer analyze: aSession` — there's no first-class session value to pass.
+2. **Namespace coherence.** `Workspace` already mixes actors, classes, supervisors, packages, sync, test, bind:as:, and load. Adding `sessionBindings`, `sessionGlobals`, `clearSession`, `resolveBinding:` would push it past discoverable scale. A dedicated `Session` class keeps each surface focused.
+
+The shadowing footgun (Option B's genuine advantage) is mitigated by the proposed shadowing warning. The ergonomic loss in Option B (no first-class session value) is permanent and not mitigable.
 
 ### Option C: Recursive Scope Chain (rejected)
 
-**Newcomer:** "Once I learn the parent pattern, I can walk any depth — just like prototype chains in JavaScript."
+**Newcomer:** "Once I learn the parent pattern, I can walk any depth. It's just like prototype chains in JavaScript or `__getattr__` chains in Python — a familiar mental model from outside the Smalltalk world."
 
-**Smalltalk purist:** "Self's slot-chain model is the most principled scoping mechanism in any object language. This adopts proven prior art."
+**Smalltalk purist:** "Self's slot-chain model is the most principled scoping mechanism in any object language. Walking `parent` is more uniform than special-casing each layer with a named accessor (`bindings`, `globals`, ...). Adopt proven prior art."
 
-**BEAM veteran:** "A uniform parent walk is easier to implement recursively than a fixed two-layer structure."
+**BEAM veteran:** "Process linking already gives BEAM a parent chain (`$ancestors`). A uniform `parent` accessor on Scope objects mirrors what's already happening at the OTP level — recursive walks are idiomatic on BEAM."
 
-**Operator:** "Depth-flexible scopes future-proof the design — package-level scopes, module-level scopes, etc., all fit without redesign."
+**Operator:** "If we ever introduce per-package, per-module, or per-actor scopes, depth-flexible scopes absorb them without redesign. Today's two-layer model becomes tomorrow's five-layer model without breaking callers."
 
-**Language designer:** "Most elegant. Layers are a special case of a more general scope-chain abstraction."
+**Language designer:** "Most elegant. Two layers IS the special case; the general case is a chain. Designing for the general case prevents future entrenchment of the wrong abstraction."
 
-**Why not adopted:** Premature generalisation. We have two layers and no concrete plan for a third. The cost (a `Scope` class hierarchy, recursive resolution semantics, tooling for chain inspection) is paid up front for hypothetical future flexibility. If a third layer appears, `Session` can grow a `parent` accessor non-breakingly.
+**Why not adopted:** Beamtalk has explicitly settled on a two-layer binding model — session locals over workspace globals — with no plans for additional layers. Package encapsulation (ADR 0070) is class-scoped, not a binding-resolution layer; module scope is an Erlang concept invisible to Beamtalk users (per project memory). The general-case argument requires a third layer to ever materialise; given the design direction, that's a bet against settled decisions. The cost — a `Scope` class hierarchy, recursive resolution semantics, tooling for chain inspection, plus the foreign vocabulary of "scope" in a Smalltalk context — is paid for an extension we are choosing not to take.
 
 ### Tension Points
 
-- **Newcomers** would mildly prefer Option B (fewer concepts) but are not harmed by Option A — `Session` is itself a small, learnable concept.
-- **Operators** prefer Option A as soon as multi-session is a real concern; Option B becomes brittle.
-- **Language designers** are split between A and C; the deciding factor is current need versus speculative need.
+- **Common-case ergonomics vs. composability.** Option B genuinely wins for the introspect-your-own-session case (no injected binding to shadow, no new class to learn). Option A wins when sessions need to be passed as values or enumerated. The decision turns on whether composability matters enough to pay the shadowing-warning cost.
+- **`Session` as injected binding** is the load-bearing footgun. Without it, Option A loses much of its ergonomic advantage (you'd always type `Workspace currentSession bindings`). With it, we add a name that can be shadowed by `:=`. The shadowing warning is the bridge.
+- **Speculative future use.** `Workspace sessions collect: [:s | s bindings]` is not exercised by any current caller. We're paying class-design complexity for a use case that today only appears in the Consequences section. Honest assessment: if this stays unused for 12 months, the value of a first-class Session over Option B is substantially weaker.
+- **Two layers is settled.** Option C's strongest argument (future layer flexibility) requires bet-against-settled-design. Both A and C agree the current need is two layers; A says "two named accessors", C says "n-arity chain". Given Beamtalk's commitment to two layers, A is the right level of generality.
 
 ## Alternatives Considered
 
