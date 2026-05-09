@@ -64,6 +64,9 @@ sealed typed Object subclass: Session
 
   /// Walk binding layers, return first match or nil.
   /// Lookup order: session locals → workspace globals.
+  /// Primarily a REPL debugging tool: answers "where does this name
+  /// resolve from?" interactively. Compiled code uses normal scope
+  /// resolution; this method is for introspection, not dispatch.
   resolve: aName :: Symbol -> Object =>
     (Erlang beamtalk_session_primitives) resolve: aName
 
@@ -71,7 +74,10 @@ sealed typed Object subclass: Session
   clear -> Nil =>
     (Erlang beamtalk_session_primitives) clear
 
-  /// Layer name symbols, in resolution order.
+  /// Layer name symbols, in resolution order. Stable — Beamtalk's binding
+  /// model has exactly two layers (session locals over workspace globals)
+  /// and no plan for additional layers. Package-level encapsulation
+  /// (ADR 0070) is class-scoped, not a binding-resolution layer.
   layers -> List(Symbol) => #(#session, #workspace)
 
   /// Stable session identifier (matches the protocol session ID).
@@ -166,7 +172,7 @@ The session-as-object model is recognisably Smalltalk: `Session` is to a Beamtal
 `Workspace sessions` (a follow-up extension) can return a list of `Session` objects, each individually inspectable. Compared to opaque PIDs in `supervisor:which_children`, this gives operators a structured view of who is connected and what they have bound.
 
 **Tooling developer (LSP / VS Code).**
-LSP completions can call `Session resolve: aSymbol` to mirror the runtime resolution path exactly, instead of duplicating the merge-and-shadow logic. The MCP server can call `Session bindings` directly via `evaluate` to display per-session state in the inspector panel.
+The MCP server can call `Session bindings` and `Session globals` via `evaluate` to display per-session state in the inspector panel. Tooling that needs the merged binding map (e.g. completions) merges those two Dictionaries in resolution order — no separate primitive needed.
 
 ## Steelman Analysis
 
