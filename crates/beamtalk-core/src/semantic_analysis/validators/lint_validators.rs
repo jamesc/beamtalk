@@ -546,6 +546,11 @@ pub(crate) fn check_redundant_local_type_annotation(
     type_map: &TypeMap,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // A future refinement could thread the surrounding method's type-param
+    // subst, but for the common cases (`Counter`, `List(Foo)`) the resolved
+    // form matches the inferer's symbolic placeholders without a subst.
+    // Hoisted out of the walker so we don't re-allocate per assignment.
+    let empty_subst: HashMap<ecow::EcoString, InferredType> = HashMap::new();
     walk_module(module, &mut |expr| {
         let Expression::Assignment {
             target,
@@ -584,11 +589,6 @@ pub(crate) fn check_redundant_local_type_annotation(
             return;
         };
 
-        // Resolve the annotation against an empty substitution map. A future
-        // refinement could thread the surrounding method's type-param subst,
-        // but for the common cases (`Counter`, `List(Foo)`) the resolved form
-        // matches the inferer's symbolic placeholders without a subst.
-        let empty_subst: HashMap<ecow::EcoString, InferredType> = HashMap::new();
         let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
             annotation,
             &empty_subst,
