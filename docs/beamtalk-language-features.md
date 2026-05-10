@@ -3369,6 +3369,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `dnu` | Does-not-understand hints |
 | `type` | Type mismatch warnings *and* method-not-found (DNU) hints |
 | `unused` | Unused variable warnings |
+| `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
 
