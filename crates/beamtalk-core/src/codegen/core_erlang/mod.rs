@@ -1655,17 +1655,10 @@ impl CoreErlangGenerator {
     /// Returns `None` if source text is unavailable or the span is out of range.
     pub(super) fn span_to_line(&self, span: Span) -> Option<u32> {
         let source = self.source_text.as_deref()?;
-        let offset = span.start() as usize;
-        if offset > source.len() {
+        if span.start() as usize > source.len() {
             return None;
         }
-        let newline_count = source[..offset].bytes().filter(|&b| b == b'\n').count();
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "source files over 4GB (2^32 lines) are not supported"
-        )]
-        let line = newline_count as u32 + 1;
-        Some(line)
+        Some(span.line_number(source))
     }
 
     /// BT-940: Wraps a Document with a Core Erlang line annotation.

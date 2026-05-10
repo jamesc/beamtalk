@@ -1738,14 +1738,6 @@ struct LintResult {
     total: usize,
 }
 
-/// Convert a byte offset into a 1-indexed line number.
-fn offset_to_line(source: &str, offset: usize) -> u32 {
-    let clamped = offset.min(source.len());
-    #[allow(clippy::cast_possible_truncation)]
-    let line = source[..clamped].bytes().filter(|&b| b == b'\n').count() as u32 + 1;
-    line
-}
-
 /// BT-2152: Run the shared three-step lint analysis pipeline for a single
 /// module. Callers pre-filter `parse_diags` per their severity requirements
 /// and pass them in; this helper appends lint-pass results, runs semantic
@@ -2099,7 +2091,7 @@ fn run_lint_structured(path: &str) -> LintResult {
 
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
-            let line = offset_to_line(&source, diag.span.start() as usize);
+            let line = diag.span.line_number(&source);
             let severity = match diag.severity {
                 Severity::Error => "error",
                 Severity::Warning | Severity::Lint | Severity::Hint => "warning",
@@ -2166,38 +2158,6 @@ impl ServerHandler for BeamtalkMcp {
 mod tests {
     use super::*;
     use camino::Utf8PathBuf;
-
-    // --- offset_to_line ---
-
-    #[test]
-    fn offset_to_line_empty_string() {
-        assert_eq!(offset_to_line("", 0), 1);
-    }
-
-    #[test]
-    fn offset_to_line_single_line() {
-        let src = "hello world";
-        assert_eq!(offset_to_line(src, 0), 1);
-        assert_eq!(offset_to_line(src, 5), 1);
-        assert_eq!(offset_to_line(src, src.len()), 1);
-    }
-
-    #[test]
-    fn offset_to_line_multi_line() {
-        let src = "line1\nline2\nline3";
-        assert_eq!(offset_to_line(src, 0), 1); // start of line1
-        assert_eq!(offset_to_line(src, 5), 1); // end of line1 (before \n)
-        assert_eq!(offset_to_line(src, 6), 2); // start of line2
-        assert_eq!(offset_to_line(src, 11), 2); // end of line2 (before \n)
-        assert_eq!(offset_to_line(src, 12), 3); // start of line3
-    }
-
-    #[test]
-    fn offset_to_line_clamps_past_end() {
-        let src = "abc";
-        // Offset beyond source length should clamp and not panic.
-        assert_eq!(offset_to_line(src, 999), 1);
-    }
 
     // --- run_lint_structured ---
 

@@ -87,6 +87,21 @@ impl Span {
     pub const fn as_range(self) -> Range<usize> {
         self.start as usize..self.end as usize
     }
+
+    /// Returns the 1-based line number of this span's start position in `source`.
+    ///
+    /// Counts the number of `\n` bytes before `self.start` and adds one.
+    /// The offset is clamped to `source.len()` so out-of-range spans safely
+    /// return the last line rather than panicking.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "source files over 4GB (2^32 lines) are not supported"
+    )]
+    pub fn line_number(self, source: &str) -> u32 {
+        let offset = (self.start as usize).min(source.len());
+        source[..offset].bytes().filter(|&b| b == b'\n').count() as u32 + 1
+    }
 }
 
 impl From<Range<u32>> for Span {
@@ -162,5 +177,33 @@ mod tests {
         let span = Span::new(5, 15);
         let range: Range<usize> = span.into();
         assert_eq!(range, 5..15);
+    }
+
+    #[test]
+    fn line_number_empty_source() {
+        assert_eq!(Span::new(0, 0).line_number(""), 1);
+    }
+
+    #[test]
+    fn line_number_single_line() {
+        let src = "hello";
+        assert_eq!(Span::new(0, 0).line_number(src), 1);
+        assert_eq!(Span::new(5, 5).line_number(src), 1);
+    }
+
+    #[test]
+    fn line_number_multi_line() {
+        let src = "line1\nline2\nline3";
+        assert_eq!(Span::new(0, 0).line_number(src), 1); // start of line1
+        assert_eq!(Span::new(5, 5).line_number(src), 1); // end of line1 (before \n)
+        assert_eq!(Span::new(6, 6).line_number(src), 2); // start of line2
+        assert_eq!(Span::new(11, 11).line_number(src), 2); // end of line2 (before \n)
+        assert_eq!(Span::new(12, 12).line_number(src), 3); // start of line3
+    }
+
+    #[test]
+    fn line_number_clamps_past_end() {
+        let src = "hello";
+        assert_eq!(Span::new(999, 999).line_number(src), 1);
     }
 }
