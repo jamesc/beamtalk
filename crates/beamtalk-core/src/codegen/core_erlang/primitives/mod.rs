@@ -1656,4 +1656,355 @@ mod tests {
         let result = doc_to_string(generate_primitive_bif("CompiledMethod", "notAMethod", &[]));
         assert!(result.is_none());
     }
+
+    // Integer arithmetic — remaining ops (BT-2161)
+
+    #[test]
+    fn test_integer_minus() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "-",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'-'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_multiply() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "*",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'*'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_divide() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "/",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'/'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_integer_divide() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "div:",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'div'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_power() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "**",
+            &["Other".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'erlang':'round'(call 'math':'pow'(\
+                 call 'erlang':'float'(Self), call 'erlang':'float'(Other)))"
+                    .to_string()
+            )
+        );
+    }
+
+    // Integer comparisons — all 7 operators (BT-2161)
+
+    #[test]
+    fn test_integer_eq() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "=:=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_neq() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "/=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_strict_neq() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "=/=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'=/='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_lt() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "<",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_gt() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            ">",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'>'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_le() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "<=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'=<'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_ge() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            ">=",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
+    }
+
+    // Integer conversions — asFloat and printString (BT-2161)
+
+    #[test]
+    fn test_integer_as_float() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "asFloat", &[]));
+        assert_eq!(result, Some("call 'erlang':'float'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_print_string() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'integer_to_binary'(Self)".to_string())
+        );
+    }
+
+    // Integer bitwise operations (BT-2161)
+
+    #[test]
+    fn test_integer_bit_and() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "bitAnd:",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'band'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_bit_or() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "bitOr:",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'bor'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_bit_xor() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "bitXor:",
+            &["Other".to_string()],
+        ));
+        assert_eq!(result, Some("call 'erlang':'bxor'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_bit_not() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "bitNot", &[]));
+        assert_eq!(result, Some("call 'erlang':'bnot'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_integer_bit_shift() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "bitShift:",
+            &["N".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "case call 'erlang':'>='(N, 0) of \
+                 'true' when 'true' -> call 'erlang':'bsl'(Self, N) \
+                 'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, N)) end"
+                    .to_string()
+            )
+        );
+    }
+
+    // Integer character predicates — remaining three (BT-2161)
+
+    #[test]
+    fn test_integer_is_uppercase() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "isUppercase", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_is_lowercase() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "isLowercase", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_is_whitespace() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "isWhitespace", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string())
+        );
+    }
+
+    // Integer math functions (BT-2161)
+
+    #[test]
+    fn test_integer_sqrt() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "sqrt", &[]));
+        assert_eq!(
+            result,
+            Some("call 'math':'sqrt'(call 'erlang':'float'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_log() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "log", &[]));
+        assert_eq!(
+            result,
+            Some("call 'math':'log'(call 'erlang':'float'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_ln() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "ln", &[]));
+        assert_eq!(
+            result,
+            Some("call 'math':'log'(call 'erlang':'float'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_log2() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "log2", &[]));
+        assert_eq!(
+            result,
+            Some("call 'math':'log2'(call 'erlang':'float'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_log10() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "log10", &[]));
+        assert_eq!(
+            result,
+            Some("call 'math':'log10'(call 'erlang':'float'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_exp() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "exp", &[]));
+        assert_eq!(
+            result,
+            Some("call 'math':'exp'(call 'erlang':'float'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_raised_to() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Integer",
+            "raisedTo:",
+            &["Exp".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "case call 'erlang':'is_integer'(Exp) of \
+                 'true' when 'true' -> \
+                   case call 'erlang':'>='(Exp, 0) of \
+                     'true' when 'true' -> \
+                       call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp))) \
+                     'false' when 'true' -> \
+                       call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
+                   end \
+                 'false' when 'true' -> \
+                   call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
+               end"
+                    .to_string()
+            )
+        );
+    }
+
+    // Integer edge cases (BT-2161)
+
+    #[test]
+    fn test_integer_unknown_selector() {
+        let result = doc_to_string(generate_primitive_bif("Integer", "notAMethod", &[]));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_integer_binary_op_missing_param() {
+        // binary_bif returns None when params is empty (uses `?` on params.first())
+        let result = doc_to_string(generate_primitive_bif("Integer", "+", &[]));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_integer_power_missing_param() {
+        // power_bif returns None when params is empty
+        let result = doc_to_string(generate_primitive_bif("Integer", "**", &[]));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_integer_bit_shift_missing_param() {
+        // bitShift: returns None when params is empty
+        let result = doc_to_string(generate_primitive_bif("Integer", "bitShift:", &[]));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_integer_raised_to_missing_param() {
+        // raisedTo: returns None when params is empty
+        let result = doc_to_string(generate_primitive_bif("Integer", "raisedTo:", &[]));
+        assert!(result.is_none());
+    }
 }
