@@ -20,6 +20,7 @@
 - `beamtalk lint` validates cache entries against live `.beam` file mtimes, skipping stale entries when the underlying module has been recompiled (BT-2139).
 - Fix false-positive `Unresolved class` warnings in the LSP for classes defined in fetched dependencies — the LSP now preloads `.bt` files from `_build/deps/*/src/` (BT-2137).
 - Fix LSP `is_protocol_type` always returning `false` for registered protocols, causing false-positive type warnings on protocol-typed parameters (BT-2135).
+- **Redundant type annotation lint** — `name :: T := <expr>` is flagged when the inferred type of `<expr>` exactly matches `T`, since the annotation adds no information the type checker doesn't already have. Suppressible with `@expect type_annotation`. Skips unions and widening annotations where the annotation does real work (BT-2140).
 
 ### Internal
 
@@ -30,6 +31,8 @@
 - Extract `call_self_p0`/`call_p0_self` helpers in primitives codegen — deduplicates ~56 matching arms across `string.rs`, `list.rs`, and `dictionary.rs` (BT-2146).
 - Extract `try_canonicalize` helper in `package.rs` — deduplicates 5 identical inline `canonicalize`-with-fallback patterns (BT-2149).
 - Add missing `domain => [beamtalk, stdlib]` metadata to nine `?LOG_*` calls across five stdlib modules (BT-2141).
+- Extract duplicated analysis pipeline in MCP server into shared `run_module_analysis` helper (BT-2152).
+- Extract duplicated NLR catch-var allocation into shared `NlrCatchVars` struct/helper (BT-2155).
 
 ## 0.4.0 — 2026-04-27
 
