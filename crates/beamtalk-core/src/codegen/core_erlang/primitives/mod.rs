@@ -1814,7 +1814,10 @@ mod tests {
             "bitAnd:",
             &["Other".to_string()],
         ));
-        assert_eq!(result, Some("call 'erlang':'band'(Self, Other)".to_string()));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'band'(Self, Other)".to_string())
+        );
     }
 
     #[test]
@@ -1834,7 +1837,10 @@ mod tests {
             "bitXor:",
             &["Other".to_string()],
         ));
-        assert_eq!(result, Some("call 'erlang':'bxor'(Self, Other)".to_string()));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'bxor'(Self, Other)".to_string())
+        );
     }
 
     #[test]
