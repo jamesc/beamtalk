@@ -234,11 +234,17 @@ pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
     if s.is_empty() {
         return Document::Str("#{}#");
     }
-    let segments: Vec<String> = s
-        .bytes()
-        .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
-        .collect();
-    Document::String(format!("#{{{}}}#", segments.join(",")))
+    let mut parts: Vec<Document<'static>> = vec![Document::Str("#{")];
+    for (i, b) in s.bytes().enumerate() {
+        if i > 0 {
+            parts.push(Document::Str(","));
+        }
+        parts.push(Document::Str("#<"));
+        parts.push(Document::String(b.to_string()));
+        parts.push(Document::Str(">(8,1,'integer',['unsigned'|['big']])"));
+    }
+    parts.push(Document::Str("}#"));
+    Document::Vec(parts)
 }
 
 /// Converts an `Option<Document>` to an `Option<String>` for test assertions.
@@ -2012,5 +2018,31 @@ mod tests {
         // raisedTo: returns None when params is empty
         let result = doc_to_string(generate_primitive_bif("Integer", "raisedTo:", &[]));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_core_erlang_binary_string_empty() {
+        let doc = core_erlang_binary_string("");
+        assert_eq!(doc.to_pretty_string(), "#{}#");
+    }
+
+    #[test]
+    fn test_core_erlang_binary_string_single_byte() {
+        // 'a' = 97
+        let doc = core_erlang_binary_string("a");
+        assert_eq!(
+            doc.to_pretty_string(),
+            "#{#<97>(8,1,'integer',['unsigned'|['big']])}#"
+        );
+    }
+
+    #[test]
+    fn test_core_erlang_binary_string_multi_byte() {
+        // "hi" = bytes [104, 105]
+        let doc = core_erlang_binary_string("hi");
+        assert_eq!(
+            doc.to_pretty_string(),
+            "#{#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}#"
+        );
     }
 }
