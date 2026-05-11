@@ -433,9 +433,10 @@ tcp_start_workspace(Retries) ->
     {ok, Port} = inet:port(LSock),
     gen_tcp:close(LSock),
     timer:sleep(50),
+    TmpDir = beamtalk_file:'tempDirectory'(),
     Config = #{
         workspace_id => <<"tcp_test_ws">>,
-        project_path => <<"/tmp/bt_tcp_test">>,
+        project_path => <<TmpDir/binary, "/bt_tcp_test">>,
         tcp_port => Port,
         auto_cleanup => false
     },
@@ -2298,7 +2299,7 @@ ensure_structured_error_undefined_variable_test() ->
     ?assertEqual(undefined_variable, Err#beamtalk_error.kind).
 
 ensure_structured_error_file_not_found_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({file_not_found, "/tmp/foo.bt"}),
+    Err = beamtalk_repl_server:ensure_structured_error({file_not_found, "/nonexistent/foo.bt"}),
     ?assertEqual(file_not_found, Err#beamtalk_error.kind).
 
 ensure_structured_error_read_error_test() ->
