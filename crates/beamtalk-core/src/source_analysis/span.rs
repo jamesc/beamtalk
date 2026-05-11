@@ -88,19 +88,15 @@ impl Span {
         self.start as usize..self.end as usize
     }
 
-    /// Returns the 1-based line number of this span's start position in `source`.
-    ///
-    /// Counts the number of `\n` bytes before `self.start` and adds one.
-    /// The offset is clamped to `source.len()` so out-of-range spans safely
-    /// return the last line rather than panicking.
-    #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "source files over 4GB (2^32 lines) are not supported"
-    )]
     pub fn line_number(self, source: &str) -> u32 {
         let offset = (self.start as usize).min(source.len());
-        source[..offset].bytes().filter(|&b| b == b'\n').count() as u32 + 1
+        source
+            .as_bytes()
+            .iter()
+            .take(offset)
+            .filter(|&&b| b == b'\n')
+            .count() as u32
+             1
     }
 }
 
