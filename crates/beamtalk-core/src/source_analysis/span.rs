@@ -96,7 +96,7 @@ impl Span {
             .take(offset)
             .filter(|&&b| b == b'\n')
             .count() as u32
-             1
+            + 1
     }
 }
 
