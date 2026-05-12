@@ -2269,10 +2269,11 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
         docs.push(frame.preamble.clone());
-        docs.push(Document::String(format!(
-            " letrec '{fn_name}'/2 = fun (I, StateAcc) -> ",
-            fn_name = frame.fn_name
-        )));
+        docs.push(docvec![
+            " letrec '",
+            Document::String(frame.fn_name.clone()),
+            "'/2 = fun (I, StateAcc) -> ",
+        ]);
 
         self.push_scope();
 
@@ -2302,18 +2303,23 @@ impl CoreErlangGenerator {
 
         // Recursive call + false arm + initial apply
         docs.push(docvec![
-            format!(
-                " apply '{fn_name}'/2 ({next}, {fstate}) ",
-                fn_name = frame.fn_name,
-                next = frame.next_counter,
-                fstate = final_state_var,
-            ),
+            " apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/2 (",
+            Document::String(frame.next_counter.clone()),
+            ", ",
+            Document::String(final_state_var),
+            ") ",
             frame.false_arm.clone(),
-            Document::String(format!(
-                "in apply '{fn_name}'/2 ({init_ctr}, {init_state})",
-                fn_name = frame.fn_name,
-                init_ctr = frame.initial_counter,
-            )),
+            docvec![
+                "in apply '",
+                Document::String(frame.fn_name.clone()),
+                "'/2 (",
+                Document::String(frame.initial_counter.clone()),
+                ", ",
+                Document::String(init_state),
+                ")",
+            ],
         ]);
 
         Ok(Document::Vec(docs))
