@@ -2303,12 +2303,13 @@ impl CoreErlangGenerator {
 
         // Recursive call + false arm + initial apply
         docs.push(docvec![
-            format!(
-                " apply '{fn_name}'/2 ({next}, {fstate}) ",
-                fn_name = frame.fn_name,
-                next = frame.next_counter,
-                fstate = final_state_var,
-            ),
+            " apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/2 (",
+            Document::String(frame.next_counter.clone()),
+            ", ",
+            Document::String(final_state_var),
+            ") ",
             frame.false_arm.clone(),
             docvec![
                 "in apply '",
