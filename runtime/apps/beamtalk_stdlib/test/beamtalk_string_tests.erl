@@ -26,10 +26,10 @@ at_middle_char_test() ->
     ?assertEqual(<<"l">>, beamtalk_string:at(<<"hello">>, 3)).
 
 at_utf8_grapheme_test() ->
-    ?assertEqual(<<"\xc3\xa9"/utf8>>, beamtalk_string:at(<<"caf\xc3\xa9"/utf8>>, 4)).
+    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:at(<<"caf\x{E9}"/utf8>>, 4)).
 
 at_emoji_test() ->
-    ?assertEqual(<<"\xf0\x9f\x91\x8b"/utf8>>, beamtalk_string:at(<<"hi\xf0\x9f\x91\x8b"/utf8>>, 3)).
+    ?assertEqual(<<"\x{1F44B}"/utf8>>, beamtalk_string:at(<<"hi\x{1F44B}"/utf8>>, 3)).
 
 at_out_of_bounds_test() ->
     ?assertError(
@@ -75,7 +75,7 @@ capitalize_single_char_test() ->
     ?assertEqual(<<"A">>, beamtalk_string:capitalize(<<"a">>)).
 
 capitalize_utf8_test() ->
-    ?assertEqual(<<"\xc3\x9cber"/utf8>>, beamtalk_string:capitalize(<<"\xc3\xbcber"/utf8>>)).
+    ?assertEqual(<<"\x{DC}ber"/utf8>>, beamtalk_string:capitalize(<<"\x{FC}ber"/utf8>>)).
 
 %%% ============================================================================
 %%% reverse/1
@@ -91,7 +91,7 @@ reverse_single_char_test() ->
     ?assertEqual(<<"a">>, beamtalk_string:reverse(<<"a">>)).
 
 reverse_utf8_test() ->
-    ?assertEqual(<<"\xc3\xa9fac"/utf8>>, beamtalk_string:reverse(<<"caf\xc3\xa9"/utf8>>)).
+    ?assertEqual(<<"\x{E9}fac"/utf8>>, beamtalk_string:reverse(<<"caf\x{E9}"/utf8>>)).
 
 %%% ============================================================================
 %%% includes/2
@@ -164,8 +164,8 @@ index_of_empty_substr_test() ->
     ?assertEqual(nil, beamtalk_string:index_of(<<"hello">>, <<>>)).
 
 index_of_utf8_test() ->
-    %% "caf\xc3\xa9" - 'f' is at grapheme position 3
-    ?assertEqual(3, beamtalk_string:index_of(<<"caf\xc3\xa9"/utf8>>, <<"f">>)).
+    %% "caf\x{E9}" (U+00E9) - 'f' is at grapheme position 3
+    ?assertEqual(3, beamtalk_string:index_of(<<"caf\x{E9}"/utf8>>, <<"f">>)).
 
 %%% ============================================================================
 %%% split_on/2
@@ -223,8 +223,8 @@ as_list_empty_test() ->
 
 as_list_utf8_test() ->
     ?assertEqual(
-        [<<"c">>, <<"a">>, <<"f">>, <<"\xc3\xa9"/utf8>>],
-        beamtalk_string:as_list(<<"caf\xc3\xa9"/utf8>>)
+        [<<"c">>, <<"a">>, <<"f">>, <<"\x{E9}"/utf8>>],
+        beamtalk_string:as_list(<<"caf\x{E9}"/utf8>>)
     ).
 
 %%% ============================================================================
@@ -412,9 +412,9 @@ take_negative_test() ->
     ?assertEqual(<<>>, beamtalk_string:take(<<"hello">>, -1)).
 
 take_utf8_test() ->
-    Str = unicode:characters_to_binary("h\xc3\xa9llo"),
+    Str = unicode:characters_to_binary("h\x{E9}llo"),
     ?assertEqual(
-        unicode:characters_to_binary("h\xc3\xa9"),
+        unicode:characters_to_binary("h\x{E9}"),
         beamtalk_string:take(Str, 2)
     ).
 
@@ -435,7 +435,7 @@ drop_negative_test() ->
     ?assertEqual(<<"hello">>, beamtalk_string:drop(<<"hello">>, -1)).
 
 drop_utf8_test() ->
-    Str = unicode:characters_to_binary("h\xc3\xa9llo"),
+    Str = unicode:characters_to_binary("h\x{E9}llo"),
     ?assertEqual(<<"llo">>, beamtalk_string:drop(Str, 2)).
 
 %%% ============================================================================
@@ -503,10 +503,10 @@ from_code_point_lowercase_test() ->
     ?assertEqual(<<"z">>, beamtalk_string:from_code_point(122)).
 
 from_code_point_multibyte_test() ->
-    ?assertEqual(<<"\xe2\x82\xac"/utf8>>, beamtalk_string:from_code_point(8364)).
+    ?assertEqual(<<"\x{20AC}"/utf8>>, beamtalk_string:from_code_point(8364)).
 
 from_code_point_emoji_test() ->
-    ?assertEqual(<<"\xf0\x9f\x98\x80"/utf8>>, beamtalk_string:from_code_point(128512)).
+    ?assertEqual(<<"\x{1F600}"/utf8>>, beamtalk_string:from_code_point(128512)).
 
 from_code_point_zero_test() ->
     ?assertEqual(<<0>>, beamtalk_string:from_code_point(0)).
@@ -536,7 +536,7 @@ from_code_points_empty_test() ->
     ?assertEqual(<<>>, beamtalk_string:from_code_points([])).
 
 from_code_points_multibyte_test() ->
-    ?assertEqual(<<"\xe2\x82\xac\xc2\xa3"/utf8>>, beamtalk_string:from_code_points([8364, 163])).
+    ?assertEqual(<<"\x{20AC}\x{A3}"/utf8>>, beamtalk_string:from_code_points([8364, 163])).
 
 from_code_point_non_integer_raises_test() ->
     ?assertError(
@@ -572,7 +572,7 @@ from_code_points_non_integer_elements_raises_test() ->
     ).
 
 from_code_point_surrogate_raises_test() ->
-    %% 0xD800 is a surrogate half — not a valid Unicode scalar value.
+    %% 0xD800 is a surrogate half -- not a valid Unicode scalar value.
     %% unicode:characters_to_binary/1 returns {error, <<>>, [55296]},
     %% triggering the inner type_error branch (lines 250-253).
     ?assertError(
@@ -621,10 +621,10 @@ from_iolist_binary_passthrough_test() ->
     ?assertEqual(<<"hello">>, beamtalk_string:from_iolist(<<"hello">>)).
 
 from_iolist_valid_utf8_bytes_test() ->
-    %% [195, 169] = UTF-8 byte sequence for U+00E9 "\xc3\xa9".
+    %% [195, 169] = UTF-8 byte sequence for U+00E9 (e-acute).
     %% iolist_to_binary succeeds, unicode:characters_to_binary validates the
-    %% bytes — result is the same binary (lines 308-325).
-    ?assertEqual(<<"\xc3\xa9"/utf8>>, beamtalk_string:from_iolist([195, 169])).
+    %% bytes -- result is the same binary (lines 308-325).
+    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:from_iolist([195, 169])).
 
 from_iolist_charlist_ascii_test() ->
     %% [104, 105] = code points for "hi". iolist_to_binary succeeds and the
@@ -634,15 +634,15 @@ from_iolist_charlist_ascii_test() ->
 from_iolist_invalid_utf8_falls_back_to_charlist_test() ->
     %% [233] = 0xE9. iolist_to_binary succeeds (single byte), but <<0xE9>> is
     %% not valid UTF-8 alone (incomplete sequence), so the impl falls back to
-    %% treating the original list as a Unicode charlist: codepoint 233 = "\xc3\xa9"
+    %% treating the original list as a Unicode charlist: codepoint 233 = U+00E9
     %% (lines 325-344).
-    ?assertEqual(<<"\xc3\xa9"/utf8>>, beamtalk_string:from_iolist([233])).
+    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:from_iolist([233])).
 
 from_iolist_large_codepoint_charlist_test() ->
-    %% [8364] = U+20AC "\xe2\x82\xac". iolist_to_binary/1 raises badarg (8364 > 255), so
+    %% [8364] = U+20AC (euro sign). iolist_to_binary/1 raises badarg (8364 > 255), so
     %% the impl falls straight to the charlist path:
-    %% unicode:characters_to_binary([8364]) → "\xe2\x82\xac" (lines 349-357).
-    ?assertEqual(<<"\xe2\x82\xac"/utf8>>, beamtalk_string:from_iolist([8364])).
+    %% unicode:characters_to_binary([8364]) -> U+20AC (lines 349-357).
+    ?assertEqual(<<"\x{20AC}"/utf8>>, beamtalk_string:from_iolist([8364])).
 
 from_iolist_invalid_codepoint_raises_test() ->
     %% [16#D800] is a surrogate. iolist_to_binary raises badarg (>255), and the
@@ -657,7 +657,7 @@ from_iolist_invalid_codepoint_raises_test() ->
     ).
 
 from_iolist_non_binary_non_list_raises_test() ->
-    %% An integer is neither binary nor list — type_error (lines 368-371).
+    %% An integer is neither binary nor list -- type_error (lines 368-371).
     ?assertError(
         #{
             '$beamtalk_class' := _,
