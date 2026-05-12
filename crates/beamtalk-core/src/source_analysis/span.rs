@@ -90,7 +90,7 @@ impl Span {
 
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "source files over 4GB are not supported"
+        reason = "offset is bounded by self.start (a u32), so the newline count cannot exceed u32::MAX"
     )]
     pub fn line_number(self, source: &str) -> u32 {
         let offset = (self.start as usize).min(source.len());
