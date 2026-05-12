@@ -3015,9 +3015,17 @@ impl CoreErlangGenerator {
         } else {
             "Self"
         };
-        Ok(Document::String(format!(
-            "call '{runtime_module}':'dispatch'('{name}', [{params_str}], {self_var})"
-        )))
+        Ok(docvec![
+            "call '",
+            Document::String(runtime_module),
+            "':'dispatch'('",
+            Document::String(name.to_string()),
+            "', [",
+            Document::String(params_str),
+            "], ",
+            Document::Str(self_var),
+            ")"
+        ])
     }
 
     /// BT-1478: Generates inline `logger:log/3` code for Logger @intrinsic bodies.

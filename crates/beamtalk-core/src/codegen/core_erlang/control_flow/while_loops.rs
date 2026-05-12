@@ -261,9 +261,11 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // Initial call with packed state
-        docs.push(Document::String(format!(
-            "in apply 'while'/1 ({init_state})"
-        )));
+        docs.push(docvec![
+            "in apply 'while'/1 (",
+            Document::String(init_state),
+            ")"
+        ]);
 
         Ok(Document::Vec(docs))
     }
