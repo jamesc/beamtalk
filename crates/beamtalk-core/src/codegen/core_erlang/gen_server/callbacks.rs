@@ -499,6 +499,7 @@ impl CoreErlangGenerator {
             let err_var1 = format!("_UErr{idx}b");
             let err_msg_var = format!("_UErrMsg{idx}");
             let class_name_var = format!("_UErrClass{idx}");
+            let fmt_var = format!("_UFmt{idx}");
             let hint_msg = format!(
                 "{owning_class} field '{field_name}' (:: {type_name}) was not initialized",
             );
@@ -550,7 +551,7 @@ impl CoreErlangGenerator {
                                 "':'class_name'() in",
                                 line(),
                                 "let ",
-                                Document::String(format!("_UFmt{idx}")),
+                                Document::String(fmt_var.clone()),
                                 " = call 'beamtalk_error':'format'(",
                                 Document::String(err_var1.clone()),
                                 ") in",
@@ -564,7 +565,7 @@ impl CoreErlangGenerator {
                                 ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                 line(),
                                 "{'stop', ",
-                                Document::String(format!("_UFmt{idx}")),
+                                Document::String(fmt_var),
                                 ", InitNewState}",
                             ]
                         ),
