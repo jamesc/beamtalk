@@ -55,6 +55,13 @@ use crate::ast::{Block, Expression};
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    fn state_acc_var_doc(state_version: usize) -> Document<'static> {
+        match state_version {
+            0 => docvec!["StateAcc"],
+            n => docvec!["StateAcc", Document::String(n.to_string())],
+        }
+    }
+
     /// Generates the NLR-passthrough catch clause preamble shared by both
     /// `generate_on_do` and `generate_on_do_with_mutations`.
     ///
@@ -360,10 +367,6 @@ impl CoreErlangGenerator {
         let (try_body_doc, try_result_var, try_final) =
             self.generate_exception_body_with_threading(receiver_block)?;
         docs.push(try_body_doc);
-        let try_final_var = match try_final {
-            0 => "StateAcc".to_string(),
-            n => format!("StateAcc{n}"),
-        };
         // BT-483: Return {Result, State} from try body
         // Success: pass {Result, State} through + catch clause with NLR passthrough.
         // BT-754/BT-761/BT-854: NLR re-raise via on_do_catch_preamble (see generate_on_do).
@@ -371,7 +374,7 @@ impl CoreErlangGenerator {
             " {",
             Document::String(try_result_var),
             ", ",
-            Document::String(try_final_var),
+            Self::state_acc_var_doc(try_final),
             "} ",
             "of ",
             Document::String(state_after_try.clone()),
@@ -413,16 +416,12 @@ impl CoreErlangGenerator {
         let (handler_body_doc, handler_result_var, handler_final) =
             self.generate_exception_body_with_threading(handler_block)?;
         docs.push(handler_body_doc);
-        let handler_final_var = match handler_final {
-            0 => "StateAcc".to_string(),
-            n => format!("StateAcc{n}"),
-        };
         // BT-483: Return {Result, State} from handler
         docs.push(docvec![
             " {",
             Document::String(handler_result_var),
             ", ",
-            Document::String(handler_final_var),
+            Self::state_acc_var_doc(handler_final),
             "} ",
         ]);
         self.pop_scope();
@@ -580,16 +579,12 @@ impl CoreErlangGenerator {
         let (try_body_doc, try_result_var, try_final) =
             self.generate_exception_body_with_threading(receiver_block)?;
         docs.push(try_body_doc);
-        let try_final_var = match try_final {
-            0 => "StateAcc".to_string(),
-            n => format!("StateAcc{n}"),
-        };
         // BT-483: Return {Result, State} from try body
         docs.push(docvec![
             " {",
             Document::String(try_result_var),
             ", ",
-            Document::String(try_final_var),
+            Self::state_acc_var_doc(try_final),
             "} ",
         ]);
 
@@ -611,17 +606,12 @@ impl CoreErlangGenerator {
         let (cleanup_success_doc, _, cleanup_success_final) =
             self.generate_exception_body_with_threading(cleanup_block)?;
         docs.push(cleanup_success_doc);
-        let cleanup_success_var = if cleanup_success_final == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{cleanup_success_final}")
-        };
         // BT-483: Return try body result with cleanup's final state
         docs.push(docvec![
             " {",
             Document::String(result_from_try),
             ", ",
-            Document::String(cleanup_success_var),
+            Self::state_acc_var_doc(cleanup_success_final),
             "} ",
         ]);
 
