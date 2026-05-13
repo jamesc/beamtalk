@@ -55,6 +55,125 @@ use crate::ast::{Block, Expression};
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    fn state_acc_var_doc(state_version: usize) -> Document<'static> {
+        match state_version {
+            0 => docvec!["StateAcc"],
+            n => docvec!["StateAcc", Document::String(n.to_string())],
+        }
+    }
+
+    /// Generates the NLR-passthrough catch clause preamble shared by both
+    /// `generate_on_do` and `generate_on_do_with_mutations`.
+    ///
+    /// Produces an open-ended fragment; caller appends the `<'true'>` branch
+    /// body, the `<'false'>` re-raise arm, and the closing `end end`.
+    ///
+    /// BT-754/BT-761/BT-854: NLR throws (`{'$bt_nlr', ...}`) must bypass
+    /// on:do: so the enclosing method's NLR handler can intercept them.
+    #[allow(clippy::too_many_arguments)]
+    fn on_do_catch_preamble(
+        type_var: &str,
+        error_var: &str,
+        stack_var: String,
+        nlr_tok_var: String,
+        nlr_val_var: String,
+        nlr_state_var: String,
+        nlr_tok_var2: String,
+        nlr_val_var2: String,
+        other_pair_var: String,
+        built_stack_var: String,
+        ex_obj_var: String,
+        match_var: String,
+        ex_class_var: String,
+    ) -> Document<'static> {
+        docvec![
+            "catch <",
+            Document::String(type_var.to_string()),
+            ", ",
+            Document::String(error_var.to_string()),
+            ", ",
+            Document::String(stack_var.clone()),
+            "> -> ",
+            "case {",
+            Document::String(type_var.to_string()),
+            ", ",
+            Document::String(error_var.to_string()),
+            "} of ",
+            "<{'throw', {'$bt_nlr', ",
+            Document::String(nlr_tok_var),
+            ", ",
+            Document::String(nlr_val_var),
+            ", ",
+            Document::String(nlr_state_var),
+            "}}> when 'true' -> primop 'raw_raise'(",
+            Document::String(type_var.to_string()),
+            ", ",
+            Document::String(error_var.to_string()),
+            ", ",
+            Document::String(stack_var.clone()),
+            ") ",
+            "<{'throw', {'$bt_nlr', ",
+            Document::String(nlr_tok_var2),
+            ", ",
+            Document::String(nlr_val_var2),
+            "}}> when 'true' -> primop 'raw_raise'(",
+            Document::String(type_var.to_string()),
+            ", ",
+            Document::String(error_var.to_string()),
+            ", ",
+            Document::String(stack_var.clone()),
+            ") ",
+            "<",
+            Document::String(other_pair_var),
+            "> when 'true' -> ",
+            "let ",
+            Document::String(built_stack_var.clone()),
+            " = primop 'build_stacktrace'(",
+            Document::String(stack_var),
+            ") in ",
+            "let ",
+            Document::String(ex_obj_var.clone()),
+            " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
+            Document::String(type_var.to_string()),
+            ", ",
+            Document::String(error_var.to_string()),
+            ", ",
+            Document::String(built_stack_var),
+            ") in ",
+            "let ",
+            Document::String(match_var.clone()),
+            " = call 'beamtalk_exception_handler':'matches_class'(",
+            Document::String(ex_class_var),
+            ", ",
+            Document::String(ex_obj_var),
+            ") in ",
+            "case ",
+            Document::String(match_var),
+            " of ",
+            "<'true'> when 'true' -> ",
+        ]
+    }
+
+    /// Builds the `apply HandlerFun (ExObj)` or `apply HandlerFun ()` fragment
+    /// for `on:do:` exception handlers.
+    fn make_handler_apply(
+        handler_var: String,
+        ex_obj_var: String,
+        takes_arg: bool,
+    ) -> Document<'static> {
+        if takes_arg {
+            docvec![
+                "apply ",
+                Document::String(handler_var),
+                " (",
+                Document::String(ex_obj_var),
+                ")",
+            ]
+        } else {
+            docvec!["apply ", Document::String(handler_var), " ()"]
+        }
+    }
+
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
     /// object and passes to handler block.
     ///
@@ -115,11 +234,8 @@ impl CoreErlangGenerator {
         let ex_class_code = self.expression_doc(ex_class)?;
         let handler_code = self.expression_doc(handler)?;
 
-        let handler_apply = if handler_takes_arg {
-            Document::String(format!("apply {handler_var} ({ex_obj_var})"))
-        } else {
-            Document::String(format!("apply {handler_var} ()"))
-        };
+        let handler_apply =
+            Self::make_handler_apply(handler_var.clone(), ex_obj_var.clone(), handler_takes_arg);
 
         // BT-754: Fresh variable names for the NLR pattern guard (Core Erlang
         // does not support anonymous `_` wildcards — each must be unique).
@@ -133,46 +249,51 @@ impl CoreErlangGenerator {
         let other_pair_var = self.fresh_temp_var("OtherPair");
 
         Ok(docvec![
-            Document::String(format!("let {block_var} = ")),
+            "let ",
+            Document::String(block_var.clone()),
+            " = ",
             receiver_code,
-            Document::String(format!(" in let {ex_class_var} = ")),
+            " in let ",
+            Document::String(ex_class_var.clone()),
+            " = ",
             ex_class_code,
-            Document::String(format!(" in let {handler_var} = ")),
+            " in let ",
+            Document::String(handler_var),
+            " = ",
             handler_code,
-            Document::String(format!(" in try apply {block_var} () ")),
-            Document::String(format!("of {result_var} -> {result_var} ")),
-            Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
-            // BT-754/BT-761/BT-854: Non-local returns throw {'$bt_nlr', Token, Value, State}
-            // (4-tuple for both actors and value types since BT-854). on:do: must NOT
-            // catch them — re-raise so the enclosing method's NLR handler can intercept.
-            // The 3-tuple arm is kept as a safety net for backward compatibility.
-            Document::String(format!(
-                "case {{{type_var}, {error_var}}} of \
-                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}, {nlr_state_var}}}}}> when 'true' -> \
-                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
-                 <{{'throw', {{'$bt_nlr', {nlr_tok_var2}, {nlr_val_var2}}}}}> when 'true' -> \
-                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
-                 <{other_pair_var}> when 'true' -> "
-            )),
-            Document::String(format!(
-                "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
-            )),
-            Document::String(format!(
-                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'\
-                 ({type_var}, {error_var}, {built_stack_var}) in "
-            )),
-            Document::String(format!(
-                "let {match_var} = call 'beamtalk_exception_handler':'matches_class'\
-                 ({ex_class_var}, {ex_obj_var}) in "
-            )),
-            Document::String(format!("case {match_var} of ")),
-            Document::Str("<'true'> when 'true' -> "),
+            " in try apply ",
+            Document::String(block_var),
+            " () ",
+            "of ",
+            Document::String(result_var.clone()),
+            " -> ",
+            Document::String(result_var),
+            " ",
+            Self::on_do_catch_preamble(
+                &type_var,
+                &error_var,
+                stack_var.clone(),
+                nlr_tok_var,
+                nlr_val_var,
+                nlr_state_var,
+                nlr_tok_var2,
+                nlr_val_var2,
+                other_pair_var,
+                built_stack_var,
+                ex_obj_var,
+                match_var,
+                ex_class_var,
+            ),
             handler_apply,
-            Document::Str(" "),
-            Document::String(format!(
-                "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end \
-                 end"
-            )),
+            " ",
+            "<'false'> when 'true' -> primop 'raw_raise'(",
+            Document::String(type_var),
+            ", ",
+            Document::String(error_var),
+            ", ",
+            Document::String(stack_var),
+            ") end ",
+            "end",
         ])
     }
 
@@ -228,14 +349,17 @@ impl CoreErlangGenerator {
 
         // Bind exception class
         let ex_class_code = self.expression_doc(ex_class)?;
-
         // Rename current state to StateAcc for uniform threading
         let current_state = self.current_state_var();
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
-            Document::String(format!("let {ex_class_var} = ")),
+            "let ",
+            Document::String(ex_class_var.clone()),
+            " = ",
             ex_class_code,
-            Document::String(format!(" in let StateAcc = {current_state} in try ")),
+            " in let StateAcc = ",
+            Document::String(current_state),
+            " in try ",
         ]];
 
         // Generate try body (receiver block) with state threading
@@ -243,51 +367,48 @@ impl CoreErlangGenerator {
         let (try_body_doc, try_result_var, try_final) =
             self.generate_exception_body_with_threading(receiver_block)?;
         docs.push(try_body_doc);
-        let try_final_var = if try_final == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{try_final}")
-        };
         // BT-483: Return {Result, State} from try body
-        // Success: pass {Result, State} through + catch clause header
+        // Success: pass {Result, State} through + catch clause with NLR passthrough.
+        // BT-754/BT-761/BT-854: NLR re-raise via on_do_catch_preamble (see generate_on_do).
         docs.push(docvec![
-            Document::String(format!(" {{{try_result_var}, {try_final_var}}} ")),
-            Document::String(format!("of {state_after_try} -> {state_after_try} ")),
-            Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
-            // BT-754/BT-761/BT-854: Re-raise NLR throws transparently (see generate_on_do).
-            // Both actors and value types now use 4-tuple format (BT-854).
-            // The 3-tuple arm is kept as a safety net for backward compatibility.
-            Document::String(format!(
-                "case {{{type_var}, {error_var}}} of \
-                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}, {nlr_state_var}}}}}> when 'true' -> \
-                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
-                 <{{'throw', {{'$bt_nlr', {nlr_tok_var2}, {nlr_val_var2}}}}}> when 'true' -> \
-                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
-                 <{other_pair_var}> when 'true' -> "
-            )),
-            Document::String(format!(
-                "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
-            )),
-            Document::String(format!(
-                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'\
-                 ({type_var}, {error_var}, {built_stack_var}) in "
-            )),
-            Document::String(format!(
-                "let {match_var} = call 'beamtalk_exception_handler':'matches_class'\
-                 ({ex_class_var}, {ex_obj_var}) in "
-            )),
-            Document::String(format!("case {match_var} of ")),
-            Document::Str("<'true'> when 'true' -> "),
+            " {",
+            Document::String(try_result_var),
+            ", ",
+            Self::state_acc_var_doc(try_final),
+            "} ",
+            "of ",
+            Document::String(state_after_try.clone()),
+            " -> ",
+            Document::String(state_after_try),
+            " ",
+            Self::on_do_catch_preamble(
+                &type_var,
+                &error_var,
+                stack_var.clone(),
+                nlr_tok_var,
+                nlr_val_var,
+                nlr_state_var,
+                nlr_tok_var2,
+                nlr_val_var2,
+                other_pair_var,
+                built_stack_var,
+                ex_obj_var.clone(),
+                match_var,
+                ex_class_var,
+            ),
         ]);
-
         // Bind handler parameter (e.g., [:e | ...] binds e to exception object)
         self.push_scope();
         if let Some(param) = handler_block.parameters.first() {
             let param_var = Self::to_core_erlang_var(&param.name);
             self.bind_var(&param.name, &param_var);
-            docs.push(Document::String(format!(
-                "let {param_var} = {ex_obj_var} in "
-            )));
+            docs.push(docvec![
+                "let ",
+                Document::String(param_var),
+                " = ",
+                Document::String(ex_obj_var),
+                " in ",
+            ]);
         }
 
         // Generate handler body with state threading (from original StateAcc)
@@ -295,23 +416,26 @@ impl CoreErlangGenerator {
         let (handler_body_doc, handler_result_var, handler_final) =
             self.generate_exception_body_with_threading(handler_block)?;
         docs.push(handler_body_doc);
-        let handler_final_var = if handler_final == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{handler_final}")
-        };
         // BT-483: Return {Result, State} from handler
-        docs.push(Document::String(format!(
-            " {{{handler_result_var}, {handler_final_var}}} "
-        )));
+        docs.push(docvec![
+            " {",
+            Document::String(handler_result_var),
+            ", ",
+            Self::state_acc_var_doc(handler_final),
+            "} ",
+        ]);
         self.pop_scope();
 
         // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
-        docs.push(Document::String(format!(
-            "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
-             end \
-             end"
-        )));
+        docs.push(docvec![
+            "<'false'> when 'true' -> primop 'raw_raise'(",
+            Document::String(type_var.clone()),
+            ", ",
+            Document::String(error_var.clone()),
+            ", ",
+            Document::String(stack_var),
+            ") end end",
+        ]);
 
         Ok(Document::Vec(docs))
     }
@@ -368,21 +492,43 @@ impl CoreErlangGenerator {
         let cleanup_code = self.expression_doc(cleanup)?;
 
         Ok(docvec![
-            Document::String(format!("let {block_var} = ")),
+            "let ",
+            Document::String(block_var.clone()),
+            " = ",
             receiver_code,
-            Document::String(format!(" in let {cleanup_var} = ")),
+            " in let ",
+            Document::String(cleanup_var.clone()),
+            " = ",
             cleanup_code,
-            Document::String(format!(
-                " in try let {try_result_var} = apply {block_var} () in {try_result_var} "
-            )),
-            Document::String(format!(
-                "of {result_var} -> let _ = apply {cleanup_var} () in {result_var} "
-            )),
-            Document::String(format!(
-                "catch <{type_var}, {error_var}, {stack_var}> -> \
-                 do apply {cleanup_var} () \
-                 primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
-            )),
+            " in try let ",
+            Document::String(try_result_var.clone()),
+            " = apply ",
+            Document::String(block_var),
+            " () in ",
+            Document::String(try_result_var),
+            " ",
+            "of ",
+            Document::String(result_var.clone()),
+            " -> let _ = apply ",
+            Document::String(cleanup_var.clone()),
+            " () in ",
+            Document::String(result_var),
+            " ",
+            "catch <",
+            Document::String(type_var.clone()),
+            ", ",
+            Document::String(error_var.clone()),
+            ", ",
+            Document::String(stack_var.clone()),
+            "> -> do apply ",
+            Document::String(cleanup_var),
+            " () primop 'raw_raise'(",
+            Document::String(type_var),
+            ", ",
+            Document::String(error_var),
+            ", ",
+            Document::String(stack_var),
+            ")",
         ])
     }
 
@@ -422,60 +568,78 @@ impl CoreErlangGenerator {
 
         // Rename current state to StateAcc
         let current_state = self.current_state_var();
-        let mut docs: Vec<Document<'static>> = vec![Document::String(format!(
-            "let StateAcc = {current_state} in try "
-        ))];
+        let mut docs: Vec<Document<'static>> = vec![docvec![
+            "let StateAcc = ",
+            Document::String(current_state),
+            " in try ",
+        ]];
 
         // Generate try body with state threading
         // BT-483: Now returns (doc, result_var, state_version)
         let (try_body_doc, try_result_var, try_final) =
             self.generate_exception_body_with_threading(receiver_block)?;
         docs.push(try_body_doc);
-        let try_final_var = if try_final == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{try_final}")
-        };
         // BT-483: Return {Result, State} from try body
-        docs.push(Document::String(format!(
-            " {{{try_result_var}, {try_final_var}}} "
-        )));
+        docs.push(docvec![
+            " {",
+            Document::String(try_result_var),
+            ", ",
+            Self::state_acc_var_doc(try_final),
+            "} ",
+        ]);
 
         // Success: run cleanup starting from try body's state
         // BT-483: Extract Result and State from {Result, State} tuple using element/N
         let result_from_try = self.fresh_temp_var("TryResult");
-        docs.push(Document::String(format!(
-            "of {state_after_try} -> \
-             let {result_from_try} = call 'erlang':'element'(1, {state_after_try}) in \
-             let StateAcc = call 'erlang':'element'(2, {state_after_try}) in "
-        )));
+        docs.push(docvec![
+            "of ",
+            Document::String(state_after_try.clone()),
+            " -> let ",
+            Document::String(result_from_try.clone()),
+            " = call 'erlang':'element'(1, ",
+            Document::String(state_after_try.clone()),
+            ") in let StateAcc = call 'erlang':'element'(2, ",
+            Document::String(state_after_try),
+            ") in ",
+        ]);
 
         let (cleanup_success_doc, _, cleanup_success_final) =
             self.generate_exception_body_with_threading(cleanup_block)?;
         docs.push(cleanup_success_doc);
-        let cleanup_success_var = if cleanup_success_final == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{cleanup_success_final}")
-        };
         // BT-483: Return try body result with cleanup's final state
-        docs.push(Document::String(format!(
-            " {{{result_from_try}, {cleanup_success_var}}} "
-        )));
+        docs.push(docvec![
+            " {",
+            Document::String(result_from_try),
+            ", ",
+            Self::state_acc_var_doc(cleanup_success_final),
+            "} ",
+        ]);
 
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
-        docs.push(Document::String(format!(
-            "catch <{type_var}, {error_var}, {stack_var}> -> "
-        )));
+        docs.push(docvec![
+            "catch <",
+            Document::String(type_var.clone()),
+            ", ",
+            Document::String(error_var.clone()),
+            ", ",
+            Document::String(stack_var.clone()),
+            "> -> ",
+        ]);
 
         // Cleanup body generates state mutations that are discarded (re-raise follows)
         let (cleanup_error_doc, _, _) =
             self.generate_exception_body_with_threading(cleanup_block)?;
         docs.push(cleanup_error_doc);
 
-        docs.push(Document::String(format!(
-            " primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
-        )));
+        docs.push(docvec![
+            " primop 'raw_raise'(",
+            Document::String(type_var),
+            ", ",
+            Document::String(error_var),
+            ", ",
+            Document::String(stack_var),
+            ")",
+        ]);
 
         Ok(Document::Vec(docs))
     }
@@ -537,9 +701,13 @@ impl CoreErlangGenerator {
                 if is_last {
                     // BT-483: Self-dispatch result is in dispatch_var
                     let rv = self.fresh_temp_var("ExResult");
-                    docs.push(Document::String(format!(
-                        "let {rv} = call 'erlang':'element'(1, {dispatch_var}) in "
-                    )));
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(rv.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        ") in ",
+                    ]);
                     result_var = rv;
                 }
             } else if Self::is_local_var_assignment(expr) {
@@ -556,9 +724,11 @@ impl CoreErlangGenerator {
                     let rv = self.fresh_temp_var("ExResult");
                     let expr_doc = self.expression_doc(expr)?;
                     docs.push(docvec![
-                        Document::String(format!("let {rv} = ")),
+                        "let ",
+                        Document::String(rv.clone()),
+                        " = ",
                         expr_doc,
-                        Document::Str(" in"),
+                        " in",
                     ]);
                     result_var = rv;
                 } else {
@@ -572,14 +742,20 @@ impl CoreErlangGenerator {
                         let next_var = self.peek_next_state_var();
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
-                            Document::String(format!("let {tuple_var} = ")),
+                            "let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
                             expr_doc,
-                            Document::String(format!(
-                                " in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "
-                            )),
-                            Document::String(format!(
-                                "let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"
-                            )),
+                            " in let ",
+                            Document::String(rv.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ") in ",
+                            "let ",
+                            Document::String(next_var),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in",
                         ]);
                         let _ = self.next_state_var();
                         result_var = rv;
@@ -588,9 +764,11 @@ impl CoreErlangGenerator {
                         let rv = self.fresh_temp_var("ExResult");
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
-                            Document::String(format!("let {rv} = ")),
+                            "let ",
+                            Document::String(rv.clone()),
+                            " = ",
                             expr_doc,
-                            Document::Str(" in"),
+                            " in",
                         ]);
                         result_var = rv;
                     }
