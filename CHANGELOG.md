@@ -34,6 +34,7 @@
 - Extract duplicated analysis pipeline in MCP server into shared `run_module_analysis` helper (BT-2152).
 - Extract duplicated NLR catch-var allocation into shared `NlrCatchVars` struct/helper (BT-2155).
 - Replace `format!()` calls with `Document` API in `core_erlang_binary_string` — continues the BT-875 cleanup (BT-2163).
+- Replace 6 `Document::String(format!())` calls with `docvec!` in `callbacks.rs`, `mod.rs`, `while_loops.rs`, and `control_flow/mod.rs` — continues the BT-875 cleanup (BT-2166).
 
 ## 0.4.0 — 2026-04-27
 
