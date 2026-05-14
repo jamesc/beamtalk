@@ -92,13 +92,22 @@ binding_names_contains_workspace_test() ->
 %%% ============================================================================
 
 binding_name_for_class_transcript_stream_test() ->
-    ?assertEqual({ok, 'Transcript'}, beamtalk_workspace_config:binding_name_for_class('TranscriptStream')).
+    ?assertEqual(
+        {ok, 'Transcript'},
+        beamtalk_workspace_config:binding_name_for_class('TranscriptStream')
+    ).
 
 binding_name_for_class_beamtalk_interface_test() ->
-    ?assertEqual({ok, 'Beamtalk'}, beamtalk_workspace_config:binding_name_for_class('BeamtalkInterface')).
+    ?assertEqual(
+        {ok, 'Beamtalk'},
+        beamtalk_workspace_config:binding_name_for_class('BeamtalkInterface')
+    ).
 
 binding_name_for_class_workspace_interface_test() ->
-    ?assertEqual({ok, 'Workspace'}, beamtalk_workspace_config:binding_name_for_class('WorkspaceInterface')).
+    ?assertEqual(
+        {ok, 'Workspace'},
+        beamtalk_workspace_config:binding_name_for_class('WorkspaceInterface')
+    ).
 
 binding_name_for_class_unknown_returns_undefined_test() ->
     ?assertEqual(undefined, beamtalk_workspace_config:binding_name_for_class('Counter')).
