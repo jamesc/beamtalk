@@ -17,6 +17,7 @@ repository = "https://github.com/jamesc/beamtalk"
 
 [workspace.dependencies]
 # Workspace crates
+beamtalk-build = { path = "crates/beamtalk-build" }
 beamtalk-core = { path = "crates/beamtalk-core" }
 beamtalk-etf = { path = "crates/beamtalk-etf" }
 beamtalk-examples = { path = "crates/beamtalk-examples" }
