@@ -68,5 +68,8 @@ predicates = "3"
 name = "build_bench"
 harness = false
 
+[build-dependencies]
+beamtalk-build.workspace = true
+
 [lints]
 workspace = true

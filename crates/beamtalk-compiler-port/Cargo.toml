@@ -37,5 +37,8 @@ tracing-subscriber = { workspace = true }
 # why: property-based testing for compiler port robustness (ADR 0011 Phase 4)
 proptest = { workspace = true }
 
+[build-dependencies]
+beamtalk-build.workspace = true
+
 [lints]
 workspace = true
