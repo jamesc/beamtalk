@@ -35,6 +35,8 @@
 - Extract duplicated NLR catch-var allocation into shared `NlrCatchVars` struct/helper (BT-2155).
 - Replace `format!()` calls with `Document` API in `core_erlang_binary_string` — continues the BT-875 cleanup (BT-2163).
 - Replace 6 `Document::String(format!())` calls with `docvec!` in `callbacks.rs`, `mod.rs`, `while_loops.rs`, and `control_flow/mod.rs` — continues the BT-875 cleanup (BT-2166).
+- Replace all 44 `Document::String(format!())` violations with `docvec!` equivalents in `exception_handling.rs`, extract `on_do_catch_preamble` and `make_handler_apply` helpers — continues the BT-875 cleanup (BT-2169).
+- Centralize byte-offset→line-number logic into `Span::line_number`, removing duplicate implementations from codegen and MCP server (BT-2160).
 
 ## 0.4.0 — 2026-04-27
 
