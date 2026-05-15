@@ -1,5 +1,6 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
+%%% **DDD Context:** Runtime Context
 
 -module(beamtalk_log_filter_tests).
 
