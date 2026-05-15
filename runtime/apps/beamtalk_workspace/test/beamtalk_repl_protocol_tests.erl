@@ -552,7 +552,7 @@ encode_modules_new_format_test() ->
     Modules = [
         {counter, #{
             name => <<"Counter">>,
-            source_file => "/tmp/c.bt",
+            source_file => "counter.bt",
             actor_count => 2,
             load_time => 99,
             time_ago => "5s ago"
@@ -563,7 +563,7 @@ encode_modules_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     [M] = maps:get(<<"modules">>, Decoded),
     ?assertEqual(<<"Counter">>, maps:get(<<"name">>, M)),
-    ?assertEqual(<<"/tmp/c.bt">>, maps:get(<<"source_file">>, M)).
+    ?assertEqual(<<"counter.bt">>, maps:get(<<"source_file">>, M)).
 
 %%% encode_sessions/3 legacy format
 

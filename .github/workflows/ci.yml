@@ -96,6 +96,14 @@ jobs:
             ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.27
             ${{ runner.os }}-erlang-otp-27.0-
 
+      - name: Use toolchain cargo directly (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          TOOLCHAIN_CARGO="$(rustup which cargo)"
+          TOOLCHAIN_BIN="$(dirname "$TOOLCHAIN_CARGO")"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
+          "$TOOLCHAIN_CARGO" --version
+
       - name: Build, lint, and fast tests
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.

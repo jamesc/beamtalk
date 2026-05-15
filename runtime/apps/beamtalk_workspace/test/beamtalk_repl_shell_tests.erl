@@ -245,7 +245,7 @@ unload_module_removes_from_tracker_test_() ->
                 sys:replace_state(Pid, fun({SId, State, Worker}) ->
                     Tracker = beamtalk_repl_state:get_module_tracker(State),
                     NewTracker = beamtalk_repl_modules:add_module(
-                        DummyMod, "/tmp/test.bt", Tracker
+                        DummyMod, "test.bt", Tracker
                     ),
                     {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State), Worker}
                 end),
