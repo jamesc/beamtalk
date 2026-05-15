@@ -102,7 +102,7 @@ jobs:
           TOOLCHAIN_CARGO="$(rustup which cargo)"
           TOOLCHAIN_BIN="$(dirname "$TOOLCHAIN_CARGO")"
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
-          cargo --version
+          "$TOOLCHAIN_CARGO" --version
 
       - name: Build, lint, and fast tests
         # build first so clippy and test-rust reuse its artifacts.
