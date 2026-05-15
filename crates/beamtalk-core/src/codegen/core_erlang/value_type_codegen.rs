@@ -755,11 +755,19 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let arity = slots.len() + 2; // _ClassSelf + _ClassVars + N slot args
 
+        // Pre-compute slot argument names once; write! instead of format! per codegen rules.
+        let slot_arg_names: Vec<String> = (0..slots.len())
+            .map(|i| {
+                let mut name = String::from("SlotArg");
+                let _ = write!(&mut name, "{i}");
+                name
+            })
+            .collect();
+
         // Extra slot parameters appended after "_ClassSelf, _ClassVars": ", SlotArg0", ...
-        let slot_param_docs: Vec<Document<'static>> = slots
+        let slot_param_docs: Vec<Document<'static>> = slot_arg_names
             .iter()
-            .enumerate()
-            .flat_map(|(i, _)| [Document::Str(", "), Document::String(format!("SlotArg{i}"))])
+            .flat_map(|name| [Document::Str(", "), Document::String(name.clone())])
             .collect();
 
         // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
@@ -778,7 +786,7 @@ impl CoreErlangGenerator {
                     Document::Str("'"),
                     Document::String(slot_name.clone()),
                     Document::Str("' => "),
-                    Document::String(format!("SlotArg{i}")),
+                    Document::String(slot_arg_names[i].clone()),
                 ]);
             }
 
@@ -810,7 +818,7 @@ impl CoreErlangGenerator {
                 Document::Str(", '"),
                 Document::String(slot_name.clone()),
                 Document::Str("' => "),
-                Document::String(format!("SlotArg{i}")),
+                Document::String(slot_arg_names[i].clone()),
             ]);
         }
 
