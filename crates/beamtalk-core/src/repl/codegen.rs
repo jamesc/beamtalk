@@ -340,7 +340,7 @@ impl<'a> ReplAssembler<'a> {
         let mut step_pairs: Vec<(String, Document<'static>)> = Vec::new();
 
         for (i, expr) in expressions[..n - 1].iter().enumerate() {
-            let result_var = format!("_R{}", i + 1);
+            let result_var = self.generator.fresh_temp_var("R");
             let (part, repl_mutated) = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
             let step_val: Document<'static> = if repl_mutated {
@@ -626,8 +626,8 @@ impl<'a> ReplAssembler<'a> {
         let mut body_parts: Vec<Document<'static>> = Vec::new();
 
         // Process all but the last expression
-        for (i, expr) in expressions[..n - 1].iter().enumerate() {
-            let result_var = format!("_R{}", i + 1);
+        for expr in &expressions[..n - 1] {
+            let result_var = self.generator.fresh_temp_var("R");
             let (part, _repl_mutated) = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
         }
