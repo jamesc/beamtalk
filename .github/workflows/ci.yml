@@ -96,16 +96,12 @@ jobs:
             ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.27
             ${{ runner.os }}-erlang-otp-27.0-
 
-      - name: Ensure cargo shim works (macOS)
+      - name: Use toolchain cargo directly (macOS)
         if: runner.os == 'macOS'
         run: |
-          if ! cargo --version >/dev/null 2>&1; then
-            CARGO_BIN="$(command -v cargo || true)"
-            RUSTUP_BIN="$(command -v rustup || true)"
-            if [ -n "$CARGO_BIN" ] && [ -n "$RUSTUP_BIN" ]; then
-              ln -sf "$RUSTUP_BIN" "$CARGO_BIN"
-            fi
-          fi
+          TOOLCHAIN_CARGO="$(rustup which cargo)"
+          TOOLCHAIN_BIN="$(dirname "$TOOLCHAIN_CARGO")"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
           cargo --version
 
       - name: Build, lint, and fast tests
