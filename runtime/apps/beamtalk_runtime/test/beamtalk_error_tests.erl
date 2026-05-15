@@ -362,3 +362,112 @@ extract_beamtalk_error_respects_depth_limit_test() ->
     %% Error nested 3 levels deep, but depth limit is 1
     Nested = {a, {b, Error}},
     ?assertEqual(undefined, beamtalk_error:extract_beamtalk_error(Nested, 1)).
+
+%%% Tests: format_reason/2
+
+format_reason_with_beamtalk_error_record_test() ->
+    Error = beamtalk_error:new(actor_dead, 'Counter'),
+    Result = beamtalk_error:format_reason(error, Error),
+    ?assert(is_binary(Result)),
+    ?assertEqual(<<"Counter actor process has terminated (Counter:actor_dead)">>, Result).
+
+format_reason_with_exception_tagged_map_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'String'),
+    Error1 = beamtalk_error:with_selector(Error, 'push:'),
+    Wrapped = #{'$beamtalk_class' => 'NoSuchMethodError', error => Error1},
+    Result = beamtalk_error:format_reason(error, Wrapped),
+    ?assert(is_binary(Result)),
+    ?assertEqual(<<"String does not understand 'push:' (String:does_not_understand)">>, Result).
+
+format_reason_with_arbitrary_term_test() ->
+    Result = beamtalk_error:format_reason(error, {badmatch, 42}),
+    ?assert(is_binary(Result)),
+    ?assertEqual(<<"error:{badmatch,42}">>, Result).
+
+%%% Tests: with_message/2 (atom and fallback clauses)
+
+with_message_atom_converts_to_binary_test() ->
+    Error0 = beamtalk_error:new(user_error, 'Widget'),
+    Error = beamtalk_error:with_message(Error0, no_such_method),
+    ?assertEqual(<<"no_such_method">>, Error#beamtalk_error.message).
+
+with_message_tuple_formats_as_binary_test() ->
+    Error0 = beamtalk_error:new(user_error, 'Widget'),
+    Error = beamtalk_error:with_message(Error0, {badarg, 99}),
+    ?assertEqual(<<"{badarg,99}">>, Error#beamtalk_error.message).
+
+%%% Tests: generate_message/3 — missing error kinds
+
+actor_dead_message_test() ->
+    Error1 = beamtalk_error:new(actor_dead, 'Counter'),
+    ?assertEqual(<<"Counter actor process has terminated">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'increment'),
+    ?assertEqual(
+        <<"Cannot send 'increment' to Counter (actor process has terminated)">>,
+        Error2#beamtalk_error.message
+    ).
+
+file_not_found_message_test() ->
+    Error1 = beamtalk_error:new(file_not_found, 'File'),
+    ?assertEqual(<<"File: file not found">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'open'),
+    ?assertEqual(<<"File 'open': file not found">>, Error2#beamtalk_error.message).
+
+permission_denied_message_test() ->
+    Error1 = beamtalk_error:new(permission_denied, 'File'),
+    ?assertEqual(<<"File: permission denied">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'write'),
+    ?assertEqual(<<"File 'write': permission denied">>, Error2#beamtalk_error.message).
+
+io_error_message_test() ->
+    Error1 = beamtalk_error:new(io_error, 'FileHandle'),
+    ?assertEqual(<<"FileHandle: I/O error">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'read'),
+    ?assertEqual(<<"FileHandle 'read': I/O error">>, Error2#beamtalk_error.message).
+
+user_error_message_test() ->
+    Error1 = beamtalk_error:new(user_error, 'Widget'),
+    ?assertEqual(<<"Error">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, badarg),
+    ?assertEqual(<<"badarg">>, Error2#beamtalk_error.message).
+
+stdlib_shadowing_message_test() ->
+    Error1 = beamtalk_error:new(stdlib_shadowing, 'Object'),
+    ?assertEqual(<<"Cannot redefine stdlib class 'Object'">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'redefine'),
+    ?assertEqual(
+        <<"Cannot redefine stdlib class 'Object' (via 'redefine')">>,
+        Error2#beamtalk_error.message
+    ).
+
+uninitialized_state_error_message_test() ->
+    Error1 = beamtalk_error:new(uninitialized_state_error, 'Counter'),
+    ?assertEqual(<<"UninitializedStateError in Counter">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'getValue'),
+    ?assertEqual(
+        <<"UninitializedStateError in 'getValue' on Counter">>,
+        Error2#beamtalk_error.message
+    ).
+
+class_already_exists_with_selector_message_test() ->
+    Error = beamtalk_error:new(class_already_exists, 'Counter'),
+    ErrorWithSel = beamtalk_error:with_selector(Error, 'load'),
+    ?assertEqual(
+        <<"Class 'Counter' already exists (via 'load')">>,
+        ErrorWithSel#beamtalk_error.message
+    ).
+
+generate_message_catchall_with_selector_test() ->
+    Error = beamtalk_error:new(custom_kind, 'Widget'),
+    ErrorWithSel = beamtalk_error:with_selector(Error, 'doSomething'),
+    ?assertEqual(
+        <<"custom_kind error in 'doSomething' on Widget">>,
+        ErrorWithSel#beamtalk_error.message
+    ).
