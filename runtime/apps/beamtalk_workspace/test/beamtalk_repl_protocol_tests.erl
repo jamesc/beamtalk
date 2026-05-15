@@ -618,8 +618,7 @@ decode_json_array_returns_error_test() ->
     ?assertMatch({error, {invalid_request, non_object_json}}, Result).
 
 decode_json_string_returns_error_test() ->
-    Result = beamtalk_repl_protocol:decode(<<"\"hello\"">>
-    ),
+    Result = beamtalk_repl_protocol:decode(<<"\"hello\"">>),
     ?assertMatch({error, {invalid_request, non_object_json}}, Result).
 
 decode_json_number_returns_error_test() ->
