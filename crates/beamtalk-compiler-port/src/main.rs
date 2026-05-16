@@ -676,9 +676,6 @@ fn partition_diagnostics(
 ///
 /// Returns `Ok((module, warnings))` on success, or `Err(response_term)` containing a
 /// formatted `diagnostic_error_response` that the caller should return directly.
-///
-/// Shared by `handle_compile_expression` and `handle_compile_expression_trace` to
-/// eliminate the identical parse → analyse → validate → filter pipeline.
 fn parse_and_check_expression(
     source: &str,
     known_vars: &[String],
