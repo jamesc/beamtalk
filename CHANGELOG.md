@@ -38,6 +38,7 @@
 - Replace all 44 `Document::String(format!())` violations with `docvec!` equivalents in `exception_handling.rs`, extract `on_do_catch_preamble` and `make_handler_apply` helpers — continues the BT-875 cleanup (BT-2169).
 - Centralize byte-offset→line-number logic into `Span::line_number`, removing duplicate implementations from codegen and MCP server (BT-2160).
 - Extract duplicate `build.rs` version-injection logic into shared `beamtalk-build` workspace crate — single source of truth for `BEAMTALK_VERSION` emission (BT-2172).
+- Replace 5 `format!()` calls with `fresh_temp_var` / `write!` in `repl/codegen.rs` and `value_type_codegen.rs` — continues the BT-875 cleanup (BT-2175).
 
 ## 0.4.0 — 2026-04-27
 
