@@ -72,11 +72,26 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 
 ### Behaviour
 
-- The `>>` operator has two forms — only the **patch form** triggers ChangeLog activity:
-  - `Counter >> #selector` — reader, returns a `CompiledMethod` object (no side effect, no log entry)
-  - `Counter >> selector => body` — patcher, installs and (when flushable) logs
-- A successful patch (or new `save-method` REPL op) does three things atomically: (1) reads and parses `Counter sourceFile` to capture the existing method's exact byte span and source body as `prev_source`; (2) installs the new method in memory; (3) appends a `ChangeEntry` to the workspace ChangeLog. The disk read in step 1 is what makes `revert:` and splice both work; without it, the hook cannot know what the disk currently contains.
-- A class is **flushable** iff `sourceFile` is non-nil **and** the source file lies inside the current project's source tree (per the active `beamtalk.toml`). Stdlib classes, dynamic classes (ADR 0038), and classes loaded from package dependencies are **not flushable** — patches against them install in memory but emit no ChangeEntry. This guards reproducible builds against accidental writes into the dependency cache.
+**Intent: ephemeral vs durable.** The ChangeLog records *durable* changes (intent-to-keep). Ephemeral exploration — spike a fix, check it works, throw it away — is supported but does not produce log entries. Intent is signalled by the **operation chosen**, not the identity of the caller:
+
+| Operation | Intent | ChangeLog |
+|-----------|--------|-----------|
+| `Counter >> selector => body` (REPL/browser) | durable — human typed it | logged |
+| `save-method` op (REPL/MCP/LSP/browser) | durable | logged |
+| `save-class` op (REPL/MCP/LSP/browser) — new class from source | durable | logged (`kind: "new-class"`) |
+| `try-method` op (MCP only) | ephemeral — agent exploration | **not** logged |
+| `Counter >> #selector` (reader form) | n/a — pure read | not logged |
+| `load-source` of an existing class | ephemeral by default (legacy browser internal op) | not logged unless `intent: "save"` parameter set |
+
+`author_kind` (`human` / `agent` / `test`) is recorded on every entry as **audit metadata**, not as a filter. `Workspace dirty` defaults to *all* logged entries regardless of author — an agent that ran `save-class` for ten new test files produces ten visible dirty entries, because those files are the deliverable.
+
+**Method patch flow (`>>` patcher form, `save-method` op).** A successful patch does three things atomically: (1) reads and parses `Counter sourceFile` to capture the existing method's exact byte span and source body as `prev_source`; (2) installs the new method in memory; (3) appends a `ChangeEntry` to the workspace ChangeLog. The disk read in step 1 is what makes `revert:` and splice both work; without it, the hook cannot know what the disk currently contains.
+
+**New-class flow (`save-class` op).** Parameters: `(source, targetPath)`, where `targetPath` is required and must lie inside the project source tree. The op (1) compiles and installs the class in memory, (2) writes a `ChangeEntry` of `kind: "new-class"` with `prev_source = nil`, `span = nil`, and the full class source as `source`. Subsequent `>>` patches against this class log additional entries layered on top; at flush time, entries replay in order — the `new-class` entry writes the initial file, then later method patches splice into it. This avoids needing a class-to-source serialiser; we don't reconstruct from in-memory metadata. `targetPath` is rejected if it already exists on disk (use `save-method` or `>>` against the existing class instead).
+
+**Ephemeral patch flow (`try-method` op, MCP only).** Installs in memory exactly like `>>` but emits no ChangeEntry. Agents use this for exploration: spike a candidate fix, run tests via `evaluate`, observe outcome, and either (a) discard by ignoring it (memory diverges from disk, will be lost on restart — fine for spikes) or (b) promote by calling `save-method` with the same source to log it for real. The `try-method` → `save-method` step is the agent's analogue of a human typing `>>` at the REPL: they tried it interactively, now they want to keep it.
+
+A class is **flushable** iff `sourceFile` is non-nil **and** the source file lies inside the current project's source tree (per the active `beamtalk.toml`). Stdlib classes, dynamic classes (ADR 0038), and classes loaded from package dependencies are **not flushable** — patches against them install in memory but emit no ChangeEntry. This guards reproducible builds against accidental writes into the dependency cache. New classes created via `save-class` are flushable by construction (target path is required to be in-project).
 - The ChangeLog is the dirty state. A method is "dirty" iff there is an unflushed ChangeEntry whose target is that method, that class, or that file. Granularity is per-method; aggregate views (per-class, per-file) are derived.
 - `Workspace flush` walks pending ChangeEntries, groups them by source file, computes a new file body per file by replacing each target method's recorded byte span with its patched source, writes each via temp+rename, then prunes the flushed entries from the log. The splice operates on byte spans recorded at hook time — it does not depend on the formatter being able to round-trip the whole file. ChangeEntry pruning is deferred until **every** file in the flush completes its rename successfully; partial failure leaves all entries in the log for retry (see Atomicity below).
 - `Workspace flush: Counter` flushes only entries targeting that class. Similar for `flush: #{file: "..."}`.
@@ -87,13 +102,13 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 
 | Surface | Binding |
 |---------|---------|
-| Beamtalk | `Workspace flush`, `Workspace flush: aClass`, `Workspace clearChanges`, `Workspace changes`, `Workspace dirty`, `Workspace dirtyMethods` |
+| Beamtalk | `Workspace flush`, `Workspace flush: aClass`, `Workspace clearChanges`, `Workspace changes`, `Workspace dirty`, `Workspace dirtyMethods`, `Workspace saveClass:to:` |
 | REPL meta-command | `:flush`, `:flush <Class>`, `:changes`, `:dirty` |
-| MCP | `flush`, `list_changes`, `dirty_methods` |
-| LSP | client-driven via `workspace/executeCommand` for `flush`; `workspace/applyEdit` consumed *from* runtime on flush so VSCode buffers refresh |
-| Browser | per-method "Save" button → save-method op → ChangeLog. Workspace-level "Save All" → flush. Dirty indicators on tab/method tree. |
+| MCP | `save_method`, `save_class`, `try_method` (ephemeral), `flush`, `list_changes`, `dirty_methods` |
+| LSP | client-driven via `workspace/executeCommand` for `flush` and `save_class`; `workspace/applyEdit` consumed *from* runtime on flush so VSCode buffers refresh |
+| Browser | per-method "Save" button → `save-method` op → ChangeLog. "New File" action → `save-class` op. Workspace-level "Save All" → flush. Dirty indicators on tab/method tree. |
 
-### REPL session
+### REPL session (human, patching existing class)
 
 ```beamtalk
 > Counter >> increment => self.value := self.value + 1
@@ -108,6 +123,38 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 => flushed 1 method across 1 file
 > Workspace dirty
 => false
+```
+
+### MCP agent session (spike, then commit new test + impl)
+
+```beamtalk
+// 1. Agent explores via try_method — installs in memory, no log entry
+mcp> try_method(class: "Counter", selector: "doubled", body: "^ self value * 2")
+=> a CompiledMethod (memory only, ephemeral)
+mcp> evaluate("(Counter new) doubled")
+=> 0                                              // works, agent commits
+
+// 2. Agent promotes the spike to a logged change
+mcp> save_method(class: "Counter", selector: "doubled", body: "^ self value * 2")
+=> ChangeEntry logged (#doubled in Counter)
+
+// 3. Agent creates a new test class for the feature
+mcp> save_class(source: "<DoubleCounterTest source>", target: "test/double_counter_test.bt")
+=> ChangeEntry logged (kind: new-class)
+
+// 4. Agent creates the impl file for a follow-up class
+mcp> save_class(source: "<DoubleCounter source>", target: "src/double_counter.bt")
+=> ChangeEntry logged (kind: new-class)
+
+// 5. Human reviews and flushes
+> Workspace dirty
+=> true
+> Workspace dirtyMethods
+=> #{Counter -> #{#doubled},
+     DoubleCounterTest -> #new-class,
+     DoubleCounter -> #new-class}
+> Workspace flush
+=> flushed 1 method + 2 new files across 3 files
 ```
 
 ### Error examples
@@ -143,9 +190,10 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 | External-edit detection | At flush time, compare per-file `(mtime, content-hash)` against the snapshot captured when the first pending ChangeEntry for that file was logged. Mismatch → conflict; pending entries remain in the log; user chooses force/discard/diff. |
 | LSP coordination on flush | Runtime emits `workspace/applyEdit` for each flushed file; VSCode reloads the buffer. If the editor has unsaved changes, VSCode's standard conflict dialog applies. |
 | Multi-client (two browsers) | Last-writer-wins on memory install. Both clients' ChangeEntries land in the log; on flush, the second client's entry shadows the first for the same method. Each browser session observes the dirty set and shows "modified by another session" when its local view drifts. |
-| ChangeLog format | Append-only JSON-Lines under workspace data dir: `<workspace>/changes.jsonl`. Each entry: `{ts, class, selector, kind: "instance"\|"class", source, prev_source, sourceFile, span: {start, end}, author, author_kind: "human"\|"agent"\|"test"}`. Survives workspace restart. |
-| ChangeLog growth | Bounded ring of last N=1000 entries by default. Older entries archived to `changes-<timestamp>.jsonl.gz` on flush. Agent- and test-authored entries are pruned aggressively (kept N=200 by default); see Author-kind handling below. |
-| Author-kind handling | ChangeEntries carry `author_kind`. MCP-originated patches are tagged `agent`; patches issued from inside a `Workspace runTests` invocation are tagged `test`; everything else is `human`. `Workspace dirty` and `Workspace dirtyMethods` default to `human`-only; `Workspace dirty: #all` includes all kinds; `Workspace flush` flushes only `human` entries by default (the `kinds:` keyword overrides). Test patches and agent exploration thus do not pollute the dirty set or the user's git tree by default, while still being recorded for audit. |
+| ChangeLog format | Append-only JSON-Lines under workspace data dir: `<workspace>/changes.jsonl`. Each entry: `{ts, class, selector, kind: "instance"\|"class"\|"new-class", source, prev_source, sourceFile, span: {start, end} \| null, author, author_kind: "human"\|"agent"\|"test", intent: "save"\|"new"}`. `new-class` entries have `span: null` and `prev_source: null`. Survives workspace restart. |
+| ChangeLog growth | Bounded ring of last N=1000 entries by default. Older entries archived to `changes-<timestamp>.jsonl.gz` on flush. Entries with `author_kind: "test"` (logged by `Workspace runTests` for its own setup patches) are pruned aggressively (kept N=200) since they're audit-only and never the user's deliverable. `human` and `agent` entries are retained on equal footing — both represent durable intent and are pruned only by the ring bound. |
+| Intent vs author | Intent is signalled by the **op chosen**, not the caller: `save-method`/`save-class` always log; `try-method` never logs; the `>>` patcher form logs (it has no ephemeral mode — humans who want an ephemeral patch can `Workspace clearChanges` after). `author_kind` is **audit metadata** — it tells us *who* made a logged change, not whether it counts as dirty. `Workspace dirty` and `Workspace flush` include all logged entries by default; the `kinds:` keyword filters by `author_kind` for selective flushing if needed (e.g., `Workspace flush kinds: #{agent}` to commit an agent batch separately from human changes). |
+| New-class flush | When flushing a `new-class` entry, the splice operation is "write `source` to `targetPath`" (no byte-span surgery; the file doesn't exist yet). External-edit detection still applies: if `targetPath` was created externally between the `save-class` call and flush, the conflict surfaces with the same force/discard/diff choice. Subsequent `>>` patches against a not-yet-flushed new class produce additional entries that replay in order at flush — the `new-class` entry writes first, then later method-patch entries splice into the just-written file. |
 | Undo | `Workspace revert: aMethod` re-installs `prev_source` from the most recent ChangeEntry for that method and appends a new revert entry (revert is itself a patch, not log mutation). Revert is only possible for flushable classes — ephemeral memory-only patches against stdlib/dependencies are not recorded and therefore not revertable. |
 | Release builds | No-op. Release nodes do not start a workspace; ChangeLog code is in `beamtalk_workspace`, not `beamtalk_runtime`. |
 | Stdlib classes | `sourceFile => nil` ⇒ patches are memory-only and never logged. |
@@ -282,7 +330,8 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 
 - Two-step save is unusual for editor users; mitigated by `autoflush: true` and visible "Save All" UI.
 - Byte-span splice depends on the parser correctly resolving every method's span against arbitrary `.bt` files. Phase 0 exists to validate this against the stdlib+examples corpus before any flush code is written. If Phase 0 fails, the design pivots.
-- ChangeLog growth on long-lived workspaces requires pruning policy. Mitigated by author-kind separation: agent and test entries are pruned aggressively while human entries are retained.
+- ChangeLog growth on long-lived workspaces requires pruning policy. Human and agent entries are pruned equally by the 1000-entry ring; test entries are pruned aggressively (200) since they are audit-only.
+- Two MCP tools (`try_method` ephemeral, `save_method` durable) means agents must choose the right one. Documented in MCP tool descriptions; the typical agent flow is "try → evaluate → save," and getting it wrong produces visible drift between `Workspace dirty` and what the agent intended.
 - Multi-client coordination is last-writer-wins; concurrent edits to the same method by two users will lose one — observable but not prevented.
 - Autoflush is best-effort consistency, not transactional. On flush failure under autoflush, memory and disk diverge and require manual reconciliation. This is documented behaviour, not a bug to fix — the alternative (rolling back the BEAM module install) is unsound when live actors hold references to the new closures.
 - Multi-file flush failure leaves a mixed state across files even after the two-phase protocol — Phase B renames are sequential, and a hard I/O error mid-sequence means some files renamed and some did not. The user gets a per-file status report and can re-flush; entries for already-renamed files are pruned, entries for failed files remain.
@@ -293,7 +342,7 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 - `autoflush: true` collapses the model to Alternative B at the per-workspace level. Users who want write-through can have it; the default does not.
 - Stdlib and dynamic classes (no `sourceFile`) silently accept patches as memory-only. This matches today's behaviour for `>>` against `Integer`, but the ChangeLog will not contain entries for them — they are not flushable by definition.
 - Package dependency classes silently accept patches as memory-only for the same reason — their `sourceFile` is outside the project tree. This is a feature, not a limitation: reproducible builds depend on dependency caches being treated as read-only.
-- MCP agents using `>>` for exploratory patches generate `author_kind: agent` entries that do not contribute to the default dirty set. Operators reviewing the audit log can still inspect agent activity via `Workspace dirty: #all` or by reading `changes.jsonl` directly.
+- MCP agents finalising new tests or impl files via `save_class` / `save_method` produce visible `dirty` entries — the deliverable is supposed to be visible. Agents that want to spike-without-noise use `try_method`, which installs in memory but does not log. The split is by op intent, not by author identity.
 
 ### DDD Model Impact
 
@@ -311,10 +360,10 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 | `crates/beamtalk-core/src/source_analysis/` | New byte-span resolver: given source text and `(class, selector, kind)`, return the byte span of that method's definition. Pure parser-level work; no new printer. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_changelog.erl` (new) | Gen_server owning the append-only ChangeLog. ETS for live state, JSON-Lines on disk. Exposed via the `Workspace` facade per ADR 0040. Lives in the workspace context, not REPL, because it's consumed cross-surface. |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New REPL ops: `save-method`, `flush`, `list-changes`, `dirty`. Thin handlers delegating to `beamtalk_workspace_changelog`. |
-| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `changes`, `dirty`, `dirty:`, `dirtyMethods`, `revert:`, `clearChanges`. |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New REPL ops: `save-method`, `save-class`, `try-method`, `flush`, `list-changes`, `dirty`. Thin handlers delegating to `beamtalk_workspace_changelog`. `try-method` skips the ChangeLog emit; `save-class` validates that `targetPath` is in-project and not pre-existing. |
+| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `flush kinds:`, `changes`, `dirty`, `dirty:`, `dirtyMethods`, `revert:`, `clearChanges`, `saveClass:to:`. |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands: `:flush`, `:flush <Class>`, `:changes`, `:dirty`. |
-| `crates/beamtalk-mcp/src/server.rs` | New tools: `flush`, `list_changes`, `dirty_methods`. MCP-issued patches are auto-tagged `author_kind: agent`. |
+| `crates/beamtalk-mcp/src/server.rs` | New tools: `save_method`, `save_class`, `try_method`, `flush`, `list_changes`, `dirty_methods`. MCP-issued logged patches are auto-tagged `author_kind: agent` for audit. `try_method` is the explicit ephemeral spike path; `save_method`/`save_class` are the durable-commit path. |
 | `crates/beamtalk-lsp/src/server.rs` | Handle `workspace/executeCommand` for `flush`. Emit `workspace/applyEdit` *to* clients on flush events received from the runtime. |
 | `runtime/apps/beamtalk_workspace/priv/static/workspace.js` | Per-method dirty indicator, "Save" per method, "Save All to Disk" workspace-level. |
 | `docs/development/surface-parity.md` | Add rows for `save-method`, `flush`, `list-changes`, `dirty`. |
@@ -327,7 +376,7 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 | **0** | **Validation spike** (internal scaffolding, not user-facing). Implement the byte-span resolver and prove it against the entire stdlib + examples corpus: parse, locate every method's span, re-serialise file with a no-op span replacement, and assert byte-identical output. This is the load-bearing assumption of the design — validate it before building anything else. | S | Corpus round-trip tests in `crates/beamtalk-core/src/source_analysis/`. |
 | **1** | ChangeLog gen_server + JSON-Lines persistence + `Workspace changes` / `dirty` / `dirtyMethods`. Hooks into `beamtalk_extensions.erl`. No flush yet. `author_kind` plumbing through REPL/MCP. | M | EUnit tests for the gen_server; BUnit tests for the `Workspace` facade reads. |
 | **2** | `Workspace flush` + `flush:` + single-file atomic temp+rename + multi-file two-phase (Phase A all writes, Phase B all renames) + external-edit detection. Pruning rules implemented. | M | EUnit tests for atomicity (kill the process between phases); BUnit tests for the facade. |
-| **3** | `save-method` REPL op, MCP tool, LSP `executeCommand`, browser "Save" UI. Surface-parity table updated; surface-drift CI gate passes. | M | Surface-parity tests; browser e2e for the Save button. |
+| **3** | `save-method`, `save-class`, `try-method` REPL ops + MCP tools; LSP `executeCommand` for `flush` and `save_class`; browser "Save" / "New File" UI. Surface-parity table updated; surface-drift CI gate passes. | M | Surface-parity tests; browser e2e for Save and New File; MCP integration tests for the try→save promotion flow. |
 | **4** | `Workspace revert:` + `clearChanges` + `autoflush` setting. ChangeLog browsing UI in the browser workspace. | S | BUnit tests for revert; e2e for autoflush. |
 | **5** | LSP-side `workspace/applyEdit` consumption in VSCode + e2e test that flush refreshes an open buffer. | S | VSCode extension e2e. |
 
