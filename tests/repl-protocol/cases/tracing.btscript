@@ -28,13 +28,13 @@ c := Counter spawn
 // => #Actor<Counter,_>
 
 c increment
-// => _
+// => 1
 
 c increment
-// => _
+// => 2
 
 c increment
-// => _
+// => 3
 
 stats := Tracing stats
 // => _
@@ -55,7 +55,7 @@ Tracing enable
 // => _
 
 c increment
-// => _
+// => 4
 
 c getValue
 // => 4
@@ -104,7 +104,7 @@ prevSize := (Tracing traces) size
 // => _
 
 c increment
-// => _
+// => 5
 
 (Tracing traces) size == prevSize
 // => true
@@ -175,4 +175,4 @@ Tracing clear
 // => true
 
 c stop
-// => _
+// => ok
