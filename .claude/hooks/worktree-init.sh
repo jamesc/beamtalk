@@ -38,13 +38,30 @@ fi
 git config core.hooksPath .githooks 2>/dev/null || true
 
 # --- Hex bridge proxy for cloud environments ---
-# Erlang's httpc can't negotiate TLS through egress proxies that do MITM
+# Erlang's httpc can't verify TLS through egress proxies that do MITM
 # interception, AND doesn't respect no_proxy for localhost. Start a local
-# HTTP-to-HTTPS bridge so rebar3/hex can fetch packages, then:
-#   1. Set HEX_CDN (rebar3's built-in repo URL override) to point at the bridge
-#   2. Install a rebar3 wrapper that strips proxy env vars so httpc connects
-#      directly to the bridge on localhost instead of routing through the proxy
+# HTTP-to-HTTPS bridge so rebar3/hex can fetch packages.
+#
+# Two trigger modes:
+#   1. Authenticated upstream proxy (older sandbox)   — HTTP_PROXY contains creds
+#   2. Transparent TLS interception (Claude Code cloud) — CLAUDE_CODE_REMOTE=true
+#      In mode 2 there is no HTTP_PROXY, but Erlang still rejects hex.pm's
+#      MITM-issued cert ("Unknown CA"); the bridge solves it by terminating
+#      TLS in Python (which trusts the system-installed MITM root).
+#
+# The rebar3 wrapper / Node --use-env-proxy bits are ONLY needed in mode 1
+# (to stop httpc routing localhost through the proxy and to make Node fetch
+# proxy-aware). In mode 2 they are no-ops, so they stay gated on HTTP_PROXY.
+_HAS_AUTH_PROXY=0
 if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
+  _HAS_AUTH_PROXY=1
+fi
+_IN_CLOUD_SANDBOX=0
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  _IN_CLOUD_SANDBOX=1
+fi
+
+if (( _HAS_AUTH_PROXY || _IN_CLOUD_SANDBOX )); then
   HEX_BRIDGE_PORT="${HEX_BRIDGE_PORT:-18081}"
   HEX_BRIDGE_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/hex-bridge-proxy.py"
   # Start the bridge if not already running
@@ -58,51 +75,60 @@ if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
   # Tell rebar3 to fetch packages from the local bridge (not hex.pm directly)
   export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
 
-  # Node.js built-in fetch (undici) doesn't respect HTTP_PROXY/HTTPS_PROXY by
-  # default. --use-env-proxy (Node 22.21+) enables proxy-aware fetch, which
-  # fixes tools like streamlinear-cli that use bare fetch() for API calls.
-  # Guard: only set when Node supports the flag, and skip if already present.
-  if command -v node >/dev/null 2>&1; then
-    _NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "")"
-    if [[ "${_NODE_MAJOR}" =~ ^[0-9]+$ ]] && (( _NODE_MAJOR >= 22 )); then
-      case " ${NODE_OPTIONS:-} " in
-        *" --use-env-proxy "*) ;;
-        *) export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--use-env-proxy" ;;
-      esac
-    fi
-  fi
-
-  # Install a rebar3 wrapper that strips proxy env vars before calling the real
-  # rebar3. Erlang's httpc ignores no_proxy, so without this it routes even
-  # localhost requests through the egress proxy (which returns 407).
   WRAPPER_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/.claude/bin"
-  # Resolve the real rebar3 with the wrapper dir stripped from PATH to avoid
-  # an infinite exec loop if the hook runs twice in the same session.
-  CLEAN_PATH="${PATH//${WRAPPER_DIR}:/}"    # Remove from start/middle
-  CLEAN_PATH="${CLEAN_PATH%:${WRAPPER_DIR}}" # Remove from end
-  REAL_REBAR3="$(PATH="${CLEAN_PATH}" command -v rebar3 || true)"
-  if [[ -z "${REAL_REBAR3:-}" ]] || [[ ! -x "${REAL_REBAR3}" ]]; then
-    echo "Warning: rebar3 not found on PATH; skipping hex bridge wrapper setup."
-  else
-    mkdir -p "${WRAPPER_DIR}"
-    cat > "${WRAPPER_DIR}/rebar3" << WRAPPER
+  _EXTRA_EXPORT_LINES=""
+
+  if (( _HAS_AUTH_PROXY )); then
+    # Node.js built-in fetch (undici) doesn't respect HTTP_PROXY/HTTPS_PROXY by
+    # default. --use-env-proxy (Node 22.21+) enables proxy-aware fetch, which
+    # fixes tools like streamlinear-cli that use bare fetch() for API calls.
+    # Guard: only set when Node supports the flag, and skip if already present.
+    if command -v node >/dev/null 2>&1; then
+      _NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "")"
+      if [[ "${_NODE_MAJOR}" =~ ^[0-9]+$ ]] && (( _NODE_MAJOR >= 22 )); then
+        case " ${NODE_OPTIONS:-} " in
+          *" --use-env-proxy "*) ;;
+          *) export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--use-env-proxy" ;;
+        esac
+      fi
+    fi
+
+    # Install a rebar3 wrapper that strips proxy env vars before calling the real
+    # rebar3. Erlang's httpc ignores no_proxy, so without this it routes even
+    # localhost requests through the egress proxy (which returns 407).
+    # Resolve the real rebar3 with the wrapper dir stripped from PATH to avoid
+    # an infinite exec loop if the hook runs twice in the same session.
+    CLEAN_PATH="${PATH//${WRAPPER_DIR}:/}"    # Remove from start/middle
+    CLEAN_PATH="${CLEAN_PATH%:${WRAPPER_DIR}}" # Remove from end
+    REAL_REBAR3="$(PATH="${CLEAN_PATH}" command -v rebar3 || true)"
+    if [[ -z "${REAL_REBAR3:-}" ]] || [[ ! -x "${REAL_REBAR3}" ]]; then
+      echo "Warning: rebar3 not found on PATH; skipping hex bridge wrapper setup."
+    else
+      mkdir -p "${WRAPPER_DIR}"
+      cat > "${WRAPPER_DIR}/rebar3" << WRAPPER
 #!/usr/bin/env bash
 export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 exec "${REAL_REBAR3}" "\$@"
 WRAPPER
-    chmod +x "${WRAPPER_DIR}/rebar3"
-    export PATH="${WRAPPER_DIR}:${PATH}"
+      chmod +x "${WRAPPER_DIR}/rebar3"
+      export PATH="${WRAPPER_DIR}:${PATH}"
+    fi
+
+    _NODE_OPTS_LINE="case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac"
+    _EXTRA_EXPORT_LINES="export PATH=\"${WRAPPER_DIR}:\${PATH}\"
+${_NODE_OPTS_LINE}"
   fi
 
   # --- Persist proxy env vars to shell configs ---
-  # NODE_OPTIONS persistence doesn't depend on rebar3, so always run this.
-  # PATH/HEX_CDN are included unconditionally (harmless no-op if wrapper absent).
+  # HEX_CDN is always exported. PATH/NODE_OPTIONS lines only when HTTP_PROXY
+  # is set (mode 1) — they're no-ops in the cloud-sandbox-only mode.
   _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
-  _NODE_OPTS_LINE="case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac"
-  _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
-export PATH=\"${WRAPPER_DIR}:\${PATH}\"
-${_NODE_OPTS_LINE}"
+  _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\""
+  if [[ -n "${_EXTRA_EXPORT_LINES}" ]]; then
+    _EXPORT_BLOCK="${_EXPORT_BLOCK}
+${_EXTRA_EXPORT_LINES}"
+  fi
 
   # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
   # Always overwrite — this file is entirely ours. Best-effort (|| true).
@@ -120,7 +146,7 @@ PROFBLOCK
     { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
     mv "${_TMPRC}" "${HOME}/.bashrc"
     echo "Added hex-bridge PATH to ~/.bashrc (before non-interactive guard)"
-  elif ! grep -qF "use-env-proxy" "${HOME}/.bashrc" 2>/dev/null; then
+  elif (( _HAS_AUTH_PROXY )) && ! grep -qF "use-env-proxy" "${HOME}/.bashrc" 2>/dev/null; then
     # Backfill: marker exists from a previous run but NODE_OPTIONS line is missing
     sed -i "/${_MARKER//\//\\/}/a ${_NODE_OPTS_LINE}" "${HOME}/.bashrc" 2>/dev/null || true
     echo "Backfilled NODE_OPTIONS into ~/.bashrc"
@@ -135,7 +161,7 @@ ${_MARKER}
 ${_EXPORT_BLOCK}
 ZBLOCK
       echo "Added hex-bridge PATH to ~/.zshenv"
-    elif ! grep -qF "use-env-proxy" "${HOME}/.zshenv" 2>/dev/null; then
+    elif (( _HAS_AUTH_PROXY )) && ! grep -qF "use-env-proxy" "${HOME}/.zshenv" 2>/dev/null; then
       sed -i "/${_MARKER//\//\\/}/a ${_NODE_OPTS_LINE}" "${HOME}/.zshenv" 2>/dev/null || true
       echo "Backfilled NODE_OPTIONS into ~/.zshenv"
     fi
