@@ -1,4 +1,4 @@
-# ADR 0081: Method-Level Edit and Save in the Live Workspace
+# ADR 0082: Method-Level Edit and Save in the Live Workspace
 
 ## Status
 Proposed (2026-05-17)
@@ -473,7 +473,7 @@ This ADR covers **patch** (existing method) and **create** (new class file). The
 | **Renames** (class rename, method rename, file relocation) | Touches two paths (the old and the new), needs cross-file rename detection in the splice machinery, and benefits from concrete usage data from the patch-and-create case before its UX is locked in. | "Destructive Workspace Operations" |
 | **Schema accommodation** | The ChangeLog format reserves the `kind` enum as open (`"instance"`, `"class"`, `"new-class"` today; `"remove-method"`, `"remove-class"`, `"rename"` will slot in later) and `author_kind` as open. Future ADRs extend the enum without breaking the format. No prep-work needed in this ADR's implementation phases. | n/a |
 
-**Implementation order:** ADR 0081 phases 0–3 land first → method-removal language primitive ADR lands in parallel → destructive workspace ops ADR is written *after* phases 1–2 ship and produce real usage signal (i.e., the UX questions are answered by what users actually try to do, not by speculation now).
+**Implementation order:** ADR 0082 phases 0–3 land first → method-removal language primitive ADR lands in parallel → destructive workspace ops ADR is written *after* phases 1–2 ship and produce real usage signal (i.e., the UX questions are answered by what users actually try to do, not by speculation now).
 
 ## Migration Path
 
