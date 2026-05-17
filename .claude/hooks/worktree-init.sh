@@ -98,8 +98,8 @@ if (( _HAS_AUTH_PROXY || _IN_CLOUD_SANDBOX )); then
     # localhost requests through the egress proxy (which returns 407).
     # Resolve the real rebar3 with the wrapper dir stripped from PATH to avoid
     # an infinite exec loop if the hook runs twice in the same session.
-    CLEAN_PATH="${PATH//${WRAPPER_DIR}:/}"    # Remove from start/middle
-    CLEAN_PATH="${CLEAN_PATH%:${WRAPPER_DIR}}" # Remove from end
+    CLEAN_PATH="${PATH//"${WRAPPER_DIR}":/}"    # Remove from start/middle
+    CLEAN_PATH="${CLEAN_PATH%:"${WRAPPER_DIR}"}" # Remove from end
     REAL_REBAR3="$(PATH="${CLEAN_PATH}" command -v rebar3 || true)"
     if [[ -z "${REAL_REBAR3:-}" ]] || [[ ! -x "${REAL_REBAR3}" ]]; then
       echo "Warning: rebar3 not found on PATH; skipping hex bridge wrapper setup."
