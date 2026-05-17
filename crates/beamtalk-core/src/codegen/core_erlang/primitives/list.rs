@@ -197,3 +197,372 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::doc_to_string;
+    use super::*;
+
+    // Access ops
+
+    #[test]
+    fn test_size() {
+        let result = doc_to_string(generate_list_bif("size", &[]));
+        assert_eq!(result, Some("call 'erlang':'length'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let result = doc_to_string(generate_list_bif("isEmpty", &[]));
+        assert_eq!(result, Some("call 'erlang':'=:='(Self, [])".to_string()));
+    }
+
+    #[test]
+    fn test_first() {
+        let result = doc_to_string(generate_list_bif("first", &[]));
+        let output = result.expect("first should produce code");
+        assert!(output.contains("case Self of"));
+        assert!(output.contains("<[H|_T]> when 'true' -> H"));
+        assert!(output.contains("'does_not_understand'"));
+        assert!(output.contains("'first'"));
+    }
+
+    #[test]
+    fn test_rest() {
+        let result = doc_to_string(generate_list_bif("rest", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "case Self of \
+                 <[_H|T]> when 'true' -> T \
+                 <[]> when 'true' -> [] \
+                 end"
+                .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_last() {
+        let result = doc_to_string(generate_list_bif("last", &[]));
+        let output = result.expect("last should produce code");
+        assert!(output.contains("case Self of"));
+        assert!(output.contains("call 'lists':'last'(Self)"));
+        assert!(output.contains("'does_not_understand'"));
+        assert!(output.contains("'last'"));
+    }
+
+    #[test]
+    fn test_at() {
+        let result = doc_to_string(generate_list_bif("at:", &["N".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'at'(Self, N)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_includes() {
+        let result = doc_to_string(generate_list_bif("includes:", &["Item".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'lists':'member'(Item, Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sort() {
+        let result = doc_to_string(generate_list_bif("sort", &[]));
+        assert_eq!(result, Some("call 'lists':'sort'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_sort_with() {
+        let result = doc_to_string(generate_list_bif("sort:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'sort_with'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_reversed() {
+        let result = doc_to_string(generate_list_bif("reversed", &[]));
+        assert_eq!(result, Some("call 'lists':'reverse'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_unique() {
+        let result = doc_to_string(generate_list_bif("unique", &[]));
+        assert_eq!(result, Some("call 'lists':'usort'(Self)".to_string()));
+    }
+
+    // Iteration ops
+
+    #[test]
+    fn test_detect() {
+        let result = doc_to_string(generate_list_bif("detect:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'detect'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_detect_if_none() {
+        let result = doc_to_string(generate_list_bif(
+            "detect:ifNone:",
+            &["Block".to_string(), "Default".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'detect_if_none'(Self, Block, Default)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_do() {
+        let result = doc_to_string(generate_list_bif("do:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'do'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_collect() {
+        let result = doc_to_string(generate_list_bif("collect:", &["Block".to_string()]));
+        assert_eq!(result, Some("call 'lists':'map'(Block, Self)".to_string()));
+    }
+
+    #[test]
+    fn test_select() {
+        let result = doc_to_string(generate_list_bif("select:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'lists':'filter'(Block, Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_reject() {
+        let result = doc_to_string(generate_list_bif("reject:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'reject'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_inject_into() {
+        let result = doc_to_string(generate_list_bif(
+            "inject:into:",
+            &["Init".to_string(), "Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_collection':'inject_into'(Self, Init, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_take() {
+        let result = doc_to_string(generate_list_bif("take:", &["N".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'take'(Self, N)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_drop() {
+        let result = doc_to_string(generate_list_bif("drop:", &["N".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'drop'(Self, N)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_flatten() {
+        let result = doc_to_string(generate_list_bif("flatten", &[]));
+        assert_eq!(result, Some("call 'lists':'flatten'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_flat_map() {
+        let result = doc_to_string(generate_list_bif("flatMap:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'lists':'flatmap'(Block, Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_count() {
+        let result = doc_to_string(generate_list_bif("count:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'length'(call 'lists':'filter'(Block, Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_any_satisfy() {
+        let result = doc_to_string(generate_list_bif("anySatisfy:", &["Block".to_string()]));
+        assert_eq!(result, Some("call 'lists':'any'(Block, Self)".to_string()));
+    }
+
+    #[test]
+    fn test_all_satisfy() {
+        let result = doc_to_string(generate_list_bif("allSatisfy:", &["Block".to_string()]));
+        assert_eq!(result, Some("call 'lists':'all'(Block, Self)".to_string()));
+    }
+
+    // Misc ops
+
+    #[test]
+    fn test_zip() {
+        let result = doc_to_string(generate_list_bif("zip:", &["Other".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'zip'(Self, Other)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_group_by() {
+        let result = doc_to_string(generate_list_bif("groupBy:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'group_by'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_partition() {
+        let result = doc_to_string(generate_list_bif("partition:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'partition'(Self, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_take_while() {
+        let result = doc_to_string(generate_list_bif("takeWhile:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'lists':'takewhile'(Block, Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_drop_while() {
+        let result = doc_to_string(generate_list_bif("dropWhile:", &["Block".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'lists':'dropwhile'(Block, Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_intersperse() {
+        let result = doc_to_string(generate_list_bif("intersperse:", &["Sep".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'intersperse'(Self, Sep)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_add_first() {
+        let result = doc_to_string(generate_list_bif("addFirst:", &["Item".to_string()]));
+        assert_eq!(result, Some("[Item|Self]".to_string()));
+    }
+
+    #[test]
+    fn test_add() {
+        let result = doc_to_string(generate_list_bif("add:", &["Item".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'++'(Self, [Item|[]])".to_string())
+        );
+    }
+
+    #[test]
+    fn test_concat() {
+        let result = doc_to_string(generate_list_bif("++", &["Other".to_string()]));
+        assert_eq!(result, Some("call 'erlang':'++'(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_from_to() {
+        let result = doc_to_string(generate_list_bif(
+            "from:to:",
+            &["Start".to_string(), "End".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'from_to'(Self, Start, End)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_print_string() {
+        let result = doc_to_string(generate_list_bif("printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_stream() {
+        let result = doc_to_string(generate_list_bif("stream", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_stream':'on'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_at_random() {
+        let result = doc_to_string(generate_list_bif("atRandom", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_random':'atRandom'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_join() {
+        let result = doc_to_string(generate_list_bif("join", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'iolist_to_binary'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_join_with_sep() {
+        let result = doc_to_string(generate_list_bif("join:", &["Sep".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'iolist_to_binary'(call 'lists':'join'(Sep, Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_with_all_factory() {
+        let result = doc_to_string(generate_list_bif("withAll:", &["List".to_string()]));
+        assert_eq!(result, Some("List".to_string()));
+    }
+
+    // Edge cases
+
+    #[test]
+    fn test_unknown_selector_returns_none() {
+        assert_eq!(doc_to_string(generate_list_bif("notAMethod", &[])), None);
+    }
+}
