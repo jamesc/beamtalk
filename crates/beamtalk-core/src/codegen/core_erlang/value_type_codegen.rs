@@ -11,7 +11,7 @@
 
 use std::fmt::Write as FmtWrite;
 
-use super::document::{Document, concat};
+use super::document::{Document, concat, join};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -239,7 +239,7 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Module header with all attributes
-        docs.push(self.build_value_type_module_header(module, class, &exports));
+        docs.push(self.build_value_type_module_header(module, class, exports));
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
@@ -293,11 +293,7 @@ impl CoreErlangGenerator {
         docs.push(Document::Str("\n"));
 
         // Generate superclass/0 for reflection
-        let superclass_atom = class.superclass.as_ref().map_or("nil", |s| s.name.as_str());
-        docs.push(docvec![
-            format!("'superclass'/0 = fun () -> '{superclass_atom}'\n"),
-            "\n",
-        ]);
+        docs.push(self.generate_superclass_function(module)?);
 
         // BT-411: Generate class-side method functions
         if !class.class_methods.is_empty() {
@@ -352,69 +348,84 @@ impl CoreErlangGenerator {
         auto_methods: Option<&AutoSlotMethods>,
         has_explicit_new: bool,
         has_explicit_new_with: bool,
-    ) -> Vec<String> {
-        let mut exports = Vec::new();
+    ) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
         // new/0 is always needed: either the default constructor or a delegating one
         if !has_explicit_new {
-            exports.push("'new'/0".to_string());
+            parts.push(Document::Str("'new'/0"));
         }
         // new/1 (the keyword new: constructor, or the auto-generated initializer) is
         // suppressed if the class explicitly defines either new: (keyword, which emits
         // 'new'/1 itself) OR unary new (which also emits 'new'/1 via Self parameter).
         if !has_explicit_new_with && !has_explicit_new {
-            exports.push("'new'/1".to_string());
+            parts.push(Document::Str("'new'/1"));
         }
 
         // Add instance method exports (each takes Self as first parameter)
         for method in &class.methods {
             let arity = method.parameters.len() + 1; // +1 for Self parameter
             let mangled = method.selector.to_erlang_atom();
-            exports.push(format!("'{mangled}'/{arity}"));
+            parts.push(docvec![
+                "'",
+                Document::String(mangled),
+                "'/",
+                Document::String(arity.to_string()),
+            ]);
         }
 
         // BT-923: Auto-generated getter and with*: setter exports for Value subclass:
         if let Some(auto) = auto_methods {
             for field in &auto.getters {
-                exports.push(format!("'{field}'/1"));
+                parts.push(docvec!["'", Document::String(field.clone()), "'/1"]);
             }
             for field in &auto.setters {
                 let with_sel = AutoSlotMethods::with_star_selector(field);
-                exports.push(format!("'{with_sel}'/2"));
+                parts.push(docvec!["'", Document::String(with_sel), "'/2"]);
             }
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let num_slots = class.state.len();
                 let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
                 // BT-1408: Hash long keyword constructor atoms to stay within Erlang's 255-char atom limit.
                 let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
-                exports.push(format!("'{safe_fn}'/{arity}"));
+                parts.push(docvec![
+                    "'",
+                    Document::String(safe_fn),
+                    "'/",
+                    Document::String(arity.to_string()),
+                ]);
             }
         }
 
         // All value types export dispatch/3 and has_method/1
         // for runtime dispatch via superclass delegation chain
-        exports.push("'dispatch'/3".to_string());
+        parts.push(Document::Str("'dispatch'/3"));
         // BT-446: All value types also export dispatch/4 for actor hierarchy walk.
-        exports.push("'dispatch'/4".to_string());
-        exports.push("'has_method'/1".to_string());
+        parts.push(Document::Str("'dispatch'/4"));
+        parts.push(Document::Str("'has_method'/1"));
 
         // All classes export superclass/0 for reflection
-        exports.push("'superclass'/0".to_string());
+        parts.push(Document::Str("'superclass'/0"));
 
         // BT-246: Value types register with class system for dynamic dispatch
-        exports.push("'register_class'/0".to_string());
+        parts.push(Document::Str("'register_class'/0"));
 
         // BT-942: Static reflection metadata for zero-process queries
-        exports.push("'__beamtalk_meta'/0".to_string());
+        parts.push(Document::Str("'__beamtalk_meta'/0"));
 
         // BT-411: Class method exports
         for method in &class.class_methods {
             if method.kind == MethodKind::Primary {
                 let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
-                exports.push(format!("'class_{}'/{arity}", method.selector.name()));
+                parts.push(docvec![
+                    "'class_",
+                    Document::Eco(method.selector.name()),
+                    "'/",
+                    Document::String(arity.to_string()),
+                ]);
             }
         }
 
-        exports
+        join(parts, &Document::Str(", "))
     }
 
     /// Builds the Core Erlang `module 'Name' [...] attributes [...]` header document.
@@ -425,7 +436,7 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
         class: &ClassDefinition,
-        exports: &[String],
+        exports: Document<'static>,
     ) -> Document<'static> {
         // BT-586: Generate spec attributes from type annotations
         let spec_attrs = spec_codegen::generate_class_specs(class, true);
@@ -451,7 +462,11 @@ impl CoreErlangGenerator {
 
         let module_name = self.module_name.clone();
         docvec![
-            format!("module '{}' [{}]\n", module_name, exports.join(", ")),
+            "module '",
+            Document::Eco(module_name),
+            "' [",
+            exports,
+            "]\n",
             "  attributes ['on_load' = [{'register_class', 0}]",
             beamtalk_class_attr,
             file_attr,
