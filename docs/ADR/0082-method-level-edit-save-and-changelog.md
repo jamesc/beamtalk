@@ -82,7 +82,7 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 | `Counter >> #selector` (reader form) | n/a — pure read | not logged |
 | `load-source` of an existing class | ephemeral by default (legacy browser internal op) | not logged unless `intent: "save"` parameter set |
 
-`author_kind` (`human` / `agent`) is recorded on every entry as **audit metadata**, not as a filter. `Workspace dirty` defaults to *all* logged entries regardless of author — an agent that ran `Workspace newClass:at:` for ten new test files produces ten visible dirty entries, because those files are the deliverable.
+`author_kind` (`human` / `agent`) is recorded on every entry as **audit metadata**, not as a filter. The pending change set (`Workspace changes`) includes *all* logged entries regardless of author — an agent that ran `Workspace newClass:at:` for ten new test files produces ten visible entries in `Workspace changes`, because those files are the deliverable.
 
 **No new workspace-side REPL ops.** All operations described below are Beamtalk method calls submitted via the existing `evaluate` REPL op. MCP tools, LSP `executeCommand` handlers, REPL meta-commands, and browser actions are all *client-side* structured wrappers that construct the Beamtalk expression and submit it via `evaluate`. The workspace dispatcher does not learn new op names. See *Implementation* for the rationale.
 
@@ -114,9 +114,8 @@ A class is **flushable** iff `sourceFile` is non-nil **and** the source file lie
 | **`Behaviour` metaclass** | `Counter >> #selector` (existing reader form, ADR 0066) — pure read, returns CompiledMethod | tab-completion, inspector |
 | **`Workspace`** | `Workspace newClass: source at: path` (new) — durable new-class creation, logged as `kind: "new-class"` | MCP `save_class`, browser "New File", REPL |
 | **`Workspace`** | `Workspace flush`, `Workspace flush: aClass` | MCP `flush`, REPL `:flush`, LSP `executeCommand`, browser "Save All" |
-| **`Workspace`** | `Workspace dirty` | MCP `dirty` (boolean), REPL `:dirty`, browser dirty indicator |
-| **`Workspace`** | `Workspace changes` — returns the ChangeLog object | MCP `list_changes`, REPL `:changes`, browser ChangeLog viewer |
-| **`ChangeLog`** (returned by `Workspace changes`) | `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:` | MCP `dirty_methods` ≡ `Workspace changes dirtyMethods`; browser ChangeLog UI; REPL `Workspace changes <verb>` |
+| **`Workspace`** | `Workspace changes` — returns the ChangeLog object (gateway for all pending-state queries) | MCP `list_changes`, MCP `dirty`, REPL `:changes`, REPL `:dirty`, browser ChangeLog viewer, browser dirty indicator |
+| **`ChangeLog`** (returned by `Workspace changes`) | `size`, `isEmpty`, `notEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:` | "Is anything dirty?" is `Workspace changes notEmpty`; "what's dirty?" is `Workspace changes dirtyMethods`; MCP `dirty` ≡ `Workspace changes notEmpty`; MCP `dirty_methods` ≡ `Workspace changes dirtyMethods` |
 
 The `compile:source:` / `tryCompile:source:` distinction matters for implementation: tools take the body as a **value** (a Beamtalk String passed through the eval pipeline), not as a substring concatenated into a `>>` expression. Building a `>>` source string and re-parsing would require escaping the body to be valid Beamtalk source — fragile, breaks on quote chars, multi-line bodies, etc. Calling `compile:source:` directly bypasses the string-roundtrip and passes the body value end-to-end.
 
@@ -126,7 +125,7 @@ The `compile:source:` / `tryCompile:source:` distinction matters for implementat
 |---------|-----|-------------|
 | REPL meta-command | `:flush`, `:flush <Class>` | `Workspace flush` / `Workspace flush: aClass` |
 | REPL meta-command | `:changes` | `Workspace changes` |
-| REPL meta-command | `:dirty` | `Workspace dirty` |
+| REPL meta-command | `:dirty` | `Workspace changes notEmpty` |
 | MCP | `save_method` | `aClass compile: aSym source: body` |
 | MCP | `save_class` | `Workspace newClass: source at: path` |
 | MCP | `try_method` | `aClass tryCompile: aSym source: body` |
@@ -139,23 +138,23 @@ The `compile:source:` / `tryCompile:source:` distinction matters for implementat
 | Browser | "New File" | `Workspace newClass: source at: path` |
 | Browser | "Save All to Disk" | `Workspace flush` |
 
-**Workspace facade vs ChangeLog object.** The Workspace facade follows Pharo's `Smalltalk changes` idiom: it carries six methods (`flush`, `flush:`, `dirty`, `changes`, `newClass:at:`, plus the patch verbs that delegate to `Behaviour`). Detailed introspection lives *on* the ChangeLog returned by `Workspace changes` — `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. This keeps the facade small while giving the ChangeLog full collection-protocol navigation.
+**Workspace facade vs ChangeLog object.** The Workspace facade follows Pharo's `Smalltalk changes` idiom and stays minimal: four methods total (`flush`, `flush:`, `changes`, `newClass:at:`). All pending-state queries — *is anything dirty?*, *what's dirty?*, *revert this one*, *clear them all* — live on the ChangeLog returned by `Workspace changes`, which carries the full collection protocol (`size`, `isEmpty`, `notEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`). The previously-proposed convenience method `Workspace dirty` was dropped in favour of `Workspace changes notEmpty` — composes from existing primitives, makes the model explicit (there's a changeset, you're querying it), no capability lost.
 
 ### REPL session (human, patching existing class)
 
 ```beamtalk
 > Counter >> increment => self.value := self.value + 1
 => a CompiledMethod (#increment in Counter)        // memory patched
-> Workspace dirty
-=> true
 > Workspace changes
 => a ChangeLog with 1 entry
+> Workspace changes notEmpty
+=> true
 > Workspace changes dirtyMethods
 => #{Counter -> #{#increment}}
 > Workspace flush
 => flushed 1 method across 1 file
-> Workspace dirty
-=> false
+> Workspace changes isEmpty
+=> true
 ```
 
 ### MCP agent session (spike, then commit new test + impl)
@@ -187,7 +186,7 @@ mcp> save_class(source: "<DoubleCounter source>", target: "src/double_counter.bt
 => ChangeEntry logged (kind: new-class)
 
 // 5. Human reviews and flushes — same operations, no tool needed
-> Workspace dirty
+> Workspace changes notEmpty
 => true
 > Workspace changes dirtyMethods
 => #{Counter -> #{#doubled},
@@ -234,9 +233,9 @@ mcp> save_class(source: "<DoubleCounter source>", target: "src/double_counter.bt
 | Multi-client (two browsers) | Last-writer-wins on memory install. Both clients' ChangeEntries land in the log; on flush, the second client's entry shadows the first for the same method. Each browser session observes the dirty set and shows "modified by another session" when its local view drifts. |
 | ChangeLog format | Append-only JSON-Lines under workspace data dir: `<workspace>/changes.jsonl`. Each entry: `{ts, epoch, class, selector, kind: "instance"\|"class"\|"new-class", source, prev_source, sourceFile, span: {start, end} \| null, author, author_kind: "human"\|"agent", intent: "save"\|"new"}`. `new-class` entries have `span: null` and `prev_source: null`. The `author_kind` enum is intentionally open — additional kinds may be added in future revisions (e.g. for test-fixture patching) without breaking the format. Survives workspace restart. |
 | ChangeLog growth | Bounded ring of last N=1000 entries by default. Older entries archived to `changes-<timestamp>.jsonl.gz` on flush. `human` and `agent` entries are retained on equal footing — both represent durable intent and are pruned only by the ring bound. |
-| Orphan entries on restart | The ChangeLog persists across workspace restart; the BEAM module state does not. On startup, the workspace assigns a new `epoch` and tags every pre-existing entry as belonging to a prior epoch. Entries whose `prev_source` no longer matches the current on-disk content are tagged `orphan` (the disk advanced via VSCode/git/another flush while the workspace was down). Both prior-epoch and orphan entries are **excluded from `Workspace dirty` by default** — their memory state was lost on restart and the patches are no longer installed. They remain in the log for audit and inspection (`Workspace changes select: [:e \| e isOrphan]`); a `Workspace changes pruneOrphans` operation discards them on demand. Auto-prune-on-startup is opt-in via a workspace setting. |
+| Orphan entries on restart | The ChangeLog persists across workspace restart; the BEAM module state does not. On startup, the workspace assigns a new `epoch` and tags every pre-existing entry as belonging to a prior epoch. Entries whose `prev_source` no longer matches the current on-disk content are tagged `orphan` (the disk advanced via VSCode/git/another flush while the workspace was down). Both prior-epoch and orphan entries are **excluded from the active `Workspace changes` view by default** — their memory state was lost on restart and the patches are no longer installed, so `Workspace changes notEmpty` returns `false` for these alone. They remain in the underlying log for audit and inspection via `Workspace changes includingOrphans` (`select: [:e \| e isOrphan]`); a `Workspace changes pruneOrphans` operation discards them on demand. Auto-prune-on-startup is opt-in via a workspace setting. |
 | File relocation / deletion at flush | External-edit detection catches *content* changes via `(mtime, content-hash)`. A *path* change (file moved or deleted between patch and flush) surfaces as a `flush` error with a distinct conflict kind: "source file relocated or deleted." The user chooses: `Workspace changes relocate: aClass to: newPath` to update the entries' `sourceFile`, `Workspace changes clear: aClass` to discard, or `Workspace diff: aClass` to inspect. The entry is not auto-rewritten — relocation requires explicit human confirmation because the new path may be the wrong one. |
-| Intent vs author | Intent is signalled by the **method chosen**, not the caller: `compile:source:` and `newClass:at:` always log; `tryCompile:source:` never logs; the `>>` parser form desugars to `compile:source:` (no ephemeral mode in `>>` syntax — humans who want an ephemeral patch use `tryCompile:source:` directly or `Workspace changes clear` after). `author_kind` is **audit metadata** — it tells us *who* made a logged change, not whether it counts as dirty. `Workspace dirty` and `Workspace flush` include all logged entries by default; the ChangeLog's `flushKinds:` selector filters by `author_kind` for selective flushing if needed (e.g., `Workspace changes flushKinds: #{agent}` to commit an agent batch separately from human changes). |
+| Intent vs author | Intent is signalled by the **method chosen**, not the caller: `compile:source:` and `newClass:at:` always log; `tryCompile:source:` never logs; the `>>` parser form desugars to `compile:source:` (no ephemeral mode in `>>` syntax — humans who want an ephemeral patch use `tryCompile:source:` directly or `Workspace changes clear` after). `author_kind` is **audit metadata** — it tells us *who* made a logged change, not whether it counts as pending. `Workspace changes` and `Workspace flush` include all logged entries by default; the ChangeLog's `flushKinds:` selector filters by `author_kind` for selective flushing if needed (e.g., `Workspace changes flushKinds: #{agent}` to commit an agent batch separately from human changes). |
 | New-class flush | When flushing a `new-class` entry, the splice operation is "write `source` to `targetPath`" (no byte-span surgery; the file doesn't exist yet). External-edit detection still applies: if `targetPath` was created externally between the `newClass:at:` call and flush, the conflict surfaces with the same force/discard/diff choice. Subsequent `compile:source:` patches against a not-yet-flushed new class produce additional entries that replay in order at flush — the `new-class` entry writes first, then later method-patch entries splice into the just-written file. |
 | Undo | `Workspace changes revert: aMethod` re-installs `prev_source` from the most recent ChangeEntry for that method and appends a new revert entry (revert is itself a patch, not log mutation). Revert is only possible for flushable classes — ephemeral memory-only patches against stdlib/dependencies are not recorded and therefore not revertible. |
 | Release builds | No-op. Release nodes do not start a workspace; ChangeLog code is in `beamtalk_workspace`, not `beamtalk_runtime`. |
@@ -325,7 +324,7 @@ The two-stage model (stage with `git add`, commit with `git commit`) is the clos
 ### Production operator
 
 - ChangeLog is an **audit trail**: every in-memory patch is recorded with timestamp and author (REPL session, MCP tool name, browser session id).
-- "Was this fix flushed or is it still in memory?" has a definitive answer (`Workspace dirty`).
+- "Was this fix flushed or is it still in memory?" has a definitive answer (`Workspace changes notEmpty`, or inspect `Workspace changes` for the per-method breakdown).
 - Workspace restart loses unflushed patches — this is *desirable* in production: emergency in-memory fixes do not silently become permanent.
 
 ### Tooling developer (LSP/IDE)
@@ -411,7 +410,7 @@ See steelman above. Pharo's Monticello uses overlay files for package deltas wit
 - Two-step save is unusual for editor users; mitigated by `autoflush: true` and visible "Save All" UI.
 - Byte-span splice depends on the parser correctly resolving every method's span against arbitrary `.bt` files. Phase 0 exists to validate this against the stdlib+examples corpus before any flush code is written. If Phase 0 fails, the design pivots.
 - ChangeLog growth on long-lived workspaces requires pruning policy. Human and agent entries are pruned equally by the 1000-entry ring; test entries are pruned aggressively (200) since they are audit-only.
-- Two MCP tools (`try_method` ephemeral, `save_method` durable) means agents must choose the right one. Documented in MCP tool descriptions; the typical agent flow is "try → evaluate → save," and getting it wrong produces visible drift between `Workspace dirty` and what the agent intended.
+- Two MCP tools (`try_method` ephemeral, `save_method` durable) means agents must choose the right one. Documented in MCP tool descriptions; the typical agent flow is "try → evaluate → save," and getting it wrong produces visible drift between `Workspace changes` and what the agent intended.
 - Multi-client coordination is last-writer-wins; concurrent edits to the same method by two users will lose one — observable but not prevented.
 - Autoflush is best-effort consistency, not transactional. On flush failure under autoflush, memory and disk diverge and require manual reconciliation. This is documented behaviour, not a bug to fix — the alternative (rolling back the BEAM module install) is unsound when live actors hold references to the new closures.
 - Multi-file flush failure leaves a mixed state across files even after the two-phase protocol — Phase B renames are sequential, and a hard I/O error mid-sequence means some files renamed and some did not. The user gets a per-file status report and can re-flush; entries for already-renamed files are pruned, entries for failed files remain.
@@ -441,7 +440,7 @@ See steelman above. Pharo's Monticello uses overlay files for package deltas wit
 | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_changelog.erl` (new) | Gen_server owning the append-only ChangeLog. ETS for live state, JSON-Lines on disk. Exposed via the `Workspace` facade per ADR 0040. Lives in the workspace context, not REPL, because it's consumed cross-surface. |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | **No changes — no new workspace-side ops.** All operations are reached via the existing `evaluate` op, which receives a Beamtalk expression constructed by the calling layer (MCP / LSP / REPL CLI / browser). See *Rationale: why no new REPL ops* below. |
-| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `dirty`, `changes` (returns ChangeLog), `newClass:at:`. Detailed operations live *on* the returned ChangeLog object — matches Pharo's `Smalltalk changes` idiom. |
+| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `changes` (returns ChangeLog), `newClass:at:`. Four methods total — pending-state queries live on the ChangeLog object (`changes notEmpty`, `changes dirtyMethods`, etc.), matching Pharo's `Smalltalk changes` idiom. |
 | `stdlib/src/Behaviour.bt` | Two new class-side methods: `compile: aSym source: aString` (durable, logs) and `tryCompile: aSym source: aString` (ephemeral, no log). `compile:source:` is the underlying primitive that the existing `>>` patcher form desugars to (ADR 0066 parser rule updated). Both share the same compile-and-install path; only `compile:source:` emits a ChangeEntry. MCP tools call these directly with body values, avoiding fragile string-construction of `>>` expressions. |
 | `stdlib/src/ChangeLog.bt` (new) | The navigable ChangeLog object: `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. Backed by `beamtalk_workspace_changelog.erl` via FFI. |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands: `:flush`, `:flush <Class>`, `:changes`, `:dirty`. Each is a CLI-side shortcut that constructs the equivalent Beamtalk expression (e.g. `:flush` → `Workspace flush`) and submits via the existing `evaluate` op — no new workspace-side dispatch. |
@@ -456,7 +455,7 @@ See steelman above. Pharo's Monticello uses overlay files for package deltas wit
 | Phase | Scope | Effort | Tests |
 |-------|-------|--------|-------|
 | **0** | **Validation spike** (internal scaffolding, not user-facing). Implement the byte-span resolver and prove it against the entire stdlib + examples corpus: parse, locate every method's span, re-serialise file with a no-op span replacement, and assert byte-identical output. This is the load-bearing assumption of the design — validate it before building anything else. | S | Corpus round-trip tests in `crates/beamtalk-core/src/source_analysis/`. |
-| **1** | ChangeLog gen_server + JSON-Lines persistence + `Workspace changes` / `dirty` / `dirtyMethods`. Hooks into `beamtalk_extensions.erl`. No flush yet. `author_kind` plumbing through REPL/MCP. | M | EUnit tests for the gen_server; BUnit tests for the `Workspace` facade reads. |
+| **1** | ChangeLog gen_server + JSON-Lines persistence + `Workspace changes` (returns ChangeLog object) + ChangeLog collection protocol (`isEmpty`, `notEmpty`, `size`, `do:`, `select:`, `dirtyMethods`). Hooks into `beamtalk_extensions.erl`. No flush yet. `author_kind` plumbing through REPL/MCP. | M | EUnit tests for the gen_server; BUnit tests for `Workspace changes` and the ChangeLog collection methods. |
 | **2** | `Workspace flush` + `flush:` + single-file atomic temp+rename + multi-file two-phase (Phase A all writes, Phase B all renames) + external-edit detection. Pruning rules implemented. | M | EUnit tests for atomicity (kill the process between phases); BUnit tests for the facade. |
 | **3** | MCP tools (`save_method`, `save_class`, `try_method`, `flush`, `list_changes`, `dirty_methods`) implemented as expression-building wrappers over the existing `evaluate` op; LSP `executeCommand` handlers (`flush`, `save_class`) same pattern; REPL meta-commands (`:flush`, `:changes`, `:dirty`) construct expressions CLI-side; browser "Save" / "New File" / "Save All" actions same pattern. **No workspace-side REPL ops added.** Surface-parity table updated to recognise expression-backed tools as parity-compliant. | M | MCP integration tests for try→save promotion; browser e2e for Save and New File; LSP command tests; surface-parity drift check passes. |
 | **4** | ChangeLog object operations (`revert:`, `clear`, `flushKinds:`, `do:`, `select:`) + `autoflush` workspace setting. ChangeLog browsing UI in the browser workspace. | S | BUnit tests for revert and ChangeLog navigation; e2e for autoflush. |
@@ -503,9 +502,9 @@ This ADR covers **patch** (existing method) and **create** (new class file). The
 
 No user code changes required. Existing `>>` patches continue to work identically — they now additionally append to the ChangeLog (silently, until the user looks).
 
-For users who today rely on workspace-restart wiping memory patches (intentional ephemerality): behaviour is preserved. The ChangeLog persists across restart but memory does not; on restart, disk wins, and the ChangeLog contents become orphaned entries (patches whose "memory state" is no longer installed). Per *Orphan entries on restart* in Cross-cutting decisions, the workspace assigns a fresh `epoch` on startup and excludes prior-epoch entries from `Workspace dirty` automatically — the user does not need to manually clear unless they want the entries pruned from the audit log.
+For users who today rely on workspace-restart wiping memory patches (intentional ephemerality): behaviour is preserved. The ChangeLog persists across restart but memory does not; on restart, disk wins, and the ChangeLog contents become orphaned entries (patches whose "memory state" is no longer installed). Per *Orphan entries on restart* in Cross-cutting decisions, the workspace assigns a fresh `epoch` on startup and excludes prior-epoch entries from the active `Workspace changes` view automatically — the user does not need to manually clear unless they want the entries pruned from the audit log.
 
-For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "Workspace dirty" indicator and a "Flush" command surface as a phase-3 deliverable.
+For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending changes" indicator (computed from `Workspace changes notEmpty`) and a "Flush" command surface as a phase-3 deliverable.
 
 ## References
 
