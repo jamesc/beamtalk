@@ -115,56 +115,104 @@ WRAPPER
       export PATH="${WRAPPER_DIR}:${PATH}"
     fi
 
-    _NODE_OPTS_LINE="case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac"
+    # Persisted NODE_OPTIONS snippet: guarded by a runtime Node-version probe
+    # so a future shell on a Node <22.21 (no --use-env-proxy support) doesn't
+    # break with "bad option" on every node/npm invocation.
+    _NODE_OPTS_BLOCK='if command -v node >/dev/null 2>&1; then
+  _hb_node_major=$(node -p "process.versions.node.split(\".\")[0]" 2>/dev/null || echo 0)
+  if [[ "${_hb_node_major}" =~ ^[0-9]+$ ]] && (( _hb_node_major >= 22 )); then
+    case " ${NODE_OPTIONS:-} " in
+      *" --use-env-proxy "*) ;;
+      *) export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--use-env-proxy" ;;
+    esac
+  fi
+  unset _hb_node_major
+fi'
     _EXTRA_EXPORT_LINES="export PATH=\"${WRAPPER_DIR}:\${PATH}\"
-${_NODE_OPTS_LINE}"
+${_NODE_OPTS_BLOCK}"
   fi
 
   # --- Persist proxy env vars to shell configs ---
-  # HEX_CDN is always exported. PATH/NODE_OPTIONS lines only when HTTP_PROXY
+  # HEX_CDN is always exported. PATH / Node-options block only when HTTP_PROXY
   # is set (mode 1) — they're no-ops in the cloud-sandbox-only mode.
+  #
+  # The block is delimited by START_MARKER / END_MARKER so we can replace it
+  # atomically when upgrading from cloud-only to auth-proxy mode (or vice
+  # versa). The previous sed-append backfill could only add the NODE_OPTIONS
+  # line and never inserted the wrapper PATH, leaving httpc routing localhost
+  # through the proxy after an upgrade.
   _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
+  _END_MARKER="# hex-bridge-proxy END"
   _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\""
   if [[ -n "${_EXTRA_EXPORT_LINES}" ]]; then
     _EXPORT_BLOCK="${_EXPORT_BLOCK}
 ${_EXTRA_EXPORT_LINES}"
   fi
 
+  # Sentinel inside the block lets us cheaply detect mode mismatches without
+  # diffing the whole content. "wrapper-path" appears only in auth-proxy mode.
+  if (( _HAS_AUTH_PROXY )); then
+    _MODE_SENTINEL="wrapper-path"
+  else
+    _MODE_SENTINEL="cdn-only"
+  fi
+  _FULL_BLOCK="${_MARKER} (${_MODE_SENTINEL})
+${_EXPORT_BLOCK}
+${_END_MARKER}"
+
+  # _hb_install_block FILE PREPEND  — write/replace the marked block in FILE.
+  # When PREPEND=1, a freshly-added block is inserted at the top (bashrc needs
+  # this so it runs before the non-interactive guard). Otherwise appended.
+  _hb_install_block() {
+    local file="$1" prepend="$2"
+    [[ -f "${file}" ]] || : > "${file}"
+    if grep -qF "${_MARKER}" "${file}" 2>/dev/null; then
+      # Already present — replace only if the mode sentinel doesn't match.
+      if grep -qF "${_MARKER} (${_MODE_SENTINEL})" "${file}" 2>/dev/null; then
+        return 0
+      fi
+      # Strip existing block (start through end marker) and re-insert.
+      local tmp
+      tmp="$(mktemp)"
+      awk -v start="${_MARKER}" -v endm="${_END_MARKER}" '
+        index($0, start) == 1 { skip = 1; next }
+        skip && index($0, endm) == 1 { skip = 0; next }
+        !skip { print }
+      ' "${file}" > "${tmp}"
+      if (( prepend )); then
+        { printf '%s\n\n' "${_FULL_BLOCK}"; cat "${tmp}"; } > "${file}"
+      else
+        { cat "${tmp}"; printf '\n%s\n' "${_FULL_BLOCK}"; } > "${file}"
+      fi
+      rm -f "${tmp}"
+      echo "Replaced hex-bridge block in ${file} (now: ${_MODE_SENTINEL})"
+    else
+      if (( prepend )); then
+        local tmp
+        tmp="$(mktemp)"
+        { printf '%s\n\n' "${_FULL_BLOCK}"; cat "${file}"; } > "${tmp}"
+        mv "${tmp}" "${file}"
+        echo "Added hex-bridge block to ${file} (mode: ${_MODE_SENTINEL})"
+      else
+        printf '\n%s\n' "${_FULL_BLOCK}" >> "${file}"
+        echo "Added hex-bridge block to ${file} (mode: ${_MODE_SENTINEL})"
+      fi
+    fi
+  }
+
   # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
   # Always overwrite — this file is entirely ours. Best-effort (|| true).
   _PROFILED="/etc/profile.d/hex-bridge.sh"
   cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK || true
-${_MARKER}
-${_EXPORT_BLOCK}
+${_FULL_BLOCK}
 PROFBLOCK
 
   # Method 2: ~/.bashrc — insert BEFORE the non-interactive guard
-  if ! grep -qF "${_MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
-    # Ensure ~/.bashrc exists (may be absent in minimal images)
-    [[ -f "${HOME}/.bashrc" ]] || : > "${HOME}/.bashrc"
-    _TMPRC="$(mktemp)"
-    { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
-    mv "${_TMPRC}" "${HOME}/.bashrc"
-    echo "Added hex-bridge PATH to ~/.bashrc (before non-interactive guard)"
-  elif (( _HAS_AUTH_PROXY )) && ! grep -qF "use-env-proxy" "${HOME}/.bashrc" 2>/dev/null; then
-    # Backfill: marker exists from a previous run but NODE_OPTIONS line is missing
-    sed -i "/${_MARKER//\//\\/}/a ${_NODE_OPTS_LINE}" "${HOME}/.bashrc" 2>/dev/null || true
-    echo "Backfilled NODE_OPTIONS into ~/.bashrc"
-  fi
+  _hb_install_block "${HOME}/.bashrc" 1
 
   # Method 3: ~/.zshenv (always sourced by zsh, even non-interactive)
   if [[ "$(basename "${SHELL:-bash}")" == "zsh" ]]; then
-    if ! grep -qF "${_MARKER}" "${HOME}/.zshenv" 2>/dev/null; then
-      cat >> "${HOME}/.zshenv" << ZBLOCK
-
-${_MARKER}
-${_EXPORT_BLOCK}
-ZBLOCK
-      echo "Added hex-bridge PATH to ~/.zshenv"
-    elif (( _HAS_AUTH_PROXY )) && ! grep -qF "use-env-proxy" "${HOME}/.zshenv" 2>/dev/null; then
-      sed -i "/${_MARKER//\//\\/}/a ${_NODE_OPTS_LINE}" "${HOME}/.zshenv" 2>/dev/null || true
-      echo "Backfilled NODE_OPTIONS into ~/.zshenv"
-    fi
+    _hb_install_block "${HOME}/.zshenv" 0
   fi
 fi
 
