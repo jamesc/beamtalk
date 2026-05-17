@@ -39,6 +39,7 @@
 - Centralize byte-offset→line-number logic into `Span::line_number`, removing duplicate implementations from codegen and MCP server (BT-2160).
 - Extract duplicate `build.rs` version-injection logic into shared `beamtalk-build` workspace crate — single source of truth for `BEAMTALK_VERSION` emission (BT-2172).
 - Replace 5 `format!()` calls with `fresh_temp_var` / `write!` in `repl/codegen.rs` and `value_type_codegen.rs` — continues the BT-875 cleanup (BT-2175).
+- Extract shared `parse_and_check_expression` helper in compiler-port — deduplicates ~20-line lex/parse/validate preamble from `handle_compile_expression` and `handle_compile_expression_trace` (BT-2178).
 
 ## 0.4.0 — 2026-04-27
 
