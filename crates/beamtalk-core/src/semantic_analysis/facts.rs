@@ -846,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_facts_class_methods_indexed_in_class_facts() {
+    fn compute_facts_instance_methods_indexed_in_class_facts() {
         let method = MethodDefinition::new(
             MessageSelector::Unary("getValue".into()),
             vec![],
@@ -866,6 +866,32 @@ mod tests {
             .expect("Counter should have class facts");
         assert!(cf.has_instance_method("getValue"));
         assert_eq!(cf.instance_method_index("getValue"), Some(0));
+    }
+
+    #[test]
+    fn compute_facts_class_side_methods_indexed_in_class_facts() {
+        // class_methods (class-side) indexing is a separate branch in compute_semantic_facts
+        let class_method = MethodDefinition::new(
+            MessageSelector::Unary("withDefault".into()),
+            vec![],
+            vec![bare(lit(0))],
+            ts(),
+        );
+        let mut class = ClassDefinition::new(
+            Identifier::new("Counter", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![],
+            ts(),
+        );
+        class.class_methods.push(class_method);
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+        let cf = facts
+            .class_facts("Counter")
+            .expect("Counter should have class facts");
+        assert!(cf.has_class_method("withDefault"));
+        assert_eq!(cf.class_method_index("withDefault"), Some(0));
+        assert!(!cf.has_instance_method("withDefault"));
     }
 
     #[test]
