@@ -559,7 +559,7 @@ test-runtime: build-stdlib
     #!/usr/bin/env bash
     set -eo pipefail
     echo "🧪 Running Erlang runtime unit tests..."
-    if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 rebar3 eunit --cover=false --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
+    if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 rebar3 eunit --cover=false --app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler 2>&1); then
         echo "$OUTPUT" | tail -2
     else
         echo "$OUTPUT"
@@ -577,7 +577,7 @@ test-runtime: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @$env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--cover=false' '--app=beamtalk_runtime,beamtalk_workspace' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--cover=false' '--app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @$env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
@@ -642,7 +642,7 @@ coverage-runtime: build-stdlib
     # Run 1: runtime + workspace tests.
     # bt@*.beam files are findable via apps/beamtalk_stdlib/ebin/ (project app ebin
     # stays on the code path when beamtalk_stdlib is not listed as an explicit --app).
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover 2>&1); then
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler --cover 2>&1); then
         echo "$OUTPUT"
         echo "❌ EUnit tests (runtime+workspace) failed"
         exit 1

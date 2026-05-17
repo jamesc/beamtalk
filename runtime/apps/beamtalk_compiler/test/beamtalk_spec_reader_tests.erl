@@ -240,10 +240,10 @@ map_type_result_ok_error_test() ->
         )
     ).
 
-%% {ok, pid()} | {error, term()} → Result(Pid, Dynamic)
+%% {ok, pid()} | {error, term()} → Result(Pid) (Dynamic err is elided)
 map_type_result_pid_dynamic_test() ->
     ?assertEqual(
-        <<"Result(Pid, Dynamic)">>,
+        <<"Result(Pid)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, pid, []}]},
@@ -264,11 +264,11 @@ map_type_result_bare_ok_test() ->
         )
     ).
 
-%% {ok, T} without error branch → Result(T, Dynamic)
+%% {ok, T} without error branch → Result(T) (Dynamic err is elided)
 map_type_result_ok_only_test() ->
     %% {ok, T} | other — ok branch present, no error branch
     ?assertEqual(
-        <<"Result(String | Binary, Dynamic) | Integer">>,
+        <<"Result(String | Binary) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -280,7 +280,7 @@ map_type_result_ok_only_test() ->
 %% {ok, T} as the sole branch in a union with no error branch
 map_type_result_ok_only_pure_test() ->
     ?assertEqual(
-        <<"Result(String | Binary, Dynamic)">>,
+        <<"Result(String | Binary)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]}
@@ -389,8 +389,10 @@ verify_timer_send_after_result_test() ->
     ?assert(length(SendAfterSpecs) > 0),
     [Spec | _] = SendAfterSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should be a Result type
-    ?assertMatch(<<"Result(", _/binary>>, RetType).
+    %% Should be a Result type. When both ok and err resolve to Dynamic
+    %% the formatter emits the bare `Result` form (no parentheses), so
+    %% match on the `Result` prefix to cover both shapes.
+    ?assertMatch(<<"Result", _/binary>>, RetType).
 
 %% application:start/1 → Result(Nil, ...) (bare ok in union)
 verify_application_start_result_test() ->
@@ -406,8 +408,10 @@ verify_application_start_result_test() ->
     ?assert(length(StartSpecs) > 0),
     [Spec | _] = StartSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should be Result(Nil, ...) because of bare ok atom
-    ?assertMatch(<<"Result(Nil,", _/binary>>, RetType).
+    %% Should start with Result(Nil because of the bare `ok` atom. The
+    %% formatter elides `, Dynamic` from the err position, so the value
+    %% may be either `Result(Nil)` or `Result(Nil, <ErrType>)`.
+    ?assertMatch(<<"Result(Nil", _/binary>>, RetType).
 
 %%% ---------------------------------------------------------------
 %%% Bounded fun with ok/error union (constraint resolution into Result)
