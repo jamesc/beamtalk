@@ -57,15 +57,21 @@ compile_expression_succeeds() ->
         beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"test_mod">>, []),
     ?assert(is_binary(CoreErlang)),
     ?assert(byte_size(CoreErlang) > 0),
-    %% Verify Core Erlang contains the addition via the qualified BIF call.
-    ?assert(binary:match(CoreErlang, <<"'erlang':'+'">>) =/= nomatch).
+    %% The compiler emits `call 'erlang':'+'\n\t\t    (1, 2)`. Check both
+    %% the qualified BIF and the literal operand pair so that operand-order
+    %% regressions are still caught.
+    ?assert(binary:match(CoreErlang, <<"'erlang':'+'">>) =/= nomatch),
+    ?assert(binary:match(CoreErlang, <<"1, 2">>) =/= nomatch).
 
 compile_expression_known_vars() ->
     {ok, CoreErlang, []} =
         beamtalk_compiler:compile_expression(<<"x + 1">>, <<"test_mod">>, [<<"x">>]),
     ?assert(is_binary(CoreErlang)),
-    %% Variable x referenced via the qualified maps:get/2 call.
-    ?assert(binary:match(CoreErlang, <<"'maps':'get'">>) =/= nomatch).
+    %% Variable x is fetched via `call 'maps':'get'\n\t\t\t ('x', State)`.
+    %% Assert both the qualified call and the `'x'` key are present so that
+    %% the test still guards variable-lookup specifically.
+    ?assert(binary:match(CoreErlang, <<"'maps':'get'">>) =/= nomatch),
+    ?assert(binary:match(CoreErlang, <<"'x'">>) =/= nomatch).
 
 compile_expression_error() ->
     {error, Diagnostics} =

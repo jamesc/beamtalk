@@ -639,12 +639,12 @@ coverage-runtime: build-stdlib
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    # Run 1: runtime + workspace tests.
+    # Run 1: runtime + workspace + compiler tests.
     # bt@*.beam files are findable via apps/beamtalk_stdlib/ebin/ (project app ebin
     # stays on the code path when beamtalk_stdlib is not listed as an explicit --app).
     if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler --cover 2>&1); then
         echo "$OUTPUT"
-        echo "❌ EUnit tests (runtime+workspace) failed"
+        echo "❌ EUnit tests (runtime+workspace+compiler) failed"
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true

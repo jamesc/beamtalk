@@ -389,10 +389,14 @@ verify_timer_send_after_result_test() ->
     ?assert(length(SendAfterSpecs) > 0),
     [Spec | _] = SendAfterSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should be a Result type. When both ok and err resolve to Dynamic
-    %% the formatter emits the bare `Result` form (no parentheses), so
-    %% match on the `Result` prefix to cover both shapes.
-    ?assertMatch(<<"Result", _/binary>>, RetType).
+    %% The formatter emits one of two shapes: bare `Result` (when both ok
+    %% and err resolve to Dynamic) or `Result(...)` (closing parenthesis).
+    %% Anything else — e.g. `ResultFoo` — should fail.
+    ?assert(
+        RetType =:= <<"Result">> orelse
+            (binary:match(RetType, <<"Result(">>) =:= {0, 7} andalso
+                binary:last(RetType) =:= $))
+    ).
 
 %% application:start/1 → Result(Nil, ...) (bare ok in union)
 verify_application_start_result_test() ->
@@ -408,10 +412,15 @@ verify_application_start_result_test() ->
     ?assert(length(StartSpecs) > 0),
     [Spec | _] = StartSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should start with Result(Nil because of the bare `ok` atom. The
-    %% formatter elides `, Dynamic` from the err position, so the value
-    %% may be either `Result(Nil)` or `Result(Nil, <ErrType>)`.
-    ?assertMatch(<<"Result(Nil", _/binary>>, RetType).
+    %% The formatter elides `, Dynamic` from the err position, so the only
+    %% two valid shapes here are `Result(Nil)` and `Result(Nil, <ErrType>)`.
+    %% Reject malformed values like `Result(NilThing` by checking the
+    %% delimiter explicitly.
+    ?assert(
+        RetType =:= <<"Result(Nil)">> orelse
+            (binary:match(RetType, <<"Result(Nil, ">>) =:= {0, 12} andalso
+                binary:last(RetType) =:= $))
+    ).
 
 %%% ---------------------------------------------------------------
 %%% Bounded fun with ok/error union (constraint resolution into Result)
