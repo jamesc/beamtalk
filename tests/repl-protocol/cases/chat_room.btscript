@@ -135,7 +135,7 @@ room say: "Hello everyone!" from: "Alice"
 
 // Check message history — formatted as "sender: text" strings
 history := room getHistory
-// => _
+// => ["Alice: Hello everyone!"]
 
 history size
 // => 1
@@ -145,7 +145,7 @@ history first
 
 // Check that alice received the message (via do: broadcast)
 aliceInbox := alice getInbox
-// => _
+// => ["Alice: Hello everyone!"]
 
 aliceInbox size
 // => 1
@@ -155,7 +155,7 @@ aliceInbox first
 
 // Check that bob also received it
 bobInbox := bob getInbox
-// => _
+// => ["Alice: Hello everyone!"]
 
 bobInbox size
 // => 1
@@ -173,7 +173,7 @@ room say: "Hey Alice!" from: "Bob"
 
 // History now has 2 messages
 history2 := room getHistory
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!"]
 
 history2 size
 // => 2
@@ -183,13 +183,13 @@ history2 last
 
 // Both members received both messages
 aliceInbox2 := alice getInbox
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!"]
 
 aliceInbox2 size
 // => 2
 
 bobInbox2 := bob getInbox
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!"]
 
 bobInbox2 size
 // => 2
@@ -221,14 +221,14 @@ room say: "Anyone there?" from: "Bob"
 
 // Alice doesn't receive the new message
 aliceInbox3 := alice getInbox
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!"]
 
 aliceInbox3 size
 // => 2
 
 // Bob receives it
 bobInbox3 := bob getInbox
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!","Bob: Anyone there?"]
 
 bobInbox3 size
 // => 3
@@ -293,7 +293,7 @@ membersBefore includes: bob
 
 // Moderator kicks bob from the room
 mod kick: bob
-// => _
+// => Set(_)
 
 membersAfter := room online
 // => Set(_)
@@ -317,14 +317,14 @@ mod say: "Welcome!"
 
 // Room history should contain the prefixed message
 modHistory := room getHistory
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!","Bob: Anyone there?","Admin: [MOD] Welcome!"]
 
 modHistory last
 // => Admin: [MOD] Welcome!
 
 // Bob should have received the prefixed message
 bobInboxMod := bob getInbox
-// => _
+// => ["Alice: Hello everyone!","Bob: Hey Alice!","Bob: Anyone there?","Admin: [MOD] Welcome!"]
 
 bobInboxMod last
 // => Admin: [MOD] Welcome!
