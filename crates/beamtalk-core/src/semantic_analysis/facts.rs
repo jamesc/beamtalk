@@ -469,3 +469,519 @@ fn classify_dispatch(
 
     DispatchKind::Unknown
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{
+        Block, ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+        MethodDefinition, Module, StandaloneMethodDefinition,
+    };
+    use crate::source_analysis::Span;
+
+    fn ts() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn lit(n: i64) -> Expression {
+        Expression::Literal(Literal::Integer(n), ts())
+    }
+
+    fn ident(name: &str) -> Expression {
+        Expression::Identifier(Identifier::new(name, ts()))
+    }
+
+    fn ret(val: Expression) -> Expression {
+        Expression::Return {
+            value: Box::new(val),
+            span: ts(),
+        }
+    }
+
+    fn bare(expr: Expression) -> ExpressionStatement {
+        ExpressionStatement::bare(expr)
+    }
+
+    fn empty_block(span: Span) -> Block {
+        Block::new(vec![], vec![], span)
+    }
+
+    fn block_with(body: Vec<ExpressionStatement>, span: Span) -> Block {
+        Block::new(vec![], body, span)
+    }
+
+    // ---------------------------------------------------------------
+    // classify_dispatch — private function
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn classify_self_send() {
+        let sel = MessageSelector::Unary("increment".into());
+        assert_eq!(
+            classify_dispatch(&ident("self"), &sel, false),
+            DispatchKind::SelfSend
+        );
+    }
+
+    #[test]
+    fn classify_actor_cast() {
+        let sel = MessageSelector::Unary("increment".into());
+        assert_eq!(
+            classify_dispatch(&ident("self"), &sel, true),
+            DispatchKind::ActorCast
+        );
+    }
+
+    #[test]
+    fn classify_control_flow_keyword() {
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("timesRepeat:", ts())]);
+        assert_eq!(
+            classify_dispatch(&lit(5), &sel, false),
+            DispatchKind::ControlFlow
+        );
+    }
+
+    #[test]
+    fn classify_control_flow_unary() {
+        let sel = MessageSelector::Unary("whileTrue".into());
+        let block_expr = Expression::Block(empty_block(ts()));
+        assert_eq!(
+            classify_dispatch(&block_expr, &sel, false),
+            DispatchKind::ControlFlow
+        );
+    }
+
+    #[test]
+    fn classify_unknown_non_self_receiver() {
+        let sel = MessageSelector::Unary("size".into());
+        assert_eq!(
+            classify_dispatch(&ident("other"), &sel, false),
+            DispatchKind::Unknown
+        );
+    }
+
+    #[test]
+    fn classify_binary_selector_is_unknown() {
+        let sel = MessageSelector::Binary("+".into());
+        assert_eq!(
+            classify_dispatch(&lit(1), &sel, false),
+            DispatchKind::Unknown
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // expr_has_block_nlr — private recursive function
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn nlr_literal_leaf_is_false() {
+        assert!(!expr_has_block_nlr(&lit(42), false));
+        assert!(!expr_has_block_nlr(&lit(42), true));
+    }
+
+    #[test]
+    fn nlr_return_at_method_level_is_false() {
+        // ^ at top level (inside_block=false) is a normal early return, not NLR
+        assert!(!expr_has_block_nlr(&ret(lit(1)), false));
+    }
+
+    #[test]
+    fn nlr_return_inside_block_is_true() {
+        let block_expr = Expression::Block(block_with(vec![bare(ret(lit(1)))], ts()));
+        assert!(expr_has_block_nlr(&block_expr, false));
+    }
+
+    #[test]
+    fn nlr_block_without_return_is_false() {
+        let block_expr = Expression::Block(block_with(vec![bare(lit(42))], ts()));
+        assert!(!expr_has_block_nlr(&block_expr, false));
+    }
+
+    #[test]
+    fn nlr_return_in_message_arg_block() {
+        // receiver with: [^1]  → NLR in block arg
+        let arg_block = Expression::Block(block_with(vec![bare(ret(lit(1)))], ts()));
+        let send = Expression::MessageSend {
+            receiver: Box::new(ident("x")),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("with:", ts())]),
+            arguments: vec![arg_block],
+            is_cast: false,
+            span: ts(),
+        };
+        assert!(expr_has_block_nlr(&send, false));
+    }
+
+    #[test]
+    fn nlr_message_send_without_return_is_false() {
+        let send = Expression::MessageSend {
+            receiver: Box::new(ident("x")),
+            selector: MessageSelector::Unary("size".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: ts(),
+        };
+        assert!(!expr_has_block_nlr(&send, false));
+    }
+
+    #[test]
+    fn nlr_nested_block_with_return_is_true() {
+        // Outer block body: [inner block containing ^1]
+        let inner = Expression::Block(block_with(vec![bare(ret(lit(1)))], ts()));
+        let outer = Expression::Block(block_with(vec![bare(inner)], ts()));
+        assert!(expr_has_block_nlr(&outer, false));
+    }
+
+    // ---------------------------------------------------------------
+    // block_has_nlr — private function
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn block_has_nlr_true_when_body_has_return() {
+        let b = block_with(vec![bare(ret(lit(0)))], ts());
+        assert!(block_has_nlr(&b));
+    }
+
+    #[test]
+    fn block_has_nlr_false_when_no_return() {
+        let b = block_with(vec![bare(lit(0))], ts());
+        assert!(!block_has_nlr(&b));
+    }
+
+    // ---------------------------------------------------------------
+    // ClassFacts helper methods
+    // ---------------------------------------------------------------
+
+    fn make_class_facts() -> ClassFacts {
+        let mut cf = ClassFacts::default();
+        cf.instance_methods_by_selector
+            .insert("getValue".to_string(), 0);
+        cf.instance_methods_by_selector
+            .insert("setValue:".to_string(), 1);
+        cf.class_methods_by_selector.insert("new".to_string(), 0);
+        cf
+    }
+
+    #[test]
+    fn class_facts_has_instance_method_found() {
+        let cf = make_class_facts();
+        assert!(cf.has_instance_method("getValue"));
+    }
+
+    #[test]
+    fn class_facts_has_instance_method_not_found() {
+        let cf = make_class_facts();
+        assert!(!cf.has_instance_method("missing"));
+    }
+
+    #[test]
+    fn class_facts_has_class_method_found() {
+        let cf = make_class_facts();
+        assert!(cf.has_class_method("new"));
+    }
+
+    #[test]
+    fn class_facts_has_class_method_not_found() {
+        let cf = make_class_facts();
+        assert!(!cf.has_class_method("missing"));
+    }
+
+    #[test]
+    fn class_facts_instance_method_index_found() {
+        let cf = make_class_facts();
+        assert_eq!(cf.instance_method_index("getValue"), Some(0));
+        assert_eq!(cf.instance_method_index("setValue:"), Some(1));
+    }
+
+    #[test]
+    fn class_facts_instance_method_index_not_found() {
+        let cf = make_class_facts();
+        assert_eq!(cf.instance_method_index("missing"), None);
+    }
+
+    #[test]
+    fn class_facts_class_method_index_found() {
+        let cf = make_class_facts();
+        assert_eq!(cf.class_method_index("new"), Some(0));
+    }
+
+    #[test]
+    fn class_facts_class_method_index_not_found() {
+        let cf = make_class_facts();
+        assert_eq!(cf.class_method_index("missing"), None);
+    }
+
+    // ---------------------------------------------------------------
+    // SemanticFacts default/accessor methods
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn semantic_facts_default_dispatch_kind_is_unknown() {
+        let facts = SemanticFacts::default();
+        assert_eq!(
+            facts.dispatch_kind(&Span::new(0, 10)),
+            DispatchKind::Unknown
+        );
+    }
+
+    #[test]
+    fn semantic_facts_default_block_profile_is_none() {
+        let facts = SemanticFacts::default();
+        assert!(facts.block_profile(&Span::new(0, 10)).is_none());
+    }
+
+    #[test]
+    fn semantic_facts_default_has_block_nlr_is_false() {
+        let facts = SemanticFacts::default();
+        assert!(!facts.has_block_nlr(&Span::new(0, 10)));
+    }
+
+    #[test]
+    fn semantic_facts_default_class_facts_is_none() {
+        let facts = SemanticFacts::default();
+        assert!(facts.class_facts("MissingClass").is_none());
+    }
+
+    // ---------------------------------------------------------------
+    // SemanticFacts::has_block_nlr_or_walk — is_populated fallback
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn has_block_nlr_or_walk_unpopulated_detects_nlr_via_ast_walk() {
+        // is_populated=false (default): falls back to expr_has_block_nlr walk
+        let facts = SemanticFacts::default();
+        let body = vec![bare(Expression::Block(block_with(
+            vec![bare(ret(lit(1)))],
+            ts(),
+        )))];
+        assert!(facts.has_block_nlr_or_walk(&Span::new(0, 100), &body));
+    }
+
+    #[test]
+    fn has_block_nlr_or_walk_unpopulated_no_nlr_returns_false() {
+        let facts = SemanticFacts::default();
+        let body = vec![bare(lit(42))];
+        assert!(!facts.has_block_nlr_or_walk(&Span::new(0, 100), &body));
+    }
+
+    #[test]
+    fn has_block_nlr_or_walk_populated_uses_set_not_walk() {
+        // Populate facts via compute_semantic_facts with a method that has block NLR
+        let method_span = Span::new(100, 200);
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("test".into()),
+            vec![],
+            vec![bare(Expression::Block(block_with(
+                vec![bare(ret(lit(42)))],
+                ts(),
+            )))],
+            method_span,
+        );
+        let class = ClassDefinition::new(
+            Identifier::new("MyClass", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![method],
+            ts(),
+        );
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+
+        // Populated: method_span is in methods_with_block_nlr → true
+        assert!(facts.has_block_nlr_or_walk(&method_span, &[]));
+        // Populated: other span is NOT in set → false, even if body_stmts contain NLR
+        let nlr_body = vec![bare(Expression::Block(block_with(
+            vec![bare(ret(lit(1)))],
+            ts(),
+        )))];
+        assert!(!facts.has_block_nlr_or_walk(&Span::new(999, 999), &nlr_body));
+    }
+
+    // ---------------------------------------------------------------
+    // compute_semantic_facts — integration
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn compute_facts_empty_module_produces_empty_facts() {
+        let facts = compute_semantic_facts(&Module::new(vec![], ts()));
+        assert!(facts.block_profiles.is_empty());
+        assert!(facts.dispatch_kinds.is_empty());
+        assert!(facts.class_facts.is_empty());
+        assert!(facts.methods_with_block_nlr.is_empty());
+    }
+
+    #[test]
+    fn compute_facts_block_in_module_expr_populates_block_profiles() {
+        let block_span = Span::new(5, 20);
+        let b = block_with(vec![bare(lit(1))], block_span);
+        let module = Module::new(vec![bare(Expression::Block(b))], ts());
+        let facts = compute_semantic_facts(&module);
+        assert!(facts.block_profiles.contains_key(&block_span));
+    }
+
+    #[test]
+    fn compute_facts_self_send_classified_as_self_send() {
+        let msg_span = Span::new(10, 20);
+        let send = Expression::MessageSend {
+            receiver: Box::new(ident("self")),
+            selector: MessageSelector::Unary("increment".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: msg_span,
+        };
+        let facts = compute_semantic_facts(&Module::new(vec![bare(send)], ts()));
+        assert_eq!(facts.dispatch_kind(&msg_span), DispatchKind::SelfSend);
+    }
+
+    #[test]
+    fn compute_facts_control_flow_keyword_classified_as_control_flow() {
+        let msg_span = Span::new(10, 30);
+        let send = Expression::MessageSend {
+            receiver: Box::new(lit(3)),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("timesRepeat:", ts())]),
+            arguments: vec![Expression::Block(empty_block(ts()))],
+            is_cast: false,
+            span: msg_span,
+        };
+        let facts = compute_semantic_facts(&Module::new(vec![bare(send)], ts()));
+        assert_eq!(facts.dispatch_kind(&msg_span), DispatchKind::ControlFlow);
+    }
+
+    #[test]
+    fn compute_facts_instance_methods_indexed_in_class_facts() {
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("getValue".into()),
+            vec![],
+            vec![bare(lit(0))],
+            ts(),
+        );
+        let class = ClassDefinition::new(
+            Identifier::new("Counter", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![method],
+            ts(),
+        );
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+        let cf = facts
+            .class_facts("Counter")
+            .expect("Counter should have class facts");
+        assert!(cf.has_instance_method("getValue"));
+        assert_eq!(cf.instance_method_index("getValue"), Some(0));
+    }
+
+    #[test]
+    fn compute_facts_class_side_methods_indexed_in_class_facts() {
+        // class_methods (class-side) indexing is a separate branch in compute_semantic_facts
+        let class_method = MethodDefinition::new(
+            MessageSelector::Unary("withDefault".into()),
+            vec![],
+            vec![bare(lit(0))],
+            ts(),
+        );
+        let mut class = ClassDefinition::new(
+            Identifier::new("Counter", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![],
+            ts(),
+        );
+        class.class_methods.push(class_method);
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+        let cf = facts
+            .class_facts("Counter")
+            .expect("Counter should have class facts");
+        assert!(cf.has_class_method("withDefault"));
+        assert_eq!(cf.class_method_index("withDefault"), Some(0));
+        assert!(!cf.has_instance_method("withDefault"));
+    }
+
+    #[test]
+    fn compute_facts_method_with_block_nlr_populates_nlr_set() {
+        let method_span = Span::new(50, 150);
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("withNlr".into()),
+            vec![],
+            vec![bare(Expression::Block(block_with(
+                vec![bare(ret(lit(42)))],
+                ts(),
+            )))],
+            method_span,
+        );
+        let class = ClassDefinition::new(
+            Identifier::new("MyClass", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![method],
+            ts(),
+        );
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+        assert!(
+            facts.methods_with_block_nlr.contains(&method_span),
+            "method with ^ inside block should be in methods_with_block_nlr"
+        );
+    }
+
+    #[test]
+    fn compute_facts_method_without_block_nlr_not_in_nlr_set() {
+        let method_span = Span::new(50, 150);
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("plain".into()),
+            vec![],
+            vec![bare(lit(0))],
+            method_span,
+        );
+        let class = ClassDefinition::new(
+            Identifier::new("MyClass", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![method],
+            ts(),
+        );
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+        assert!(!facts.methods_with_block_nlr.contains(&method_span));
+    }
+
+    #[test]
+    fn compute_facts_module_level_assignment_block_nlr() {
+        // Legacy gen_server dispatch: myMethod := [:p | [^42]]
+        // The outer block is treated as method-level (inside_block=false).
+        // A ^ nested inside an inner block IS NLR — its span enters methods_with_block_nlr.
+        let block_span = Span::new(5, 50);
+        let inner = Expression::Block(block_with(vec![bare(ret(lit(42)))], ts()));
+        let outer_block = block_with(vec![bare(inner)], block_span);
+        let assignment = Expression::Assignment {
+            target: Box::new(ident("myMethod")),
+            value: Box::new(Expression::Block(outer_block)),
+            type_annotation: None,
+            span: ts(),
+        };
+        let module = Module::new(vec![bare(assignment)], ts());
+        let facts = compute_semantic_facts(&module);
+        assert!(facts.methods_with_block_nlr.contains(&block_span));
+    }
+
+    #[test]
+    fn compute_facts_standalone_method_nlr() {
+        // Standalone method: Counter >> withNlr => [^1]
+        let method_span = Span::new(10, 100);
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("withNlr".into()),
+            vec![],
+            vec![bare(Expression::Block(block_with(
+                vec![bare(ret(lit(1)))],
+                ts(),
+            )))],
+            method_span,
+        );
+        let standalone = StandaloneMethodDefinition {
+            class_name: Identifier::new("Counter", ts()),
+            package: None,
+            is_class_method: false,
+            method,
+            span: ts(),
+        };
+        let mut module = Module::new(vec![], ts());
+        module.method_definitions.push(standalone);
+        let facts = compute_semantic_facts(&module);
+        assert!(facts.methods_with_block_nlr.contains(&method_span));
+    }
+}
