@@ -76,10 +76,9 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 
 | Operation | Intent | ChangeLog |
 |-----------|--------|-----------|
-| `Counter >> selector => body` (REPL/browser) | durable — human typed it | logged |
-| `save-method` op (REPL/MCP/LSP/browser) | durable | logged |
-| `save-class` op (REPL/MCP/LSP/browser) — new class from source | durable | logged (`kind: "new-class"`) |
-| `try-method` op (MCP only) | ephemeral — agent exploration | **not** logged |
+| `Counter >> selector => body` (durable patcher form, ADR 0066) | durable — caller wants to keep it | logged |
+| `Counter tryPatch: #selector source: body` (ephemeral patcher) | ephemeral — exploration / spike | **not** logged |
+| `Workspace newClass: source at: path` (new-class creation) | durable — caller wants a new file | logged (`kind: "new-class"`) |
 | `Counter >> #selector` (reader form) | n/a — pure read | not logged |
 | `load-source` of an existing class | ephemeral by default (legacy browser internal op) | not logged unless `intent: "save"` parameter set |
 
@@ -100,15 +99,41 @@ A class is **flushable** iff `sourceFile` is non-nil **and** the source file lie
 
 ### Surface
 
-| Surface | Binding |
-|---------|---------|
-| Beamtalk | `Workspace flush`, `Workspace flush: aClass`, `Workspace dirty`, `Workspace changes` (returns ChangeLog object). On the ChangeLog: `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. |
-| REPL meta-command | `:flush`, `:flush <Class>`, `:changes`, `:dirty` |
-| MCP | `save_method`, `save_class`, `try_method` (ephemeral), `flush`, `list_changes`, `dirty_methods` |
-| LSP | client-driven via `workspace/executeCommand` for `flush` and `save_class`; `workspace/applyEdit` consumed *from* runtime on flush so VSCode buffers refresh |
-| Browser | per-method "Save" button → `save-method` op → ChangeLog. "New File" action → `save-class` op. Workspace-level "Save All" → flush. Dirty indicators on tab/method tree. |
+**Principle (per ADR 0040): every MCP / REPL / LSP / browser tool op is a structured invocation of a Beamtalk-level expression. There are no tool-only operations — every op compiles to something a human could type at the REPL.** The tool surface is a convenience layer; the language is the API.
 
-**Workspace facade vs ChangeLog object.** The Beamtalk surface follows Pharo's `Smalltalk changes` idiom: the Workspace facade exposes only verbs a human would type at a REPL (the four above), and `Workspace changes` returns a navigable ChangeLog object that carries detailed introspection. `save-method` / `save-class` / `try-method` are deliberately *not* on the Workspace facade — they are tool-protocol operations (MCP/LSP/browser) invoked by structured callers. Humans write classes by typing them and patch methods with `>>`; they do not call `Workspace saveClass:to:` from a Beamtalk literal.
+**Beamtalk language bindings (the methods every tool calls through to):**
+
+| Where | Binding | Used by |
+|-------|---------|---------|
+| **`Behaviour` metaclass** | `Counter >> selector => body` (existing patcher form, ADR 0066) — durable, logged | MCP `save_method`, browser "Save", REPL editor save |
+| **`Behaviour` metaclass** | `Counter >> #selector` (existing reader form, ADR 0066) — pure read, returns CompiledMethod | tab-completion, inspector |
+| **`Behaviour` metaclass** | `Counter tryPatch: #selector source: body` (new) — ephemeral, no log | MCP `try_method` |
+| **`Workspace`** | `Workspace newClass: source at: path` (new) — durable new-class creation, logged as `kind: "new-class"` | MCP `save_class`, browser "New File", REPL |
+| **`Workspace`** | `Workspace flush`, `Workspace flush: aClass` | MCP `flush`, REPL `:flush`, LSP `executeCommand`, browser "Save All" |
+| **`Workspace`** | `Workspace dirty` | MCP `dirty` (boolean), REPL `:dirty`, browser dirty indicator |
+| **`Workspace`** | `Workspace changes` — returns the ChangeLog object | MCP `list_changes`, REPL `:changes`, browser ChangeLog viewer |
+| **`ChangeLog`** (returned by `Workspace changes`) | `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:` | MCP `dirty_methods` ≡ `Workspace changes dirtyMethods`; browser ChangeLog UI; REPL `Workspace changes <verb>` |
+
+**Tool surfaces (each row maps to one or more bindings above):**
+
+| Surface | Op | Compiles to |
+|---------|-----|-------------|
+| REPL meta-command | `:flush`, `:flush <Class>` | `Workspace flush` / `Workspace flush: aClass` |
+| REPL meta-command | `:changes` | `Workspace changes` |
+| REPL meta-command | `:dirty` | `Workspace dirty` |
+| MCP | `save_method` | `aClass >> aSym => body` |
+| MCP | `save_class` | `Workspace newClass: source at: path` |
+| MCP | `try_method` | `aClass tryPatch: aSym source: body` |
+| MCP | `flush` | `Workspace flush` (or `Workspace flush: aClass`) |
+| MCP | `list_changes` | `Workspace changes` (returns serialised log) |
+| MCP | `dirty_methods` | `Workspace changes dirtyMethods` |
+| LSP | `workspace/executeCommand: flush` | `Workspace flush` |
+| LSP | `workspace/executeCommand: save_class` | `Workspace newClass: source at: path` |
+| Browser | "Save" (per method) | `aClass >> aSym => body` |
+| Browser | "New File" | `Workspace newClass: source at: path` |
+| Browser | "Save All to Disk" | `Workspace flush` |
+
+**Workspace facade vs ChangeLog object.** The Workspace facade follows Pharo's `Smalltalk changes` idiom: it carries six methods (`flush`, `flush:`, `dirty`, `changes`, `newClass:at:`, plus the patch verbs that delegate to `Behaviour`). Detailed introspection lives *on* the ChangeLog returned by `Workspace changes` — `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. This keeps the facade small while giving the ChangeLog full collection-protocol navigation.
 
 ### REPL session (human, patching existing class)
 
@@ -129,26 +154,32 @@ A class is **flushable** iff `sourceFile` is non-nil **and** the source file lie
 
 ### MCP agent session (spike, then commit new test + impl)
 
+Each MCP tool call below is annotated with the Beamtalk expression it compiles to — the tool is a structured invocation, the language is the API.
+
 ```beamtalk
 // 1. Agent explores via try_method — installs in memory, no log entry
 mcp> try_method(class: "Counter", selector: "doubled", body: "^ self value * 2")
+//   ≡ Counter tryPatch: #doubled source: "^ self value * 2"
 => a CompiledMethod (memory only, ephemeral)
 mcp> evaluate("(Counter new) doubled")
 => 0                                              // works, agent commits
 
 // 2. Agent promotes the spike to a logged change
 mcp> save_method(class: "Counter", selector: "doubled", body: "^ self value * 2")
+//   ≡ Counter >> doubled => self value * 2
 => ChangeEntry logged (#doubled in Counter)
 
 // 3. Agent creates a new test class for the feature
 mcp> save_class(source: "<DoubleCounterTest source>", target: "test/double_counter_test.bt")
+//   ≡ Workspace newClass: "<DoubleCounterTest source>" at: "test/double_counter_test.bt"
 => ChangeEntry logged (kind: new-class)
 
 // 4. Agent creates the impl file for a follow-up class
 mcp> save_class(source: "<DoubleCounter source>", target: "src/double_counter.bt")
+//   ≡ Workspace newClass: "<DoubleCounter source>" at: "src/double_counter.bt"
 => ChangeEntry logged (kind: new-class)
 
-// 5. Human reviews and flushes
+// 5. Human reviews and flushes — same operations, no tool needed
 > Workspace dirty
 => true
 > Workspace changes dirtyMethods
@@ -385,11 +416,12 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 | `crates/beamtalk-core/src/source_analysis/` | New byte-span resolver: given source text and `(class, selector, kind)`, return the byte span of that method's definition. Pure parser-level work; no new printer. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_changelog.erl` (new) | Gen_server owning the append-only ChangeLog. ETS for live state, JSON-Lines on disk. Exposed via the `Workspace` facade per ADR 0040. Lives in the workspace context, not REPL, because it's consumed cross-surface. |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New REPL ops: `save-method`, `save-class`, `try-method`, `flush`, `list-changes`, `dirty`. Thin handlers delegating to `beamtalk_workspace_changelog`. `try-method` skips the ChangeLog emit; `save-class` validates that `targetPath` is in-project and not pre-existing. |
-| `stdlib/src/Workspace.bt` | New facade methods (slim): `flush`, `flush:`, `dirty`, `changes` (returns ChangeLog). Detailed operations live *on* the returned ChangeLog object, not on the Workspace facade — matches Pharo's `Smalltalk changes` idiom. |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New REPL ops: `save-method`, `save-class`, `try-method`, `flush`, `list-changes`, `dirty`. Each handler is a thin shim that constructs the equivalent Beamtalk expression (e.g. `save-method` builds `aClass >> aSym => body` and evaluates it; `save-class` evaluates `Workspace newClass: src at: path`) — the language is the authority, the op is the structured invocation. |
+| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `dirty`, `changes` (returns ChangeLog), `newClass:at:`. Detailed operations live *on* the returned ChangeLog object — matches Pharo's `Smalltalk changes` idiom. |
+| `stdlib/src/Behaviour.bt` | New class-side method `tryPatch:source:` (ephemeral patch, no log) — symmetric with the existing `>>` patcher form (durable). Both share the same compile-and-install path; `tryPatch:` skips the ChangeLog emit. |
 | `stdlib/src/ChangeLog.bt` (new) | The navigable ChangeLog object: `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. Backed by `beamtalk_workspace_changelog.erl` via FFI. |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands: `:flush`, `:flush <Class>`, `:changes`, `:dirty`. |
-| `crates/beamtalk-mcp/src/server.rs` | New tools: `save_method`, `save_class`, `try_method`, `flush`, `list_changes`, `dirty_methods`. MCP-issued logged patches are auto-tagged `author_kind: agent` for audit. `try_method` is the explicit ephemeral spike path; `save_method`/`save_class` are the durable-commit path. |
+| `crates/beamtalk-mcp/src/server.rs` | New tools: `save_method`, `save_class`, `try_method`, `flush`, `list_changes`, `dirty_methods`. Each tool implementation constructs the corresponding Beamtalk expression (see Surface table) and submits it via the existing `evaluate` pathway — there is no MCP-only code path that bypasses the language. MCP-issued logged patches are auto-tagged `author_kind: agent` for audit. |
 | `crates/beamtalk-lsp/src/server.rs` | Handle `workspace/executeCommand` for `flush`. Emit `workspace/applyEdit` *to* clients on flush events received from the runtime. |
 | `runtime/apps/beamtalk_workspace/priv/static/workspace.js` | Per-method dirty indicator, "Save" per method, "Save All to Disk" workspace-level. |
 | `docs/development/surface-parity.md` | Add rows for `save-method`, `flush`, `list-changes`, `dirty`. |
