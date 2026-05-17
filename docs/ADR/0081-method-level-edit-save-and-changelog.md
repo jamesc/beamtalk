@@ -76,8 +76,8 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 
 | Operation | Intent | ChangeLog |
 |-----------|--------|-----------|
-| `Counter >> selector => body` (durable patcher form, ADR 0066) | durable — caller wants to keep it | logged |
-| `Counter tryPatch: #selector source: body` (ephemeral patcher) | ephemeral — exploration / spike | **not** logged |
+| `Counter compile: #selector source: body` (durable, ADR 0066 `>>` desugars to this) | durable — caller wants to keep it | logged |
+| `Counter tryCompile: #selector source: body` (ephemeral) | ephemeral — exploration / spike | **not** logged |
 | `Workspace newClass: source at: path` (new-class creation) | durable — caller wants a new file | logged (`kind: "new-class"`) |
 | `Counter >> #selector` (reader form) | n/a — pure read | not logged |
 | `load-source` of an existing class | ephemeral by default (legacy browser internal op) | not logged unless `intent: "save"` parameter set |
@@ -106,14 +106,17 @@ A class is **flushable** iff `sourceFile` is non-nil **and** the source file lie
 
 | Where | Binding | Used by |
 |-------|---------|---------|
-| **`Behaviour` metaclass** | `Counter >> selector => body` (existing patcher form, ADR 0066) — durable, logged | MCP `save_method`, browser "Save", REPL editor save |
+| **`Behaviour` metaclass** | `Counter compile: #selector source: "body"` (new, underlying primitive) — durable, logged | `>>` parser desugars to this; MCP `save_method`, browser "Save", REPL editor save call it directly |
+| **`Behaviour` metaclass** | `Counter tryCompile: #selector source: "body"` (new, underlying primitive) — ephemeral, no log | MCP `try_method` calls it directly |
+| **`Behaviour` metaclass** | `Counter >> selector => body` (existing patcher form, ADR 0066) — parser sugar that desugars to `compile:source:` | Humans typing at the REPL |
 | **`Behaviour` metaclass** | `Counter >> #selector` (existing reader form, ADR 0066) — pure read, returns CompiledMethod | tab-completion, inspector |
-| **`Behaviour` metaclass** | `Counter tryPatch: #selector source: body` (new) — ephemeral, no log | MCP `try_method` |
 | **`Workspace`** | `Workspace newClass: source at: path` (new) — durable new-class creation, logged as `kind: "new-class"` | MCP `save_class`, browser "New File", REPL |
 | **`Workspace`** | `Workspace flush`, `Workspace flush: aClass` | MCP `flush`, REPL `:flush`, LSP `executeCommand`, browser "Save All" |
 | **`Workspace`** | `Workspace dirty` | MCP `dirty` (boolean), REPL `:dirty`, browser dirty indicator |
 | **`Workspace`** | `Workspace changes` — returns the ChangeLog object | MCP `list_changes`, REPL `:changes`, browser ChangeLog viewer |
 | **`ChangeLog`** (returned by `Workspace changes`) | `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:` | MCP `dirty_methods` ≡ `Workspace changes dirtyMethods`; browser ChangeLog UI; REPL `Workspace changes <verb>` |
+
+The `compile:source:` / `tryCompile:source:` distinction matters for implementation: tools take the body as a **value** (a Beamtalk String passed through the eval pipeline), not as a substring concatenated into a `>>` expression. Building a `>>` source string and re-parsing would require escaping the body to be valid Beamtalk source — fragile, breaks on quote chars, multi-line bodies, etc. Calling `compile:source:` directly bypasses the string-roundtrip and passes the body value end-to-end.
 
 **Tool surfaces (each row maps to one or more bindings above):**
 
@@ -122,15 +125,15 @@ A class is **flushable** iff `sourceFile` is non-nil **and** the source file lie
 | REPL meta-command | `:flush`, `:flush <Class>` | `Workspace flush` / `Workspace flush: aClass` |
 | REPL meta-command | `:changes` | `Workspace changes` |
 | REPL meta-command | `:dirty` | `Workspace dirty` |
-| MCP | `save_method` | `aClass >> aSym => body` |
+| MCP | `save_method` | `aClass compile: aSym source: body` |
 | MCP | `save_class` | `Workspace newClass: source at: path` |
-| MCP | `try_method` | `aClass tryPatch: aSym source: body` |
+| MCP | `try_method` | `aClass tryCompile: aSym source: body` |
 | MCP | `flush` | `Workspace flush` (or `Workspace flush: aClass`) |
 | MCP | `list_changes` | `Workspace changes` (returns serialised log) |
 | MCP | `dirty_methods` | `Workspace changes dirtyMethods` |
 | LSP | `workspace/executeCommand: flush` | `Workspace flush` |
 | LSP | `workspace/executeCommand: save_class` | `Workspace newClass: source at: path` |
-| Browser | "Save" (per method) | `aClass >> aSym => body` |
+| Browser | "Save" (per method) | `aClass compile: aSym source: body` |
 | Browser | "New File" | `Workspace newClass: source at: path` |
 | Browser | "Save All to Disk" | `Workspace flush` |
 
@@ -160,14 +163,15 @@ Each MCP tool call below is annotated with the Beamtalk expression it compiles t
 ```beamtalk
 // 1. Agent explores via try_method — installs in memory, no log entry
 mcp> try_method(class: "Counter", selector: "doubled", body: "^ self value * 2")
-//   ≡ Counter tryPatch: #doubled source: "^ self value * 2"
+//   ≡ Counter tryCompile: #doubled source: "^ self value * 2"
 => a CompiledMethod (memory only, ephemeral)
 mcp> evaluate("(Counter new) doubled")
 => 0                                              // works, agent commits
 
 // 2. Agent promotes the spike to a logged change
 mcp> save_method(class: "Counter", selector: "doubled", body: "^ self value * 2")
-//   ≡ Counter >> doubled => self value * 2
+//   ≡ Counter compile: #doubled source: "^ self value * 2"
+//   (a human typing `Counter >> doubled => self value * 2` reaches the same method via parser sugar)
 => ChangeEntry logged (#doubled in Counter)
 
 // 3. Agent creates a new test class for the feature
@@ -234,9 +238,12 @@ mcp> save_class(source: "<DoubleCounter source>", target: "src/double_counter.bt
 | New-class flush | When flushing a `new-class` entry, the splice operation is "write `source` to `targetPath`" (no byte-span surgery; the file doesn't exist yet). External-edit detection still applies: if `targetPath` was created externally between the `save-class` call and flush, the conflict surfaces with the same force/discard/diff choice. Subsequent `>>` patches against a not-yet-flushed new class produce additional entries that replay in order at flush — the `new-class` entry writes first, then later method-patch entries splice into the just-written file. |
 | Undo | `Workspace changes revert: aMethod` re-installs `prev_source` from the most recent ChangeEntry for that method and appends a new revert entry (revert is itself a patch, not log mutation). Revert is only possible for flushable classes — ephemeral memory-only patches against stdlib/dependencies are not recorded and therefore not revertible. |
 | Release builds | No-op. Release nodes do not start a workspace; ChangeLog code is in `beamtalk_workspace`, not `beamtalk_runtime`. |
-| Stdlib classes | `sourceFile => nil` ⇒ patches are memory-only and never logged. |
-| Dynamic classes (ADR 0038, ClassBuilder) | `sourceFile => nil` ⇒ patches are memory-only and never logged. |
-| Package dependency classes | `sourceFile` resolves to a path **outside** the current project source tree ⇒ patches install in memory but emit no ChangeEntry. Reproducible-build guarantee preserved. |
+| Stdlib classes | `sourceFile => nil` ⇒ **`compile:source:` raises an error** ("cannot patch <Class>: stdlib classes are sealed against editing"). Memory state unchanged. `tryCompile:source:` succeeds (ephemeral patches against stdlib are legitimate exploration). The agent/user is told loudly rather than silently losing work on restart. |
+| Dynamic classes (ADR 0038, ClassBuilder) | `sourceFile => nil` ⇒ same as stdlib: `compile:source:` raises, `tryCompile:source:` succeeds. |
+| Package dependency classes | `sourceFile` outside the current project source tree ⇒ same as stdlib: `compile:source:` raises ("cannot patch <Class>: source file lies outside the project tree at <path>"), `tryCompile:source:` succeeds. Reproducible-build guarantee preserved by the raise. |
+| `Workspace newClass:` validation | The op raises if: (a) `targetPath` already exists on disk; (b) `targetPath` lies outside the project source tree; (c) `source` parses successfully *but* the declared class name does not match the basename of `targetPath` (one-class-per-file convention per ADR 0040); (d) a class with that name is already loaded in memory (use `compile:source:` against the existing class, or remove it first). All four are loud errors with specific messages — no silent fallback. |
+| `tryCompile:source:` and restart | Ephemeral patches do not survive workspace restart. They install in memory but emit no ChangeEntry; on restart, memory wins from disk and the ephemeral patch is gone. This is by design — `tryCompile:` is the spike-and-discard path. Agents wanting to keep a successful spike must call `compile:source:` (or `save_method` MCP tool) to log it. |
+| Concurrent compile + flush | `Workspace flush` snapshots the set of pending ChangeEntries at flush start (end of Phase A). New `compile:source:` calls that arrive mid-flush append to the log normally and become pending for the next flush; they do not race with the in-progress flush operation. The ChangeLog gen_server serialises log appends and flush-start reads. |
 | Extension methods (ADR 0066) | A class adding extension methods to a foreign class has its own `sourceFile`; the patch is logged against the extender's file, not the extended class's file. **Multi-extender ambiguity:** if two packages both extend `String >> shout`, the patch is logged against the file owning the *currently-resolved* extension method (whatever the MRO picked at dispatch time). Conflict resolution between competing extenders is ADR 0066's problem, not this ADR's — we faithfully patch whichever extender was active. |
 | `autoflush: true` | Memory install → flush in the same call. On flush failure (external-edit conflict, write error, multi-file partial), memory and disk diverge — we do **not** attempt to roll back the BEAM module install (prior binary may be unloaded; live actors may hold references to the new closures). The error surfaces with a "memory ahead of disk" warning and the ChangeEntry remains in the log for manual flush. Autoflush is best-effort consistency, not transactional. |
 
@@ -330,29 +337,38 @@ The two-stage model (stage with `git add`, commit with `git commit`) is the clos
 ### Alternative A — Memory-only (status quo + "Export Changes")
 
 - 🧑‍💻 **Newcomer:** "There is zero risk of an IDE save mangling my git tree. I can copy-paste the export when I'm ready."
-- 🎩 **Smalltalk purist:** "Image-style; no surprises about file representation."
+- 🎩 **Smalltalk purist:** "Pharo's `.changes` exists because pure memory *is* insufficient — but it's an internal mechanism, not a user-facing flush. Adopting Pharo's *log* without Pharo's *image* is half a model. Either go all-in on persistent runtime state (an image) or stay honest that the runtime is ephemeral and source files are the only durable artifact. The hybrid is the worst of both worlds."
 - ⚙️ **BEAM veteran:** "This is the only option that preserves the existing memory-only invariant *literally*. Anything else is a new contract."
 - 🏭 **Operator:** "Best for production triage — patches cannot leak to disk by accident."
 - 🎨 **Language designer:** "Smallest surface. The export step is human and intentional, like `:show-codegen` is."
-- **Why rejected:** users *will* lose work on workspace restart with no warning; the IDE story still ends in copy-paste; no audit trail for what was changed in memory.
+- **Why rejected:** users *will* lose work on workspace restart with no warning; the IDE story still ends in copy-paste; no audit trail for what was changed in memory. The Smalltalk-purist's "half a model" critique is real, but ADR 0004 already chose against the image — option A makes that choice user-visible in a way that maximises pain.
 
 ### Alternative B — Write-through (every patch writes immediately)
 
 - 🧑‍💻 **Newcomer:** "Ctrl-S writes the file like every other editor. The model is one model."
-- 🎩 **Smalltalk purist:** "Closest to image semantics: the source-of-truth and the running system are always in agreement."
+- 🎩 **Smalltalk purist:** "Live editing means edits propagate everywhere — memory, disk, IDE views — simultaneously. That's Morphic's deepest promise. A two-step save reintroduces the compile-deploy cycle Smalltalk was invented to abolish; flush is a build step in disguise."
 - ⚙️ **BEAM veteran:** "If we are going to write at all, write transactionally. One model is easier to reason about than two."
 - 🏭 **Operator:** "Every change is in git history (after the user commits). Audit trail is the git log."
-- 🎨 **Language designer:** "Maximally consistent."
-- **Why rejected:** every transient `>>` from a REPL one-liner or an MCP agent mutates the user's git tree; collision with VSCode unsaved buffers and `git pull` is constant; rollback on compile failure means rolling back disk too, which is fiddly; violates the safety property operators rely on.
+- 🎨 **Language designer:** "Zero impedance between language and tooling. There is no 'pending state' to reason about because pending state cannot exist; the system is either consistent or in an explicit conflict. The two-step model adds a synchronisation question — *is my memory ahead of disk or behind?* — which is a category of bug that doesn't exist with write-through."
+- **Why rejected:** every transient `>>` from a REPL one-liner or an MCP agent mutates the user's git tree; collision with VSCode unsaved buffers and `git pull` is constant; rollback on compile failure means rolling back disk too, which is fiddly; violates the safety property operators rely on. The Smalltalk-purist's "flush is a build step in disguise" critique is fair — Option C *does* reintroduce a hint of compile-deploy. We accept that cost because the alternative (silent file mutation from a REPL one-liner) is worse.
 
 ### Alternative D — REPL memory-only, browser-editor write-through
 
 - 🧑‍💻 **Newcomer:** "Each surface behaves like its native idiom — the REPL is a REPL, the editor is an editor."
-- 🎩 **Smalltalk purist:** "Surfaces are different tools; different rules are fine."
+- 🎩 **Smalltalk purist:** "REPL and Browser are different *activities*, not different views of the same thing. Pharo doesn't save when you Do-It in the Workspace, but it does save when you Save-As in the System Browser. The semantics follow the user's intent, which is signalled by which tool they reached for."
 - ⚙️ **BEAM veteran:** "REPL stays clean for production work."
 - 🏭 **Operator:** "I never accidentally write code from a REPL session."
-- 🎨 **Language designer:** "Two-surface honesty: don't pretend they're the same."
-- **Why rejected:** violates the surface-parity contract in CLAUDE.md (`docs/development/surface-parity.md` line 7: equivalent effects across surfaces unless explicitly `surface-specific`). The same patch from MCP and from the browser would produce different on-disk outcomes — exactly the drift surface-parity exists to prevent. The drift-check binary would have to whitelist this, which we have collectively decided not to do.
+- 🎨 **Language designer:** "Two-surface honesty: don't pretend they're the same. Each surface has its own contract; trying to unify them produces compromises that satisfy nobody."
+- **Why rejected:** violates the surface-parity contract in CLAUDE.md (`docs/development/surface-parity.md` line 7: equivalent effects across surfaces unless explicitly `surface-specific`). The same patch from MCP and from the browser would produce different on-disk outcomes — exactly the drift surface-parity exists to prevent. The drift-check binary would have to whitelist this, which we have collectively decided not to do. The Smalltalk-purist's "different activities, different semantics" critique is genuine — we counter it via the `try_method` / `save_method` split, which encodes the *activity* (explore vs commit) at the op level rather than at the surface level.
+
+### Alternative F — Shadow-file overlay (Monticello-style)
+
+- 🧑‍💻 **Newcomer:** "I can see exactly what's pending in a separate file. No splice machinery means no risk of mangling my real source."
+- 🎩 **Smalltalk purist:** "This is literally how Monticello (Pharo's package system) handles deltas — overlay files that compose with originals. Decades of production use. Why reinvent it?"
+- ⚙️ **BEAM veteran:** "Loader complexity is small (read original.bt + original.bt.patch, merge); no splice machinery needed; no byte-span resolver risk in Phase 0."
+- 🏭 **Operator:** "Pending patches are visible as files on disk — operationally legible, greppable, diff-able."
+- 🎨 **Language designer:** "Separates concerns: the *original* file is the user's source-of-truth; the *patch* file is the workspace's pending state. Two artifacts, two responsibilities. Cleaner than splicing into a shared file."
+- **Why rejected:** every load operation pays the cost of merging overlay-into-original (parsing two files instead of one); the `.bt.patch` files pollute the source tree and confuse external tools (git, grep, fmt); flush still has to splice eventually (to remove the overlay), so the byte-span resolver is needed anyway; multi-method-edit cases produce overlapping overlays that re-introduce the conflict-resolution problem the overlay was meant to avoid; and the user-experience of "your patch is in a sidecar file" is alien to anyone not from the Pharo ecosystem. Acceptable for a package manager (Monticello's actual domain) but wrong for live method editing.
 
 ### Tension points
 
@@ -373,6 +389,9 @@ See steelman above. Matches per-surface intuition but violates surface parity; r
 
 ### Alternative E — Image-style snapshot (revisit ADR 0004)
 Drop file-based source entirely; persist the workspace as a binary image. Rejected by ADR 0004 with extensive rationale; this ADR does not revisit that decision.
+
+### Alternative F — Shadow-file overlay (Monticello-style)
+See steelman above. Pharo's Monticello uses overlay files for package deltas, and the model has decades of production use. Rejected for live method editing because every load pays an overlay-merge cost, sidecar `.bt.patch` files pollute the source tree and confuse external tools, and flush still needs the byte-span resolver to remove the overlay — so we pay the splice-machinery cost regardless. Right model for packages, wrong model for the inner loop.
 
 ## Consequences
 
@@ -421,7 +440,7 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New REPL ops: `save-method`, `save-class`, `try-method`, `flush`, `list-changes`, `dirty`. Each handler is a thin shim that constructs the equivalent Beamtalk expression (e.g. `save-method` builds `aClass >> aSym => body` and evaluates it; `save-class` evaluates `Workspace newClass: src at: path`) — the language is the authority, the op is the structured invocation. |
 | `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `dirty`, `changes` (returns ChangeLog), `newClass:at:`. Detailed operations live *on* the returned ChangeLog object — matches Pharo's `Smalltalk changes` idiom. |
-| `stdlib/src/Behaviour.bt` | New class-side method `tryPatch:source:` (ephemeral patch, no log) — symmetric with the existing `>>` patcher form (durable). Both share the same compile-and-install path; `tryPatch:` skips the ChangeLog emit. |
+| `stdlib/src/Behaviour.bt` | Two new class-side methods: `compile: aSym source: aString` (durable, logs) and `tryCompile: aSym source: aString` (ephemeral, no log). `compile:source:` is the underlying primitive that the existing `>>` patcher form desugars to (ADR 0066 parser rule updated). Both share the same compile-and-install path; only `compile:source:` emits a ChangeEntry. MCP tools call these directly with body values, avoiding fragile string-construction of `>>` expressions. |
 | `stdlib/src/ChangeLog.bt` (new) | The navigable ChangeLog object: `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. Backed by `beamtalk_workspace_changelog.erl` via FFI. |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands: `:flush`, `:flush <Class>`, `:changes`, `:dirty`. |
 | `crates/beamtalk-mcp/src/server.rs` | New tools: `save_method`, `save_class`, `try_method`, `flush`, `list_changes`, `dirty_methods`. Each tool implementation constructs the corresponding Beamtalk expression (see Surface table) and submits it via the existing `evaluate` pathway — there is no MCP-only code path that bypasses the language. MCP-issued logged patches are auto-tagged `author_kind: agent` for audit. |
@@ -442,6 +461,19 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 | **5** | LSP-side `workspace/applyEdit` consumption in VSCode + e2e test that flush refreshes an open buffer. | S | VSCode extension e2e. |
 
 Total: ~M-L across 6 phases. Phase 0 is scaffolding — its deliverable is *evidence that byte-span splice works on real code*, not a shippable feature. If Phase 0 reveals that the parser cannot reliably resolve method spans against arbitrary `.bt` files, the design pivots before phases 1–5 commit to it.
+
+## Out of Scope
+
+This ADR covers **patch** (existing method) and **create** (new class file). The following are deliberately deferred to follow-up ADRs so that the persistence model can ship without being held up by destructive-op design:
+
+| Deferred concern | Why deferred | Future ADR |
+|------------------|--------------|-----------|
+| **Method-level removal** (`aClass removeSelector:`) | The language primitive does not exist yet. Adding it is a separate design question (raise vs no-op on absent selector? cascade to overrides? extension-method handling?) — not bundled with persistence. The runtime can erase a method's `method_signatures` entry (`beamtalk_object_class.erl:640`) but there is no first-class Beamtalk method that calls it. | "Method-level Removal Language Primitive" |
+| **Class-level removal flush UX** | `aClass removeFromSystem` already exists (BT-785) for memory removal. What it should mean to *flush* a class removal — deleting a `.bt` file from disk — is irreversibly destructive and wants its own UX: confirmation prompt, `.bt.deleted` tombstone, undo flow. Different concerns than patch/create. | "Destructive Workspace Operations" |
+| **Renames** (class rename, method rename, file relocation) | Touches two paths (the old and the new), needs cross-file rename detection in the splice machinery, and benefits from concrete usage data from the patch-and-create case before its UX is locked in. | "Destructive Workspace Operations" |
+| **Schema accommodation** | The ChangeLog format reserves the `kind` enum as open (`"instance"`, `"class"`, `"new-class"` today; `"remove-method"`, `"remove-class"`, `"rename"` will slot in later) and `author_kind` as open. Future ADRs extend the enum without breaking the format. No prep-work needed in this ADR's implementation phases. | n/a |
+
+**Implementation order:** ADR 0081 phases 0–3 land first → method-removal language primitive ADR lands in parallel → destructive workspace ops ADR is written *after* phases 1–2 ship and produce real usage signal (i.e., the UX questions are answered by what users actually try to do, not by speculation now).
 
 ## Migration Path
 
