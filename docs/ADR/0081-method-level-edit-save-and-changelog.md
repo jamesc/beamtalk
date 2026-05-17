@@ -72,12 +72,16 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 
 ### Behaviour
 
-- A successful `>>` patch (or new `save-method` REPL op) does two things atomically: installs the new method in memory **and** appends a `ChangeEntry` to the workspace ChangeLog.
+- The `>>` operator has two forms — only the **patch form** triggers ChangeLog activity:
+  - `Counter >> #selector` — reader, returns a `CompiledMethod` object (no side effect, no log entry)
+  - `Counter >> selector => body` — patcher, installs and (when flushable) logs
+- A successful patch (or new `save-method` REPL op) does three things atomically: (1) reads and parses `Counter sourceFile` to capture the existing method's exact byte span and source body as `prev_source`; (2) installs the new method in memory; (3) appends a `ChangeEntry` to the workspace ChangeLog. The disk read in step 1 is what makes `revert:` and splice both work; without it, the hook cannot know what the disk currently contains.
+- A class is **flushable** iff `sourceFile` is non-nil **and** the source file lies inside the current project's source tree (per the active `beamtalk.toml`). Stdlib classes, dynamic classes (ADR 0038), and classes loaded from package dependencies are **not flushable** — patches against them install in memory but emit no ChangeEntry. This guards reproducible builds against accidental writes into the dependency cache.
 - The ChangeLog is the dirty state. A method is "dirty" iff there is an unflushed ChangeEntry whose target is that method, that class, or that file. Granularity is per-method; aggregate views (per-class, per-file) are derived.
-- `Workspace flush` walks pending ChangeEntries, groups them by source file, splices each set into the file via the trivia-preserving printer, writes via temp+rename, then prunes the flushed entries from the log.
+- `Workspace flush` walks pending ChangeEntries, groups them by source file, computes a new file body per file by replacing each target method's recorded byte span with its patched source, writes each via temp+rename, then prunes the flushed entries from the log. The splice operates on byte spans recorded at hook time — it does not depend on the formatter being able to round-trip the whole file. ChangeEntry pruning is deferred until **every** file in the flush completes its rename successfully; partial failure leaves all entries in the log for retry (see Atomicity below).
 - `Workspace flush: Counter` flushes only entries targeting that class. Similar for `flush: #{file: "..."}`.
 - `Workspace clearChanges` discards the ChangeLog without writing. Memory still holds the latest patched versions until the next workspace restart, when disk wins.
-- An `autoflush` workspace setting (boolean, default `false`) inverts the default: live patches flush immediately. This is one switch, applied uniformly across all surfaces — surface parity preserved.
+- An `autoflush` workspace setting (boolean, default `false`) inverts the default: live patches flush immediately. This is one switch, applied uniformly across all surfaces — surface parity preserved. On autoflush failure (external-edit conflict, write error), memory and disk diverge and the user is told so explicitly; we do not roll back the BEAM module install because the prior `.beam` binary may already be unloaded and live actors may hold references to the new closures. Autoflush is therefore best-effort consistency, not transactional consistency.
 
 ### Surface
 
@@ -130,20 +134,25 @@ Without an explicit decision, any browser "Save" button has to choose silently b
 
 | Concern | Decision |
 |---------|----------|
-| Splice strategy | Trivia-preserving printer driven from the AST. Replace only the method's source span; leave surrounding comments, blank lines, and ordering intact. No reflow, no `bt fmt` on write. |
-| Atomicity | Write `<file>.tmp` → fsync → atomic rename. Memory install precedes disk write; ChangeEntry is only pruned after rename returns. A crash between install and rename leaves the entry pending — retried on next flush. |
+| Splice strategy | **Byte-span replacement**, not AST round-trip. At hook time, the disk file is parsed to locate the target method's exact byte span (start..end including the body and trailing newline); that span is stored on the ChangeEntry. At flush time, a new file body is produced by copying bytes verbatim outside the span and substituting the patched source inside it. No reformat, no AST reprint of unchanged content. This sidesteps the open question of whether the formatter can round-trip every `.bt` file losslessly — only the parser's span resolution must be correct, which ADR 0044's trivia model already supports. |
+| Single-file atomicity | Write `<file>.tmp` → fsync → atomic rename. Memory install precedes disk write; ChangeEntry is only pruned after rename returns. A crash between install and rename leaves the entry pending — retried on next flush. |
+| Multi-file atomicity | Two-phase per flush operation. **Phase A:** parse every target file, validate every recorded byte span still resolves cleanly, write every `<file>.tmp`. **Phase B:** rename each `<file>.tmp` → `<file>` in sequence. If any Phase A step fails, abort the entire flush; no temp files are renamed; **no ChangeEntries are pruned**. If a Phase B rename fails (POSIX guarantees atomicity but the OS may surface I/O errors), the failed file's entries remain in the log alongside any entries for files that haven't yet renamed; already-renamed files are reported as completed. The user sees a per-file status report. This is the strongest atomicity achievable without filesystem transactions, and it ensures the failure mode is *recoverable via re-flush*, not silent data loss. |
 | Compile failure on patch | Memory unchanged, ChangeLog unchanged, error surfaced. |
-| Compile failure on flush | Should not happen — patches were already compiled into memory. If parse of the *target file* fails (file got corrupted externally), flush aborts and reports the unparseable file. |
+| Disk-read failure on patch | If `sourceFile` cannot be read or parsed at hook time (file deleted, syntax error introduced externally), the patch downgrades to memory-only: memory is patched, but no ChangeEntry is emitted and the user is warned that the patch will not survive workspace restart. |
+| Compile failure on flush | Should not happen — patches were already compiled into memory. Splice is purely byte-level. The only flush-time failure modes are external-edit conflicts and I/O errors. |
 | External-edit detection | At flush time, compare per-file `(mtime, content-hash)` against the snapshot captured when the first pending ChangeEntry for that file was logged. Mismatch → conflict; pending entries remain in the log; user chooses force/discard/diff. |
 | LSP coordination on flush | Runtime emits `workspace/applyEdit` for each flushed file; VSCode reloads the buffer. If the editor has unsaved changes, VSCode's standard conflict dialog applies. |
 | Multi-client (two browsers) | Last-writer-wins on memory install. Both clients' ChangeEntries land in the log; on flush, the second client's entry shadows the first for the same method. Each browser session observes the dirty set and shows "modified by another session" when its local view drifts. |
-| ChangeLog format | Append-only JSON-Lines under workspace data dir: `<workspace>/changes.jsonl`. Each entry: `{ts, class, selector, kind: "instance"\|"class", source, prev_source, sourceFile, author}`. Survives workspace restart. |
-| ChangeLog growth | Bounded ring of last N=1000 entries by default. Older entries archived to `changes-<timestamp>.jsonl.gz` on flush. |
-| Undo | `Workspace revert: aMethod` re-installs `prev_source` from the ChangeLog and appends a new revert entry (revert is itself a patch, not log mutation). |
+| ChangeLog format | Append-only JSON-Lines under workspace data dir: `<workspace>/changes.jsonl`. Each entry: `{ts, class, selector, kind: "instance"\|"class", source, prev_source, sourceFile, span: {start, end}, author, author_kind: "human"\|"agent"\|"test"}`. Survives workspace restart. |
+| ChangeLog growth | Bounded ring of last N=1000 entries by default. Older entries archived to `changes-<timestamp>.jsonl.gz` on flush. Agent- and test-authored entries are pruned aggressively (kept N=200 by default); see Author-kind handling below. |
+| Author-kind handling | ChangeEntries carry `author_kind`. MCP-originated patches are tagged `agent`; patches issued from inside a `Workspace runTests` invocation are tagged `test`; everything else is `human`. `Workspace dirty` and `Workspace dirtyMethods` default to `human`-only; `Workspace dirty: #all` includes all kinds; `Workspace flush` flushes only `human` entries by default (the `kinds:` keyword overrides). Test patches and agent exploration thus do not pollute the dirty set or the user's git tree by default, while still being recorded for audit. |
+| Undo | `Workspace revert: aMethod` re-installs `prev_source` from the most recent ChangeEntry for that method and appends a new revert entry (revert is itself a patch, not log mutation). Revert is only possible for flushable classes — ephemeral memory-only patches against stdlib/dependencies are not recorded and therefore not revertable. |
 | Release builds | No-op. Release nodes do not start a workspace; ChangeLog code is in `beamtalk_workspace`, not `beamtalk_runtime`. |
-| Dynamic classes (ADR 0038, ClassBuilder) | `sourceFile => nil` ⇒ patches are memory-only and never logged. Same for stdlib classes. |
+| Stdlib classes | `sourceFile => nil` ⇒ patches are memory-only and never logged. |
+| Dynamic classes (ADR 0038, ClassBuilder) | `sourceFile => nil` ⇒ patches are memory-only and never logged. |
+| Package dependency classes | `sourceFile` resolves to a path **outside** the current project source tree ⇒ patches install in memory but emit no ChangeEntry. Reproducible-build guarantee preserved. |
 | Extension methods (ADR 0066) | A class adding extension methods to a foreign class has its own `sourceFile`; the patch is logged against the extender's file, not the extended class's file. |
-| `autoflush: true` | Memory install → flush in the same transaction. On flush failure (external-edit conflict, write error), the install is *rolled back* in memory before surfacing the error. This is the only mode where memory ever rolls back. |
+| `autoflush: true` | Memory install → flush in the same call. On flush failure (external-edit conflict, write error, multi-file partial), memory and disk diverge — we do **not** attempt to roll back the BEAM module install (prior binary may be unloaded; live actors may hold references to the new closures). The error surfaces with a "memory ahead of disk" warning and the ChangeEntry remains in the log for manual flush. Autoflush is best-effort consistency, not transactional. |
 
 ## Prior Art
 
@@ -272,21 +281,25 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 ### Negative
 
 - Two-step save is unusual for editor users; mitigated by `autoflush: true` and visible "Save All" UI.
-- Trivia-preserving printer is non-trivial; bugs in the splice corrupt user source. Mitigation: temp+rename atomicity, byte-range fallback if AST splice fails, ChangeLog retains prev_source for revert.
-- ChangeLog growth on long-lived workspaces requires pruning policy.
+- Byte-span splice depends on the parser correctly resolving every method's span against arbitrary `.bt` files. Phase 0 exists to validate this against the stdlib+examples corpus before any flush code is written. If Phase 0 fails, the design pivots.
+- ChangeLog growth on long-lived workspaces requires pruning policy. Mitigated by author-kind separation: agent and test entries are pruned aggressively while human entries are retained.
 - Multi-client coordination is last-writer-wins; concurrent edits to the same method by two users will lose one — observable but not prevented.
+- Autoflush is best-effort consistency, not transactional. On flush failure under autoflush, memory and disk diverge and require manual reconciliation. This is documented behaviour, not a bug to fix — the alternative (rolling back the BEAM module install) is unsound when live actors hold references to the new closures.
+- Multi-file flush failure leaves a mixed state across files even after the two-phase protocol — Phase B renames are sequential, and a hard I/O error mid-sequence means some files renamed and some did not. The user gets a per-file status report and can re-flush; entries for already-renamed files are pruned, entries for failed files remain.
 
 ### Neutral
 
 - ChangeLog persistence introduces a new on-disk artifact (`<workspace>/changes.jsonl`). Backup story is "it lives next to the workspace; back it up with the workspace."
 - `autoflush: true` collapses the model to Alternative B at the per-workspace level. Users who want write-through can have it; the default does not.
 - Stdlib and dynamic classes (no `sourceFile`) silently accept patches as memory-only. This matches today's behaviour for `>>` against `Integer`, but the ChangeLog will not contain entries for them — they are not flushable by definition.
+- Package dependency classes silently accept patches as memory-only for the same reason — their `sourceFile` is outside the project tree. This is a feature, not a limitation: reproducible builds depend on dependency caches being treated as read-only.
+- MCP agents using `>>` for exploratory patches generate `author_kind: agent` entries that do not contribute to the default dirty set. Operators reviewing the audit log can still inspect agent activity via `Workspace dirty: #all` or by reading `changes.jsonl` directly.
 
 ### DDD Model Impact
 
-- **Compilation context** owns the trivia-preserving printer (extends existing AST/printer infrastructure).
-- **REPL context** owns the ChangeLog gen_server and the flush op. New module: `beamtalk_repl_changelog.erl`.
-- **Workspace context** gains `Workspace flush`, `Workspace changes`, `Workspace dirty`, `Workspace dirtyMethods`, `Workspace revert:`, `Workspace clearChanges`.
+- **Compilation context** owns the byte-span resolver — given a source string and a target `(class, selector)`, return the exact byte span of the method definition. Reuses the existing parser; no new printer required.
+- **Workspace context** owns the ChangeLog gen_server, the flush op, and the `Workspace` facade extensions. New module: `beamtalk_workspace_changelog.erl` (not REPL-scoped — the ChangeLog is consumed cross-surface by REPL, MCP, LSP, and browser, so DDD-correct placement is the workspace, not the REPL).
+- **REPL context** gains thin op handlers (`save-method`, `flush`, `list-changes`, `dirty`) that delegate to the workspace ChangeLog.
 - **No language-service changes** — the LSP server consumes `workspace/applyEdit` notifications from the runtime, which is a one-way bridge already supported by the protocol.
 
 ## Implementation
@@ -295,13 +308,13 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 
 | Layer | Change |
 |-------|--------|
-| `crates/beamtalk-core/src/codegen/` | New trivia-preserving splice printer: given an AST and a target method span, produce a new file body with only that method's span replaced. Reuses existing trivia model from ADR 0044. |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_changelog.erl` (new) | Gen_server owning the append-only ChangeLog. ETS for live state, JSON-Lines on disk. Exposed via the `Workspace` facade per ADR 0040. |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New ops: `save-method`, `flush`, `list-changes`, `dirty`. Integrated alongside existing `load-source` / `reload` ops. |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl` (or wherever `>>` install lives) | Hook the install path to emit a ChangeEntry to the workspace ChangeLog process when one is reachable. Stdlib / dynamic classes (`sourceFile = nil`) skip the emit. |
-| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `changes`, `dirty`, `dirtyMethods`, `revert:`, `clearChanges`. |
+| `crates/beamtalk-core/src/source_analysis/` | New byte-span resolver: given source text and `(class, selector, kind)`, return the byte span of that method's definition. Pure parser-level work; no new printer. |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_changelog.erl` (new) | Gen_server owning the append-only ChangeLog. ETS for live state, JSON-Lines on disk. Exposed via the `Workspace` facade per ADR 0040. Lives in the workspace context, not REPL, because it's consumed cross-surface. |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | New REPL ops: `save-method`, `flush`, `list-changes`, `dirty`. Thin handlers delegating to `beamtalk_workspace_changelog`. |
+| `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `changes`, `dirty`, `dirty:`, `dirtyMethods`, `revert:`, `clearChanges`. |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands: `:flush`, `:flush <Class>`, `:changes`, `:dirty`. |
-| `crates/beamtalk-mcp/src/server.rs` | New tools: `flush`, `list_changes`, `dirty_methods`. |
+| `crates/beamtalk-mcp/src/server.rs` | New tools: `flush`, `list_changes`, `dirty_methods`. MCP-issued patches are auto-tagged `author_kind: agent`. |
 | `crates/beamtalk-lsp/src/server.rs` | Handle `workspace/executeCommand` for `flush`. Emit `workspace/applyEdit` *to* clients on flush events received from the runtime. |
 | `runtime/apps/beamtalk_workspace/priv/static/workspace.js` | Per-method dirty indicator, "Save" per method, "Save All to Disk" workspace-level. |
 | `docs/development/surface-parity.md` | Add rows for `save-method`, `flush`, `list-changes`, `dirty`. |
@@ -309,16 +322,16 @@ Drop file-based source entirely; persist the workspace as a binary image. Reject
 
 ### Phased rollout
 
-| Phase | Scope | Effort |
-|-------|-------|--------|
-| **0** | ChangeLog gen_server + JSON-Lines persistence + `Workspace changes` / `dirty` (read-only). No flush yet. Validates the log mechanism end-to-end before any disk-write code is written. | S |
-| **1** | Trivia-preserving splice printer in `beamtalk-core`. Unit tests covering: replace single method, preserve surrounding comments, preserve blank lines, preserve method order, gracefully fail on un-parseable target file. | M |
-| **2** | `Workspace flush` + `flush:` + atomic temp+rename + external-edit detection. ChangeEntry pruning on success. Wire to existing `>>` install path. | M |
-| **3** | `save-method` REPL op, MCP tool, LSP `executeCommand`, browser "Save" UI. Surface-parity table updated. | M |
-| **4** | `Workspace revert:` + `clearChanges` + `autoflush` setting. ChangeLog browsing UI in the browser workspace. | S |
-| **5** | LSP-side `workspace/applyEdit` consumption in VSCode + e2e test that flush refreshes an open buffer. | S |
+| Phase | Scope | Effort | Tests |
+|-------|-------|--------|-------|
+| **0** | **Validation spike** (internal scaffolding, not user-facing). Implement the byte-span resolver and prove it against the entire stdlib + examples corpus: parse, locate every method's span, re-serialise file with a no-op span replacement, and assert byte-identical output. This is the load-bearing assumption of the design — validate it before building anything else. | S | Corpus round-trip tests in `crates/beamtalk-core/src/source_analysis/`. |
+| **1** | ChangeLog gen_server + JSON-Lines persistence + `Workspace changes` / `dirty` / `dirtyMethods`. Hooks into `beamtalk_extensions.erl`. No flush yet. `author_kind` plumbing through REPL/MCP. | M | EUnit tests for the gen_server; BUnit tests for the `Workspace` facade reads. |
+| **2** | `Workspace flush` + `flush:` + single-file atomic temp+rename + multi-file two-phase (Phase A all writes, Phase B all renames) + external-edit detection. Pruning rules implemented. | M | EUnit tests for atomicity (kill the process between phases); BUnit tests for the facade. |
+| **3** | `save-method` REPL op, MCP tool, LSP `executeCommand`, browser "Save" UI. Surface-parity table updated; surface-drift CI gate passes. | M | Surface-parity tests; browser e2e for the Save button. |
+| **4** | `Workspace revert:` + `clearChanges` + `autoflush` setting. ChangeLog browsing UI in the browser workspace. | S | BUnit tests for revert; e2e for autoflush. |
+| **5** | LSP-side `workspace/applyEdit` consumption in VSCode + e2e test that flush refreshes an open buffer. | S | VSCode extension e2e. |
 
-Total: ~M-L across 6 phases; Phase 0 is independently shippable as a read-only audit log even without the flush story.
+Total: ~M-L across 6 phases. Phase 0 is scaffolding — its deliverable is *evidence that byte-span splice works on real code*, not a shippable feature. If Phase 0 reveals that the parser cannot reliably resolve method spans against arbitrary `.bt` files, the design pivots before phases 1–5 commit to it.
 
 ## Migration Path
 
