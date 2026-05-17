@@ -475,7 +475,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         Block, ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
-        MethodDefinition, Module,
+        MethodDefinition, Module, StandaloneMethodDefinition,
     };
     use crate::source_analysis::Span;
 
@@ -912,5 +912,50 @@ mod tests {
         );
         let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
         assert!(!facts.methods_with_block_nlr.contains(&method_span));
+    }
+
+    #[test]
+    fn compute_facts_module_level_assignment_block_nlr() {
+        // Legacy gen_server dispatch: myMethod := [:p | [^42]]
+        // The outer block is treated as method-level (inside_block=false).
+        // A ^ nested inside an inner block IS NLR — its span enters methods_with_block_nlr.
+        let block_span = Span::new(5, 50);
+        let inner = Expression::Block(block_with(vec![bare(ret(lit(42)))], ts()));
+        let outer_block = block_with(vec![bare(inner)], block_span);
+        let assignment = Expression::Assignment {
+            target: Box::new(ident("myMethod")),
+            value: Box::new(Expression::Block(outer_block)),
+            type_annotation: None,
+            span: ts(),
+        };
+        let module = Module::new(vec![bare(assignment)], ts());
+        let facts = compute_semantic_facts(&module);
+        assert!(facts.methods_with_block_nlr.contains(&block_span));
+    }
+
+    #[test]
+    fn compute_facts_standalone_method_nlr() {
+        // Standalone method: Counter >> withNlr => [^1]
+        let method_span = Span::new(10, 100);
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("withNlr".into()),
+            vec![],
+            vec![bare(Expression::Block(block_with(
+                vec![bare(ret(lit(1)))],
+                ts(),
+            )))],
+            method_span,
+        );
+        let standalone = StandaloneMethodDefinition {
+            class_name: Identifier::new("Counter", ts()),
+            package: None,
+            is_class_method: false,
+            method,
+            span: ts(),
+        };
+        let mut module = Module::new(vec![], ts());
+        module.method_definitions.push(standalone);
+        let facts = compute_semantic_facts(&module);
+        assert!(facts.methods_with_block_nlr.contains(&method_span));
     }
 }
