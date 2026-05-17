@@ -1558,18 +1558,33 @@ fn read_specs_protocol(
 ///
 /// Returns an error if `erl` cannot be invoked to discover the OTP lib directory.
 pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
-    // Use `erl -noshell -noinput -eval '...'` to find the OTP lib directory.
-    // We clear the environment to avoid user-specific Erlang config affecting the probe.
+    // Apps we want type specs from. `erts` is included so `erlang.beam`
+    // (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets covered — its specs
+    // are on disk even though `code:which(erlang)` returns `preloaded`. BT-2159.
+    //
+    // We probe `code:lib_dir(App)` per app rather than globbing `<lib_dir>/<app>-*`
+    // because OTP layouts differ: upstream/kerl/brew put `erts-<vsn>` directly
+    // under the OTP root, while Debian also mirrors it under `lib/`. `code:lib_dir/1`
+    // is Erlang's canonical resolution and handles both.
+    const COMMON_APPS: &[&str] = &[
+        "stdlib", "kernel", "erts", "crypto", "ssl", "inets", "mnesia", "os_mon",
+    ];
+
+    let apps_atom_list = COMMON_APPS.join(",");
+    let probe = format!(
+        "lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), halt()."
+    );
+
     let output = Command::new("erl")
         .arg("-noshell")
         .arg("-noinput")
         .arg("-boot")
         .arg("no_dot_erlang")
         .arg("-eval")
-        .arg("io:format(\"~s\", [code:lib_dir()]), halt().")
+        .arg(&probe)
         .output()
         .into_diagnostic()
-        .wrap_err("Failed to run erl to discover OTP lib directory")?;
+        .wrap_err("Failed to run erl to discover OTP ebin directories")?;
 
     if !output.status.success() {
         let stderr_msg = String::from_utf8_lossy(&output.stderr);
@@ -1581,48 +1596,19 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
         return Ok(Vec::new());
     }
 
-    let lib_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if lib_dir.is_empty() {
-        warn!("erl probe returned empty lib_dir");
-        return Ok(Vec::new());
-    }
-
-    // Collect .beam files from common OTP application ebin directories.
-    // Each app lives in `lib_dir/<app>-<version>/ebin/`.
-    //
-    // `erts` is included because `erts-<version>/ebin/erlang.beam` carries
-    // Dialyzer specs for the BIFs (`whereis/1`, `spawn/3`, `self/0`, etc.)
-    // even though `code:which(erlang)` returns `preloaded`. Without `erts`,
-    // every `(Erlang erlang) ...` call resolves to `Dynamic`. BT-2159.
-    let common_apps = [
-        "stdlib", "kernel", "erts", "crypto", "ssl", "inets", "mnesia", "os_mon",
-    ];
-
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut beam_files = Vec::new();
-    let lib_path = std::path::Path::new(&lib_dir);
-    if let Ok(entries) = std::fs::read_dir(lib_path) {
-        for entry in entries.flatten() {
-            let dir_name = entry.file_name();
-            let dir_name_str = dir_name.to_string_lossy();
-            // Check if this directory matches one of our common apps (e.g., "stdlib-5.2")
-            let matches_app = common_apps.iter().any(|app| {
-                dir_name_str.starts_with(app)
-                    && dir_name_str.as_bytes().get(app.len()) == Some(&b'-')
-            });
-            if !matches_app {
-                continue;
-            }
-            let ebin_dir = entry.path().join("ebin");
-            if !ebin_dir.is_dir() {
-                continue;
-            }
-            if let Ok(ebin_entries) = std::fs::read_dir(&ebin_dir) {
-                for file in ebin_entries.flatten() {
-                    let path = file.path();
-                    if path.extension().is_some_and(|e| e == "beam") {
-                        if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
-                            beam_files.push(utf8);
-                        }
+    for line in stdout.lines() {
+        let ebin_dir = std::path::Path::new(line.trim());
+        if !ebin_dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(ebin_dir) {
+            for file in entries.flatten() {
+                let path = file.path();
+                if path.extension().is_some_and(|e| e == "beam") {
+                    if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                        beam_files.push(utf8);
                     }
                 }
             }
@@ -2219,23 +2205,24 @@ end
 
     /// BT-2159: `erts` must be in the OTP discovery set so `erlang.beam`
     /// (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets spec extraction.
-    /// `code:which(erlang)` returns `preloaded`, but the `.beam` exists at
-    /// `<lib_dir>/erts-<version>/ebin/erlang.beam` with full abstract code.
+    /// `code:which(erlang)` returns `preloaded`, but the `.beam` exists in
+    /// `<erts-app>/ebin/erlang.beam` with full abstract code.
     #[test]
     fn discover_otp_beam_files_includes_erts() {
         let Ok(beams) = discover_otp_beam_files() else {
-            // Skip when `erl` is unavailable in the test environment.
+            // Skip only when `erl` cannot be spawned (test env without Erlang).
+            // A successful probe that returns zero beams is a real failure and
+            // is caught by the assert below.
             return;
         };
-        if beams.is_empty() {
-            return;
-        }
         let has_erlang = beams
             .iter()
             .any(|p| p.file_stem().is_some_and(|s| s == "erlang"));
         assert!(
             has_erlang,
-            "discover_otp_beam_files must include erts/ebin/erlang.beam so BIF specs reach NativeTypeRegistry (BT-2159). Got: {beams:?}"
+            "discover_otp_beam_files must include erts/ebin/erlang.beam so BIF specs reach NativeTypeRegistry (BT-2159). Got {} beams: {:?}",
+            beams.len(),
+            beams
         );
     }
 

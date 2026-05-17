@@ -119,12 +119,21 @@ read_specs_erlang_bifs_test() ->
 
 %% Locate erlang.beam on disk. `code:which(erlang)` returns `preloaded` because
 %% the BIF module is loaded into the VM at boot, but the .beam file with
-%% abstract code still ships in `erts-<vsn>/ebin/`.
+%% abstract code still ships in `<erts>/ebin/`.
+%%
+%% Use `code:lib_dir(erts)` rather than globbing — OTP layouts differ
+%% (upstream/kerl/brew put `erts-<vsn>` under the OTP root; Debian also
+%% mirrors it under `lib/`). `code:lib_dir/1` is Erlang's canonical resolution.
 find_erlang_beam() ->
-    LibDir = code:lib_dir(),
-    case filelib:wildcard("erts-*/ebin/erlang.beam", LibDir) of
-        [Rel | _] -> filename:join(LibDir, Rel);
-        [] -> not_found
+    case code:lib_dir(erts) of
+        {error, _} ->
+            not_found;
+        Dir ->
+            Path = filename:join([Dir, "ebin", "erlang.beam"]),
+            case filelib:is_regular(Path) of
+                true -> Path;
+                false -> not_found
+            end
     end.
 
 %%% ---------------------------------------------------------------
