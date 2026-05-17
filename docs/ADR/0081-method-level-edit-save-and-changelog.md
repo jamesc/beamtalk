@@ -212,6 +212,27 @@ Pharo's `.changes` file is the canonical reference. Every method edit appends a 
 **Adapted:** the log persists across workspace restarts (matching Pharo's `.changes` durability) but unlike Pharo there is no image — flush writes the splice into the `.bt` source files instead of into a binary image.
 **Rejected:** Pharo's auto-write-on-edit behaviour. Pharo's image-based model means "write" doesn't touch user-visible files. Our files *are* user-visible (and version-controlled), so silent writes on every edit are wrong by default.
 
+### GemStone/S (GemTalk Systems)
+
+GemStone/S is a multi-user, persistent Smalltalk: classes, methods, and all live objects reside in a transactional object repository, not in source files. Edits happen inside a per-session transaction; `System commitTransaction` makes them durable and visible to other sessions, `System abortTransaction` discards them. Concurrent commits to the same method surface as a first-class `TransactionConflict` that the user resolves explicitly. GemStone has run production multi-developer Smalltalk systems at scale for thirty years — it is the canonical reference for the *workflow shape* this ADR adopts.
+
+**Workflow parallel.** The three core steps map one-to-one:
+
+| GemStone/S | Beamtalk (this ADR) |
+|------------|---------------------|
+| Edit method → in-session install | `>>` patch / `save-method` → memory install + ChangeEntry |
+| `System commitTransaction` | `Workspace flush` |
+| `System abortTransaction` | `Workspace clearChanges` |
+| `TransactionConflict` on commit | External-edit conflict at flush time |
+| File-in from topaz / GBS | `save-class` with `targetPath` |
+| Per-session transaction isolation | Single shared workspace; multi-client last-writer-wins (simpler point on the same axis) |
+
+**Adopted:** the *explicit-commit, conflict-as-first-class* model. GemStone proves at production scale that a save → commit → conflict-aware workflow is intuitive when the vocabulary is explicit and the conflict surface is part of the contract, not an afterthought. Our `Workspace flush` and external-edit detection inherit this directly. The "commit/abort/conflict" vocabulary is also worth borrowing in user-facing docs — newcomers from any DB-backed system will recognise it.
+
+**Adapted:** GemStone's per-session transaction isolation. They support arbitrarily many concurrent sessions, each with its own pending edits, reconciled via optimistic concurrency at commit time. We don't need that today — multi-client coordination is last-writer-wins on memory install, and conflict surfaces only at flush against the on-disk file. The model is the same; the scope is narrower. If multi-session isolation becomes a need, GemStone's optimistic-concurrency approach is the upgrade path.
+
+**Rejected:** the object repository as the source of truth. ADR 0004 made the opposite architectural choice — files are the source. GemStone solved the persistence problem by making the database authoritative and treating source text as a projection; we solve it by making the filesystem authoritative and treating memory + ChangeLog as a transactional staging area on top. Architecturally opposite; *user-experience-wise* close enough that GemStone is the strongest single piece of prior art we have for the workflow shape, even though the storage model is mirror-image different.
+
 ### Erlang / Elixir
 
 Erlang's `code:load_binary/3` and Elixir's `Code.compile_string/2` install modules from in-memory source. Neither has a "save back to file" path — production releases ship `.beam` only, and source-editing happens externally in editors. ElixirLS and Erlang LS read files; they never write code back.
