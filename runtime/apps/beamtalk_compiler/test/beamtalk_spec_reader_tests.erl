@@ -78,6 +78,55 @@ read_specs_nonexistent_file_test() ->
     Result = beamtalk_spec_reader:read_specs("/nonexistent/path/fake.beam"),
     ?assertMatch({error, {beam_lib, _}}, Result).
 
+%% BT-2159: `:erlang` BIFs (whereis/1, is_process_alive/1, spawn/3, self/0, etc.)
+%% live in `erts-<vsn>/ebin/erlang.beam` even though `code:which(erlang)` is
+%% `preloaded`. Verify the spec reader extracts them when handed the file path
+%% directly — the Rust discovery side (BT-2159) now finds it via the `erts`
+%% app entry in `discover_otp_beam_files`.
+read_specs_erlang_bifs_test() ->
+    case find_erlang_beam() of
+        not_found ->
+            %% Unusual OTP layout — skip rather than fail.
+            ok;
+        BeamFile ->
+            {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+            Required = [
+                {<<"whereis">>, 1},
+                {<<"is_process_alive">>, 1},
+                {<<"spawn">>, 1},
+                {<<"spawn">>, 3},
+                {<<"register">>, 2},
+                {<<"unregister">>, 1},
+                {<<"self">>, 0},
+                {<<"node">>, 0},
+                {<<"monotonic_time">>, 0},
+                {<<"system_time">>, 0}
+            ],
+            SpecKeys = [{maps:get(name, S), maps:get(arity, S)} || S <- Specs],
+            Missing = [K || K <- Required, not lists:member(K, SpecKeys)],
+            ?assertEqual([], Missing),
+            %% whereis/1 must return a known type (not just Dynamic) so typed
+            %% callers in beamtalk-watcher can drop the `@expect type` pragma.
+            [WhereisSpec | _] = [
+                S
+             || S <- Specs,
+                maps:get(name, S) =:= <<"whereis">>,
+                maps:get(arity, S) =:= 1
+            ],
+            [WhereisParam] = maps:get(params, WhereisSpec),
+            ?assertEqual(<<"Symbol">>, maps:get(type, WhereisParam))
+    end.
+
+%% Locate erlang.beam on disk. `code:which(erlang)` returns `preloaded` because
+%% the BIF module is loaded into the VM at boot, but the .beam file with
+%% abstract code still ships in `erts-<vsn>/ebin/`.
+find_erlang_beam() ->
+    LibDir = code:lib_dir(),
+    case filelib:wildcard("erts-*/ebin/erlang.beam", LibDir) of
+        [Rel | _] -> filename:join(LibDir, Rel);
+        [] -> not_found
+    end.
+
 %%% ---------------------------------------------------------------
 %%% map_type/1 — Erlang type to Beamtalk type mapping
 %%% ---------------------------------------------------------------

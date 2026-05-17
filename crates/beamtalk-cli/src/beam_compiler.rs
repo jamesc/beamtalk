@@ -1589,8 +1589,13 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
 
     // Collect .beam files from common OTP application ebin directories.
     // Each app lives in `lib_dir/<app>-<version>/ebin/`.
+    //
+    // `erts` is included because `erts-<version>/ebin/erlang.beam` carries
+    // Dialyzer specs for the BIFs (`whereis/1`, `spawn/3`, `self/0`, etc.)
+    // even though `code:which(erlang)` returns `preloaded`. Without `erts`,
+    // every `(Erlang erlang) ...` call resolves to `Dynamic`. BT-2159.
     let common_apps = [
-        "stdlib", "kernel", "crypto", "ssl", "inets", "mnesia", "os_mon",
+        "stdlib", "kernel", "erts", "crypto", "ssl", "inets", "mnesia", "os_mon",
     ];
 
     let mut beam_files = Vec::new();
@@ -2209,6 +2214,28 @@ end
             cache.lookup("my_app", path_b, 100, 0),
             Some("specs_from_b".to_string()),
             "Path B should return its own cached specs"
+        );
+    }
+
+    /// BT-2159: `erts` must be in the OTP discovery set so `erlang.beam`
+    /// (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets spec extraction.
+    /// `code:which(erlang)` returns `preloaded`, but the `.beam` exists at
+    /// `<lib_dir>/erts-<version>/ebin/erlang.beam` with full abstract code.
+    #[test]
+    fn discover_otp_beam_files_includes_erts() {
+        let Ok(beams) = discover_otp_beam_files() else {
+            // Skip when `erl` is unavailable in the test environment.
+            return;
+        };
+        if beams.is_empty() {
+            return;
+        }
+        let has_erlang = beams
+            .iter()
+            .any(|p| p.file_stem().is_some_and(|s| s == "erlang"));
+        assert!(
+            has_erlang,
+            "discover_otp_beam_files must include erts/ebin/erlang.beam so BIF specs reach NativeTypeRegistry (BT-2159). Got: {beams:?}"
         );
     }
 
