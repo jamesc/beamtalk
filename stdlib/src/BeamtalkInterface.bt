@@ -132,7 +132,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
   /// Beamtalk sendersOf: #neverCalledXyzzy  // => []
   /// ```
-  sendersOf: aSelector :: Symbol -> List =>
+  sendersOf: aSelector :: Symbol -> List(Dictionary) =>
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "Beamtalk sendersOf: requires a Symbol argument"
     ]
@@ -155,7 +155,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// Wraps the `>>` lookup in an exception handler so a class for which
   /// `>>` is not yet supported (e.g. metaclass-shaped registry entries) is
   /// silently skipped rather than aborting the whole walk.
-  collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List -> List =>
+  collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -177,7 +177,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// Internal helper for `collectSendersFor:in:into:`. Splits the per-method
   /// FFI call out so the surrounding `inject:into:` body stays a single
   /// expression, which keeps the type-inference behaviour predictable.
-  appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List -> List =>
+  appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
     lines := (Erlang beamtalk_interface) findSendersIn: methodSource selector: aSelector
     lines
       inject: result

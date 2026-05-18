@@ -154,6 +154,6 @@ unavailable.
 Backs `Beamtalk sendersOf:' for System Browser-style call-site navigation.
 """.
 -spec find_senders_in_source(binary(), atom() | binary()) ->
-    {ok, [non_neg_integer()]} | {error, [map()]}.
+    {ok, [pos_integer()]} | {error, [map()]}.
 find_senders_in_source(Source, Selector) ->
     beamtalk_compiler_server:find_senders_in_source(Source, Selector).

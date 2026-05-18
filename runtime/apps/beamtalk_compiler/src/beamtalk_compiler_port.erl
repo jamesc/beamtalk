@@ -317,8 +317,10 @@ Used by `Beamtalk sendersOf:' via `beamtalk_interface' to power
 System Browser-style "who calls this method?" navigation.
 """.
 -spec find_senders_in_source(port(), binary(), atom() | binary()) ->
-    {ok, [non_neg_integer()]} | {error, [map()]}.
-find_senders_in_source(Port, Source, Selector) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_senders_in_source(Port, Source, Selector) when
+    is_atom(Selector) orelse is_binary(Selector)
+->
     SelectorBin =
         case Selector of
             A when is_atom(A) -> atom_to_binary(A, utf8);
@@ -365,7 +367,14 @@ find_senders_in_source(Port, Source, Selector) ->
                 domain => [beamtalk, runtime], port => Port
             }),
             {error, [#{message => <<"Compiler port is not available">>}]}
-    end.
+    end;
+find_senders_in_source(_Port, _Source, _Selector) ->
+    {error, [
+        #{
+            message =>
+                <<"find_senders_in_source: selector must be an atom or binary">>
+        }
+    ]}.
 
 -doc "Close the compiler port.".
 -spec close(port()) -> true.

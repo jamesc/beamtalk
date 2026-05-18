@@ -181,9 +181,16 @@ as a `MessageSend' or `Cascade'. Returns `{ok, []}' if no senders are
 found; returns `{error, Diagnostics}' if the compiler port is unavailable.
 """.
 -spec find_senders_in_source(binary(), atom() | binary()) ->
-    {ok, [non_neg_integer()]} | {error, [map()]}.
+    {ok, [pos_integer()]} | {error, [map()]}.
 find_senders_in_source(Source, Selector) ->
-    gen_server:call(?MODULE, {find_senders_in_source, Source, Selector}, 30000).
+    try
+        gen_server:call(?MODULE, {find_senders_in_source, Source, Selector}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, [#{message => <<"Compiler server is not available">>}]};
+        exit:{timeout, _} ->
+            {error, [#{message => <<"Compiler server timed out">>}]}
+    end.
 
 -doc """
 Register a class with its metadata in the compiler server cache.

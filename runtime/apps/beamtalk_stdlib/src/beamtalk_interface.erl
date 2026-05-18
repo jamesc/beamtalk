@@ -197,8 +197,10 @@ Symbol from Beamtalk and a String both work. Returns a list of 1-based line
 numbers (relative to the supplied source); returns `[]` if no senders are
 found or the source cannot be parsed.
 """.
--spec findSendersIn(binary(), atom() | binary()) -> [non_neg_integer()].
-findSendersIn(Source, Selector) when is_binary(Source) ->
+-spec findSendersIn(binary(), atom() | binary()) -> [pos_integer()].
+findSendersIn(Source, Selector) when
+    is_binary(Source), (is_atom(Selector) orelse is_binary(Selector))
+->
     SelectorBin =
         case Selector of
             A when is_atom(A) -> atom_to_binary(A, utf8);
@@ -218,7 +220,11 @@ findSendersIn(_Source, _Selector) ->
     Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
     Err1 = beamtalk_error:with_selector(Err0, 'findSendersIn:selector:'),
     Err2 = beamtalk_error:with_message(
-        Err1, <<"findSendersIn:selector: expects a binary source argument">>
+        Err1,
+        <<
+            "findSendersIn:selector: expects a binary source and an atom or "
+            "binary selector"
+        >>
     ),
     beamtalk_error:raise(Err2).
 
