@@ -558,9 +558,14 @@ method_not_found_hint(ClassName, DefiningClass, Selector) ->
 -doc """
 Walk the superclass chain to find an inherited class method.
 
-Uses the ETS hierarchy table for O(1) superclass lookup per level.
-Makes gen_server calls to each ancestor to check its local class_methods.
-Safe to call from within a gen_server handle_call because we only walk
+Uses the ETS hierarchy table for O(1) superclass lookup per level and
+the ETS class-methods table (BT-2008) for the per-ancestor selector +
+module lookup. The hot path issues no `gen_server:call`s — both tables
+are populated atomically inside `beamtalk_object_class:init/1` before
+the class becomes externally dispatch-visible, so a hierarchy entry
+without a matching methods entry is not reachable from normal dispatch.
+
+Safe to call from within a gen_server `handle_call` because we only walk
 UP the hierarchy (no circular dependency possible).
 """.
 -spec find_class_method_in_chain(selector(), class_name()) ->
@@ -581,51 +586,17 @@ find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX
     ),
     not_found;
 find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
-    case beamtalk_class_registry:whereis_class(AncestorName) of
-        undefined ->
-            not_found;
-        AncestorPid ->
-            %% Query ancestor's local class_methods
-            AncestorClassMethods =
-                try
-                    gen_server:call(AncestorPid, get_local_class_methods, 5000)
-                catch
-                    Class:Reason:Stack ->
-                        ?LOG_WARNING(
-                            "Class chain walk: failed to query ~p class_methods: ~p:~p",
-                            [AncestorName, Class, Reason],
-                            #{domain => [beamtalk, runtime], stacktrace => Stack}
-                        ),
-                        #{}
-                end,
-            case maps:is_key(Selector, AncestorClassMethods) of
+    case beamtalk_class_methods_table:lookup(AncestorName) of
+        {ok, AncestorModule, Selectors} ->
+            case lists:member(Selector, Selectors) of
                 true ->
-                    AncestorModule =
-                        try
-                            %% BT-893: Use module_name/1 (not gen_server:call directly) so
-                            %% the self-call guard fires if AncestorPid happens to be self().
-                            beamtalk_object_class:module_name(AncestorPid)
-                        catch
-                            Class2:Reason2:Stack2 ->
-                                ?LOG_WARNING(
-                                    "Class chain walk: failed to get module for ~p: ~p:~p",
-                                    [AncestorName, Class2, Reason2],
-                                    #{domain => [beamtalk, runtime], stacktrace => Stack2}
-                                ),
-                                undefined
-                        end,
-                    case AncestorModule of
-                        undefined ->
-                            %% Class has method in metadata but no module — skip and continue up.
-                            Next = superclass_from_ets(AncestorName),
-                            find_class_method_in_ancestors(Selector, Next, Depth + 1);
-                        _ ->
-                            {ok, AncestorName, AncestorModule}
-                    end;
+                    {ok, AncestorName, AncestorModule};
                 false ->
                     Next = superclass_from_ets(AncestorName),
                     find_class_method_in_ancestors(Selector, Next, Depth + 1)
-            end
+            end;
+        not_found ->
+            not_found
     end.
 
 -doc "Read the superclass name from the hierarchy table (no gen_server call).".

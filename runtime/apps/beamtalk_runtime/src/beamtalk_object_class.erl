@@ -374,6 +374,7 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_methods_table(),
     beamtalk_class_registry:ensure_pid_table(),
     ok = pg:join(beamtalk_classes, self()),
 
@@ -410,6 +411,9 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_hierarchy_table:insert(ClassName, Superclass),
     %% BT-1285: Store module name in ETS for deadlock-free lookup during supervisor init.
     beamtalk_class_module_table:insert(ClassName, Module),
+    %% BT-2008: Mirror local class-method selectors into ETS so the inherited
+    %% class-method chain walk in beamtalk_class_dispatch can avoid gen_server hops.
+    beamtalk_class_methods_table:insert(ClassName, Module, maps:keys(ClassMethods)),
 
     %% BT-893: Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
@@ -777,6 +781,7 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
     _ = (catch beamtalk_class_hierarchy_table:delete(ClassName)),
     _ = (catch beamtalk_class_module_table:delete(ClassName)),
+    _ = (catch beamtalk_class_methods_table:delete(ClassName)),
     %% BT-1768: Clean up pid reverse index. Only cleaned on graceful shutdown —
     %% on crash, the entry intentionally survives for auto-restart recovery.
     _ = (catch ets:delete(beamtalk_class_pids, self())),
@@ -1062,6 +1067,11 @@ apply_class_info(State, ClassInfo) ->
     beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass),
     %% BT-1285: Keep module ETS table in sync when module changes on hot-reload.
     beamtalk_class_module_table:insert(State#class_state.name, NewModule),
+    %% BT-2008: Keep class-method selector ETS table in sync — selectors and module
+    %% may both change on hot reload (new class methods added, module recompiled).
+    beamtalk_class_methods_table:insert(
+        State#class_state.name, NewModule, maps:keys(NewClassMethods)
+    ),
 
     State#class_state{
         module = NewModule,

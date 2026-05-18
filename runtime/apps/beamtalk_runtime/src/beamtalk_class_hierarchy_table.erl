@@ -23,11 +23,17 @@ ETS-owner pattern used elsewhere in the runtime.
   during class init/terminate via this module's API.
 * `{read_concurrency, true}` — optimised for the frequent hierarchy-walk
   reads performed by `beamtalk_class_registry` and dispatch.
+* `{heir, beamtalk_runtime_sup, undefined}` (BT-1888 / BT-2008 pattern) —
+  the table survives if the owner class process crashes, so hierarchy
+  lookups don't degrade after an owner death.
 
 ## Concurrency
 
 `new/0` uses a try/catch around `ets:new/2` to be safe under concurrent
-first-use (TOCTOU race between `ets:info/1` and `ets:new/2`).
+first-use (TOCTOU race between `ets:info/1` and `ets:new/2`). All
+read/write ops also guard against `badarg` from a TOCTOU race where the
+table is deleted between an existence check and the actual ETS op
+(possible during test teardown or shutdown).
 """.
 
 -export([
@@ -61,13 +67,20 @@ new() ->
             try
                 ets:new(
                     beamtalk_class_hierarchy,
-                    [set, public, named_table, {read_concurrency, true}]
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {read_concurrency, true}
+                        | beamtalk_class_registry:heir_option()
+                    ]
                 ),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
+            beamtalk_class_registry:maybe_set_heir(beamtalk_class_hierarchy),
             ok
     end.
 
@@ -79,26 +92,40 @@ classes.  Overwrites any existing entry (ETS `set` semantics).
 """.
 -spec insert(class_name(), superclass()) -> ok.
 insert(ClassName, Superclass) ->
-    ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
-    ok.
+    try
+        ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
+        ok
+    catch
+        error:badarg ->
+            %% Table vanished — recreate and retry once.
+            new(),
+            ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
+            ok
+    end.
 
 -doc """
 Remove a class entry from the hierarchy table.
 
 Called during class gen_server `terminate/2` to keep the table clean.
-Safe to call even if the entry does not exist.
+Safe to call even if the entry — or the table itself — does not exist.
 """.
 -spec delete(class_name()) -> ok.
 delete(ClassName) ->
-    ets:delete(beamtalk_class_hierarchy, ClassName),
-    ok.
+    try
+        ets:delete(beamtalk_class_hierarchy, ClassName),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 -doc """
 Look up the superclass of a class.
 
 Returns `{ok, Superclass}` if the class is in the hierarchy table,
 or `not_found` otherwise.  Returns `not_found` (rather than crashing)
-if the table does not exist yet — safe during bootstrap.
+if the table does not exist yet (safe during bootstrap) or if it
+disappears between the existence check and the lookup (TOCTOU under
+teardown).
 """.
 -spec lookup(class_name()) -> {ok, superclass()} | not_found.
 lookup(ClassName) ->
@@ -106,9 +133,11 @@ lookup(ClassName) ->
         undefined ->
             not_found;
         _ ->
-            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+            try ets:lookup(beamtalk_class_hierarchy, ClassName) of
                 [{_, Super}] -> {ok, Super};
                 [] -> not_found
+            catch
+                error:badarg -> not_found
             end
     end.
 
