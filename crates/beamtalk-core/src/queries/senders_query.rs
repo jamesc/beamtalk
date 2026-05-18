@@ -69,9 +69,9 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
         }
     }
 
-    // Sources that look like top-level expressions (rare, but possible if a
-    // tool synthesises method source differently) are walked as a fallback so
-    // we still find sends.
+    // Sources that look like top-level expressions, or that parsed as
+    // standalone `Class >> selector => body` definitions, are walked as
+    // fallbacks so partial-parse cases still contribute senders.
     for stmt in &module.expressions {
         collect_send_lines(
             &stmt.expression,
@@ -79,6 +79,16 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
             &wrapped,
             &mut wrapped_lines,
         );
+    }
+    for smd in &module.method_definitions {
+        for stmt in &smd.method.body {
+            collect_send_lines(
+                &stmt.expression,
+                selector_name,
+                &wrapped,
+                &mut wrapped_lines,
+            );
+        }
     }
 
     // Translate from wrapped-source line numbers back to input-source space.
