@@ -1012,8 +1012,10 @@ impl TypeChecker {
             }
         }
 
-        // If receiver is a class reference, check class-side methods
-        if let Expression::ClassReference { name, .. } = receiver {
+        // If receiver is a class reference, check class-side methods.
+        // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
+        // — matches the block-param inference normalisation above.
+        if let Expression::ClassReference { name, .. } = unwrap_parens(receiver) {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
@@ -1066,8 +1068,9 @@ impl TypeChecker {
             ..
         } = receiver_ty
         {
-            // In class methods, self sends should check class-side methods
-            if env.in_class_method && Self::is_self_receiver(receiver) {
+            // In class methods, self sends should check class-side methods.
+            // BT-2158: unwrap parens so `(self) foo:` dispatches class-side.
+            if env.in_class_method && Self::is_self_receiver(unwrap_parens(receiver)) {
                 if !in_abstract_method {
                     self.check_argument_types(
                         class_name,
