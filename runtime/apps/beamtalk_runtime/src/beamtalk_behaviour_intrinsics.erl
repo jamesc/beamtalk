@@ -194,7 +194,17 @@ classLocalMethods(Self) ->
             gen_server:call(ClassPid, methods)
     end.
 
--doc "Return all superclasses of the receiver in order (immediate parent to root).".
+-doc """
+Return all superclasses of the receiver in order (immediate parent to root).
+
+Note (BT-2189): For metaclass receivers this currently walks the underlying
+class pid and returns regular class objects (the parallel metaclass hierarchy
+is not modelled here, by design — fixing it would change the semantics of
+`inheritsFrom:`/`isKindOf:` on class objects). The Beamtalk-level
+`superclassChain` handles the metaclass case directly by walking via
+`superclass`, which dispatches through `metaclassSuperclass` for metaclass
+receivers.
+""".
 -spec classAllSuperclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
@@ -395,16 +405,37 @@ Full chain walk for canUnderstand: is implemented via classCanUnderstand.
 
 BT-1635: When called on a metaclass object, checks class methods instead
 of instance methods.
+
+BT-2189: Uses __beamtalk_meta/0 fast path when available — mirrors the
+fast path already in `classLocalMethods/1` and avoids a gen_server
+round-trip per call, which matters for the bulk iteration done by
+`Beamtalk implementorsOf:`. Falls back to gen_server for dynamic classes
+built via ClassBuilder.
 """.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
 classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
     %% BT-1635: Metaclass receiver — check class methods.
-    ClassMethods = beamtalk_object_class:local_class_methods_map(ClassPid),
-    maps:is_key(Selector, ClassMethods);
+    %% BT-2189: Use __beamtalk_meta/0 fast path when available, matching the
+    %% instance-side clause below. Avoids per-call gen_server hops during the
+    %% bulk iteration done by `Beamtalk implementorsOf:`.
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            maps:is_key(Selector, maps:get(class_method_info, Meta, #{}));
+        not_available ->
+            ClassMethods = beamtalk_object_class:local_class_methods_map(ClassPid),
+            maps:is_key(Selector, ClassMethods)
+    end;
 classIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
-    LocalMethods = gen_server:call(ClassPid, methods),
-    lists:member(Selector, LocalMethods).
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            maps:is_key(Selector, maps:get(method_info, Meta));
+        not_available ->
+            LocalMethods = gen_server:call(ClassPid, methods),
+            lists:member(Selector, LocalMethods)
+    end.
 
 -doc """
 Return the names of fields declared in this class (not inherited).

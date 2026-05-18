@@ -49,6 +49,53 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```
   globals -> Dictionary => (Erlang beamtalk_interface) globals
 
+  /// Return all classes that locally define the given selector.
+  ///
+  /// Searches both instance-side and class-side definitions:
+  /// instance-side hits appear as class objects (e.g. `Integer`),
+  /// class-side hits appear as metaclass objects (e.g. `Counter class`).
+  /// A class that defines the selector on both sides appears twice — once
+  /// as the class and once as the metaclass.
+  ///
+  /// Does NOT walk inherited methods — only classes with their own
+  /// definition of the selector are returned. Iterates the full class
+  /// registry (`allClasses`) so stdlib and user classes are both in the
+  /// search set.
+  ///
+  /// Matches Pharo's `SystemNavigation >> #allImplementorsOf:`.
+  ///
+  /// Raises an error if the argument is not a Symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk implementorsOf: #asString    // => [Integer, Float, String, ...]
+  /// Beamtalk implementorsOf: #new         // => [..., Counter class, ...]
+  /// Beamtalk implementorsOf: #nonExistent // => []
+  /// ```
+  ///
+  /// Implemented as an instance method on the workspace singleton facade.
+  /// A class-side companion is technically possible now that
+  /// `classIncludesSelector/2` uses the `__beamtalk_meta/0` fast path
+  /// (BT-2189) — the original self-deadlock concern (gen_server:call
+  /// back into BeamtalkInterface during iteration) no longer applies for
+  /// compiled stdlib classes, because the fast path bypasses gen_server
+  /// entirely and `module_name/1` self-reads via the process dictionary.
+  /// We keep this instance-only to match Pharo's `SystemNavigation
+  /// default allImplementorsOf:` shape; behavioural BUnit tests therefore
+  /// have to drive the method through the live workspace singleton, and
+  /// in BUnit only the selector existence is checked. Live coverage is in
+  /// the E2E REPL-protocol suite.
+  implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
+    (aSelector isKindOf: Symbol) ifFalse: [
+      self error: "Beamtalk implementorsOf: requires a Symbol argument"
+    ]
+    classes := self allClasses
+    instanceImpls := classes select: [:c | c includesSelector: aSelector]
+    classSideImpls := (classes select: [:c |
+      c class includesSelector: aSelector
+    ]) collect: [:c | c class]
+    instanceImpls ++ classSideImpls
+
   /// Show class documentation: name, superclass, and method signatures.
   /// Accepts a Class reference, a Symbol class name, or a String class name.
   ///
