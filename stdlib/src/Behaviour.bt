@@ -76,6 +76,24 @@ abstract Object subclass: Behaviour
   /// ```
   sealed allSubclasses -> List(Behaviour) => @primitive "classAllSubclasses"
 
+  /// Return the chain from self up to (and including) Object as a list.
+  ///
+  /// Self is at the head; Object is at the tail when the class inherits
+  /// from Object. For classes that do not reach Object (e.g. ProtoObject
+  /// or `ProtoObject subclass:` classes such as Erlang), returns the full
+  /// chain to the root. For Object itself, returns `#(Object)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter superclassChain  // => [Counter, Actor, Object]
+  /// Object superclassChain   // => [Object]
+  /// ```
+  sealed superclassChain -> List(Behaviour) =>
+    full := self allSuperclasses addFirst: self
+    objectIdx := full indexOf: Object
+    objectIdx isNil ifTrue: [^full]
+    full take: objectIdx
+
   /// Test whether the receiver strictly inherits from aClass (self not included).
   ///
   /// Pure Beamtalk — delegates to allSuperclasses.

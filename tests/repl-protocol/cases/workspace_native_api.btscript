@@ -164,3 +164,42 @@ wsGlobals includesKey: #Beamtalk
 // Workspace globals also includes loaded user classes
 wsGlobals includesKey: #Counter
 // => true
+
+// ===========================================================================
+// BEAMTALK IMPLEMENTORSOF: — find classes that locally define a selector
+// (BT-2189)
+// ===========================================================================
+
+// implementorsOf: returns a non-empty list for a widely-implemented selector
+asStringImpls := Beamtalk implementorsOf: #asString
+// => _
+
+asStringImpls isEmpty
+// => false
+
+// Stdlib classes participate — Integer/Float/String all locally define asString
+asStringImpls includes: Integer
+// => true
+
+asStringImpls includes: String
+// => true
+
+asStringImpls includes: Float
+// => true
+
+// User-loaded classes show up in results when they implement the selector.
+// Counter (loaded above) locally defines #increment.
+(Beamtalk implementorsOf: #increment) includes: Counter
+// => true
+
+// Selectors with no implementors return an empty list
+Beamtalk implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
+// => []
+
+// implementorsOf: does NOT walk inheritance — #class is defined on
+// ProtoObject; Integer inherits it but is not an implementor.
+classImpls := Beamtalk implementorsOf: #class
+// => _
+
+classImpls includes: Integer
+// => false

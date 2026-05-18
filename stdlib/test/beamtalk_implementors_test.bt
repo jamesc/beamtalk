@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2189: BUnit-level coverage for Beamtalk `implementorsOf:` — finds all
+// classes that directly define a given selector. Backs System Browser-style
+// navigation ("who else has this method?").
+//
+// Like `beamtalk_interface_test.bt`, this suite is limited to class-level
+// introspection because the workspace singleton `Beamtalk` is not
+// bootstrapped in the BUnit test context, and `BeamtalkInterface` is a
+// `sealed typed Object subclass:` which cannot be instantiated.
+//
+// `implementorsOf:` is instance-only (not class-side): a class-side form
+// would self-deadlock during iteration when it reaches BeamtalkInterface
+// itself, because the dispatch for `c includesSelector:` would gen_server
+// call back into the running class gen_server.
+//
+// Behavioural tests for `implementorsOf:` (happy path, multi-implementor,
+// no-implementor, stdlib participation) live in the E2E REPL-protocol suite
+// at tests/repl-protocol/cases/workspace_native_api.btscript, which runs
+// in workspace_mode and has the live `Beamtalk` singleton available.
+
+TestCase subclass: BeamtalkImplementorsTest
+
+  // --- selector existence ---
+  testIncludesSelectorImplementorsOf =>
+    self assert: (BeamtalkInterface includesSelector: #implementorsOf:)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation calls self allClasses then filters by
+  // includesSelector:. Both primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (BeamtalkInterface includesSelector: #allClasses)
+    self assert: (Behaviour includesSelector: #includesSelector:)

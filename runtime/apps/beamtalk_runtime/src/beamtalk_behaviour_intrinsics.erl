@@ -395,6 +395,12 @@ Full chain walk for canUnderstand: is implemented via classCanUnderstand.
 
 BT-1635: When called on a metaclass object, checks class methods instead
 of instance methods.
+
+BT-2189: Uses __beamtalk_meta/0 fast path when available — mirrors the
+fast path already in `classLocalMethods/1` and avoids a gen_server
+round-trip per call, which matters for the bulk iteration done by
+`Beamtalk implementorsOf:`. Falls back to gen_server for dynamic classes
+built via ClassBuilder.
 """.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
 classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
@@ -403,8 +409,14 @@ classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Sel
     maps:is_key(Selector, ClassMethods);
 classIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
-    LocalMethods = gen_server:call(ClassPid, methods),
-    lists:member(Selector, LocalMethods).
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            maps:is_key(Selector, maps:get(method_info, Meta));
+        not_available ->
+            LocalMethods = gen_server:call(ClassPid, methods),
+            lists:member(Selector, LocalMethods)
+    end.
 
 -doc """
 Return the names of fields declared in this class (not inherited).

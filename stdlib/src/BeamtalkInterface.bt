@@ -49,6 +49,36 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```
   globals -> Dictionary => (Erlang beamtalk_interface) globals
 
+  /// Return all classes that locally define the given selector.
+  ///
+  /// Does NOT walk inherited methods — only classes with their own
+  /// definition of the selector are returned. Iterates the full class
+  /// registry (`allClasses`) so stdlib and user classes are both in the
+  /// search set.
+  ///
+  /// Matches Pharo's `SystemNavigation >> #allImplementorsOf:`.
+  ///
+  /// Raises an error if the argument is not a Symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk implementorsOf: #asString    // => [Integer, Float, String, ...]
+  /// Beamtalk implementorsOf: #nonExistent // => []
+  /// ```
+  ///
+  /// Implemented as an instance method only. A class-side companion would
+  /// run inside the BeamtalkInterface class gen_server and self-deadlock
+  /// when the iteration reaches BeamtalkInterface itself (the dispatch for
+  /// `c includesSelector:` would gen_server:call back into the running
+  /// process). Behavioural BUnit tests therefore have to drive the method
+  /// through the live workspace singleton; in BUnit, only the selector
+  /// existence is checked. Live coverage is in the E2E REPL-protocol suite.
+  implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
+    (aSelector isKindOf: Symbol) ifFalse: [
+      self error: "Beamtalk implementorsOf: requires a Symbol argument"
+    ]
+    self allClasses select: [:c | c includesSelector: aSelector]
+
   /// Show class documentation: name, superclass, and method signatures.
   /// Accepts a Class reference, a Symbol class name, or a String class name.
   ///

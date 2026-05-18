@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2189: Tests for Behaviour hierarchy queries (subclasses, allSubclasses,
+// superclassChain). subclasses/allSubclasses also have coverage in
+// class_hierarchy_query_test.bt; this file focuses on superclassChain and
+// edge cases relevant to System Browser-style navigation.
+
+TestCase subclass: BehaviourHierarchyTest
+
+  // --- superclassChain ---
+  testSuperclassChainStartsWithSelf =>
+    chain := Counter superclassChain
+    self assert: chain first equals: Counter
+
+  testSuperclassChainEndsAtObject =>
+    chain := Counter superclassChain
+    self assert: chain last equals: Object
+
+  testSuperclassChainIncludesIntermediate =>
+    // Counter -> Actor -> Object
+    chain := Counter superclassChain
+    self assert: (chain includes: Counter)
+    self assert: (chain includes: Actor)
+    self assert: (chain includes: Object)
+
+  testSuperclassChainOrder =>
+    // Order is self, parent, grandparent, ..., Object
+    chain := Counter superclassChain
+    self assert: (chain indexOf: Counter) equals: 1
+    self assert: (chain indexOf: Actor) equals: 2
+    self assert: (chain indexOf: Object) equals: 3
+
+  testSuperclassChainStopsAtObject =>
+    // ProtoObject lives above Object — superclassChain must NOT include it.
+    chain := Counter superclassChain
+    self deny: (chain includes: ProtoObject)
+
+  testObjectSuperclassChain =>
+    // Object superclassChain returns #(Object) — Object is the terminal node.
+    chain := Object superclassChain
+    self assert: chain size equals: 1
+    self assert: chain first equals: Object
+
+  testStdlibClassSuperclassChain =>
+    // Integer inherits from Number, which inherits from Object.
+    chain := Integer superclassChain
+    self assert: chain first equals: Integer
+    self assert: chain last equals: Object
+    self assert: (chain includes: Number)
+
+  testFloatSuperclassChain =>
+    // Float is sealed but still has the chain
+    chain := Float superclassChain
+    self assert: chain first equals: Float
+    self assert: chain last equals: Object
+    self assert: (chain includes: Number)
+
+  testBooleanSuperclassChain =>
+    chain := True superclassChain
+    self assert: chain first equals: True
+    self assert: chain last equals: Object
+    self assert: (chain includes: Boolean)
+
+  // --- subclasses (regression coverage relevant to System Browser) ---
+  testObjectHasManySubclasses =>
+    // Object is the root for the user-facing tower — many direct subclasses.
+    self deny: Object subclasses isEmpty
+
+  testLeafClassHasNoSubclasses =>
+    // Float is sealed — leaf in the hierarchy.
+    self assert: Float subclasses isEmpty
+    self assert: True subclasses isEmpty
+
+  testStdlibParticipates =>
+    // Integer should appear in Number's subclasses (live registry).
+    self assert: (Number subclasses includes: Integer)
