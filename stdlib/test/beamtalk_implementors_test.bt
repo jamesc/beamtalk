@@ -10,10 +10,14 @@
 // bootstrapped in the BUnit test context, and `BeamtalkInterface` is a
 // `sealed typed Object subclass:` which cannot be instantiated.
 //
-// `implementorsOf:` is instance-only (not class-side): a class-side form
-// would self-deadlock during iteration when it reaches BeamtalkInterface
-// itself, because the dispatch for `c includesSelector:` would gen_server
-// call back into the running class gen_server.
+// `implementorsOf:` is instance-only on the workspace singleton facade,
+// matching Pharo's `SystemNavigation default allImplementorsOf:` shape.
+// (Historical note: a class-side form was originally blocked by a
+// self-deadlock when the iteration hit BeamtalkInterface itself —
+// `c includesSelector:` would gen_server:call back into the running
+// class gen_server. The BT-2189 __beamtalk_meta/0 fast path on
+// classIncludesSelector/2 defused that concern for compiled stdlib
+// classes, so the choice is now conventional rather than technical.)
 //
 // Behavioural tests for `implementorsOf:` (happy path, multi-implementor,
 // no-implementor, stdlib participation) live in the E2E REPL-protocol suite

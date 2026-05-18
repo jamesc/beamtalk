@@ -73,13 +73,18 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk implementorsOf: #nonExistent // => []
   /// ```
   ///
-  /// Implemented as an instance method only. A class-side companion would
-  /// run inside the BeamtalkInterface class gen_server and self-deadlock
-  /// when the iteration reaches BeamtalkInterface itself (the dispatch for
-  /// `c includesSelector:` would gen_server:call back into the running
-  /// process). Behavioural BUnit tests therefore have to drive the method
-  /// through the live workspace singleton; in BUnit, only the selector
-  /// existence is checked. Live coverage is in the E2E REPL-protocol suite.
+  /// Implemented as an instance method on the workspace singleton facade.
+  /// A class-side companion is technically possible now that
+  /// `classIncludesSelector/2` uses the `__beamtalk_meta/0` fast path
+  /// (BT-2189) — the original self-deadlock concern (gen_server:call
+  /// back into BeamtalkInterface during iteration) no longer applies for
+  /// compiled stdlib classes, because the fast path bypasses gen_server
+  /// entirely and `module_name/1` self-reads via the process dictionary.
+  /// We keep this instance-only to match Pharo's `SystemNavigation
+  /// default allImplementorsOf:` shape; behavioural BUnit tests therefore
+  /// have to drive the method through the live workspace singleton, and
+  /// in BUnit only the selector existence is checked. Live coverage is in
+  /// the E2E REPL-protocol suite.
   implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "Beamtalk implementorsOf: requires a Symbol argument"
