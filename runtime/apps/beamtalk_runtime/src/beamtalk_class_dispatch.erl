@@ -558,9 +558,13 @@ method_not_found_hint(ClassName, DefiningClass, Selector) ->
 -doc """
 Walk the superclass chain to find an inherited class method.
 
-Uses the ETS hierarchy table for O(1) superclass lookup per level.
-Makes gen_server calls to each ancestor to check its local class_methods.
-Safe to call from within a gen_server handle_call because we only walk
+Uses the ETS hierarchy table for O(1) superclass lookup per level and
+the ETS class-methods table (BT-2008) for the per-ancestor selector +
+module lookup, so the hot path issues no `gen_server:call`s. Falls back
+to the gen_server query path on cache miss (class registered but not yet
+mirrored into the table) for defensive correctness.
+
+Safe to call from within a gen_server `handle_call` because we only walk
 UP the hierarchy (no circular dependency possible).
 """.
 -spec find_class_method_in_chain(selector(), class_name()) ->
@@ -581,11 +585,32 @@ find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX
     ),
     not_found;
 find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
+    case beamtalk_class_methods_table:lookup(AncestorName) of
+        {ok, AncestorModule, Selectors} ->
+            case lists:member(Selector, Selectors) of
+                true ->
+                    {ok, AncestorName, AncestorModule};
+                false ->
+                    Next = superclass_from_ets(AncestorName),
+                    find_class_method_in_ancestors(Selector, Next, Depth + 1)
+            end;
+        not_found ->
+            %% Defensive fallback: class registered in the hierarchy but its
+            %% methods/module entry is not in ETS yet. Use the gen_server path
+            %% so correctness is preserved even mid-bootstrap or after a test
+            %% torn down the ETS table.
+            find_class_method_in_ancestors_via_gen_server(Selector, AncestorName, Depth)
+    end.
+
+-spec find_class_method_in_ancestors_via_gen_server(
+    selector(), class_name(), non_neg_integer()
+) ->
+    {ok, class_name(), atom()} | not_found.
+find_class_method_in_ancestors_via_gen_server(Selector, AncestorName, Depth) ->
     case beamtalk_class_registry:whereis_class(AncestorName) of
         undefined ->
             not_found;
         AncestorPid ->
-            %% Query ancestor's local class_methods
             AncestorClassMethods =
                 try
                     gen_server:call(AncestorPid, get_local_class_methods, 5000)

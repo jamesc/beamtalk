@@ -1098,8 +1098,9 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
         "PERF: class_self_dispatch/helper_overhead ~.2fx vs direct_apply (~bns absolute)~n",
         [Overhead, AbsOverheadNs]),
 
-    %% Sanity bounds — these document the expected cost of the chain walk
-    %% (2 gen_server:calls per ancestor + ETS lookups). Tuned loose so CI
-    %% noise doesn't flake; tighten once we have historical data.
-    ?assert(HelperMedian < 500_000),  %% helper < 500us per call
-    ?assert(DirectMedian < 10_000).   %% direct apply < 10us per call
+    %% Sanity bounds — after BT-2008 the chain walk reads module + selector
+    %% list from ETS (no gen_server hops), so the helper should be well under
+    %% 1µs. The 2_000ns ceiling leaves ~2x headroom for CI noise on the
+    %% Dictionary → Collection chain measured here.
+    ?assert(HelperMedian < 2_000),    %% helper < 2µs per call (post-BT-2008)
+    ?assert(DirectMedian < 10_000).   %% direct apply < 10µs per call

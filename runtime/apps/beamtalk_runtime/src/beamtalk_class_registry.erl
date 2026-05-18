@@ -36,6 +36,7 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
     ensure_module_table/0,
+    ensure_methods_table/0,
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
@@ -196,6 +197,18 @@ Called from `beamtalk_object_class:init/1` alongside `ensure_hierarchy_table/0`.
 -spec ensure_module_table() -> ok.
 ensure_module_table() ->
     beamtalk_class_module_table:new().
+
+-doc """
+Ensure the class methods ETS table exists (BT-2008).
+
+Delegates to `beamtalk_class_methods_table:new/0`.
+Called from `beamtalk_object_class:init/1` so the chain walker in
+`beamtalk_class_dispatch:find_class_method_in_ancestors/3` can resolve
+inherited class-method dispatch without any gen_server round-trips.
+""".
+-spec ensure_methods_table() -> ok.
+ensure_methods_table() ->
+    beamtalk_class_methods_table:new().
 
 -doc """
 Ensure the class collision warnings ETS table exists.
