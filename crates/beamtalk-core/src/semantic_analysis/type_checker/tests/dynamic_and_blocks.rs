@@ -489,6 +489,37 @@ typed Object subclass: App\n\
 }
 
 #[test]
+fn block_params_typed_for_parenthesised_class_reference_cascade_bt2158() {
+    // BT-2158: `(HTTPRouter) build: [...]; ...` (cascade on a parenthesised
+    // class reference) should still be detected as class-side and propagate
+    // block-param types. Pre-fix the cascade path didn't unwrap parens.
+    let source = "\
+typed Object subclass: HTTPRouteBuilder\n\
+  get: path :: String -> HTTPRouteBuilder => self\n\
+typed Object subclass: HTTPRouter\n\
+  class build: aBlock :: Block(HTTPRouteBuilder, Object) -> HTTPRouter =>\n\
+    builder :: HTTPRouteBuilder := HTTPRouteBuilder new\n\
+    aBlock value: builder\n\
+    HTTPRouter new\n\
+typed Object subclass: App\n\
+  go -> HTTPRouter =>\n\
+    (HTTPRouter)\n\
+      build: [:r | r get: \"/\"];\n\
+      yourself\n";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "BT-2158: cascade on parenthesised class reference should propagate block-param types, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
 fn block_params_typed_via_method_parameter_annotation() {
     // Method parameter `items :: List(Dictionary)` — sort: block params should get Dictionary.
     let source = "typed Object subclass: T\n  m: items :: List(Dictionary) -> List(Dictionary) => items sort: [:a :b | (a at: \"x\" ifAbsent: [0]) < (b at: \"x\" ifAbsent: [0])]";
