@@ -600,8 +600,17 @@ resolve_remote_type(Mod, TypeName, Args) ->
                 non_existing ->
                     <<"Dynamic">>;
                 preloaded ->
-                    %% Preloaded modules (erlang, init, etc.) have no .beam on disk
-                    <<"Dynamic">>;
+                    %% Preloaded modules (erlang, init, erts_internal, ...) are
+                    %% loaded into the VM at boot, but the .beam file ships on
+                    %% disk under <lib_dir>/erts-<vsn>/ebin/ with abstract code.
+                    %% `code:get_object_code/1` returns its binary directly;
+                    %% `beam_lib:chunks/2` accepts a binary in place of a path.
+                    case code:get_object_code(Mod) of
+                        {_, Bin, _} ->
+                            resolve_remote_type_from_beam(Bin, Mod, TypeName, Arity, Depth);
+                        error ->
+                            <<"Dynamic">>
+                    end;
                 cover_compiled ->
                     <<"Dynamic">>;
                 BeamFile ->
@@ -612,10 +621,10 @@ resolve_remote_type(Mod, TypeName, Args) ->
     end.
 
 -spec resolve_remote_type_from_beam(
-    file:filename_all(), atom(), atom(), non_neg_integer(), non_neg_integer()
+    file:filename_all() | binary(), atom(), atom(), non_neg_integer(), non_neg_integer()
 ) -> binary().
-resolve_remote_type_from_beam(BeamFile, _Mod, TypeName, Arity, Depth) ->
-    case beam_lib:chunks(BeamFile, [abstract_code]) of
+resolve_remote_type_from_beam(BeamRef, _Mod, TypeName, Arity, Depth) ->
+    case beam_lib:chunks(BeamRef, [abstract_code]) of
         {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
             RemoteOpaqueSet = build_opaque_set(Forms),
             case sets:is_element({TypeName, Arity}, RemoteOpaqueSet) of

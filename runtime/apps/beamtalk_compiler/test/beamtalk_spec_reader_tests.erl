@@ -1166,6 +1166,29 @@ resolve_remote_type_disk_log_test() ->
             ?assertEqual(<<"Result(Nil, Symbol | Tuple)">>, RetType)
     end.
 
+%% BT-2185: Remote type references into preloaded modules (`erlang`, `init`,
+%% `erts_internal`, ...) resolve via `code:get_object_code/1`. Previously this
+%% arm short-circuited to Dynamic because the comment claimed preloaded
+%% modules had no .beam on disk — they do, the file just isn't what
+%% `code:which/1` returns.
+%%
+%% `erlang:timestamp()` is defined as `{non_neg_integer(), non_neg_integer(),
+%% non_neg_integer()}`, which maps to Tuple.
+resolve_remote_type_erlang_preloaded_test() ->
+    case code:get_object_code(erlang) of
+        error ->
+            %% erts-stripped distribution — preloaded fallback path is
+            %% covered by code; we just can't exercise the happy path here.
+            ok;
+        {_, _, _} ->
+            ?assertEqual(
+                <<"Tuple">>,
+                beamtalk_spec_reader:map_type(
+                    {remote_type, 0, [{atom, 0, erlang}, {atom, 0, timestamp}, []]}
+                )
+            )
+    end.
+
 %% map_type/1 without context still returns Dynamic for user_type.
 map_type_user_type_no_context_test() ->
     %% When called outside read_specs, no type registry is set
