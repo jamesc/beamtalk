@@ -601,10 +601,12 @@ resolve_remote_type(Mod, TypeName, Args) ->
                     <<"Dynamic">>;
                 preloaded ->
                     %% Preloaded modules (erlang, init, erts_internal, ...) are
-                    %% loaded into the VM at boot, but the .beam file ships on
-                    %% disk under <lib_dir>/erts-<vsn>/ebin/ with abstract code.
-                    %% `code:get_object_code/1` returns its binary directly;
-                    %% `beam_lib:chunks/2` accepts a binary in place of a path.
+                    %% loaded into the VM at boot. The .beam files ship on disk
+                    %% under <lib_dir>/erts-<vsn>/ebin/ and typically include
+                    %% abstract code; stripped distributions may omit it, in
+                    %% which case resolve_remote_type_from_beam falls back to
+                    %% Dynamic. `code:get_object_code/1` returns the binary
+                    %% directly; `beam_lib:chunks/2` accepts a binary or path.
                     case code:get_object_code(Mod) of
                         {_, Bin, _} ->
                             resolve_remote_type_from_beam(Bin, Mod, TypeName, Arity, Depth);

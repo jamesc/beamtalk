@@ -1177,16 +1177,20 @@ resolve_remote_type_disk_log_test() ->
 resolve_remote_type_erlang_preloaded_test() ->
     case code:get_object_code(erlang) of
         error ->
-            %% erts-stripped distribution — preloaded fallback path is
-            %% covered by code; we just can't exercise the happy path here.
             ok;
-        {_, _, _} ->
-            ?assertEqual(
-                <<"Tuple">>,
-                beamtalk_spec_reader:map_type(
-                    {remote_type, 0, [{atom, 0, erlang}, {atom, 0, timestamp}, []]}
-                )
-            )
+        {_, Bin, _} ->
+            case beam_lib:chunks(Bin, [abstract_code]) of
+                {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
+                    ?assertEqual(
+                        <<"Tuple">>,
+                        beamtalk_spec_reader:map_type(
+                            {remote_type, 0, [{atom, 0, erlang}, {atom, 0, timestamp}, []]}
+                        )
+                    );
+                _ ->
+                    %% Abstract code stripped — can't exercise the happy path.
+                    ok
+            end
     end.
 
 %% map_type/1 without context still returns Dynamic for user_type.
