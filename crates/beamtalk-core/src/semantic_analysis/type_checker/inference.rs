@@ -592,7 +592,13 @@ impl TypeChecker {
                     let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
                     (send_ty.clone(), receiver.as_ref(), send_ty)
                 };
-                let is_class_ref = matches!(cascade_target, Expression::ClassReference { .. });
+                // BT-2158: normalise the cascade target so parenthesised
+                // class references (`(HTTPRouter) build: [...]; ...`) are
+                // treated as class-side both for block-param inference and
+                // downstream selector validation.
+                let unwrapped_target = unwrap_parens(cascade_target);
+                let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
+                let is_class_side_send = Self::is_class_side_receiver(cascade_target, env);
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     self.infer_args_with_block_context(
@@ -602,9 +608,10 @@ impl TypeChecker {
                         hierarchy,
                         env,
                         in_abstract_method,
+                        is_class_side_send,
                     );
                     if is_class_ref {
-                        if let Expression::ClassReference { name, .. } = cascade_target {
+                        if let Expression::ClassReference { name, .. } = unwrapped_target {
                             self.check_class_side_send(
                                 &name.name,
                                 &selector_name,
@@ -614,7 +621,7 @@ impl TypeChecker {
                             );
                         }
                     } else if let InferredType::Known { ref class_name, .. } = dispatch_ty {
-                        if env.in_class_method && Self::is_self_receiver(cascade_target) {
+                        if env.in_class_method && Self::is_self_receiver(unwrapped_target) {
                             if !in_abstract_method {
                                 self.check_class_side_send(
                                     class_name,
@@ -920,6 +927,10 @@ impl TypeChecker {
                 in_abstract_method,
             )
         } else {
+            // BT-2158: detect class-side sends so block-param propagation
+            // uses `find_class_method` instead of `find_method`. Shares the
+            // helper with the downstream `is_class_side_receiver` check below.
+            let is_class_side = Self::is_class_side_receiver(receiver, env);
             self.infer_args_with_block_context(
                 arguments,
                 &receiver_ty,
@@ -927,6 +938,7 @@ impl TypeChecker {
                 hierarchy,
                 env,
                 in_abstract_method,
+                is_class_side,
             )
         };
 
@@ -950,12 +962,9 @@ impl TypeChecker {
         // Restricted to non-class-side receivers: `ClassName ifNil: ... ifNotNil: ...`
         // and `self ifNil: ... ifNotNil: ...` inside a class method must
         // flow through `check_class_side_send` so an invalid metaclass send
-        // still emits DNU. Unwrap parens first so `(ClassName) ifNil: ...`
+        // still emits DNU. The helper unwraps parens so `(ClassName) ifNil: ...`
         // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
-        let unwrapped_receiver = unwrap_parens(receiver);
-        let is_class_side_receiver =
-            matches!(unwrapped_receiver, Expression::ClassReference { .. })
-                || (env.in_class_method && Self::is_self_receiver(unwrapped_receiver));
+        let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
         if !is_class_side_receiver
             && matches!(
                 selector_name.as_str(),
@@ -1003,8 +1012,10 @@ impl TypeChecker {
             }
         }
 
-        // If receiver is a class reference, check class-side methods
-        if let Expression::ClassReference { name, .. } = receiver {
+        // If receiver is a class reference, check class-side methods.
+        // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
+        // — matches the block-param inference normalisation above.
+        if let Expression::ClassReference { name, .. } = unwrap_parens(receiver) {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
@@ -1057,8 +1068,9 @@ impl TypeChecker {
             ..
         } = receiver_ty
         {
-            // In class methods, self sends should check class-side methods
-            if env.in_class_method && Self::is_self_receiver(receiver) {
+            // In class methods, self sends should check class-side methods.
+            // BT-2158: unwrap parens so `(self) foo:` dispatches class-side.
+            if env.in_class_method && Self::is_self_receiver(unwrap_parens(receiver)) {
                 if !in_abstract_method {
                     self.check_argument_types(
                         class_name,
@@ -1518,6 +1530,16 @@ impl TypeChecker {
     /// Returns true if the expression is `self` (direct identifier reference).
     fn is_self_receiver(expr: &Expression) -> bool {
         matches!(expr, Expression::Identifier(ident) if ident.name == "self")
+    }
+
+    /// Returns true if `expr` resolves to a class-side receiver — either a
+    /// direct `ClassReference` or `self` inside a class method. Unwraps
+    /// parentheses so `(HTTPRouter) foo:` and `(self) foo:` are treated
+    /// identically to the un-parenthesised forms (BT-2158).
+    fn is_class_side_receiver(expr: &Expression, env: &TypeEnv) -> bool {
+        let unwrapped = unwrap_parens(expr);
+        matches!(unwrapped, Expression::ClassReference { .. })
+            || (env.in_class_method && Self::is_self_receiver(unwrapped))
     }
 
     /// Describes where an expression's type originated (BT-1588).
@@ -2310,6 +2332,8 @@ impl TypeChecker {
     /// `Dynamic(DynamicReceiver)` into block params in the fallback paths so
     /// downstream uses propagate that reason (which is filtered from the warning),
     /// matching how the send result itself is already classified.
+    #[allow(clippy::too_many_arguments)] // class-side flag (BT-2158) added to existing 7 args
+    #[allow(clippy::too_many_lines)] // two-phase block-arg inference adds necessary branches
     fn infer_args_with_block_context(
         &mut self,
         arguments: &[Expression],
@@ -2318,6 +2342,7 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
         in_abstract_method: bool,
+        is_class_side_send: bool,
     ) -> Vec<InferredType> {
         // Fast path: receiver must be Known to look up method signatures.
         // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
@@ -2339,10 +2364,17 @@ impl TypeChecker {
             );
         };
 
-        // Look up the method to get param types. If the selector isn't defined on
-        // the receiver's class, block params likewise have no resolvable type;
-        // use the Dynamic-block-param fallback so usages don't double-warn.
-        let Some(method) = hierarchy.find_method(class_name, selector_name) else {
+        // Look up the method to get param types. For class-side sends
+        // (`ClassName foo:` or `self foo:` inside a class method), look up the
+        // class-side method; otherwise the instance method. BT-2158: without
+        // this split, class-side block parameters never get their declared
+        // types propagated to the call-site block params.
+        let method_lookup = if is_class_side_send {
+            hierarchy.find_class_method(class_name, selector_name)
+        } else {
+            hierarchy.find_method(class_name, selector_name)
+        };
+        let Some(method) = method_lookup else {
             return self.infer_args_with_dynamic_block_params(
                 arguments,
                 receiver_ty,

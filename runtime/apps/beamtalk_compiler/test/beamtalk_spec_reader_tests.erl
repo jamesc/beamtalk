@@ -1166,6 +1166,60 @@ resolve_remote_type_disk_log_test() ->
             ?assertEqual(<<"Result(Nil, Symbol | Tuple)">>, RetType)
     end.
 
+%% BT-2185: Remote type references into preloaded modules (`erlang`, `init`,
+%% `erts_internal`, ...) resolve via `code:get_object_code/1`. Previously this
+%% arm short-circuited to Dynamic because the comment claimed preloaded
+%% modules had no .beam on disk — they do, the file just isn't what
+%% `code:which/1` returns.
+%%
+%% `erlang:timestamp()` is defined as `{non_neg_integer(), non_neg_integer(),
+%% non_neg_integer()}`, which maps to Tuple.
+resolve_remote_type_erlang_preloaded_test() ->
+    case code:get_object_code(erlang) of
+        error ->
+            ok;
+        {_, Bin, _} ->
+            case beam_lib:chunks(Bin, [abstract_code]) of
+                {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
+                    ?assertEqual(
+                        <<"Tuple">>,
+                        beamtalk_spec_reader:map_type(
+                            {remote_type, 0, [{atom, 0, erlang}, {atom, 0, timestamp}, []]}
+                        )
+                    );
+                _ ->
+                    %% Abstract code stripped — can't exercise the happy path.
+                    ok
+            end
+    end.
+
+%% BT-2185: Also verify that a Result-shaped union type in a preloaded module
+%% resolves through the new code path. `prim_file:prim_file_name_error()` is
+%% defined as `error | ignore | warning` — the bare `error` atom should be
+%% classified as a Result error branch (with Nil reason), and the remaining
+%% `ignore | warning` atoms fall through to the Symbol union.
+resolve_remote_type_prim_file_preloaded_test() ->
+    case code:get_object_code(prim_file) of
+        error ->
+            ok;
+        {_, Bin, _} ->
+            case beam_lib:chunks(Bin, [abstract_code]) of
+                {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
+                    ?assertEqual(
+                        <<"Result(Dynamic, Nil) | Symbol">>,
+                        beamtalk_spec_reader:map_type(
+                            {remote_type, 0, [
+                                {atom, 0, prim_file},
+                                {atom, 0, prim_file_name_error},
+                                []
+                            ]}
+                        )
+                    );
+                _ ->
+                    ok
+            end
+    end.
+
 %% map_type/1 without context still returns Dynamic for user_type.
 map_type_user_type_no_context_test() ->
     %% When called outside read_specs, no type registry is set
