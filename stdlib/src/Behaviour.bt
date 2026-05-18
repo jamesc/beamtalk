@@ -81,11 +81,11 @@ abstract Object subclass: Behaviour
   /// Self is at the head; Object is at the tail when the class inherits
   /// from Object. For classes that do not reach Object (e.g. ProtoObject
   /// or `ProtoObject subclass:` classes such as Erlang), returns the full
-  /// chain to the root. For Object itself, returns `#(Object)`.
+  /// chain to the root. For Object itself, returns `[Object]`.
   ///
   /// When called on a metaclass receiver, walks the parallel metaclass
   /// hierarchy and terminates at `Object class`:
-  /// `Counter class superclassChain` => `#(Counter class, Actor class, Object class)`.
+  /// `Counter class superclassChain` => `[Counter class, Actor class, Object class]`.
   ///
   /// ## Examples
   /// ```beamtalk
