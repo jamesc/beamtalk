@@ -2091,11 +2091,22 @@ fn report_results(
 mod tests {
     use super::*;
 
+    fn write_bt_file(name: &str, content: &str) -> (tempfile::TempDir, Utf8PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = Utf8PathBuf::from_path_buf(temp.path().join(name)).unwrap();
+        fs::write(&file, content).unwrap();
+        (temp, file)
+    }
+
+    fn temp_utf8_dir() -> (tempfile::TempDir, Utf8PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        (temp, dir)
+    }
+
     #[test]
     fn test_discover_no_test_classes() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let file = Utf8PathBuf::from_path_buf(temp.path().join("plain.bt")).unwrap();
-        fs::write(&file, "Object subclass: Plain\n  foo => 42\n").unwrap();
+        let (_temp, file) = write_bt_file("plain.bt", "Object subclass: Plain\n  foo => 42\n");
 
         let (classes, loads) = discover_test_classes(&file).unwrap();
         assert!(classes.is_empty());
@@ -2104,13 +2115,10 @@ mod tests {
 
     #[test]
     fn test_discover_test_case_subclass() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let file = Utf8PathBuf::from_path_buf(temp.path().join("my_test.bt")).unwrap();
-        fs::write(
-            &file,
+        let (_temp, file) = write_bt_file(
+            "my_test.bt",
             "TestCase subclass: MyTest\n  testAdd => self assert: (1 + 2) equals: 3\n  helper => nil\n",
-        )
-        .unwrap();
+        );
 
         let (classes, _) = discover_test_classes(&file).unwrap();
         assert_eq!(classes.len(), 1);
@@ -2120,13 +2128,10 @@ mod tests {
 
     #[test]
     fn test_discover_setup_teardown() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let file = Utf8PathBuf::from_path_buf(temp.path().join("lifecycle.bt")).unwrap();
-        fs::write(
-            &file,
+        let (_temp, file) = write_bt_file(
+            "lifecycle.bt",
             "TestCase subclass: LifecycleTest\n  setUp => nil\n  tearDown => nil\n  testIt => self assert: true\n",
-        )
-        .unwrap();
+        );
 
         let (classes, _) = discover_test_classes(&file).unwrap();
         assert_eq!(classes.len(), 1);
@@ -2137,13 +2142,10 @@ mod tests {
 
     #[test]
     fn test_discover_load_directives() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let file = Utf8PathBuf::from_path_buf(temp.path().join("with_load.bt")).unwrap();
-        fs::write(
-            &file,
+        let (_temp, file) = write_bt_file(
+            "with_load.bt",
             "// @load stdlib/test/fixtures/counter.bt\nTestCase subclass: T\n  testX => nil\n",
-        )
-        .unwrap();
+        );
 
         let (_, loads) = discover_test_classes(&file).unwrap();
         assert_eq!(loads, vec!["stdlib/test/fixtures/counter.bt"]);
@@ -2154,8 +2156,7 @@ mod tests {
 
     #[test]
     fn test_collect_beam_module_names() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         // Create some .beam files and non-.beam files
         fs::write(dir.join("bt@my_app@counter.beam"), b"fake beam").unwrap();
@@ -2171,8 +2172,7 @@ mod tests {
 
     #[test]
     fn test_collect_beam_module_names_empty_dir() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         let modules = collect_beam_module_names(&dir).unwrap();
         assert!(modules.is_empty());
@@ -2180,8 +2180,7 @@ mod tests {
 
     #[test]
     fn test_build_fixture_class_module_index_flat() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         // BT-2006: fixture also declares a protocol so we can assert the
         // returned `protocol_infos` carries it through.
@@ -2248,8 +2247,7 @@ mod tests {
 
     #[test]
     fn test_find_package_root_found() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         // Create nested structure: pkg/test/my_test.bt with beamtalk.toml at pkg/
         let pkg_dir = dir.join("pkg");
@@ -2268,8 +2266,7 @@ mod tests {
 
     #[test]
     fn test_find_package_root_not_found() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         // No beamtalk.toml anywhere
         fs::create_dir_all(dir.join("sub")).unwrap();
@@ -2330,8 +2327,7 @@ mod tests {
 
     #[test]
     fn test_find_package_root_directory_input() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         fs::write(
             dir.join("beamtalk.toml"),
@@ -2345,8 +2341,7 @@ mod tests {
 
     #[test]
     fn test_class_index_for_file_uses_own_package() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         // Two packages, each defining a class named "Counter"
         let pkg_a = dir.join("pkg_a");
@@ -2414,8 +2409,7 @@ mod tests {
 
     #[test]
     fn test_class_index_for_file_fixture_classes_available() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         let pkg_a = dir.join("pkg_a");
         fs::create_dir_all(pkg_a.join("test")).unwrap();
@@ -2521,8 +2515,7 @@ mod tests {
     /// This test verifies the renaming logic that produces those unique names.
     #[test]
     fn test_module_name_prefixed_for_multi_package_collision_avoidance() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, dir) = temp_utf8_dir();
 
         // Two packages, each with a SmokeTest class
         let pkg_a = dir.join("pkg_a");
