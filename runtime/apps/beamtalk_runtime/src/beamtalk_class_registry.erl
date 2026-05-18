@@ -38,6 +38,8 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     ensure_module_table/0,
     ensure_methods_table/0,
     ensure_class_warnings_table/0,
+    heir_option/0,
+    maybe_set_heir/1,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
     drain_class_warnings_by_qualified_names/1,
@@ -201,10 +203,13 @@ ensure_module_table() ->
 -doc """
 Ensure the class methods ETS table exists (BT-2008).
 
-Delegates to `beamtalk_class_methods_table:new/0`.
-Called from `beamtalk_object_class:init/1` so the chain walker in
-`beamtalk_class_dispatch:find_class_method_in_ancestors/3` can resolve
-inherited class-method dispatch without any gen_server round-trips.
+Delegates to `beamtalk_class_methods_table:new/0`, which both creates
+the table on first call and retroactively sets the heir to
+`beamtalk_runtime_sup` (BT-1888 pattern) so the cache survives owner
+process crashes. Called from `beamtalk_object_class:init/1` so the
+chain walker in `beamtalk_class_dispatch:find_class_method_in_ancestors/3`
+can resolve inherited class-method dispatch without any gen_server
+round-trips.
 """.
 -spec ensure_methods_table() -> ok.
 ensure_methods_table() ->

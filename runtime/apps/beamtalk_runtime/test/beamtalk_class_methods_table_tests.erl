@@ -121,13 +121,21 @@ delete_nonexistent_is_safe_test() ->
 %%====================================================================
 
 lookup_when_table_absent_returns_not_found_test() ->
-    %% Save real contents so we can restore the table afterward.
-    Saved = ets:tab2list(beamtalk_class_methods),
-    (try
-        ets:delete(beamtalk_class_methods)
-    catch
-        _:_ -> ok
-    end),
+    %% Save real contents so we can restore the table afterward. Guard the
+    %% tab2list call so the test does not crash if the table is already
+    %% absent (e.g., another test left it that way).
+    Saved =
+        case ets:whereis(beamtalk_class_methods) of
+            undefined -> [];
+            _ -> ets:tab2list(beamtalk_class_methods)
+        end,
+    case ets:whereis(beamtalk_class_methods) of
+        undefined ->
+            ok;
+        _ ->
+            true = ets:delete(beamtalk_class_methods),
+            ?assertEqual(undefined, ets:whereis(beamtalk_class_methods))
+    end,
     try
         %% Must not crash when the table does not exist.
         ?assertEqual(not_found, beamtalk_class_methods_table:lookup('AnyClass'))

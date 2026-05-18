@@ -40,11 +40,17 @@ same writer (`beamtalk_object_class:init/1` and `apply_class_info/2`).
   during class init/terminate/update via this module's API.
 * `{read_concurrency, true}` — optimised for the frequent reads on the
   class-dispatch hot path.
+* `{heir, beamtalk_runtime_sup, undefined}` (BT-1888 pattern) — the
+  table survives if the owner class process crashes, so the cache is
+  not lost when the first registering class dies.
 
 ## Concurrency
 
 `new/0` uses a try/catch around `ets:new/2` to be safe under concurrent
-first-use (TOCTOU race between `ets:info/1` and `ets:new/2`).
+first-use (TOCTOU race between `ets:info/1` and `ets:new/2`). All
+read/write ops also guard against `badarg` from a TOCTOU race where the
+table is deleted between an existence check and the actual ETS op
+(possible during test teardown or shutdown).
 """.
 
 -export([
@@ -64,9 +70,11 @@ first-use (TOCTOU race between `ets:info/1` and `ets:new/2`).
 -doc """
 Ensure the class methods ETS table exists (idempotent).
 
-Creates the table on first call; subsequent calls are no-ops.
-Safe to call concurrently — a try/catch handles the race between
-`ets:info/1` and `ets:new/2`.
+Creates the table on first call; subsequent calls are no-ops apart from
+retroactively setting the heir if the supervisor is now alive (the
+`maybe_set_heir/1` pattern used by `beamtalk_class_warnings`). Safe to
+call concurrently — a try/catch handles the race between `ets:info/1`
+and `ets:new/2`.
 """.
 -spec new() -> ok.
 new() ->
@@ -75,13 +83,20 @@ new() ->
             try
                 ets:new(
                     beamtalk_class_methods,
-                    [set, public, named_table, {read_concurrency, true}]
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {read_concurrency, true}
+                        | beamtalk_class_registry:heir_option()
+                    ]
                 ),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
+            beamtalk_class_registry:maybe_set_heir(beamtalk_class_methods),
             ok
     end.
 
@@ -92,34 +107,48 @@ Inserts `{ClassName, Module, Selectors}`. Overwrites any existing entry
 (ETS `set` semantics), so re-loading a class or redefining its class
 methods updates the entry in place.
 
-Calls `new/0` first to ensure the table exists. Guards against the rare
-case where the table was deleted (e.g., by test teardown) between the
-class gen_server's `init/1` and a subsequent hot-reload `update_class`
-call.
+Calls `new/0` first to ensure the table exists. If the table is
+concurrently deleted between `new/0` and `ets:insert/2` (rare, but can
+happen during test teardown), the insert is retried after recreating
+the table — guaranteeing the documented insert-or-overwrite contract
+under TOCTOU.
 """.
 -spec insert(class_name(), module(), [selector()]) -> ok.
 insert(ClassName, Module, Selectors) when is_list(Selectors) ->
     new(),
-    ets:insert(beamtalk_class_methods, {ClassName, Module, Selectors}),
-    ok.
+    try
+        ets:insert(beamtalk_class_methods, {ClassName, Module, Selectors}),
+        ok
+    catch
+        error:badarg ->
+            %% Table vanished between new/0 and ets:insert/2 — recreate and retry once.
+            new(),
+            ets:insert(beamtalk_class_methods, {ClassName, Module, Selectors}),
+            ok
+    end.
 
 -doc """
 Remove a class entry from the table.
 
 Called during class gen_server `terminate/2` to keep the table clean.
-Safe to call even if the entry does not exist.
+Safe to call even if the entry — or the table itself — does not exist.
 """.
 -spec delete(class_name()) -> ok.
 delete(ClassName) ->
-    ets:delete(beamtalk_class_methods, ClassName),
-    ok.
+    try
+        ets:delete(beamtalk_class_methods, ClassName),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 -doc """
 Look up the module and local class-method selectors for a class.
 
 Returns `{ok, Module, Selectors}` if the class is in the table, or
 `not_found` otherwise. Returns `not_found` (rather than crashing) if the
-table does not exist yet — safe during bootstrap.
+table does not exist yet (safe during bootstrap) or if it disappears
+between the existence check and the lookup (TOCTOU under teardown).
 """.
 -spec lookup(class_name()) -> {ok, module(), [selector()]} | not_found.
 lookup(ClassName) ->
@@ -127,8 +156,10 @@ lookup(ClassName) ->
         undefined ->
             not_found;
         _ ->
-            case ets:lookup(beamtalk_class_methods, ClassName) of
+            try ets:lookup(beamtalk_class_methods, ClassName) of
                 [{_, Module, Selectors}] -> {ok, Module, Selectors};
                 [] -> not_found
+            catch
+                error:badarg -> not_found
             end
     end.
