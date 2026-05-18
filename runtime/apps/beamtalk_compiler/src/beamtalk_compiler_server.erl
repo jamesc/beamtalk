@@ -30,7 +30,8 @@ to avoid temp files on disk (BT-48).
     version/0,
     compile_core_erlang/1,
     register_class/2,
-    resolve_completion_type/1
+    resolve_completion_type/1,
+    find_senders_in_source/2
 ]).
 
 %% gen_server callbacks
@@ -172,6 +173,19 @@ resolve_completion_type(Expression) ->
     end.
 
 -doc """
+Find call sites of a selector in a single method's source (BT-2190).
+
+Backs `Beamtalk sendersOf:' — parses the method source and returns a list
+of 1-based line numbers (relative to `Source') where the selector appears
+as a `MessageSend' or `Cascade'. Returns `{ok, []}' if no senders are
+found; returns `{error, Diagnostics}' if the compiler port is unavailable.
+""".
+-spec find_senders_in_source(binary(), atom() | binary()) ->
+    {ok, [non_neg_integer()]} | {error, [map()]}.
+find_senders_in_source(Source, Selector) ->
+    gen_server:call(?MODULE, {find_senders_in_source, Source, Selector}, 30000).
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -259,6 +273,11 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
     {reply, Result, State};
 handle_call({diagnostics, Source}, _From, State) ->
     Result = do_diagnostics(State#state.port, Source),
+    {reply, Result, State};
+handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
+    Result = beamtalk_compiler_port:find_senders_in_source(
+        State#state.port, Source, Selector
+    ),
     {reply, Result, State};
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),

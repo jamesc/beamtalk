@@ -14,7 +14,7 @@
 use std::io;
 
 use beamtalk_etf::{
-    self as etf, atom, binary_from_str as binary, map_get, term_to_atom, term_to_bool,
+    self as etf, atom, binary_from_str as binary, int_term, map_get, term_to_atom, term_to_bool,
     term_to_string, term_to_string_list, term_to_usize,
 };
 use clap::{ArgAction, Parser};
@@ -1295,6 +1295,38 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
     }
 }
 
+/// Handle a `find_senders_in_source` request (BT-2190).
+///
+/// Backs `Beamtalk sendersOf:` — parses the source of a single compiled method
+/// and reports 1-based line numbers (relative to the input source) where a
+/// `MessageSend` or `Cascade` with the given selector appears.
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+/// - `selector` (binary): the target selector name (without the leading `#`)
+///
+/// Response: `#{status => ok, lines => [Line, ...]}`. Returns an empty list
+/// when no senders are found or the source cannot be parsed.
+fn handle_find_senders_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(selector) = map_get(request, "selector").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'selector' field".to_string()]);
+    };
+
+    let lines = beamtalk_core::queries::senders_query::find_senders_in_source(&source, &selector);
+    let line_terms: Vec<Term> = lines
+        .iter()
+        .map(|&line| int_term(i32::try_from(line).unwrap_or(i32::MAX)))
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("lines"), Term::from(List::from(line_terms))),
+    ]))
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -1314,6 +1346,7 @@ fn handle_request(request_term: &Term) -> Term {
         "diagnostics" => handle_diagnostics(map),
         "version" => handle_version(),
         "resolve_completion_type" => handle_resolve_completion_type(map),
+        "find_senders_in_source" => handle_find_senders_in_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }

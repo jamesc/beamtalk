@@ -28,7 +28,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     diagnostics/1,
     version/0,
     compile_core_erlang/1,
-    resolve_completion_type/1
+    resolve_completion_type/1,
+    find_senders_in_source/2
 ]).
 
 -doc """
@@ -137,3 +138,22 @@ Returns `{ok, ModuleName, Binary}' or `{error, Reason}'.
 -spec compile_core_erlang(binary()) -> {ok, atom(), binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin) ->
     beamtalk_compiler_server:compile_core_erlang(CoreErlangBin).
+
+-doc """
+Find call sites of a selector in a single method's source (BT-2190).
+
+`Source' is the source of a single compiled method (as returned by
+`CompiledMethod source'). `Selector' is the target selector as an atom or
+binary (without a leading `#').
+
+Returns `{ok, [Line]}' on success, where each line is a 1-based line number
+within `Source'. Returns `{ok, []}' when no senders are found or the source
+cannot be parsed. Returns `{error, Diagnostics}' if the compiler port is
+unavailable.
+
+Backs `Beamtalk sendersOf:' for System Browser-style call-site navigation.
+""".
+-spec find_senders_in_source(binary(), atom() | binary()) ->
+    {ok, [non_neg_integer()]} | {error, [map()]}.
+find_senders_in_source(Source, Selector) ->
+    beamtalk_compiler_server:find_senders_in_source(Source, Selector).
