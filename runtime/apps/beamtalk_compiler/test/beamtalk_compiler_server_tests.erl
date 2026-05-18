@@ -74,7 +74,10 @@ handle_compile_response_error_test() ->
 handle_compile_response_unexpected_test() ->
     Response = #{status => unknown_status, data => <<"garbage">>},
     Result = beamtalk_compiler_server:handle_compile_response(Response),
-    ?assertMatch({error, [<<"Unexpected compiler response">>]}, Result).
+    ?assertMatch(
+        {error, [#{message := <<"Unexpected compiler response">>}]},
+        Result
+    ).
 
 %%% ---------------------------------------------------------------
 %%% handle_diagnostics_response/1 — internal response handler
@@ -93,7 +96,10 @@ handle_diagnostics_response_error_test() ->
 handle_diagnostics_response_unexpected_test() ->
     Response = #{bogus => true},
     Result = beamtalk_compiler_server:handle_diagnostics_response(Response),
-    ?assertMatch({error, [<<"Unexpected compiler response">>]}, Result).
+    ?assertMatch(
+        {error, [#{message := <<"Unexpected compiler response">>}]},
+        Result
+    ).
 
 %%% ---------------------------------------------------------------
 %%% handle_version_response/1 — internal response handler

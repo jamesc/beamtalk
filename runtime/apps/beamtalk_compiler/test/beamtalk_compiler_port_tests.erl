@@ -43,16 +43,22 @@ simple_expression_test() ->
     with_port(fun(Port) ->
         {ok, CoreErlang, []} =
             beamtalk_compiler_port:compile_expression(Port, <<"1 + 2">>, <<"test">>, []),
-        %% Verify the Core Erlang contains the expected addition
-        ?assert(binary:match(CoreErlang, <<"'+'(1, 2)">>) =/= nomatch)
+        %% The port emits `call 'erlang':'+'\n\t\t    (1, 2)`. Check both
+        %% the qualified BIF and the literal operand pair so that operand-order
+        %% regressions are still caught.
+        ?assert(binary:match(CoreErlang, <<"'erlang':'+'">>) =/= nomatch),
+        ?assert(binary:match(CoreErlang, <<"1, 2">>) =/= nomatch)
     end).
 
 known_vars_test() ->
     with_port(fun(Port) ->
         {ok, CoreErlang, []} =
             beamtalk_compiler_port:compile_expression(Port, <<"x + 1">>, <<"test">>, [<<"x">>]),
-        %% Verify it references the variable x via maps:get
-        ?assert(binary:match(CoreErlang, <<"'get'('x'">>) =/= nomatch)
+        %% Variable x is fetched via `call 'maps':'get'\n\t\t\t ('x', State)`.
+        %% Assert both the qualified call and the `'x'` key are present so that
+        %% the test still guards variable-lookup specifically.
+        ?assert(binary:match(CoreErlang, <<"'maps':'get'">>) =/= nomatch),
+        ?assert(binary:match(CoreErlang, <<"'x'">>) =/= nomatch)
     end).
 
 invalid_expression_returns_error_test() ->
@@ -291,7 +297,7 @@ class_module_index_used_for_spawn_with_args_expression_test() ->
         },
         {ok, CoreErlang, []} =
             beamtalk_compiler_port:compile_expression(
-                Port, <<"Counter spawnWith: #{ value: 10 }">>, <<"repl_test">>, [], Options
+                Port, <<"Counter spawnWith: #{#value => 10}">>, <<"repl_test">>, [], Options
             ),
         ?assert(
             binary:match(CoreErlang, <<"'bt@getting_started@counter':'spawn'">>) =/= nomatch

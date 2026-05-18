@@ -298,10 +298,10 @@ map_type_result_ok_error_test() ->
         )
     ).
 
-%% {ok, pid()} | {error, term()} → Result(Pid, Dynamic)
+%% {ok, pid()} | {error, term()} → Result(Pid) (Dynamic err is elided)
 map_type_result_pid_dynamic_test() ->
     ?assertEqual(
-        <<"Result(Pid, Dynamic)">>,
+        <<"Result(Pid)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, pid, []}]},
@@ -322,11 +322,11 @@ map_type_result_bare_ok_test() ->
         )
     ).
 
-%% {ok, T} without error branch → Result(T, Dynamic)
+%% {ok, T} without error branch → Result(T) (Dynamic err is elided)
 map_type_result_ok_only_test() ->
     %% {ok, T} | other — ok branch present, no error branch
     ?assertEqual(
-        <<"Result(String | Binary, Dynamic) | Integer">>,
+        <<"Result(String | Binary) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -338,7 +338,7 @@ map_type_result_ok_only_test() ->
 %% {ok, T} as the sole branch in a union with no error branch
 map_type_result_ok_only_pure_test() ->
     ?assertEqual(
-        <<"Result(String | Binary, Dynamic)">>,
+        <<"Result(String | Binary)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]}
@@ -447,8 +447,14 @@ verify_timer_send_after_result_test() ->
     ?assert(length(SendAfterSpecs) > 0),
     [Spec | _] = SendAfterSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should be a Result type
-    ?assertMatch(<<"Result(", _/binary>>, RetType).
+    %% The formatter emits one of two shapes: bare `Result` (when both ok
+    %% and err resolve to Dynamic) or `Result(...)` (closing parenthesis).
+    %% Anything else — e.g. `ResultFoo` — should fail.
+    ?assert(
+        RetType =:= <<"Result">> orelse
+            (binary:match(RetType, <<"Result(">>) =:= {0, 7} andalso
+                binary:last(RetType) =:= $))
+    ).
 
 %% application:start/1 → Result(Nil, ...) (bare ok in union)
 verify_application_start_result_test() ->
@@ -464,8 +470,15 @@ verify_application_start_result_test() ->
     ?assert(length(StartSpecs) > 0),
     [Spec | _] = StartSpecs,
     RetType = maps:get(return_type, Spec),
-    %% Should be Result(Nil, ...) because of bare ok atom
-    ?assertMatch(<<"Result(Nil,", _/binary>>, RetType).
+    %% The formatter elides `, Dynamic` from the err position, so the only
+    %% two valid shapes here are `Result(Nil)` and `Result(Nil, <ErrType>)`.
+    %% Reject malformed values like `Result(NilThing` by checking the
+    %% delimiter explicitly.
+    ?assert(
+        RetType =:= <<"Result(Nil)">> orelse
+            (binary:match(RetType, <<"Result(Nil, ">>) =:= {0, 12} andalso
+                binary:last(RetType) =:= $))
+    ).
 
 %%% ---------------------------------------------------------------
 %%% Bounded fun with ok/error union (constraint resolution into Result)
