@@ -2324,6 +2324,8 @@ impl TypeChecker {
     /// `Dynamic(DynamicReceiver)` into block params in the fallback paths so
     /// downstream uses propagate that reason (which is filtered from the warning),
     /// matching how the send result itself is already classified.
+    #[allow(clippy::too_many_arguments)] // class-side flag (BT-2158) added to existing 7 args
+    #[allow(clippy::too_many_lines)] // two-phase block-arg inference adds necessary branches
     fn infer_args_with_block_context(
         &mut self,
         arguments: &[Expression],
