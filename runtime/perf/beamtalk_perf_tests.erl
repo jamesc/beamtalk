@@ -1099,8 +1099,7 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
         [Overhead, AbsOverheadNs]),
 
     %% Sanity bounds — after BT-2008 the chain walk reads module + selector
-    %% list from ETS (no gen_server hops), so the helper should be well under
-    %% 1µs. The 2_000ns ceiling leaves ~2x headroom for CI noise on the
-    %% Dictionary → Collection chain measured here.
+    %% list from ETS (no gen_server hops). Observed median ~1.6µs on the
+    %% Dictionary → Collection chain; 2_000ns leaves headroom for CI noise.
     ?assert(HelperMedian < 2_000),    %% helper < 2µs per call (post-BT-2008)
     ?assert(DirectMedian < 10_000).   %% direct apply < 10µs per call
