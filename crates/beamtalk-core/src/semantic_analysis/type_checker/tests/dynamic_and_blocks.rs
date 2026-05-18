@@ -372,6 +372,123 @@ fn block_params_more_than_signature_extra_stays_dynamic() {
 }
 
 #[test]
+fn block_params_typed_from_user_defined_class_method_signature_bt2158() {
+    // BT-2158: When a method's block parameter has a concrete (non-generic)
+    // class type, calling the method should propagate that type to the block's
+    // parameter. Mirrors `HTTPRouter build: [:r | ...]` from the watcher.
+    let source = "\
+typed Object subclass: HTTPRequest\n\
+  body -> String => \"hi\"\n\
+typed Object subclass: HTTPRouteBuilder\n\
+  get: path :: String handler: handler :: Block(HTTPRequest, Object) -> HTTPRouteBuilder => self\n\
+typed Object subclass: HTTPRouter\n\
+  build: aBlock :: Block(HTTPRouteBuilder, Object) -> HTTPRouter =>\n\
+    builder :: HTTPRouteBuilder := HTTPRouteBuilder new\n\
+    aBlock value: builder\n\
+typed Object subclass: App\n\
+  go -> HTTPRouter => HTTPRouter new build: [:r | r get: \"/\" handler: [:req | req body]]\n";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "BT-2158: block params `r` (HTTPRouteBuilder) and `req` (HTTPRequest) should be typed from method signatures, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_typed_for_class_method_bt2158() {
+    // BT-2158: class-method block parameter propagation.
+    // The watcher style is often `HTTPRouter build: [:r | ...]` where `build:`
+    // is a class-side message.
+    let source = "\
+typed Object subclass: HTTPRouteBuilder\n\
+  get: path :: String -> HTTPRouteBuilder => self\n\
+typed Object subclass: HTTPRouter\n\
+  class build: aBlock :: Block(HTTPRouteBuilder, Object) -> HTTPRouter =>\n\
+    builder :: HTTPRouteBuilder := HTTPRouteBuilder new\n\
+    aBlock value: builder\n\
+    HTTPRouter new\n\
+typed Object subclass: App\n\
+  go -> HTTPRouter => HTTPRouter build: [:r | r get: \"/\"]\n";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "BT-2158: class-method block param `r` should be typed as HTTPRouteBuilder, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_typed_for_class_method_via_self_bt2158() {
+    // BT-2158: `self build:` inside a class method should propagate block-param
+    // types from the class-side method's signature too.
+    let source = "\
+typed Object subclass: HTTPRouteBuilder\n\
+  get: path :: String -> HTTPRouteBuilder => self\n\
+typed Object subclass: HTTPRouter\n\
+  class build: aBlock :: Block(HTTPRouteBuilder, Object) -> HTTPRouter =>\n\
+    builder :: HTTPRouteBuilder := HTTPRouteBuilder new\n\
+    aBlock value: builder\n\
+    HTTPRouter new\n\
+  class buildHello -> HTTPRouter => self build: [:r | r get: \"/hello\"]\n";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "BT-2158: `self build:` in class method should propagate block-param type, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
+fn block_params_typed_for_class_method_in_cascade_bt2158() {
+    // BT-2158: cascade sends to a class reference should also propagate
+    // block-param types from class-side methods.
+    let source = "\
+typed Object subclass: HTTPRouteBuilder\n\
+  get: path :: String -> HTTPRouteBuilder => self\n\
+typed Object subclass: HTTPRouter\n\
+  class build: aBlock :: Block(HTTPRouteBuilder, Object) -> HTTPRouter =>\n\
+    builder :: HTTPRouteBuilder := HTTPRouteBuilder new\n\
+    aBlock value: builder\n\
+    HTTPRouter new\n\
+  class buildMore: aBlock :: Block(HTTPRouteBuilder, Object) -> HTTPRouter =>\n\
+    builder :: HTTPRouteBuilder := HTTPRouteBuilder new\n\
+    aBlock value: builder\n\
+    HTTPRouter new\n\
+typed Object subclass: App\n\
+  go -> HTTPRouter =>\n\
+    HTTPRouter\n\
+      build: [:r | r get: \"/\"];\n\
+      buildMore: [:r2 | r2 get: \"/more\"]\n";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "BT-2158: cascade sends to a class reference should propagate block-param types, got: {dynamic_warnings:?}"
+    );
+}
+
+#[test]
 fn block_params_typed_via_method_parameter_annotation() {
     // Method parameter `items :: List(Dictionary)` — sort: block params should get Dictionary.
     let source = "typed Object subclass: T\n  m: items :: List(Dictionary) -> List(Dictionary) => items sort: [:a :b | (a at: \"x\" ifAbsent: [0]) < (b at: \"x\" ifAbsent: [0])]";

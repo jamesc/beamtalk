@@ -593,6 +593,11 @@ impl TypeChecker {
                     (send_ty.clone(), receiver.as_ref(), send_ty)
                 };
                 let is_class_ref = matches!(cascade_target, Expression::ClassReference { .. });
+                // BT-2158: same class-side detection as `infer_message_send_with_receiver_ty`
+                // so cascade messages also resolve block-typed params from the
+                // class-side method.
+                let is_class_side_send =
+                    is_class_ref || (env.in_class_method && Self::is_self_receiver(cascade_target));
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     self.infer_args_with_block_context(
@@ -602,6 +607,7 @@ impl TypeChecker {
                         hierarchy,
                         env,
                         in_abstract_method,
+                        is_class_side_send,
                     );
                     if is_class_ref {
                         if let Expression::ClassReference { name, .. } = cascade_target {
@@ -920,6 +926,13 @@ impl TypeChecker {
                 in_abstract_method,
             )
         } else {
+            // BT-2158: detect class-side sends so block-param propagation
+            // uses `find_class_method` instead of `find_method`. Mirrors the
+            // `is_class_side_receiver` computation below (which runs after
+            // arg inference for other purposes).
+            let unwrapped = unwrap_parens(receiver);
+            let is_class_side = matches!(unwrapped, Expression::ClassReference { .. })
+                || (env.in_class_method && Self::is_self_receiver(unwrapped));
             self.infer_args_with_block_context(
                 arguments,
                 &receiver_ty,
@@ -927,6 +940,7 @@ impl TypeChecker {
                 hierarchy,
                 env,
                 in_abstract_method,
+                is_class_side,
             )
         };
 
@@ -2318,6 +2332,7 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
         in_abstract_method: bool,
+        is_class_side_send: bool,
     ) -> Vec<InferredType> {
         // Fast path: receiver must be Known to look up method signatures.
         // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
@@ -2339,10 +2354,17 @@ impl TypeChecker {
             );
         };
 
-        // Look up the method to get param types. If the selector isn't defined on
-        // the receiver's class, block params likewise have no resolvable type;
-        // use the Dynamic-block-param fallback so usages don't double-warn.
-        let Some(method) = hierarchy.find_method(class_name, selector_name) else {
+        // Look up the method to get param types. For class-side sends
+        // (`ClassName foo:` or `self foo:` inside a class method), look up the
+        // class-side method; otherwise the instance method. BT-2158: without
+        // this split, class-side block parameters never get their declared
+        // types propagated to the call-site block params.
+        let method_lookup = if is_class_side_send {
+            hierarchy.find_class_method(class_name, selector_name)
+        } else {
+            hierarchy.find_method(class_name, selector_name)
+        };
+        let Some(method) = method_lookup else {
             return self.infer_args_with_dynamic_block_params(
                 arguments,
                 receiver_ty,
