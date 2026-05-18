@@ -101,10 +101,11 @@ abstract Object subclass: Behaviour
     terminator := self isMeta ifTrue: [Object class] ifFalse: [Object]
     result := List new
     current := self
-    [current isNil not and: [(result includes: terminator) not]] whileTrue: [
-      result := result add: current
-      current := current superclass
-    ]
+    [current isNil not and: [(result includes: terminator) not]]
+      whileTrue: [
+        result := result add: current
+        current := current superclass
+      ]
     result
 
   /// Test whether the receiver strictly inherits from aClass (self not included).

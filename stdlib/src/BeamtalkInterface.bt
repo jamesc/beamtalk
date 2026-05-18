@@ -91,8 +91,9 @@ sealed typed Object subclass: BeamtalkInterface
     ]
     classes := self allClasses
     instanceImpls := classes select: [:c | c includesSelector: aSelector]
-    classSideImpls := (classes select: [:c | c class includesSelector: aSelector])
-      collect: [:c | c class]
+    classSideImpls := (classes select: [:c |
+      c class includesSelector: aSelector
+    ]) collect: [:c | c class]
     instanceImpls ++ classSideImpls
 
   /// Show class documentation: name, superclass, and method signatures.
