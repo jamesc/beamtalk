@@ -1193,6 +1193,33 @@ resolve_remote_type_erlang_preloaded_test() ->
             end
     end.
 
+%% BT-2185: Also verify that a Result-shaped union type in a preloaded module
+%% resolves through the new code path. `prim_file:prim_file_name_error()` is
+%% defined as `error | ignore | warning` — the bare `error` atom should be
+%% classified as a Result error branch (with Nil reason), and the remaining
+%% `ignore | warning` atoms fall through to the Symbol union.
+resolve_remote_type_prim_file_preloaded_test() ->
+    case code:get_object_code(prim_file) of
+        error ->
+            ok;
+        {_, Bin, _} ->
+            case beam_lib:chunks(Bin, [abstract_code]) of
+                {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
+                    ?assertEqual(
+                        <<"Result(Dynamic, Nil) | Symbol">>,
+                        beamtalk_spec_reader:map_type(
+                            {remote_type, 0, [
+                                {atom, 0, prim_file},
+                                {atom, 0, prim_file_name_error},
+                                []
+                            ]}
+                        )
+                    );
+                _ ->
+                    ok
+            end
+    end.
+
 %% map_type/1 without context still returns Dynamic for user_type.
 map_type_user_type_no_context_test() ->
     %% When called outside read_specs, no type registry is set
