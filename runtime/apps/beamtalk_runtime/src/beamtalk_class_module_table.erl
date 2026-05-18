@@ -31,11 +31,17 @@ names without ever touching a potentially-blocked class gen_server.
   during class init/terminate/update via this module's API.
 * `{read_concurrency, true}` — optimised for the frequent lookups performed
   during supervisor init and hierarchy walks.
+* `{heir, beamtalk_runtime_sup, undefined}` (BT-1888 / BT-2008 pattern) —
+  the table survives if the owner class process crashes, so module-name
+  lookups don't degrade after an owner death.
 
 ## Concurrency
 
 `new/0` uses a try/catch around `ets:new/2` to be safe under concurrent
-first-use (TOCTOU race between `ets:info/1` and `ets:new/2`).
+first-use (TOCTOU race between `ets:info/1` and `ets:new/2`). All
+read/write ops also guard against `badarg` from a TOCTOU race where the
+table is deleted between an existence check and the actual ETS op
+(possible during test teardown or shutdown).
 """.
 
 -export([
@@ -65,13 +71,20 @@ new() ->
             try
                 ets:new(
                     beamtalk_class_module,
-                    [set, public, named_table, {read_concurrency, true}]
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {read_concurrency, true}
+                        | beamtalk_class_registry:heir_option()
+                    ]
                 ),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
+            beamtalk_class_registry:maybe_set_heir(beamtalk_class_module),
             ok
     end.
 
@@ -88,26 +101,40 @@ class gen_server's `init/1` and a subsequent hot-reload `update_class` call.
 -spec insert(class_name(), module()) -> ok.
 insert(ClassName, ModuleName) ->
     new(),
-    ets:insert(beamtalk_class_module, {ClassName, ModuleName}),
-    ok.
+    try
+        ets:insert(beamtalk_class_module, {ClassName, ModuleName}),
+        ok
+    catch
+        error:badarg ->
+            %% Table vanished between new/0 and ets:insert/2 — recreate and retry once.
+            new(),
+            ets:insert(beamtalk_class_module, {ClassName, ModuleName}),
+            ok
+    end.
 
 -doc """
 Remove a class entry from the table.
 
 Called during class gen_server `terminate/2` to keep the table clean.
-Safe to call even if the entry does not exist.
+Safe to call even if the entry — or the table itself — does not exist.
 """.
 -spec delete(class_name()) -> ok.
 delete(ClassName) ->
-    ets:delete(beamtalk_class_module, ClassName),
-    ok.
+    try
+        ets:delete(beamtalk_class_module, ClassName),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 -doc """
 Look up the module name for a class.
 
 Returns `{ok, ModuleName}` if the class is in the table,
 or `not_found` otherwise.  Returns `not_found` (rather than crashing)
-if the table does not exist yet — safe during bootstrap.
+if the table does not exist yet (safe during bootstrap) or if it
+disappears between the existence check and the lookup (TOCTOU under
+teardown).
 """.
 -spec lookup(class_name()) -> {ok, module()} | not_found.
 lookup(ClassName) ->
@@ -115,8 +142,10 @@ lookup(ClassName) ->
         undefined ->
             not_found;
         _ ->
-            case ets:lookup(beamtalk_class_module, ClassName) of
+            try ets:lookup(beamtalk_class_module, ClassName) of
                 [{_, Module}] -> {ok, Module};
                 [] -> not_found
+            catch
+                error:badarg -> not_found
             end
     end.
