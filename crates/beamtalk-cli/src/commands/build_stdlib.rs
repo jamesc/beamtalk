@@ -1287,10 +1287,15 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    fn temp_utf8_dir() -> (TempDir, Utf8PathBuf) {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        (temp, dir)
+    }
+
     #[test]
     fn test_find_stdlib_files() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, lib_dir) = temp_utf8_dir();
 
         fs::write(lib_dir.join("Integer.bt"), "// stub").unwrap();
         fs::write(lib_dir.join("String.bt"), "// stub").unwrap();
@@ -1304,8 +1309,7 @@ mod tests {
 
     #[test]
     fn test_find_stdlib_files_sorted() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, lib_dir) = temp_utf8_dir();
 
         fs::write(lib_dir.join("Zebra.bt"), "// stub").unwrap();
         fs::write(lib_dir.join("Alpha.bt"), "// stub").unwrap();
@@ -1317,8 +1321,7 @@ mod tests {
 
     #[test]
     fn test_find_stdlib_files_empty_dir() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, lib_dir) = temp_utf8_dir();
 
         let files = find_stdlib_files(&lib_dir).unwrap();
         assert!(files.is_empty());
@@ -1357,8 +1360,7 @@ mod tests {
 
     #[test]
     fn test_clean_ebin_dir() {
-        let temp = TempDir::new().unwrap();
-        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, ebin_dir) = temp_utf8_dir();
 
         fs::write(ebin_dir.join("beamtalk_integer.beam"), "fake").unwrap();
         fs::write(ebin_dir.join("beamtalk_stdlib.app"), "fake").unwrap();
@@ -1373,8 +1375,7 @@ mod tests {
 
     #[test]
     fn test_generate_app_file() {
-        let temp = TempDir::new().unwrap();
-        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, ebin_dir) = temp_utf8_dir();
 
         let source_files = vec![
             Utf8PathBuf::from("lib/Integer.bt"),
@@ -1395,8 +1396,7 @@ mod tests {
 
     #[test]
     fn test_generate_app_file_empty() {
-        let temp = TempDir::new().unwrap();
-        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, ebin_dir) = temp_utf8_dir();
 
         generate_app_file(&ebin_dir, &[], &[], &[]).unwrap();
 
@@ -1406,8 +1406,7 @@ mod tests {
 
     #[test]
     fn test_generate_app_file_invalid_name_errors() {
-        let temp = TempDir::new().unwrap();
-        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, ebin_dir) = temp_utf8_dir();
 
         let source_files = vec![
             Utf8PathBuf::from("lib/Integer.bt"),
@@ -1420,8 +1419,7 @@ mod tests {
 
     #[test]
     fn test_generate_app_file_with_protocol_modules() {
-        let temp = TempDir::new().unwrap();
-        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (_temp, ebin_dir) = temp_utf8_dir();
 
         let source_files = vec![Utf8PathBuf::from("lib/Integer.bt")];
         let protocol_modules = vec!["bt@stdlib@printable".to_string()];
