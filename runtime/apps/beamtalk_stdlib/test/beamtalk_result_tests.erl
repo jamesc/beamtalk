@@ -6,11 +6,14 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_result module (BT-1254).
+EUnit tests for beamtalk_result module (BT-1254, BT-2187).
 
 Tests cover:
 - from_tagged_tuple/1 — ok tuple, error tuple (atom, #beamtalk_error{}, wrapped map)
-- class_tryDo:/3 — success path, exception path
+- 'fromTuple:'/1 — ok, error, and invalid-input clauses
+- class_tryDo:/3 — success path, exception path, NLR re-raise
+- 'unwrapError:'/2 — wrapped exception re-raise, raw symbol signal, raw map
+- FFI shims: ok/1, makeError/1, fromTuple/1, tryDo/1, unwrapError/1
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -277,3 +280,101 @@ try_do_nlr_reraise_3tuple_test() ->
         {'$bt_nlr', FakeToken, hello},
         beamtalk_result:'tryDo:'(fun() -> throw({'$bt_nlr', FakeToken, hello}) end)
     ).
+
+%%% ============================================================================
+%%% 'fromTuple:'/1 — all three clauses
+%%% ============================================================================
+
+from_tuple_ok_returns_ok_result_test() ->
+    %% {ok, Value} clause → delegates to from_tagged_tuple/1
+    Result = beamtalk_result:'fromTuple:'({ok, hello}),
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := hello, 'errReason' := nil},
+        Result
+    ).
+
+from_tuple_error_wraps_reason_test() ->
+    %% {error, Reason} clause → delegates to from_tagged_tuple/1, reason is wrapped
+    Result = beamtalk_result:'fromTuple:'({error, enoent}),
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := false, 'okValue' := nil},
+        Result
+    ),
+    #{'errReason' := ErrReason} = Result,
+    %% ensure_wrapped/1 promotes the bare atom to a Beamtalk Exception map
+    ?assertMatch(#{'$beamtalk_class' := _, 'error' := #beamtalk_error{}}, ErrReason).
+
+from_tuple_invalid_raises_type_error_test() ->
+    %% Any other value raises type_error with class='Result', selector='fromTuple:'
+    try
+        beamtalk_result:'fromTuple:'({foo, bar}),
+        ?assert(false, "'fromTuple:' should have raised a type_error")
+    catch
+        error:Caught ->
+            ?assertMatch(
+                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+                Caught
+            ),
+            #{error := Inner} = Caught,
+            ?assertEqual('Result', Inner#beamtalk_error.class),
+            ?assertEqual('fromTuple:', Inner#beamtalk_error.selector),
+            ?assertNotEqual(nomatch, binary:match(Inner#beamtalk_error.message, <<"fromTuple:">>))
+    end.
+
+%%% ============================================================================
+%%% FFI shims — delegate to canonical colon-suffixed functions
+%%% ============================================================================
+
+ok_shim_returns_ok_result_test() ->
+    %% ok/1 is the FFI shim for 'ok:'(Value)
+    Result = beamtalk_result:ok(99),
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 99, 'errReason' := nil},
+        Result
+    ).
+
+make_error_shim_stores_reason_as_is_test() ->
+    %% makeError/1 is the FFI shim for 'makeError:'(Reason) — does NOT wrap
+    Result = beamtalk_result:makeError(not_found),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'okValue' := nil,
+            'errReason' := not_found
+        },
+        Result
+    ).
+
+from_tuple_shim_delegates_to_from_tuple_test() ->
+    %% fromTuple/1 is the FFI shim for 'fromTuple:'(Tuple)
+    Result = beamtalk_result:fromTuple({ok, 7}),
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 7, 'errReason' := nil},
+        Result
+    ).
+
+try_do_shim_delegates_to_try_do_test() ->
+    %% tryDo/1 is the FFI shim for 'tryDo:'(Block)
+    Result = beamtalk_result:tryDo(fun() -> 42 end),
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 42, 'errReason' := nil},
+        Result
+    ).
+
+unwrap_error_shim_raises_signal_test() ->
+    %% unwrapError/1 shim calls 'unwrapError:'(undefined, ErrReason)
+    %% For a raw symbol, this raises a signal error.
+    try
+        beamtalk_result:unwrapError(bad_value),
+        ?assert(false, "unwrapError/1 should have raised an exception")
+    catch
+        error:Caught ->
+            ?assertMatch(
+                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = signal}},
+                Caught
+            ),
+            #{error := Inner} = Caught,
+            ?assertEqual('Result', Inner#beamtalk_error.class),
+            ?assertEqual('unwrap', Inner#beamtalk_error.selector)
+    end.
