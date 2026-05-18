@@ -203,3 +203,25 @@ classImpls := Beamtalk implementorsOf: #class
 
 classImpls includes: Integer
 // => false
+
+// implementorsOf: also finds class-side implementors as metaclass objects.
+// `Bag` defines `class withAll:` — that hit appears as `Bag class`.
+withAllImpls := Beamtalk implementorsOf: #withAll:
+// => _
+
+withAllImpls includes: Bag class
+// => true
+
+// superclassChain works on metaclass receivers — walks the parallel hierarchy.
+// Counter class superclassChain => [Counter class, Actor class, Object class]
+metaChain := Counter class superclassChain
+// => _
+
+metaChain first
+// => Counter class
+
+metaChain last
+// => Object class
+
+metaChain size
+// => 3

@@ -51,6 +51,12 @@ sealed typed Object subclass: BeamtalkInterface
 
   /// Return all classes that locally define the given selector.
   ///
+  /// Searches both instance-side and class-side definitions:
+  /// instance-side hits appear as class objects (e.g. `Integer`),
+  /// class-side hits appear as metaclass objects (e.g. `Counter class`).
+  /// A class that defines the selector on both sides appears twice — once
+  /// as the class and once as the metaclass.
+  ///
   /// Does NOT walk inherited methods — only classes with their own
   /// definition of the selector are returned. Iterates the full class
   /// registry (`allClasses`) so stdlib and user classes are both in the
@@ -63,6 +69,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ## Examples
   /// ```beamtalk
   /// Beamtalk implementorsOf: #asString    // => [Integer, Float, String, ...]
+  /// Beamtalk implementorsOf: #new         // => [..., Counter class, ...]
   /// Beamtalk implementorsOf: #nonExistent // => []
   /// ```
   ///
@@ -77,7 +84,11 @@ sealed typed Object subclass: BeamtalkInterface
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "Beamtalk implementorsOf: requires a Symbol argument"
     ]
-    self allClasses select: [:c | c includesSelector: aSelector]
+    classes := self allClasses
+    instanceImpls := classes select: [:c | c includesSelector: aSelector]
+    classSideImpls := (classes select: [:c | c class includesSelector: aSelector])
+      collect: [:c | c class]
+    instanceImpls ++ classSideImpls
 
   /// Show class documentation: name, superclass, and method signatures.
   /// Accepts a Class reference, a Symbol class name, or a String class name.

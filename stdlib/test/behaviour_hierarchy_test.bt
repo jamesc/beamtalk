@@ -75,3 +75,26 @@ TestCase subclass: BehaviourHierarchyTest
   testStdlibParticipates =>
     // Integer should appear in Number's subclasses (live registry).
     self assert: (Number subclasses includes: Integer)
+
+  // --- superclassChain on metaclasses (BT-2189) ---
+  // The parallel metaclass hierarchy walks via metaclassSuperclass at the
+  // runtime layer: Counter class -> Actor class -> Object class.
+  testMetaclassSuperclassChainStartsWithSelf =>
+    chain := Counter class superclassChain
+    self assert: chain first equals: Counter class
+
+  testMetaclassSuperclassChainEndsAtObjectClass =>
+    chain := Counter class superclassChain
+    self assert: chain last equals: Object class
+
+  testMetaclassSuperclassChainOrder =>
+    chain := Counter class superclassChain
+    self assert: (chain indexOf: Counter class) equals: 1
+    self assert: (chain indexOf: Actor class) equals: 2
+    self assert: (chain indexOf: Object class) equals: 3
+
+  testObjectMetaclassSuperclassChain =>
+    // Object class superclassChain returns #(Object class).
+    chain := Object class superclassChain
+    self assert: chain size equals: 1
+    self assert: chain first equals: Object class

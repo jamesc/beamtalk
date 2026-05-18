@@ -83,16 +83,29 @@ abstract Object subclass: Behaviour
   /// or `ProtoObject subclass:` classes such as Erlang), returns the full
   /// chain to the root. For Object itself, returns `#(Object)`.
   ///
+  /// When called on a metaclass receiver, walks the parallel metaclass
+  /// hierarchy and terminates at `Object class`:
+  /// `Counter class superclassChain` => `#(Counter class, Actor class, Object class)`.
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// Counter superclassChain  // => [Counter, Actor, Object]
-  /// Object superclassChain   // => [Object]
+  /// Counter superclassChain        // => [Counter, Actor, Object]
+  /// Object superclassChain         // => [Object]
+  /// Counter class superclassChain  // => [Counter class, Actor class, Object class]
   /// ```
   sealed superclassChain -> List(Behaviour) =>
-    full := self allSuperclasses addFirst: self
-    objectIdx := full indexOf: Object
-    objectIdx isNil ifTrue: [^full]
-    full take: objectIdx
+    // Walk via `superclass`, which is polymorphic: dispatches to
+    // metaclassSuperclass for metaclass receivers (parallel hierarchy)
+    // and classSuperclass for regular classes. Terminate at Object,
+    // or `Object class` for metaclass receivers.
+    terminator := self isMeta ifTrue: [Object class] ifFalse: [Object]
+    result := List new
+    current := self
+    [current isNil not and: [(result includes: terminator) not]] whileTrue: [
+      result := result add: current
+      current := current superclass
+    ]
+    result
 
   /// Test whether the receiver strictly inherits from aClass (self not included).
   ///
