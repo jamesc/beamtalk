@@ -34,7 +34,7 @@ c class name
 
 // Field access works on the value object
 c radius
-// => _
+// => 5.0
 
 // Inherited area method computes correctly
 c area
@@ -56,13 +56,13 @@ r class name
 // => Rectangle
 
 r width
-// => _
+// => 4.0
 
 r height
-// => _
+// => 3.0
 
 r area
-// => _
+// => 12.0
 
 r perimeter
-// => _
+// => 14.0
