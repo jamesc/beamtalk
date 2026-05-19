@@ -78,18 +78,25 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         let doc = docvec![
-            format!("letrec '{loop_fn}'/0 = fun () -> "),
-            format!("let {cond_var} = "),
+            "letrec '",
+            Document::String(loop_fn.clone()),
+            "'/0 = fun () -> let ",
+            Document::String(cond_var.clone()),
+            " = ",
             cond_code,
-            " in ",
-            format!("case apply {cond_var} () of "),
-            "<'true'> when 'true' -> ",
-            format!("let {body_var} = "),
+            " in case apply ",
+            Document::String(cond_var),
+            " () of <'true'> when 'true' -> let ",
+            Document::String(body_var.clone()),
+            " = ",
             body_code,
-            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
-            "<'false'> when 'true' -> 'nil' ",
-            "end ",
-            format!("in apply '{loop_fn}'/0 ()"),
+            " in let _ = apply ",
+            Document::String(body_var),
+            " () in apply '",
+            Document::String(loop_fn.clone()),
+            "'/0 () <'false'> when 'true' -> 'nil' end in apply '",
+            Document::String(loop_fn),
+            "'/0 ()",
         ];
 
         Ok(doc)
@@ -147,18 +154,25 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         let doc = docvec![
-            format!("letrec '{loop_fn}'/0 = fun () -> "),
-            format!("let {cond_var} = "),
+            "letrec '",
+            Document::String(loop_fn.clone()),
+            "'/0 = fun () -> let ",
+            Document::String(cond_var.clone()),
+            " = ",
             cond_code,
-            " in ",
-            format!("case apply {cond_var} () of "),
-            "<'false'> when 'true' -> ",
-            format!("let {body_var} = "),
+            " in case apply ",
+            Document::String(cond_var),
+            " () of <'false'> when 'true' -> let ",
+            Document::String(body_var.clone()),
+            " = ",
             body_code,
-            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
-            "<'true'> when 'true' -> 'nil' ",
-            "end ",
-            format!("in apply '{loop_fn}'/0 ()"),
+            " in let _ = apply ",
+            Document::String(body_var),
+            " () in apply '",
+            Document::String(loop_fn.clone()),
+            "'/0 () <'true'> when 'true' -> 'nil' end in apply '",
+            Document::String(loop_fn),
+            "'/0 ()",
         ];
 
         Ok(doc)
@@ -209,7 +223,11 @@ impl CoreErlangGenerator {
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
         docs.extend(unpack_docs);
 
-        docs.push(docvec![format!("let {cond_var} = fun (StateAcc) -> "),]);
+        docs.push(docvec![
+            "let ",
+            Document::String(cond_var.clone()),
+            " = fun (StateAcc) -> ",
+        ]);
 
         // Generate condition inside branch context
         let cond_doc = self.with_branch_context(|this| {
@@ -222,17 +240,17 @@ impl CoreErlangGenerator {
         docs.push(cond_doc);
 
         // Condition application and true/false arm headers
-        if negate {
-            docs.push(docvec![
-                format!(" in case apply {cond_var} (StateAcc) of "),
-                "<'false'> when 'true' -> ",
-            ]);
+        let cond_apply_arm = if negate {
+            "<'false'> when 'true' -> "
         } else {
-            docs.push(docvec![
-                format!(" in case apply {cond_var} (StateAcc) of "),
-                "<'true'> when 'true' -> ",
-            ]);
-        }
+            "<'true'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " in case apply ",
+            Document::String(cond_var),
+            " (StateAcc) of ",
+            cond_apply_arm,
+        ]);
 
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, &plan, &BodyKind::Letrec)?;
@@ -243,19 +261,18 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        if negate {
-            docs.push(docvec![
-                format!(" apply 'while'/1 ({final_state_var}) "),
-                "<'true'> when 'true' -> {'nil', StateAcc} ",
-                "end ",
-            ]);
+        let exit_arm = if negate {
+            "<'true'> when 'true' -> {'nil', StateAcc} "
         } else {
-            docs.push(docvec![
-                format!(" apply 'while'/1 ({final_state_var}) "),
-                "<'false'> when 'true' -> {'nil', StateAcc} ",
-                "end ",
-            ]);
-        }
+            "<'false'> when 'true' -> {'nil', StateAcc} "
+        };
+        docs.push(docvec![
+            " apply 'while'/1 (",
+            Document::String(final_state_var),
+            ") ",
+            exit_arm,
+            "end ",
+        ]);
 
         // Pop scope to restore original bindings (before the letrec)
         self.pop_scope();

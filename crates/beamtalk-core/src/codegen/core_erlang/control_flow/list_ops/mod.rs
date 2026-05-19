@@ -149,17 +149,29 @@ impl CoreErlangGenerator {
         };
 
         Ok(docvec![
-            format!("let {list_var} = "),
+            "let ",
+            Document::String(list_var.clone()),
+            " = ",
             recv_code,
-            format!(" in let {body_var} = "),
+            " in let ",
+            Document::String(body_var.clone()),
+            " = ",
             body_code,
-            format!(
-                " in case call 'erlang':'is_list'({list_var}) of \
-                 <'true'> when 'true' -> \
-                 call 'lists':'{operation}'({body_var}, {list_var}) \
-                 <'false'> when 'true' -> \
-                 call 'beamtalk_primitive':'send'({list_var}, '{selector}', [{body_var}]) end"
-            ),
+            " in case call 'erlang':'is_list'(",
+            Document::String(list_var.clone()),
+            ") of <'true'> when 'true' -> call 'lists':'",
+            Document::String(operation.to_string()),
+            "'(",
+            Document::String(body_var.clone()),
+            ", ",
+            Document::String(list_var.clone()),
+            ") <'false'> when 'true' -> call 'beamtalk_primitive':'send'(",
+            Document::String(list_var),
+            ", '",
+            Document::String(selector.to_string()),
+            "', [",
+            Document::String(body_var),
+            "]) end",
         ])
     }
 

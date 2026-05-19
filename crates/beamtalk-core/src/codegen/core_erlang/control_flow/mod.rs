@@ -31,8 +31,6 @@ mod exception_handling;
 mod list_ops;
 mod while_loops;
 
-use std::fmt::Write as FmtWrite;
-
 use super::document::{Document, join};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
@@ -583,11 +581,15 @@ impl ThreadingPlan {
         if self.threaded_locals.is_empty() || self.use_direct_params || self.use_hybrid_params {
             return (Document::Nil, self.initial_state_var.clone());
         }
-        let mut pack_str = String::new();
+        let mut pack_docs: Vec<Document<'static>> = Vec::new();
         // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
         let mut current = if matches!(self.context, CodeGenContext::ValueType) {
             let init_map_var = generator.fresh_temp_var("InitMap");
-            let _ = write!(pack_str, "let {init_map_var} = call 'maps':'new'() in ");
+            pack_docs.push(docvec![
+                "let ",
+                Document::String(init_map_var.clone()),
+                " = call 'maps':'new'() in ",
+            ]);
             init_map_var
         } else {
             self.initial_state_var.clone()
@@ -599,13 +601,20 @@ impl ThreadingPlan {
                 .cloned()
                 .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
             let key = self.state_key(var_name);
-            let _ = write!(
-                pack_str,
-                "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
-            );
+            pack_docs.push(docvec![
+                "let ",
+                Document::String(packed_var.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(core_var),
+                ", ",
+                Document::String(current),
+                ") in ",
+            ]);
             current = packed_var;
         }
-        (Document::String(pack_str), current)
+        (Document::Vec(pack_docs), current)
     }
 
     /// Generates `let X = maps:get(key, StateAcc) in` for each threaded local
@@ -775,25 +784,31 @@ impl ThreadingPlan {
     /// Generates `let X = maps:get(key, FinalState) in` for each threaded local
     /// to extract updated values after the loop completes.
     ///
-    /// Returns the extract code as a `String` for easy embedding in `format!` expressions.
-    pub fn generate_extract_suffix(
+    /// Returns the extract code as a `Document` (BT-2216: replaces the legacy
+    /// `String` variant that used `format!` to produce CE syntax).
+    pub fn generate_extract_suffix_doc(
         &self,
         final_state_var: &str,
         generator: &CoreErlangGenerator,
-    ) -> String {
-        let mut s = String::new();
+    ) -> Document<'static> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
         for var_name in &self.threaded_locals {
             let core_var = generator
                 .lookup_var(var_name)
                 .cloned()
                 .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
             let key = self.state_key(var_name);
-            let _ = write!(
-                s,
-                "let {core_var} = call 'maps':'get'('{key}', {final_state_var}) in "
-            );
+            docs.push(docvec![
+                "let ",
+                Document::String(core_var),
+                " = call 'maps':'get'('",
+                Document::String(key),
+                "', ",
+                Document::String(final_state_var.to_string()),
+                ") in ",
+            ]);
         }
-        s
+        Document::Vec(docs)
     }
 
     // ─── BT-1276: Tuple accumulator helpers ───────────────────────────────────
@@ -1036,7 +1051,7 @@ pub(super) struct CountedLoopFrame {
     pub continue_header: Document<'static>,
     /// Expression used as the next counter in the recursive call
     /// (e.g. `"call 'erlang':'+'(I, 1)"`).
-    pub next_counter: String,
+    pub next_counter: Document<'static>,
     /// Initial counter argument for the first `apply` call (e.g. `"1"` or `StartVar`).
     pub initial_counter: String,
     /// The `false` arm and `end` (e.g. `"<'false'> when 'true' -> {'nil', StateAcc} end"`).
@@ -2306,7 +2321,7 @@ impl CoreErlangGenerator {
             " apply '",
             Document::String(frame.fn_name.clone()),
             "'/2 (",
-            Document::String(frame.next_counter.clone()),
+            frame.next_counter.clone(),
             ", ",
             Document::String(final_state_var),
             ") ",
@@ -2405,7 +2420,7 @@ impl CoreErlangGenerator {
 
         // Build Document arg lists for the recursive call and the initial apply.
         let recursive_args_doc = join(
-            std::iter::once(Document::String(frame.next_counter.clone()))
+            std::iter::once(frame.next_counter.clone())
                 .chain(final_args.into_iter().map(Document::String)),
             &Document::Str(", "),
         );
@@ -2637,7 +2652,7 @@ impl CoreErlangGenerator {
     ) {
         // Recursive call args: next_counter, updated locals, readonly fields (unchanged), updated mutated fields
         let recursive_args_doc = join(
-            std::iter::once(Document::String(frame.next_counter.clone()))
+            std::iter::once(frame.next_counter.clone())
                 .chain(final_local_args.into_iter().map(Document::String))
                 .chain(
                     readonly_param_names
