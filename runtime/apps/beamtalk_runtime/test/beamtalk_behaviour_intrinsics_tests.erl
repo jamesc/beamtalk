@@ -12,8 +12,8 @@ Tests intrinsic functions for class reflection: metaclassNew, classClass,
 className, classLocalMethods, classFieldNames, classIncludesSelector,
 classDoc, classSetDoc, classSetMethodDoc, classSubclasses, classAllSubclasses,
 classMethods (including inheritance and deduplication), classCanUnderstand
-(including inherited selectors), classInheritsFrom (transitive), classIncludesBehaviour,
-classWhichIncludesSelector (inherited), classAllFieldNames (inherited),
+(including inherited selectors), classWhichIncludesSelector (inherited),
+classAllFieldNames (inherited),
 classRemoveFromSystem, classRemoveFromSystemByName, metaclass primitives
 (thisClass, classMethods, localClassMethods, includesSelector, allMethods).
 
@@ -915,100 +915,6 @@ class_can_understand_from_name_unregistered_test() ->
     ).
 
 %%% ============================================================================
-%%% classInheritsFrom/2
-%%% ============================================================================
-
-class_inherits_from_direct_parent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ParentObj, ParentPid} = register_class('BT1792BiInheritsParent', #{}, #{}),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1792BiInheritsChild', 'BT1792BiInheritsParent', #{}, #{}
-                ),
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classInheritsFrom(ChildObj, ParentObj)
-                    ),
-                    %% Parent does NOT inherit from child
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classInheritsFrom(ParentObj, ChildObj)
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classIncludesBehaviour/2
-%%% ============================================================================
-
-class_includes_behaviour_self_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiIncludesBeh', #{}, #{}),
-                try
-                    %% A class includes itself as a behaviour
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesBehaviour(ClassObj, ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_includes_behaviour_ancestor_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ParentObj, ParentPid} = register_class('BT1792BiBehParent', #{}, #{}),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1792BiBehChild', 'BT1792BiBehParent', #{}, #{}
-                ),
-                try
-                    %% Child includes parent
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesBehaviour(ChildObj, ParentObj)
-                    ),
-                    %% Parent does NOT include child
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classIncludesBehaviour(ParentObj, ChildObj)
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
 %%% classWhichIncludesSelector/2
 %%% ============================================================================
 
@@ -1595,108 +1501,6 @@ class_can_understand_from_name_inherited_test_() ->
                     end),
                     (try
                         gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classInheritsFrom/2 — transitive (grandparent) ---
-
-class_inherits_from_grandparent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {GrandObj, GrandPid} = register_class('BT1959InheritsGrand', #{}, #{}),
-                {_ParentObj, ParentPid} = register_class_with_super(
-                    'BT1959InheritsMiddle', 'BT1959InheritsGrand', #{}, #{}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959InheritsBottom', 'BT1959InheritsMiddle', #{}, #{}
-                ),
-                try
-                    %% Grandchild inherits from grandparent
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classInheritsFrom(ChildObj, GrandObj)
-                    ),
-                    %% Grandparent does NOT inherit from grandchild
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classInheritsFrom(GrandObj, ChildObj)
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(GrandPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%% A class does NOT inherit from itself (strict)
-class_inherits_from_self_is_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1959InheritsSelf', #{}, #{}),
-                try
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classInheritsFrom(ClassObj, ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classIncludesBehaviour/2 — transitive (grandparent) ---
-
-class_includes_behaviour_grandparent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {GrandObj, GrandPid} = register_class('BT1959BehGrand', #{}, #{}),
-                {_ParentObj, ParentPid} = register_class_with_super(
-                    'BT1959BehMiddle', 'BT1959BehGrand', #{}, #{}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959BehBottom', 'BT1959BehGrand', #{}, #{}
-                ),
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesBehaviour(ChildObj, GrandObj)
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(GrandPid, normal, 5000)
                     catch
                         _:_ -> ok
                     end)

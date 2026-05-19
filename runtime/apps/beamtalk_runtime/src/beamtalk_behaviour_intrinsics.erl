@@ -30,8 +30,6 @@ that the Behaviour/Class libraries can rely on.
 | classMethods/1              | Combined local + inherited methods via superclass chain   |
 | classIncludesSelector/2     | Membership check in local method dictionary               |
 | classCanUnderstand/2        | Selector lookup against full method dictionary (classMethods/1) |
-| classInheritsFrom/2         | Predicate over the superclass chain (classAllSuperclasses/1) |
-| classIncludesBehaviour/2    | Behaviour / interface membership via superclass chain     |
 | classWhichIncludesSelector/2| First class in hierarchy whose local methods include selector |
 | classFieldNames/1           | Field names from class gen_server state                   |
 | classAllFieldNames/1        | Combined field names via superclass chain                 |
@@ -61,8 +59,6 @@ that the Behaviour/Class libraries can rely on.
     classIncludesSelector/2,
     classCanUnderstand/2,
     classCanUnderstandFromName/2,
-    classInheritsFrom/2,
-    classIncludesBehaviour/2,
     classWhichIncludesSelector/2,
     classFieldNames/1,
     classAllFieldNames/1,
@@ -316,52 +312,6 @@ classCanUnderstandFromName(ClassName, Selector) ->
         end,
         false
     ).
-
--doc "Test whether the receiver strictly inherits from aClass (self not included).".
--spec classInheritsFrom(#beamtalk_object{}, #beamtalk_object{}) -> boolean().
-classInheritsFrom(Self, TargetClassObj) ->
-    TargetPid = erlang:element(4, TargetClassObj),
-    TargetName = gen_server:call(TargetPid, class_name),
-    ClassPid = erlang:element(4, Self),
-    SuperName = gen_server:call(ClassPid, superclass),
-    case SuperName of
-        TargetName ->
-            true;
-        _ ->
-            walk_hierarchy(
-                SuperName,
-                fun(CN, _CPid, _Acc) ->
-                    case CN of
-                        TargetName -> {halt, true};
-                        _ -> {cont, false}
-                    end
-                end,
-                false
-            )
-    end.
-
--doc "Test whether aBehaviour is the receiver or one of its ancestors.".
--spec classIncludesBehaviour(#beamtalk_object{}, #beamtalk_object{}) -> boolean().
-classIncludesBehaviour(Self, TargetClassObj) ->
-    SelfPid = erlang:element(4, Self),
-    SelfName = gen_server:call(SelfPid, class_name),
-    TargetPid = erlang:element(4, TargetClassObj),
-    TargetName = gen_server:call(TargetPid, class_name),
-    case SelfName of
-        TargetName ->
-            true;
-        _ ->
-            walk_hierarchy(
-                SelfName,
-                fun(CN, _CPid, _Acc) ->
-                    case CN of
-                        TargetName -> {halt, true};
-                        _ -> {cont, false}
-                    end
-                end,
-                false
-            )
-    end.
 
 -doc """
 Walk the hierarchy and return the class object that defines the selector, or nil.
