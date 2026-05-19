@@ -1224,6 +1224,7 @@ impl CoreErlangGenerator {
     ///             'superclassRef' => 'Actor',
     ///             'moduleName' => 'class_definition',
     ///             'methodSource' => ~{...}~,
+    ///             'classMethodSource' => ~{...}~,
     ///             'methodSignatures' => ~{...}~,
     ///             'classMethodSignatures' => ~{}~,
     ///             'classState' => ~{}~,
@@ -1314,6 +1315,14 @@ impl CoreErlangGenerator {
                 Document::String(Self::binary_string_literal(&sig_str))
             });
 
+            // BT-2195: Class-side method source — mirrors method_source for the
+            // instance side. Required by SystemNavigation `sendersOf:` /
+            // `referencesTo:` / `methodsMatching:` to scan class-side bodies.
+            let class_method_source_doc = Self::build_selector_map(&class_methods_primary, |m| {
+                let source_str = self.extract_method_source(m);
+                Document::String(Self::binary_string_literal(&source_str))
+            });
+
             // BT-412: Class variable initial values
             let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
 
@@ -1367,6 +1376,7 @@ impl CoreErlangGenerator {
                 class.superclass_name(),
                 &self.module_name,
                 method_source_doc,
+                class_method_source_doc,
                 method_sigs_doc,
                 class_method_sigs_doc,
                 class_vars_doc,
@@ -1537,6 +1547,7 @@ impl CoreErlangGenerator {
         superclass_name: &str,
         module_name: &str,
         method_source_doc: Document<'static>,
+        class_method_source_doc: Document<'static>,
         method_sigs_doc: Document<'static>,
         class_method_sigs_doc: Document<'static>,
         class_vars_doc: Document<'static>,
@@ -1576,6 +1587,10 @@ impl CoreErlangGenerator {
                     line(),
                     "'methodSource' => ~{",
                     method_source_doc,
+                    "}~,",
+                    line(),
+                    "'classMethodSource' => ~{",
+                    class_method_source_doc,
                     "}~,",
                     line(),
                     "'methodSignatures' => ~{",

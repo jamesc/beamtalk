@@ -90,6 +90,10 @@ and join the `beamtalk_classes` pg group for enumeration.
     fields = [] :: [atom()],
     class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
+    %% BT-2195: Class-side method source. Symmetric companion to
+    %% method_source, used by SystemNavigation source-text scanners to walk
+    %% class-side bodies (`sendersOf:`, `referencesTo:`, `methodsMatching:`).
+    class_method_source = #{} :: #{selector() => binary()},
     %% BT-988: Method display signatures for :help command
     method_signatures = #{} :: #{selector() => binary()},
     %% BT-990: Class-side method display signatures for :help command
@@ -464,6 +468,7 @@ init({ClassName, ClassInfo}) ->
         fields = maps:get(fields, Meta, maps:get(fields, ClassInfo, [])),
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
+        class_method_source = maps:get(class_method_source, ClassInfo, #{}),
         method_signatures = maps:get(method_signatures, ClassInfo, #{}),
         class_method_signatures = maps:get(class_method_signatures, ClassInfo, #{}),
         %% Merge: ClassInfo explicit values (from old format) are lower priority than meta.
@@ -604,12 +609,17 @@ handle_call(
     end;
 %% BT-990: Return CompiledMethod-like map for class-side methods.
 %% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
+%% BT-2195: Populate __source__ from class_method_source so that
+%% SystemNavigation source-text scanners (sendersOf:, referencesTo:,
+%% methodsMatching:) can walk class-side method bodies. Empty binary when no
+%% source has been registered (e.g. dynamic methods, primitives).
 handle_call(
     {class_method, Selector},
     _From,
     #class_state{
         superclass = Superclass,
         class_methods = ClassMethods,
+        class_method_source = ClassMethodSource,
         class_method_signatures = ClassMethodSigs,
         class_method_docs = ClassMethodDocs
     } = State
@@ -620,7 +630,7 @@ handle_call(
                 #{
                     '$beamtalk_class' => 'CompiledMethod',
                     '__selector__' => Selector,
-                    '__source__' => <<"">>,
+                    '__source__' => maps:get(Selector, ClassMethodSource, <<"">>),
                     '__signature__' => maps:get(Selector, ClassMethodSigs, nil),
                     '__method_info__' => MethodInfo,
                     '__doc__' => maps:get(Selector, ClassMethodDocs, nil)
@@ -1090,6 +1100,9 @@ apply_class_info(State, ClassInfo) ->
             maps:get(is_sealed, ClassInfo, State#class_state.is_sealed)
         ),
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
+        class_method_source = maps:get(
+            class_method_source, ClassInfo, State#class_state.class_method_source
+        ),
         method_signatures = maps:get(
             method_signatures, ClassInfo, State#class_state.method_signatures
         ),

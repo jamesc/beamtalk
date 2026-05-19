@@ -86,15 +86,17 @@ sealed typed Object subclass: SystemNavigation
   /// Return a collection of call sites that send the given selector.
   ///
   /// Each result is a Dictionary with three keys:
-  /// - `#class` — the class whose method contains the send
+  /// - `#class` — the class whose method contains the send (the class object
+  ///   for an instance-side hit, the metaclass object for a class-side hit)
   /// - `#selector` — the selector of the method that contains the send
   /// - `#line` — the 1-based line number within the method source where
   ///   the send appears
   ///
   /// A method that sends `aSelector` multiple times produces one record per
-  /// occurrence. Iterates the navigation scope and walks instance-side
-  /// method dictionaries so stdlib and user classes are both covered.
-  /// Matches Pharo's `SystemNavigation >> #allSendersOf:`.
+  /// occurrence. Iterates the navigation scope and walks both instance-side
+  /// and class-side method dictionaries (BT-2195), so stdlib and user
+  /// classes are both covered on both sides. Matches Pharo's
+  /// `SystemNavigation >> #allSendersOf:`.
   ///
   /// Naive implementation: parses every method's source on every call. Fine
   /// for an on-demand IDE pane (a few seconds on a 200-class workspace) but
@@ -102,14 +104,10 @@ sealed typed Object subclass: SystemNavigation
   /// index is a follow-up optimization.
   ///
   /// Known limitations (tracked for follow-up work):
-  /// - Class-side methods are not scanned. The runtime currently does not
-  ///   retain class-side method source strings (only instance-side sources
-  ///   are kept in `method_source`), and `>>` does not yet accept a
-  ///   metaclass receiver. Closing this gap requires both pieces.
   /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
   ///   ETS are not scanned — that registry stores compiled functions, not
   ///   source. The future-index optimization is the right place to fix
-  ///   both gaps.
+  ///   this gap.
   ///
   /// Raises an error if the argument is not a Symbol. Returns an empty
   /// collection if no senders are found (not an error).
@@ -126,10 +124,19 @@ sealed typed Object subclass: SystemNavigation
     self allClasses
       inject: List new
       into: [:acc :cls |
-        self
+        // BT-2195: Walk both instance side (`cls`) and class side
+        // (`cls class`, the metaclass) so class-method bodies are
+        // searched too. `collectSendersFor:in:into:` skips scopes for
+        // which `>>` is not yet supported, so the metaclass walk is
+        // safe even on registry entries that don't carry source.
+        withInstance := self
           collectSendersFor: aSelector
           in: cls
           into: acc
+        self
+          collectSendersFor: aSelector
+          in: cls class
+          into: withInstance
       ]
 
   /// Append senders of `aSelector` found in any instance method of `aScope`
@@ -178,16 +185,19 @@ sealed typed Object subclass: SystemNavigation
   /// Return a collection of references to the given class.
   ///
   /// Each result is a Dictionary with three keys:
-  /// - `#class` — the class whose method contains the reference
+  /// - `#class` — the class whose method contains the reference (the class
+  ///   object for an instance-side hit, the metaclass object for a
+  ///   class-side hit)
   /// - `#selector` — the selector of the method that contains the reference
   /// - `#line` — the 1-based line number within the method source where
   ///   the reference appears
   ///
   /// A method that mentions `aClass` multiple times produces one record per
-  /// occurrence. Iterates the navigation scope and walks instance-side method
-  /// dictionaries so stdlib and user classes are both covered. Class names
-  /// that appear in type annotations (parameter, return, or generic
-  /// parameters such as `List(Counter)`) are also matched. Matches Pharo's
+  /// occurrence. Iterates the navigation scope and walks both instance-side
+  /// and class-side method dictionaries (BT-2195), so stdlib and user
+  /// classes are both covered on both sides. Class names that appear in
+  /// type annotations (parameter, return, or generic parameters such as
+  /// `List(Counter)`) are also matched. Matches Pharo's
   /// `SystemNavigation >> #allReferencesTo:`.
   ///
   /// Naive implementation: parses every method's source on every call. Same
@@ -195,8 +205,6 @@ sealed typed Object subclass: SystemNavigation
   /// `class -> [sites]` index is a follow-up optimization.
   ///
   /// Known limitations (shared with `sendersOf:`, tracked for follow-up):
-  /// - Class-side methods are not scanned. The runtime currently does not
-  ///   retain class-side method source strings.
   /// - Extension methods (ADR 0066) are not scanned — the registry stores
   ///   compiled functions, not source.
   ///
@@ -248,10 +256,19 @@ sealed typed Object subclass: SystemNavigation
     self allClasses
       inject: List new
       into: [:acc :cls |
-        self
+        // BT-2195: Walk both instance side (`cls`) and class side
+        // (`cls class`, the metaclass). `collectReferencesFor:in:into:`
+        // skips scopes for which `>>` is not yet supported, so the
+        // metaclass walk is safe even on registry entries that don't
+        // carry source.
+        withInstance := self
           collectReferencesFor: targetName
           in: cls
           into: acc
+        self
+          collectReferencesFor: targetName
+          in: cls class
+          into: withInstance
       ]
 
   /// Append references to a class (identified by `targetName`) found in any
@@ -304,15 +321,16 @@ sealed typed Object subclass: SystemNavigation
   /// Source-text grep across the whole loaded class registry — answers
   /// "show me every method whose body mentions X." Each result is a
   /// Dictionary with two keys:
-  /// - `#class` — the class that defines the method
+  /// - `#class` — the class that defines the method (the class object for
+  ///   an instance-side hit, the metaclass object for a class-side hit)
   /// - `#selector` — the selector of the matching method
   ///
-  /// Iterates the navigation scope (`allClasses`) and walks each class's
-  /// instance-side method dictionary. Methods whose source is missing
-  /// (e.g. generated primitives, methods registered without source text)
-  /// are skipped, not raised. One match per method suffices —
-  /// `methodsMatching:` does not enumerate every match position within a
-  /// single method.
+  /// Iterates the navigation scope (`allClasses`) and walks both
+  /// instance-side and class-side method dictionaries (BT-2195). Methods
+  /// whose source is missing (e.g. generated primitives, methods registered
+  /// without source text) are skipped, not raised. One match per method
+  /// suffices — `methodsMatching:` does not enumerate every match position
+  /// within a single method.
   ///
   /// The argument must be a compiled `Regex` instance. Callers that have a
   /// pattern string should compile it explicitly via `Regex from: ...
@@ -326,10 +344,6 @@ sealed typed Object subclass: SystemNavigation
   /// optimisation (see ADR 0033 / BT-2201).
   ///
   /// Known limitations (mirror `sendersOf:` — same iteration shell):
-  /// - Class-side methods are not scanned. The runtime currently does not
-  ///   retain class-side method source strings (only instance-side sources
-  ///   are kept in `method_source`), and `>>` does not yet accept a
-  ///   metaclass receiver. Closing this gap requires both pieces.
   /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
   ///   ETS are not scanned — that registry stores compiled functions, not
   ///   source. Closing this gap requires the future-index optimisation.
@@ -350,10 +364,18 @@ sealed typed Object subclass: SystemNavigation
     self allClasses
       inject: List new
       into: [:acc :cls |
-        self
+        // BT-2195: Walk both instance side (`cls`) and class side
+        // (`cls class`, the metaclass). `collectMethodsMatching:in:into:`
+        // already skips classes for which `>>` is not yet supported and
+        // methods with no source, so the metaclass walk is safe.
+        withInstance := self
           collectMethodsMatching: aRegex
           in: cls
           into: acc
+        self
+          collectMethodsMatching: aRegex
+          in: cls class
+          into: withInstance
       ]
 
   /// Append `{class, selector}` records for methods of `aScope` whose source

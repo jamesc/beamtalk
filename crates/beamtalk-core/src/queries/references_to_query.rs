@@ -380,4 +380,19 @@ mod tests {
         let lines = find_references_to_in_source("noop => self", "Object");
         assert!(lines.is_empty());
     }
+
+    /// BT-2195: Class-side method sources (as unparsed for `class_method_source`)
+    /// carry the same shape as instance methods — no `class ` prefix is emitted
+    /// by `unparse_method`. The references walker must still find class
+    /// references in their bodies and signatures.
+    #[test]
+    fn bt2195_finds_reference_in_class_method_source() {
+        let src = "/// doc\ndefault -> SystemNavigation =>\n  @expect dnu\n  self new";
+        let lines = find_references_to_in_source(src, "SystemNavigation");
+        // The return-type annotation on line 2 references SystemNavigation.
+        assert!(
+            !lines.is_empty(),
+            "expected at least one reference, got {lines:?}"
+        );
+    }
 }

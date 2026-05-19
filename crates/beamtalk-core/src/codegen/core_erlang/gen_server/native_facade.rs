@@ -561,6 +561,30 @@ impl CoreErlangGenerator {
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
 
+            // BT-2195: Class-side method source (mirrors method_source for the
+            // instance side). Allows SystemNavigation source-text scanners to
+            // walk class-side method bodies.
+            let mut class_method_source_docs: Vec<Document<'static>> = Vec::new();
+            for (method_idx, method) in class
+                .class_methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .enumerate()
+            {
+                if method_idx > 0 {
+                    class_method_source_docs.push(Document::Str(", "));
+                }
+                let source_str = self.extract_method_source(method);
+                let binary = Self::binary_string_literal(&source_str);
+                class_method_source_docs.push(docvec![
+                    "'",
+                    Document::Eco(method.selector.name()),
+                    "' => ",
+                    Document::String(binary),
+                ]);
+            }
+            let class_method_source_doc = Document::Vec(class_method_source_docs);
+
             // Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
@@ -636,6 +660,10 @@ impl CoreErlangGenerator {
                         line(),
                         "'methodSource' => ~{",
                         method_source_doc,
+                        "}~,",
+                        line(),
+                        "'classMethodSource' => ~{",
+                        class_method_source_doc,
                         "}~,",
                         line(),
                         "'methodSignatures' => ~{",

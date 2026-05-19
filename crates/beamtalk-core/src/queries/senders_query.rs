@@ -273,6 +273,34 @@ mod tests {
         assert!(lines.is_empty());
     }
 
+    /// BT-2195: Class-side methods carry a return-type arrow in their
+    /// signature (e.g. `default -> SystemNavigation =>`). The senders walker
+    /// must still find sends inside the body — exercises the source shape
+    /// produced by the unparser for class-side definitions.
+    #[test]
+    fn bt2195_finds_send_in_class_method_with_return_type() {
+        let src = "default -> SystemNavigation =>\n  self new";
+        let lines = find_senders_in_source(src, "new");
+        assert_eq!(
+            lines,
+            vec![2],
+            "expected to find `new` on line 2, got {lines:?}"
+        );
+    }
+
+    /// BT-2195: The unparser emits doc comments (`///`) and the `@expect`
+    /// directive before the body. The senders walker must still recurse into
+    /// the body and find sends.
+    #[test]
+    fn bt2195_finds_send_in_class_method_with_doc_and_expect() {
+        let src = "/// doc line\ndefault -> SystemNavigation =>\n  @expect dnu\n  self new";
+        let lines = find_senders_in_source(src, "new");
+        assert!(
+            !lines.is_empty(),
+            "expected `new` to be found, got {lines:?}"
+        );
+    }
+
     #[test]
     fn handles_unparseable_source_without_panicking() {
         // Garbage source — parser produces diagnostics but does not crash.

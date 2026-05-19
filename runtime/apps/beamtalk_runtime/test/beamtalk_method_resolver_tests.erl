@@ -40,7 +40,11 @@ resolver_test_() ->
                 fun test_resolve_with_instance_tuple/0},
             {"resolve with non-atom/non-pid raises type_error",
                 fun test_resolve_with_invalid_ref/0},
-            {"resolve with integer raises type_error", fun test_resolve_with_integer/0}
+            {"resolve with integer raises type_error", fun test_resolve_with_integer/0},
+            {"resolve with metaclass receiver looks up class-side methods",
+                fun test_resolve_with_metaclass/0},
+            {"resolve with metaclass receiver returns nil for missing class method",
+                fun test_resolve_with_metaclass_missing/0}
         ]
     end}.
 
@@ -101,3 +105,28 @@ test_resolve_with_integer() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_method_resolver:resolve(42, '+')
     ).
+
+%% BT-2195: Metaclass receivers (class = 'Metaclass') route to the
+%% class-side method dictionary instead of the instance-side one. A
+%% `SystemNavigation class >> #default` lookup must return a CompiledMethod
+%% map whose `__selector__` is `default` — that selector is defined on the
+%% class side of SystemNavigation, not the instance side.
+test_resolve_with_metaclass() ->
+    NavPid = beamtalk_class_registry:whereis_class('SystemNavigation'),
+    ?assertNotEqual(undefined, NavPid),
+    MetaObj = #beamtalk_object{
+        class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = NavPid
+    },
+    Result = beamtalk_method_resolver:resolve(MetaObj, 'default'),
+    ?assertMatch(#{'__selector__' := 'default'}, Result).
+
+test_resolve_with_metaclass_missing() ->
+    NavPid = beamtalk_class_registry:whereis_class('SystemNavigation'),
+    ?assertNotEqual(undefined, NavPid),
+    MetaObj = #beamtalk_object{
+        class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = NavPid
+    },
+    Result = beamtalk_method_resolver:resolve(
+        MetaObj, 'classSideSelectorThatDoesNotExistXyzzy'
+    ),
+    ?assertEqual(nil, Result).

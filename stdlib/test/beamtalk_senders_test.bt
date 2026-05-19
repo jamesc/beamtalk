@@ -36,3 +36,32 @@ TestCase subclass: SystemNavigationSendersTest
   // iteration so it can be unit-checked separately.
   testHelperCollectSendersIsDefined =>
     self assert: (SystemNavigation includesSelector: #collectSendersFor:in:into:)
+
+  // --- BT-2195: class-side scanning ---
+  //
+  // Behavioural assertions (does the metaclass walk produce hits?) live in
+  // the REPL-protocol E2E suite — the BUnit harness does not start the
+  // compiler-port process, so `findSendersIn:` returns `[]` here regardless
+  // of the source's contents. The BUnit checks below cover the parts that
+  // do not require the compiler port: that `>>` on a metaclass returns a
+  // CompiledMethod with non-empty source, and that the underlying
+  // primitives `methods` / `respondsTo:` work on a metaclass scope.
+
+  // `SystemNavigation class >> #default` returns a CompiledMethod with
+  // non-empty source — confirms the metaclass path through `>>` is wired
+  // (the resolver routes `class = 'Metaclass'` receivers to the
+  // `{class_method, _}` handler, which now plumbs `class_method_source`
+  // into `__source__`).
+  testMetaclassMethodHasSource =>
+    cm := SystemNavigation class >> #default
+    self deny: cm isNil
+    self deny: cm source isEmpty
+
+  // Composition primitives must work on a metaclass scope.
+  // `SystemNavigation class methods` returns class-side selectors (via
+  // `classLocalMethods`'s `'Metaclass'` clause), and the metaclass
+  // receiver responds to `>>` (so the `respondsTo:` guard in
+  // `collectSendersFor:in:into:` does not skip class-side scopes).
+  testMetaclassScopePrimitivesPresent =>
+    self assert: ((SystemNavigation class) methods includes: #default)
+    self assert: ((SystemNavigation class) respondsTo: #'>>')
