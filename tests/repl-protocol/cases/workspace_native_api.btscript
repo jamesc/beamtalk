@@ -171,7 +171,7 @@ wsGlobals includesKey: #Counter
 // ===========================================================================
 
 // implementorsOf: returns a non-empty list for a widely-implemented selector
-asStringImpls := SystemNavigation implementorsOf: #asString
+asStringImpls := SystemNavigation default implementorsOf: #asString
 // => _
 
 asStringImpls isEmpty
@@ -189,16 +189,16 @@ asStringImpls includes: Float
 
 // User-loaded classes show up in results when they implement the selector.
 // Counter (loaded above) locally defines #increment.
-(SystemNavigation implementorsOf: #increment) includes: Counter
+(SystemNavigation default implementorsOf: #increment) includes: Counter
 // => true
 
 // Selectors with no implementors return an empty list
-SystemNavigation implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
+SystemNavigation default implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
 // => []
 
 // implementorsOf: does NOT walk inheritance — #class is defined on
 // ProtoObject; Integer inherits it but is not an implementor.
-classImpls := SystemNavigation implementorsOf: #class
+classImpls := SystemNavigation default implementorsOf: #class
 // => _
 
 classImpls includes: Integer
@@ -206,7 +206,7 @@ classImpls includes: Integer
 
 // implementorsOf: also finds class-side implementors as metaclass objects.
 // `Bag` defines `class withAll:` — that hit appears as `Bag class`.
-withAllImpls := SystemNavigation implementorsOf: #withAll:
+withAllImpls := SystemNavigation default implementorsOf: #withAll:
 // => _
 
 withAllImpls includes: Bag class
@@ -234,7 +234,7 @@ metaChain size
 // sendersOf: returns a non-empty list for a widely-sent binary selector.
 // Counter (loaded above) sends `+` from `increment`, so `+` must have
 // at least one sender in a workspace that has Counter loaded.
-plusSenders := SystemNavigation sendersOf: #+
+plusSenders := SystemNavigation default sendersOf: #+
 // => _
 
 plusSenders isEmpty
@@ -278,9 +278,9 @@ plusLineList allSatisfy: [:n | n > 0]
 // => true
 
 // sendersOf: with a selector that nobody sends returns an empty list.
-SystemNavigation sendersOf: #neverCalledByAnybodyXyzzy
+SystemNavigation default sendersOf: #neverCalledByAnybodyXyzzy
 // => []
 
 // Symbol argument is required — passing a String raises a useful error.
-[SystemNavigation sendersOf: "+"] on: Error do: [:e | #ok]
+[SystemNavigation default sendersOf: "+"] on: Error do: [:e | #ok]
 // => ok

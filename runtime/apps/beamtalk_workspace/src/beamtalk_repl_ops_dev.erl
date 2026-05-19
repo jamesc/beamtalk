@@ -1507,10 +1507,9 @@ get_session_bindings(SessionPid) ->
     end.
 
 -doc """
-Get workspace-level global bindings (e.g. Transcript, Beamtalk,
-Workspace, SystemNavigation). Uses get_session_bindings/0 to include
-singletons as well as bind:as: entries. Returns empty map if workspace
-interface is unavailable.
+Get workspace-level global bindings (e.g. Transcript, Beamtalk, Workspace).
+Uses get_session_bindings/0 to include singletons as well as bind:as: entries.
+Returns empty map if workspace interface is unavailable.
 """.
 -spec get_workspace_bindings() -> map().
 get_workspace_bindings() ->

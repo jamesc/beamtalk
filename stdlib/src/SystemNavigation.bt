@@ -1,43 +1,52 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// SystemNavigation — Singleton facade for "where is X used" / "who
-/// implements X" queries over the loaded class registry.
+/// SystemNavigation — Class-registry navigation queries ("who implements X",
+/// "where is X used").
 ///
 /// Home for System Browser-style navigation queries that previously lived
 /// on `Beamtalk` (BT-2189 / BT-2190). Matches the Pharo/Squeak/Cuis
-/// convention (`SystemNavigation default allImplementorsOf:` collapsed
-/// here to a direct send on the `SystemNavigation` global binding).
+/// convention: callers reach an instance via a constructor and dispatch
+/// queries against it.
 ///
-/// `SystemNavigation` is a workspace-level value singleton (no process):
-/// the global binding points at a sealed `Object` instance bootstrapped
-/// alongside `Beamtalk` and `Workspace`. Iteration helpers live as
-/// instance methods on this singleton so they run as plain Erlang
-/// functions in the calling eval worker — important because the queries
-/// walk the full class registry, and routing them through a class
-/// gen_server would self-deadlock when the iteration reaches
-/// `SystemNavigation` itself.
+/// `SystemNavigation default` returns a navigation rooted at the full
+/// loaded class registry. Future constructors (BT-2201) — e.g.
+/// `SystemNavigation over: aPackage`, `SystemNavigation forClasses: aList`
+/// — will hand back instances scoped to a narrower set, reusing the same
+/// query protocol.
+///
+/// All query logic lives on instance methods. The class side is just a
+/// constructor surface. This is deliberate: routing the iteration through
+/// a class gen_server would self-deadlock when the walk reaches
+/// `SystemNavigation` itself. Instance methods on a sealed Object value
+/// type run as plain Erlang in the calling eval worker.
 ///
 /// ## Examples
 /// ```beamtalk
-/// SystemNavigation implementorsOf: #asString
-/// SystemNavigation sendersOf: #+
+/// SystemNavigation default implementorsOf: #asString
+/// SystemNavigation default sendersOf: #+
 /// ```
 sealed typed Object subclass: SystemNavigation
-  classState: current :: SystemNavigation | Nil = nil
 
-  /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> SystemNavigation | Nil => self.current
-
-  /// Set the current singleton instance.
-  class current: instance :: SystemNavigation -> SystemNavigation =>
-    self.current := instance
-
-  /// Snapshot of the live class registry as a typed list.
+  /// Return a navigation query rooted at the default scope (all loaded
+  /// classes in the workspace's class registry).
   ///
-  /// Internal helper so iteration in `implementorsOf:` / `sendersOf:`
-  /// dispatches on a typed receiver. Wrapping the FFI in a typed method
-  /// is what `BeamtalkInterface` does for the same reason — it lets the
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default implementorsOf: #asString
+  /// ```
+  class default -> SystemNavigation =>
+    // `new` is implicit on sealed Object subclasses (handled by the
+    // runtime's class instantiation path) but isn't surfaced through the
+    // compile-time class hierarchy, so suppress the dnu check.
+    @expect dnu
+    self new
+
+  /// Snapshot of the class registry visible to this navigation query.
+  ///
+  /// Currently always returns the full registry. Future scoped instances
+  /// (BT-2201) will override this to filter by package or explicit class
+  /// list. Wrapping the FFI in a typed instance method lets downstream
   /// block parameters infer `Class` / `Behaviour` instead of `Dynamic`.
   allClasses -> List(Behaviour) => (Erlang beamtalk_interface) allClasses
 
@@ -50,8 +59,8 @@ sealed typed Object subclass: SystemNavigation
   /// as the class and once as the metaclass.
   ///
   /// Does NOT walk inherited methods — only classes with their own
-  /// definition of the selector are returned. Iterates the full class
-  /// registry so stdlib and user classes are both in the search set.
+  /// definition of the selector are returned. Iterates the navigation
+  /// scope so stdlib and user classes are both in the search set.
   ///
   /// Matches Pharo's `SystemNavigation >> #allImplementorsOf:`.
   ///
@@ -59,9 +68,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation implementorsOf: #asString    // => [Integer, Float, String, ...]
-  /// SystemNavigation implementorsOf: #new         // => [..., Counter class, ...]
-  /// SystemNavigation implementorsOf: #nonExistent // => []
+  /// SystemNavigation default implementorsOf: #asString    // => [Integer, Float, String, ...]
+  /// SystemNavigation default implementorsOf: #new         // => [..., Counter class, ...]
+  /// SystemNavigation default implementorsOf: #nonExistent // => []
   /// ```
   implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
     (aSelector isKindOf: Symbol) ifFalse: [
@@ -83,9 +92,9 @@ sealed typed Object subclass: SystemNavigation
   ///   the send appears
   ///
   /// A method that sends `aSelector` multiple times produces one record per
-  /// occurrence. Iterates the class registry and walks instance-side method
-  /// dictionaries so stdlib and user classes are both covered. Matches
-  /// Pharo's `SystemNavigation >> #allSendersOf:`.
+  /// occurrence. Iterates the navigation scope and walks instance-side
+  /// method dictionaries so stdlib and user classes are both covered.
+  /// Matches Pharo's `SystemNavigation >> #allSendersOf:`.
   ///
   /// Naive implementation: parses every method's source on every call. Fine
   /// for an on-demand IDE pane (a few seconds on a 200-class workspace) but
@@ -107,8 +116,8 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
-  /// SystemNavigation sendersOf: #neverCalledXyzzy  // => []
+  /// SystemNavigation default sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
+  /// SystemNavigation default sendersOf: #neverCalledXyzzy  // => []
   /// ```
   sendersOf: aSelector :: Symbol -> List(Dictionary) =>
     (aSelector isKindOf: Symbol) ifFalse: [

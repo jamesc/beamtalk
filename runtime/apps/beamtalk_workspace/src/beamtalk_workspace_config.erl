@@ -8,10 +8,9 @@
 -moduledoc """
 Single source of truth for workspace singleton configuration.
 
-Centralises the mapping between binding names (Transcript, Beamtalk,
-Workspace, SystemNavigation), class names (TranscriptStream,
-BeamtalkInterface, WorkspaceInterface, SystemNavigation), and Erlang
-modules (beamtalk_transcript_stream, etc.).
+Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
+class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
+and Erlang modules (beamtalk_transcript_stream, etc.).
 
 Singletons are split into two categories:
 - Actor singletons: `singletons/0` — started as gen_server children by the
@@ -87,11 +86,6 @@ value_singletons() ->
             binding_name => 'Workspace',
             class_name => 'WorkspaceInterface',
             module => 'bt@stdlib@workspace_interface'
-        },
-        #{
-            binding_name => 'SystemNavigation',
-            class_name => 'SystemNavigation',
-            module => 'bt@stdlib@system_navigation'
         }
     ].
 

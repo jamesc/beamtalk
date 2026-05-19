@@ -9,7 +9,7 @@
 
 ### Standard Library
 
-- **`SystemNavigation` singleton** — `implementorsOf:` and `sendersOf:` moved off `Beamtalk` and onto a new workspace-level `SystemNavigation` value singleton, matching Pharo/Squeak/Cuis convention. Use `SystemNavigation implementorsOf: #foo` and `SystemNavigation sendersOf: #foo`. The methods on `Beamtalk` are removed outright (no deprecation period; pre-1.0 reflective queries with no broad surface area) (BT-2214).
+- **`SystemNavigation`** — `implementorsOf:` and `sendersOf:` moved off `Beamtalk` onto a new `SystemNavigation` class, matching Pharo/Squeak/Cuis convention. Reach an instance via `SystemNavigation default` and dispatch queries against it: `SystemNavigation default implementorsOf: #foo`, `SystemNavigation default sendersOf: #foo`. The class side is constructors only — `default` today, with `over: aPackage` and `forClasses: aList` planned for the BT-2201 query API expansion — so future scoped queries fit cleanly without breaking the protocol. The methods on `Beamtalk` are removed outright (no deprecation period; pre-1.0 reflective queries with no broad surface area) (BT-2214).
 
 ### Runtime
 

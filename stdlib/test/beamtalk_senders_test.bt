@@ -5,11 +5,10 @@
 // call sites of a given selector across the loaded class registry. Backs
 // System Browser-style navigation ("who calls this method?").
 //
-// `sendersOf:` is an instance method on the `SystemNavigation` workspace
-// singleton (sealed Object value type), matching the Pharo `SystemNavigation
-// default allSendersOf:` shape. See the note in
-// `beamtalk_implementors_test.bt` for why this is a singleton rather than
-// class-side methods on a regular class.
+// `sendersOf:` is an instance method on `SystemNavigation`, reached via
+// the `default` (or future scoped) constructor. See the note in
+// `beamtalk_implementors_test.bt` for why the class side is constructors
+// only and queries live on the instance.
 //
 // Behavioural tests (happy path, multiple call sites in one method,
 // no-senders, stdlib senders, Symbol type check) live in the E2E

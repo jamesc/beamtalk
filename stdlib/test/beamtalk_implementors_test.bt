@@ -5,13 +5,12 @@
 // all classes that directly define a given selector. Backs System Browser-style
 // navigation ("who else has this method?").
 //
-// `implementorsOf:` is an instance method on the `SystemNavigation` workspace
-// singleton (sealed Object value type), matching the Pharo `SystemNavigation
-// default allImplementorsOf:` shape. We use a singleton — rather than
-// class-side methods on a regular class — so the iteration runs in the
-// calling eval worker as plain Erlang. Class-side methods on a regular class
-// would self-deadlock when the iteration reaches `SystemNavigation` itself
-// (`gen_server:call` to self).
+// `implementorsOf:` is an instance method on `SystemNavigation`, reached via
+// the `default` (or future scoped) constructor. The class-side surface is
+// constructors only — query logic stays on the instance so the iteration
+// runs as plain Erlang in the caller and avoids the class-gen_server
+// self-deadlock that hits when a class method walks the registry and the
+// walk reaches its own class.
 //
 // Behavioural tests (happy path, multi-implementor, no-implementor, stdlib
 // participation) live in the E2E REPL-protocol suite at
@@ -24,10 +23,14 @@ TestCase subclass: SystemNavigationImplementorsTest
   testIncludesSelectorImplementorsOf =>
     self assert: (SystemNavigation includesSelector: #implementorsOf:)
 
+  testIncludesSelectorDefault =>
+    self assert: (SystemNavigation class includesSelector: #default)
+
   // --- composition primitives must be in place ---
 
-  // The implementation iterates the class registry (via beamtalk_interface)
+  // The implementation iterates the navigation scope (via `allClasses`)
   // and filters by includesSelector:. That primitive has to be present on
   // Behaviour.
   testCompositionPrimitivesPresent =>
+    self assert: (SystemNavigation includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #includesSelector:)
