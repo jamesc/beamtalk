@@ -204,12 +204,14 @@ format_frame_file_no_line_test() ->
 %%%   - bt@ and beamtalk_ paths return snake_to_class directly, no registry.
 %%%   - The fallback nil-return path exits before the registry call.
 %%%   - erlang:whereis/1 returns undefined safely when no process is registered.
+%%% All atoms used in assertions ('Integer', 'StackFrame') are guaranteed to be
+%%% in the atom table by make_test_frame/0 defined earlier in this file.
 %%% ===================================================================
 
-%% bt@ prefix, single-segment: 'bt@counter' → 'Counter'
-%% 'Counter' atom is in the table via tagged_map_tests.
+%% bt@ prefix, single-segment: 'bt@stack_frame' → 'StackFrame'
+%% 'StackFrame' atom is in the table from make_test_frame/0 in this file.
 module_to_class_bt_prefix_single_word_test() ->
-    ?assertEqual('Counter', beamtalk_stack_frame:module_to_class('bt@counter')).
+    ?assertEqual('StackFrame', beamtalk_stack_frame:module_to_class('bt@stack_frame')).
 
 %% bt@ prefix, multi-segment stdlib: 'bt@stdlib@integer' → 'Integer'
 %% The last '@'-separated segment determines the class name.
