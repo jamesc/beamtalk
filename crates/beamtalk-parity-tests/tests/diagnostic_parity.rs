@@ -68,10 +68,20 @@ async fn diagnostic_parity_corpus() {
     let mut mcp = McpDriver::spawn(&repl).await.expect("spawn mcp driver");
 
     let cases = corpus_cases();
+    let skip_chmod_cases = running_as_root();
     let mut failures: Vec<String> = Vec::new();
     for case in &cases {
         if !case.unreadable_files.is_empty() && !cfg!(unix) {
             // Fixtures relying on `chmod 000` are Unix-only; skip on Windows.
+            continue;
+        }
+        if !case.unreadable_files.is_empty() && skip_chmod_cases {
+            // Root bypasses POSIX permission bits, so `chmod 000` fixtures
+            // can still be read. Skip when running as root (e.g. sandboxes).
+            eprintln!(
+                "[{}] skipped: running as root, chmod-based fixtures bypass POSIX permissions",
+                case.name
+            );
             continue;
         }
         let staged = match stage_fixture(&corpus_root, case) {
@@ -97,6 +107,25 @@ async fn diagnostic_parity_corpus() {
         "diagnostic parity assertions failed:\n  - {}",
         failures.join("\n  - ")
     );
+}
+
+/// True when the test process is running as Unix root. Root bypasses POSIX
+/// permission bits, so `chmod 000` fixtures (BT-2056 / BT-2067) cannot
+/// produce the expected `permission_denied` diagnostics under root.
+fn running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .is_some_and(|s| s.trim() == "0")
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 /// Per-surface expected counts. Each surface field is checked with `>=` so
