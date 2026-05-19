@@ -569,7 +569,7 @@ handle_senders_response(Other) ->
 Handle ETF response from a find_references_to_in_source request (BT-2203).
 Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
 """.
--spec handle_references_response(map()) -> {ok, [non_neg_integer()]} | {error, [map()]}.
+-spec handle_references_response(map()) -> {ok, [pos_integer()]} | {error, [map()]}.
 handle_references_response(#{status := ok, lines := Lines}) when is_list(Lines) ->
     {ok, Lines};
 handle_references_response(#{status := error, diagnostics := Diagnostics}) ->

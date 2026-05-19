@@ -101,9 +101,14 @@ pub fn find_references_to_in_source(method_source: &str, class_name: &str) -> Ve
     }
 
     // Translate from wrapped-source line numbers back to input-source space.
+    // Drop any line that falls inside the synthetic wrapper header (line
+    // numbers <= PREFIX_LINES). Using `.max(1)` here would silently collapse
+    // wrapper-region matches onto line 1 of the user's source, masking them
+    // as a real reference at the top of the method.
     wrapped_lines
         .into_iter()
-        .map(|line| line.saturating_sub(PREFIX_LINES).max(1))
+        .filter(|&line| line > PREFIX_LINES)
+        .map(|line| line - PREFIX_LINES)
         .collect()
 }
 

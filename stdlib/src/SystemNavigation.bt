@@ -227,14 +227,22 @@ sealed typed Object subclass: SystemNavigation
     // (and any other Behaviour subclass) while rejecting ordinary values.
     (aClass respondsTo: #subclasses)
       ifFalse: [
-        self error: "SystemNavigation referencesTo: requires a class object (an instance of Behaviour)."
+        self error: "SystemNavigation referencesTo: requires a class/metaclass object."
       ]
     // Resolve the class name once, up front, rather than on every method.
-    // `name` is declared on Class/Metaclass (not Behaviour), so the static
-    // type-checker can't see it through the `Behaviour` annotation even
-    // though the runtime guarantees the receiver responds to it.
+    // `name` is declared on Class/Metaclass (not Behaviour), so we also
+    // duck-type-check it: a Behaviour entry that responds to `subclasses`
+    // but not `name` (no known case today, but possible for registry-shaped
+    // entries) is rejected with the same error path rather than crashing
+    // on the downstream `aClass name` send.
+    (aClass respondsTo: #name)
+      ifFalse: [
+        self error: "SystemNavigation referencesTo: requires a class/metaclass object."
+      ]
     // Convert to String so Class (returns Symbol) and Metaclass (returns
-    // String) both flow through the same downstream FFI shape.
+    // String) both flow through the same downstream FFI shape. The static
+    // type-checker can't see `name` through the `Behaviour` annotation,
+    // even though the runtime guard above guarantees the receiver responds.
     @expect dnu
     targetName := aClass name asString
     self allClasses
