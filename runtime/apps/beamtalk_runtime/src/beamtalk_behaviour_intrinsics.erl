@@ -189,19 +189,20 @@ classLocalMethods(Self) ->
 -doc """
 Return all superclasses of the receiver in order (immediate parent to root).
 
-BT-2194: For metaclass receivers (objects tagged `'Metaclass'`) walks the
-*parallel* metaclass hierarchy, returning metaclass objects. For
-`Counter class` this yields `[Actor class, Object class, ProtoObject class]`.
-The parallel chain truncates at the metaclass of the root class — it does
-NOT merge into `Class`/`Behaviour`/`Object` as Smalltalk does. Consequence:
-`Integer isKindOf: Object` is `false` on a class-object receiver. The
-corresponding instance-side query (`42 isKindOf: Object`) still returns `true`.
+BT-2194/BT-2217: For metaclass receivers (objects tagged `'Metaclass'`)
+walks the *parallel* metaclass hierarchy and then grounds into the
+instance-side `Class → Behaviour → Object → ProtoObject` tower (ADR 0036).
+For `Counter class` this yields
+`[Actor class, Object class, ProtoObject class, Class, Behaviour, Object, ProtoObject]`.
+Consequence: `Counter class isKindOf: Object` returns `true`, agreeing with
+the dispatch chain (`Counter class respondsTo: #printString` is `true` via
+the same Class/Behaviour/Object protocol).
 """.
 -spec classAllSuperclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
-    %% BT-2194: Metaclass receiver — walk the parallel metaclass hierarchy.
+    %% BT-2194: walk the parallel metaclass hierarchy (returns metaclass objects).
     SuperName = gen_server:call(ClassPid, superclass),
-    Supers = walk_hierarchy(
+    MetaSupers = walk_hierarchy(
         SuperName,
         fun(_CN, CPid, Acc) ->
             MetaObj = #beamtalk_object{
@@ -211,7 +212,21 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
         end,
         []
     ),
-    lists:reverse(Supers);
+    %% BT-2217: Ground the parallel chain into the instance-side `Class` tower
+    %% so the metaclass hierarchy merges with `Class → Behaviour → Object →
+    %% ProtoObject` (ADR 0036). `Class` may be absent during early bootstrap;
+    %% walk_hierarchy/3 returns the initial accumulator in that case.
+    InstanceSupers = walk_hierarchy(
+        'Class',
+        fun(CN, CPid, Acc) ->
+            Module = gen_server:call(CPid, module_name),
+            Tag = beamtalk_class_registry:class_object_tag(CN),
+            ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = CPid},
+            {cont, [ClassObj | Acc]}
+        end,
+        []
+    ),
+    lists:reverse(MetaSupers) ++ lists:reverse(InstanceSupers);
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     SuperName = gen_server:call(ClassPid, superclass),
@@ -715,13 +730,21 @@ Example: `Counter class superclass == Actor class`.
 BT-1186: Now uses gen_server:call(Pid, superclass) directly. BT-1185 fixed
 apply_class_info/2 to update the gen_server superclass from __beamtalk_meta/0,
 so the gen_server always holds the correct superclass.
+
+BT-2217: Grounds the parallel chain at `ProtoObject class superclass == Class`
+(ADR 0036). When the gen_server reports no superclass, return the instance-side
+`Class` class object. From there, subsequent `superclass` sends route through
+the regular instance-side dispatch (`classSuperclass`), unfolding
+`Class → Behaviour → Object → ProtoObject` via the standard walker. `Class`
+may be absent during early bootstrap; `atom_to_class_object/1` returns `nil`
+in that case, preserving the pre-grounding behaviour.
 """.
 -spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassSuperclass(Self) ->
     Pid = erlang:element(4, Self),
     case gen_server:call(Pid, superclass) of
         none ->
-            nil;
+            atom_to_class_object('Class');
         SuperName ->
             case atom_to_class_object(SuperName) of
                 nil -> nil;

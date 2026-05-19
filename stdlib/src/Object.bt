@@ -224,10 +224,10 @@ ProtoObject subclass: Object
   ///
   /// For class-object receivers, follows Smalltalk semantics: `self class`
   /// is the metaclass, so the check walks the *parallel metaclass hierarchy*.
-  /// Beamtalk's metaclass tower truncates at `ProtoObject class` (does not
-  /// merge into Class/Behaviour/Object as Pharo does — see ADR 0036), so
-  /// `Integer isKindOf: Object` returns `false`. Use `42 isKindOf: Object`
-  /// (instance receiver) instead.
+  /// The parallel chain is grounded at `ProtoObject class superclass == Class`
+  /// (ADR 0036), so the metaclass tower merges into the instance-side
+  /// `Class → Behaviour → Object → ProtoObject` chain. As a result,
+  /// `Integer isKindOf: Object` and `Integer isKindOf: Class` both return `true`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -237,6 +237,8 @@ ProtoObject subclass: Object
   /// #foo isKindOf: String       // => false
   /// Integer isKindOf: Number    // => false (metaclass chain, not instance chain)
   /// Integer isKindOf: Number class  // => true  (Number class is in the parallel chain)
+  /// Integer isKindOf: Object    // => true (grounded — Object is reachable via the metaclass tower)
+  /// Integer isKindOf: Class     // => true (Integer class inherits from Class)
   /// ```
   isKindOf: aClass -> Boolean => self class includesBehaviour: aClass
 

@@ -31,7 +31,7 @@ TestCase subclass: IsKindOfTest
 
   testFalseIsKindOfBoolean => self assert: (false isKindOf: Boolean)
 
-  // --- BT-2194: class-object receivers walk the parallel metaclass chain ---
+  // --- BT-2194/BT-2217: class-object receivers walk the parallel metaclass chain ---
 
   // Class is an instance of its metaclass — NOT of its instance-side superclass.
   // Integer is an instance of `Integer class`, whose parallel chain is
@@ -40,12 +40,19 @@ TestCase subclass: IsKindOfTest
     self deny: (Integer isKindOf: Number)
     self deny: (Counter isKindOf: Actor)
 
-  // Beamtalk's metaclass tower truncates at `ProtoObject class` (ADR 0036
-  // divergence from Pharo). `Integer isKindOf: Object` is false; the
-  // instance-side query is the right form for that question.
-  testClassNotKindOfObject =>
-    self deny: (Integer isKindOf: Object)
-    self deny: (Counter isKindOf: Object)
+  // BT-2217: The metaclass tower is grounded — `ProtoObject class superclass`
+  // is `Class`, so the parallel chain merges into `Class → Behaviour → Object
+  // → ProtoObject`. `Integer isKindOf: Object` and `Integer isKindOf: Class`
+  // therefore both hold, matching Pharo and the dispatch chain (which already
+  // routes through `Class`/`Behaviour`/`Object` for metaclass receivers).
+  testClassIsKindOfObject =>
+    self assert: (Integer isKindOf: Object)
+    self assert: (Counter isKindOf: Object)
+
+  testClassIsKindOfClass =>
+    self assert: (Integer isKindOf: Class)
+    self assert: (Counter isKindOf: Class)
+    self assert: (Integer isKindOf: Behaviour)
 
   // A class IS a kind of the metaclass of its superclass.
   testClassIsKindOfSuperclassMetaclass =>
@@ -61,11 +68,18 @@ TestCase subclass: IsKindOfTest
     self assert: (Counter class inheritsFrom: Object class)
     self deny: (Counter class inheritsFrom: Counter class)
 
-  // A metaclass does NOT inherit from the instance-side classes.
-  testMetaclassDoesNotInheritFromInstanceClass =>
+  // BT-2217: With the grounded chain, a metaclass DOES inherit from the
+  // instance-side `Class`/`Behaviour`/`Object`/`ProtoObject`. It still does
+  // not inherit from sibling instance-side classes like `Counter` or `Actor`.
+  testMetaclassDoesNotInheritFromInstanceSiblings =>
     self deny: (Counter class inheritsFrom: Counter)
     self deny: (Counter class inheritsFrom: Actor)
-    self deny: (Counter class inheritsFrom: Object)
+
+  testMetaclassInheritsFromGroundedInstanceTower =>
+    self assert: (Counter class inheritsFrom: Class)
+    self assert: (Counter class inheritsFrom: Behaviour)
+    self assert: (Counter class inheritsFrom: Object)
+    self assert: (Counter class inheritsFrom: ProtoObject)
 
   testMetaclassIncludesBehaviourMetaclass =>
     self assert: (Counter class includesBehaviour: Counter class)
@@ -73,22 +87,32 @@ TestCase subclass: IsKindOfTest
     self assert: (Counter class includesBehaviour: Object class)
     self deny: (Counter class includesBehaviour: Integer class)
 
-  // --- BT-2194: allSuperclasses returns metaclass objects for metaclass receivers ---
-  testMetaclassAllSuperclassesReturnsParallelChain =>
+  // --- BT-2194/BT-2217: allSuperclasses returns the grounded chain for metaclass receivers ---
+  testMetaclassAllSuperclassesReturnsGroundedChain =>
+    // Parallel chain: [Actor class, Object class, ProtoObject class]
+    // then grounded: [Class, Behaviour, Object, ProtoObject]
     chain := Counter class allSuperclasses
-    self assert: chain size equals: 3
+    self assert: chain size equals: 7
     self assert: chain first == Actor class
-    self assert: chain last == ProtoObject class
+    self assert: chain last == ProtoObject
+    // Parallel chain members
     self assert: (chain includes: Actor class)
     self assert: (chain includes: Object class)
     self assert: (chain includes: ProtoObject class)
-    // Instance-side classes are NOT in the parallel chain.
+    // Grounded instance-side members
+    self assert: (chain includes: Class)
+    self assert: (chain includes: Behaviour)
+    self assert: (chain includes: Object)
+    self assert: (chain includes: ProtoObject)
+    // Sibling instance-side classes are NOT in the chain.
     self deny: (chain includes: Counter)
     self deny: (chain includes: Actor)
-    self deny: (chain includes: Object)
 
-  testObjectClassAllSuperclassesTruncated =>
-    // `Object class` parallel chain is just `[ProtoObject class]` — truncated.
+  testObjectClassAllSuperclassesIsGrounded =>
+    // `Object class` parallel chain is `[ProtoObject class]` then grounds
+    // into `[Class, Behaviour, Object, ProtoObject]`.
     chain := Object class allSuperclasses
-    self assert: chain size equals: 1
+    self assert: chain size equals: 5
     self assert: chain first == ProtoObject class
+    self assert: chain last == ProtoObject
+    self assert: (chain includes: Class)

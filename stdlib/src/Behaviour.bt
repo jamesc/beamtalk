@@ -86,6 +86,11 @@ abstract Object subclass: Behaviour
   /// When called on a metaclass receiver, walks the parallel metaclass
   /// hierarchy and terminates at `Object class`:
   /// `Counter class superclassChain` => `[Counter class, Actor class, Object class]`.
+  /// The parallel chain is grounded at `Class` (ADR 0036 / BT-2217), so the
+  /// underlying `allSuperclasses` continues through `Class → Behaviour → Object →
+  /// ProtoObject`. `superclassChain` deliberately stops at `Object class` —
+  /// symmetric with the instance-side `Object` terminator — so the metaclass
+  /// view ends where the parallel tower meets the instance tower.
   ///
   /// ## Examples
   /// ```beamtalk
