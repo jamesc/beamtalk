@@ -187,7 +187,7 @@ version() ->
 -doc """
 Find call sites of a selector within a single method's source (BT-2190).
 
-Backs `Beamtalk sendersOf:`. Delegates to `beamtalk_compiler:find_senders_in_source/2`,
+Backs `SystemNavigation sendersOf:`. Delegates to `beamtalk_compiler:find_senders_in_source/2`,
 which parses the source via the OTP-port compiler and walks the AST for
 matching `MessageSend` / `Cascade` nodes.
 

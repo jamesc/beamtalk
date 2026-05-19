@@ -151,7 +151,7 @@ within `Source'. Returns `{ok, []}' when no senders are found or the source
 cannot be parsed. Returns `{error, Diagnostics}' if the compiler port is
 unavailable.
 
-Backs `Beamtalk sendersOf:' for System Browser-style call-site navigation.
+Backs `SystemNavigation sendersOf:' for System Browser-style call-site navigation.
 """.
 -spec find_senders_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.

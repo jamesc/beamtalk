@@ -66,6 +66,7 @@
             #{name => 'Supervisor', module => 'bt@stdlib@supervisor', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Symbol', module => 'bt@stdlib@symbol', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'System', module => 'bt@stdlib@system', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'SystemNavigation', module => 'bt@stdlib@system_navigation', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TestCase', module => 'bt@stdlib@test_case', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'TestResult', module => 'bt@stdlib@test_result', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TestRunner', module => 'bt@stdlib@test_runner', parent => 'Object', package => 'stdlib', kind => object, type_params => []},

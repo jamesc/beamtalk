@@ -7,6 +7,10 @@
 - **Character literal dispatch** — character literals (`$A`, `$a`, etc.) now dispatch through the Character method table instead of Integer's. `$A asString` returns `"A"` (not `"65"`), `$A class` returns `Character`, and methods like `uppercase`, `lowercase`, `printString` work correctly on character literals. `Character value: 65` class-method sends also work (BT-2095).
 - **`@expect inheritance` diagnostic category** — sealed-class and sealed-method constraint diagnostics are now categorized as `Inheritance`, so they reach CLI and MCP lint surfaces that filter to categorized diagnostics. Previously these diagnostics were uncategorized and only appeared in the LSP (BT-2087).
 
+### Standard Library
+
+- **`SystemNavigation` singleton** — `implementorsOf:` and `sendersOf:` moved off `Beamtalk` and onto a new workspace-level `SystemNavigation` value singleton, matching Pharo/Squeak/Cuis convention. Use `SystemNavigation implementorsOf: #foo` and `SystemNavigation sendersOf: #foo`. The methods on `Beamtalk` are removed outright (no deprecation period; pre-1.0 reflective queries with no broad surface area) (BT-2214).
+
 ### Runtime
 
 - Fix namespace collision diagnostic when hot-reloading a `Protocol define:` file on a second surface (e.g., MCP after REPL) — the compiler's class cache now filters pre-loaded protocol entries before hierarchy injection, and `register_module` accepts protocol re-registration when the existing class has superclass `Protocol` (BT-2088).

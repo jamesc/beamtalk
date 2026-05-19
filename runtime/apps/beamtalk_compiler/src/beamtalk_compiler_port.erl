@@ -313,7 +313,7 @@ Sends an ETF-encoded `find_senders_in_source' request and returns
 `{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each
 line is a 1-based line number relative to `Source'.
 
-Used by `Beamtalk sendersOf:' via `beamtalk_interface' to power
+Used by `SystemNavigation sendersOf:' via `beamtalk_interface' to power
 System Browser-style "who calls this method?" navigation.
 """.
 -spec find_senders_in_source(port(), binary(), atom() | binary()) ->

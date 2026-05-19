@@ -527,8 +527,8 @@ get_user_bindings() ->
 
 -doc """
 Return non-class workspace globals for session binding injection.
-Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
-bind:as: names. Class objects are excluded.
+Includes singletons (Transcript, Beamtalk, Workspace, SystemNavigation)
+and user-registered bind:as: names. Class objects are excluded.
 """.
 -spec get_session_bindings() -> #{atom() => term()}.
 get_session_bindings() ->
@@ -783,7 +783,17 @@ handle_session_bindings(UserBindings) ->
             nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
             Obj -> Obj
         end,
-    Base2#{'Workspace' => WorkspaceObj}.
+    Base3 = Base2#{'Workspace' => WorkspaceObj},
+    %% Resolve SystemNavigation (BT-2214) — value singleton with the same
+    %% binding/class name. Falls back to a plain tagged-map so the binding
+    %% is always present and gives a useful does-not-understand error
+    %% rather than "unknown class" if the singleton hasn't bootstrapped yet.
+    SystemNavigationObj =
+        case resolve_singleton('SystemNavigation') of
+            nil -> #{'$beamtalk_class' => 'SystemNavigation'};
+            NavObj -> NavObj
+        end,
+    Base3#{'SystemNavigation' => SystemNavigationObj}.
 
 -doc "Convert a name argument to an atom.".
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
@@ -820,6 +830,7 @@ check_bind_conflicts(AtomName) ->
 is_protected_name('Transcript') -> true;
 is_protected_name('Beamtalk') -> true;
 is_protected_name('Workspace') -> true;
+is_protected_name('SystemNavigation') -> true;
 is_protected_name(_) -> false.
 
 -doc "Warn if name is an existing loaded class.".

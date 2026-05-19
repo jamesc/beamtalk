@@ -51,7 +51,9 @@ bindings_initially_empty_test_() ->
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 %% ADR 0019: Workspace bindings are injected automatically;
                 %% verify no USER bindings are present.
-                UserBindings = maps:without(['Transcript', 'Beamtalk', 'Workspace'], Bindings),
+                UserBindings = maps:without(
+                    ['Transcript', 'Beamtalk', 'Workspace', 'SystemNavigation'], Bindings
+                ),
                 ?assertEqual(#{}, UserBindings),
                 beamtalk_repl_shell:stop(Pid)
             end)
@@ -67,7 +69,9 @@ clear_bindings_test_() ->
                 ok = beamtalk_repl_shell:clear_bindings(Pid),
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 %% ADR 0019: Workspace bindings re-injected after clear
-                UserBindings = maps:without(['Transcript', 'Beamtalk', 'Workspace'], Bindings),
+                UserBindings = maps:without(
+                    ['Transcript', 'Beamtalk', 'Workspace', 'SystemNavigation'], Bindings
+                ),
                 ?assertEqual(#{}, UserBindings),
                 beamtalk_repl_shell:stop(Pid)
             end)
@@ -213,8 +217,12 @@ multiple_sessions_independent_test_() ->
                 %% ADR 0019: Both have only workspace bindings (no user bindings)
                 {ok, B1} = beamtalk_repl_shell:get_bindings(Pid1),
                 {ok, B2} = beamtalk_repl_shell:get_bindings(Pid2),
-                UserB1 = maps:without(['Transcript', 'Beamtalk', 'Workspace'], B1),
-                UserB2 = maps:without(['Transcript', 'Beamtalk', 'Workspace'], B2),
+                UserB1 = maps:without(
+                    ['Transcript', 'Beamtalk', 'Workspace', 'SystemNavigation'], B1
+                ),
+                UserB2 = maps:without(
+                    ['Transcript', 'Beamtalk', 'Workspace', 'SystemNavigation'], B2
+                ),
                 ?assertEqual(#{}, UserB1),
                 ?assertEqual(#{}, UserB2),
                 beamtalk_repl_shell:stop(Pid1),

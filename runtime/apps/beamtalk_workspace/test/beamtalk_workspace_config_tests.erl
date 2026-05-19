@@ -49,31 +49,36 @@ value_singletons_returns_list_test() ->
     Result = beamtalk_workspace_config:value_singletons(),
     ?assert(is_list(Result)).
 
-value_singletons_has_two_entries_test() ->
+value_singletons_has_three_entries_test() ->
     Result = beamtalk_workspace_config:value_singletons(),
-    ?assertEqual(2, length(Result)).
+    ?assertEqual(3, length(Result)).
 
 value_singletons_beamtalk_binding_test() ->
-    [Beamtalk, _Workspace] = beamtalk_workspace_config:value_singletons(),
+    [Beamtalk, _Workspace, _SystemNavigation] = beamtalk_workspace_config:value_singletons(),
     ?assertEqual('Beamtalk', maps:get(binding_name, Beamtalk)),
     ?assertEqual('BeamtalkInterface', maps:get(class_name, Beamtalk)).
 
 value_singletons_workspace_binding_test() ->
-    [_Beamtalk, Workspace] = beamtalk_workspace_config:value_singletons(),
+    [_Beamtalk, Workspace, _SystemNavigation] = beamtalk_workspace_config:value_singletons(),
     ?assertEqual('Workspace', maps:get(binding_name, Workspace)),
     ?assertEqual('WorkspaceInterface', maps:get(class_name, Workspace)).
+
+value_singletons_system_navigation_binding_test() ->
+    [_Beamtalk, _Workspace, SystemNavigation] = beamtalk_workspace_config:value_singletons(),
+    ?assertEqual('SystemNavigation', maps:get(binding_name, SystemNavigation)),
+    ?assertEqual('SystemNavigation', maps:get(class_name, SystemNavigation)).
 
 %%% ============================================================================
 %%% binding_names/0
 %%% ============================================================================
 
-binding_names_returns_three_test() ->
+binding_names_returns_four_test() ->
     Names = beamtalk_workspace_config:binding_names(),
-    ?assertEqual(3, length(Names)).
+    ?assertEqual(4, length(Names)).
 
 binding_names_exact_order_test() ->
     Names = beamtalk_workspace_config:binding_names(),
-    ?assertEqual(['Transcript', 'Beamtalk', 'Workspace'], Names).
+    ?assertEqual(['Transcript', 'Beamtalk', 'Workspace', 'SystemNavigation'], Names).
 
 binding_names_contains_transcript_test() ->
     Names = beamtalk_workspace_config:binding_names(),
@@ -86,6 +91,10 @@ binding_names_contains_beamtalk_test() ->
 binding_names_contains_workspace_test() ->
     Names = beamtalk_workspace_config:binding_names(),
     ?assert(lists:member('Workspace', Names)).
+
+binding_names_contains_system_navigation_test() ->
+    Names = beamtalk_workspace_config:binding_names(),
+    ?assert(lists:member('SystemNavigation', Names)).
 
 %%% ============================================================================
 %%% binding_name_for_class/1
@@ -107,6 +116,12 @@ binding_name_for_class_workspace_interface_test() ->
     ?assertEqual(
         {ok, 'Workspace'},
         beamtalk_workspace_config:binding_name_for_class('WorkspaceInterface')
+    ).
+
+binding_name_for_class_system_navigation_test() ->
+    ?assertEqual(
+        {ok, 'SystemNavigation'},
+        beamtalk_workspace_config:binding_name_for_class('SystemNavigation')
     ).
 
 binding_name_for_class_unknown_returns_undefined_test() ->

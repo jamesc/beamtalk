@@ -1,40 +1,39 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-2190: BUnit-level coverage for Beamtalk `sendersOf:` — finds all call
-// sites of a given selector across the loaded class registry. Backs System
-// Browser-style navigation ("who calls this method?").
+// BT-2214: BUnit-level coverage for `SystemNavigation sendersOf:` — finds all
+// call sites of a given selector across the loaded class registry. Backs
+// System Browser-style navigation ("who calls this method?").
 //
-// Like `beamtalk_implementors_test.bt`, this suite is limited to class-level
-// selector existence checks because the workspace singleton `Beamtalk` is
-// not bootstrapped in the BUnit test context, and `BeamtalkInterface` is a
-// `sealed typed Object subclass:` that cannot be instantiated.
+// `sendersOf:` is an instance method on the `SystemNavigation` workspace
+// singleton (sealed Object value type), matching the Pharo `SystemNavigation
+// default allSendersOf:` shape. See the note in
+// `beamtalk_implementors_test.bt` for why this is a singleton rather than
+// class-side methods on a regular class.
 //
-// Behavioural tests for `sendersOf:` (happy path, multiple call sites in
-// one method, no-senders, stdlib senders, Symbol type check) live in the
-// E2E REPL-protocol suite at tests/repl-protocol/cases/workspace_native_api.btscript,
-// which runs in workspace_mode and has the live `Beamtalk` singleton
-// available.
+// Behavioural tests (happy path, multiple call sites in one method,
+// no-senders, stdlib senders, Symbol type check) live in the E2E
+// REPL-protocol suite at tests/repl-protocol/cases/workspace_native_api.btscript,
+// which runs in workspace_mode and has the live class registry populated
+// with user classes.
 
-TestCase subclass: BeamtalkSendersTest
+TestCase subclass: SystemNavigationSendersTest
 
   // --- selector existence ---
   testIncludesSelectorSendersOf =>
-    self assert: (BeamtalkInterface includesSelector: #sendersOf:)
+    self assert: (SystemNavigation includesSelector: #sendersOf:)
 
   // --- composition primitives must be in place ---
 
-  // The implementation calls self allClasses, then for each class walks
-  // `aClass methods` + `aClass class methods`, fetches each method via
-  // `>>`, reads its `source`, and asks the compiler to find matching
-  // MessageSend lines. All of those primitives have to be present.
+  // The implementation walks aClass methods, fetches each method via `>>`,
+  // reads its source, and asks the compiler to find matching MessageSend
+  // lines. All of those primitives have to be present.
   testCompositionPrimitivesPresent =>
-    self assert: (BeamtalkInterface includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #methods)
     self assert: (Behaviour includesSelector: #'>>')
     self assert: (CompiledMethod includesSelector: #source)
 
   // The internal helper `collectSendersFor:in:into:` factors out per-class
-  // iteration so both instance and class-side method dictionaries are walked.
+  // iteration so it can be unit-checked separately.
   testHelperCollectSendersIsDefined =>
-    self assert: (BeamtalkInterface includesSelector: #collectSendersFor:in:into:)
+    self assert: (SystemNavigation includesSelector: #collectSendersFor:in:into:)

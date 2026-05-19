@@ -409,15 +409,15 @@ of instance methods.
 BT-2189: Uses __beamtalk_meta/0 fast path when available — mirrors the
 fast path already in `classLocalMethods/1` and avoids a gen_server
 round-trip per call, which matters for the bulk iteration done by
-`Beamtalk implementorsOf:`. Falls back to gen_server for dynamic classes
-built via ClassBuilder.
+`SystemNavigation implementorsOf:`. Falls back to gen_server for dynamic
+classes built via ClassBuilder.
 """.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
 classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
     %% BT-1635: Metaclass receiver — check class methods.
     %% BT-2189: Use __beamtalk_meta/0 fast path when available, matching the
     %% instance-side clause below. Avoids per-call gen_server hops during the
-    %% bulk iteration done by `Beamtalk implementorsOf:`.
+    %% bulk iteration done by `SystemNavigation implementorsOf:`.
     Module = beamtalk_object_class:module_name(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
