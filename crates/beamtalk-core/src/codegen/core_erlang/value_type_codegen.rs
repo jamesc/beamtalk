@@ -1253,16 +1253,19 @@ impl CoreErlangGenerator {
         // BT-754/BT-764: Wrap the method body in try/catch to catch non-local
         // returns thrown by ^ inside block closures.
         let body_doc = Document::Vec(body_parts);
+        let params_str = params.join(", ");
         let fun_doc = if let Some(token_var) = nlr_token_var {
             let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
             docvec![
-                format!("fun ({}) ->\n", params.join(", ")),
+                "fun (",
+                Document::String(params_str),
+                ") ->\n",
                 catch_vars.format_try_prefix(),
                 body_doc,
                 catch_vars.format_catch_suffix(),
             ]
         } else {
-            docvec![format!("fun ({}) ->\n", params.join(", ")), body_doc]
+            docvec!["fun (", Document::String(params_str), ") ->\n", body_doc,]
         };
         let fun_doc = if let Some(line_num) = line_annotation {
             self.annotate_with_line(fun_doc, line_num)
@@ -1270,7 +1273,11 @@ impl CoreErlangGenerator {
             fun_doc
         };
         Ok(docvec![
-            format!("'{}'/{} = ", mangled, arity),
+            "'",
+            Document::String(mangled),
+            "'/",
+            Document::String(arity.to_string()),
+            " = ",
             fun_doc,
             "\n",
         ])
@@ -1298,22 +1305,32 @@ impl CoreErlangGenerator {
                 let val_doc = self.expression_doc(value)?;
                 let new_self = self.next_self_var();
                 return Ok(docvec![
-                    "    ",
-                    format!("let {val_var} = "),
+                    "    let ",
+                    Document::String(val_var.clone()),
+                    " = ",
                     val_doc,
-                    format!(
-                        " in let {new_self} = call 'maps':'put'('{}', {val_var}, {current_self}) in\n",
-                        field.name
-                    ),
+                    " in let ",
+                    Document::String(new_self),
+                    " = call 'maps':'put'('",
+                    Document::Eco(field.name.clone()),
+                    "', ",
+                    Document::String(val_var),
+                    ", ",
+                    Document::String(current_self),
+                    ") in\n",
                 ]);
             }
         }
         // Fallback: sequence as a side-effecting expression
         let tmp_var = self.fresh_temp_var("seq");
         let expr_code = self.capture_expression(expr)?;
-        Ok(Document::String(format!(
-            "    let {tmp_var} = {expr_code} in\n"
-        )))
+        Ok(docvec![
+            "    let ",
+            Document::String(tmp_var),
+            " = ",
+            Document::String(expr_code),
+            " in\n",
+        ])
     }
 
     /// BT-1213: Generate an open let-chain for a non-last `[block_withmutations] value`
