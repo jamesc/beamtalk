@@ -1431,6 +1431,7 @@ impl CoreErlangGenerator {
     /// it's discarded since this is used for non-last expressions in block bodies.
     ///
     /// Uses Document/docvec! (ADR 0018) for composable rendering.
+    #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
     pub(super) fn generate_self_dispatch_open(
         &mut self,
         expr: &Expression,

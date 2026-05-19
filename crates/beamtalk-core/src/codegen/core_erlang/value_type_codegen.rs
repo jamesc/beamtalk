@@ -1639,6 +1639,7 @@ impl CoreErlangGenerator {
     /// this form emits the foldl and the `let X = maps:get(...)` extractions directly in
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
+    #[allow(clippy::too_many_lines)] // Document-based foldl scaffolding spans many lines
     pub(in crate::codegen::core_erlang) fn generate_value_type_do_open(
         &mut self,
         expr: &Expression,
