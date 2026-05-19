@@ -44,7 +44,8 @@ dictionary or ETS state is required.
     help/1, help/2,
     erlangHelp/1, erlangHelp/2,
     version/0,
-    findSendersIn/2
+    findSendersIn/2,
+    findReferencesToIn/2
 ]).
 
 %%% ============================================================================
@@ -224,6 +225,51 @@ findSendersIn(_Source, _Selector) ->
         <<
             "findSendersIn:selector: expects a binary source and an atom or "
             "binary selector"
+        >>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc """
+Find references to a class within a single method's source (BT-2203).
+
+Backs `SystemNavigation referencesTo:'. Delegates to
+`beamtalk_compiler:find_references_to_in_source/2', which parses the source
+via the OTP-port compiler and walks the AST for matching `ClassReference'
+nodes (plus class names in type annotations).
+
+Called via `(Erlang beamtalk_interface) findReferencesToIn: source class: aClassName'.
+The class-name argument is normalised to a binary before delegation so that a
+Symbol from Beamtalk and a String both work. Returns a list of 1-based line
+numbers (relative to the supplied source); returns `[]' if no references are
+found or the source cannot be parsed.
+""".
+-spec findReferencesToIn(binary(), atom() | binary()) -> [pos_integer()].
+findReferencesToIn(Source, ClassName) when
+    is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
+->
+    ClassNameBin =
+        case ClassName of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    case beamtalk_compiler:find_references_to_in_source(Source, ClassNameBin) of
+        {ok, Lines} ->
+            Lines;
+        {error, _Diagnostics} ->
+            %% Compiler port unavailable — degrade to "no references found"
+            %% rather than crashing the caller. Iteration in `referencesTo:'
+            %% should not be aborted by a transient port failure on one
+            %% method's source.
+            []
+    end;
+findReferencesToIn(_Source, _ClassName) ->
+    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'findReferencesToIn:class:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<
+            "findReferencesToIn:class: expects a binary source and an atom or "
+            "binary class name"
         >>
     ),
     beamtalk_error:raise(Err2).

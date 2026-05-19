@@ -31,7 +31,8 @@ to avoid temp files on disk (BT-48).
     compile_core_erlang/1,
     register_class/2,
     resolve_completion_type/1,
-    find_senders_in_source/2
+    find_senders_in_source/2,
+    find_references_to_in_source/2
 ]).
 
 %% gen_server callbacks
@@ -193,6 +194,27 @@ find_senders_in_source(Source, Selector) ->
     end.
 
 -doc """
+Find references to a class in a single method's source (BT-2203).
+
+Backs `SystemNavigation referencesTo:' — parses the method source and returns a
+list of 1-based line numbers (relative to `Source') where the class is named
+as a `ClassReference' AST node or in a type annotation. Returns `{ok, []}' if
+no references are found; returns `{error, Diagnostics}' if the compiler port
+is unavailable.
+""".
+-spec find_references_to_in_source(binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_references_to_in_source(Source, ClassName) ->
+    try
+        gen_server:call(?MODULE, {find_references_to_in_source, Source, ClassName}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, [#{message => <<"Compiler server is not available">>}]};
+        exit:{timeout, _} ->
+            {error, [#{message => <<"Compiler server timed out">>}]}
+    end.
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -284,6 +306,11 @@ handle_call({diagnostics, Source}, _From, State) ->
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
         State#state.port, Source, Selector
+    ),
+    {reply, Result, State};
+handle_call({find_references_to_in_source, Source, ClassName}, _From, State) ->
+    Result = beamtalk_compiler_port:find_references_to_in_source(
+        State#state.port, Source, ClassName
     ),
     {reply, Result, State};
 handle_call(version, _From, State) ->

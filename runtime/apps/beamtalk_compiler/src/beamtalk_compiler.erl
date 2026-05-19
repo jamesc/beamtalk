@@ -29,7 +29,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     version/0,
     compile_core_erlang/1,
     resolve_completion_type/1,
-    find_senders_in_source/2
+    find_senders_in_source/2,
+    find_references_to_in_source/2
 ]).
 
 -doc """
@@ -157,3 +158,25 @@ Backs `SystemNavigation sendersOf:' for System Browser-style call-site navigatio
     {ok, [pos_integer()]} | {error, [map()]}.
 find_senders_in_source(Source, Selector) ->
     beamtalk_compiler_server:find_senders_in_source(Source, Selector).
+
+-doc """
+Find references to a class in a single method's source (BT-2203).
+
+`Source' is the source of a single compiled method (as returned by
+`CompiledMethod source'). `ClassName' is the target class name as an atom or
+binary (without a leading `#').
+
+Returns `{ok, [Line]}' on success, where each line is a 1-based line number
+within `Source'. Returns `{ok, []}' when no references are found or the source
+cannot be parsed. Returns `{error, Diagnostics}' if the compiler port is
+unavailable.
+
+Backs `SystemNavigation referencesTo:' for System Browser-style class-reference
+navigation. Mirrors `find_senders_in_source/2' (BT-2190); the underlying
+visitor matches `ClassReference' AST nodes (and class names in type
+annotations) instead of `MessageSend' nodes.
+""".
+-spec find_references_to_in_source(binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_references_to_in_source(Source, ClassName) ->
+    beamtalk_compiler_server:find_references_to_in_source(Source, ClassName).

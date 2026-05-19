@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2203: BUnit-level coverage for `SystemNavigation referencesTo:` — finds
+// all sites where a class is mentioned across the loaded class registry.
+// Backs System Browser-style navigation ("who mentions this class?").
+//
+// `referencesTo:` is an instance method on `SystemNavigation`, reached via
+// the `default` (or future scoped) constructor. Mirrors the structure of
+// `beamtalk_senders_test.bt`: the behavioural happy-path / multi-site /
+// stdlib-included / no-references / type-check cases live in the E2E
+// REPL-protocol suite which has the live class registry populated with
+// user classes. These BUnit checks cover selector existence, composition
+// primitives, and helper-defined assertions that don't need a populated
+// workspace.
+
+TestCase subclass: SystemNavigationReferencesTest
+
+  // --- selector existence ---
+  testIncludesSelectorReferencesTo =>
+    self assert: (SystemNavigation includesSelector: #referencesTo:)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation walks `aClass methods`, fetches each method via `>>`,
+  // reads its source, and asks the compiler to find matching ClassReference
+  // lines. All of those primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // The internal helper `collectReferencesFor:in:into:` factors out
+  // per-class iteration so it can be unit-checked separately.
+  testHelperCollectReferencesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectReferencesFor:in:into:)
+
+  // The per-method appender helper exists too.
+  testHelperAppendReferencesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #appendReferencesIn:targetName:owner:methodSelector:into:)

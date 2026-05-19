@@ -284,3 +284,54 @@ SystemNavigation default sendersOf: #neverCalledByAnybodyXyzzy
 // Symbol argument is required — passing a String raises a useful error.
 [SystemNavigation default sendersOf: "+"] on: Error do: [:e | #ok]
 // => ok
+
+// ===========================================================================
+// SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
+// ===========================================================================
+
+// referencesTo: returns a non-empty list for a widely-referenced class.
+// Integer is named in many stdlib method sources (return types, generic
+// parameters, examples wrapped in doc-comments are stripped, but the
+// signature mentions remain). In a workspace where stdlib classes are
+// loaded, at least one reference must exist.
+integerRefs := SystemNavigation default referencesTo: Integer
+// => _
+
+integerRefs isEmpty
+// => false
+
+// Each record is a Dictionary with #class, #selector, #line keys —
+// same shape as sendersOf:.
+intRecord := integerRefs first
+// => _
+
+intRecord includesKey: #class
+// => true
+
+intRecord includesKey: #selector
+// => true
+
+intRecord includesKey: #line
+// => true
+
+// Line numbers are 1-based positive integers.
+intLineList := integerRefs collect: [:r | r at: #line]
+// => _
+
+intLineList allSatisfy: [:n | n > 0]
+// => true
+
+// referencesTo: with a class that nothing mentions returns an empty list.
+// (Bag class is a metaclass — nothing in the source tree spells
+// `Bag class` as a single class-reference token, so this is a stable empty.)
+SystemNavigation default referencesTo: Bag class
+// => []
+
+// Class object argument is required — passing a Symbol raises a useful error.
+// This is the most common mistake since `sendersOf:` takes a Symbol.
+[SystemNavigation default referencesTo: #Integer] on: Error do: [:e | #ok]
+// => ok
+
+// Passing a String also raises.
+[SystemNavigation default referencesTo: "Integer"] on: Error do: [:e | #ok]
+// => ok
