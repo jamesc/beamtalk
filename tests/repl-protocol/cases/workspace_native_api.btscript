@@ -342,6 +342,32 @@ extBareSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSende
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixBareSenderExt)
 // => _
 
+// BT-2196: A class-side extension (registered under the `#'Integer class'`
+// metaclass tag) reports the metaclass OBJECT in `#class`, matching the
+// shape BT-2195's class-side method walk emits — not the raw atom. This is
+// the parity guarantee `resolveExtensionClass:` provides: callers can
+// compare `record at: #class` against `Integer class` directly.
+extMetaFun := [:a :s | s]
+// => _
+
+extMetaSource := "describe => self btTwoTwoOneSixMetaSenderMarker"
+// => _
+
+Erlang beamtalk_extensions register: #'Integer class' selector: #btTwoTwoOneSixMetaSenderExt fun: extMetaFun owner: #test source: extMetaSource
+// => _
+
+extMetaHits := SystemNavigation default sendersOf: #btTwoTwoOneSixMetaSenderMarker
+// => _
+
+(extMetaHits collect: [:r | r at: #class]) includes: Integer class
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
+// => _
+
 // ===========================================================================
 // SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
 // ===========================================================================

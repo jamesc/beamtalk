@@ -597,19 +597,40 @@ sealed typed Object subclass: SystemNavigation
         ] ifFalse: [acc]
       ]
 
-  /// Resolve an extension registry class tag (an atom) to a real class
-  /// object via `(Erlang beamtalk_interface) findClass:`. Falls back to the
-  /// raw tag when the registry has no matching class — that is the
-  /// metaclass-tagged class-side extension case (`#'Integer class'`), where
-  /// the tag string does not match any registered class name.
+  /// Resolve an extension registry class tag (an atom) to the class object
+  /// the navigation queries should report in `#class`.
+  ///
+  /// Two tag shapes occur in the extension registry:
+  /// - Instance-side tags (`#Integer`) resolve directly via
+  ///   `(Erlang beamtalk_interface) findClass:` to the class object.
+  /// - Class-side tags (`#'Integer class'`) name a metaclass. `findClass:`
+  ///   only knows instance-side class names, so we strip the trailing
+  ///   `" class"`, resolve the base class, and send `class` to get the
+  ///   metaclass object — matching what BT-2195's class-side method walk
+  ///   reports for an ordinary class-method hit (a metaclass *object*, not
+  ///   a Symbol). This keeps `record at: #class` comparable across
+  ///   class-body and extension hits.
+  ///
+  /// Falls back to the raw tag only when neither lookup succeeds (a tag with
+  /// no registered class behind it — should not happen in practice, but the
+  /// scan must not crash on a stray registry entry).
   ///
   /// Internal helper for the three `collectExtension*` walks. Splits the
   /// lookup out so the surrounding `inject:into:` bodies stay a single
   /// expression each (matches the helper style elsewhere in this file).
   ///
-  /// Return type is intentionally untyped (Dynamic) — the result is either
-  /// a class object or an atom, which has no shared supertype in the
-  /// declared type system.
+  /// Return type is intentionally untyped (Dynamic) — the result is a class
+  /// object, a metaclass object, or (defensively) the raw atom, which have
+  /// no shared supertype in the declared type system.
   resolveExtensionClass: classTag :: Symbol -> Object =>
-    resolved := (Erlang beamtalk_interface) findClass: classTag
-    resolved isNil ifTrue: [classTag] ifFalse: [resolved]
+    tagString := classTag asString
+    (tagString endsWith: " class")
+      ifTrue: [
+        baseName := (tagString take: tagString size - 6) asAtom
+        baseClass := (Erlang beamtalk_interface) findClass: baseName
+        baseClass isNil ifTrue: [classTag] ifFalse: [baseClass class]
+      ]
+      ifFalse: [
+        resolved := (Erlang beamtalk_interface) findClass: classTag
+        resolved isNil ifTrue: [classTag] ifFalse: [resolved]
+      ]
