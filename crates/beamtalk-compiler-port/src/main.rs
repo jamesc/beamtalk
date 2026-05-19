@@ -1327,6 +1327,42 @@ fn handle_find_senders_in_source(request: &Map) -> Term {
     ]))
 }
 
+/// Handle a `find_references_to_in_source` request (BT-2203).
+///
+/// Backs `SystemNavigation referencesTo:` — parses the source of a single
+/// compiled method and reports 1-based line numbers (relative to the input
+/// source) where a `ClassReference` AST node with the given class name
+/// appears.
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+/// - `class_name` (binary): the target class name (without the leading `#`)
+///
+/// Response: `#{status => ok, lines => [Line, ...]}`. Returns an empty list
+/// when no references are found or the source cannot be parsed.
+fn handle_find_references_to_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(class_name) = map_get(request, "class_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_name' field".to_string()]);
+    };
+
+    let lines = beamtalk_core::queries::references_to_query::find_references_to_in_source(
+        &source,
+        &class_name,
+    );
+    let line_terms: Vec<Term> = lines
+        .iter()
+        .map(|&line| int_term(i32::try_from(line).unwrap_or(i32::MAX)))
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("lines"), Term::from(List::from(line_terms))),
+    ]))
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -1347,6 +1383,7 @@ fn handle_request(request_term: &Term) -> Term {
         "version" => handle_version(),
         "resolve_completion_type" => handle_resolve_completion_type(map),
         "find_senders_in_source" => handle_find_senders_in_source(map),
+        "find_references_to_in_source" => handle_find_references_to_in_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }

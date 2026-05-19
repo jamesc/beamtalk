@@ -174,3 +174,118 @@ sealed typed Object subclass: SystemNavigation
         @expect type
         acc add: #{#class => aClass, #selector => methodSel, #line => line}
       ]
+
+  /// Return a collection of references to the given class.
+  ///
+  /// Each result is a Dictionary with three keys:
+  /// - `#class` — the class whose method contains the reference
+  /// - `#selector` — the selector of the method that contains the reference
+  /// - `#line` — the 1-based line number within the method source where
+  ///   the reference appears
+  ///
+  /// A method that mentions `aClass` multiple times produces one record per
+  /// occurrence. Iterates the navigation scope and walks instance-side method
+  /// dictionaries so stdlib and user classes are both covered. Class names
+  /// that appear in type annotations (parameter, return, or generic
+  /// parameters such as `List(Counter)`) are also matched. Matches Pharo's
+  /// `SystemNavigation >> #allReferencesTo:`.
+  ///
+  /// Naive implementation: parses every method's source on every call. Same
+  /// performance envelope as `sendersOf:`. A maintained
+  /// `class -> [sites]` index is a follow-up optimization.
+  ///
+  /// Known limitations (shared with `sendersOf:`, tracked for follow-up):
+  /// - Class-side methods are not scanned. The runtime currently does not
+  ///   retain class-side method source strings.
+  /// - Extension methods (ADR 0066) are not scanned — the registry stores
+  ///   compiled functions, not source.
+  ///
+  /// Argument must be a class object (a `Behaviour`). Passing a Symbol or
+  /// String — the most common mistake, since `sendersOf:` takes a Symbol —
+  /// raises a typed error pointing the caller at the right argument shape.
+  /// Returns an empty collection if no references are found (not an error).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default referencesTo: Integer  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
+  /// SystemNavigation default referencesTo: NeverUsedClass  // => []
+  /// ```
+  referencesTo: aClass :: Behaviour -> List(Dictionary) =>
+    (aClass isKindOf: Symbol)
+      ifTrue: [
+        self error: "SystemNavigation referencesTo: requires a class object, not a Symbol. Pass the class itself (e.g. Counter), not its name as a symbol (e.g. #Counter)."
+      ]
+    (aClass isKindOf: String)
+      ifTrue: [
+        self error: "SystemNavigation referencesTo: requires a class object, not a String. Pass the class itself (e.g. Counter), not its name as a string."
+      ]
+    // Duck-type check: a class object responds to `subclasses` (declared on
+    // Behaviour). `isKindOf: Behaviour` is not the right gate because the
+    // metaclass parallel-hierarchy bottoms out at `Object class`, not at
+    // Behaviour, so `Integer isKindOf: Behaviour` is false at runtime.
+    // `respondsTo:` is the reliable test that admits Class and Metaclass
+    // (and any other Behaviour subclass) while rejecting ordinary values.
+    (aClass respondsTo: #subclasses)
+      ifFalse: [
+        self error: "SystemNavigation referencesTo: requires a class object (an instance of Behaviour)."
+      ]
+    // Resolve the class name once, up front, rather than on every method.
+    // `name` is declared on Class/Metaclass (not Behaviour), so the static
+    // type-checker can't see it through the `Behaviour` annotation even
+    // though the runtime guarantees the receiver responds to it.
+    // Convert to String so Class (returns Symbol) and Metaclass (returns
+    // String) both flow through the same downstream FFI shape.
+    @expect dnu
+    targetName := aClass name asString
+    self allClasses
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectReferencesFor: targetName
+          in: cls
+          into: acc
+      ]
+
+  /// Append references to a class (identified by `targetName`) found in any
+  /// instance method of `aScope` (a class) to `result`. Returns the (possibly
+  /// extended) result list.
+  ///
+  /// Internal helper for `referencesTo:`. Iterates `aScope methods`, fetches
+  /// each method's source via `>>`, and asks the compiler to find matching
+  /// `ClassReference` line numbers. Mirrors `collectSendersFor:in:into:`.
+  ///
+  /// Guards the `>>` send with `respondsTo:` so a class for which `>>`
+  /// is not yet supported (e.g. metaclass-shaped registry entries) is
+  /// silently skipped rather than aborting the whole walk.
+  collectReferencesFor: targetName :: String in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            self
+              appendReferencesIn: method source
+              targetName: targetName
+              owner: aScope
+              methodSelector: methodSel
+              into: acc
+          ]
+      ]
+
+  /// Append one record per matching `ClassReference` found in `methodSource`.
+  ///
+  /// Internal helper for `collectReferencesFor:in:into:`. Splits the
+  /// per-method FFI call out so the surrounding `inject:into:` body stays a
+  /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
+  appendReferencesIn: methodSource :: String targetName: targetName :: String owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+    lines := (Erlang beamtalk_interface) findReferencesToIn: methodSource class: targetName
+    lines
+      inject: result
+      into: [:acc :line |
+        @expect type
+        acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
+      ]

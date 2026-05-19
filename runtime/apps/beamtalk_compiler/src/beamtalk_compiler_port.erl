@@ -21,6 +21,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     compile_expression_trace/4, compile_expression_trace/5,
     resolve_completion_type/3,
     find_senders_in_source/3,
+    find_references_to_in_source/3,
     close/1
 ]).
 
@@ -376,6 +377,78 @@ find_senders_in_source(_Port, _Source, _Selector) ->
         }
     ]}.
 
+-doc """
+Find references to a class within a single method's source (BT-2203).
+
+Sends an ETF-encoded `find_references_to_in_source' request and returns
+`{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each
+line is a 1-based line number relative to `Source'.
+
+Used by `SystemNavigation referencesTo:' via `beamtalk_interface' to power
+System Browser-style "who mentions this class?" navigation. Mirrors
+`find_senders_in_source/3' (BT-2190) but the visitor matches `ClassReference'
+AST nodes (and class names in type annotations) instead of `MessageSend' nodes.
+""".
+-spec find_references_to_in_source(port(), binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_references_to_in_source(Port, Source, ClassName) when
+    is_atom(ClassName) orelse is_binary(ClassName)
+->
+    ClassNameBin =
+        case ClassName of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    Request = #{
+        command => find_references_to_in_source,
+        source => Source,
+        class_name => ClassNameBin
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_references_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (references)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during references query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (references)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (references)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end;
+find_references_to_in_source(_Port, _Source, _ClassName) ->
+    {error, [
+        #{
+            message =>
+                <<"find_references_to_in_source: class name must be an atom or binary">>
+        }
+    ]}.
+
 -doc "Close the compiler port.".
 -spec close(port()) -> true.
 close(Port) ->
@@ -488,6 +561,21 @@ handle_senders_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_senders_response(Other) ->
     ?LOG_ERROR("Unexpected senders response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+-doc """
+Handle ETF response from a find_references_to_in_source request (BT-2203).
+Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
+""".
+-spec handle_references_response(map()) -> {ok, [non_neg_integer()]} | {error, [map()]}.
+handle_references_response(#{status := ok, lines := Lines}) when is_list(Lines) ->
+    {ok, Lines};
+handle_references_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, normalize_diagnostics(Diagnostics)};
+handle_references_response(Other) ->
+    ?LOG_ERROR("Unexpected references response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
