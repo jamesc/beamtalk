@@ -16,14 +16,12 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // sumList: — basic single-variable accumulation
   // =========================================================================
-  testSumListBasic =>
-    self assert: (self.helper sumList: #(1, 2, 3)) equals: 6
+  testSumListBasic => self assert: (self.helper sumList: #(1, 2, 3)) equals: 6
 
   testSumListSingleElement =>
     self assert: (self.helper sumList: #(42)) equals: 42
 
-  testSumListEmptyList =>
-    self assert: (self.helper sumList: #()) equals: 0
+  testSumListEmptyList => self assert: (self.helper sumList: #()) equals: 0
 
   testSumListNegativeNumbers =>
     self assert: (self.helper sumList: #(-1, -2, -3)) equals: -6
@@ -53,7 +51,9 @@ TestCase subclass: DoAccumulatorTest
     ]) equals: 3
 
   testCountMatchingEmptyList =>
-    self assert: (self.helper countMatching: #() predicate: [:x | x > 0]) equals: 0
+    self assert: (self.helper countMatching: #() predicate: [:x |
+      x > 0
+    ]) equals: 0
 
   // =========================================================================
   // findMax: — accumulator initialized from first element, updated via branch
@@ -79,8 +79,7 @@ TestCase subclass: DoAccumulatorTest
   testFindMinBasic =>
     self assert: (self.helper findMin: #(3, 1, 4, 1, 5, 9, 2, 6)) equals: 1
 
-  testFindMinSingleElement =>
-    self assert: (self.helper findMin: #(7)) equals: 7
+  testFindMinSingleElement => self assert: (self.helper findMin: #(7)) equals: 7
 
   testFindMinAlreadySorted =>
     self assert: (self.helper findMin: #(1, 2, 3, 4, 5)) equals: 1
