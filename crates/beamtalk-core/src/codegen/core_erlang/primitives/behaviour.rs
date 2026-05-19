@@ -66,12 +66,7 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
 
     // Parameterized intrinsics
     match selector {
-        "classIncludesSelector"
-        | "classCanUnderstand"
-        | "classWhichIncludesSelector"
-        | "classDocForMethod"
-        | "classSetDoc"
-        | "classConformsTo" => {
+        "classIncludesSelector" | "classDocForMethod" | "classSetDoc" | "classConformsTo" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
         }
