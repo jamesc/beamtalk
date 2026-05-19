@@ -40,6 +40,19 @@ with_temp_file(Name, Contents, Fun) ->
         file:delete(Name)
     end.
 
+%% Returns true when the EUnit process is running as the Unix root user.
+%% Root bypasses POSIX permission bits, so tests that chmod a file to 0o000
+%% (or a directory to 0o555) and expect `permission_denied` would otherwise
+%% spuriously fail. Used by the *_permission_denied_test cases below to
+%% short-circuit when running inside a sandbox / container that runs as root.
+running_as_root() ->
+    case os:type() of
+        {unix, _} ->
+            string:trim(os:cmd("id -u")) =:= "0";
+        _ ->
+            false
+    end.
+
 %%% ============================================================================
 %%% FFI shims
 %%% ============================================================================
@@ -279,8 +292,8 @@ readAll_absolute_path_test() ->
     end.
 
 readAll_permission_denied_test() ->
-    case os:type() of
-        {win32, _} ->
+    case {os:type(), running_as_root()} of
+        {{win32, _}, _} ->
             %% Windows: Use icacls to deny read permissions via ACL
             FileName = "_bt_test_noperm_read.txt",
             ok = file:write_file(FileName, <<"secret">>),
@@ -310,7 +323,7 @@ readAll_permission_denied_test() ->
                 _ = os:cmd(ResetCmd),
                 file:delete(FileName)
             end;
-        _ ->
+        {{unix, _}, false} ->
             %% Unix: Use chmod to remove read permissions
             FileName = "_bt_test_noperm_read.txt",
             ok = file:write_file(FileName, <<"secret">>),
@@ -333,7 +346,10 @@ readAll_permission_denied_test() ->
             after
                 file:change_mode(FileName, 8#644),
                 file:delete(FileName)
-            end
+            end;
+        _ ->
+            %% Running as root: skip (root bypasses POSIX permission bits).
+            ok
     end.
 
 %%% ============================================================================
@@ -410,8 +426,8 @@ writeAll_creates_subdirectory_test() ->
     end.
 
 writeAll_permission_denied_test() ->
-    case os:type() of
-        {win32, _} ->
+    case {os:type(), running_as_root()} of
+        {{win32, _}, _} ->
             %% Windows: Create a file first, then deny write access to it
             FileName = "_bt_test_readonly_file.txt",
             ok = file:write_file(FileName, <<"initial">>),
@@ -443,7 +459,7 @@ writeAll_permission_denied_test() ->
                 _ = os:cmd(ResetCmd),
                 file:delete(FileName)
             end;
-        _ ->
+        {{unix, _}, false} ->
             %% Unix: Use chmod to make directory read-only
             Dir = "_bt_test_readonly_dir",
             FileName = Dir ++ "/test.txt",
@@ -470,7 +486,10 @@ writeAll_permission_denied_test() ->
                 file:change_mode(Dir, 8#755),
                 file:delete(FileName),
                 file:del_dir(Dir)
-            end
+            end;
+        _ ->
+            %% Running as root: skip (root bypasses POSIX permission bits).
+            ok
     end.
 
 %%% ============================================================================
@@ -1461,8 +1480,8 @@ writeAll_overwrite_existing_test() ->
 %%% ============================================================================
 
 readBinary_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             FileName = "_bt_test_noperm_readbin.dat",
             ok = file:write_file(FileName, <<1, 2, 3>>),
             ok = file:change_mode(FileName, 8#000),
@@ -1496,8 +1515,8 @@ readBinary_permission_denied_test() ->
 %%% ============================================================================
 
 writeBinary_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             Dir = "_bt_test_readonly_bindir",
             FileName = Dir ++ "/test.dat",
             ok = filelib:ensure_dir(FileName),
@@ -1533,8 +1552,8 @@ writeBinary_permission_denied_test() ->
 %%% ============================================================================
 
 appendBinary_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             Dir = "_bt_test_readonly_appenddir",
             FileName = Dir ++ "/test.dat",
             ok = filelib:ensure_dir(FileName),
@@ -1572,8 +1591,8 @@ appendBinary_permission_denied_test() ->
 %%% ============================================================================
 
 lines_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             FileName = "_bt_test_noperm_lines.txt",
             ok = file:write_file(FileName, <<"line1\nline2\n">>),
             ok = file:change_mode(FileName, 8#000),
@@ -1607,8 +1626,8 @@ lines_permission_denied_test() ->
 %%% ============================================================================
 
 open_do_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             FileName = "_bt_test_noperm_open.txt",
             ok = file:write_file(FileName, <<"data\n">>),
             ok = file:change_mode(FileName, 8#000),
@@ -1645,8 +1664,8 @@ open_do_permission_denied_test() ->
 %%% ============================================================================
 
 listDirectory_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             Dir = "_bt_eunit_listdir_noperm",
             ok = filelib:ensure_path(Dir),
             ok = file:write_file(Dir ++ "/a.txt", <<"a">>),
@@ -1692,8 +1711,8 @@ listDirectory_includes_subdirectories_test() ->
 %%% ============================================================================
 
 mkdir_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             Dir = "_bt_eunit_mkdir_noperm",
             ok = file:make_dir(Dir),
             ok = file:change_mode(Dir, 8#555),
@@ -1727,8 +1746,8 @@ mkdir_permission_denied_test() ->
 %%% ============================================================================
 
 rename_to_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             Dir = "_bt_eunit_rename_noperm",
             Src = Dir ++ "/src.txt",
             Dst = Dir ++ "/dst.txt",
@@ -1782,8 +1801,8 @@ rename_to_overwrites_destination_test() ->
 %%% ============================================================================
 
 delete_permission_denied_test() ->
-    case os:type() of
-        {unix, _} ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
             Dir = "_bt_eunit_delete_noperm",
             FileName = Dir ++ "/protected.txt",
             ok = filelib:ensure_path(Dir),

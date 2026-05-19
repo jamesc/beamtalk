@@ -2159,6 +2159,20 @@ mod tests {
     use super::*;
     use camino::Utf8PathBuf;
 
+    /// True when the test process is running as Unix root. Root bypasses
+    /// POSIX permission bits, so `chmod 000` fixtures cannot produce the
+    /// expected `permission_denied` errors. Tests that rely on those
+    /// fixtures bail early when this returns true (e.g. CI sandboxes).
+    #[cfg(unix)]
+    fn running_as_root() -> bool {
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .is_some_and(|s| s.trim() == "0")
+    }
+
     // --- run_lint_structured ---
 
     #[test]
@@ -2316,6 +2330,11 @@ mod tests {
     fn run_lint_structured_unreadable_package_file_warns() {
         use std::os::unix::fs::PermissionsExt;
 
+        if running_as_root() {
+            eprintln!("skipped: running as root, chmod 000 doesn't apply");
+            return;
+        }
+
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-lint-unreadable-{}",
             std::process::id()
@@ -2362,6 +2381,11 @@ mod tests {
     fn compute_diagnostic_summary_unreadable_package_file() {
         use std::os::unix::fs::PermissionsExt;
 
+        if running_as_root() {
+            eprintln!("skipped: running as root, chmod 000 doesn't apply");
+            return;
+        }
+
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-summary-unreadable-{}",
             std::process::id()
@@ -2406,6 +2430,11 @@ mod tests {
     fn compute_diagnostic_summary_unreadable_direct_target() {
         use std::os::unix::fs::PermissionsExt;
 
+        if running_as_root() {
+            eprintln!("skipped: running as root, chmod 000 doesn't apply");
+            return;
+        }
+
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-summary-unreadable-target-{}",
             std::process::id()
@@ -2443,6 +2472,11 @@ mod tests {
     #[test]
     fn compute_diagnostic_summary_directory_with_unreadable_target() {
         use std::os::unix::fs::PermissionsExt;
+
+        if running_as_root() {
+            eprintln!("skipped: running as root, chmod 000 doesn't apply");
+            return;
+        }
 
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-summary-dir-unreadable-{}",
@@ -2484,6 +2518,11 @@ mod tests {
     #[test]
     fn run_lint_structured_directory_with_unreadable_target_errors() {
         use std::os::unix::fs::PermissionsExt;
+
+        if running_as_root() {
+            eprintln!("skipped: running as root, chmod 000 doesn't apply");
+            return;
+        }
 
         let dir = std::env::temp_dir().join(format!(
             "beamtalk-mcp-lint-dir-unreadable-{}",
