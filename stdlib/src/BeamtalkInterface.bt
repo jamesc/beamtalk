@@ -96,6 +96,96 @@ sealed typed Object subclass: BeamtalkInterface
     ]) collect: [:c | c class]
     instanceImpls ++ classSideImpls
 
+  /// Return a collection of call sites that send the given selector.
+  ///
+  /// Each result is a Dictionary with three keys:
+  /// - `#class` — the class whose method contains the send
+  /// - `#selector` — the selector of the method that contains the send
+  /// - `#line` — the 1-based line number within the method source where
+  ///   the send appears
+  ///
+  /// A method that sends `aSelector` multiple times produces one record per
+  /// occurrence. Iterates `allClasses` and walks instance-side method
+  /// dictionaries so stdlib and user classes are both covered. Matches
+  /// Pharo's `SystemNavigation >> #allSendersOf:`.
+  ///
+  /// Naive implementation: parses every method's source on every call. Fine
+  /// for an on-demand IDE pane (a few seconds on a 200-class workspace) but
+  /// not for hot live-highlight paths. A maintained `selector -> [sites]`
+  /// index is a follow-up optimization.
+  ///
+  /// Known limitations (tracked for follow-up work):
+  /// - Class-side methods are not scanned. The runtime currently does not
+  ///   retain class-side method source strings (only instance-side sources
+  ///   are kept in `method_source`), and `>>` does not yet accept a
+  ///   metaclass receiver. Closing this gap requires both pieces.
+  /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
+  ///   ETS are not scanned — that registry stores compiled functions, not
+  ///   source. The future-index optimization is the right place to fix
+  ///   both gaps.
+  ///
+  /// Raises an error if the argument is not a Symbol. Returns an empty
+  /// collection if no senders are found (not an error).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
+  /// Beamtalk sendersOf: #neverCalledXyzzy  // => []
+  /// ```
+  sendersOf: aSelector :: Symbol -> List(Dictionary) =>
+    (aSelector isKindOf: Symbol) ifFalse: [
+      self error: "Beamtalk sendersOf: requires a Symbol argument"
+    ]
+    self allClasses
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectSendersFor: aSelector
+          in: cls
+          into: acc
+      ]
+
+  /// Append senders of `aSelector` found in any instance method of `aScope`
+  /// (a class) to `result`. Returns the (possibly extended) result list.
+  ///
+  /// Internal helper for `sendersOf:`. Iterates `aScope methods`, fetches
+  /// each method's source via `>>`, and asks the compiler to find matching
+  /// `MessageSend` line numbers.
+  ///
+  /// Wraps the `>>` lookup in an exception handler so a class for which
+  /// `>>` is not yet supported (e.g. metaclass-shaped registry entries) is
+  /// silently skipped rather than aborting the whole walk.
+  collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := [aScope >> methodSel] on: Error do: [:e | nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            self
+              appendSendersIn: method source
+              selector: aSelector
+              class: aScope
+              methodSelector: methodSel
+              into: acc
+          ]
+      ]
+
+  /// Append one record per matching `MessageSend` found in `methodSource`.
+  ///
+  /// Internal helper for `collectSendersFor:in:into:`. Splits the per-method
+  /// FFI call out so the surrounding `inject:into:` body stays a single
+  /// expression, which keeps the type-inference behaviour predictable.
+  appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+    lines := (Erlang beamtalk_interface) findSendersIn: methodSource selector: aSelector
+    lines
+      inject: result
+      into: [:acc :line |
+        @expect type
+        acc add: #{#class => aClass, #selector => methodSel, #line => line}
+      ]
+
   /// Show class documentation: name, superclass, and method signatures.
   /// Accepts a Class reference, a Symbol class name, or a String class name.
   ///

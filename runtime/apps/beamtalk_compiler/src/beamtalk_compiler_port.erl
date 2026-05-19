@@ -20,6 +20,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     compile_expression/4, compile_expression/5,
     compile_expression_trace/4, compile_expression_trace/5,
     resolve_completion_type/3,
+    find_senders_in_source/3,
     close/1
 ]).
 
@@ -305,6 +306,76 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
             {error, type_unknown}
     end.
 
+-doc """
+Find call sites of a selector in a single method's source (BT-2190).
+
+Sends an ETF-encoded `find_senders_in_source' request and returns
+`{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each
+line is a 1-based line number relative to `Source'.
+
+Used by `Beamtalk sendersOf:' via `beamtalk_interface' to power
+System Browser-style "who calls this method?" navigation.
+""".
+-spec find_senders_in_source(port(), binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_senders_in_source(Port, Source, Selector) when
+    is_atom(Selector) orelse is_binary(Selector)
+->
+    SelectorBin =
+        case Selector of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    Request = #{
+        command => find_senders_in_source,
+        source => Source,
+        selector => SelectorBin
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_senders_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (senders)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during senders query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (senders)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (senders)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end;
+find_senders_in_source(_Port, _Source, _Selector) ->
+    {error, [
+        #{
+            message =>
+                <<"find_senders_in_source: selector must be an atom or binary">>
+        }
+    ]}.
+
 -doc "Close the compiler port.".
 -spec close(port()) -> true.
 close(Port) ->
@@ -405,6 +476,21 @@ handle_resolve_response(#{status := ok, class_name := ClassName}) when is_binary
     end;
 handle_resolve_response(_) ->
     {error, type_unknown}.
+
+-doc """
+Handle ETF response from a find_senders_in_source request (BT-2190).
+Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
+""".
+-spec handle_senders_response(map()) -> {ok, [non_neg_integer()]} | {error, [map()]}.
+handle_senders_response(#{status := ok, lines := Lines}) when is_list(Lines) ->
+    {ok, Lines};
+handle_senders_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, normalize_diagnostics(Diagnostics)};
+handle_senders_response(Other) ->
+    ?LOG_ERROR("Unexpected senders response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
 Normalize a list of diagnostics to a uniform list of maps.

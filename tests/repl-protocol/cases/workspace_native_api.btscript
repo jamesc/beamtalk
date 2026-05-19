@@ -225,3 +225,62 @@ metaChain last
 
 metaChain size
 // => 3
+
+// ===========================================================================
+// BEAMTALK SENDERSOF: — find call sites of a selector
+// (BT-2190)
+// ===========================================================================
+
+// sendersOf: returns a non-empty list for a widely-sent binary selector.
+// Counter (loaded above) sends `+` from `increment`, so `+` must have
+// at least one sender in a workspace that has Counter loaded.
+plusSenders := Beamtalk sendersOf: #+
+// => _
+
+plusSenders isEmpty
+// => false
+
+// Each record is a Dictionary with #class, #selector, #line keys.
+plusRecord := plusSenders first
+// => _
+
+plusRecord includesKey: #class
+// => true
+
+plusRecord includesKey: #selector
+// => true
+
+plusRecord includesKey: #line
+// => true
+
+// Counter >> #increment sends `+` — assert by collecting all class atoms
+// from the senders and checking Counter appears (avoids in-block equality
+// against a class reference, which the multi-line REPL parser does not
+// terminate predictably).
+plusClassList := plusSenders collect: [:r | r at: #class]
+// => _
+
+plusClassList includes: Counter
+// => true
+
+// At least one of those records names the `increment` method.
+plusSelectorList := plusSenders collect: [:r | r at: #selector]
+// => _
+
+plusSelectorList includes: #increment
+// => true
+
+// Line numbers are 1-based positive integers.
+plusLineList := plusSenders collect: [:r | r at: #line]
+// => _
+
+plusLineList allSatisfy: [:n | n > 0]
+// => true
+
+// sendersOf: with a selector that nobody sends returns an empty list.
+Beamtalk sendersOf: #neverCalledByAnybodyXyzzy
+// => []
+
+// Symbol argument is required — passing a String raises a useful error.
+[Beamtalk sendersOf: "+"] on: Error do: [:e | #ok]
+// => ok

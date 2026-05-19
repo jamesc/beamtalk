@@ -43,7 +43,8 @@ dictionary or ETS state is required.
     globals/0,
     help/1, help/2,
     erlangHelp/1, erlangHelp/2,
-    version/0
+    version/0,
+    findSendersIn/2
 ]).
 
 %%% ============================================================================
@@ -182,6 +183,50 @@ version() ->
         {ok, Vsn} -> list_to_binary(Vsn);
         _ -> <<"unknown">>
     end.
+
+-doc """
+Find call sites of a selector within a single method's source (BT-2190).
+
+Backs `Beamtalk sendersOf:`. Delegates to `beamtalk_compiler:find_senders_in_source/2`,
+which parses the source via the OTP-port compiler and walks the AST for
+matching `MessageSend` / `Cascade` nodes.
+
+Called via `(Erlang beamtalk_interface) findSendersIn: source selector: aSelector`.
+The selector argument is normalised to a binary before delegation so that a
+Symbol from Beamtalk and a String both work. Returns a list of 1-based line
+numbers (relative to the supplied source); returns `[]` if no senders are
+found or the source cannot be parsed.
+""".
+-spec findSendersIn(binary(), atom() | binary()) -> [pos_integer()].
+findSendersIn(Source, Selector) when
+    is_binary(Source), (is_atom(Selector) orelse is_binary(Selector))
+->
+    SelectorBin =
+        case Selector of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    case beamtalk_compiler:find_senders_in_source(Source, SelectorBin) of
+        {ok, Lines} ->
+            Lines;
+        {error, _Diagnostics} ->
+            %% Compiler port unavailable — degrade to "no senders found"
+            %% rather than crashing the caller. Iteration in `sendersOf:`
+            %% should not be aborted by a transient port failure on one
+            %% method's source.
+            []
+    end;
+findSendersIn(_Source, _Selector) ->
+    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'findSendersIn:selector:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<
+            "findSendersIn:selector: expects a binary source and an atom or "
+            "binary selector"
+        >>
+    ),
+    beamtalk_error:raise(Err2).
 
 %%% ============================================================================
 %%% Internal method implementations
