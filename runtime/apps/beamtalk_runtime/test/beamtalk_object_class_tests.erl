@@ -2374,3 +2374,57 @@ bt1982_find_inherited_class_method_test_() ->
             end)
         ]
     end}.
+
+%% BT-2195: class_method_source flows from ClassInfo through init/1 into the
+%% per-class state and shows up in the `{class_method, Sel}` CompiledMethod
+%% reply's `__source__` field. Closes the gap that previously hard-coded
+%% `<<"">>` and made SystemNavigation's source-text scanners blind to
+%% class-side bodies.
+bt2195_class_method_source_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
+                Source = <<"helper => self new">>,
+                ClassInfo = #{
+                    name => 'BT2195SrcClass',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{
+                        'helper' => #{arity => 0, block => Method}
+                    },
+                    class_method_source => #{
+                        'helper' => Source
+                    }
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(
+                    'BT2195SrcClass', ClassInfo
+                ),
+                Result = gen_server:call(Pid, {class_method, 'helper'}),
+                ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, Result),
+                ?assertEqual(Source, maps:get('__source__', Result))
+            end),
+            %% Selectors without a source entry fall back to empty binary —
+            %% preserves the pre-BT-2195 default for primitives / dynamic
+            %% methods that have no source.
+            ?_test(begin
+                Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
+                ClassInfo = #{
+                    name => 'BT2195NoSrcClass',
+                    module => test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    class_methods => #{
+                        'helper' => #{arity => 0, block => Method}
+                    }
+                    %% No class_method_source key — exercise the default.
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(
+                    'BT2195NoSrcClass', ClassInfo
+                ),
+                Result = gen_server:call(Pid, {class_method, 'helper'}),
+                ?assertEqual(<<"">>, maps:get('__source__', Result))
+            end)
+        ]
+    end}.

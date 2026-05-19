@@ -42,6 +42,15 @@ Raises beamtalk_error for invalid class references.
     ClassRef :: pid() | atom() | tuple().
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     resolve_with_hierarchy(ClassPid, Selector);
+%% BT-2195: Metaclass receiver — look up class-side methods of the described
+%% class. The 'Metaclass'-tagged beamtalk_object holds the *described* class's
+%% pid in its `pid` field (see beamtalk_behaviour_intrinsics:classClass/1); we
+%% ask that class gen_server for its class methods (which walks the metaclass
+%% parallel hierarchy via find_inherited_class_method/2).
+resolve(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) when
+    is_pid(ClassPid)
+->
+    resolve_class_side(ClassPid, Selector);
 resolve(#beamtalk_object{class = ClassTag, pid = ClassPid} = Obj, Selector) when
     is_atom(ClassTag), is_pid(ClassPid)
 ->
@@ -90,6 +99,19 @@ resolve_with_hierarchy(ClassPid, Selector) ->
         Method ->
             Method
     end.
+
+-doc """
+BT-2195: Resolve a class-side method on the class identified by `ClassPid`.
+
+Delegates to the class gen_server's `{class_method, Selector}` handler which
+returns a `CompiledMethod` map carrying the class-side source / signature /
+doc, or walks the metaclass parallel hierarchy to find an inherited class
+method (via `find_inherited_class_method/2` on the gen_server side). Returns
+`nil` when no class method with the selector is defined in the chain.
+""".
+-spec resolve_class_side(pid(), selector()) -> compiled_method() | 'nil'.
+resolve_class_side(ClassPid, Selector) ->
+    gen_server:call(ClassPid, {class_method, Selector}).
 
 -doc """
 Walk the superclass chain to find an inherited method.

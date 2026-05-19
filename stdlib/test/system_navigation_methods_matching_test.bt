@@ -120,3 +120,24 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
       into: List new
     selectors := results collect: [:r | r at: #selector]
     self assert: (selectors includes: #abs)
+
+  // --- BT-2195: class-side scanning (scoped) ---
+  //
+  // `methodsMatching:` matches in pure Beamtalk (via `String >>
+  // #matchesRegex:`) — no compiler port required — so the metaclass scope
+  // walk is testable directly here. `SystemNavigation class >> #default`
+  // is a class-side method whose body contains the literal `self new`, so
+  // scoping to `SystemNavigation class` and matching `self new` must
+  // include `#default`. Confirms class-side source is preserved end-to-end
+  // (codegen -> class_method_source -> {class_method, _} ->
+  // CompiledMethod.source) and that `collectMethodsMatching:in:into:`
+  // accepts a metaclass scope.
+  testMetaclassScopeMatch =>
+    nav := SystemNavigation default
+    pat := (Regex from: "self new") unwrap
+    results := nav
+      collectMethodsMatching: pat
+      in: SystemNavigation class
+      into: List new
+    selectors := results collect: [:r | r at: #selector]
+    self assert: (selectors includes: #default)

@@ -45,3 +45,26 @@ TestCase subclass: CompiledMethodTest
 
   testAsString =>
     self assert: (Counter >> #getValue) asString equals: "a CompiledMethod(getValue)"
+
+  // BT-2195: `>>` on a metaclass receiver looks up class-side methods.
+  // `SystemNavigation class >> #default` is a defined class-side selector,
+  // so the lookup must return a non-nil CompiledMethod with selector
+  // `#default`. Confirms the resolver routes `class = 'Metaclass'`
+  // receivers through the `{class_method, _}` handler.
+  testMetaclassLookupHit =>
+    cm := SystemNavigation class >> #default
+    self deny: cm isNil
+    self assert: cm selector equals: #default
+
+  // BT-2195: Class-side source is preserved end-to-end and reachable via
+  // `>>` + `source`. The method body of `SystemNavigation class >>
+  // #default` contains the literal `self new`, so `source` must include
+  // it (used by SystemNavigation's source-text scanners).
+  testMetaclassLookupSourceText =>
+    src := (SystemNavigation class >> #default) source
+    self assert: (src includesSubstring: "self new")
+
+  // BT-2195: Metaclass-side `>>` returns nil for an undefined selector,
+  // mirroring the instance-side `Integer >> #nonExistent` contract.
+  testMetaclassLookupMiss =>
+    self assert: (SystemNavigation class >> #neverDefinedMetaclassSelectorXyzzy) equals: nil

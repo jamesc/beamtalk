@@ -285,6 +285,21 @@ SystemNavigation default sendersOf: #neverCalledByAnybodyXyzzy
 [SystemNavigation default sendersOf: "+"] on: Error do: [:e | #ok]
 // => ok
 
+// BT-2195: Class-side method bodies participate. `SystemNavigation class
+// >> #default` is a class-side method that sends `new`, so the senders of
+// `#new` must include a hit whose `#class` is `SystemNavigation class`
+// (the metaclass object), not `SystemNavigation`. Confirms the walker
+// recurses through `cls class` as well as `cls`, and that the metaclass
+// object is what shows up in the record.
+newSenders := SystemNavigation default sendersOf: #new
+// => _
+
+newSenderClasses := newSenders collect: [:r | r at: #class]
+// => _
+
+newSenderClasses includes: SystemNavigation class
+// => true
+
 // ===========================================================================
 // SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
 // ===========================================================================
@@ -326,6 +341,16 @@ intLineList allSatisfy: [:n | n > 0]
 // `Bag class` as a single class-reference token, so this is a stable empty.)
 SystemNavigation default referencesTo: Bag class
 // => []
+
+// BT-2195: Class-side method bodies participate. `SystemNavigation class
+// >> #default` declares return type `-> SystemNavigation` which is a
+// class reference, so the references to `SystemNavigation` must include
+// at least one record whose `#class` is `SystemNavigation class`.
+navRefs := SystemNavigation default referencesTo: SystemNavigation
+// => _
+
+(navRefs collect: [:r | r at: #class]) includes: SystemNavigation class
+// => true
 
 // Class object argument is required — passing a Symbol raises a useful error.
 // This is the most common mistake since `sendersOf:` takes a Symbol.
@@ -386,6 +411,16 @@ SystemNavigation default methodsMatching: (Regex from: absent) unwrap
 // useful error, mirroring sendersOf:'s Symbol-only contract.
 [SystemNavigation default methodsMatching: "ifTrue:"] on: Error do: [:e | #ok]
 // => ok
+
+// BT-2195: Class-side method bodies participate. `SystemNavigation class
+// >> #default` body contains the literal `self new`, so a regex over
+// that literal must include a record whose `#class` is `SystemNavigation
+// class`.
+newSelfMatches := SystemNavigation default methodsMatching: (Regex from: "self new") unwrap
+// => _
+
+(newSelfMatches collect: [:r | r at: #class]) includes: SystemNavigation class
+// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION SELECTORSMATCHING: — fuzzy selector search (BT-2204)

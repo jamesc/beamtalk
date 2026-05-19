@@ -38,3 +38,20 @@ TestCase subclass: SystemNavigationReferencesTest
   // The per-method appender helper exists too.
   testHelperAppendReferencesIsDefined =>
     self assert: (SystemNavigation includesSelector: #appendReferencesIn:targetName:owner:methodSelector:into:)
+
+  // --- BT-2195: class-side scanning ---
+  //
+  // Behavioural assertions (does the metaclass walk produce hits?) live in
+  // the REPL-protocol E2E suite — same reason as `sendersOf:`: the BUnit
+  // harness does not start the compiler-port process, so
+  // `findReferencesToIn:class:` returns `[]` here regardless of input. The
+  // checks below only require the parts that work without the port.
+
+  // The metaclass scope must respond to the iteration primitives the
+  // walker relies on: `methods` returns class-side selectors, and `>>`
+  // returns a CompiledMethod with non-empty source for those selectors.
+  testMetaclassScopePrimitivesPresent =>
+    self assert: ((SystemNavigation class) methods includes: #default)
+    cm := (SystemNavigation class) >> #default
+    self deny: cm isNil
+    self deny: cm source isEmpty
