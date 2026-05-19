@@ -2451,11 +2451,7 @@ impl CoreErlangGenerator {
                     let arg_var = format!("DispArg{i}");
                     let mut access: Document<'static> = Document::Str("Args");
                     for _ in 0..i {
-                        access = docvec![
-                            "call 'erlang':'tl'(",
-                            access,
-                            ")",
-                        ];
+                        access = docvec!["call 'erlang':'tl'(", access, ")",];
                     }
                     method_branches.push(docvec![
                         "            let <",
@@ -2470,10 +2466,7 @@ impl CoreErlangGenerator {
             // Build the call expression: call 'mod':'method'(Self, DispArg0, ...)
             let mut call_args: Vec<Document<'static>> = vec![Document::Str("Self")];
             for i in 0..method.parameters.len() {
-                call_args.push(docvec![
-                    ", DispArg",
-                    Document::String(i.to_string()),
-                ]);
+                call_args.push(docvec![", DispArg", Document::String(i.to_string()),]);
             }
             let call_doc = docvec![
                 "call '",
@@ -2794,29 +2787,17 @@ impl CoreErlangGenerator {
         // Add class-defined methods
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            selectors.push(docvec![
-                "'",
-                Document::String(mangled),
-                "'",
-            ]);
+            selectors.push(docvec!["'", Document::String(mangled), "'",]);
         }
 
         // BT-923: Add auto-generated getter and with*: setter selectors
         if let Some(auto) = auto_methods {
             for field in &auto.getters {
-                selectors.push(docvec![
-                    "'",
-                    Document::String(field.clone()),
-                    "'",
-                ]);
+                selectors.push(docvec!["'", Document::String(field.clone()), "'",]);
             }
             for field in &auto.setters {
                 let with_sel = AutoSlotMethods::with_star_selector(field);
-                selectors.push(docvec![
-                    "'",
-                    Document::String(with_sel),
-                    "'",
-                ]);
+                selectors.push(docvec!["'", Document::String(with_sel), "'",]);
             }
         }
 
