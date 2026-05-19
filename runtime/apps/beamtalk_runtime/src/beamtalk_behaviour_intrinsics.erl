@@ -29,8 +29,6 @@ that the Behaviour/Class libraries can rely on.
 | classLocalMethods/1         | Local method dictionary from class gen_server state       |
 | classMethods/1              | Combined local + inherited methods via superclass chain   |
 | classIncludesSelector/2     | Membership check in local method dictionary               |
-| classCanUnderstand/2        | Selector lookup against full method dictionary (classMethods/1) |
-| classWhichIncludesSelector/2| First class in hierarchy whose local methods include selector |
 | classFieldNames/1           | Field names from class gen_server state                   |
 | classAllFieldNames/1        | Combined field names via superclass chain                 |
 | className/1                 | Class name from class gen_server state                    |
@@ -57,9 +55,7 @@ that the Behaviour/Class libraries can rely on.
     classLocalMethods/1,
     classMethods/1,
     classIncludesSelector/2,
-    classCanUnderstand/2,
     classCanUnderstandFromName/2,
-    classWhichIncludesSelector/2,
     classFieldNames/1,
     classAllFieldNames/1,
     className/1,
@@ -276,29 +272,12 @@ classMethods(Self) ->
     ),
     ordsets:to_list(Acc).
 
--doc "Test whether instances understand the selector (full inheritance chain).".
--spec classCanUnderstand(#beamtalk_object{}, atom()) -> boolean().
-classCanUnderstand(Self, Selector) ->
-    ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
-    walk_hierarchy(
-        ClassName,
-        fun(_CN, CPid, _Acc) ->
-            case beamtalk_object_class:has_method(CPid, Selector) of
-                true -> {halt, true};
-                false -> {cont, false}
-            end
-        end,
-        false
-    ).
-
 -doc """
 Test whether the class named ClassName has instances that understand Selector.
 
 ADR 0032 Phase 3: Canonical single-source hierarchy walk used by
 beamtalk_dispatch:responds_to/2. Takes ClassName directly (not a class object)
-to avoid the extra gen_server:call that classCanUnderstand/2 needs to re-fetch
-the class name from the pid.
+to avoid an extra gen_server:call needed to re-fetch the class name from a pid.
 """.
 -spec classCanUnderstandFromName(atom(), atom()) -> boolean().
 classCanUnderstandFromName(ClassName, Selector) ->
@@ -311,28 +290,6 @@ classCanUnderstandFromName(ClassName, Selector) ->
             end
         end,
         false
-    ).
-
--doc """
-Walk the hierarchy and return the class object that defines the selector, or nil.
-""".
--spec classWhichIncludesSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{} | 'nil'.
-classWhichIncludesSelector(Self, Selector) ->
-    ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
-    walk_hierarchy(
-        ClassName,
-        fun(CN, CPid, _Acc) ->
-            case beamtalk_object_class:has_method(CPid, Selector) of
-                true ->
-                    Module = gen_server:call(CPid, module_name),
-                    Tag = beamtalk_class_registry:class_object_tag(CN),
-                    {halt, #beamtalk_object{class = Tag, class_mod = Module, pid = CPid}};
-                false ->
-                    {cont, nil}
-            end
-        end,
-        nil
     ).
 
 -doc """
@@ -365,7 +322,8 @@ classAllFieldNames(Self) ->
 Test whether the selector is defined locally in this class.
 
 Does NOT check superclasses — local containment only.
-Full chain walk for canUnderstand: is implemented via classCanUnderstand.
+Full chain walk for `canUnderstand:` is implemented in pure Beamtalk
+(`Behaviour>>canUnderstand:`) on top of `classMethods/1`.
 
 BT-1635: When called on a metaclass object, checks class methods instead
 of instance methods.

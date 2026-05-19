@@ -11,8 +11,8 @@ EUnit tests for beamtalk_behaviour_intrinsics module (BT-1088, BT-1959).
 Tests intrinsic functions for class reflection: metaclassNew, classClass,
 className, classLocalMethods, classFieldNames, classIncludesSelector,
 classDoc, classSetDoc, classSetMethodDoc, classSubclasses, classAllSubclasses,
-classMethods (including inheritance and deduplication), classCanUnderstand
-(including inherited selectors), classWhichIncludesSelector (inherited),
+classMethods (including inheritance and deduplication),
+classCanUnderstandFromName (including inherited selectors),
 classAllFieldNames (inherited),
 classRemoveFromSystem, classRemoveFromSystemByName, metaclass primitives
 (thisClass, classMethods, localClassMethods, includesSelector, allMethods).
@@ -805,55 +805,6 @@ class_methods_includes_local_test_() ->
     end}.
 
 %%% ============================================================================
-%%% classCanUnderstand/2
-%%% ============================================================================
-
-class_can_understand_true_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1792BiCanUnderstand',
-                    #{},
-                    #{'quux' => MethodFun}
-                ),
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classCanUnderstand(ClassObj, 'quux')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_can_understand_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiCanUnderstandNo', #{}, #{}),
-                try
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classCanUnderstand(ClassObj, 'nope')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
 %%% classCanUnderstandFromName/2
 %%% ============================================================================
 
@@ -913,61 +864,6 @@ class_can_understand_from_name_unregistered_test() ->
             'BT1792NoSuchClass', 'anything'
         )
     ).
-
-%%% ============================================================================
-%%% classWhichIncludesSelector/2
-%%% ============================================================================
-
-class_which_includes_selector_found_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1792BiWhichInclSel',
-                    #{},
-                    #{'findMe' => MethodFun}
-                ),
-                try
-                    Result = beamtalk_behaviour_intrinsics:classWhichIncludesSelector(
-                        ClassObj, 'findMe'
-                    ),
-                    ?assertMatch(#beamtalk_object{}, Result),
-                    ?assertEqual(
-                        'BT1792BiWhichInclSel',
-                        beamtalk_behaviour_intrinsics:className(Result)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_which_includes_selector_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiWhichInclNil', #{}, #{}),
-                try
-                    Result = beamtalk_behaviour_intrinsics:classWhichIncludesSelector(
-                        ClassObj, 'noSuchMethod'
-                    ),
-                    ?assertEqual(nil, Result)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
 
 %%% ============================================================================
 %%% classAllFieldNames/1
@@ -1432,46 +1328,6 @@ class_methods_metaclass_receiver_test_() ->
         ]
     end}.
 
-%%% --- classCanUnderstand/2 — inherited selectors ---
-
-class_can_understand_inherited_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ParentObj, ParentPid} = register_class(
-                    'BT1959CanUndParent',
-                    #{},
-                    #{'inherited' => MethodFun}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959CanUndChild', 'BT1959CanUndParent', #{}, #{}
-                ),
-                try
-                    %% Child can understand parent's method via inheritance
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classCanUnderstand(ChildObj, 'inherited')
-                    ),
-                    %% But not a nonexistent method
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classCanUnderstand(ChildObj, 'bogus')
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
 %%% --- classCanUnderstandFromName/2 — inherited selectors ---
 
 class_can_understand_from_name_inherited_test_() ->
@@ -1492,46 +1348,6 @@ class_can_understand_from_name_inherited_test_() ->
                         beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
                             'BT1959CanUndNameChild', 'fromParent'
                         )
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classWhichIncludesSelector/2 — found in parent ---
-
-class_which_includes_selector_in_parent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ParentObj, ParentPid} = register_class(
-                    'BT1959WhichInclParent',
-                    #{},
-                    #{'parentOnly' => MethodFun}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959WhichInclChild', 'BT1959WhichInclParent', #{}, #{}
-                ),
-                try
-                    Result = beamtalk_behaviour_intrinsics:classWhichIncludesSelector(
-                        ChildObj, 'parentOnly'
-                    ),
-                    ?assertMatch(#beamtalk_object{}, Result),
-                    ?assertEqual(
-                        'BT1959WhichInclParent',
-                        beamtalk_behaviour_intrinsics:className(Result)
                     )
                 after
                     (try
