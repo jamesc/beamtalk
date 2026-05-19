@@ -70,8 +70,6 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         | "classCanUnderstand"
         | "classWhichIncludesSelector"
         | "classDocForMethod"
-        | "classInheritsFrom"
-        | "classIncludesBehaviour"
         | "classSetDoc"
         | "classConformsTo" => {
             let arg = params.first()?;

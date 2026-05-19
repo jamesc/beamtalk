@@ -94,18 +94,16 @@ abstract Object subclass: Behaviour
   /// Counter class superclassChain  // => [Counter class, Actor class, Object class]
   /// ```
   sealed superclassChain -> List(Behaviour) =>
-    // Walk via `superclass`, which is polymorphic: dispatches to
-    // metaclassSuperclass for metaclass receivers (parallel hierarchy)
-    // and classSuperclass for regular classes. Terminate at Object,
-    // or `Object class` for metaclass receivers.
+    // BT-2194: allSuperclasses is now metaclass-aware (walks the parallel
+    // hierarchy for metaclass receivers), so we can build the chain
+    // directly: self at the head, then the superclass chain up to
+    // (and including) the terminator (Object, or `Object class` for
+    // metaclass receivers).
     terminator := self isMeta ifTrue: [Object class] ifFalse: [Object]
-    result := List new
-    current := self
-    [current isNil not and: [(result includes: terminator) not]]
-      whileTrue: [
-        result := result add: current
-        current := current superclass
-      ]
+    result := (List new) add: self
+    self allSuperclasses do: [:c |
+      (result includes: terminator) ifFalse: [result := result add: c]
+    ]
     result
 
   /// Test whether the receiver strictly inherits from aClass (self not included).

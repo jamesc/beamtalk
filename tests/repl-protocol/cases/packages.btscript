@@ -147,8 +147,11 @@ intPkg name
 // ===========================================================================
 
 // stdlib@Integer used as receiver in a message send
+// BT-2194: false because Integer is an instance of `Integer class` (a Metaclass),
+// whose parallel chain is [Number class, Object class, ProtoObject class]
+// — Number itself is not in that chain.
 stdlib@Integer isKindOf: Number
-// => true
+// => false
 
 // stdlib@Array is a class reference
 (stdlib@Array new) class
