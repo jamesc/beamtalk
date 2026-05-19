@@ -692,14 +692,14 @@ impl CoreErlangGenerator {
         Ok(docvec![
             function_head,
             "\n",
-            format!(
-                "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in\n"
-            ),
-            format!(
-                "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '{selector}') in\n"
-            ),
+            "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
+            Document::String(class_name.to_string()),
+            "') in\n",
+            "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
+            Document::String(selector.to_string()),
+            "') in\n",
             "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-            hint_binary,
+            Document::String(hint_binary),
             ") in\n",
             "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
@@ -2602,12 +2602,10 @@ impl CoreErlangGenerator {
             "            end\n",
             // --- printString ---
             "        <'printString'> when 'true' ->\n",
-            format!(
-                "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n"
-            ),
-            format!(
-                "            let <PsStr4> = call 'erlang':'iolist_to_binary'([{a_space_binary}|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n"
-            ),
+            "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n",
+            "            let <PsStr4> = call 'erlang':'iolist_to_binary'([",
+            Document::String(a_space_binary),
+            "|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n",
             "            {'reply', PsStr4, State}\n",
             // --- perform: ---
             "        <'perform:'> when 'true' ->\n",
@@ -2645,7 +2643,9 @@ impl CoreErlangGenerator {
             "            end\n",
             // --- Default: delegate to dispatch/3 ---
             "        <_OtherSel4> when 'true' ->\n",
-            format!("            try call '{mod_name}':'dispatch'(Selector, Args, Self)\n"),
+            "            try call '",
+            Document::String(mod_name.to_string()),
+            "':'dispatch'(Selector, Args, Self)\n",
             "            of <D4Result> -> {'reply', D4Result, State}\n",
             "            catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
             "    end\n",
@@ -2659,7 +2659,9 @@ impl CoreErlangGenerator {
     /// dispatch service.
     fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
         docvec![
-            format!("    try call '{mod_name}':'dispatch'(Selector, Args, Self)\n"),
+            "    try call '",
+            Document::String(mod_name.to_string()),
+            "':'dispatch'(Selector, Args, Self)\n",
             "    of <D4Result> -> {'reply', D4Result, State}\n",
             "    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
         ]
@@ -2676,17 +2678,21 @@ impl CoreErlangGenerator {
         let hint = Self::core_erlang_binary(&format!(
             "Expected {expected_arity} argument(s) for {selector}"
         ));
+        let indent_doc = || Document::String(indent.to_string());
+        let selector_doc = || Document::String(selector.to_string());
         docvec![
-            format!(
-                "{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"
-            ),
-            format!(
-                "{indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n"
-            ),
-            format!(
-                "{indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n"
-            ),
-            format!("{indent}{{'error', ArErr2, State}}"),
+            indent_doc(),
+            "let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
+            indent_doc(),
+            "let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, ",
+            selector_doc(),
+            ") in\n",
+            indent_doc(),
+            "let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, ",
+            Document::String(hint),
+            ") in\n",
+            indent_doc(),
+            "{'error', ArErr2, State}",
         ]
     }
 
@@ -2699,17 +2705,21 @@ impl CoreErlangGenerator {
         indent: &str,
     ) -> Document<'static> {
         let hint = Self::core_erlang_binary(hint_msg);
+        let indent_doc = || Document::String(indent.to_string());
+        let selector_doc = || Document::String(selector.to_string());
         docvec![
-            format!(
-                "{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"
-            ),
-            format!(
-                "{indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n"
-            ),
-            format!(
-                "{indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n"
-            ),
-            format!("{indent}{{'error', TyErr2, State}}"),
+            indent_doc(),
+            "let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
+            indent_doc(),
+            "let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, ",
+            selector_doc(),
+            ") in\n",
+            indent_doc(),
+            "let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, ",
+            Document::String(hint),
+            ") in\n",
+            indent_doc(),
+            "{'error', TyErr2, State}",
         ]
     }
 
@@ -2756,14 +2766,14 @@ impl CoreErlangGenerator {
         }
 
         // Build list of all known selectors
-        let mut selectors: Vec<String> = vec![
-            "'class'".to_string(),
-            "'respondsTo:'".to_string(),
-            "'fieldNames'".to_string(),
-            "'fieldAt:'".to_string(),
-            "'fieldAt:put:'".to_string(),
-            "'perform:'".to_string(),
-            "'perform:withArguments:'".to_string(),
+        let mut selectors: Vec<Document<'static>> = vec![
+            Document::Str("'class'"),
+            Document::Str("'respondsTo:'"),
+            Document::Str("'fieldNames'"),
+            Document::Str("'fieldAt:'"),
+            Document::Str("'fieldAt:put:'"),
+            Document::Str("'perform:'"),
+            Document::Str("'perform:withArguments:'"),
         ];
 
         // Include default asString if dispatch/3 generates one
@@ -2777,43 +2787,58 @@ impl CoreErlangGenerator {
                 "True" | "False" | "UndefinedObject" | "Block"
             )
         {
-            selectors.push("'asString'".to_string());
+            selectors.push(Document::Str("'asString'"));
         }
 
         // Add class-defined methods
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            selectors.push(format!("'{mangled}'"));
+            selectors.push(docvec![
+                "'",
+                Document::String(mangled),
+                "'",
+            ]);
         }
 
         // BT-923: Add auto-generated getter and with*: setter selectors
         if let Some(auto) = auto_methods {
             for field in &auto.getters {
-                selectors.push(format!("'{field}'"));
+                selectors.push(docvec![
+                    "'",
+                    Document::String(field.clone()),
+                    "'",
+                ]);
             }
             for field in &auto.setters {
                 let with_sel = AutoSlotMethods::with_star_selector(field);
-                selectors.push(format!("'{with_sel}'"));
+                selectors.push(docvec![
+                    "'",
+                    Document::String(with_sel),
+                    "'",
+                ]);
             }
         }
 
         let false_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
-            Document::String(format!(
-                "<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n"
-            ))
+            docvec![
+                "<'false'> when 'true' -> call '",
+                Document::String(super_mod.clone()),
+                "':'has_method'(Selector)\n",
+            ]
         } else {
             Document::Str("<'false'> when 'true' -> 'false'\n")
         };
 
-        let selectors_list = selectors.join(", ");
         let doc = docvec![
             "'has_method'/1 = fun (Selector) ->\n",
-            format!("    case call 'lists':'member'(Selector, [{selectors_list}]) of\n"),
+            "    case call 'lists':'member'(Selector, [",
+            join(selectors, &Document::Str(", ")),
+            "]) of\n",
             "        <'true'> when 'true' -> 'true'\n",
             "        <'false'> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'has'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'has'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <'true'> when 'true' -> 'true'\n",
             "                ",
             false_branch,
@@ -2845,33 +2870,41 @@ impl CoreErlangGenerator {
             "    case Selector of\n",
             // class
             "        <'class'> when 'true' ->\n",
-            format!("            '{class_name}'\n"),
+            "            '",
+            Document::String(class_name.clone()),
+            "'\n",
             // respondsTo:
             "        <'respondsTo:'> when 'true' ->\n",
             "            case Args of\n",
-            format!(
-                "                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"
-            ),
+            "                <[RtSelector | _]> when 'true' -> call '",
+            Document::Eco(mod_name.clone()),
+            "':'has_method'(RtSelector)\n",
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
             // perform:
             "        <'perform:'> when 'true' ->\n",
             "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
-            format!("            call '{mod_name}':'dispatch'(PerfSel, [], Self)\n"),
+            "            call '",
+            Document::Eco(mod_name.clone()),
+            "':'dispatch'(PerfSel, [], Self)\n",
             // perform:withArguments:
             "        <'perform:withArguments:'> when 'true' ->\n",
             "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
             "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
-            format!("            call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)\n"),
+            "            call '",
+            Document::Eco(mod_name),
+            "':'dispatch'(PwaSel, PwaArgs, Self)\n",
             // Default: extension check, then superclass delegation
             "        <_Other> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'lookup'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
             "                    apply ExtFun(Args, Self)\n",
             "                <'not_found'> when 'true' ->\n",
-            format!("                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"),
+            "                    call '",
+            Document::String(super_mod),
+            "':'dispatch'(Selector, Args, Self)\n",
             "            end\n",
             "    end\n",
             "\n",
@@ -2899,13 +2932,13 @@ impl CoreErlangGenerator {
             "    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'perform:', 'perform:withArguments:']) of\n",
             "        <'true'> when 'true' -> 'true'\n",
             "        <'false'> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'has'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'has'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <'true'> when 'true' -> 'true'\n",
-            format!(
-                "                <'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n"
-            ),
+            "                <'false'> when 'true' -> call '",
+            Document::String(super_mod),
+            "':'has_method'(Selector)\n",
             "            end\n",
             "    end\n",
             "\n",
