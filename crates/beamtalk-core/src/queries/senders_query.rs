@@ -5,7 +5,8 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `Beamtalk sendersOf:` (BT-2190). Given the source text of a single
+//! Backs `SystemNavigation sendersOf:` (BT-2190, moved to `SystemNavigation`
+//! in BT-2214). Given the source text of a single
 //! compiled method (as returned by `CompiledMethod source`) and a target
 //! selector name, returns the 1-based line numbers, relative to the method
 //! source, at which a `MessageSend` or `Cascade` message with that selector

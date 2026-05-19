@@ -166,12 +166,12 @@ wsGlobals includesKey: #Counter
 // => true
 
 // ===========================================================================
-// BEAMTALK IMPLEMENTORSOF: — find classes that locally define a selector
-// (BT-2189)
+// SYSTEMNAVIGATION IMPLEMENTORSOF: — find classes that locally define a selector
+// (BT-2214; originally added on Beamtalk in BT-2189, moved here in BT-2214)
 // ===========================================================================
 
 // implementorsOf: returns a non-empty list for a widely-implemented selector
-asStringImpls := Beamtalk implementorsOf: #asString
+asStringImpls := SystemNavigation default implementorsOf: #asString
 // => _
 
 asStringImpls isEmpty
@@ -189,16 +189,16 @@ asStringImpls includes: Float
 
 // User-loaded classes show up in results when they implement the selector.
 // Counter (loaded above) locally defines #increment.
-(Beamtalk implementorsOf: #increment) includes: Counter
+(SystemNavigation default implementorsOf: #increment) includes: Counter
 // => true
 
 // Selectors with no implementors return an empty list
-Beamtalk implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
+SystemNavigation default implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
 // => []
 
 // implementorsOf: does NOT walk inheritance — #class is defined on
 // ProtoObject; Integer inherits it but is not an implementor.
-classImpls := Beamtalk implementorsOf: #class
+classImpls := SystemNavigation default implementorsOf: #class
 // => _
 
 classImpls includes: Integer
@@ -206,7 +206,7 @@ classImpls includes: Integer
 
 // implementorsOf: also finds class-side implementors as metaclass objects.
 // `Bag` defines `class withAll:` — that hit appears as `Bag class`.
-withAllImpls := Beamtalk implementorsOf: #withAll:
+withAllImpls := SystemNavigation default implementorsOf: #withAll:
 // => _
 
 withAllImpls includes: Bag class
@@ -227,14 +227,14 @@ metaChain size
 // => 3
 
 // ===========================================================================
-// BEAMTALK SENDERSOF: — find call sites of a selector
-// (BT-2190)
+// SYSTEMNAVIGATION SENDERSOF: — find call sites of a selector
+// (BT-2214; originally added on Beamtalk in BT-2190, moved here in BT-2214)
 // ===========================================================================
 
 // sendersOf: returns a non-empty list for a widely-sent binary selector.
 // Counter (loaded above) sends `+` from `increment`, so `+` must have
 // at least one sender in a workspace that has Counter loaded.
-plusSenders := Beamtalk sendersOf: #+
+plusSenders := SystemNavigation default sendersOf: #+
 // => _
 
 plusSenders isEmpty
@@ -278,9 +278,9 @@ plusLineList allSatisfy: [:n | n > 0]
 // => true
 
 // sendersOf: with a selector that nobody sends returns an empty list.
-Beamtalk sendersOf: #neverCalledByAnybodyXyzzy
+SystemNavigation default sendersOf: #neverCalledByAnybodyXyzzy
 // => []
 
 // Symbol argument is required — passing a String raises a useful error.
-[Beamtalk sendersOf: "+"] on: Error do: [:e | #ok]
+[SystemNavigation default sendersOf: "+"] on: Error do: [:e | #ok]
 // => ok

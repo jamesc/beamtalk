@@ -175,7 +175,7 @@ resolve_completion_type(Expression) ->
 -doc """
 Find call sites of a selector in a single method's source (BT-2190).
 
-Backs `Beamtalk sendersOf:' — parses the method source and returns a list
+Backs `SystemNavigation sendersOf:' — parses the method source and returns a list
 of 1-based line numbers (relative to `Source') where the selector appears
 as a `MessageSend' or `Cascade'. Returns `{ok, []}' if no senders are
 found; returns `{error, Diagnostics}' if the compiler port is unavailable.

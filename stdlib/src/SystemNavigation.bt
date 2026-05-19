@@ -1,0 +1,176 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SystemNavigation — Class-registry navigation queries ("who implements X",
+/// "where is X used").
+///
+/// Home for System Browser-style navigation queries that previously lived
+/// on `Beamtalk` (BT-2189 / BT-2190). Matches the Pharo/Squeak/Cuis
+/// convention: callers reach an instance via a constructor and dispatch
+/// queries against it.
+///
+/// `SystemNavigation default` returns a navigation rooted at the full
+/// loaded class registry. Future constructors (BT-2201) — e.g.
+/// `SystemNavigation over: aPackage`, `SystemNavigation forClasses: aList`
+/// — will hand back instances scoped to a narrower set, reusing the same
+/// query protocol.
+///
+/// All query logic lives on instance methods. The class side is just a
+/// constructor surface. This is deliberate: routing the iteration through
+/// a class gen_server would self-deadlock when the walk reaches
+/// `SystemNavigation` itself. Instance methods on a sealed Object value
+/// type run as plain Erlang in the calling eval worker.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemNavigation default implementorsOf: #asString
+/// SystemNavigation default sendersOf: #+
+/// ```
+sealed typed Object subclass: SystemNavigation
+
+  /// Return a navigation query rooted at the default scope (all loaded
+  /// classes in the workspace's class registry).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default implementorsOf: #asString
+  /// ```
+  class default -> SystemNavigation =>
+    // `new` is implicit on sealed Object subclasses (handled by the
+    // runtime's class instantiation path) but isn't surfaced through the
+    // compile-time class hierarchy, so suppress the dnu check.
+    @expect dnu
+    self new
+
+  /// Snapshot of the class registry visible to this navigation query.
+  ///
+  /// Currently always returns the full registry. Future scoped instances
+  /// (BT-2201) will override this to filter by package or explicit class
+  /// list. Wrapping the FFI in a typed instance method lets downstream
+  /// block parameters infer `Class` / `Behaviour` instead of `Dynamic`.
+  allClasses -> List(Behaviour) => (Erlang beamtalk_interface) allClasses
+
+  /// Return all classes that locally define the given selector.
+  ///
+  /// Searches both instance-side and class-side definitions:
+  /// instance-side hits appear as class objects (e.g. `Integer`),
+  /// class-side hits appear as metaclass objects (e.g. `Counter class`).
+  /// A class that defines the selector on both sides appears twice — once
+  /// as the class and once as the metaclass.
+  ///
+  /// Does NOT walk inherited methods — only classes with their own
+  /// definition of the selector are returned. Iterates the navigation
+  /// scope so stdlib and user classes are both in the search set.
+  ///
+  /// Matches Pharo's `SystemNavigation >> #allImplementorsOf:`.
+  ///
+  /// Raises an error if the argument is not a Symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default implementorsOf: #asString    // => [Integer, Float, String, ...]
+  /// SystemNavigation default implementorsOf: #new         // => [..., Counter class, ...]
+  /// SystemNavigation default implementorsOf: #nonExistent // => []
+  /// ```
+  implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
+    (aSelector isKindOf: Symbol) ifFalse: [
+      self error: "SystemNavigation implementorsOf: requires a Symbol argument"
+    ]
+    classes := self allClasses
+    instanceImpls := classes select: [:c | c includesSelector: aSelector]
+    classSideImpls := (classes select: [:c |
+      c class includesSelector: aSelector
+    ]) collect: [:c | c class]
+    instanceImpls ++ classSideImpls
+
+  /// Return a collection of call sites that send the given selector.
+  ///
+  /// Each result is a Dictionary with three keys:
+  /// - `#class` — the class whose method contains the send
+  /// - `#selector` — the selector of the method that contains the send
+  /// - `#line` — the 1-based line number within the method source where
+  ///   the send appears
+  ///
+  /// A method that sends `aSelector` multiple times produces one record per
+  /// occurrence. Iterates the navigation scope and walks instance-side
+  /// method dictionaries so stdlib and user classes are both covered.
+  /// Matches Pharo's `SystemNavigation >> #allSendersOf:`.
+  ///
+  /// Naive implementation: parses every method's source on every call. Fine
+  /// for an on-demand IDE pane (a few seconds on a 200-class workspace) but
+  /// not for hot live-highlight paths. A maintained `selector -> [sites]`
+  /// index is a follow-up optimization.
+  ///
+  /// Known limitations (tracked for follow-up work):
+  /// - Class-side methods are not scanned. The runtime currently does not
+  ///   retain class-side method source strings (only instance-side sources
+  ///   are kept in `method_source`), and `>>` does not yet accept a
+  ///   metaclass receiver. Closing this gap requires both pieces.
+  /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
+  ///   ETS are not scanned — that registry stores compiled functions, not
+  ///   source. The future-index optimization is the right place to fix
+  ///   both gaps.
+  ///
+  /// Raises an error if the argument is not a Symbol. Returns an empty
+  /// collection if no senders are found (not an error).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
+  /// SystemNavigation default sendersOf: #neverCalledXyzzy  // => []
+  /// ```
+  sendersOf: aSelector :: Symbol -> List(Dictionary) =>
+    (aSelector isKindOf: Symbol) ifFalse: [
+      self error: "SystemNavigation sendersOf: requires a Symbol argument"
+    ]
+    self allClasses
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectSendersFor: aSelector
+          in: cls
+          into: acc
+      ]
+
+  /// Append senders of `aSelector` found in any instance method of `aScope`
+  /// (a class) to `result`. Returns the (possibly extended) result list.
+  ///
+  /// Internal helper for `sendersOf:`. Iterates `aScope methods`, fetches
+  /// each method's source via `>>`, and asks the compiler to find matching
+  /// `MessageSend` line numbers.
+  ///
+  /// Guards the `>>` send with `respondsTo:` so a class for which `>>`
+  /// is not yet supported (e.g. metaclass-shaped registry entries) is
+  /// silently skipped rather than aborting the whole walk.
+  collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            self
+              appendSendersIn: method source
+              selector: aSelector
+              class: aScope
+              methodSelector: methodSel
+              into: acc
+          ]
+      ]
+
+  /// Append one record per matching `MessageSend` found in `methodSource`.
+  ///
+  /// Internal helper for `collectSendersFor:in:into:`. Splits the per-method
+  /// FFI call out so the surrounding `inject:into:` body stays a single
+  /// expression, which keeps the type-inference behaviour predictable.
+  appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+    lines := (Erlang beamtalk_interface) findSendersIn: methodSource selector: aSelector
+    lines
+      inject: result
+      into: [:acc :line |
+        @expect type
+        acc add: #{#class => aClass, #selector => methodSel, #line => line}
+      ]

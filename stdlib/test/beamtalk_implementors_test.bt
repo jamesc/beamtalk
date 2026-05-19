@@ -1,39 +1,36 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-2189: BUnit-level coverage for Beamtalk `implementorsOf:` — finds all
-// classes that directly define a given selector. Backs System Browser-style
+// BT-2214: BUnit-level coverage for `SystemNavigation implementorsOf:` — finds
+// all classes that directly define a given selector. Backs System Browser-style
 // navigation ("who else has this method?").
 //
-// Like `beamtalk_interface_test.bt`, this suite is limited to class-level
-// introspection because the workspace singleton `Beamtalk` is not
-// bootstrapped in the BUnit test context, and `BeamtalkInterface` is a
-// `sealed typed Object subclass:` which cannot be instantiated.
+// `implementorsOf:` is an instance method on `SystemNavigation`, reached via
+// the `default` (or future scoped) constructor. The class-side surface is
+// constructors only — query logic stays on the instance so the iteration
+// runs as plain Erlang in the caller and avoids the class-gen_server
+// self-deadlock that hits when a class method walks the registry and the
+// walk reaches its own class.
 //
-// `implementorsOf:` is instance-only on the workspace singleton facade,
-// matching Pharo's `SystemNavigation default allImplementorsOf:` shape.
-// (Historical note: a class-side form was originally blocked by a
-// self-deadlock when the iteration hit BeamtalkInterface itself —
-// `c includesSelector:` would gen_server:call back into the running
-// class gen_server. The BT-2189 __beamtalk_meta/0 fast path on
-// classIncludesSelector/2 defused that concern for compiled stdlib
-// classes, so the choice is now conventional rather than technical.)
-//
-// Behavioural tests for `implementorsOf:` (happy path, multi-implementor,
-// no-implementor, stdlib participation) live in the E2E REPL-protocol suite
-// at tests/repl-protocol/cases/workspace_native_api.btscript, which runs
-// in workspace_mode and has the live `Beamtalk` singleton available.
+// Behavioural tests (happy path, multi-implementor, no-implementor, stdlib
+// participation) live in the E2E REPL-protocol suite at
+// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
+// workspace_mode and has the live class registry populated with user classes.
 
-TestCase subclass: BeamtalkImplementorsTest
+TestCase subclass: SystemNavigationImplementorsTest
 
   // --- selector existence ---
   testIncludesSelectorImplementorsOf =>
-    self assert: (BeamtalkInterface includesSelector: #implementorsOf:)
+    self assert: (SystemNavigation includesSelector: #implementorsOf:)
+
+  testIncludesSelectorDefault =>
+    self assert: (SystemNavigation class includesSelector: #default)
 
   // --- composition primitives must be in place ---
 
-  // The implementation calls self allClasses then filters by
-  // includesSelector:. Both primitives have to be present.
+  // The implementation iterates the navigation scope (via `allClasses`)
+  // and filters by includesSelector:. That primitive has to be present on
+  // Behaviour.
   testCompositionPrimitivesPresent =>
-    self assert: (BeamtalkInterface includesSelector: #allClasses)
+    self assert: (SystemNavigation includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #includesSelector:)

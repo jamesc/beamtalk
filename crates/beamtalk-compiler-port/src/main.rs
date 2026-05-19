@@ -1297,7 +1297,7 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
 
 /// Handle a `find_senders_in_source` request (BT-2190).
 ///
-/// Backs `Beamtalk sendersOf:` — parses the source of a single compiled method
+/// Backs `SystemNavigation sendersOf:` — parses the source of a single compiled method
 /// and reports 1-based line numbers (relative to the input source) where a
 /// `MessageSend` or `Cascade` with the given selector appears.
 ///
