@@ -193,3 +193,59 @@ format_frame_file_no_line_test() ->
     Frame = (make_test_frame())#{line => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
     ?assertEqual(<<"Integer>>+/2 (src/beamtalk_integer.erl)">>, Result).
+
+%%% ===================================================================
+%%% module_to_class/1 tests
+%%%
+%%% These tests directly exercise the three pattern-match branches in
+%%% module_to_class/1 (bt@ prefix, beamtalk_ prefix, fallback) and the
+%%% non-atom guard clause. No OTP application or registry process is
+%%% required because:
+%%%   - bt@ and beamtalk_ paths return snake_to_class directly, no registry.
+%%%   - The fallback nil-return path exits before the registry call.
+%%%   - erlang:whereis/1 returns undefined safely when no process is registered.
+%%% ===================================================================
+
+%% bt@ prefix, single-segment: 'bt@counter' → 'Counter'
+%% 'Counter' atom is in the table via tagged_map_tests.
+module_to_class_bt_prefix_single_word_test() ->
+    ?assertEqual('Counter', beamtalk_stack_frame:module_to_class('bt@counter')).
+
+%% bt@ prefix, multi-segment stdlib: 'bt@stdlib@integer' → 'Integer'
+%% The last '@'-separated segment determines the class name.
+module_to_class_bt_prefix_stdlib_test() ->
+    ?assertEqual('Integer', beamtalk_stack_frame:module_to_class('bt@stdlib@integer')).
+
+%% bt@ prefix, alt stdlib format: 'bt@integer' → 'Integer'
+module_to_class_bt_prefix_alt_format_test() ->
+    ?assertEqual('Integer', beamtalk_stack_frame:module_to_class('bt@integer')).
+
+%% beamtalk_ prefix, single word: 'beamtalk_integer' → 'Integer'
+module_to_class_beamtalk_prefix_single_word_test() ->
+    ?assertEqual('Integer', beamtalk_stack_frame:module_to_class('beamtalk_integer')).
+
+%% beamtalk_ prefix, multi-word: 'beamtalk_stack_frame' → 'StackFrame'
+%% Exercises snake_to_class multi-word capitalization.
+%% 'StackFrame' atom is already in the table from make_test_frame/0 above.
+module_to_class_beamtalk_prefix_multi_word_test() ->
+    ?assertEqual('StackFrame', beamtalk_stack_frame:module_to_class('beamtalk_stack_frame')).
+
+%% beamtalk_ prefix, unknown atom: capitalized form not in atom table → nil
+%% Exercises the snake_to_class badarg catch (line 134 of source).
+module_to_class_beamtalk_prefix_unknown_atom_test() ->
+    ?assertEqual(nil, beamtalk_stack_frame:module_to_class('beamtalk_xyzzy_q123_unique_abc')).
+
+%% Fallback (_) case, snake_to_class → nil: no registry call, returns nil
+%% Capitalized 'XyzzyQ123UniqueModuleDef' is not in the atom table.
+module_to_class_plain_unknown_module_test() ->
+    ?assertEqual(nil, beamtalk_stack_frame:module_to_class('xyzzy_q123_unique_module_def')).
+
+%% Fallback (_) case, class in atom table but not registered → nil
+%% 'Counter' resolves via snake_to_class; erlang:whereis returns undefined.
+module_to_class_plain_known_atom_not_registered_test() ->
+    ?assertEqual(nil, beamtalk_stack_frame:module_to_class('counter')).
+
+%% Non-atom input: guard clause returns nil without touching ModStr (line 119).
+module_to_class_non_atom_test() ->
+    ?assertEqual(nil, beamtalk_stack_frame:module_to_class(42)),
+    ?assertEqual(nil, beamtalk_stack_frame:module_to_class(<<"counter">>)).
