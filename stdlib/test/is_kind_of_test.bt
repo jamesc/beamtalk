@@ -30,3 +30,65 @@ TestCase subclass: IsKindOfTest
   testTrueIsKindOfBoolean => self assert: (true isKindOf: Boolean)
 
   testFalseIsKindOfBoolean => self assert: (false isKindOf: Boolean)
+
+  // --- BT-2194: class-object receivers walk the parallel metaclass chain ---
+
+  // Class is an instance of its metaclass — NOT of its instance-side superclass.
+  // Integer is an instance of `Integer class`, whose parallel chain is
+  // [Number class, Object class, ProtoObject class] — Number is not in it.
+  testClassNotKindOfInstanceSuperclass =>
+    self deny: (Integer isKindOf: Number)
+    self deny: (Counter isKindOf: Actor)
+
+  // Beamtalk's metaclass tower truncates at `ProtoObject class` (ADR 0036
+  // divergence from Pharo). `Integer isKindOf: Object` is false; the
+  // instance-side query is the right form for that question.
+  testClassNotKindOfObject =>
+    self deny: (Integer isKindOf: Object)
+    self deny: (Counter isKindOf: Object)
+
+  // A class IS a kind of the metaclass of its superclass.
+  testClassIsKindOfSuperclassMetaclass =>
+    self assert: (Integer isKindOf: Number class)
+    self assert: (Counter isKindOf: Actor class)
+
+  // --- BT-2194: inheritsFrom: / includesBehaviour: on metaclass receivers ---
+
+  // `Counter class` is a metaclass. Its parallel chain walks through
+  // [Actor class, Object class, ProtoObject class].
+  testMetaclassInheritsFromParentMetaclass =>
+    self assert: (Counter class inheritsFrom: Actor class)
+    self assert: (Counter class inheritsFrom: Object class)
+    self deny: (Counter class inheritsFrom: Counter class)
+
+  // A metaclass does NOT inherit from the instance-side classes.
+  testMetaclassDoesNotInheritFromInstanceClass =>
+    self deny: (Counter class inheritsFrom: Counter)
+    self deny: (Counter class inheritsFrom: Actor)
+    self deny: (Counter class inheritsFrom: Object)
+
+  testMetaclassIncludesBehaviourMetaclass =>
+    self assert: (Counter class includesBehaviour: Counter class)
+    self assert: (Counter class includesBehaviour: Actor class)
+    self assert: (Counter class includesBehaviour: Object class)
+    self deny: (Counter class includesBehaviour: Integer class)
+
+  // --- BT-2194: allSuperclasses returns metaclass objects for metaclass receivers ---
+  testMetaclassAllSuperclassesReturnsParallelChain =>
+    chain := Counter class allSuperclasses
+    self assert: chain size equals: 3
+    self assert: chain first == Actor class
+    self assert: chain last == ProtoObject class
+    self assert: (chain includes: Actor class)
+    self assert: (chain includes: Object class)
+    self assert: (chain includes: ProtoObject class)
+    // Instance-side classes are NOT in the parallel chain.
+    self deny: (chain includes: Counter)
+    self deny: (chain includes: Actor)
+    self deny: (chain includes: Object)
+
+  testObjectClassAllSuperclassesTruncated =>
+    // `Object class` parallel chain is just `[ProtoObject class]` — truncated.
+    chain := Object class allSuperclasses
+    self assert: chain size equals: 1
+    self assert: chain first equals: ProtoObject class

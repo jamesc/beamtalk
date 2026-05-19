@@ -197,15 +197,29 @@ classLocalMethods(Self) ->
 -doc """
 Return all superclasses of the receiver in order (immediate parent to root).
 
-Note (BT-2189): For metaclass receivers this currently walks the underlying
-class pid and returns regular class objects (the parallel metaclass hierarchy
-is not modelled here, by design — fixing it would change the semantics of
-`inheritsFrom:`/`isKindOf:` on class objects). The Beamtalk-level
-`superclassChain` handles the metaclass case directly by walking via
-`superclass`, which dispatches through `metaclassSuperclass` for metaclass
-receivers.
+BT-2194: For metaclass receivers (objects tagged `'Metaclass'`) walks the
+*parallel* metaclass hierarchy, returning metaclass objects. For
+`Counter class` this yields `[Actor class, Object class, ProtoObject class]`.
+The parallel chain truncates at the metaclass of the root class — it does
+NOT merge into `Class`/`Behaviour`/`Object` as Smalltalk does. Consequence:
+`Integer isKindOf: Object` is `false` on a class-object receiver. The
+corresponding instance-side query (`42 isKindOf: Object`) still returns `true`.
 """.
 -spec classAllSuperclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
+classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
+    %% BT-2194: Metaclass receiver — walk the parallel metaclass hierarchy.
+    SuperName = gen_server:call(ClassPid, superclass),
+    Supers = walk_hierarchy(
+        SuperName,
+        fun(_CN, CPid, Acc) ->
+            MetaObj = #beamtalk_object{
+                class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = CPid
+            },
+            {cont, [MetaObj | Acc]}
+        end,
+        []
+    ),
+    lists:reverse(Supers);
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     SuperName = gen_server:call(ClassPid, superclass),
