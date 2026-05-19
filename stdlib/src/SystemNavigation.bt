@@ -27,7 +27,7 @@ sealed typed Object subclass: SystemNavigation
   classState: current :: SystemNavigation | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> SystemNavigation => self.current
+  class current -> SystemNavigation | Nil => self.current
 
   /// Set the current singleton instance.
   class current: instance :: SystemNavigation -> SystemNavigation =>
@@ -130,14 +130,16 @@ sealed typed Object subclass: SystemNavigation
   /// each method's source via `>>`, and asks the compiler to find matching
   /// `MessageSend` line numbers.
   ///
-  /// Wraps the `>>` lookup in an exception handler so a class for which
-  /// `>>` is not yet supported (e.g. metaclass-shaped registry entries) is
+  /// Guards the `>>` send with `respondsTo:` so a class for which `>>`
+  /// is not yet supported (e.g. metaclass-shaped registry entries) is
   /// silently skipped rather than aborting the whole walk.
   collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
-        method := [aScope >> methodSel] on: Error do: [:e | nil]
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
         method isNil
           ifTrue: [acc]
           ifFalse: [
