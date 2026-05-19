@@ -386,3 +386,78 @@ SystemNavigation default methodsMatching: (Regex from: absent) unwrap
 // useful error, mirroring sendersOf:'s Symbol-only contract.
 [SystemNavigation default methodsMatching: "ifTrue:"] on: Error do: [:e | #ok]
 // => ok
+
+// ===========================================================================
+// SYSTEMNAVIGATION SELECTORSMATCHING: — fuzzy selector search (BT-2204)
+// ===========================================================================
+
+// Substring match across the stdlib — `append` hits selectors like
+// `#appendBinary:contents:` on File. Result is non-empty.
+appendHits := SystemNavigation default selectorsMatching: "append"
+// => _
+
+appendHits isEmpty
+// => false
+
+// Every hit's printable name actually contains the substring "append"
+// (case-insensitive, so a lowercase test of each hit hits the lowercase needle).
+appendHits allSatisfy: [:s | s asString lowercase includesSubstring: "append"]
+// => true
+
+// Case-insensitive: an uppercase pattern returns the same hits as lowercase.
+upperHits := SystemNavigation default selectorsMatching: "APPEND"
+// => _
+
+upperHits size == appendHits size
+// => true
+
+// Result is sorted alphabetically — sorting again does not change anything.
+appendHits asString == (appendHits sort) asString
+// => true
+
+// Result is deduplicated — `unique` does not shrink the list further.
+appendHits size == (appendHits unique) size
+// => true
+
+// `#=` is defined on many classes but appears once in the deduped result.
+equalsHits := SystemNavigation default selectorsMatching: "="
+// => _
+
+equalsHits size == (equalsHits unique) size
+// => true
+
+// Counter (loaded above) locally defines `increment` — that selector shows up
+// in a substring search for "incr".
+(SystemNavigation default selectorsMatching: "incr") includes: #increment
+// => true
+
+// Class-side selectors participate. `default` is a class-side method on
+// SystemNavigation, so it appears in a search for "default".
+(SystemNavigation default selectorsMatching: "default") includes: #default
+// => true
+
+// Extension methods (ADR 0066) participate. Register a uniquely-named
+// extension and verify the selector shows up; clean up the ETS entry after.
+extFun := [:a :s | s]
+// => _
+
+Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoFourExtMarker fun: extFun owner: #test
+// => _
+
+(SystemNavigation default selectorsMatching: "btTwoTwoFourExtMarker") includes: #btTwoTwoFourExtMarker
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoFourExtMarker)
+// => _
+
+// No-match returns an empty list.
+SystemNavigation default selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
+// => []
+
+// Empty pattern is rejected with a typed error.
+[SystemNavigation default selectorsMatching: ""] on: Error do: [:e | #ok]
+// => ok
+
+// Non-String argument is rejected with a typed error.
+[SystemNavigation default selectorsMatching: #notAString] on: Error do: [:e | #ok]
+// => ok

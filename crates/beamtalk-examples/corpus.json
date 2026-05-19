@@ -23264,6 +23264,32 @@
       "explanation": "BT-2203: BUnit-level coverage for `SystemNavigation referencesTo:` — finds all sites where a class is mentioned across the loaded class registry. Backs System Browser-style navigation (\"who mentions this class?\").  `referencesTo:` is an instance method on `SystemNavigation`, reached via the `default` (or future scoped) constructor. Mirrors the structure of `beamtalk_senders_test.bt`: the behavioural happy-path / multi-site / stdlib-included / no-references / type-check cases live in the E2E REPL-protocol suite which has the live class registry populated with user classes. These BUnit checks cover selector existence, composition primitives, and helper-defined assertions that don't need a populated workspace."
     },
     {
+      "id": "stdlib-test-system-navigation-selectors-matching-test",
+      "title": "SystemNavigationSelectorsMatchingTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SystemNavigationSelectorsMatchingTest",
+        "TestCase",
+        "async",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "object",
+        "process",
+        "subclassing",
+        "system_navigation_selectors_matching_test",
+        "testCompositionPrimitivesPresent",
+        "testHelperExtensionSelectorsForIsDefined",
+        "testHelperSelectorsForClassIsDefined",
+        "testIncludesSelectorSelectorsMatching"
+      ],
+      "source": "// BT-2204: BUnit-level coverage for `SystemNavigation selectorsMatching:` —\n// fuzzy selector search across the loaded class registry. Powers omni-bar /\n// Cmd-T \"find any selector\" surfaces in an IDE.\n//\n// `selectorsMatching:` is an instance method on `SystemNavigation`, reached\n// via the `default` (or future scoped) constructor. See the note in\n// `beamtalk_implementors_test.bt` for why the class side is constructors\n// only and queries live on the instance.\n//\n// Behavioural tests (case-insensitive substring match, class-side\n// participation, extension-method participation, dedup, sort, empty-pattern\n// rejection, no-match returns []) live in the E2E REPL-protocol suite at\n// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in\n// workspace_mode and has the live class registry populated with user\n// classes.\n\nTestCase subclass: SystemNavigationSelectorsMatchingTest\n\n  // --- selector existence ---\n  testIncludesSelectorSelectorsMatching =>\n    self assert: (SystemNavigation includesSelector: #selectorsMatching:)\n\n  // --- composition primitives must be in place ---\n\n  // The implementation iterates the navigation scope (via `allClasses`),\n  // collects each class's instance-side `methods`, class-side `class\n  // methods`, and the extension registry, then filters by lowercase\n  // substring. All of those primitives have to be present.\n  testCompositionPrimitivesPresent =>\n    self assert: (SystemNavigation includesSelector: #allClasses)\n    self assert: (Behaviour includesSelector: #methods)\n    self assert: (String includesSelector: #lowercase)\n    self assert: (String includesSelector: #includesSubstring:)\n    self assert: (String includesSelector: #isEmpty)\n    self assert: (Symbol includesSelector: #asString)\n    self assert: (List includesSelector: #unique)\n    self assert: (List includesSelector: #sort)\n\n  // The internal helpers `selectorsForClass:` and `extensionSelectorsFor:`\n  // factor out per-class iteration so they can be unit-checked separately.\n  testHelperSelectorsForClassIsDefined =>\n    self assert: (SystemNavigation includesSelector: #selectorsForClass:)\n\n  testHelperExtensionSelectorsForIsDefined =>\n    self assert: (SystemNavigation includesSelector: #extensionSelectorsFor:)",
+      "explanation": "BT-2204: BUnit-level coverage for `SystemNavigation selectorsMatching:` — fuzzy selector search across the loaded class registry. Powers omni-bar / Cmd-T \"find any selector\" surfaces in an IDE.  `selectorsMatching:` is an instance method on `SystemNavigation`, reached via the `default` (or future scoped) constructor. See the note in `beamtalk_implementors_test.bt` for why the class side is constructors only and queries live on the instance.  Behavioural tests (case-insensitive substring match, class-side participation, extension-method participation, dedup, sort, empty-pattern rejection, no-match returns []) live in the E2E REPL-protocol suite at tests/repl-protocol/cases/workspace_native_api.btscript, which runs in workspace_mode and has the live class registry populated with user classes."
+    },
+    {
       "id": "stdlib-test-system-test",
       "title": "SystemTest",
       "category": "stdlib-tests",
