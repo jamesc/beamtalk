@@ -12,6 +12,7 @@
 - Fix namespace collision diagnostic when hot-reloading a `Protocol define:` file on a second surface (e.g., MCP after REPL) — the compiler's class cache now filters pre-loaded protocol entries before hierarchy injection, and `register_module` accepts protocol re-registration when the existing class has superclass `Protocol` (BT-2088).
 - Fix `conformsTo:` returning `true` for unknown or non-protocol names — now correctly returns `false` when the protocol name is not registered (BT-2136).
 - Fix telemetry handler attachment race in `beamtalk_trace_store` — declare `telemetry` and `telemetry_poller` as OTP application dependencies so handler attachment is deterministic (BT-2116).
+- Fix `isKindOf:` / `inheritsFrom:` / `includesBehaviour:` returning semantically incorrect results on class-object receivers — `Integer isKindOf: Number` now correctly returns `false` (Integer is an instance of `Integer class`, whose parallel metaclass chain does not include `Number`). `classAllSuperclasses` now walks the parallel metaclass hierarchy for metaclass-tagged receivers. Beamtalk's metaclass tower truncates at `ProtoObject class` (does not merge into Class/Behaviour/Object as Pharo does), so `Integer isKindOf: Object` is `false`; use the instance-side query (`42 isKindOf: Object`) for that question (BT-2194).
 
 ### Tooling
 

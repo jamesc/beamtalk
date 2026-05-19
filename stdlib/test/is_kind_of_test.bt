@@ -91,4 +91,4 @@ TestCase subclass: IsKindOfTest
     // `Object class` parallel chain is just `[ProtoObject class]` — truncated.
     chain := Object class allSuperclasses
     self assert: chain size equals: 1
-    self assert: chain first equals: ProtoObject class
+    self assert: chain first == ProtoObject class
