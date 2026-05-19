@@ -55,3 +55,13 @@ TestCase subclass: SystemNavigationReferencesTest
     cm := (SystemNavigation class) >> #default
     self deny: cm isNil
     self deny: cm source isEmpty
+
+  // --- BT-2196: extension method scanning ---
+
+  // The extension-scan helper is present (the `referencesTo:` body
+  // delegates to it after the class-side walk). Behavioural coverage of
+  // the extension-source path lives in the E2E REPL-protocol suite — the
+  // compiler port needed to parse extension source bodies is not running
+  // under BUnit.
+  testHelperCollectExtensionReferencesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionReferencesFor:into:)

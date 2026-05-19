@@ -387,4 +387,15 @@ mod tests {
         // Send appears on line 2 of the input source.
         assert_eq!(lines, vec![2]);
     }
+
+    // BT-2196: scanning extension method source (registered via
+    // `beamtalk_extensions:register/5`) should produce hits the same way
+    // class-body methods do. This is the canonical shape passed by
+    // `SystemNavigation collectExtensionSendersFor:into:` when iterating
+    // the extension sources table.
+    #[test]
+    fn finds_send_in_extension_style_source() {
+        let lines = find_senders_in_source("describe => self asString", "asString");
+        assert_eq!(lines, vec![1]);
+    }
 }

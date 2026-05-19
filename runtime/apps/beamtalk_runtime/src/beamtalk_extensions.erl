@@ -27,6 +27,14 @@ Table: `beamtalk_extensions`
 - Key: `{Class, Selector}`
 - Value: `{{Class, Selector}, Fun, Owner}`
 
+Sources table: `beamtalk_extension_sources` (BT-2196)
+- Type: set (unique keys)
+- Key: `{Class, Selector}`
+- Value: `{{Class, Selector}, Source}` where Source is the method body text
+- Populated only by `register/5`. Enables source-text navigation queries
+  (`SystemNavigation sendersOf:`, `referencesTo:`, `methodsMatching:`) to
+  scan extension methods.
+
 Conflicts table: `beamtalk_extension_conflicts`
 - Type: bag (multiple values per key)
 - Key: `{Class, Selector}`
@@ -63,8 +71,11 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
 -export([
     init/0,
     register/4,
+    register/5,
     lookup/2,
     list/1,
+    listAllWithSource/0,
+    getSource/2,
     conflicts/0,
     has/2
 ]).
@@ -72,6 +83,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
 -include_lib("kernel/include/logger.hrl").
 
 -define(EXTENSIONS_TABLE, beamtalk_extensions).
+-define(SOURCES_TABLE, beamtalk_extension_sources).
 -define(CONFLICTS_TABLE, beamtalk_extension_conflicts).
 
 %%% ============================================================================
@@ -81,8 +93,10 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
 -doc """
 Initialize the extension registry ETS tables.
 
-Creates two tables:
+Creates three tables:
 - beamtalk_extensions: Current method registrations
+- beamtalk_extension_sources: Method body source text (BT-2196) — populated
+  only by `register/5` so source-text navigation queries can scan extensions.
 - beamtalk_extension_conflicts: History of conflicting registrations
 
 This should be called once during application startup.
@@ -93,6 +107,15 @@ init() ->
     case ets:info(?EXTENSIONS_TABLE) of
         undefined ->
             ets:new(?EXTENSIONS_TABLE, [set, public, named_table, {read_concurrency, true}]);
+        _ ->
+            % Already exists
+            ok
+    end,
+
+    %% Create sources table (BT-2196)
+    case ets:info(?SOURCES_TABLE) of
+        undefined ->
+            ets:new(?SOURCES_TABLE, [set, public, named_table, {read_concurrency, true}]);
         _ ->
             % Already exists
             ok
@@ -130,11 +153,31 @@ register('String', 'json', JsonFun, mylib).
 ```
 """.
 -spec register(atom(), atom(), function(), atom()) -> ok.
-register(Class, Selector, Fun, Owner) when
+register(Class, Selector, Fun, Owner) ->
+    register(Class, Selector, Fun, Owner, undefined).
+
+-doc """
+Register an extension method on a class, with the method body source text.
+
+Same as `register/4` but also stores `Source` (a binary holding the method's
+body text) in the extension sources table. Powers source-text navigation
+queries (`SystemNavigation sendersOf:`, `referencesTo:`, `methodsMatching:`)
+that need to scan extension methods (BT-2196).
+
+`Source` may be `undefined` to register without source (equivalent to
+`register/4`); pass a binary to enable scanning.
+
+Parameters:
+- Class, Selector, Fun, Owner — as for `register/4`.
+- Source — `binary()` method body, or `undefined` to skip source tracking.
+""".
+-spec register(atom(), atom(), function(), atom(), binary() | undefined) -> ok.
+register(Class, Selector, Fun, Owner, Source) when
     is_atom(Class),
     is_atom(Selector),
     is_function(Fun),
-    is_atom(Owner)
+    is_atom(Owner),
+    (Source =:= undefined orelse is_binary(Source))
 ->
     Key = {Class, Selector},
 
@@ -143,10 +186,12 @@ register(Class, Selector, Fun, Owner) when
         [] ->
             %% New registration
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+            maybe_store_source(Key, Source),
             ok;
         [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
             %% Same owner updating - no conflict
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+            maybe_store_source(Key, Source),
             ok;
         [{Key, _OldFun, OldOwner}] ->
             %% Conflict: different owner
@@ -163,6 +208,7 @@ register(Class, Selector, Fun, Owner) when
 
             %% Overwrite (last-writer-wins)
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+            maybe_store_source(Key, Source),
             ok
     end.
 
@@ -241,6 +287,57 @@ has(Class, Selector) when is_atom(Class), is_atom(Selector) ->
     Key = {Class, Selector},
     ets:member(?EXTENSIONS_TABLE, Key).
 
+-doc """
+Return the registered source body for an extension, if `register/5`
+was used to register it (BT-2196).
+
+Returns `{ok, Source}` when a source was stored, or `not_found` when no
+source is recorded (either the extension does not exist, or it was
+registered via `register/4` without source).
+""".
+-spec getSource(atom(), atom()) -> {ok, binary()} | not_found.
+getSource(Class, Selector) when is_atom(Class), is_atom(Selector) ->
+    Key = {Class, Selector},
+    try
+        case ets:lookup(?SOURCES_TABLE, Key) of
+            [{Key, Source}] -> {ok, Source};
+            [] -> not_found
+        end
+    catch
+        error:badarg ->
+            %% Sources table not initialised yet (early bootstrap).
+            %% Mirrors `listAllWithSource/0` — preserve the `not_found`
+            %% contract rather than letting the missing-table error escape.
+            not_found
+    end.
+
+-doc """
+Return all extension entries that have an associated source body (BT-2196).
+
+Powers source-text navigation queries on `SystemNavigation` that need to
+scan extension methods. Extensions registered via `register/4` (without
+source) are deliberately excluded — there is nothing to scan, and
+returning them would force every caller to filter.
+
+Each tuple is `{Class, Selector, Source}` where Source is the binary
+method body text. Returns `[]` when no extensions have stored source.
+""".
+-spec listAllWithSource() -> [{atom(), atom(), binary()}].
+listAllWithSource() ->
+    try
+        ets:foldl(
+            fun({{Class, Selector}, Source}, Acc) ->
+                [{Class, Selector, Source} | Acc]
+            end,
+            [],
+            ?SOURCES_TABLE
+        )
+    catch
+        error:badarg ->
+            %% Sources table not initialised yet (early bootstrap).
+            []
+    end.
+
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
@@ -257,3 +354,27 @@ group_conflicts(Conflicts) ->
         Conflicts
     ),
     maps:to_list(Dict).
+
+-doc """
+Store source body in the sources table iff a source binary was supplied.
+
+`undefined` means the caller used the legacy `register/4` path (or
+explicitly passed `undefined` to `register/5`) and has no source body
+to share. In that case we **delete** any previously stored source for
+the same `{Class, Selector}` rather than no-op'ing: an extension that
+was re-registered without source must not keep its old body around in
+the sources table, or `listAllWithSource/0` would surface stale text
+attributed to a now-sourceless registration.
+
+Deletion is a silent no-op if no row exists (ETS semantics), so the
+common "first registration via `register/4`" path stays cheap.
+""".
+-spec maybe_store_source({atom(), atom()}, binary() | undefined) -> ok.
+maybe_store_source(Key, undefined) ->
+    %% Drop any stale source body from a prior register/5 — keep the
+    %% sources table in sync with the (now sourceless) dispatch entry.
+    ets:delete(?SOURCES_TABLE, Key),
+    ok;
+maybe_store_source(Key, Source) when is_binary(Source) ->
+    ets:insert(?SOURCES_TABLE, {Key, Source}),
+    ok.

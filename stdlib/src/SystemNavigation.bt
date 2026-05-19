@@ -103,11 +103,11 @@ sealed typed Object subclass: SystemNavigation
   /// not for hot live-highlight paths. A maintained `selector -> [sites]`
   /// index is a follow-up optimization.
   ///
-  /// Known limitations (tracked for follow-up work):
-  /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
-  ///   ETS are not scanned — that registry stores compiled functions, not
-  ///   source. The future-index optimization is the right place to fix
-  ///   this gap.
+  /// Extension methods (ADR 0066) are scanned when registered with source via
+  /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
+  /// extension hit is the extended target class (or the metaclass atom for
+  /// `Target class` extensions); `register/4` registrations without source
+  /// remain invisible to the source-text scan.
   ///
   /// Raises an error if the argument is not a Symbol. Returns an empty
   /// collection if no senders are found (not an error).
@@ -121,7 +121,7 @@ sealed typed Object subclass: SystemNavigation
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "SystemNavigation sendersOf: requires a Symbol argument"
     ]
-    self allClasses
+    classScan := self allClasses
       inject: List new
       into: [:acc :cls |
         // BT-2195: Walk both instance side (`cls`) and class side
@@ -138,6 +138,8 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
+    // BT-2196: walk source-bearing extensions registered via `register/5`.
+    self collectExtensionSendersFor: aSelector into: classScan
 
   /// Append senders of `aSelector` found in any instance method of `aScope`
   /// (a class) to `result`. Returns the (possibly extended) result list.
@@ -204,9 +206,11 @@ sealed typed Object subclass: SystemNavigation
   /// performance envelope as `sendersOf:`. A maintained
   /// `class -> [sites]` index is a follow-up optimization.
   ///
-  /// Known limitations (shared with `sendersOf:`, tracked for follow-up):
-  /// - Extension methods (ADR 0066) are not scanned — the registry stores
-  ///   compiled functions, not source.
+  /// Extension methods (ADR 0066) are scanned when registered with source via
+  /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
+  /// extension hit is the extended target class (or the metaclass atom for
+  /// `Target class` extensions); `register/4` registrations without source
+  /// remain invisible.
   ///
   /// Argument must be a class object (a `Behaviour`). Passing a Symbol or
   /// String — the most common mistake, since `sendersOf:` takes a Symbol —
@@ -253,7 +257,7 @@ sealed typed Object subclass: SystemNavigation
     // even though the runtime guard above guarantees the receiver responds.
     @expect dnu
     targetName := aClass name asString
-    self allClasses
+    classScan := self allClasses
       inject: List new
       into: [:acc :cls |
         // BT-2195: Walk both instance side (`cls`) and class side
@@ -270,6 +274,8 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
+    // BT-2196: walk source-bearing extensions registered via `register/5`.
+    self collectExtensionReferencesFor: targetName into: classScan
 
   /// Append references to a class (identified by `targetName`) found in any
   /// instance method of `aScope` (a class) to `result`. Returns the (possibly
@@ -343,10 +349,11 @@ sealed typed Object subclass: SystemNavigation
   /// for hot live-highlight paths. A maintained index is a follow-up
   /// optimisation (see ADR 0033 / BT-2201).
   ///
-  /// Known limitations (mirror `sendersOf:` — same iteration shell):
-  /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
-  ///   ETS are not scanned — that registry stores compiled functions, not
-  ///   source. Closing this gap requires the future-index optimisation.
+  /// Extension methods (ADR 0066) are scanned when registered with source via
+  /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
+  /// extension hit is the extended target class (or the metaclass atom for
+  /// `Target class` extensions); `register/4` registrations without source
+  /// remain invisible.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -361,7 +368,7 @@ sealed typed Object subclass: SystemNavigation
     (aRegex isKindOf: Regex) ifFalse: [
       self error: "SystemNavigation methodsMatching: requires a Regex argument"
     ]
-    self allClasses
+    classScan := self allClasses
       inject: List new
       into: [:acc :cls |
         // BT-2195: Walk both instance side (`cls`) and class side
@@ -377,6 +384,8 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
+    // BT-2196: walk source-bearing extensions registered via `register/5`.
+    self collectExtensionMethodsMatching: aRegex into: classScan
 
   /// Append `{class, selector}` records for methods of `aScope` whose source
   /// matches `aRegex` to `result`. Returns the (possibly extended) result.
@@ -493,3 +502,114 @@ sealed typed Object subclass: SystemNavigation
         @expect type
         entry at: 1
       ]
+
+  /// Append senders of `aSelector` found in every extension method source
+  /// (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended) result.
+  ///
+  /// Iterates the extension sources table — populated by
+  /// `beamtalk_extensions:register/5` — and runs the same per-method scan as
+  /// `collectSendersFor:in:into:` on each registered body. Extensions
+  /// registered via `register/4` (without source) are silently absent from
+  /// the source table and therefore from the scan; that is the documented
+  /// behaviour (see `sendersOf:` docstring).
+  ///
+  /// Each match emits a Dictionary `#{#class => Class, #selector => Selector,
+  /// #line => Line}` shaped identically to the class-side scan, so callers
+  /// cannot distinguish a hit on an extension from a hit on a class-body
+  /// method. The `#class` value is resolved from the extension's registry
+  /// tag via `resolveExtensionClass:` — a real class object when the tag
+  /// is a known instance-side class name (e.g. `#Integer`), or the raw
+  /// atom (e.g. `#'String class'`) when no class lookup succeeds (e.g. for
+  /// metaclass-tagged class-side extensions).
+  collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        @expect type
+        extClassTag := entry at: 1
+        @expect type
+        extSelector := entry at: 2
+        @expect type
+        extSource := entry at: 3
+        extClass := self resolveExtensionClass: extClassTag
+        lines := (Erlang beamtalk_interface) findSendersIn: extSource selector: aSelector
+        lines
+          inject: acc
+          into: [:innerAcc :line |
+            @expect type
+            innerAcc add: #{
+              #class => extClass,
+              #selector => extSelector,
+              #line => line
+            }
+          ]
+      ]
+
+  /// Append references to `targetName` found in every extension method
+  /// source (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended)
+  /// result. Mirrors `collectExtensionSendersFor:into:`, swapping the
+  /// per-method scan to `findReferencesToIn:class:`.
+  collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        @expect type
+        extClassTag := entry at: 1
+        @expect type
+        extSelector := entry at: 2
+        @expect type
+        extSource := entry at: 3
+        extClass := self resolveExtensionClass: extClassTag
+        lines := (Erlang beamtalk_interface) findReferencesToIn: extSource class: targetName
+        lines
+          inject: acc
+          into: [:innerAcc :line |
+            @expect type
+            innerAcc add: #{
+              #class => extClass,
+              #selector => extSelector,
+              #line => line
+            }
+          ]
+      ]
+
+  /// Append `{class, selector}` records for every extension method (ADR 0066
+  /// / BT-2196) whose source matches `aRegex` to `result`. Returns the
+  /// (possibly extended) result. Mirrors `collectMethodsMatching:in:into:`
+  /// but iterates the extension sources table rather than a class's
+  /// instance method dictionary.
+  collectExtensionMethodsMatching: aRegex :: Regex into: result :: List(Dictionary) -> List(Dictionary) =>
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        @expect type
+        extClassTag := entry at: 1
+        @expect type
+        extSelector := entry at: 2
+        @expect type
+        extSource := entry at: 3
+        extClass := self resolveExtensionClass: extClassTag
+        (extSource matchesRegex: aRegex) ifTrue: [
+          acc add: #{#class => extClass, #selector => extSelector}
+        ] ifFalse: [acc]
+      ]
+
+  /// Resolve an extension registry class tag (an atom) to a real class
+  /// object via `(Erlang beamtalk_interface) findClass:`. Falls back to the
+  /// raw tag when the registry has no matching class — that is the
+  /// metaclass-tagged class-side extension case (`#'Integer class'`), where
+  /// the tag string does not match any registered class name.
+  ///
+  /// Internal helper for the three `collectExtension*` walks. Splits the
+  /// lookup out so the surrounding `inject:into:` bodies stay a single
+  /// expression each (matches the helper style elsewhere in this file).
+  ///
+  /// Return type is intentionally untyped (Dynamic) — the result is either
+  /// a class object or an atom, which has no shared supertype in the
+  /// declared type system.
+  resolveExtensionClass: classTag :: Symbol -> Object =>
+    resolved := (Erlang beamtalk_interface) findClass: classTag
+    resolved isNil ifTrue: [classTag] ifFalse: [resolved]
