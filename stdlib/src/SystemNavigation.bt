@@ -384,3 +384,90 @@ sealed typed Object subclass: SystemNavigation
               ]
           ]
       ]
+
+  /// Return a sorted, deduplicated list of selectors whose name contains
+  /// `aPattern` (case-insensitive substring match).
+  ///
+  /// Powers omni-bar / Cmd-T "find any selector" surfaces in an IDE. Pure
+  /// registry walk — no AST parsing required. For each class in the
+  /// navigation scope, collects instance-side selectors, class-side
+  /// selectors, and extension-method selectors (ADR 0066) registered on
+  /// either side, then filters by lowercase substring match.
+  ///
+  /// Matching uses `selectorString lowercase includesSubstring: aPattern
+  /// lowercase`, mirroring Pharo's `SystemNavigation >>
+  /// #allSelectorsContaining:`.
+  ///
+  /// Raises an error if the argument is not a String, or if the pattern is
+  /// empty (an empty pattern would match every selector and is almost
+  /// certainly a programming error).
+  ///
+  /// Returns `[]` when no selectors match.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default selectorsMatching: "append"
+  ///   // => [#appendBinary:contents:, ...]
+  /// SystemNavigation default selectorsMatching: "AppEnd"
+  ///   // => [#appendBinary:contents:, ...]   (case-insensitive)
+  /// SystemNavigation default selectorsMatching: "noSelectorContainsThisXyzzy"
+  ///   // => []
+  /// ```
+  selectorsMatching: aPattern :: String -> List(Symbol) =>
+    (aPattern isKindOf: String) ifFalse: [
+      self error: "SystemNavigation selectorsMatching: requires a String argument"
+    ]
+    aPattern isEmpty
+      ifTrue: [
+        self error: "SystemNavigation selectorsMatching: requires a non-empty pattern (empty would match every selector)"
+      ]
+    needle := aPattern lowercase
+    allSels := self allClasses inject: List new into: [:acc :cls |
+      acc ++ (self selectorsForClass: cls)
+    ]
+    matches := allSels select: [:sel |
+      sel asString lowercase includesSubstring: needle
+    ]
+    matches unique sort
+
+  /// Return every selector defined on the given class: instance-side,
+  /// class-side, and extension-method selectors (ADR 0066) registered on
+  /// either the instance tag or the metaclass tag.
+  ///
+  /// Internal helper for `selectorsMatching:`. Splits the per-class gather
+  /// out so the surrounding `inject:into:` body stays a single expression,
+  /// mirroring the `collectSendersFor:in:into:` / `sendersOf:` pairing
+  /// above.
+  ///
+  /// `name` lives on `Class`, not on the abstract `Behaviour` upper bound,
+  /// so the send is guarded with `respondsTo:` (mirroring
+  /// `collectSendersFor:in:into:`): a non-Class Behaviour entry is silently
+  /// skipped for extension lookups rather than aborting the whole walk.
+  selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
+    instance := aClass methods
+    classSide := aClass class methods
+    (aClass respondsTo: #name) ifFalse: [^instance ++ classSide]
+    @expect dnu
+    className := aClass name
+    instanceExtensions := self extensionSelectorsFor: className
+    metaTag := (className asString ++ " class") asAtom
+    classSideExtensions := self extensionSelectorsFor: metaTag
+    instance ++ classSide ++ instanceExtensions ++ classSideExtensions
+
+  /// Return the selectors of all extension methods (ADR 0066) registered
+  /// against the given class tag.
+  ///
+  /// Internal helper for `selectorsForClass:`. The extension registry
+  /// returns `{Selector, Owner}` 2-tuples; this strips the owner, keeping
+  /// only the selector atoms. Returns `[]` when the tag has no extensions.
+  ///
+  /// The `@expect type` annotation covers the per-entry `at:` send —
+  /// `Erlang beamtalk_extensions list:` returns plain Erlang 2-tuples
+  /// (Dynamic to the type checker).
+  extensionSelectorsFor: classTag :: Symbol -> List(Symbol) =>
+    rawEntries := Erlang beamtalk_extensions list: classTag
+    rawEntries
+      collect: [:entry |
+        @expect type
+        entry at: 1
+      ]

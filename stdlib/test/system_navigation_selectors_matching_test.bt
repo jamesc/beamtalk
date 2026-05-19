@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2204: BUnit-level coverage for `SystemNavigation selectorsMatching:` —
+// fuzzy selector search across the loaded class registry. Powers omni-bar /
+// Cmd-T "find any selector" surfaces in an IDE.
+//
+// `selectorsMatching:` is an instance method on `SystemNavigation`, reached
+// via the `default` (or future scoped) constructor. See the note in
+// `beamtalk_implementors_test.bt` for why the class side is constructors
+// only and queries live on the instance.
+//
+// Behavioural tests (case-insensitive substring match, class-side
+// participation, extension-method participation, dedup, sort, empty-pattern
+// rejection, no-match returns []) live in the E2E REPL-protocol suite at
+// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
+// workspace_mode and has the live class registry populated with user
+// classes.
+
+TestCase subclass: SystemNavigationSelectorsMatchingTest
+
+  // --- selector existence ---
+  testIncludesSelectorSelectorsMatching =>
+    self assert: (SystemNavigation includesSelector: #selectorsMatching:)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation iterates the navigation scope (via `allClasses`),
+  // collects each class's instance-side `methods`, class-side `class
+  // methods`, and the extension registry, then filters by lowercase
+  // substring. All of those primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (String includesSelector: #lowercase)
+    self assert: (String includesSelector: #includesSubstring:)
+    self assert: (String includesSelector: #isEmpty)
+    self assert: (Symbol includesSelector: #asString)
+    self assert: (List includesSelector: #unique)
+    self assert: (List includesSelector: #sort)
+
+  // The internal helpers `selectorsForClass:` and `extensionSelectorsFor:`
+  // factor out per-class iteration so they can be unit-checked separately.
+  testHelperSelectorsForClassIsDefined =>
+    self assert: (SystemNavigation includesSelector: #selectorsForClass:)
+
+  testHelperExtensionSelectorsForIsDefined =>
+    self assert: (SystemNavigation includesSelector: #extensionSelectorsFor:)
