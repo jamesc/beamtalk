@@ -759,7 +759,9 @@ impl CoreErlangGenerator {
         let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             actual_receiver,
-            Document::String(format!(", '{selector_atom}', [")),
+            ", '",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
             "])"
         ];
@@ -888,9 +890,11 @@ impl CoreErlangGenerator {
                 MessageSelector::Unary(module_name)
                     if !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str()) =>
                 {
-                    let doc = docvec![Document::String(format!(
-                        "~{{'$beamtalk_class' => 'ErlangModule', 'module' => '{module_name}'}}~"
-                    ))];
+                    let doc = docvec![
+                        "~{'$beamtalk_class' => 'ErlangModule', 'module' => '",
+                        Document::Eco(module_name.clone()),
+                        "'}~",
+                    ];
                     Ok(Some(doc))
                 }
                 _ => {
@@ -1318,7 +1322,9 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
         let call_doc = docvec![
-            Document::String(format!("call 'beamtalk_class_instantiation':'{helper}'(")),
+            "call 'beamtalk_class_instantiation':'",
+            Document::Str(helper),
+            "'(",
             "call 'erlang':'get'('beamtalk_class_name'), ",
             "call 'erlang':'get'('beamtalk_class_module'), ",
             "call 'erlang':'get'('beamtalk_class_is_abstract'), ",
@@ -1379,17 +1385,27 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
-            Document::String(format!(
-                "case call '{module}':'safe_dispatch'('{selector_atom}', ["
-            )),
+            "case call '",
+            Document::Eco(module),
+            "':'safe_dispatch'('",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
-            Document::String(format!("], {current_state}) of ")),
-            Document::String(format!(
-                "<{{'reply', {result_var}, {state_var}}}> when 'true' -> {result_var} "
-            )),
-            Document::String(format!(
-                "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-            )),
+            "], ",
+            Document::String(current_state),
+            ") of ",
+            "<{'reply', ",
+            Document::String(result_var.clone()),
+            ", ",
+            Document::String(state_var),
+            "}> when 'true' -> ",
+            Document::String(result_var),
+            " ",
+            "<{'error', ",
+            Document::String(error_var.clone()),
+            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+            Document::String(error_var),
+            ") ",
             "end"
         ];
 
@@ -1415,6 +1431,7 @@ impl CoreErlangGenerator {
     /// it's discarded since this is used for non-last expressions in block bodies.
     ///
     /// Uses Document/docvec! (ADR 0018) for composable rendering.
+    #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
     pub(super) fn generate_self_dispatch_open(
         &mut self,
         expr: &Expression,
@@ -1444,39 +1461,65 @@ impl CoreErlangGenerator {
                     let module = self.module_name.clone();
                     let comma = if arguments.is_empty() { "" } else { ", " };
                     docvec![
-                        Document::String(format!(
-                            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
-                        )),
-                        Document::String(format!(
-                            "let {dispatch_var} = case call '{module}':'__sealed_{selector_name}'("
-                        )),
+                        "let ",
+                        Document::String(self_var.clone()),
+                        " = call 'beamtalk_actor':'make_self'(",
+                        Document::String(current_state.clone()),
+                        ") in ",
+                        "let ",
+                        Document::String(dispatch_var.clone()),
+                        " = case call '",
+                        Document::Eco(module),
+                        "':'__sealed_",
+                        Document::String(selector_name),
+                        "'(",
                         args_doc,
-                        Document::String(format!("{comma}{self_var}, {current_state}) of "))
+                        Document::Str(comma),
+                        Document::String(self_var),
+                        ", ",
+                        Document::String(current_state),
+                        ") of ",
                     ]
                 } else {
                     // Level 2: Direct dispatch/4 call
                     let self_var = self.fresh_temp_var("SealedSelf");
                     let module = self.module_name.clone();
                     docvec![
-                        Document::String(format!(
-                            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
-                        )),
-                        Document::String(format!(
-                            "let {dispatch_var} = case call '{module}':'dispatch'('{selector_atom}', ["
-                        )),
+                        "let ",
+                        Document::String(self_var.clone()),
+                        " = call 'beamtalk_actor':'make_self'(",
+                        Document::String(current_state.clone()),
+                        ") in ",
+                        "let ",
+                        Document::String(dispatch_var.clone()),
+                        " = case call '",
+                        Document::Eco(module),
+                        "':'dispatch'('",
+                        Document::String(selector_atom),
+                        "', [",
                         args_doc,
-                        Document::String(format!("], {self_var}, {current_state}) of "))
+                        "], ",
+                        Document::String(self_var),
+                        ", ",
+                        Document::String(current_state),
+                        ") of ",
                     ]
                 }
             } else {
                 // Normal: safe_dispatch/3
                 let module = self.module_name.clone();
                 docvec![
-                    Document::String(format!(
-                        "let {dispatch_var} = case call '{module}':'safe_dispatch'('{selector_atom}', ["
-                    )),
+                    "let ",
+                    Document::String(dispatch_var.clone()),
+                    " = case call '",
+                    Document::Eco(module),
+                    "':'safe_dispatch'('",
+                    Document::String(selector_atom),
+                    "', [",
                     args_doc,
-                    Document::String(format!("], {current_state}) of "))
+                    "], ",
+                    Document::String(current_state),
+                    ") of ",
                 ]
             };
 
@@ -1484,16 +1527,26 @@ impl CoreErlangGenerator {
             let new_state = self.next_state_var();
             let doc = docvec![
                 call_doc,
-                Document::String(format!(
-                    "<{{'reply', {result_var}, {state_var}}}> when 'true' -> {{{result_var}, {state_var}}} "
-                )),
-                Document::String(format!(
-                    "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-                )),
+                "<{'reply', ",
+                Document::String(result_var.clone()),
+                ", ",
+                Document::String(state_var.clone()),
+                "}> when 'true' -> {",
+                Document::String(result_var),
+                ", ",
+                Document::String(state_var),
+                "} ",
+                "<{'error', ",
+                Document::String(error_var.clone()),
+                ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+                Document::String(error_var),
+                ") ",
                 "end in ",
-                Document::String(format!(
-                    "let {new_state} = call 'erlang':'element'(2, {dispatch_var}) in "
-                ))
+                "let ",
+                Document::String(new_state),
+                " = call 'erlang':'element'(2, ",
+                Document::String(dispatch_var.clone()),
+                ") in "
             ];
 
             return Ok((doc, dispatch_var));
@@ -1531,20 +1584,32 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
-            Document::String(format!(
-                "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
-            )),
-            Document::String(format!(
-                "case call '{module}':'dispatch'('{selector_atom}', ["
-            )),
+            "let ",
+            Document::String(self_var.clone()),
+            " = call 'beamtalk_actor':'make_self'(",
+            Document::String(current_state.clone()),
+            ") in ",
+            "case call '",
+            Document::Eco(module),
+            "':'dispatch'('",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
-            Document::String(format!("], {self_var}, {current_state}) of ")),
-            Document::String(format!(
-                "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
-            )),
-            Document::String(format!(
-                "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-            )),
+            "], ",
+            Document::String(self_var),
+            ", ",
+            Document::String(current_state),
+            ") of ",
+            "<{'reply', ",
+            Document::String(result_var.clone()),
+            ", _}> when 'true' -> ",
+            Document::String(result_var),
+            " ",
+            "<{'error', ",
+            Document::String(error_var.clone()),
+            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+            Document::String(error_var),
+            ") ",
             "end"
         ];
 
@@ -1570,18 +1635,32 @@ impl CoreErlangGenerator {
         let comma = if arguments.is_empty() { "" } else { ", " };
 
         let doc = docvec![
-            Document::String(format!(
-                "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
-            )),
-            Document::String(format!("case call '{module}':'__sealed_{selector_name}'(")),
+            "let ",
+            Document::String(self_var.clone()),
+            " = call 'beamtalk_actor':'make_self'(",
+            Document::String(current_state.clone()),
+            ") in ",
+            "case call '",
+            Document::Eco(module),
+            "':'__sealed_",
+            Document::String(selector_name.to_string()),
+            "'(",
             args_doc,
-            Document::String(format!("{comma}{self_var}, {current_state}) of ")),
-            Document::String(format!(
-                "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
-            )),
-            Document::String(format!(
-                "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-            )),
+            Document::Str(comma),
+            Document::String(self_var),
+            ", ",
+            Document::String(current_state),
+            ") of ",
+            "<{'reply', ",
+            Document::String(result_var.clone()),
+            ", _}> when 'true' -> ",
+            Document::String(result_var),
+            " ",
+            "<{'error', ",
+            Document::String(error_var.clone()),
+            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+            Document::String(error_var),
+            ") ",
             "end"
         ];
 
@@ -1845,12 +1924,19 @@ impl CoreErlangGenerator {
                 let new_state = self.next_state_var();
 
                 let doc = docvec![
-                    Document::String(format!("let {val_var} = ")),
+                    "let ",
+                    Document::String(val_var.clone()),
+                    " = ",
                     val_doc,
-                    Document::String(format!(
-                        " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                        field.name
-                    ))
+                    " in let ",
+                    Document::String(new_state),
+                    " = call 'maps':'put'('",
+                    Document::Eco(field.name.clone()),
+                    "', ",
+                    Document::String(val_var.clone()),
+                    ", ",
+                    Document::String(current_state),
+                    ") in ",
                 ];
 
                 // BT-884: Return the val var so callers (e.g. cascade codegen) can
@@ -1977,11 +2063,15 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
-            Document::String(format!(
-                "call 'beamtalk_dispatch':'super'('{selector_atom}', ["
-            )),
+            "call 'beamtalk_dispatch':'super'('",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
-            Document::String(format!("], Self, {current_state}, '{class_name}')"))
+            "], Self, ",
+            Document::String(current_state),
+            ", '",
+            Document::String(class_name),
+            "')",
         ];
         Ok(doc)
     }
@@ -2046,26 +2136,30 @@ impl CoreErlangGenerator {
         if in_repl_context {
             let doc = docvec![
                 "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
-                Document::String(format!(
-                    "<'undefined'> when 'true' -> call '{module_name}':'spawn'("
-                )),
+                "<'undefined'> when 'true' -> call '",
+                Document::String(module_name.clone()),
+                "':'spawn'(",
                 args_doc.clone(),
-                Document::String(format!(
-                    ") <RegistryPid> when 'true' -> let SpawnResult = call '{module_name}':'spawn'("
-                )),
+                ") <RegistryPid> when 'true' -> let SpawnResult = call '",
+                Document::String(module_name.clone()),
+                "':'spawn'(",
                 args_doc,
                 ") in ",
                 "let SpawnPid = call 'erlang':'element'(4, SpawnResult) in ",
-                Document::String(format!(
-                    "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, '{class_name}', '{module_name}') in "
-                )),
+                "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, '",
+                Document::String(class_name.to_string()),
+                "', '",
+                Document::String(module_name),
+                "') in ",
                 "SpawnResult ",
                 "end"
             ];
             Ok(doc)
         } else {
             let doc = docvec![
-                Document::String(format!("call '{module_name}':'spawn'(")),
+                "call '",
+                Document::String(module_name),
+                "':'spawn'(",
                 args_doc,
                 ")"
             ];
@@ -2094,9 +2188,9 @@ impl CoreErlangGenerator {
         }
         let arg_doc = self.expression_doc(&arguments[0])?;
         let doc = docvec![
-            Document::String(format!(
-                "call 'beamtalk_method_resolver':'resolve'('{class_name}', "
-            )),
+            "call 'beamtalk_method_resolver':'resolve'('",
+            Document::String(class_name.to_string()),
+            "', ",
             arg_doc,
             ")"
         ];
@@ -2209,15 +2303,27 @@ impl CoreErlangGenerator {
 
         // BT-1942: `let Lookup = maps:find(...) in <arg_preamble> case Lookup of ...`
         // — lookup first, then args, then the dispatch branches.
-        let lookup_binding = Document::String(format!(
-            "let {lookup_var} = call 'maps':'find'('{class_name}', {state_var}) in "
-        ));
+        let lookup_binding = docvec![
+            "let ",
+            Document::String(lookup_var.clone()),
+            " = call 'maps':'find'('",
+            Document::String(class_name.to_string()),
+            "', ",
+            Document::String(state_var),
+            ") in ",
+        ];
         let case_doc = docvec![
-            Document::String(format!("case {lookup_var} of ")),
-            Document::String(format!("<{{'ok', {binding_val_var}}}> when 'true' -> ")),
-            Document::String(format!(
-                "call 'beamtalk_message_dispatch':'send'({binding_val_var}, '{instance_selector}', ["
-            )),
+            "case ",
+            Document::String(lookup_var),
+            " of ",
+            "<{'ok', ",
+            Document::String(binding_val_var.clone()),
+            "}> when 'true' -> ",
+            "call 'beamtalk_message_dispatch':'send'(",
+            Document::String(binding_val_var),
+            ", '",
+            Document::String(instance_selector),
+            "', [",
             args_doc,
             "]) ",
             "<'error'> when 'true' -> ",
@@ -2282,16 +2388,26 @@ impl CoreErlangGenerator {
             self.bind_args_to_temps(arguments, "WsArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
-        let lookup_binding = Document::String(format!(
-            "let {lookup_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
-        ));
+        let lookup_binding = docvec![
+            "let ",
+            Document::String(lookup_var.clone()),
+            " = call 'beamtalk_class_registry':'whereis_class'('",
+            Document::String(class_name.to_string()),
+            "') in ",
+        ];
         let case_doc = docvec![
-            Document::String(format!("case {lookup_var} of ")),
+            "case ",
+            Document::String(lookup_var),
+            " of ",
             "<'undefined'> when 'true' -> 'nil' ",
-            Document::String(format!("<{class_pid_var}> when 'true' -> ")),
-            Document::String(format!(
-                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
-            )),
+            "<",
+            Document::String(class_pid_var.clone()),
+            "> when 'true' -> ",
+            "call 'beamtalk_object_class':'class_send'(",
+            Document::String(class_pid_var),
+            ", '",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
             "]) end"
         ];
@@ -2363,12 +2479,16 @@ impl CoreErlangGenerator {
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
 
         let call_doc = docvec![
-            Document::String(format!(
-                "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
-            )),
-            Document::String(format!(
-                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
-            )),
+            "let ",
+            Document::String(class_pid_var.clone()),
+            " = call 'beamtalk_class_registry':'whereis_class'('",
+            Document::String(class_name.to_string()),
+            "') in ",
+            "call 'beamtalk_object_class':'class_send'(",
+            Document::String(class_pid_var),
+            ", '",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
             "])"
         ];

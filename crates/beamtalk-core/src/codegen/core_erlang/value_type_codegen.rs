@@ -503,15 +503,24 @@ impl CoreErlangGenerator {
             && superclass_name != "none"
         {
             if let Some(super_mod) = self.superclass_module_name(superclass_name) {
-                let mut own_field_parts = Vec::new();
-                own_field_parts.push(format!("'$beamtalk_class' => '{class_name}'"));
+                let mut own_field_parts: Vec<Document<'static>> = Vec::new();
+                own_field_parts.push(docvec![
+                    "'$beamtalk_class' => '",
+                    Document::String(class_name.clone()),
+                    "'",
+                ]);
                 for field in &class.state {
                     let default_code = if let Some(default_value) = &field.default_value {
                         self.capture_expression(default_value)?
                     } else {
                         "'nil'".to_string()
                     };
-                    own_field_parts.push(format!("'{}' => {}", field.name.name, default_code));
+                    own_field_parts.push(docvec![
+                        "'",
+                        Document::Eco(field.name.name.clone()),
+                        "' => ",
+                        Document::String(default_code),
+                    ]);
                 }
                 return Ok(docvec![
                     "'new'/0 = fun () ->\n",
@@ -519,7 +528,7 @@ impl CoreErlangGenerator {
                     Document::String(super_mod),
                     "':'new'() in\n",
                     "    call 'maps':'merge'(ParentState, ~{",
-                    Document::String(own_field_parts.join(", ")),
+                    join(own_field_parts, &Document::Str(", ")),
                     "}~)\n",
                     "\n",
                 ]);
@@ -527,7 +536,7 @@ impl CoreErlangGenerator {
         }
 
         // Direct Value subclass: build a flat map with all own fields.
-        let mut field_parts = Vec::new();
+        let mut field_parts: Vec<Document<'static>> = Vec::new();
 
         // Add each field with its default value
         for field in &class.state {
@@ -536,7 +545,12 @@ impl CoreErlangGenerator {
             } else {
                 "'nil'".to_string()
             };
-            field_parts.push(format!(", '{}' => {}", field.name.name, default_code));
+            field_parts.push(docvec![
+                ", '",
+                Document::Eco(field.name.name.clone()),
+                "' => ",
+                Document::String(default_code),
+            ]);
         }
 
         Ok(docvec![
@@ -544,7 +558,7 @@ impl CoreErlangGenerator {
             "    ~{'$beamtalk_class' => '",
             class_name,
             "'",
-            field_parts.join(""),
+            concat(field_parts),
             "}~\n",
             "\n",
         ])
@@ -678,14 +692,14 @@ impl CoreErlangGenerator {
         Ok(docvec![
             function_head,
             "\n",
-            format!(
-                "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in\n"
-            ),
-            format!(
-                "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '{selector}') in\n"
-            ),
+            "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
+            Document::String(class_name.to_string()),
+            "') in\n",
+            "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
+            Document::String(selector.to_string()),
+            "') in\n",
             "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-            hint_binary,
+            Document::String(hint_binary),
             ") in\n",
             "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
@@ -1166,9 +1180,13 @@ impl CoreErlangGenerator {
                     // Non-last expressions: wrap in let to sequence side effects
                     let tmp_var = self.fresh_temp_var("seq");
                     let expr_code = self.capture_expression(expr)?;
-                    body_parts.push(Document::String(format!(
-                        "    let {tmp_var} = {expr_code} in\n"
-                    )));
+                    body_parts.push(docvec![
+                        "    let ",
+                        Document::String(tmp_var),
+                        " = ",
+                        Document::String(expr_code),
+                        " in\n",
+                    ]);
                 }
             }
         }
@@ -1621,6 +1639,7 @@ impl CoreErlangGenerator {
     /// this form emits the foldl and the `let X = maps:get(...)` extractions directly in
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
+    #[allow(clippy::too_many_lines)] // Document-based foldl scaffolding spans many lines
     pub(in crate::codegen::core_erlang) fn generate_value_type_do_open(
         &mut self,
         expr: &Expression,
@@ -1653,8 +1672,11 @@ impl CoreErlangGenerator {
 
         // Phase 1: create a fresh map and pack each captured local into it.
         let init_map_var = self.fresh_temp_var("InitMap");
-        let mut pack_prefix = String::new();
-        let _ = write!(pack_prefix, "let {init_map_var} = call 'maps':'new'() in ");
+        let mut pack_docs: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            Document::String(init_map_var.clone()),
+            " = call 'maps':'new'() in ",
+        ]];
         let mut current = init_map_var;
         for var_name in &threaded_locals {
             let packed_var = self.fresh_temp_var("Packed");
@@ -1663,10 +1685,17 @@ impl CoreErlangGenerator {
                 .cloned()
                 .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
             let key = Self::local_state_key(var_name);
-            let _ = write!(
-                pack_prefix,
-                "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
-            );
+            pack_docs.push(docvec![
+                "let ",
+                Document::String(packed_var.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(core_var),
+                ", ",
+                Document::String(current),
+                ") in ",
+            ]);
             current = packed_var;
         }
         let init_state_code = current;
@@ -1680,17 +1709,25 @@ impl CoreErlangGenerator {
         let item_var = Self::to_core_erlang_var(item_param);
 
         let mut docs: Vec<Document<'static>> = vec![
-            Document::String(pack_prefix),
+            concat(pack_docs),
             docvec![
-                format!("let {list_var} = "),
+                "let ",
+                Document::String(list_var.clone()),
+                " = ",
                 recv_code,
-                format!(
-                    " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
-                     <'true'> when 'true' -> {list_var} \
-                     <'false'> when 'true' -> \
-                     call 'beamtalk_collection':'to_list'({list_var}) end \
-                     in let {lambda_var} = fun ({item_var}, StateAcc) -> "
-                ),
+                " in let ",
+                Document::String(safe_list_var.clone()),
+                " = case call 'erlang':'is_list'(",
+                Document::String(list_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                Document::String(list_var.clone()),
+                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+                Document::String(list_var),
+                ") end in let ",
+                Document::String(lambda_var.clone()),
+                " = fun (",
+                Document::String(item_var.clone()),
+                ", StateAcc) -> ",
             ],
         ];
 
@@ -1703,22 +1740,35 @@ impl CoreErlangGenerator {
         // expression, so they shadow the pre-loop bindings and are visible to all
         // subsequent `body_parts`.
         let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_code = format!(
-            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {init_state_code}, {safe_list_var}) in "
-        );
+        let mut post_docs: Vec<Document<'static>> = vec![docvec![
+            " in let ",
+            Document::String(fold_result.clone()),
+            " = call 'lists':'foldl'(",
+            Document::String(lambda_var),
+            ", ",
+            Document::String(init_state_code),
+            ", ",
+            Document::String(safe_list_var),
+            ") in ",
+        ]];
         for var_name in &threaded_locals {
             let core_var = Self::to_core_erlang_var(var_name);
             // Update the scope so subsequent method-body expressions look up
             // this Erlang variable name.
             self.bind_var(var_name, &core_var);
             let key = Self::local_state_key(var_name);
-            let _ = write!(
-                post_code,
-                "let {core_var} = call 'maps':'get'('{key}', {fold_result}) in "
-            );
+            post_docs.push(docvec![
+                "let ",
+                Document::String(core_var),
+                " = call 'maps':'get'('",
+                Document::String(key),
+                "', ",
+                Document::String(fold_result.clone()),
+                ") in ",
+            ]);
         }
         // Intentionally open — the caller's next body_part provides the continuation.
-        docs.push(Document::String(post_code));
+        docs.push(concat(post_docs));
 
         Ok(Document::Vec(docs))
     }
@@ -2203,9 +2253,11 @@ impl CoreErlangGenerator {
                 "':'doesNotUnderstand:args:'(Self, Selector, Args)\n",
             ]
         } else if let Some(ref super_mod) = superclass_mod {
-            Document::String(format!(
-                "                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"
-            ))
+            docvec![
+                "                    call '",
+                Document::String(super_mod.clone()),
+                "':'dispatch'(Selector, Args, Self)\n",
+            ]
         } else {
             // Root of hierarchy — raise does_not_understand
             let dnu_hint = Self::core_erlang_binary(
@@ -2215,9 +2267,9 @@ impl CoreErlangGenerator {
                 "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
                 "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
                 "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
-                format!(
-                    "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in\n"
-                ),
+                "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, ",
+                Document::String(dnu_hint),
+                ") in\n",
                 "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
             ]
         };
@@ -2227,13 +2279,15 @@ impl CoreErlangGenerator {
             "    case Selector of\n",
             // class
             "        <'class'> when 'true' ->\n",
-            format!("            '{class_name}'\n"),
+            "            '",
+            Document::String(class_name.clone()),
+            "'\n",
             // respondsTo:
             "        <'respondsTo:'> when 'true' ->\n",
             "            case Args of\n",
-            format!(
-                "                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"
-            ),
+            "                <[RtSelector | _]> when 'true' -> call '",
+            Document::String(mod_name.to_string()),
+            "':'has_method'(RtSelector)\n",
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
             // asString (conditional)
@@ -2244,23 +2298,27 @@ impl CoreErlangGenerator {
             field_at_branch,
             // fieldAt:put:
             "        <'fieldAt:put:'> when 'true' ->\n",
-            format!(
-                "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
-            ),
+            "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '",
+            Document::String(class_name.clone()),
+            "') in\n",
             "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in\n",
-            format!(
-                "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in\n"
-            ),
+            "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
+            Document::String(immutable_hint),
+            ") in\n",
             "            call 'beamtalk_error':'raise'(ImmErr2)\n",
             // perform:
             "        <'perform:'> when 'true' ->\n",
             "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
-            format!("            call '{mod_name}':'dispatch'(PerfSel, [], Self)\n"),
+            "            call '",
+            Document::String(mod_name.to_string()),
+            "':'dispatch'(PerfSel, [], Self)\n",
             // perform:withArguments:
             "        <'perform:withArguments:'> when 'true' ->\n",
             "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
             "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
-            format!("            call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)\n"),
+            "            call '",
+            Document::String(mod_name.to_string()),
+            "':'dispatch'(PwaSel, PwaArgs, Self)\n",
             // Class-defined method branches
             Document::Vec(method_branches),
             // BT-923: Auto-generated getter and with*: dispatch arms
@@ -2271,9 +2329,9 @@ impl CoreErlangGenerator {
             ),
             // Default case
             "        <_Other> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'lookup'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
             "                    apply ExtFun(Args, Self)\n",
             "                <'not_found'> when 'true' ->\n",
@@ -2310,7 +2368,9 @@ impl CoreErlangGenerator {
             let binary = Self::core_erlang_binary(default_str);
             docvec![
                 "        <'asString'> when 'true' ->\n",
-                format!("            {binary}\n"),
+                "            ",
+                Document::String(binary),
+                "\n",
             ]
         }
     }
@@ -2373,9 +2433,11 @@ impl CoreErlangGenerator {
         let mut method_branches: Vec<Document<'static>> = Vec::new();
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            method_branches.push(Document::String(format!(
-                "        <'{mangled}'> when 'true' ->\n"
-            )));
+            method_branches.push(docvec![
+                "        <'",
+                Document::String(mangled.clone()),
+                "'> when 'true' ->\n",
+            ]);
 
             // BT-854: Methods with NLR return {Result, State} tuple — unwrap via case.
             let has_nlr = self
@@ -2387,15 +2449,15 @@ impl CoreErlangGenerator {
                 // Extract args from Args list: hd(Args), hd(tl(Args)), ...
                 for (i, _param) in method.parameters.iter().enumerate() {
                     let arg_var = format!("DispArg{i}");
-                    let mut access = "Args".to_string();
+                    let mut access: Document<'static> = Document::Str("Args");
                     for _ in 0..i {
-                        access = format!("call 'erlang':'tl'({access})");
+                        access = docvec!["call 'erlang':'tl'(", access, ")",];
                     }
                     method_branches.push(docvec![
                         "            let <",
-                        arg_var,
+                        Document::String(arg_var),
                         "> = call 'erlang':'hd'(",
-                        Document::String(access),
+                        access,
                         ") in\n",
                     ]);
                 }
@@ -2404,14 +2466,16 @@ impl CoreErlangGenerator {
             // Build the call expression: call 'mod':'method'(Self, DispArg0, ...)
             let mut call_args: Vec<Document<'static>> = vec![Document::Str("Self")];
             for i in 0..method.parameters.len() {
-                call_args.push(Document::String(format!(", DispArg{i}")));
+                call_args.push(docvec![", DispArg", Document::String(i.to_string()),]);
             }
             let call_doc = docvec![
-                Document::String(format!("call '{mod_name}':'")),
+                "call '",
+                Document::String(mod_name.to_string()),
+                "':'",
                 Document::String(mangled.clone()),
-                Document::Str("'("),
+                "'(",
                 Document::Vec(call_args),
-                Document::Str(")"),
+                ")",
             ];
 
             if has_nlr {
@@ -2532,12 +2596,10 @@ impl CoreErlangGenerator {
             "            end\n",
             // --- printString ---
             "        <'printString'> when 'true' ->\n",
-            format!(
-                "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n"
-            ),
-            format!(
-                "            let <PsStr4> = call 'erlang':'iolist_to_binary'([{a_space_binary}|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n"
-            ),
+            "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n",
+            "            let <PsStr4> = call 'erlang':'iolist_to_binary'([",
+            Document::String(a_space_binary),
+            "|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n",
             "            {'reply', PsStr4, State}\n",
             // --- perform: ---
             "        <'perform:'> when 'true' ->\n",
@@ -2575,7 +2637,9 @@ impl CoreErlangGenerator {
             "            end\n",
             // --- Default: delegate to dispatch/3 ---
             "        <_OtherSel4> when 'true' ->\n",
-            format!("            try call '{mod_name}':'dispatch'(Selector, Args, Self)\n"),
+            "            try call '",
+            Document::String(mod_name.to_string()),
+            "':'dispatch'(Selector, Args, Self)\n",
             "            of <D4Result> -> {'reply', D4Result, State}\n",
             "            catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
             "    end\n",
@@ -2589,7 +2653,9 @@ impl CoreErlangGenerator {
     /// dispatch service.
     fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
         docvec![
-            format!("    try call '{mod_name}':'dispatch'(Selector, Args, Self)\n"),
+            "    try call '",
+            Document::String(mod_name.to_string()),
+            "':'dispatch'(Selector, Args, Self)\n",
             "    of <D4Result> -> {'reply', D4Result, State}\n",
             "    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
         ]
@@ -2606,17 +2672,21 @@ impl CoreErlangGenerator {
         let hint = Self::core_erlang_binary(&format!(
             "Expected {expected_arity} argument(s) for {selector}"
         ));
+        let indent_doc = || Document::String(indent.to_string());
+        let selector_doc = || Document::String(selector.to_string());
         docvec![
-            format!(
-                "{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"
-            ),
-            format!(
-                "{indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n"
-            ),
-            format!(
-                "{indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n"
-            ),
-            format!("{indent}{{'error', ArErr2, State}}"),
+            indent_doc(),
+            "let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
+            indent_doc(),
+            "let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, ",
+            selector_doc(),
+            ") in\n",
+            indent_doc(),
+            "let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, ",
+            Document::String(hint),
+            ") in\n",
+            indent_doc(),
+            "{'error', ArErr2, State}",
         ]
     }
 
@@ -2629,17 +2699,21 @@ impl CoreErlangGenerator {
         indent: &str,
     ) -> Document<'static> {
         let hint = Self::core_erlang_binary(hint_msg);
+        let indent_doc = || Document::String(indent.to_string());
+        let selector_doc = || Document::String(selector.to_string());
         docvec![
-            format!(
-                "{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"
-            ),
-            format!(
-                "{indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n"
-            ),
-            format!(
-                "{indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n"
-            ),
-            format!("{indent}{{'error', TyErr2, State}}"),
+            indent_doc(),
+            "let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
+            indent_doc(),
+            "let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, ",
+            selector_doc(),
+            ") in\n",
+            indent_doc(),
+            "let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, ",
+            Document::String(hint),
+            ") in\n",
+            indent_doc(),
+            "{'error', TyErr2, State}",
         ]
     }
 
@@ -2686,14 +2760,14 @@ impl CoreErlangGenerator {
         }
 
         // Build list of all known selectors
-        let mut selectors: Vec<String> = vec![
-            "'class'".to_string(),
-            "'respondsTo:'".to_string(),
-            "'fieldNames'".to_string(),
-            "'fieldAt:'".to_string(),
-            "'fieldAt:put:'".to_string(),
-            "'perform:'".to_string(),
-            "'perform:withArguments:'".to_string(),
+        let mut selectors: Vec<Document<'static>> = vec![
+            Document::Str("'class'"),
+            Document::Str("'respondsTo:'"),
+            Document::Str("'fieldNames'"),
+            Document::Str("'fieldAt:'"),
+            Document::Str("'fieldAt:put:'"),
+            Document::Str("'perform:'"),
+            Document::Str("'perform:withArguments:'"),
         ];
 
         // Include default asString if dispatch/3 generates one
@@ -2707,43 +2781,46 @@ impl CoreErlangGenerator {
                 "True" | "False" | "UndefinedObject" | "Block"
             )
         {
-            selectors.push("'asString'".to_string());
+            selectors.push(Document::Str("'asString'"));
         }
 
         // Add class-defined methods
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            selectors.push(format!("'{mangled}'"));
+            selectors.push(docvec!["'", Document::String(mangled), "'",]);
         }
 
         // BT-923: Add auto-generated getter and with*: setter selectors
         if let Some(auto) = auto_methods {
             for field in &auto.getters {
-                selectors.push(format!("'{field}'"));
+                selectors.push(docvec!["'", Document::String(field.clone()), "'",]);
             }
             for field in &auto.setters {
                 let with_sel = AutoSlotMethods::with_star_selector(field);
-                selectors.push(format!("'{with_sel}'"));
+                selectors.push(docvec!["'", Document::String(with_sel), "'",]);
             }
         }
 
         let false_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
-            Document::String(format!(
-                "<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n"
-            ))
+            docvec![
+                "<'false'> when 'true' -> call '",
+                Document::String(super_mod.clone()),
+                "':'has_method'(Selector)\n",
+            ]
         } else {
             Document::Str("<'false'> when 'true' -> 'false'\n")
         };
 
-        let selectors_list = selectors.join(", ");
         let doc = docvec![
             "'has_method'/1 = fun (Selector) ->\n",
-            format!("    case call 'lists':'member'(Selector, [{selectors_list}]) of\n"),
+            "    case call 'lists':'member'(Selector, [",
+            join(selectors, &Document::Str(", ")),
+            "]) of\n",
             "        <'true'> when 'true' -> 'true'\n",
             "        <'false'> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'has'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'has'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <'true'> when 'true' -> 'true'\n",
             "                ",
             false_branch,
@@ -2775,33 +2852,41 @@ impl CoreErlangGenerator {
             "    case Selector of\n",
             // class
             "        <'class'> when 'true' ->\n",
-            format!("            '{class_name}'\n"),
+            "            '",
+            Document::String(class_name.clone()),
+            "'\n",
             // respondsTo:
             "        <'respondsTo:'> when 'true' ->\n",
             "            case Args of\n",
-            format!(
-                "                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"
-            ),
+            "                <[RtSelector | _]> when 'true' -> call '",
+            Document::Eco(mod_name.clone()),
+            "':'has_method'(RtSelector)\n",
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
             // perform:
             "        <'perform:'> when 'true' ->\n",
             "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
-            format!("            call '{mod_name}':'dispatch'(PerfSel, [], Self)\n"),
+            "            call '",
+            Document::Eco(mod_name.clone()),
+            "':'dispatch'(PerfSel, [], Self)\n",
             // perform:withArguments:
             "        <'perform:withArguments:'> when 'true' ->\n",
             "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
             "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
-            format!("            call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)\n"),
+            "            call '",
+            Document::Eco(mod_name),
+            "':'dispatch'(PwaSel, PwaArgs, Self)\n",
             // Default: extension check, then superclass delegation
             "        <_Other> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'lookup'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
             "                    apply ExtFun(Args, Self)\n",
             "                <'not_found'> when 'true' ->\n",
-            format!("                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"),
+            "                    call '",
+            Document::String(super_mod),
+            "':'dispatch'(Selector, Args, Self)\n",
             "            end\n",
             "    end\n",
             "\n",
@@ -2829,13 +2914,13 @@ impl CoreErlangGenerator {
             "    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'perform:', 'perform:withArguments:']) of\n",
             "        <'true'> when 'true' -> 'true'\n",
             "        <'false'> when 'true' ->\n",
-            format!(
-                "            case call 'beamtalk_extensions':'has'('{class_name}', Selector) of\n"
-            ),
+            "            case call 'beamtalk_extensions':'has'('",
+            Document::String(class_name),
+            "', Selector) of\n",
             "                <'true'> when 'true' -> 'true'\n",
-            format!(
-                "                <'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n"
-            ),
+            "                <'false'> when 'true' -> call '",
+            Document::String(super_mod),
+            "':'has_method'(Selector)\n",
             "            end\n",
             "    end\n",
             "\n",
