@@ -297,3 +297,90 @@ sealed typed Object subclass: SystemNavigation
         @expect type
         acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
       ]
+
+  /// Return a collection of `{class, selector}` records for every method
+  /// whose source text matches `aRegex`.
+  ///
+  /// Source-text grep across the whole loaded class registry — answers
+  /// "show me every method whose body mentions X." Each result is a
+  /// Dictionary with two keys:
+  /// - `#class` — the class that defines the method
+  /// - `#selector` — the selector of the matching method
+  ///
+  /// Iterates the navigation scope (`allClasses`) and walks each class's
+  /// instance-side method dictionary. Methods whose source is missing
+  /// (e.g. generated primitives, methods registered without source text)
+  /// are skipped, not raised. One match per method suffices —
+  /// `methodsMatching:` does not enumerate every match position within a
+  /// single method.
+  ///
+  /// The argument must be a compiled `Regex` instance. Callers that have a
+  /// pattern string should compile it explicitly via `Regex from: ...
+  /// unwrap`; passing a String raises a typed error. Matches Pharo's
+  /// `SystemNavigation >> #allMethodsWithSourceString:` in spirit, but
+  /// requires an explicit regex object rather than guessing literal vs
+  /// regex from the input.
+  ///
+  /// Performance: O(N x source-length). Fine for on-demand IDE search; not
+  /// for hot live-highlight paths. A maintained index is a follow-up
+  /// optimisation (see ADR 0033 / BT-2201).
+  ///
+  /// Known limitations (mirror `sendersOf:` — same iteration shell):
+  /// - Class-side methods are not scanned. The runtime currently does not
+  ///   retain class-side method source strings (only instance-side sources
+  ///   are kept in `method_source`), and `>>` does not yet accept a
+  ///   metaclass receiver. Closing this gap requires both pieces.
+  /// - Extension methods (ADR 0066) registered via `beamtalk_extensions`
+  ///   ETS are not scanned — that registry stores compiled functions, not
+  ///   source. Closing this gap requires the future-index optimisation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pat := (Regex from: "ifTrue:") unwrap
+  /// SystemNavigation default methodsMatching: pat
+  ///   // => [#{#class => Counter, #selector => increment}, ...]
+  /// SystemNavigation default methodsMatching:
+  ///   (Regex from: "xyzzyNeverAppearsInAnyMethodBody") unwrap
+  ///   // => []
+  /// ```
+  methodsMatching: aRegex :: Regex -> List(Dictionary) =>
+    (aRegex isKindOf: Regex) ifFalse: [
+      self error: "SystemNavigation methodsMatching: requires a Regex argument"
+    ]
+    self allClasses
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectMethodsMatching: aRegex
+          in: cls
+          into: acc
+      ]
+
+  /// Append `{class, selector}` records for methods of `aScope` whose source
+  /// matches `aRegex` to `result`. Returns the (possibly extended) result.
+  ///
+  /// Internal helper for `methodsMatching:`. Iterates `aScope methods`,
+  /// fetches each via `>>`, and tests `aRegex` against the source. Methods
+  /// with no source (nil) — or classes whose method lookup is unsupported
+  /// (e.g. metaclass-shaped registry entries; see `sendersOf:`) — are
+  /// skipped silently.
+  collectMethodsMatching: aRegex :: Regex in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            src := method source
+            src isNil
+              ifTrue: [acc]
+              ifFalse: [
+                (src matchesRegex: aRegex) ifTrue: [
+                  acc add: #{#class => aScope, #selector => methodSel}
+                ] ifFalse: [acc]
+              ]
+          ]
+      ]
