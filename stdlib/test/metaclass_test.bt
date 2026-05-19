@@ -69,6 +69,13 @@ TestCase subclass: MetaclassTest
     self assert: Actor class class superclass equals: Object class class
     // Object's metaclass superclass is ProtoObject's metaclass
     self assert: Object class class superclass equals: ProtoObject class class
+    // BT-2217: ProtoObject's metaclass grounds into the instance-side `Class`,
+    // merging the parallel chain with `Class → Behaviour → Object → ProtoObject`.
+    self assert: ProtoObject class superclass equals: Class
+    // From there, regular instance-side dispatch continues the chain.
+    self assert: Class superclass equals: Behaviour
+    self assert: Behaviour superclass equals: Object
+    self assert: Object superclass equals: ProtoObject
 
   // BT-803: self-grounding fixed point — Metaclass class class == Metaclass class
   testSelfGrounding =>

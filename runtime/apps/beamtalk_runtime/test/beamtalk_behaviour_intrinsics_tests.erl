@@ -1973,9 +1973,10 @@ bt1982_class_remove_rejects_stdlib_test_() ->
         ]
     end}.
 
-%% metaclassSuperclass on a root class (superclass=none) returns nil —
-%% covers the none branch of metaclassSuperclass/1.
-bt1982_metaclass_superclass_root_returns_nil_test_() ->
+%% metaclassSuperclass on a root class (superclass=none) grounds the parallel
+%% chain into the instance-side `Class` (ADR 0036 / BT-2217). Covers the none
+%% branch of metaclassSuperclass/1.
+bt1982_metaclass_superclass_root_grounds_at_class_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
@@ -1987,15 +1988,19 @@ bt1982_metaclass_superclass_root_returns_nil_test_() ->
                     class_methods => #{}
                 },
                 {ok, Pid} = beamtalk_object_class:start('BT1982RootMeta', ClassInfo),
-                ClassObj = #beamtalk_object{
-                    class = 'BT1982RootMeta class',
-                    class_mod = test_class,
+                %% Metaclass receiver — what real metaclass objects look like.
+                MetaObj = #beamtalk_object{
+                    class = 'Metaclass',
+                    class_mod = beamtalk_metaclass_bt,
                     pid = Pid
                 },
                 try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:metaclassSuperclass(ClassObj)
+                    Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
+                    %% BT-2217: parallel chain grounds at `Class` — expect the
+                    %% instance-side Class class object, not nil.
+                    ?assertMatch(
+                        #beamtalk_object{class = 'Class class'},
+                        Result
                     )
                 after
                     try

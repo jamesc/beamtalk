@@ -604,8 +604,12 @@ self assert: (Metaclass class class == Metaclass class) equals: true.
 ## Implementation Tracking
 
 **Epic:** BT-801
-**Issues:** BT-802 (Phase 1: Bootstrap stub, runtime wiring + primitives), BT-803 (Phase 2: Metaclass.bt stdlib class + tests)
-**Status:** Planned
+**Issues:**
+- BT-802 (Phase 1: Bootstrap stub, runtime wiring + primitives) — Done
+- BT-803 (Phase 2: Metaclass.bt stdlib class + tests) — Done
+- BT-2194 — Fix `isKindOf:` / `inheritsFrom:` on metaclass receivers (`classAllSuperclasses` walks the parallel chain) — Done
+- BT-2217 — Ground the parallel metaclass chain at `Class` (`ProtoObject class superclass == Class`) — Done
+**Status:** Implemented
 
 ## References
 
