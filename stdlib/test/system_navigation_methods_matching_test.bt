@@ -1,0 +1,122 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2205: BUnit-level coverage for `SystemNavigation methodsMatching:` —
+// full-system source-text grep that returns `{class, selector}` records for
+// every method whose source matches a `Regex`. Backs an IDE "find any method
+// whose body matches X" surface.
+//
+// `methodsMatching:` is an instance method on `SystemNavigation`, reached
+// via the `default` (or future scoped) constructor. The class-side surface
+// stays constructors-only — see the note in `beamtalk_implementors_test.bt`
+// for why query iteration runs on the instance.
+//
+// Behavioural assertions in this file scope themselves to a single class
+// via the public helper `collectMethodsMatching:in:into:`. The full-registry
+// scan is O(N x source-length) and would dominate suite time if every test
+// case re-ran it. Whole-system coverage lives in
+// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
+// workspace_mode and has the live class registry populated.
+
+TestCase subclass: SystemNavigationMethodsMatchingTest
+
+  // --- selector existence ---
+  testIncludesSelectorMethodsMatching =>
+    self assert: (SystemNavigation includesSelector: #methodsMatching:)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation walks `aScope methods`, fetches each via `>>`, reads
+  // the method source, and asks `String >> #matchesRegex:` whether the
+  // compiled `Regex` matches. All of those primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (CompiledMethod includesSelector: #source)
+    self assert: (String includesSelector: #matchesRegex:)
+
+  // The internal helper `collectMethodsMatching:in:into:` factors out
+  // per-class iteration so it can be checked separately.
+  testHelperCollectMethodsMatchingIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectMethodsMatching:in:into:)
+
+  // --- argument type check ---
+
+  // String is the most likely wrong-type input — the selector takes a
+  // compiled Regex, not a raw pattern string. The runtime `isKindOf:`
+  // guard must trip even when the caller bypasses the static check.
+  testStringArgumentRaisesError =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav methodsMatching: "ifTrue:"] raise: #user_error
+
+  // Symbol is another tempting wrong-type input (callers used to fuzzy
+  // selector search by symbol). Same rejection.
+  testSymbolArgumentRaisesError =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav methodsMatching: #ifTrue:] raise: #user_error
+
+  // --- happy path: stdlib match (scoped) ---
+
+  // A regex that matches a literal known to appear in `Integer` method
+  // bodies must produce a non-empty list, and each record must be a
+  // Dictionary with #class and #selector keys. Scoping to `Integer` via
+  // the per-class helper keeps the BUnit run fast — full-registry shape
+  // assertions are covered by the REPL-protocol E2E suite.
+  testStdlibMatchHasShape =>
+    nav := SystemNavigation default
+    pat := (Regex from: "ifTrue:") unwrap
+    results := nav
+      collectMethodsMatching: pat
+      in: Integer
+      into: List new
+    self deny: results isEmpty
+    record := results first
+    self assert: (record includesKey: #class)
+    self assert: (record includesKey: #selector)
+
+  // Regex anchors and character classes must be honoured (i.e. the search
+  // really goes through the regex engine and isn't a substring shortcut).
+  // Use a character-class alternation between `if(True|False):` — any hit
+  // is genuinely a regex match, not a naive substring scan that happens to
+  // also accept the same literal. Scoped to `Integer`.
+  testRegexAnchorsAndCharClasses =>
+    nav := SystemNavigation default
+    pat := (Regex from: "if(True|False):") unwrap
+    results := nav
+      collectMethodsMatching: pat
+      in: Integer
+      into: List new
+    self deny: results isEmpty
+
+  // --- no-match path (scoped) ---
+
+  // A pattern that no method in `Integer` contains must come back empty
+  // (not raise). The regex is built at runtime from concatenated fragments
+  // so that no method's source — including this test's own source — ever
+  // literally contains the assembled pattern. Defeats the "the test file
+  // itself matches the pattern it searches for" loophole.
+  testNoMatchReturnsEmpty =>
+    nav := SystemNavigation default
+    needle := "xyzzyA" ++ "bsentNeedleZZ" ++ "1n0Wh3re"
+    results := nav
+      collectMethodsMatching: (Regex from: needle) unwrap
+      in: Integer
+      into: List new
+    self assert: results isEmpty
+
+  // --- selector identity in records (scoped) ---
+
+  // Confirm that the record names a real stdlib selector. We match a
+  // literal that appears in `Integer >> #abs` so #abs must be in the
+  // resulting selector set. Scoping to `Integer` keeps the test fast.
+  testKnownSelectorAppears =>
+    nav := SystemNavigation default
+    pat := (Regex from: "self negated") unwrap
+    results := nav
+      collectMethodsMatching: pat
+      in: Integer
+      into: List new
+    selectors := results collect: [:r | r at: #selector]
+    self assert: (selectors includes: #abs)

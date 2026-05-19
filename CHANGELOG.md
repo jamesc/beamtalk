@@ -10,6 +10,7 @@
 ### Standard Library
 
 - **`SystemNavigation`** — `implementorsOf:` and `sendersOf:` moved off `Beamtalk` onto a new `SystemNavigation` class, matching Pharo/Squeak/Cuis convention. Reach an instance via `SystemNavigation default` and dispatch queries against it: `SystemNavigation default implementorsOf: #foo`, `SystemNavigation default sendersOf: #foo`. The class side is constructors only — `default` today, with `over: aPackage` and `forClasses: aList` planned for the BT-2201 query API expansion — so future scoped queries fit cleanly without breaking the protocol. The methods on `Beamtalk` are removed outright (no deprecation period; pre-1.0 reflective queries with no broad surface area) (BT-2214).
+- **`SystemNavigation methodsMatching:`** — new source-text grep query that returns `{class, selector}` records for every loaded method whose `CompiledMethod source` matches a compiled `Regex`. Argument must be a `Regex` (raises a typed error on a raw `String` so callers stay explicit about compile-once semantics). Iterates `allClasses` and skips methods whose source is missing. Same iteration shell as `sendersOf:`, so class-side and extension methods are out of scope until the runtime gains class-side source retention and an extensions reverse index (BT-2205).
 
 ### Runtime
 

@@ -335,3 +335,54 @@ SystemNavigation default referencesTo: Bag class
 // Passing a String also raises.
 [SystemNavigation default referencesTo: "Integer"] on: Error do: [:e | #ok]
 // => ok
+
+// ===========================================================================
+// SYSTEMNAVIGATION METHODSMATCHING: — source-text grep (BT-2205)
+// ===========================================================================
+
+// methodsMatching: returns a non-empty list when the pattern hits a stdlib
+// method body. `ifTrue:` is sent from dozens of stdlib methods, so the
+// search must produce hits.
+ifTrueMethods := SystemNavigation default methodsMatching: (Regex from: "ifTrue:") unwrap
+// => _
+
+ifTrueMethods isEmpty
+// => false
+
+// Each record is a Dictionary with #class and #selector keys (no #line —
+// methodsMatching: returns one record per matching method, not per
+// occurrence).
+ifTrueMethodRecord := ifTrueMethods first
+// => _
+
+ifTrueMethodRecord includesKey: #class
+// => true
+
+ifTrueMethodRecord includesKey: #selector
+// => true
+
+// Integer >> #abs has body `(self < 0) ifTrue: [self negated] ifFalse:
+// [self]`, so a pattern that targets the `self negated` literal must
+// produce an Integer / #abs record.
+negatedMatches := SystemNavigation default methodsMatching: (Regex from: "self negated") unwrap
+// => _
+
+(negatedMatches collect: [:r | r at: #class]) includes: Integer
+// => true
+
+(negatedMatches collect: [:r | r at: #selector]) includes: #abs
+// => true
+
+// methodsMatching: with a pattern that nobody's source contains returns an
+// empty list. The pattern is split across two literals so the script file
+// itself doesn't trigger a self-match.
+absent := "xyzzyAbsentNeed" ++ "leZZ1n0Wh3re"
+// => _
+
+SystemNavigation default methodsMatching: (Regex from: absent) unwrap
+// => []
+
+// Regex argument is required — passing a String (raw pattern) raises a
+// useful error, mirroring sendersOf:'s Symbol-only contract.
+[SystemNavigation default methodsMatching: "ifTrue:"] on: Error do: [:e | #ok]
+// => ok
