@@ -28,7 +28,7 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no senders found" identically to "could not parse".
 
-use crate::ast::{Expression, StringSegment};
+use crate::ast::{Expression, Pattern, StringSegment};
 use crate::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -151,6 +151,7 @@ fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, line
         Expression::Match { value, arms, .. } => {
             collect_send_lines(value, selector_name, source, lines);
             for arm in arms {
+                collect_pattern_send_lines(&arm.pattern, selector_name, source, lines);
                 if let Some(guard) = &arm.guard {
                     collect_send_lines(guard, selector_name, source, lines);
                 }
@@ -191,6 +192,67 @@ fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, line
         | Expression::ExpectDirective { .. }
         | Expression::Spread { .. }
         | Expression::Error { .. } => {}
+    }
+}
+
+/// Recursively collect line numbers of message sends inside a [`Pattern`].
+///
+/// Patterns are themselves name-binding/literal-matching constructs and carry
+/// no message sends today — `BinarySegment::size` is the only expression slot
+/// in the [`Pattern`] enum, and the parser currently restricts it to an
+/// integer literal or a bare identifier (see
+/// `parse_binary_segment_size`). The walker is defensive: it traverses
+/// container patterns (Tuple/Array/List/Map/Constructor) and the binary
+/// segment size expression so that loosening the parser later does not
+/// silently regress `sendersOf:`. Constructor-pattern selector keywords (e.g.
+/// the `ok:` in `Result ok: v`) are *not* sends and are skipped here.
+fn collect_pattern_send_lines(
+    pattern: &Pattern,
+    selector_name: &str,
+    source: &str,
+    lines: &mut Vec<u32>,
+) {
+    match pattern {
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                collect_pattern_send_lines(&segment.value, selector_name, source, lines);
+                if let Some(size) = &segment.size {
+                    collect_send_lines(size, selector_name, source, lines);
+                }
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                collect_pattern_send_lines(element, selector_name, source, lines);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                collect_pattern_send_lines(element, selector_name, source, lines);
+            }
+            if let Some(rest_pattern) = rest {
+                collect_pattern_send_lines(rest_pattern, selector_name, source, lines);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                collect_pattern_send_lines(element, selector_name, source, lines);
+            }
+            if let Some(tail_pattern) = tail {
+                collect_pattern_send_lines(tail_pattern, selector_name, source, lines);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_pattern_send_lines(&pair.value, selector_name, source, lines);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_selector, inner) in keywords {
+                collect_pattern_send_lines(inner, selector_name, source, lines);
+            }
+        }
+        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
     }
 }
 
@@ -278,6 +340,16 @@ mod tests {
         // Garbage source — parser produces diagnostics but does not crash.
         let lines = find_senders_in_source(")@!", "anything");
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn constructor_pattern_keyword_is_not_a_send() {
+        // `ok:` in `Result ok: v` is a constructor-pattern selector keyword,
+        // not a message send. A query for `ok:` should not report it. The
+        // body's `ok:` *send* still counts.
+        let src = "wrap: x =>\n  x match: [\n    Result ok: v -> Result ok: v;\n    _ -> nil]";
+        let lines = find_senders_in_source(src, "ok:");
+        assert_eq!(lines, vec![3]);
     }
 
     #[test]

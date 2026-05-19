@@ -30,7 +30,7 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no references found" identically to "could not parse".
 
-use crate::ast::{Expression, StringSegment, TypeAnnotation};
+use crate::ast::{Expression, Pattern, StringSegment, TypeAnnotation};
 use crate::source_analysis::{lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -166,6 +166,7 @@ fn collect_reference_lines(
         Expression::Match { value, arms, .. } => {
             collect_reference_lines(value, class_name, source, lines);
             for arm in arms {
+                collect_pattern_reference_lines(&arm.pattern, class_name, source, lines);
                 if let Some(guard) = &arm.guard {
                     collect_reference_lines(guard, class_name, source, lines);
                 }
@@ -205,6 +206,68 @@ fn collect_reference_lines(
         | Expression::ExpectDirective { .. }
         | Expression::Spread { .. }
         | Expression::Error { .. } => {}
+    }
+}
+
+/// Recursively collect line numbers of class references inside a [`Pattern`].
+///
+/// `Constructor` patterns carry an explicit class name (e.g. `Result ok: v`);
+/// container patterns recurse into their nested patterns so a class mentioned
+/// only inside a nested constructor (e.g. `Result ok: (Wrapper value: v)`) is
+/// still reported. `BinarySegment::size` is a full expression and is walked
+/// via `collect_reference_lines`.
+fn collect_pattern_reference_lines(
+    pattern: &Pattern,
+    class_name: &str,
+    source: &str,
+    lines: &mut Vec<u32>,
+) {
+    match pattern {
+        Pattern::Constructor {
+            class, keywords, ..
+        } => {
+            if class.name.as_str() == class_name {
+                lines.push(class.span.line_number(source));
+            }
+            for (_selector, inner) in keywords {
+                collect_pattern_reference_lines(inner, class_name, source, lines);
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                collect_pattern_reference_lines(element, class_name, source, lines);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                collect_pattern_reference_lines(element, class_name, source, lines);
+            }
+            if let Some(rest_pattern) = rest {
+                collect_pattern_reference_lines(rest_pattern, class_name, source, lines);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                collect_pattern_reference_lines(element, class_name, source, lines);
+            }
+            if let Some(tail_pattern) = tail {
+                collect_pattern_reference_lines(tail_pattern, class_name, source, lines);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_pattern_reference_lines(&pair.value, class_name, source, lines);
+            }
+        }
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                collect_pattern_reference_lines(&segment.value, class_name, source, lines);
+                if let Some(size) = &segment.size {
+                    collect_reference_lines(size, class_name, source, lines);
+                }
+            }
+        }
+        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
     }
 }
 
@@ -369,6 +432,24 @@ mod tests {
         let src = "/// Builds an Integer.\nmake => Integer new";
         let lines = find_references_to_in_source(src, "Integer");
         assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_reference_in_match_arm_pattern() {
+        // The only mention of `Result` is inside a match-arm constructor
+        // pattern. Without walking patterns this would be missed.
+        let src = "classify: x =>\n  x match: [\n    Result ok: v -> v;\n    _ -> nil]";
+        let lines = find_references_to_in_source(src, "Result");
+        assert_eq!(lines, vec![3]);
+    }
+
+    #[test]
+    fn finds_reference_in_nested_match_arm_pattern() {
+        // Class appears only inside a nested constructor pattern.
+        let src =
+            "unwrap: x =>\n  x match: [\n    Result ok: (Wrapper value: v) -> v;\n    _ -> nil]";
+        let lines = find_references_to_in_source(src, "Wrapper");
+        assert_eq!(lines, vec![3]);
     }
 
     #[test]
