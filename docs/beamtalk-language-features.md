@@ -424,7 +424,7 @@ p fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)
 p class                // => Point
 Point superclass       // => Value
 
-// Full chain from self up to (and including) Object
+// Full chain from self up to (and including) Object (or Object class for metaclass receivers)
 Counter superclassChain        // => [Counter, Actor, Object]
 Object superclassChain         // => [Object]
 Counter class superclassChain  // => [Counter class, Actor class, Object class]
