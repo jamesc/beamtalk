@@ -222,8 +222,9 @@ findSendersIn(Source, Selector) when
             %% the per-method fault-tolerance contract is unchanged: a transient port
             %% failure on one method's source must not abort the whole `sendersOf:`
             %% iteration. The log exists for systemic-failure visibility — if the
-            %% compiler port is wedged, every call will emit a warning and operators
-            %% can see the pattern in the log rather than getting silently empty results.
+            %% compiler port is wedged, every call will emit a warning (or an
+            %% error for port-unavailability) and operators can see the pattern
+            %% in the log rather than getting silently empty results.
             log_compiler_diagnostics(Diagnostics, 'findSendersIn:selector:'),
             []
     end;
@@ -318,8 +319,9 @@ findReferencesToIn(Source, ClassName) when
             %% the per-method fault-tolerance contract is unchanged: a transient port
             %% failure on one method's source must not abort the whole `referencesTo:'
             %% iteration. The log exists for systemic-failure visibility — if the
-            %% compiler port is wedged, every call will emit a warning and operators
-            %% can see the pattern in the log rather than getting silently empty results.
+            %% compiler port is wedged, every call will emit a warning (or an
+            %% error for port-unavailability) and operators can see the pattern
+            %% in the log rather than getting silently empty results.
             log_compiler_diagnostics(Diagnostics, 'findReferencesToIn:class:'),
             []
     end;
@@ -363,20 +365,43 @@ log_compiler_diagnostics(Diagnostics, Selector) ->
         end,
         Diagnostics
     ),
+    %% Include a short summary in the message body itself: in text log mode the
+    %% handler template renders only `msg`, so the full `diagnostics` payload in
+    %% metadata is invisible there (it only shows up in structured/JSON logs).
+    Summary = summarise_diagnostics(Diagnostics),
     Meta = #{selector => Selector, diagnostics => Diagnostics, domain => [beamtalk, stdlib]},
     case IsPortUnavailable of
         true ->
             ?LOG_ERROR(
-                "Compiler port unavailable in ~p — returning [] (per-method fault-tolerance preserved)",
-                [Selector],
+                "Compiler port unavailable in ~p: ~ts — returning [] (per-method fault-tolerance preserved)",
+                [Selector, Summary],
                 Meta
             );
         false ->
             ?LOG_WARNING(
-                "Compiler port returned diagnostics in ~p — returning [] (per-method fault-tolerance preserved)",
-                [Selector],
+                "Compiler port returned diagnostics in ~p: ~ts — returning [] (per-method fault-tolerance preserved)",
+                [Selector, Summary],
                 Meta
             )
+    end.
+
+-doc "Build a short human-readable summary of compiler diagnostics for a log message body.".
+-spec summarise_diagnostics([map()]) -> binary().
+summarise_diagnostics([]) ->
+    <<"(no diagnostics)">>;
+summarise_diagnostics([First | Rest]) ->
+    MsgBin = diagnostic_message(First),
+    case Rest of
+        [] -> MsgBin;
+        _ -> iolist_to_binary([MsgBin, " (+", integer_to_binary(length(Rest)), " more)"])
+    end.
+
+-doc "Extract a diagnostic's `message` as a binary, falling back to a printed term.".
+-spec diagnostic_message(map()) -> binary().
+diagnostic_message(D) ->
+    case maps:get(message, D, <<"(no message)">>) of
+        Msg when is_binary(Msg) -> Msg;
+        Other -> iolist_to_binary(io_lib:format("~p", [Other]))
     end.
 
 -doc "Format Erlang module help via beamtalk_erlang_help (dynamic call).".

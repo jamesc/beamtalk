@@ -52,14 +52,27 @@ remove_capture_handler({HandlerId, OrigLevel}) ->
 
 %% Drain one log event from the mailbox that matches a given level.
 %% Returns {ok, LogEvent} | not_found.
+%% Uses a fixed deadline so non-matching events consume the timeout budget
+%% rather than resetting it on each recursion (avoids waiting far longer than
+%% Timeout under log noise).
 collect_log(Level, Timeout) ->
-    receive
-        {captured_log, #{level := Level} = E} ->
-            {ok, E};
-        {captured_log, _Other} ->
-            collect_log(Level, Timeout)
-    after Timeout ->
-        not_found
+    Deadline = erlang:monotonic_time(millisecond) + Timeout,
+    collect_log_until(Level, Deadline).
+
+collect_log_until(Level, Deadline) ->
+    Remaining = Deadline - erlang:monotonic_time(millisecond),
+    case Remaining =< 0 of
+        true ->
+            not_found;
+        false ->
+            receive
+                {captured_log, #{level := Level} = E} ->
+                    {ok, E};
+                {captured_log, _Other} ->
+                    collect_log_until(Level, Deadline)
+            after Remaining ->
+                not_found
+            end
     end.
 
 %%% ============================================================================
@@ -76,9 +89,11 @@ log_compiler_diagnostics_warning_test() ->
         Result = collect_log(warning, 500),
         ?assertMatch({ok, _}, Result),
         {ok, Event} = Result,
-        %% Verify domain metadata is present
+        %% Verify the log metadata carries domain, selector, and diagnostics payload
         #{meta := Meta} = Event,
-        ?assertEqual([beamtalk, stdlib], maps:get(domain, Meta))
+        ?assertEqual([beamtalk, stdlib], maps:get(domain, Meta)),
+        ?assertEqual('findSendersIn:selector:', maps:get(selector, Meta)),
+        ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
         remove_capture_handler(Handle)
     end.
@@ -98,7 +113,9 @@ log_compiler_diagnostics_error_on_port_unavailable_test() ->
         ?assertMatch({ok, _}, Result),
         {ok, Event} = Result,
         #{meta := Meta} = Event,
-        ?assertEqual([beamtalk, stdlib], maps:get(domain, Meta))
+        ?assertEqual([beamtalk, stdlib], maps:get(domain, Meta)),
+        ?assertEqual('findReferencesToIn:class:', maps:get(selector, Meta)),
+        ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
         remove_capture_handler(Handle)
     end.
@@ -117,7 +134,9 @@ log_compiler_diagnostics_error_on_timeout_test() ->
         ?assertMatch({ok, _}, Result),
         {ok, Event} = Result,
         #{meta := Meta} = Event,
-        ?assertEqual([beamtalk, stdlib], maps:get(domain, Meta))
+        ?assertEqual([beamtalk, stdlib], maps:get(domain, Meta)),
+        ?assertEqual('findSendersIn:selector:', maps:get(selector, Meta)),
+        ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
         remove_capture_handler(Handle)
     end.
