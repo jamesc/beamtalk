@@ -428,8 +428,11 @@ handle_class_named(ClassName) when is_binary(ClassName) ->
         ClassAtom = binary_to_existing_atom(ClassName, utf8),
         handle_class_named(ClassAtom)
     catch
+        %% The full tag atom is not interned. It may still be a metaclass tag
+        %% (`<<"Foo class">>`) whose base class is live — decode on the binary
+        %% so resolution does not depend on the tag atom's interning history.
         error:badarg ->
-            nil
+            resolve_metaclass_tag(ClassName)
     end;
 handle_class_named(ClassName) when is_atom(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -463,8 +466,13 @@ identical to `beamtalk_behaviour_intrinsics:classClass/1` (ADR 0036) so that
 `==` against `Foo class` holds. This keeps the encode/decode of the metaclass
 tag convention in one place rather than reverse-engineered with string surgery
 in the stdlib.
+
+Accepts an atom or binary tag. Decoding the suffix off the binary means only
+the base class atom must be interned (always true for a live class), so binary
+metaclass tags resolve regardless of whether the full `'Foo class'` atom was
+ever created — and without minting new atoms from caller input.
 """.
--spec resolve_metaclass_tag(atom()) -> beamtalk_object() | 'nil'.
+-spec resolve_metaclass_tag(atom() | binary()) -> beamtalk_object() | 'nil'.
 resolve_metaclass_tag(Tag) ->
     case beamtalk_class_registry:is_class_name(Tag) of
         false ->

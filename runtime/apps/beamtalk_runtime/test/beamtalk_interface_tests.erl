@@ -243,6 +243,24 @@ class_named_metaclass_tag_test_() ->
                 Result = beamtalk_interface:findClass('Counter'),
                 ?assertMatch({beamtalk_object, 'Counter class', _, _}, Result)
             end},
+            {"binary metaclass tag resolves to metaclass object", fun() ->
+                ClassObj = beamtalk_interface:findClass('Counter'),
+                {beamtalk_object, _, _, ClassPid} = ClassObj,
+                MetaObj = beamtalk_interface:findClass(<<"Counter class">>),
+                ?assertEqual(
+                    {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, ClassPid},
+                    MetaObj
+                )
+            end},
+            {"binary metaclass tag decode does not depend on tag interning", fun() ->
+                %% Decode runs on the binary, so only the base class atom must
+                %% exist — the full 'Counter class' tag atom need not be interned.
+                ?assert(beamtalk_class_registry:is_class_name(<<"Counter class">>)),
+                ?assertEqual(
+                    <<"Counter">>,
+                    beamtalk_class_registry:class_display_name(<<"Counter class">>)
+                )
+            end},
             {"metaclass tag with unknown base class returns nil", fun() ->
                 ?assertEqual(nil, beamtalk_interface:findClass('NoSuchClassXYZ class'))
             end}
