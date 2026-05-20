@@ -901,6 +901,18 @@ Actor subclass: Foo
         let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [0]\n";
         let code = codegen(src);
         assert!(
+            code.split("apply _HandlerFun").skip(1).any(|suffix| {
+                suffix
+                    .trim_start_matches(|ch: char| ch.is_ascii_digit())
+                    .starts_with(" ()")
+            }),
+            "on:do: with 0-arg handler should apply handler with empty args. Got:\n{code}"
+        );
+        assert!(
+            !code.contains(" (_ExObj"),
+            "on:do: with 0-arg handler must not pass exception object to handler apply. Got:\n{code}"
+        );
+        assert!(
             code.contains("try apply"),
             "on:do: with 0-arg handler should generate try/catch via apply. Got:\n{code}"
         );
