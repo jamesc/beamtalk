@@ -65,3 +65,18 @@ TestCase subclass: SystemNavigationSendersTest
   testMetaclassScopePrimitivesPresent =>
     self assert: ((SystemNavigation class) methods includes: #default)
     self assert: ((SystemNavigation class) respondsTo: #'>>')
+
+  // --- BT-2196: extension method scanning ---
+
+  // The extension-scan helper is present (the `sendersOf:` body delegates
+  // to it after the class-side walk). Behavioural coverage — that
+  // register/5-source extensions actually surface in `sendersOf:` results —
+  // lives in the E2E REPL-protocol suite (`workspace_native_api.btscript`)
+  // because the compiler port needed to parse extension source bodies is
+  // not running under BUnit.
+  testHelperCollectExtensionSendersIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionSendersFor:into:)
+
+  // The class-tag resolver helper is present.
+  testHelperResolveExtensionClassIsDefined =>
+    self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)

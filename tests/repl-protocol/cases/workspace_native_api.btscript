@@ -300,6 +300,74 @@ newSenderClasses := newSenders collect: [:r | r at: #class]
 newSenderClasses includes: SystemNavigation class
 // => true
 
+// BT-2196: Extension method bodies registered via `register/5` (with source)
+// are scanned by `sendersOf:` alongside class-body methods. Register an
+// extension whose body sends a uniquely-named selector, then assert
+// `sendersOf:` finds it. Cleans up both ETS tables.
+extSendersFun := [:a :s | s]
+// => _
+
+extSendersSource := "describe => self btTwoTwoOneSixSrcSenderMarker"
+// => _
+
+Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixSrcSenderExt fun: extSendersFun owner: #test source: extSendersSource
+// => _
+
+extSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMarker
+// => _
+
+(extSenderHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixSrcSenderExt
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixSrcSenderExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixSrcSenderExt)
+// => _
+
+// BT-2196: Extensions registered via the legacy `register/4` (no source)
+// stay invisible to `sendersOf:` — there is no body text to grep.
+extBareSendersFun := [:a :s | s]
+// => _
+
+Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixBareSenderExt fun: extBareSendersFun owner: #test
+// => _
+
+extBareSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMarker
+// => _
+
+(extBareSenderHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixBareSenderExt
+// => false
+
+Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixBareSenderExt)
+// => _
+
+// BT-2196: A class-side extension (registered under the `#'Integer class'`
+// metaclass tag) reports the metaclass OBJECT in `#class`, matching the
+// shape BT-2195's class-side method walk emits — not the raw atom. This is
+// the parity guarantee `resolveExtensionClass:` provides: callers can
+// compare `record at: #class` against `Integer class` directly.
+extMetaFun := [:a :s | s]
+// => _
+
+extMetaSource := "describe => self btTwoTwoOneSixMetaSenderMarker"
+// => _
+
+Erlang beamtalk_extensions register: #'Integer class' selector: #btTwoTwoOneSixMetaSenderExt fun: extMetaFun owner: #test source: extMetaSource
+// => _
+
+extMetaHits := SystemNavigation default sendersOf: #btTwoTwoOneSixMetaSenderMarker
+// => _
+
+(extMetaHits collect: [:r | r at: #class]) includes: Integer class
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
+// => _
+
 // ===========================================================================
 // SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
 // ===========================================================================
@@ -361,6 +429,49 @@ navRefs := SystemNavigation default referencesTo: SystemNavigation
 [SystemNavigation default referencesTo: "Integer"] on: Error do: [:e | #ok]
 // => ok
 
+// BT-2196: Extension method bodies registered via `register/5` (with source)
+// are scanned by `referencesTo:` alongside class-body methods. Register an
+// extension whose body mentions a uniquely-named class atom that does not
+// resolve to a real class — we just need the FFI scan to find the textual
+// reference in the source body. We use `Integer` (a real class) as the
+// target, with an extension on `String` whose body references it.
+extRefsFun := [:a :s | s]
+// => _
+
+extRefsSource := "asInt => Integer new"
+// => _
+
+Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixSrcRefExt fun: extRefsFun owner: #test source: extRefsSource
+// => _
+
+extRefHits := SystemNavigation default referencesTo: Integer
+// => _
+
+(extRefHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixSrcRefExt
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixSrcRefExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#String, #btTwoTwoOneSixSrcRefExt)
+// => _
+
+// register/4 (no source) → invisible to referencesTo: scan.
+extBareRefsFun := [:a :s | s]
+// => _
+
+Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixBareRefExt fun: extBareRefsFun owner: #test
+// => _
+
+extBareRefHits := SystemNavigation default referencesTo: Integer
+// => _
+
+(extBareRefHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixBareRefExt
+// => false
+
+Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefExt)
+// => _
+
 // ===========================================================================
 // SYSTEMNAVIGATION METHODSMATCHING: — source-text grep (BT-2205)
 // ===========================================================================
@@ -421,6 +532,30 @@ newSelfMatches := SystemNavigation default methodsMatching: (Regex from: "self n
 
 (newSelfMatches collect: [:r | r at: #class]) includes: SystemNavigation class
 // => true
+
+// BT-2196: Extension methods registered via `register/5` (with source)
+// also participate in `methodsMatching:`. Register an extension whose
+// body contains a unique marker, then assert the pattern surfaces it.
+extMatchFun := [:a :s | s]
+// => _
+
+extMatchSource := "xyzzy => 42 // bt-two-two-one-six-method-marker"
+// => _
+
+Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixMatchExt fun: extMatchFun owner: #test source: extMatchSource
+// => _
+
+extMatchHits := SystemNavigation default methodsMatching: (Regex from: "bt-two-two-one-six-method-marker") unwrap
+// => _
+
+(extMatchHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixMatchExt
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixMatchExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixMatchExt)
+// => _
 
 // ===========================================================================
 // SYSTEMNAVIGATION SELECTORSMATCHING: — fuzzy selector search (BT-2204)

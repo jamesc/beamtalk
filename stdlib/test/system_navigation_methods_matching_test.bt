@@ -141,3 +141,15 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
       into: List new
     selectors := results collect: [:r | r at: #selector]
     self assert: (selectors includes: #default)
+
+  // --- BT-2196: extension method scanning ---
+
+  // The extension-scan helper is present (the `methodsMatching:` body
+  // delegates to it after the class-side walk). `methodsMatching:` does
+  // not need the compiler port (its scan is a pure regex match against
+  // the stored source binary) so the behavioural coverage below — that
+  // a register/5-source extension surfaces in the result — is reliable
+  // here in BUnit, unlike the `sendersOf:` / `referencesTo:` path which
+  // requires the compiler port to be running.
+  testHelperCollectExtensionMethodsMatchingIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionMethodsMatching:into:)
