@@ -74,6 +74,8 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     register/5,
     lookup/2,
     list/1,
+    extenders_of/1,
+    extensions_by/1,
     listAllWithSource/0,
     getSource/2,
     conflicts/0,
@@ -249,6 +251,62 @@ list('String').
 list(Class) when is_atom(Class) ->
     MatchPattern = {{Class, '$1'}, '_', '$2'},
     ets:select(?EXTENSIONS_TABLE, [{MatchPattern, [], [{{'$1', '$2'}}]}]).
+
+-doc """
+Return the unique set of owner classes that contribute any extension to the given target class.
+
+Scans the ETS extension table (`O(table size)`) for all entries whose key
+`{ClassName, _}` matches the given `TargetClass`, then collects the unique
+`Owner` atoms. Returns `[]` when no class extends `TargetClass`.
+
+This backs the `SystemNavigation extendersOf:` query: "which classes add
+extension methods to class X?"
+
+Examples:
+```
+extenders_of('Integer').
+% => [mylib, stdlib]   -- all owners that extend Integer
+extenders_of('NotExtended').
+% => []
+```
+""".
+-spec extenders_of(atom()) -> [atom()].
+extenders_of(TargetClass) when is_atom(TargetClass) ->
+    MatchPattern = {{TargetClass, '_'}, '_', '$1'},
+    Owners = ets:select(?EXTENSIONS_TABLE, [{MatchPattern, [], ['$1']}]),
+    lists:usort(Owners).
+
+-doc """
+Return all extensions contributed by the given owner class.
+
+Scans the ETS extension table (`O(table size)`) for all entries whose
+`Owner` field matches `OwnerClass`, then returns `{TargetClass, Selector}`
+tuples for every matching entry. Returns `[]` when `OwnerClass` contributes
+no extensions.
+
+This backs the `SystemNavigation extensionsBy:` query: "which extension
+methods does class Y contribute, and to which target classes?"
+
+Examples:
+```
+extensions_by(mylib).
+% => [{'Integer', double}, {'String', json}]
+extensions_by(unknown_owner).
+% => []
+```
+""".
+-spec extensions_by(atom()) -> [{atom(), atom()}].
+extensions_by(OwnerClass) when is_atom(OwnerClass) ->
+    ets:foldl(
+        fun
+            ({{TargetClass, Selector}, _Fun, Owner}, Acc) when Owner =:= OwnerClass ->
+                [{TargetClass, Selector} | Acc];
+            (_, Acc) ->
+                Acc
+        end,
+        [],
+        ?EXTENSIONS_TABLE
+    ).
 
 -doc """
 Show all methods that have been registered by multiple owners.
