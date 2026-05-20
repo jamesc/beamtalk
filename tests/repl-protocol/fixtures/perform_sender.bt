@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2206: E2E fixture for `SystemNavigation unimplementedSelectors`.
+//
+// `run` uses `self perform: #performOnlyXyzzy`. The dynamic selector argument
+// is a Symbol literal, not an AST send, so `performOnlyXyzzy` is never collected
+// as a sent selector — the typo-finder must not flag it. (`perform:` itself is
+// defined on Object and is in the defined set, so it is never flagged either.)
+
+Object subclass: PerformSender
+
+  run =>
+    @expect dnu
+    self perform: #performOnlyXyzzy

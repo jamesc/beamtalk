@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2206: E2E fixture for `SystemNavigation unimplementedSelectors`.
+//
+// `DnuDispatcher` defines `doesNotUnderstand:args:`, so it can legitimately
+// receive arbitrary selectors via `self`. The `dispatch` method sends a
+// uniquely-named undefined selector to `self`; the typo-finder's coarse DNU
+// heuristic must NOT flag it (the DNU handler interprets it dynamically).
+
+Object subclass: DnuDispatcher
+
+  // Intercepts any unrecognised message — this is what makes self-sends of
+  // undefined selectors legitimate for this class.
+  doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
+    @expect type
+    selector
+
+  // Sends `dnuOnlyHandledSelectorXyzzy` to self. Defined nowhere, but routed
+  // through this class's DNU handler at runtime, so it must not be flagged.
+  dispatch =>
+    @expect dnu
+    self dnuOnlyHandledSelectorXyzzy

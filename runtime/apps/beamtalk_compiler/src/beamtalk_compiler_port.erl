@@ -21,6 +21,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     compile_expression_trace/4, compile_expression_trace/5,
     resolve_completion_type/3,
     find_senders_in_source/3,
+    find_all_sends_in_source/2,
     find_references_to_in_source/3,
     close/1
 ]).
@@ -378,6 +379,70 @@ find_senders_in_source(_Port, _Source, _Selector) ->
     ]}.
 
 -doc """
+Find every message send within a single method's source (BT-2206).
+
+Single-pass companion to `find_senders_in_source/3': instead of filtering by
+one known selector, returns EVERY send. Sends an ETF-encoded
+`find_all_sends_in_source' request and returns `{ok, [Send]}' on success or
+`{error, [Diagnostic]}' on failure. Each `Send' is a map
+`#{selector := binary(), line := pos_integer(), recv := self | super | other}'.
+
+Used by `SystemNavigation unimplementedSelectors' via `beamtalk_interface' to
+compute `allSentSelectors − allDefinedSelectors' (the classic typo-finder).
+""".
+-spec find_all_sends_in_source(port(), binary()) ->
+    {ok, [map()]} | {error, [map()]}.
+find_all_sends_in_source(Port, Source) when is_binary(Source) ->
+    Request = #{
+        command => find_all_sends_in_source,
+        source => Source
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_all_sends_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (all sends)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during all-sends query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (all sends)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (all sends)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end;
+find_all_sends_in_source(_Port, _Source) ->
+    {error, [
+        #{
+            message =>
+                <<"find_all_sends_in_source: source must be a binary">>
+        }
+    ]}.
+
+-doc """
 Find references to a class within a single method's source (BT-2203).
 
 Sends an ETF-encoded `find_references_to_in_source' request and returns
@@ -561,6 +626,23 @@ handle_senders_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_senders_response(Other) ->
     ?LOG_ERROR("Unexpected senders response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+-doc """
+Handle ETF response from a find_all_sends_in_source request (BT-2206).
+Returns `{ok, [Send]}' on success (each `Send' a
+`#{selector := binary(), line := pos_integer(), recv := atom()}' map, passed
+through unchanged), `{error, [Diagnostic]}' on failure.
+""".
+-spec handle_all_sends_response(map()) -> {ok, [map()]} | {error, [map()]}.
+handle_all_sends_response(#{status := ok, sends := Sends}) when is_list(Sends) ->
+    {ok, Sends};
+handle_all_sends_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, normalize_diagnostics(Diagnostics)};
+handle_all_sends_response(Other) ->
+    ?LOG_ERROR("Unexpected all-sends response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, [#{message => <<"Unexpected compiler response">>}]}.

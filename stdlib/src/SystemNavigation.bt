@@ -597,6 +597,249 @@ sealed typed Object subclass: SystemNavigation
         ] ifFalse: [acc]
       ]
 
+  /// Return a List of every selector that is *sent* somewhere in the loaded
+  /// class registry but *defined* nowhere — the classic Smalltalk typo-finder.
+  ///
+  /// Each result is a Dictionary with two keys:
+  /// - `#selector` — the unimplemented selector (a Symbol)
+  /// - `#sites` — a List of site Dictionaries, one per send. Each site has:
+  ///   - `#class` — the class whose method contains the send (class object for
+  ///     an instance-side hit, metaclass object for a class-side hit, or the
+  ///     resolved extension target for an extension hit)
+  ///   - `#selector` — the selector of the method that contains the send
+  ///   - `#line` — the 1-based line number within that method's source
+  ///
+  /// So a typo like `self printOnStream: x` (when `printOnStream:` is defined
+  /// nowhere) surfaces with a site pointing straight at the offending method,
+  /// letting an IDE jump the user to the mistake.
+  ///
+  /// ## Single-pass design
+  ///
+  /// Computes `allSentSelectors − allDefinedSelectors`. The defined set is the
+  /// union of `selectorsForClass:` over every class in the navigation scope
+  /// (instance-side, class-side, and extension selectors). The sent set is
+  /// gathered by asking the compiler, once per method source, for EVERY send
+  /// via `(Erlang beamtalk_interface) allSendsIn:` — a single AST walk per
+  /// method rather than one walk per candidate selector. Sends whose selector
+  /// is already in the defined set are dropped; the rest are grouped by
+  /// selector into the result.
+  ///
+  /// ## Exclusions (and their limits)
+  ///
+  /// - **`doesNotUnderstand:args:`** — a class that defines the DNU override
+  ///   `doesNotUnderstand:args:` can legitimately receive arbitrary selectors
+  ///   via `self`/`super` (the DNU handler interprets them dynamically), so
+  ///   sends to `self`/`super` inside such a class are not flagged. This is a
+  ///   *coarse* heuristic: it does not know the runtime receiver type, so it
+  ///   only suppresses `self`/`super` sends in the defining class, not sends to
+  ///   other instances of it. Proper receiver-type analysis is out of scope.
+  /// - **`perform:`** — the dynamic selector argument to `perform:` /
+  ///   `perform:with:` is a Symbol *literal*, never an AST send, so it is never
+  ///   collected in the first place (no special-casing needed). `perform:`
+  ///   itself is defined on Object, so it is in the defined set and never
+  ///   flagged.
+  /// - **Erlang FFI** — `Erlang module …` and `(Erlang module) selector: …`
+  ///   are Erlang function calls routed through `ErlangModule`'s
+  ///   `doesNotUnderstand:` bridge, not Beamtalk message sends. The compiler
+  ///   tags such sends with receiver kind `#erlang_ffi`; they are dropped
+  ///   wholesale (otherwise every FFI module name and FFI function name would
+  ///   be a false positive). This is exact, not heuristic: the receiver is a
+  ///   static `Erlang …` chain in the AST.
+  /// - **Runtime-provided selectors** — a small documented set of selectors
+  ///   that are real and resolvable at runtime but are not surfaced through the
+  ///   compile-time `methods` dictionary (e.g. codegen-inlined pseudo-selectors
+  ///   or primitives registered under a different name). See
+  ///   `runtimeProvidedSelectors`.
+  ///
+  /// ## Performance
+  ///
+  /// Naive: parses every method's source on every call (same envelope as
+  /// `sendersOf:` — a few seconds on a 200-class workspace). Fine for an
+  /// on-demand IDE lint; a maintained send/define index is a follow-up.
+  ///
+  /// Returns `[]` when the registry is clean (modulo the documented
+  /// exclusions). Source-less methods and `register/4` extensions (no source)
+  /// contribute neither sends nor flags, exactly as in `sendersOf:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default unimplementedSelectors
+  ///   // => [#{#selector => #printOnStream:, #sites => [#{#class => Foo, #selector => bar, #line => 3}]}]
+  /// ```
+  unimplementedSelectors -> List(Dictionary) =>
+    classList := self allClasses
+    definedSet := classList
+      inject: Set new
+      into: [:acc :cls |
+        (self selectorsForClass: cls) inject: acc into: [:innerAcc :sel |
+          innerAcc add: sel
+        ]
+      ]
+    excludedSet := self runtimeProvidedSelectors inject: definedSet into: [:acc :sel |
+      acc add: sel
+    ]
+    grouped := classList
+      inject: Dictionary new
+      into: [:acc :cls |
+        withInstance := self
+          collectAllSendsIn: cls
+          excluding: excludedSet
+          into: acc
+        self
+          collectAllSendsIn: cls class
+          excluding: excludedSet
+          into: withInstance
+      ]
+    groupedWithExt := self collectExtensionAllSendsExcluding: excludedSet into: grouped
+    groupedWithExt keys inject: List new into: [:acc :sel |
+      acc add: #{#selector => sel, #sites => (groupedWithExt at: sel)}
+    ]
+
+  /// Selectors that are genuinely resolvable at runtime but are NOT surfaced
+  /// through the compile-time `methods` dictionary, so `unimplementedSelectors`
+  /// would otherwise flag them as typos.
+  ///
+  /// Keep this list small and documented — each entry must be a real framework
+  /// selector, never a way to silence an actual typo. Empirically derived by
+  /// running `unimplementedSelectors` against the live stdlib and confirming
+  /// each entry is inlined / registered under a different name.
+  ///
+  /// (Currently empty: the stdlib comes back clean after the structural
+  /// `doesNotUnderstand:` and `perform:` exclusions. Entries are added here
+  /// with a comment explaining the runtime mechanism that provides them.)
+  runtimeProvidedSelectors -> List(Symbol) => #()
+
+  /// Append unimplemented-send sites found in any method of `aScope` (a class
+  /// or metaclass) to the grouping Dictionary `result`, dropping any send whose
+  /// selector is in `excluded`. Returns the (possibly extended) Dictionary.
+  ///
+  /// Internal helper for `unimplementedSelectors`. Mirrors
+  /// `collectSendersFor:in:into:` but threads a grouping Dictionary
+  /// (`selector -> [sites]`) instead of a flat List, and asks the compiler for
+  /// EVERY send (`allSendsIn:`) rather than one selector's senders.
+  ///
+  /// Guards the `>>` send with `respondsTo:` so a scope for which `>>` is not
+  /// yet supported is skipped rather than aborting the whole walk.
+  collectAllSendsIn: aScope :: Behaviour excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+    // The DNU override selector is `doesNotUnderstand:args:` (selector + args),
+    // matching the stdlib protocol (ProtoObject, Erlang, ErlangModule,
+    // TimeoutProxy). A class that defines it can interpret arbitrary selectors.
+    // Use `methods includes:` rather than `includesSelector:` so the membership
+    // test runs against the same locally-defined method list this walk iterates.
+    handlesDnu := aScope methods includes: #doesNotUnderstand:args:
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            self
+              appendAllSendsIn: method source
+              owner: aScope
+              methodSelector: methodSel
+              handlesDnu: handlesDnu
+              excluding: excluded
+              into: acc
+          ]
+      ]
+
+  /// Append one grouped site per unimplemented send found in `methodSource`.
+  ///
+  /// Internal helper for `collectAllSendsIn:excluding:into:`. Splits the
+  /// per-method FFI call out so the surrounding `inject:into:` body stays a
+  /// single expression — same shape as
+  /// `appendSendersIn:selector:class:methodSelector:into:`.
+  ///
+  /// For each send tuple `{sentSel, line, recv}` returned by `allSendsIn:`,
+  /// the send is recorded in the grouping Dictionary unless:
+  /// - `sentSel` is in `excluded` (already defined, or runtime-provided), or
+  /// - the owner defines `doesNotUnderstand:` and the receiver is `#self` /
+  ///   `#super` (the coarse DNU heuristic — see `unimplementedSelectors`).
+  appendAllSendsIn: methodSource :: String owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+    sends := (Erlang beamtalk_interface) allSendsIn: methodSource
+    sends
+      inject: result
+      into: [:acc :s |
+        @expect type
+        sentSel := s at: 1
+        @expect type
+        line := s at: 2
+        @expect type
+        recv := s at: 3
+        self
+          recordSend: sentSel
+          line: line
+          recv: recv
+          owner: ownerClass
+          methodSelector: methodSel
+          handlesDnu: handlesDnu
+          excluding: excluded
+          into: acc
+      ]
+
+  /// Add a single send site to the grouping Dictionary, applying the defined /
+  /// runtime-provided and `doesNotUnderstand:` exclusions. Returns the
+  /// (possibly extended) Dictionary unchanged when the send is excluded.
+  ///
+  /// Internal helper for `appendAllSendsIn:...`. Splitting the per-send
+  /// decision out keeps the surrounding `inject:into:` body a single
+  /// expression.
+  recordSend: sentSel :: Symbol line: line :: Integer recv: recv :: Symbol owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+    // Erlang FFI sends (`Erlang module …` / `(Erlang module) selector: …`) are
+    // Erlang function calls routed through `ErlangModule`'s `doesNotUnderstand:`,
+    // not Beamtalk message sends — neither the module name nor the FFI function
+    // name is a Beamtalk method, so they must never be flagged.
+    skipForFfi := recv == #erlang_ffi
+    // Coarse DNU heuristic: a class defining `doesNotUnderstand:` may legitimately
+    // receive arbitrary selectors via `self`/`super` (see `unimplementedSelectors`).
+    skipForDnu := handlesDnu and: [(recv == #self) or: [recv == #super]]
+    ((excluded includes: sentSel) or: [skipForFfi or: [skipForDnu]])
+      ifTrue: [result]
+      ifFalse: [
+        site := #{#class => ownerClass, #selector => methodSel, #line => line}
+        existing := result at: sentSel ifAbsent: [List new]
+        result at: sentSel put: (existing add: site)
+      ]
+
+  /// Append unimplemented-send sites found in every extension method source
+  /// (ADR 0066 / BT-2196) to the grouping Dictionary `result`. Returns the
+  /// (possibly extended) Dictionary.
+  ///
+  /// Mirrors `collectExtensionSendersFor:into:` but threads a grouping
+  /// Dictionary and asks the compiler for EVERY send via `allSendsIn:`. The
+  /// `#class` for a site is resolved from the extension's registry tag via
+  /// `resolveExtensionClass:`, matching the class-body scan.
+  ///
+  /// The `doesNotUnderstand:` exclusion does not apply to extension sources:
+  /// `handlesDnu` is `false` because an extension target's DNU handler (if any)
+  /// is a property of the *target* class, which `resolveExtensionClass:` may
+  /// return as a raw atom (not a queryable scope). Erring toward reporting is
+  /// safe — extension bodies are rare and the user can add a documented
+  /// exclusion if a real false positive ever appears.
+  collectExtensionAllSendsExcluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        @expect type
+        extClassTag := entry at: 1
+        @expect type
+        extSelector := entry at: 2
+        @expect type
+        extSource := entry at: 3
+        extClass := self resolveExtensionClass: extClassTag
+        self
+          appendAllSendsIn: extSource
+          owner: extClass
+          methodSelector: extSelector
+          handlesDnu: false
+          excluding: excluded
+          into: acc
+      ]
+
   /// Resolve an extension registry class tag (an atom) to the class object
   /// the navigation queries should report in `#class`.
   ///

@@ -45,6 +45,7 @@ dictionary or ETS state is required.
     erlangHelp/1, erlangHelp/2,
     version/0,
     findSendersIn/2,
+    allSendsIn/1,
     findReferencesToIn/2
 ]).
 
@@ -226,6 +227,54 @@ findSendersIn(_Source, _Selector) ->
             "findSendersIn:selector: expects a binary source and an atom or "
             "binary selector"
         >>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc """
+Find every message send within a single method's source (BT-2206).
+
+Backs `SystemNavigation unimplementedSelectors`. Single-pass companion to
+`findSendersIn/2`: delegates to `beamtalk_compiler:find_all_sends_in_source/1`,
+which parses the source via the OTP-port compiler and walks the AST collecting
+EVERY `MessageSend` / `Cascade` send (selector, line, receiver kind) rather than
+filtering by one selector.
+
+Called via `(Erlang beamtalk_interface) allSendsIn: source`. Each compiler-side
+send map `#{selector := Bin, line := Line, recv := Recv}` is converted to a
+3-TUPLE `{Selector, Line, Recv}` where `Selector` is the selector atom and
+`Recv` is `self`, `super`, `erlang_ffi`, or `other`. `binary_to_atom/2` (not
+`binary_to_existing_atom`) is used because a send may reference a selector atom
+that does not yet exist anywhere in the loaded image — that is precisely the
+typo case the caller is hunting for. Returning 3-tuples mirrors how
+`beamtalk_extensions list:` / `listAllWithSource` already feed BT data accessed
+via `entry at: N`.
+
+Returns a list of 3-tuples; returns `[]` if the source has no sends, cannot be
+parsed, or the compiler port is unavailable. The degrade-on-error behaviour
+mirrors `findSendersIn/2`: a transient port failure on one method's source must
+not abort the whole `unimplementedSelectors` walk.
+""".
+-spec allSendsIn(binary()) -> [{atom(), pos_integer(), atom()}].
+allSendsIn(Source) when is_binary(Source) ->
+    case beamtalk_compiler:find_all_sends_in_source(Source) of
+        {ok, Sends} ->
+            [
+                {binary_to_atom(Sel, utf8), Line, Recv}
+             || #{selector := Sel, line := Line, recv := Recv} <- Sends
+            ];
+        {error, _Diagnostics} ->
+            %% Compiler port unavailable — degrade to "no sends found" rather
+            %% than crashing the caller. Iteration in `unimplementedSelectors`
+            %% should not be aborted by a transient port failure on one
+            %% method's source.
+            []
+    end;
+allSendsIn(_Source) ->
+    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'allSendsIn:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<"allSendsIn: expects a binary source">>
     ),
     beamtalk_error:raise(Err2).
 
