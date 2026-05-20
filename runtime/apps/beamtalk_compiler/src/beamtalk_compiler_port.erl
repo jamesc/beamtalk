@@ -385,7 +385,7 @@ Single-pass companion to `find_senders_in_source/3': instead of filtering by
 one known selector, returns EVERY send. Sends an ETF-encoded
 `find_all_sends_in_source' request and returns `{ok, [Send]}' on success or
 `{error, [Diagnostic]}' on failure. Each `Send' is a map
-`#{selector := binary(), line := pos_integer(), recv := self | super | other}'.
+`#{selector := binary(), line := pos_integer(), recv := self | super | erlang_ffi | other}'.
 
 Used by `SystemNavigation unimplementedSelectors' via `beamtalk_interface' to
 compute `allSentSelectors − allDefinedSelectors' (the classic typo-finder).

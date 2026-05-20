@@ -168,7 +168,7 @@ Find every message send in a single method's source (BT-2206).
 returns EVERY send rather than filtering by one selector.
 
 Returns `{ok, [Send]}' on success, where each `Send' is a map
-`#{selector := binary(), line := pos_integer(), recv := self | super | other}'.
+`#{selector := binary(), line := pos_integer(), recv := self | super | erlang_ffi | other}'.
 Returns `{ok, []}' when the source has no sends or cannot be parsed. Returns
 `{error, Diagnostics}' if the compiler port is unavailable.
 

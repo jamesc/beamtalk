@@ -199,7 +199,7 @@ Find every message send in a single method's source (BT-2206).
 
 Backs `SystemNavigation unimplementedSelectors' — parses the method source and
 returns every send as a map `#{selector := binary(), line := pos_integer(),
-recv := self | super | other}'. Returns `{ok, []}' if the source has no sends;
+recv := self | super | erlang_ffi | other}'. Returns `{ok, []}' if the source has no sends;
 returns `{error, Diagnostics}' if the compiler port is unavailable.
 """.
 -spec find_all_sends_in_source(binary()) ->

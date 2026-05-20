@@ -81,7 +81,9 @@ pub struct SendHit {
 /// [`Expression::Cascade`] nodes and emits one [`SendHit`] per send, recording
 /// the selector name, the 1-based line number (relative to the input), and the
 /// receiver kind. A method that sends the same selector multiple times produces
-/// one entry per occurrence, preserving source order.
+/// one entry per occurrence. Hits follow a stable pre-order walk — an outer
+/// send is recorded before the sends in its receiver/argument subtrees, so the
+/// order is not strictly left-to-right by source position.
 ///
 /// Returns an empty vector if the source contains no sends or cannot be parsed
 /// at all.

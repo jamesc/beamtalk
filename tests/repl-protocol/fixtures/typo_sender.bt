@@ -9,6 +9,6 @@
 
 Object subclass: TypoSender
 
-  // Line 11: the deliberate typo send. `printOnStream:` is implemented by no
+  // The deliberate typo send (line 14). `printOnStream:` is implemented by no
   // class anywhere.
   describe: x => self printOnStream: x
