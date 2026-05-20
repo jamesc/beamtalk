@@ -99,6 +99,28 @@ inverts the issue's premise — the cold pair proposed as the safe first step is
   aliases that all create the one table, so bootstrap and test call sites are
   unchanged.
 
+## Performance
+
+The merge widens the hierarchy row from a 2-tuple `{Class, Super}` to a 5-tuple
+`#class_metadata{}`. A naive whole-row `ets:lookup/2` therefore copies more out of
+ETS, which a micro-benchmark of `inherits_from/2` (the hottest reader — runs per
+exception match) confirmed: ~+6–8% / ~7–9 ns per lookup.
+
+The single-field reads (`lookup_superclass/1`, `lookup_module/1`) instead use
+`ets:lookup_element/4` (OTP 26+), which copies only the requested element and uses
+a default to fold the table-absent / key-absent / field-unset cases into one
+return. That more than recovers the regression — it beats the old 2-tuple table,
+because it never materialises the full row:
+
+| `inherits_from/2` path | old 2-tuple | new whole-row | new `lookup_element` |
+| -- | -- | -- | -- |
+| single hop (1 lookup) | 107 ns | 128 ns (+20%) | **92 ns (-14%)** |
+| full chain (8 lookups, miss) | 882 ns | 952 ns (+8%) | **792 ns (-10%)** |
+
+`lookup_methods/1` still reads the whole row (it needs two fields), but it is off
+the per-exception path. Benchmark: `/tmp/ets_bench.escript` (synthetic, isolates
+the row-shape change on one build; throwaway, not committed).
+
 ## References
 
 - Source: `beamtalk_class_metadata.erl` (new), `beamtalk_class_registry.erl`,

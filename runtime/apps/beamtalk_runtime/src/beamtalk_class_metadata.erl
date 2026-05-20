@@ -162,10 +162,9 @@ delete(Name) ->
 -doc "Look up a class's module name. `undefined`/missing yields `not_found`.".
 -spec lookup_module(class_name()) -> {ok, module()} | not_found.
 lookup_module(Name) ->
-    case row(Name) of
-        {ok, #class_metadata{module = undefined}} -> not_found;
-        {ok, #class_metadata{module = Module}} -> {ok, Module};
-        not_found -> not_found
+    case field(Name, #class_metadata.module) of
+        undefined -> not_found;
+        Module -> {ok, Module}
     end.
 
 -doc """
@@ -190,10 +189,9 @@ when the superclass field has not been written.
 """.
 -spec lookup_superclass(class_name()) -> {ok, superclass()} | not_found.
 lookup_superclass(Name) ->
-    case row(Name) of
-        {ok, #class_metadata{superclass = undefined}} -> not_found;
-        {ok, #class_metadata{superclass = Super}} -> {ok, Super};
-        not_found -> not_found
+    case field(Name, #class_metadata.superclass) of
+        undefined -> not_found;
+        Super -> {ok, Super}
     end.
 
 -doc """
@@ -319,6 +317,24 @@ all_builtins() ->
 %%====================================================================
 %% Internal
 %%====================================================================
+
+%% Fetch a single field via ets:lookup_element/4 (OTP 26+), which copies only
+%% that element instead of the whole row — measurably faster than ets:lookup/2
+%% on the hierarchy-walk hot path (inherits_from/2). The `undefined` default
+%% collapses the three not_found cases (table absent, key absent, field unset)
+%% into one return value, since none of them is a valid written field value.
+-spec field(class_name(), pos_integer()) -> term().
+field(Name, Pos) ->
+    case ets:info(?TABLE) of
+        undefined ->
+            undefined;
+        _ ->
+            try
+                ets:lookup_element(?TABLE, Name, Pos, undefined)
+            catch
+                error:badarg -> undefined
+            end
+    end.
 
 -spec row(class_name()) -> {ok, #class_metadata{}} | not_found.
 row(Name) ->
