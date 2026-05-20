@@ -693,7 +693,6 @@ resolves the module from ETS and succeeds.
 static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     %% Ensure ETS tables exist.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:new(),
 
     %% Set up a two-level hierarchy in ETS:
     %%   'BT1285Child' extends 'BT1285Parent' extends none
@@ -710,24 +709,23 @@ static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     %% class_* functions are exported there — the walk must climb to 'BT1285Parent'.
     %% 'BT1285Child' is not registered with whereis so ClassPid = undefined;
     %% that is fine since ClassSelf is only used as a value passed to class methods.
-    Result = beamtalk_supervisor:static_init(erlang, 'BT1285Child'),
-
-    %% Clean up ETS entries to avoid polluting state for other tests.
-    beamtalk_class_metadata:delete('BT1285Child'),
-    beamtalk_class_metadata:delete('BT1285Parent'),
-    beamtalk_class_metadata:delete('BT1285Parent'),
-
-    %% The walk found class_children/2, class_strategy/2, class_maxRestarts/2,
-    %% and class_restartWindow/2 in ?MODULE (this test module) via the ETS lookup.
-    %% It should succeed with zero children and one_for_one strategy.
-    ?assertMatch(
-        {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
-        Result
-    ).
+    try
+        Result = beamtalk_supervisor:static_init(erlang, 'BT1285Child'),
+        %% The walk found class_children/2, class_strategy/2, class_maxRestarts/2,
+        %% and class_restartWindow/2 in ?MODULE (this test module) via the ETS lookup.
+        %% It should succeed with zero children and one_for_one strategy.
+        ?assertMatch(
+            {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
+            Result
+        )
+    after
+        %% Clean up ETS entries even if an assertion fails, to avoid polluting other tests.
+        beamtalk_class_metadata:delete('BT1285Child'),
+        beamtalk_class_metadata:delete('BT1285Parent')
+    end.
 
 dynamic_init_walks_hierarchy_via_ets_test() ->
     %% BT-1960: dynamic_init/2 uses the same ETS hierarchy walk as static_init.
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:new(),
 
     beamtalk_class_metadata:insert('BT1960DynChild', undefined, undefined, 'BT1960DynParent'),
@@ -738,25 +736,24 @@ dynamic_init_walks_hierarchy_via_ets_test() ->
 
     %% dynamic_init needs class_childClass, class_maxRestarts, class_restartWindow.
     %% class_childClass returns a class object (beamtalk_object record).
-    Result = beamtalk_supervisor:dynamic_init(erlang, 'BT1960DynChild'),
-
-    beamtalk_class_metadata:delete('BT1960DynChild'),
-    beamtalk_class_metadata:delete('BT1960DynParent'),
-    beamtalk_class_metadata:delete('BT1960DynChildSup'),
-    beamtalk_class_metadata:delete('BT1960DynParent'),
-
-    %% dynamic_init always uses simple_one_for_one strategy.
-    %% The child spec should contain a start_link entry for the supervisor child.
-    ?assertMatch(
-        {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
-        Result
-    ).
+    try
+        Result = beamtalk_supervisor:dynamic_init(erlang, 'BT1960DynChild'),
+        %% dynamic_init always uses simple_one_for_one strategy.
+        %% The child spec should contain a start_link entry for the supervisor child.
+        ?assertMatch(
+            {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
+            Result
+        )
+    after
+        beamtalk_class_metadata:delete('BT1960DynChild'),
+        beamtalk_class_metadata:delete('BT1960DynParent'),
+        beamtalk_class_metadata:delete('BT1960DynChildSup')
+    end.
 
 hierarchy_depth_limit_error_test() ->
     %% BT-1960: Verify that call_inherited_class_method_direct raises
     %% {supervisor_init_method_not_found, FunName} when the depth limit is exceeded.
     %% We create a circular-ish hierarchy by having a class point to itself (via ETS).
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:new(),
 
     %% Create a hierarchy where every class points to a parent that doesn't have
@@ -773,15 +770,12 @@ hierarchy_depth_limit_error_test() ->
         )
     after
         beamtalk_class_metadata:delete('BT1960LoopA'),
-        beamtalk_class_metadata:delete('BT1960LoopB'),
-        beamtalk_class_metadata:delete('BT1960LoopA'),
         beamtalk_class_metadata:delete('BT1960LoopB')
     end.
 
 hierarchy_method_not_found_no_parent_test() ->
     %% BT-1960: When a class has no parent (not_found in hierarchy table),
     %% the walk raises {supervisor_init_method_not_found, FunName}.
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:new(),
 
     %% 'BT1960Orphan' has no entry in hierarchy table at all.
@@ -856,7 +850,6 @@ Set up ETS tables and register a fake class for start_child_via_class_method.
 Returns the fake class pid (a dummy process) that should be cleaned up after the test.
 """.
 setup_fake_class(ClassName) ->
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:new(),
     %% Register a dummy process as the class gen_server so whereis_class resolves.
     FakeClassPid = spawn(fun() ->
@@ -1082,7 +1075,6 @@ stop_terminates_children_test() ->
 static_init_direct_module_test() ->
     %% BT-1960: static_init finds class methods in the module directly
     %% (no hierarchy walk needed) when the class module exports them.
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:new(),
 
     %% Register a fake class pid so whereis_class resolves.
@@ -1408,7 +1400,6 @@ run_initialize_invokes_class_initialize_test() ->
     %% BT-1980: run_initialize walks the class chain and calls class_initialize:
     %% with the supervisor tuple as an extra arg.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:new(),
     %% Register a class pointing at this module (exports 'class_initialize:'/3).
     ClassName = 'BT1980InitClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
@@ -1444,7 +1435,6 @@ to_otp_strategy_oneForOne_test() ->
     %% Exercised indirectly via static_init tests, but we also assert the
     %% strategies land in a supervisor's SupFlags.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:insert('BT1980StratOne', undefined, undefined, 'BT1980StratOneParent'),
     beamtalk_class_metadata:insert('BT1980StratOneParent', ?MODULE, undefined, none),
     try
@@ -1452,7 +1442,6 @@ to_otp_strategy_oneForOne_test() ->
             beamtalk_supervisor:static_init(erlang, 'BT1980StratOne')
     after
         beamtalk_class_metadata:delete('BT1980StratOne'),
-        beamtalk_class_metadata:delete('BT1980StratOneParent'),
         beamtalk_class_metadata:delete('BT1980StratOneParent')
     end.
 
@@ -1478,7 +1467,6 @@ to_otp_strategy_unknown_passes_through_test() ->
 %% resulting OTP strategy atom.
 apply_to_otp_strategy(BtStrategy) ->
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:new(),
     Name = list_to_atom(
         "BT1980Strat_" ++ atom_to_list(BtStrategy) ++ "_" ++
             integer_to_list(erlang:unique_integer([positive]))
@@ -1495,7 +1483,6 @@ apply_to_otp_strategy(BtStrategy) ->
         Strategy
     after
         beamtalk_class_metadata:delete(Name),
-        beamtalk_class_metadata:delete(Parent),
         beamtalk_class_metadata:delete(Parent)
     end.
 
@@ -2089,7 +2076,6 @@ test_no_initialize_on_error() ->
 %% Minimal runtime setup for class_dispatch tests that use beamtalk_object_class.
 %% Ensures ETS tables and registry are available.
 setup_class_dispatch_runtime() ->
-    beamtalk_class_metadata:new(),
     beamtalk_class_metadata:new(),
     %% Return an opaque context for teardown.
     ok.
