@@ -52,8 +52,14 @@ is_class_name_false_test() ->
 is_class_name_short_atom_test() ->
     ?assertEqual(false, beamtalk_class_registry:is_class_name('ab')).
 
-is_class_name_non_atom_test() ->
-    ?assertEqual(false, beamtalk_class_registry:is_class_name(<<"Integer class">>)).
+is_class_name_binary_true_test() ->
+    ?assertEqual(true, beamtalk_class_registry:is_class_name(<<"Integer class">>)).
+
+is_class_name_binary_false_test() ->
+    ?assertEqual(false, beamtalk_class_registry:is_class_name(<<"Integer">>)).
+
+is_class_name_unsupported_type_test() ->
+    ?assertEqual(false, beamtalk_class_registry:is_class_name(42)).
 
 is_class_name_object_class_test() ->
     ?assertEqual(true, beamtalk_class_registry:is_class_name('Object class')).
@@ -96,6 +102,18 @@ class_display_name_object_test() ->
     ?assertEqual(
         <<"Object">>,
         beamtalk_class_registry:class_display_name('Object class')
+    ).
+
+class_display_name_binary_strips_suffix_test() ->
+    ?assertEqual(
+        <<"Counter">>,
+        beamtalk_class_registry:class_display_name(<<"Counter class">>)
+    ).
+
+class_display_name_binary_no_suffix_test() ->
+    ?assertEqual(
+        <<"Counter">>,
+        beamtalk_class_registry:class_display_name(<<"Counter">>)
     ).
 
 %%% ============================================================================

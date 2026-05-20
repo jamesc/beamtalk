@@ -616,12 +616,13 @@ is_class_object(#beamtalk_object{class = Class}) when is_atom(Class) ->
 is_class_object(_) ->
     false.
 
--doc "Check if an atom class name represents a class object (ends with \" class\").".
--spec is_class_name(atom()) -> boolean().
+-doc "Check if a class name (atom or binary) represents a class object (ends with \" class\").".
+-spec is_class_name(atom() | binary()) -> boolean().
 is_class_name(ClassName) when is_atom(ClassName) ->
-    ClassBin = atom_to_binary(ClassName, utf8),
-    Size = byte_size(ClassBin) - 6,
-    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
+    is_class_name(atom_to_binary(ClassName, utf8));
+is_class_name(ClassName) when is_binary(ClassName) ->
+    Size = byte_size(ClassName) - 6,
+    Size >= 0 andalso binary:part(ClassName, Size, 6) =:= <<" class">>;
 is_class_name(_) ->
     false.
 
@@ -629,15 +630,18 @@ is_class_name(_) ->
 Strip " class" suffix from a class object name to get the display name.
 
 Returns the base class name (e.g., `'Integer class'` → `<<"Integer">>`).
-Returns the full name as binary if not a class name.
+Returns the full name as binary if not a class name. Accepts an atom or a
+binary tag — the binary form lets callers decode a tag without first interning
+the full `'Foo class'` atom (only the base class atom needs to exist).
 """.
--spec class_display_name(atom()) -> binary().
+-spec class_display_name(atom() | binary()) -> binary().
 class_display_name(ClassName) when is_atom(ClassName) ->
-    ClassBin = atom_to_binary(ClassName, utf8),
-    Size = byte_size(ClassBin) - 6,
-    case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
-        true -> binary:part(ClassBin, 0, Size);
-        false -> ClassBin
+    class_display_name(atom_to_binary(ClassName, utf8));
+class_display_name(ClassName) when is_binary(ClassName) ->
+    Size = byte_size(ClassName) - 6,
+    case Size >= 0 andalso binary:part(ClassName, Size, 6) =:= <<" class">> of
+        true -> binary:part(ClassName, 0, Size);
+        false -> ClassName
     end.
 
 %%====================================================================
