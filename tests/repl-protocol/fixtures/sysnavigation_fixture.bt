@@ -28,9 +28,7 @@ Object subclass: SysnavFixture
 
   // Body contains `ifTrue:` — gives methodsMatching: (Regex from: "ifTrue:") a hit.
   btIfTrueBodyMarker =>
-    | x |
-    x := true.
-    x ifTrue: ["hit"] ifFalse: ["miss"]
+    true ifTrue: ["hit"] ifFalse: ["miss"]
 
   // Body contains the text `self negated` in the expression — gives
   // methodsMatching: (Regex from: "self negated") a fixture-controlled hit.
@@ -40,9 +38,4 @@ Object subclass: SysnavFixture
     self negated
 
   // References SysnavFixture by name — gives referencesTo: SysnavFixture a hit.
-  btReferencesFixture => SysnavFixture new
-
-Object subclass: SysnavFixtureB
-
-  // A second implementor of asString — kept separate to avoid coupling to SysnavFixture.
-  asString => "SysnavFixtureB"
+  btReferencesFixture => SysnavFixture name

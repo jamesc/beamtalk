@@ -176,6 +176,9 @@ wsGlobals includesKey: #Counter
 :load tests/repl-protocol/fixtures/sysnavigation_fixture.bt
 // => _
 
+:load tests/repl-protocol/fixtures/sysnavigation_fixture_b.bt
+// => _
+
 // implementorsOf: returns a non-empty list for a selector with known implementors.
 // SysnavFixture and SysnavFixtureB both define #asString locally (see fixture),
 // so the result must include at least these two fixture-controlled classes.
