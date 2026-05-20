@@ -203,6 +203,53 @@ class_named_test_() ->
     end}.
 
 %%====================================================================
+%% classNamed: Metaclass Tag Tests (BT-2223)
+%%====================================================================
+
+class_named_metaclass_tag_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"metaclass tag returns metaclass object for known class", fun() ->
+                ClassObj = beamtalk_interface:dispatch(
+                    'classNamed:', ['Counter'], fake_self()
+                ),
+                {beamtalk_object, _, _, ClassPid} = ClassObj,
+                MetaObj = beamtalk_interface:dispatch(
+                    'classNamed:', ['Counter class'], fake_self()
+                ),
+                ?assertEqual(
+                    {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, ClassPid},
+                    MetaObj
+                )
+            end},
+            {"findClass/1 resolves metaclass tag to metaclass object", fun() ->
+                ClassObj = beamtalk_interface:findClass('Integer'),
+                {beamtalk_object, _, _, ClassPid} = ClassObj,
+                MetaObj = beamtalk_interface:findClass('Integer class'),
+                ?assertEqual(
+                    {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, ClassPid},
+                    MetaObj
+                )
+            end},
+            {"metaclass tag resolution matches classClass/1 shape", fun() ->
+                ClassObj = beamtalk_interface:findClass('Counter'),
+                MetaObj = beamtalk_interface:findClass('Counter class'),
+                ?assertEqual(
+                    beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                    MetaObj
+                )
+            end},
+            {"instance-side resolution unchanged for known class", fun() ->
+                Result = beamtalk_interface:findClass('Counter'),
+                ?assertMatch({beamtalk_object, 'Counter class', _, _}, Result)
+            end},
+            {"metaclass tag with unknown base class returns nil", fun() ->
+                ?assertEqual(nil, beamtalk_interface:findClass('NoSuchClassXYZ class'))
+            end}
+        ]
+    end}.
+
+%%====================================================================
 %% globals Tests
 %%====================================================================
 
