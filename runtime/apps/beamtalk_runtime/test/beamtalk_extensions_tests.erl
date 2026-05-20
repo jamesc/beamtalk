@@ -599,3 +599,194 @@ get_source_handles_uninitialised_table_test() ->
     after
         beamtalk_extensions:init()
     end.
+
+%%% ============================================================================
+%%% BT-2202: extenders_of/1 tests
+%%% ============================================================================
+
+extenders_of_empty_table_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            %% No extensions registered — must return [] not an error.
+            ?assertEqual([], beamtalk_extensions:extenders_of('Integer'))
+        end
+    end}.
+
+extenders_of_single_extender_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X * 2 end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+
+            ?assertEqual([mylib], beamtalk_extensions:extenders_of('Integer'))
+        end
+    end}.
+
+extenders_of_multiple_extenders_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+            beamtalk_extensions:register('Integer', 'triple', Fun, stdlib),
+            beamtalk_extensions:register('Integer', 'negate', Fun, otherlib),
+
+            Result = beamtalk_extensions:extenders_of('Integer'),
+            %% Three distinct owners.
+            ?assertEqual(3, length(Result)),
+            ?assert(lists:member(mylib, Result)),
+            ?assert(lists:member(stdlib, Result)),
+            ?assert(lists:member(otherlib, Result))
+        end
+    end}.
+
+extenders_of_deduplicates_same_owner_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            %% Same owner registers multiple methods on the same class.
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+            beamtalk_extensions:register('Integer', 'triple', Fun, mylib),
+            beamtalk_extensions:register('Integer', 'negate', Fun, mylib),
+
+            %% Owner should appear only once despite multiple methods.
+            ?assertEqual([mylib], beamtalk_extensions:extenders_of('Integer'))
+        end
+    end}.
+
+extenders_of_does_not_include_other_class_owners_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            beamtalk_extensions:register('String', 'json', Fun, lib1),
+            beamtalk_extensions:register('Integer', 'double', Fun, lib2),
+            beamtalk_extensions:register('Float', 'ceil', Fun, lib3),
+
+            %% Query for String should only return lib1, not lib2 or lib3.
+            ?assertEqual([lib1], beamtalk_extensions:extenders_of('String'))
+        end
+    end}.
+
+extenders_of_no_match_returns_empty_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+
+            %% Asking about a class with no extensions returns [].
+            ?assertEqual([], beamtalk_extensions:extenders_of('Float'))
+        end
+    end}.
+
+%%% ============================================================================
+%%% BT-2202: extensions_by/1 tests
+%%% ============================================================================
+
+extensions_by_empty_table_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            %% No extensions registered — must return [] not an error.
+            ?assertEqual([], beamtalk_extensions:extensions_by(mylib))
+        end
+    end}.
+
+extensions_by_single_extension_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X * 2 end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+
+            ?assertEqual([{'Integer', double}], beamtalk_extensions:extensions_by(mylib))
+        end
+    end}.
+
+extensions_by_multiple_targets_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+            beamtalk_extensions:register('String', 'json', Fun, mylib),
+            beamtalk_extensions:register('Float', 'ceil', Fun, mylib),
+
+            Result = beamtalk_extensions:extensions_by(mylib),
+            %% Three extensions contributed by mylib across different classes.
+            ?assertEqual(3, length(Result)),
+            ?assert(lists:member({'Integer', double}, Result)),
+            ?assert(lists:member({'String', json}, Result)),
+            ?assert(lists:member({'Float', ceil}, Result))
+        end
+    end}.
+
+extensions_by_excludes_other_owners_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+            beamtalk_extensions:register('String', 'json', Fun, otherlib),
+            beamtalk_extensions:register('Float', 'ceil', Fun, mylib),
+
+            %% Only mylib's extensions, not otherlib's.
+            Result = beamtalk_extensions:extensions_by(mylib),
+            ?assertEqual(2, length(Result)),
+            ?assert(lists:member({'Integer', double}, Result)),
+            ?assert(lists:member({'Float', ceil}, Result)),
+            ?assertNot(lists:member({'String', json}, Result))
+        end
+    end}.
+
+extensions_by_no_match_returns_empty_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib),
+
+            %% Unknown owner has no extensions.
+            ?assertEqual([], beamtalk_extensions:extensions_by(unknown_owner))
+        end
+    end}.
+
+%%% ============================================================================
+%%% BT-2202: Symmetric round-trip tests
+%%% ============================================================================
+
+extenders_of_extensions_by_round_trip_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            %% lib1 extends Integer and String.
+            beamtalk_extensions:register('Integer', 'double', Fun, lib1),
+            beamtalk_extensions:register('String', 'json', Fun, lib1),
+            %% lib2 extends Integer only.
+            beamtalk_extensions:register('Integer', 'triple', Fun, lib2),
+
+            %% extenders_of('Integer') should include both lib1 and lib2.
+            IntExtenders = beamtalk_extensions:extenders_of('Integer'),
+            ?assertEqual(2, length(IntExtenders)),
+            ?assert(lists:member(lib1, IntExtenders)),
+            ?assert(lists:member(lib2, IntExtenders)),
+
+            %% extenders_of('String') should include only lib1.
+            StrExtenders = beamtalk_extensions:extenders_of('String'),
+            ?assertEqual([lib1], StrExtenders),
+
+            %% extensions_by(lib1) should include both {Integer,double} and {String,json}.
+            Lib1Exts = beamtalk_extensions:extensions_by(lib1),
+            ?assertEqual(2, length(Lib1Exts)),
+            ?assert(lists:member({'Integer', double}, Lib1Exts)),
+            ?assert(lists:member({'String', json}, Lib1Exts)),
+
+            %% extensions_by(lib2) should include only {Integer,triple}.
+            Lib2Exts = beamtalk_extensions:extensions_by(lib2),
+            ?assertEqual([{'Integer', triple}], Lib2Exts),
+
+            %% Symmetry: every owner returned by extenders_of/1 for a class
+            %% must include that class in extensions_by/1 for that owner.
+            lists:foreach(
+                fun(Owner) ->
+                    OwnerExts = beamtalk_extensions:extensions_by(Owner),
+                    TargetClasses = [TC || {TC, _Sel} <- OwnerExts],
+                    ?assert(lists:member('Integer', TargetClasses))
+                end,
+                IntExtenders
+            )
+        end
+    end}.
