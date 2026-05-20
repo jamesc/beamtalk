@@ -206,9 +206,11 @@ match_subclasses(Name) ->
             [];
         _ ->
             try
-                Matches = ets:match(
-                    ?TABLE, #class_metadata{name = '$1', superclass = Name, _ = '_'}
-                ),
+                %% Raw tuple match pattern, not record syntax: `#class_metadata{_ = '_'}`
+                %% would assign the atom '_' to typed fields and trip dialyzer. Shape is
+                %% {Tag, name, module, selectors, superclass} — bind name, match superclass.
+                Pattern = {class_metadata, '$1', '_', '_', Name},
+                Matches = ets:match(?TABLE, Pattern),
                 [N || [N] <- Matches]
             catch
                 error:badarg -> []
