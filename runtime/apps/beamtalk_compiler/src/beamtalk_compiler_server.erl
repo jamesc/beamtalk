@@ -394,11 +394,11 @@ Runs synchronously in `init/1` so compile requests queue during recovery.
 """.
 -spec recover_from_beam_modules() -> #{atom() => map()}.
 recover_from_beam_modules() ->
-    %% Guard: beamtalk_class_hierarchy_table may not be loaded if the runtime
+    %% Guard: beamtalk_class_metadata may not be loaded if the runtime
     %% app is absent from the release (e.g. compiler-only deployment).
     Builtins =
-        case erlang:function_exported(beamtalk_class_hierarchy_table, all_builtins, 0) of
-            true -> beamtalk_class_hierarchy_table:all_builtins();
+        case erlang:function_exported(beamtalk_class_metadata, all_builtins, 0) of
+            true -> beamtalk_class_metadata:all_builtins();
             false -> []
         end,
     BuiltinSet = sets:from_list(Builtins),

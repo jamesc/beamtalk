@@ -391,7 +391,7 @@ disableAllDebug() ->
                 end;
             ({ClassName, user_class, FilterIds}) ->
                 lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
-                case beamtalk_class_module_table:lookup(ClassName) of
+                case beamtalk_class_metadata:lookup_module(ClassName) of
                     {ok, Module} -> logger:unset_module_level(Module);
                     not_found -> ok
                 end;
@@ -489,7 +489,7 @@ enable_class_debug(ClassName) ->
     end,
     logger:add_primary_filter(FilterId, {FilterFun, []}),
     %% Also set module level on the compiled class module
-    case beamtalk_class_module_table:lookup(ClassName) of
+    case beamtalk_class_metadata:lookup_module(ClassName) of
         {ok, Module} ->
             logger:set_module_level(Module, debug);
         not_found ->
@@ -505,7 +505,7 @@ disable_class_debug(ClassName) ->
     case ets:lookup(?DEBUG_TABLE, ClassName) of
         [{ClassName, user_class, FilterIds}] ->
             lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
-            case beamtalk_class_module_table:lookup(ClassName) of
+            case beamtalk_class_metadata:lookup_module(ClassName) of
                 {ok, Module} -> logger:unset_module_level(Module);
                 not_found -> ok
             end,

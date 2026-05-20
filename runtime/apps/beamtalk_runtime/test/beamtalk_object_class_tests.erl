@@ -151,9 +151,9 @@ teardown(_) ->
             beamtalk_class_BT1982HasClassNew
         ]
     ),
-    %% Clean up ETS hierarchy table entries
+    %% Clean up unified class metadata table entries (BT-2222)
     try
-        ets:delete_all_objects(beamtalk_class_hierarchy)
+        ets:delete_all_objects(beamtalk_class_metadata)
     catch
         _:_ -> ok
     end,
@@ -744,8 +744,8 @@ hierarchy_ets_populated_test_() ->
                 {ok, _} = beamtalk_object_class:start_link('HierRoot', RootInfo),
                 %% ETS table should have an entry for root
                 ?assertEqual(
-                    [{'HierRoot', none}],
-                    ets:lookup(beamtalk_class_hierarchy, 'HierRoot')
+                    {ok, none},
+                    beamtalk_class_metadata:lookup_superclass('HierRoot')
                 ),
                 %% Register child with superclass
                 ChildInfo = #{
@@ -756,8 +756,8 @@ hierarchy_ets_populated_test_() ->
                 },
                 {ok, _} = beamtalk_object_class:start_link('HierMid', ChildInfo),
                 ?assertEqual(
-                    [{'HierMid', 'HierRoot'}],
-                    ets:lookup(beamtalk_class_hierarchy, 'HierMid')
+                    {ok, 'HierRoot'},
+                    beamtalk_class_metadata:lookup_superclass('HierMid')
                 )
             end)
         ]
@@ -882,8 +882,8 @@ hierarchy_orphan_registration_test_() ->
                 }),
                 %% ETS records the declared relationship regardless
                 ?assertEqual(
-                    [{'HierOrphan', 'NonExistentParent'}],
-                    ets:lookup(beamtalk_class_hierarchy, 'HierOrphan')
+                    {ok, 'NonExistentParent'},
+                    beamtalk_class_metadata:lookup_superclass('HierOrphan')
                 ),
                 %% inherits_from follows the declared chain:
                 %% HierOrphan -> NonExistentParent (self-match = true)
@@ -1541,7 +1541,7 @@ apply_class_info_corrects_stale_superclass_test_() ->
                 ?assertEqual('Object', gen_server:call(Pid, superclass)),
                 ?assertEqual(
                     {ok, 'Object'},
-                    beamtalk_class_hierarchy_table:lookup('BT1185StaleSuper')
+                    beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
                 ),
 
                 %% Simulate compiled stdlib module on-load: update_class with
@@ -1559,7 +1559,7 @@ apply_class_info_corrects_stale_superclass_test_() ->
                 %% ETS hierarchy table must also be updated
                 ?assertEqual(
                     {ok, 'Behaviour'},
-                    beamtalk_class_hierarchy_table:lookup('BT1185StaleSuper')
+                    beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
                 )
             end)
         ]
@@ -1592,7 +1592,7 @@ apply_class_info_preserves_dynamic_class_superclass_test_() ->
                 ?assertEqual('Actor', gen_server:call(Pid, superclass)),
                 ?assertEqual(
                     {ok, 'Actor'},
-                    beamtalk_class_hierarchy_table:lookup('BT1185StaleSuper')
+                    beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
                 )
             end)
         ]

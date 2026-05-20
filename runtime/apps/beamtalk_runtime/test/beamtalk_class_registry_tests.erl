@@ -133,27 +133,27 @@ ensure_hierarchy_table_test_() ->
     {setup,
         fun() ->
             %% Save existing entries to restore after test
-            case ets:info(beamtalk_class_hierarchy) of
+            case ets:info(beamtalk_class_metadata) of
                 undefined -> {missing, []};
-                _ -> {exists, ets:tab2list(beamtalk_class_hierarchy)}
+                _ -> {exists, ets:tab2list(beamtalk_class_metadata)}
             end
         end,
         fun
             ({missing, _}) ->
                 %% Table didn't exist before; delete if we created it and we own it
-                case ets:info(beamtalk_class_hierarchy, owner) of
+                case ets:info(beamtalk_class_metadata, owner) of
                     undefined -> ok;
-                    Owner when Owner =:= self() -> ets:delete(beamtalk_class_hierarchy);
+                    Owner when Owner =:= self() -> ets:delete(beamtalk_class_metadata);
                     _ -> ok
                 end;
             ({exists, Saved}) ->
                 %% Restore original entries
-                ets:delete_all_objects(beamtalk_class_hierarchy),
-                ets:insert(beamtalk_class_hierarchy, Saved)
+                ets:delete_all_objects(beamtalk_class_metadata),
+                ets:insert(beamtalk_class_metadata, Saved)
         end,
         fun() ->
             ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table()),
-            ?assertNotEqual(undefined, ets:info(beamtalk_class_hierarchy)),
+            ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)),
             %% Idempotent
             ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table())
         end}.
@@ -166,17 +166,17 @@ inherits_from_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
-            Saved = ets:tab2list(beamtalk_class_hierarchy),
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, {'Object', none}),
-            ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-            ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
+            Saved = ets:tab2list(beamtalk_class_metadata),
+            ets:delete_all_objects(beamtalk_class_metadata),
+            beamtalk_class_metadata:insert('Object', undefined, undefined, none),
+            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
+            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
             Saved
         end,
         fun(Saved) ->
             %% Restore original state
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, Saved)
+            ets:delete_all_objects(beamtalk_class_metadata),
+            ets:insert(beamtalk_class_metadata, Saved)
         end,
         [
             {"same class", fun() ->
@@ -207,17 +207,17 @@ direct_subclasses_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
-            Saved = ets:tab2list(beamtalk_class_hierarchy),
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, {'Object', none}),
-            ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-            ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-            ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
+            Saved = ets:tab2list(beamtalk_class_metadata),
+            ets:delete_all_objects(beamtalk_class_metadata),
+            beamtalk_class_metadata:insert('Object', undefined, undefined, none),
+            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
+            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
+            beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor'),
             Saved
         end,
         fun(Saved) ->
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, Saved)
+            ets:delete_all_objects(beamtalk_class_metadata),
+            ets:insert(beamtalk_class_metadata, Saved)
         end,
         [
             {"direct children of Actor", fun() ->
@@ -243,17 +243,17 @@ all_subclasses_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
-            Saved = ets:tab2list(beamtalk_class_hierarchy),
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, {'Object', none}),
-            ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-            ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-            ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
+            Saved = ets:tab2list(beamtalk_class_metadata),
+            ets:delete_all_objects(beamtalk_class_metadata),
+            beamtalk_class_metadata:insert('Object', undefined, undefined, none),
+            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
+            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
+            beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor'),
             Saved
         end,
         fun(Saved) ->
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, Saved)
+            ets:delete_all_objects(beamtalk_class_metadata),
+            ets:insert(beamtalk_class_metadata, Saved)
         end,
         [
             {"all subclasses of Object", fun() ->
@@ -346,25 +346,27 @@ get_method_return_type_test_() ->
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
             beamtalk_class_registry:ensure_hierarchy_table(),
-            Saved = ets:tab2list(beamtalk_class_hierarchy),
-            ets:delete_all_objects(beamtalk_class_hierarchy),
+            Saved = ets:tab2list(beamtalk_class_metadata),
+            ets:delete_all_objects(beamtalk_class_metadata),
             %% Create a simple hierarchy: Child -> Parent -> Object
             {ok, ObjPid} = beamtalk_object_class:start('TestObject1002', #{
                 superclass => none,
                 method_return_types => #{getValue => 'Integer'}
             }),
-            ets:insert(beamtalk_class_hierarchy, {'TestObject1002', none}),
+            beamtalk_class_metadata:insert('TestObject1002', undefined, undefined, none),
             {ok, ParentPid} = beamtalk_object_class:start('TestParent1002', #{
                 superclass => 'TestObject1002',
                 method_return_types => #{name => 'String'},
                 class_method_return_types => #{'from:' => 'TestParent1002'}
             }),
-            ets:insert(beamtalk_class_hierarchy, {'TestParent1002', 'TestObject1002'}),
+            beamtalk_class_metadata:insert(
+                'TestParent1002', undefined, undefined, 'TestObject1002'
+            ),
             {ok, ChildPid} = beamtalk_object_class:start('TestChild1002', #{
                 superclass => 'TestParent1002',
                 method_return_types => #{size => 'Integer'}
             }),
-            ets:insert(beamtalk_class_hierarchy, {'TestChild1002', 'TestParent1002'}),
+            beamtalk_class_metadata:insert('TestChild1002', undefined, undefined, 'TestParent1002'),
             {Saved, [ObjPid, ParentPid, ChildPid]}
         end,
         fun({Saved, Pids}) ->
@@ -378,8 +380,8 @@ get_method_return_type_test_() ->
                 end,
                 Pids
             ),
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, Saved)
+            ets:delete_all_objects(beamtalk_class_metadata),
+            ets:insert(beamtalk_class_metadata, Saved)
         end,
         [
             {"local hit", fun() ->
@@ -600,7 +602,7 @@ restart_class_recovery_test_() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             beamtalk_class_registry:ensure_module_table(),
             beamtalk_class_registry:ensure_pid_table(),
-            HierSaved = ets:tab2list(beamtalk_class_hierarchy),
+            HierSaved = ets:tab2list(beamtalk_class_metadata),
             %% Start a class, then kill it to test recovery
             ClassInfo = #{
                 superclass => none,
@@ -624,8 +626,8 @@ restart_class_recovery_test_() ->
                         _:_ -> ok
                     end)
             end,
-            ets:delete_all_objects(beamtalk_class_hierarchy),
-            ets:insert(beamtalk_class_hierarchy, HierSaved)
+            ets:delete_all_objects(beamtalk_class_metadata),
+            ets:insert(beamtalk_class_metadata, HierSaved)
         end,
         [
             {"kill and restart class", fun() ->
@@ -788,10 +790,10 @@ drain_warnings_no_table_test() ->
 
 ensure_module_table_test() ->
     beamtalk_class_registry:ensure_module_table(),
-    ?assertNotEqual(undefined, ets:info(beamtalk_class_module)),
+    ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)),
     %% Idempotent
     beamtalk_class_registry:ensure_module_table(),
-    ?assertNotEqual(undefined, ets:info(beamtalk_class_module)).
+    ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)).
 
 %%% ============================================================================
 %%% pending load errors tests (BT-1972)
@@ -950,7 +952,7 @@ bt1982_restart_class_already_started_test_() ->
             },
             {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
             %% Record in module table so restart_class can find it.
-            beamtalk_class_module_table:insert(ClassName, beamtalk_class_bt),
+            beamtalk_class_metadata:insert(ClassName, beamtalk_class_bt, undefined, undefined),
             {ClassName, Pid}
         end,
         fun({_Name, Pid}) ->
@@ -1011,7 +1013,7 @@ bt1982_restart_class_recovers_dead_process_test_() ->
             %% Use start/2 (unlinked) so we can kill it without taking
             %% down the EUnit test supervisor.
             {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-            beamtalk_class_module_table:insert(ClassName, beamtalk_class_bt),
+            beamtalk_class_metadata:insert(ClassName, beamtalk_class_bt, undefined, undefined),
             %% Kill the class process so restart_class can resurrect it.
             MRef = monitor(process, Pid),
             exit(Pid, kill),
@@ -1069,12 +1071,12 @@ bt1982_get_method_return_type_walks_on_process_exit_test_() ->
                 superclass => none,
                 method_return_types => #{answer => 'Integer'}
             }),
-            ets:insert(beamtalk_class_hierarchy, {'BT1982RTParent', none}),
+            beamtalk_class_metadata:insert('BT1982RTParent', undefined, undefined, none),
             {ok, ChildPid} = beamtalk_object_class:start('BT1982RTChild', #{
                 superclass => 'BT1982RTParent',
                 method_return_types => #{}
             }),
-            ets:insert(beamtalk_class_hierarchy, {'BT1982RTChild', 'BT1982RTParent'}),
+            beamtalk_class_metadata:insert('BT1982RTChild', undefined, undefined, 'BT1982RTParent'),
             [ParentPid, ChildPid]
         end,
         fun(Pids) ->

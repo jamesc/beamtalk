@@ -1587,7 +1587,7 @@ is_cross_package_internal(Pid) ->
                 %% using the ETS module table for fast lookup (avoids gen_server
                 %% calls that can timeout on mock class processes in tests).
                 ClassName = beamtalk_runtime_api:class_name(Pid),
-                case beamtalk_class_module_table:lookup(ClassName) of
+                case beamtalk_class_metadata:lookup_module(ClassName) of
                     not_found ->
                         false;
                     {ok, Mod} ->
@@ -1635,7 +1635,7 @@ collect_internal_selectors(ClassName, Side, Depth) ->
     Super =
         case
             try
-                beamtalk_class_hierarchy_table:lookup(ClassName)
+                beamtalk_class_metadata:lookup_superclass(ClassName)
             catch
                 _:_ -> not_found
             end
@@ -1651,7 +1651,7 @@ collect_internal_selectors(ClassName, Side, Depth) ->
 collect_internal_selectors_for_class(ClassName, Side) ->
     case
         try
-            beamtalk_class_module_table:lookup(ClassName)
+            beamtalk_class_metadata:lookup_module(ClassName)
         catch
             _:_ -> not_found
         end

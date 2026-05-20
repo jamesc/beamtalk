@@ -162,7 +162,7 @@ crash_recovery_populates() ->
     %% application:start/1 is synchronous — init/1 (including recovery) has
     %% completed before start/1 returns, so no sleep is needed.
     Classes = beamtalk_compiler_server:get_classes(),
-    BuiltinSet = sets:from_list(beamtalk_class_hierarchy_table:all_builtins()),
+    BuiltinSet = sets:from_list(beamtalk_class_metadata:all_builtins()),
     ?assert(
         maps:fold(
             fun(ClassName, _Meta, Acc) ->

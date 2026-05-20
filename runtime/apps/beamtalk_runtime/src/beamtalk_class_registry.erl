@@ -183,37 +183,39 @@ ensure_pg_started() ->
     end.
 
 -doc """
-Ensure the class hierarchy ETS table exists.
-Delegates to beamtalk_class_hierarchy_table (BT-1062).
+Ensure the unified class metadata ETS table exists (BT-2222).
+
+Delegates to `beamtalk_class_metadata:new/0`. The hierarchy, module, and
+method-selector columns now share one row, so all three `ensure_*` functions
+create the same table; the separate names are kept for the existing bootstrap
+and test call sites. Originally three tables (BT-1062 hierarchy, BT-1285
+module, BT-2008 methods).
 """.
 -spec ensure_hierarchy_table() -> ok.
 ensure_hierarchy_table() ->
-    beamtalk_class_hierarchy_table:new().
+    beamtalk_class_metadata:new().
 
 -doc """
-Ensure the class module ETS table exists (BT-1285).
+Ensure the unified class metadata ETS table exists (BT-2222).
 
-Delegates to `beamtalk_class_module_table:new/0`.
-Called from `beamtalk_object_class:init/1` alongside `ensure_hierarchy_table/0`.
+Alias for `ensure_hierarchy_table/0`; see its docs. Called from
+`beamtalk_object_class:init/1` and `beamtalk_runtime_app:start/2`.
 """.
 -spec ensure_module_table() -> ok.
 ensure_module_table() ->
-    beamtalk_class_module_table:new().
+    beamtalk_class_metadata:new().
 
 -doc """
-Ensure the class methods ETS table exists (BT-2008).
+Ensure the unified class metadata ETS table exists (BT-2222).
 
-Delegates to `beamtalk_class_methods_table:new/0`, which both creates
-the table on first call and retroactively sets the heir to
-`beamtalk_runtime_sup` (BT-1888 pattern) so the cache survives owner
-process crashes. Called from `beamtalk_object_class:init/1` so the
+Alias for `ensure_hierarchy_table/0`. Created (and heir-set, BT-1888) so the
 chain walker in `beamtalk_class_dispatch:find_class_method_in_ancestors/3`
 can resolve inherited class-method dispatch without any gen_server
 round-trips.
 """.
 -spec ensure_methods_table() -> ok.
 ensure_methods_table() ->
-    beamtalk_class_methods_table:new().
+    beamtalk_class_metadata:new().
 
 -doc """
 Ensure the class collision warnings ETS table exists.
@@ -554,7 +556,7 @@ inherits_from(none, _Ancestor) ->
 inherits_from(ClassName, Ancestor) when ClassName =:= Ancestor ->
     true;
 inherits_from(ClassName, Ancestor) ->
-    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
         not_found -> false;
         {ok, none} -> false;
         {ok, SuperclassName} -> inherits_from(SuperclassName, Ancestor)
@@ -568,7 +570,7 @@ matches the given class name. Returns sorted atom list for deterministic output.
 """.
 -spec direct_subclasses(class_name()) -> [class_name()].
 direct_subclasses(ClassName) ->
-    lists:sort(beamtalk_class_hierarchy_table:match_subclasses(ClassName)).
+    lists:sort(beamtalk_class_metadata:match_subclasses(ClassName)).
 
 -doc """
 Return sorted list of all subclass names recursively.
@@ -729,12 +731,12 @@ Returns `{ok, NewPid}` on success, `{error, Reason}` on failure.
 """.
 -spec restart_class(class_name()) -> {ok, pid()} | {error, term()}.
 restart_class(ClassName) ->
-    case beamtalk_class_module_table:lookup(ClassName) of
+    case beamtalk_class_metadata:lookup_module(ClassName) of
         not_found ->
             {error, {no_module_for_class, ClassName}};
         {ok, Module} ->
             Superclass =
-                case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                case beamtalk_class_metadata:lookup_superclass(ClassName) of
                     {ok, S} -> S;
                     not_found -> none
                 end,
@@ -832,13 +834,13 @@ get_method_return_type(ClassName, Selector) ->
                     Found;
                 {error, not_found} ->
                     %% Walk to superclass using the hierarchy table.
-                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
                         not_found -> {error, not_found};
                         {ok, Super} -> get_method_return_type(Super, Selector)
                     end;
                 not_found ->
                     %% Process exited during call — not in this class, walk to superclass.
-                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
                         not_found -> {error, not_found};
                         {ok, Super} -> get_method_return_type(Super, Selector)
                     end
@@ -872,13 +874,13 @@ get_class_method_return_type(ClassName, Selector) ->
                 {ok, _} = Found ->
                     Found;
                 {error, not_found} ->
-                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
                         not_found -> {error, not_found};
                         {ok, Super} -> get_class_method_return_type(Super, Selector)
                     end;
                 not_found ->
                     %% Process exited during call — not in this class, walk to superclass.
-                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
                         not_found -> {error, not_found};
                         {ok, Super} -> get_class_method_return_type(Super, Selector)
                     end

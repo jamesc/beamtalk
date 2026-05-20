@@ -381,4 +381,4 @@ future_await(Future, Timeout) ->
 
 -spec hierarchy_foldl(fun(), term()) -> term().
 hierarchy_foldl(Fun, Acc) ->
-    beamtalk_class_hierarchy_table:foldl(Fun, Acc).
+    beamtalk_class_metadata:foldl(Fun, Acc).

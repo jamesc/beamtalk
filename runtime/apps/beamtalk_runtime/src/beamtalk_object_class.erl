@@ -412,12 +412,11 @@ init({ClassName, ClassInfo}) ->
         maps:get(class_methods, ClassInfo, #{})
     ),
 
-    beamtalk_class_hierarchy_table:insert(ClassName, Superclass),
-    %% BT-1285: Store module name in ETS for deadlock-free lookup during supervisor init.
-    beamtalk_class_module_table:insert(ClassName, Module),
-    %% BT-2008: Mirror local class-method selectors into ETS so the inherited
-    %% class-method chain walk in beamtalk_class_dispatch can avoid gen_server hops.
-    beamtalk_class_methods_table:insert(ClassName, Module, maps:keys(ClassMethods)),
+    %% BT-2222: One unified metadata row carries hierarchy + module + class-method
+    %% selectors. The module name enables deadlock-free lookup during supervisor
+    %% init (BT-1285); the selector set lets the inherited class-method chain walk
+    %% in beamtalk_class_dispatch avoid gen_server hops (BT-2008).
+    beamtalk_class_metadata:insert(ClassName, Module, maps:keys(ClassMethods), Superclass),
 
     %% BT-893: Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
@@ -789,9 +788,8 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     %% This runs when removeFromSystem stops the gen_server (gen_server:stop/1),
     %% ensuring the class is fully removed from the runtime registries.
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
-    _ = (catch beamtalk_class_hierarchy_table:delete(ClassName)),
-    _ = (catch beamtalk_class_module_table:delete(ClassName)),
-    _ = (catch beamtalk_class_methods_table:delete(ClassName)),
+    %% BT-2222: Single metadata row → single delete (was a three-table fan-out).
+    _ = (catch beamtalk_class_metadata:delete(ClassName)),
     %% BT-1768: Clean up pid reverse index. Only cleaned on graceful shutdown —
     %% on crash, the entry intentionally survives for auto-restart recovery.
     _ = (catch ets:delete(beamtalk_class_pids, self())),
@@ -860,7 +858,7 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
             true;
         false ->
             SuperName =
-                case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                case beamtalk_class_metadata:lookup_superclass(ClassName) of
                     {ok, S} -> S;
                     not_found -> none
                 end,
@@ -1074,13 +1072,11 @@ apply_class_info(State, ClassInfo) ->
             %% corrected value from compiled module
             {ok, S} -> S
         end,
-    beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass),
-    %% BT-1285: Keep module ETS table in sync when module changes on hot-reload.
-    beamtalk_class_module_table:insert(State#class_state.name, NewModule),
-    %% BT-2008: Keep class-method selector ETS table in sync — selectors and module
-    %% may both change on hot reload (new class methods added, module recompiled).
-    beamtalk_class_methods_table:insert(
-        State#class_state.name, NewModule, maps:keys(NewClassMethods)
+    %% BT-2222: Single metadata-row update keeps hierarchy + module + selectors in
+    %% sync on hot reload (all three may change: new superclass, recompiled module,
+    %% added class methods).
+    beamtalk_class_metadata:insert(
+        State#class_state.name, NewModule, maps:keys(NewClassMethods), NewSuperclass
     ),
 
     State#class_state{
