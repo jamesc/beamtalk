@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2207: E2E fixture for `SystemNavigation unusedSelectors`.
+//
+// `UnusedTestCaseFixture` is a TestCase subclass. Its `setUp`, `tearDown`, and
+// `testSomething` methods are invoked reflectively by the BUnit runner, never
+// via a source send. The unused report must NOT flag them (TestCase test-runner
+// exclusion).
+
+TestCase subclass: UnusedTestCaseFixture
+
+  // Invoked by the runner before each test — not a source send.
+  setUp -> Self => self
+
+  // Invoked by the runner after each test — not a source send.
+  tearDown -> Nil => nil
+
+  // A test method (test* prefix) — invoked by the runner, not a source send.
+  testSomething => self assert: true

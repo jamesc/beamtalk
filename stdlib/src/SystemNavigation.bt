@@ -877,3 +877,290 @@ sealed typed Object subclass: SystemNavigation
         resolved := (Erlang beamtalk_interface) findClass: classTag
         resolved isNil ifTrue: [classTag] ifFalse: [resolved]
       ]
+
+  /// Return a List of dead-method *candidates* — selectors that are DEFINED on
+  /// some class but SENT nowhere in the loaded class registry. The conservative
+  /// inverse of `unimplementedSelectors`.
+  ///
+  /// Each result is a Dictionary with two keys:
+  /// - `#class` — the class object for an instance-side definition, or the
+  ///   metaclass object for a class-side definition (mirrors how the other
+  ///   navigation queries report `#class`)
+  /// - `#selector` — the defined-but-unsent selector (a Symbol)
+  ///
+  /// ## A diagnostic, not a delete list
+  ///
+  /// This is deliberately framed as "worth a look", NOT "definitely dead".
+  /// A static source scan cannot see every way a method is reached, so several
+  /// categories of genuinely-live methods are *invisible* to it. Rather than
+  /// flag those as false positives, the query excludes the known-invisible
+  /// categories up front (see Exclusions). What remains is a high-signal set of
+  /// candidates for an IDE "unused methods" pane — each one still warrants human
+  /// judgement before deletion.
+  ///
+  /// ## Single-pass design
+  ///
+  /// Computes `allDefinedSelectors − allSentSelectors`. The sent set is gathered
+  /// by asking the compiler, once per method source, for EVERY send via
+  /// `(Erlang beamtalk_interface) allSendsIn:` — a single AST walk per method
+  /// rather than one walk per candidate selector, exactly as
+  /// `unimplementedSelectors` does. The defined candidates are built by walking
+  /// `cls methods` (instance-side, owner `cls`) and `cls class methods`
+  /// (class-side, owner `cls class`) directly, because each candidate must
+  /// remember its *owning* class — the flattened `selectorsForClass:` discards
+  /// that. A candidate survives into the result only if its selector is absent
+  /// from the sent set and survives every exclusion below.
+  ///
+  /// ## Exclusions (and their limits)
+  ///
+  /// - **Erlang FFI sends are NOT counted as Beamtalk uses.** `Erlang module …`
+  ///   / `(Erlang module) sel: …` are Erlang function calls (tagged
+  ///   `#erlang_ffi` at the AST), so the "selectors" they carry are Erlang
+  ///   module/function names, not Beamtalk selectors. They are dropped from the
+  ///   sent set wholesale — counting them would let an Erlang function name that
+  ///   happens to match a Beamtalk selector spuriously mark that selector as
+  ///   used. `#self` / `#super` / `#other` sends ARE counted: a self-send of
+  ///   `foo` means `foo` is used.
+  /// - **Runtime-called overrides** (`runtimeCalledSelectors`) — framework
+  ///   selectors the runtime invokes without a source-visible send (lifecycle
+  ///   hooks, the DNU handler, display/hash protocols). Overrides of these are
+  ///   never flagged. See that method for the list and the per-entry rationale.
+  /// - **TestCase test-runner methods** — for `TestCase` and any class that
+  ///   inherits from it (an `includesBehaviour: TestCase` check, self-inclusive),
+  ///   the methods `setUp` / `tearDown` and every `test…` method are invoked
+  ///   reflectively by `beamtalk_test_case`, never via a source send, so they are
+  ///   excluded. The pattern exclusion is scoped to the TestCase hierarchy
+  ///   specifically, so a normal class with an unrelated method literally named
+  ///   `test…` is still eligible to be flagged.
+  /// - **Primitive / intrinsic methods** — a method whose source is `nil` or
+  ///   whose body contains `@primitive` / `@intrinsic` is implemented in (or
+  ///   dispatched from) the runtime and is reachable in ways the source scan
+  ///   cannot see, so it is excluded. This is a heuristic: it keys off the
+  ///   `@primitive` / `@intrinsic` annotation text in the method source rather
+  ///   than a structural AST flag.
+  /// - **`perform:` is invisible.** A selector reached only via
+  ///   `self perform: #foo` / `perform:with:` is a Symbol *literal*, never an AST
+  ///   send, so it is never added to the sent set — such a method WILL appear as
+  ///   a false positive. This is an inherent limit of a static scan; no special
+  ///   casing is attempted.
+  ///
+  /// Extension methods (ADR 0066) are out of scope on the *defined* side:
+  /// unused-detection covers instance-side and class-side definitions only,
+  /// extension methods are never flagged. Extension *bodies* ARE scanned for
+  /// sends, so they still count toward marking ordinary methods as used.
+  ///
+  /// ## Performance
+  ///
+  /// Naive: parses every method's source on every call (same envelope as
+  /// `sendersOf:` / `unimplementedSelectors` — a few seconds on a 200-class
+  /// workspace). Fine for an on-demand IDE lint; a maintained send/define index
+  /// is a follow-up.
+  ///
+  /// Returns `[]` when nothing qualifies. Note that a real stdlib has many
+  /// public selectors that are part of the API surface but sent nowhere in the
+  /// library itself, so the live result is expected to be non-empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default unusedSelectors
+  ///   // => [#{#class => Foo, #selector => #neverCalledHelper}, ...]
+  /// ```
+  unusedSelectors -> List(Dictionary) =>
+    classList := self allClasses
+    sentSet := classList
+      inject: Set new
+      into: [:acc :cls |
+        withInstance := self collectSentSelectorsIn: cls into: acc
+        self collectSentSelectorsIn: cls class into: withInstance
+      ]
+    fullSentSet := self collectExtensionSentSelectorsInto: sentSet
+    excluded := self runtimeCalledSelectors inject: Set new into: [:acc :sel |
+      acc add: sel
+    ]
+    classList
+      inject: List new
+      into: [:acc :cls |
+        withInstance := self
+          collectUnusedFor: cls
+          owner: cls
+          sent: fullSentSet
+          excluded: excluded
+          into: acc
+        self
+          collectUnusedFor: cls class
+          owner: cls class
+          sent: fullSentSet
+          excluded: excluded
+          into: withInstance
+      ]
+
+  /// Selectors the runtime / framework invokes WITHOUT a source-visible Beamtalk
+  /// send, so an override of one would otherwise look unused to `unusedSelectors`.
+  ///
+  /// Keep this list small and documented — each entry must be a real selector
+  /// the runtime dispatches on its own; never a way to silence a genuinely dead
+  /// method. Each name below was verified against the live stdlib (e.g. the DNU
+  /// override is `doesNotUnderstand:args:`, NOT the Smalltalk-classic
+  /// `doesNotUnderstand:`; Beamtalk has no `printOn:` or `=` selectors).
+  ///
+  /// - `initialize` — Actor lifecycle hook called automatically after spawn
+  ///   (see `Actor >> #initialize`).
+  /// - `terminate:` — Actor lifecycle hook called by the runtime on shutdown
+  ///   (see `Actor >> #terminate:`).
+  /// - `doesNotUnderstand:args:` — the DNU handler, invoked by the message
+  ///   dispatch runtime when a selector is not understood (ProtoObject, Erlang,
+  ///   ErlangModule, TimeoutProxy define it).
+  /// - `printString` — invoked by the REPL / transcript display path to render
+  ///   a value; an override is reached through display, not a source send.
+  /// - `displayString` — invoked by user-facing display surfaces.
+  /// - `inspect` — invoked by the inspector surface.
+  /// - `hash` — invoked by hashed collections (Set / Dictionary) when storing
+  ///   or comparing elements, not via a source-level send.
+  runtimeCalledSelectors -> List(Symbol) =>
+    #(#initialize, #terminate:, #doesNotUnderstand:args:, #printString, #displayString, #inspect, #hash)
+
+  /// Add every selector *sent* in any method of `aScope` (a class or metaclass)
+  /// to the Set `result`, EXCLUDING Erlang-FFI sends. Returns the (possibly
+  /// extended) Set.
+  ///
+  /// Internal helper for `unusedSelectors`. Mirrors `collectSendersFor:in:into:`
+  /// but accumulates into a Set and asks the compiler for EVERY send
+  /// (`allSendsIn:`) rather than one selector's senders. Splitting it out keeps
+  /// the surrounding `inject:into:` body a single expression.
+  ///
+  /// Guards the `>>` send with `respondsTo:` so a scope for which `>>` is not yet
+  /// supported is skipped rather than aborting the whole walk.
+  collectSentSelectorsIn: aScope :: Behaviour into: result :: Set(Symbol) -> Set(Symbol) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil ifTrue: [
+          acc
+        ] ifFalse: [self addSentSelectorsIn: method source into: acc]
+      ]
+
+  /// Add each non-FFI sent selector found in `methodSource` to the Set `result`.
+  /// Returns the (possibly extended) Set.
+  ///
+  /// Internal helper for `collectSentSelectorsIn:into:`. Splits the per-method
+  /// FFI call out so the surrounding `inject:into:` body stays a single
+  /// expression. For each send tuple `{selector, line, recv}` from `allSendsIn:`,
+  /// the selector is added unless the receiver kind is `#erlang_ffi` (an Erlang
+  /// call, not a Beamtalk send — see `unusedSelectors`).
+  addSentSelectorsIn: methodSource :: String into: result :: Set(Symbol) -> Set(Symbol) =>
+    sends := (Erlang beamtalk_interface) allSendsIn: methodSource
+    sends
+      inject: result
+      into: [:acc :s |
+        @expect type
+        sentSel := s at: 1
+        @expect type
+        recv := s at: 3
+        recv == #erlang_ffi ifTrue: [acc] ifFalse: [acc add: sentSel]
+      ]
+
+  /// Add every non-FFI sent selector found in any extension method source
+  /// (ADR 0066 / BT-2196) to the Set `result`. Returns the (possibly extended)
+  /// Set.
+  ///
+  /// Internal helper for `unusedSelectors`. Mirrors
+  /// `collectExtensionSendersFor:into:` but accumulates into a Set and asks the
+  /// compiler for EVERY send. Extension bodies count toward marking ordinary
+  /// methods as used even though extension methods themselves are not candidates
+  /// for the unused report.
+  collectExtensionSentSelectorsInto: result :: Set(Symbol) -> Set(Symbol) =>
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        @expect type
+        extSource := entry at: 3
+        self addSentSelectorsIn: extSource into: acc
+      ]
+
+  /// Append a `#{#class, #selector}` record for every locally-defined selector
+  /// of `aScope` that is unused, recording `owner` as the reported `#class`.
+  /// Returns the (possibly extended) result List.
+  ///
+  /// Internal helper for `unusedSelectors`. `aScope` is the scope to iterate
+  /// (`cls` for instance-side, `cls class` for class-side); `owner` is the class
+  /// object to report (the same value, but threaded separately to match the
+  /// `#class` reporting convention and keep the `inject:into:` body a single
+  /// expression). A selector is reported only when none of the exclusions in
+  /// `unusedSelectors` apply.
+  ///
+  /// Whether the test-runner pattern applies is decided once per scope via
+  /// `includesBehaviour: TestCase`, so it is not recomputed per method. Using
+  /// `includesBehaviour:` (self-inclusive) rather than `inheritsFrom:` (strict)
+  /// matters: `TestCase` itself defines `setUp` / `tearDown`, which the runner
+  /// invokes reflectively just like on a subclass, so they must be excluded on
+  /// the base class too.
+  collectUnusedFor: aScope :: Behaviour owner: owner :: Object sent: sent :: Set(Symbol) excluded: excluded :: Set(Symbol) into: result :: List(Dictionary) -> List(Dictionary) =>
+    isTestCase := (aScope respondsTo: #includesBehaviour:) and: [
+      aScope includesBehaviour: TestCase
+    ]
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        self
+          recordUnused: methodSel
+          scope: aScope
+          owner: owner
+          isTestCase: isTestCase
+          sent: sent
+          excluded: excluded
+          into: acc
+      ]
+
+  /// Add a single `#{#class => owner, #selector => methodSel}` record to
+  /// `result` unless `methodSel` is excluded. Returns `result` unchanged when
+  /// the selector is excluded.
+  ///
+  /// Internal helper for `collectUnusedFor:owner:sent:excluded:into:`. Splitting
+  /// the per-selector decision out keeps the surrounding `inject:into:` body a
+  /// single expression. A selector is excluded when it is sent somewhere, is a
+  /// runtime-called override, is a TestCase test-runner method, or is a
+  /// primitive / intrinsic (see `unusedSelectors`).
+  recordUnused: methodSel :: Symbol scope: aScope :: Behaviour owner: owner :: Object isTestCase: isTestCase :: Boolean sent: sent :: Set(Symbol) excluded: excluded :: Set(Symbol) into: result :: List(Dictionary) -> List(Dictionary) =>
+    skipForTest := isTestCase and: [self isTestRunnerSelector: methodSel]
+    ((sent includes: methodSel)
+      or: [
+        (excluded includes: methodSel) or: [
+          skipForTest or: [self isPrimitiveMethod: methodSel in: aScope]
+        ]
+      ]) ifTrue: [
+      result
+    ] ifFalse: [result add: #{#class => owner, #selector => methodSel}]
+
+  /// Whether `aSelector` is invoked by the BUnit test runner rather than via a
+  /// source send: `setUp`, `tearDown`, or any selector whose name starts with
+  /// `test`. Only meaningful for selectors in the TestCase hierarchy — the caller
+  /// gates this behind `includesBehaviour: TestCase`.
+  isTestRunnerSelector: aSelector :: Symbol -> Boolean =>
+    name := aSelector asString
+    (name == "setUp") or: [(name == "tearDown") or: [name startsWith: "test"]]
+
+  /// Whether the method `methodSel` on `aScope` is a primitive / intrinsic, and
+  /// therefore reachable in ways the source scan cannot see. Treated as such
+  /// when the source is `nil` (no AST-visible body) or contains the
+  /// `@primitive` / `@intrinsic` annotation text. Heuristic — see
+  /// `unusedSelectors`.
+  ///
+  /// Guards the `>>` send with `respondsTo:` (a scope without `>>` support is
+  /// treated as primitive — its body cannot be inspected so it is conservatively
+  /// excluded rather than flagged).
+  isPrimitiveMethod: methodSel :: Symbol in: aScope :: Behaviour -> Boolean =>
+    (aScope respondsTo: #'>>') ifFalse: [^true]
+    method := aScope >> methodSel
+    method isNil ifTrue: [^true]
+    src := method source
+    src isNil
+      ifTrue: [true]
+      ifFalse: [
+        (src includesSubstring: "@primitive") or: [
+          src includesSubstring: "@intrinsic"
+        ]
+      ]

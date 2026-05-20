@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2207: E2E fixture for `SystemNavigation unusedSelectors`.
+//
+// `UnusedPrinter` overrides `printString` — a runtime-called override invoked by
+// the REPL / transcript display path, never via a source-visible send. The
+// unused report must NOT flag it (it is in `runtimeCalledSelectors`).
+
+Object subclass: UnusedPrinter
+
+  // Runtime-called override: reached through display, not a Beamtalk send.
+  printString -> String => "an UnusedPrinter"

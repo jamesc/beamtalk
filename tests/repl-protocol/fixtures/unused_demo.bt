@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2207: E2E fixture for `SystemNavigation unusedSelectors`.
+//
+// `UnusedDemo` has two helper methods:
+// - `usedHelper` IS sent (by `caller`), so it must NOT be flagged as unused.
+// - `neverCalledHelper` is sent nowhere in the workspace, so it MUST be flagged
+//   as a dead-method candidate.
+
+Object subclass: UnusedDemo
+
+  // Sends `usedHelper` — this is the source-visible use that keeps `usedHelper`
+  // out of the unused report.
+  caller => self usedHelper
+
+  // Sent by `caller` above, so it is used.
+  usedHelper => 42
+
+  // Sent by nobody anywhere — the genuine dead-method candidate.
+  neverCalledHelper => 99

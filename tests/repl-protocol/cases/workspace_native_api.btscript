@@ -714,3 +714,103 @@ unimplSelectors includes: #performOnlyXyzzy
 // And `perform:` itself (defined on Object) is never flagged.
 unimplSelectors includes: #perform:
 // => false
+
+// ===========================================================================
+// SYSTEMNAVIGATION UNUSEDSELECTORS — dead-method candidates (BT-2207)
+// ===========================================================================
+
+// Load fixtures: a class with a used + an unused method, a printString override,
+// a TestCase subclass, and a perform:-only caller.
+:load tests/repl-protocol/fixtures/unused_demo.bt
+// => _
+
+:load tests/repl-protocol/fixtures/unused_printer.bt
+// => _
+
+:load tests/repl-protocol/fixtures/unused_testcase.bt
+// => _
+
+:load tests/repl-protocol/fixtures/unused_perform.bt
+// => _
+
+// unusedSelectors returns a List of #{#class, #selector} records.
+unused := SystemNavigation default unusedSelectors
+// => _
+
+// The stdlib has many public-but-internally-unsent selectors, so the live
+// result is expected to be non-empty (do NOT assert it is empty).
+unused isEmpty
+// => false
+
+// Collect the flagged selectors once; membership checks avoid in-block equality.
+unusedSelectors := unused collect: [:r | r at: #selector]
+// => _
+
+// `neverCalledHelper` is sent nowhere — it shows up as a dead-method candidate.
+unusedSelectors includes: #neverCalledHelper
+// => true
+
+// `usedHelper` IS sent (by UnusedDemo >> caller), so it does NOT show up.
+unusedSelectors includes: #usedHelper
+// => false
+
+// Locate the neverCalledHelper record and verify its shape: #class + #selector.
+unusedRecord := unused detect: [:r | (r at: #selector) == #neverCalledHelper]
+// => _
+
+unusedRecord includesKey: #class
+// => true
+
+unusedRecord includesKey: #selector
+// => true
+
+// The flagged record's #class is the defining class — collect-then-includes to
+// avoid in-block equality against a class reference (mirrors the BT-2206 section).
+((unused select: [:r | (r at: #selector) == #neverCalledHelper])
+  collect: [:r | r at: #class]) includes: UnusedDemo
+// => true
+
+// A `printString` override is NOT flagged even though nothing visibly sends it —
+// runtime-called-override exclusion (it is in runtimeCalledSelectors).
+unusedSelectors includes: #printString
+// => false
+
+// A TestCase subclass's `testSomething` / `setUp` / `tearDown` are NOT flagged —
+// the runner invokes them reflectively (TestCase test-runner exclusion).
+unusedSelectors includes: #testSomething
+// => false
+
+// `setUp` and `tearDown` on a TestCase subclass are excluded too — the runner
+// invokes them reflectively. They are defined on TestCase subclasses only, so
+// global non-membership is a sound check of the test-runner exclusion.
+unusedSelectors includes: #setUp
+// => false
+
+unusedSelectors includes: #tearDown
+// => false
+
+// A `@primitive` / `@intrinsic`-bodied method is NOT flagged. `fieldAt:put:`
+// (`@intrinsic fieldAtPut` on Object) is sent nowhere in source, so without the
+// primitive heuristic it would be flagged; the exclusion keeps it out.
+unusedSelectors includes: #fieldAt:put:
+// => false
+
+// The primitive heuristic helper agrees: a stdlib intrinsic reads as primitive.
+SystemNavigation default isPrimitiveMethod: #hash in: Object
+// => true
+
+// ...while an ordinary stdlib method does not.
+SystemNavigation default isPrimitiveMethod: #displayString in: Object
+// => false
+
+// Documented limitation: a method reached ONLY via `self perform: #dynamicOnly`
+// IS flagged — the dynamic selector is a Symbol literal, never an AST send, so
+// the scan cannot see the use. This encodes the known false positive.
+unusedSelectors includes: #dynamicOnly
+// => true
+
+// `caller` (UnusedDemo) sends `usedHelper`, a real source send, so `caller` is
+// itself unused (sent by nobody) and SHOULD appear — confirming the scan flags
+// ordinary unsent methods, not just contrived ones.
+unusedSelectors includes: #caller
+// => true
