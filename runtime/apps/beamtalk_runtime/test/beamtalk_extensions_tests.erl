@@ -26,6 +26,11 @@ setup() ->
         _:_ -> ok
     end,
     try
+        ets:delete_all_objects(beamtalk_extension_sources)
+    catch
+        _:_ -> ok
+    end,
+    try
         ets:delete_all_objects(beamtalk_extension_conflicts)
     catch
         _:_ -> ok
@@ -37,6 +42,11 @@ cleanup(_) ->
     %% Delete all objects from both tables
     try
         ets:delete_all_objects(beamtalk_extensions)
+    catch
+        _:_ -> ok
+    end,
+    try
+        ets:delete_all_objects(beamtalk_extension_sources)
     catch
         _:_ -> ok
     end,
@@ -59,6 +69,11 @@ init_creates_tables_test() ->
         _:_ -> ok
     end),
     (try
+        ets:delete(beamtalk_extension_sources)
+    catch
+        _:_ -> ok
+    end),
+    (try
         ets:delete(beamtalk_extension_conflicts)
     catch
         _:_ -> ok
@@ -67,6 +82,7 @@ init_creates_tables_test() ->
     beamtalk_extensions:init(),
 
     ?assertNotEqual(undefined, ets:info(beamtalk_extensions)),
+    ?assertNotEqual(undefined, ets:info(beamtalk_extension_sources)),
     ?assertNotEqual(undefined, ets:info(beamtalk_extension_conflicts)).
 
 init_is_idempotent_test() ->
@@ -75,6 +91,7 @@ init_is_idempotent_test() ->
     beamtalk_extensions:init(),
 
     ?assertNotEqual(undefined, ets:info(beamtalk_extensions)),
+    ?assertNotEqual(undefined, ets:info(beamtalk_extension_sources)),
     ?assertNotEqual(undefined, ets:info(beamtalk_extension_conflicts)).
 
 %%% ============================================================================
@@ -386,3 +403,199 @@ conflicts_three_way_test_() ->
             ?assert(lists:member(lib3, Owners))
         end
     end}.
+
+%%% ============================================================================
+%%% BT-2196: Source tracking tests (register/5, getSource/2,
+%%% listAllWithSource/0)
+%%% ============================================================================
+
+register_with_source_stores_source_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X * 2 end,
+            Source = <<"double => self * 2">>,
+
+            ?assertEqual(
+                ok,
+                beamtalk_extensions:register('Integer', 'double', Fun, mylib, Source)
+            ),
+
+            %% The dispatch entry should still be present (register/5 is a
+            %% superset of register/4 — same lookup contract).
+            ?assertEqual(
+                {ok, Fun, mylib},
+                beamtalk_extensions:lookup('Integer', 'double')
+            ),
+
+            %% Source is retrievable.
+            ?assertEqual(
+                {ok, Source},
+                beamtalk_extensions:getSource('Integer', 'double')
+            )
+        end
+    end}.
+
+register_arity4_does_not_store_source_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+
+            ?assertEqual(
+                ok,
+                beamtalk_extensions:register('Integer', 'noop', Fun, mylib)
+            ),
+
+            %% No source recorded for register/4 entries — keeps the source
+            %% scan deliberately empty rather than surfacing entries with no
+            %% body to grep over.
+            ?assertEqual(
+                not_found,
+                beamtalk_extensions:getSource('Integer', 'noop')
+            )
+        end
+    end}.
+
+register_with_undefined_source_skips_source_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+
+            %% Passing undefined is equivalent to register/4 — caller
+            %% does not have source text to share.
+            ?assertEqual(
+                ok,
+                beamtalk_extensions:register('Integer', 'noop2', Fun, mylib, undefined)
+            ),
+
+            ?assertEqual(
+                not_found,
+                beamtalk_extensions:getSource('Integer', 'noop2')
+            )
+        end
+    end}.
+
+get_source_missing_extension_returns_not_found_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            ?assertEqual(
+                not_found,
+                beamtalk_extensions:getSource('NotARegisteredClass', 'noSuchSelector')
+            )
+        end
+    end}.
+
+list_all_with_source_returns_only_register5_entries_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            Src1 = <<"double => self * 2">>,
+            Src2 = <<"trim => self">>,
+
+            %% Two entries with source.
+            beamtalk_extensions:register('Integer', 'double', Fun, mylib, Src1),
+            beamtalk_extensions:register('String', 'trim', Fun, mylib, Src2),
+            %% One entry without source (register/4).
+            beamtalk_extensions:register('String', 'shout', Fun, mylib),
+
+            Listed = beamtalk_extensions:listAllWithSource(),
+
+            %% list_all_with_source/0 only surfaces entries with stored
+            %% source. Order is ETS-dependent, so check membership.
+            ?assertEqual(2, length(Listed)),
+            ?assert(lists:member({'Integer', double, Src1}, Listed)),
+            ?assert(lists:member({'String', trim, Src2}, Listed))
+        end
+    end}.
+
+list_all_with_source_handles_uninitialised_table_test() ->
+    %% Delete the sources table to simulate the early bootstrap window —
+    %% must return [] rather than crashing. Wrap in try/after so a
+    %% failing assertion still re-creates the table; otherwise the
+    %% missing-table state cascades into every later test in the run.
+    (try
+        ets:delete(beamtalk_extension_sources)
+    catch
+        _:_ -> ok
+    end),
+
+    try
+        ?assertEqual([], beamtalk_extensions:listAllWithSource())
+    after
+        beamtalk_extensions:init()
+    end.
+
+register_with_source_updates_source_on_reregister_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            Src1 = <<"original source">>,
+            Src2 = <<"updated source">>,
+
+            beamtalk_extensions:register('Integer', 'go', Fun, mylib, Src1),
+            beamtalk_extensions:register('Integer', 'go', Fun, mylib, Src2),
+
+            %% Latest source wins (mirrors last-writer-wins dispatch entry).
+            ?assertEqual({ok, Src2}, beamtalk_extensions:getSource('Integer', 'go'))
+        end
+    end}.
+
+register_arity4_clears_stale_source_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            Src = <<"original body for register/5">>,
+
+            %% First register with source so the sources table has an entry.
+            beamtalk_extensions:register('Integer', 'flip', Fun, mylib, Src),
+            ?assertEqual({ok, Src}, beamtalk_extensions:getSource('Integer', 'flip')),
+
+            %% Re-register via the legacy 4-arity path. The dispatch entry
+            %% updates as usual, but the old source body must NOT linger —
+            %% otherwise listAllWithSource/0 would still surface this
+            %% extension and attribute the stale body to a registration
+            %% that no longer carries source.
+            beamtalk_extensions:register('Integer', 'flip', Fun, mylib),
+
+            ?assertEqual(not_found, beamtalk_extensions:getSource('Integer', 'flip')),
+            %% listAllWithSource/0 must not include the stale entry either.
+            Listed = beamtalk_extensions:listAllWithSource(),
+            ?assertNot(
+                lists:any(fun({_C, S, _Src}) -> S =:= 'flip' end, Listed)
+            )
+        end
+    end}.
+
+register_with_undefined_clears_stale_source_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Fun = fun([], X) -> X end,
+            Src = <<"original body">>,
+
+            %% Seed with source via register/5.
+            beamtalk_extensions:register('Integer', 'spin', Fun, mylib, Src),
+            ?assertEqual({ok, Src}, beamtalk_extensions:getSource('Integer', 'spin')),
+
+            %% Explicit undefined source must also wipe the stale row.
+            beamtalk_extensions:register('Integer', 'spin', Fun, mylib, undefined),
+            ?assertEqual(not_found, beamtalk_extensions:getSource('Integer', 'spin'))
+        end
+    end}.
+
+get_source_handles_uninitialised_table_test() ->
+    %% Mirrors list_all_with_source_handles_uninitialised_table_test —
+    %% getSource/2 must return not_found (per its spec) rather than
+    %% letting the ETS badarg escape when the sources table doesn't
+    %% exist yet during early bootstrap. Same try/after recovery as
+    %% the sibling test so a failed assertion does not leak the
+    %% missing-table state into the rest of the suite.
+    (try
+        ets:delete(beamtalk_extension_sources)
+    catch
+        _:_ -> ok
+    end),
+
+    try
+        ?assertEqual(not_found, beamtalk_extensions:getSource('Anything', 'whatever'))
+    after
+        beamtalk_extensions:init()
+    end.
