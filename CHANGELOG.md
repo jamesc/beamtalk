@@ -6,12 +6,14 @@
 
 - **Character literal dispatch** — character literals (`$A`, `$a`, etc.) now dispatch through the Character method table instead of Integer's. `$A asString` returns `"A"` (not `"65"`), `$A class` returns `Character`, and methods like `uppercase`, `lowercase`, `printString` work correctly on character literals. `Character value: 65` class-method sends also work (BT-2095).
 - **`@expect inheritance` diagnostic category** — sealed-class and sealed-method constraint diagnostics are now categorized as `Inheritance`, so they reach CLI and MCP lint surfaces that filter to categorized diagnostics. Previously these diagnostics were uncategorized and only appeared in the LSP (BT-2087).
+- **Class-side block parameter type propagation** — the type checker now infers block parameter types from class-side method signatures (e.g., `ClassName build: [:r | ...]` where the method declares `Block(RouteBuilder, R)` correctly types `r` as `RouteBuilder`), eliminating the need for `@expect type` pragmas on class-side sends and cascades (BT-2158).
 
 ### Standard Library
 
 - **`SystemNavigation`** — `implementorsOf:` and `sendersOf:` moved off `Beamtalk` onto a new `SystemNavigation` class, matching Pharo/Squeak/Cuis convention. Reach an instance via `SystemNavigation default` and dispatch queries against it: `SystemNavigation default implementorsOf: #foo`, `SystemNavigation default sendersOf: #foo`. The class side is constructors only — `default` today, with `over: aPackage` and `forClasses: aList` planned for the BT-2201 query API expansion — so future scoped queries fit cleanly without breaking the protocol. The methods on `Beamtalk` are removed outright (no deprecation period; pre-1.0 reflective queries with no broad surface area) (BT-2214).
 - **`SystemNavigation methodsMatching:`** — new source-text grep query that returns `{class, selector}` records for every loaded method whose `CompiledMethod source` matches a compiled `Regex`. Argument must be a `Regex` (raises a typed error on a raw `String` so callers stay explicit about compile-once semantics). Iterates `allClasses` and skips methods whose source is missing (BT-2205).
 - **`SystemNavigation` class-side scanning** — `sendersOf:`, `referencesTo:`, and `methodsMatching:` now walk class-side method bodies in addition to instance-side ones. Each result's `#class` field is the class object for an instance-side hit and the metaclass object (`Counter class`) for a class-side hit. Required two runtime pieces: class-side `CompiledMethod.source` is now populated end-to-end (codegen emits `classMethodSource`, the class gen_server stores it, and the `{class_method, _}` reply plumbs it through), and `>>` now accepts a metaclass receiver (the method resolver routes `class = 'Metaclass'` objects to the class-side dictionary, walking the parallel metaclass hierarchy). Extension methods (ADR 0066) still require a future reverse index (BT-2195).
+- **`Behaviour >> superclassChain`** — returns the chain from self up to and including `Object` as a list. Self is at the head; `Object` is at the tail. For metaclass receivers, walks the parallel metaclass hierarchy: `Counter class superclassChain` returns `[Counter class, Actor class, Object class]` (BT-2189).
 
 ### Runtime
 
@@ -20,6 +22,7 @@
 - Fix telemetry handler attachment race in `beamtalk_trace_store` — declare `telemetry` and `telemetry_poller` as OTP application dependencies so handler attachment is deterministic (BT-2116).
 - Fix `isKindOf:` / `inheritsFrom:` / `includesBehaviour:` returning semantically incorrect results on class-object receivers — `Integer isKindOf: Number` now correctly returns `false` (Integer is an instance of `Integer class`, whose parallel metaclass chain does not include `Number`). `classAllSuperclasses` now walks the parallel metaclass hierarchy for metaclass-tagged receivers (BT-2194).
 - **Ground the parallel metaclass chain at `Class`** — `ProtoObject class superclass` now returns `Class` (instead of `nil`), matching Smalltalk-80, Pharo, and ADR 0036. The parallel chain `Foo class → … → ProtoObject class` merges into the instance-side `Class → Behaviour → Object → ProtoObject` tower, so `metaclassSuperclass` and `classAllSuperclasses` return a fully-grounded chain on metaclass receivers. As a result, `Integer isKindOf: Object` is now `true` (was `false` after BT-2194) and `Integer isKindOf: Class` is now `true` — agreeing with the dispatch chain, which already routed metaclass receivers through `Class`/`Behaviour`/`Object` (BT-2217).
+- ETS-backed caching for class-method dispatch — `find_class_method_in_ancestors` now reads selectors and module names from an ETS table instead of issuing `gen_server:call` round-trips per ancestor hop, reducing inherited class-method dispatch median latency from ~5–6μs to ~1.6μs (BT-2008).
 
 ### Tooling
 
@@ -50,6 +53,7 @@
 - Replace 5 `format!()` calls with `fresh_temp_var` / `write!` in `repl/codegen.rs` and `value_type_codegen.rs` — continues the BT-875 cleanup (BT-2175).
 - Extract shared `parse_and_check_expression` helper in compiler-port — deduplicates ~20-line lex/parse/validate preamble from `handle_compile_expression` and `handle_compile_expression_trace` (BT-2178).
 - Replace `format!()` violations with `Document`/`docvec!` API in `value_type_codegen.rs` module header — continues the BT-875 cleanup (BT-2181).
+- Resolve type references into preloaded modules — `resolve_remote_type` for `:erlang` and other preloaded modules now reads type specs from the BEAM binary via `code:get_object_code/1` instead of returning `Dynamic` (BT-2185).
 
 ## 0.4.0 — 2026-04-27
 
