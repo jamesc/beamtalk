@@ -1,0 +1,129 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2207: BUnit-level coverage for `SystemNavigation unusedSelectors` — the
+// conservative inverse of `unimplementedSelectors`. Reports dead-method
+// *candidates*: selectors DEFINED on some class but SENT nowhere, excluding the
+// known-invisible categories (runtime-called overrides, TestCase test-runner
+// methods, primitives/intrinsics, Erlang FFI uses).
+//
+// `unusedSelectors` is an instance method on `SystemNavigation`, reached via the
+// `default` (or future scoped) constructor. See the note in
+// `beamtalk_implementors_test.bt` for why the class side is constructors only
+// and the queries live on the instance.
+//
+// Behavioural tests (an unused method surfaces; printString / TestCase test
+// methods / @primitive bodies are not flagged; perform:-only methods are flagged
+// as the documented false positive; result-record shape) live in the E2E
+// REPL-protocol suite at
+// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
+// workspace_mode with the live class registry populated AND the compiler-port
+// process running (the source-text scan needs both). The BUnit harness does not
+// start the compiler port, so `allSendsIn:` returns `[]` here regardless of
+// source — hence these checks stay structural.
+
+TestCase subclass: SystemNavigationUnusedTest
+
+  // --- selector existence ---
+  testIncludesSelectorUnusedSelectors =>
+    self assert: (SystemNavigation includesSelector: #unusedSelectors)
+
+  // --- the documented runtime-called-overrides exclusion list ---
+
+  // The exclusion list is present and non-empty (it is the static list of
+  // framework selectors the runtime invokes without a source-visible send).
+  testRuntimeCalledSelectorsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #runtimeCalledSelectors)
+
+  testRuntimeCalledSelectorsIsNotEmpty =>
+    self deny: (SystemNavigation default runtimeCalledSelectors) isEmpty
+
+  // The verified-real entries must be present: the DNU override is
+  // `doesNotUnderstand:args:` (NOT `doesNotUnderstand:`), and lifecycle /
+  // display / hash overrides are runtime-called too.
+  testRuntimeCalledSelectorsContainsDnuOverride =>
+    self assert: ((SystemNavigation default runtimeCalledSelectors) includes: #doesNotUnderstand:args:)
+
+  testRuntimeCalledSelectorsContainsLifecycleHooks =>
+    rcs := SystemNavigation default runtimeCalledSelectors
+    self assert: (rcs includes: #initialize)
+    self assert: (rcs includes: #terminate:)
+
+  testRuntimeCalledSelectorsContainsDisplayAndHash =>
+    rcs := SystemNavigation default runtimeCalledSelectors
+    self assert: (rcs includes: #printString)
+    self assert: (rcs includes: #displayString)
+    self assert: (rcs includes: #inspect)
+    self assert: (rcs includes: #hash)
+
+  // --- the internal helpers must be defined ---
+
+  // The sent-set is built by walking methods, fetching source via `>>`, and
+  // collecting every send via `allSendsIn:` into a Set.
+  testHelperCollectSentSelectorsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectSentSelectorsIn:into:)
+
+  testHelperAddSentSelectorsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #addSentSelectorsIn:into:)
+
+  testHelperCollectExtensionSentSelectorsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionSentSelectorsInto:)
+
+  // The candidate side walks owners and applies the exclusions per selector.
+  testHelperCollectUnusedIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectUnusedFor:owner:sent:excluded:into:)
+
+  testHelperRecordUnusedIsDefined =>
+    self assert: (SystemNavigation includesSelector: #recordUnused:scope:owner:isTestCase:sent:excluded:into:)
+
+  // The TestCase and primitive predicates back the exclusions.
+  testHelperIsTestRunnerSelectorIsDefined =>
+    self assert: (SystemNavigation includesSelector: #isTestRunnerSelector:)
+
+  testHelperIsPrimitiveMethodIsDefined =>
+    self assert: (SystemNavigation includesSelector: #isPrimitiveMethod:in:)
+
+  // The class-tag resolver helper (shared with the other queries) is present.
+  testHelperResolveExtensionClassIsDefined =>
+    self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+
+  // --- the predicates compute correctly (these do not need the compiler port) ---
+
+  // The test-runner predicate matches setUp / tearDown / test* and nothing else.
+  testIsTestRunnerSelectorMatchesRunnerMethods =>
+    nav := SystemNavigation default
+    self assert: (nav isTestRunnerSelector: #setUp)
+    self assert: (nav isTestRunnerSelector: #tearDown)
+    self assert: (nav isTestRunnerSelector: #testSomething)
+    self deny: (nav isTestRunnerSelector: #increment)
+
+  // The primitive predicate reads the `@intrinsic` / `@primitive` source text:
+  // `Object >> #hash` is intrinsic; `Object >> #displayString` is ordinary.
+  testIsPrimitiveMethodDetectsIntrinsics =>
+    nav := SystemNavigation default
+    self assert: (nav isPrimitiveMethod: #hash in: Object)
+    self deny: (nav isPrimitiveMethod: #displayString in: Object)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation walks aClass methods, fetches each via `>>`, reads its
+  // source, asks for every send, and accumulates into a Set.
+  testCompositionPrimitivesPresent =>
+    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (Behaviour includesSelector: #allSuperclasses)
+    self assert: (Behaviour includesSelector: #inheritsFrom:)
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // Set is the sent-set accumulator: `add:` builds it, `includes:` filters
+  // candidates against it.
+  testSetPrimitivesPresent =>
+    self assert: (Set includesSelector: #add:)
+    self assert: (Set includesSelector: #includes:)
+
+  // String substring / prefix tests back the primitive and test-runner
+  // heuristics.
+  testStringPrimitivesPresent =>
+    self assert: (String includesSelector: #includesSubstring:)
+    self assert: (String includesSelector: #startsWith:)

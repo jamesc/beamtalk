@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2207: E2E fixture for `SystemNavigation unusedSelectors`.
+//
+// `UnusedPerform` reaches `dynamicOnly` ONLY through `self perform: #dynamicOnly`.
+// The dynamic selector is a Symbol literal, not an AST send, so the source scan
+// never records `dynamicOnly` as used — it WILL appear in the unused report.
+// This encodes the documented `perform:` false-positive limitation: a method
+// invoked only via `perform:` is, to a static scan, indistinguishable from dead.
+
+Object subclass: UnusedPerform
+
+  // Invokes `dynamicOnly` dynamically. The `#dynamicOnly` argument is a literal,
+  // not a send, so the scan cannot see this use.
+  run =>
+    @expect dnu
+    self perform: #dynamicOnly
+
+  // Reached only via `perform:` above — flagged as a (known) false positive.
+  dynamicOnly => 7
