@@ -359,9 +359,15 @@ log_compiler_diagnostics(Diagnostics, Selector) ->
     IsPortUnavailable = lists:any(
         fun(D) ->
             Msg = maps:get(message, D, <<>>),
-            is_binary(Msg) andalso
-                (binary:match(Msg, <<"not available">>) =/= nomatch orelse
-                    binary:match(Msg, <<"timed out">>) =/= nomatch)
+            %% Lowercase before matching so capitalised variants (e.g. "Timed out")
+            %% are still classified as port-unavailability (error, not warning).
+            MsgLc =
+                case is_binary(Msg) of
+                    true -> string:lowercase(Msg);
+                    false -> <<>>
+                end,
+            binary:match(MsgLc, <<"not available">>) =/= nomatch orelse
+                binary:match(MsgLc, <<"timed out">>) =/= nomatch
         end,
         Diagnostics
     ),
