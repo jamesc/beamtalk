@@ -27,15 +27,13 @@ Object subclass: SysnavFixture
   btAppendMarker => "append marker"
 
   // Body contains `ifTrue:` — gives methodsMatching: (Regex from: "ifTrue:") a hit.
-  btIfTrueBodyMarker =>
-    true ifTrue: ["hit"] ifFalse: ["miss"]
+  btIfTrueBodyMarker => true ifTrue: ["hit"] ifFalse: ["miss"]
 
   // Body contains the text `self negated` in the expression — gives
   // methodsMatching: (Regex from: "self negated") a fixture-controlled hit.
   // The method is not called in tests; the source-text scan is the only use.
   // STABLE: do not rename this method or edit its body (BT-2220).
-  btNegatedBodyMarker =>
-    self negated
+  btNegatedBodyMarker => self negated
 
   // References SysnavFixture by name — gives referencesTo: SysnavFixture a hit.
   btReferencesFixture => SysnavFixture name
