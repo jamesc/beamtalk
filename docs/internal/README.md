@@ -18,6 +18,7 @@ This directory contains internal implementation documentation, design decisions,
 |----------|-------------|
 | [Operator Implementation Status](operator-implementation-status.md) | Cross-reference of documented vs. implemented binary operators |
 | [Coverage Analysis](coverage-analysis.md) | Core Erlang compilation verification test coverage analysis |
+| [Class-Keyed ETS Tables Investigation](class-keyed-ets-tables-investigation.md) | BT-2222 survey + decision on consolidating the six class-keyed ETS tables |
 
 ### Implementation Tracking
 

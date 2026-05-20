@@ -586,7 +586,7 @@ find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX
     ),
     not_found;
 find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
-    case beamtalk_class_methods_table:lookup(AncestorName) of
+    case beamtalk_class_metadata:lookup_methods(AncestorName) of
         {ok, AncestorModule, Selectors} ->
             case lists:member(Selector, Selectors) of
                 true ->
@@ -602,7 +602,7 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
 -doc "Read the superclass name from the hierarchy table (no gen_server call).".
 -spec superclass_from_ets(class_name()) -> class_name() | none.
 superclass_from_ets(ClassName) ->
-    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
         {ok, Super} -> Super;
         not_found -> none
     end.

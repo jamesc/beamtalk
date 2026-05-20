@@ -819,8 +819,8 @@ actor_filter_ignores_other_pid() ->
 
 enableDebug_with_registered_class_sets_module_level() ->
     beamtalk_logging_config:disableAllDebug(),
-    beamtalk_class_module_table:new(),
-    beamtalk_class_module_table:insert('RegisteredClass', lists),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('RegisteredClass', lists, undefined, undefined),
     try
         ClassRef = #beamtalk_object{
             class = 'RegisteredClass class', class_mod = lists, pid = self()
@@ -830,14 +830,14 @@ enableDebug_with_registered_class_sets_module_level() ->
         ?assertEqual([{lists, debug}], logger:get_module_level(lists))
     after
         logger:unset_module_level(lists),
-        beamtalk_class_module_table:delete('RegisteredClass'),
+        beamtalk_class_metadata:delete('RegisteredClass'),
         beamtalk_logging_config:disableAllDebug()
     end.
 
 disableDebug_with_registered_class_unsets_module_level() ->
     beamtalk_logging_config:disableAllDebug(),
-    beamtalk_class_module_table:new(),
-    beamtalk_class_module_table:insert('RegisteredClass2', lists),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('RegisteredClass2', lists, undefined, undefined),
     try
         ClassRef = #beamtalk_object{
             class = 'RegisteredClass2 class', class_mod = lists, pid = self()
@@ -849,14 +849,14 @@ disableDebug_with_registered_class_unsets_module_level() ->
         ?assertEqual([], logger:get_module_level(lists))
     after
         logger:unset_module_level(lists),
-        beamtalk_class_module_table:delete('RegisteredClass2'),
+        beamtalk_class_metadata:delete('RegisteredClass2'),
         beamtalk_logging_config:disableAllDebug()
     end.
 
 disableAllDebug_with_registered_class_unsets_module_level() ->
     beamtalk_logging_config:disableAllDebug(),
-    beamtalk_class_module_table:new(),
-    beamtalk_class_module_table:insert('RegisteredClass3', lists),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('RegisteredClass3', lists, undefined, undefined),
     try
         ClassRef = #beamtalk_object{
             class = 'RegisteredClass3 class', class_mod = lists, pid = self()
@@ -867,7 +867,7 @@ disableAllDebug_with_registered_class_unsets_module_level() ->
         ?assertEqual([], logger:get_module_level(lists))
     after
         logger:unset_module_level(lists),
-        beamtalk_class_module_table:delete('RegisteredClass3')
+        beamtalk_class_metadata:delete('RegisteredClass3')
     end.
 
 %%====================================================================

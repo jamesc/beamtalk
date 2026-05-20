@@ -1959,9 +1959,9 @@ walk_chain_superclass_inheritance_test() ->
     %% does.  get_method_return_type/2 walks the ETS hierarchy table, so walk_chain/2
     %% should resolve through the superclass.
     beamtalk_class_registry:ensure_hierarchy_table(),
-    Saved = ets:tab2list(beamtalk_class_hierarchy),
-    ets:delete_all_objects(beamtalk_class_hierarchy),
-    ets:insert(beamtalk_class_hierarchy, {'WalkChainSub', 'WalkChainSuper'}),
+    Saved = ets:tab2list(beamtalk_class_metadata),
+    ets:delete_all_objects(beamtalk_class_metadata),
+    beamtalk_class_metadata:insert('WalkChainSub', undefined, undefined, 'WalkChainSuper'),
     PidSub = spawn_mock_class_with_return_types('WalkChainSub', #{}, #{}),
     PidSuper = spawn_mock_class_with_return_types(
         'WalkChainSuper', #{size => 'Integer'}, #{}
@@ -1974,8 +1974,8 @@ walk_chain_superclass_inheritance_test() ->
     after
         cleanup_mock_class('WalkChainSub', PidSub),
         cleanup_mock_class('WalkChainSuper', PidSuper),
-        ets:delete_all_objects(beamtalk_class_hierarchy),
-        ets:insert(beamtalk_class_hierarchy, Saved)
+        ets:delete_all_objects(beamtalk_class_metadata),
+        ets:insert(beamtalk_class_metadata, Saved)
     end.
 
 %%% resolve_chain_type/2 tests (BT-1006)

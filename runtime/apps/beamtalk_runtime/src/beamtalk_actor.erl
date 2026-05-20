@@ -2829,7 +2829,7 @@ class_matches(ActualClass, ReceiverClass) ->
 
 -spec class_mod_for(atom()) -> {ok, module()} | not_found.
 class_mod_for(ClassName) ->
-    case beamtalk_class_module_table:lookup(ClassName) of
+    case beamtalk_class_metadata:lookup_module(ClassName) of
         {ok, Module} -> {ok, Module};
         not_found -> not_found
     end.

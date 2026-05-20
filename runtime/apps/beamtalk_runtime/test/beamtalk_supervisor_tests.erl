@@ -205,34 +205,34 @@ is_supervisor_unknown_class_test() ->
 
 is_supervisor_returns_true_for_supervisor_subclass_test() ->
     %% BT-1960: A class registered as inheriting from 'Supervisor' returns true.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_hierarchy_table:insert('BT1960SupervisorChild', 'Supervisor'),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('BT1960SupervisorChild', undefined, undefined, 'Supervisor'),
     try
         ?assertEqual(true, beamtalk_supervisor:is_supervisor('BT1960SupervisorChild'))
     after
-        beamtalk_class_hierarchy_table:delete('BT1960SupervisorChild')
+        beamtalk_class_metadata:delete('BT1960SupervisorChild')
     end.
 
 is_supervisor_returns_true_for_dynamic_supervisor_subclass_test() ->
     %% BT-1960: A class inheriting from 'DynamicSupervisor' returns true.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_hierarchy_table:insert('BT1960DynChild', 'DynamicSupervisor'),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('BT1960DynChild', undefined, undefined, 'DynamicSupervisor'),
     try
         ?assertEqual(true, beamtalk_supervisor:is_supervisor('BT1960DynChild'))
     after
-        beamtalk_class_hierarchy_table:delete('BT1960DynChild')
+        beamtalk_class_metadata:delete('BT1960DynChild')
     end.
 
 is_supervisor_returns_false_for_non_supervisor_class_test() ->
     %% BT-1960: A class that inherits from 'Actor' (not Supervisor) returns false.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_hierarchy_table:insert('BT1960Worker', 'Actor'),
-    beamtalk_class_hierarchy_table:insert('Actor', none),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('BT1960Worker', undefined, undefined, 'Actor'),
+    beamtalk_class_metadata:insert('Actor', undefined, undefined, none),
     try
         ?assertEqual(false, beamtalk_supervisor:is_supervisor('BT1960Worker'))
     after
-        beamtalk_class_hierarchy_table:delete('BT1960Worker'),
-        beamtalk_class_hierarchy_table:delete('Actor')
+        beamtalk_class_metadata:delete('BT1960Worker'),
+        beamtalk_class_metadata:delete('Actor')
     end.
 
 %%====================================================================
@@ -683,7 +683,7 @@ via ETS — without any gen_server being registered for those classes.
 In the old code, call_inherited_class_method_direct called
 beamtalk_object_class:module_name/1 (gen_server:call).  If the ancestor
 class gen_server is blocked inside startLink/1, that call deadlocks.
-The new code reads from beamtalk_class_module_table (ETS) instead.
+The new code reads from beamtalk_class_metadata (ETS) instead.
 
 We simulate the deadlock scenario by populating ETS for a fake two-level
 hierarchy where NO gen_server processes are registered for either class.
@@ -692,83 +692,76 @@ resolves the module from ETS and succeeds.
 """.
 static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     %% Ensure ETS tables exist.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
 
     %% Set up a two-level hierarchy in ETS:
     %%   'BT1285Child' extends 'BT1285Parent' extends none
     %% Neither has a registered class gen_server process — this simulates
     %% the scenario where 'BT1285Parent' gen_server is blocked in startLink/1.
-    beamtalk_class_hierarchy_table:insert('BT1285Child', 'BT1285Parent'),
-    beamtalk_class_hierarchy_table:insert('BT1285Parent', none),
+    beamtalk_class_metadata:insert('BT1285Child', undefined, undefined, 'BT1285Parent'),
 
     %% Register module for 'BT1285Parent' only — 'BT1285Child' uses a module
     %% (erlang) that does NOT export class_children/2, forcing the walk upward.
-    beamtalk_class_module_table:insert('BT1285Parent', ?MODULE),
+    beamtalk_class_metadata:insert('BT1285Parent', ?MODULE, undefined, none),
 
     %% static_init/2 takes (Module, ClassName) where Module is the child's
     %% BEAM module.  We use 'erlang' as the child module so none of the
     %% class_* functions are exported there — the walk must climb to 'BT1285Parent'.
     %% 'BT1285Child' is not registered with whereis so ClassPid = undefined;
     %% that is fine since ClassSelf is only used as a value passed to class methods.
-    Result = beamtalk_supervisor:static_init(erlang, 'BT1285Child'),
-
-    %% Clean up ETS entries to avoid polluting state for other tests.
-    beamtalk_class_hierarchy_table:delete('BT1285Child'),
-    beamtalk_class_hierarchy_table:delete('BT1285Parent'),
-    beamtalk_class_module_table:delete('BT1285Parent'),
-
-    %% The walk found class_children/2, class_strategy/2, class_maxRestarts/2,
-    %% and class_restartWindow/2 in ?MODULE (this test module) via the ETS lookup.
-    %% It should succeed with zero children and one_for_one strategy.
-    ?assertMatch(
-        {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
-        Result
-    ).
+    try
+        Result = beamtalk_supervisor:static_init(erlang, 'BT1285Child'),
+        %% The walk found class_children/2, class_strategy/2, class_maxRestarts/2,
+        %% and class_restartWindow/2 in ?MODULE (this test module) via the ETS lookup.
+        %% It should succeed with zero children and one_for_one strategy.
+        ?assertMatch(
+            {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
+            Result
+        )
+    after
+        %% Clean up ETS entries even if an assertion fails, to avoid polluting other tests.
+        beamtalk_class_metadata:delete('BT1285Child'),
+        beamtalk_class_metadata:delete('BT1285Parent')
+    end.
 
 dynamic_init_walks_hierarchy_via_ets_test() ->
     %% BT-1960: dynamic_init/2 uses the same ETS hierarchy walk as static_init.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
 
-    beamtalk_class_hierarchy_table:insert('BT1960DynChild', 'BT1960DynParent'),
-    beamtalk_class_hierarchy_table:insert('BT1960DynParent', none),
-    beamtalk_class_module_table:insert('BT1960DynParent', ?MODULE),
+    beamtalk_class_metadata:insert('BT1960DynChild', undefined, undefined, 'BT1960DynParent'),
+    beamtalk_class_metadata:insert('BT1960DynParent', ?MODULE, undefined, none),
 
     %% class_childClass returns a supervisor subclass object, so register it.
-    beamtalk_class_hierarchy_table:insert('BT1960DynChildSup', 'Supervisor'),
+    beamtalk_class_metadata:insert('BT1960DynChildSup', undefined, undefined, 'Supervisor'),
 
     %% dynamic_init needs class_childClass, class_maxRestarts, class_restartWindow.
     %% class_childClass returns a class object (beamtalk_object record).
-    Result = beamtalk_supervisor:dynamic_init(erlang, 'BT1960DynChild'),
-
-    beamtalk_class_hierarchy_table:delete('BT1960DynChild'),
-    beamtalk_class_hierarchy_table:delete('BT1960DynParent'),
-    beamtalk_class_hierarchy_table:delete('BT1960DynChildSup'),
-    beamtalk_class_module_table:delete('BT1960DynParent'),
-
-    %% dynamic_init always uses simple_one_for_one strategy.
-    %% The child spec should contain a start_link entry for the supervisor child.
-    ?assertMatch(
-        {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
-        Result
-    ).
+    try
+        Result = beamtalk_supervisor:dynamic_init(erlang, 'BT1960DynChild'),
+        %% dynamic_init always uses simple_one_for_one strategy.
+        %% The child spec should contain a start_link entry for the supervisor child.
+        ?assertMatch(
+            {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
+            Result
+        )
+    after
+        beamtalk_class_metadata:delete('BT1960DynChild'),
+        beamtalk_class_metadata:delete('BT1960DynParent'),
+        beamtalk_class_metadata:delete('BT1960DynChildSup')
+    end.
 
 hierarchy_depth_limit_error_test() ->
     %% BT-1960: Verify that call_inherited_class_method_direct raises
     %% {supervisor_init_method_not_found, FunName} when the depth limit is exceeded.
     %% We create a circular-ish hierarchy by having a class point to itself (via ETS).
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
 
     %% Create a hierarchy where every class points to a parent that doesn't have
     %% the method, eventually exceeding the depth limit of 30.
     %% A points to B, B points to A — circular, will hit depth limit.
-    beamtalk_class_hierarchy_table:insert('BT1960LoopA', 'BT1960LoopB'),
-    beamtalk_class_hierarchy_table:insert('BT1960LoopB', 'BT1960LoopA'),
     %% Both modules are 'erlang' which won't have class_children.
-    beamtalk_class_module_table:insert('BT1960LoopA', erlang),
-    beamtalk_class_module_table:insert('BT1960LoopB', erlang),
+    beamtalk_class_metadata:insert('BT1960LoopA', erlang, undefined, 'BT1960LoopB'),
+    beamtalk_class_metadata:insert('BT1960LoopB', erlang, undefined, 'BT1960LoopA'),
 
     try
         ?assertError(
@@ -776,17 +769,14 @@ hierarchy_depth_limit_error_test() ->
             beamtalk_supervisor:static_init(erlang, 'BT1960LoopA')
         )
     after
-        beamtalk_class_hierarchy_table:delete('BT1960LoopA'),
-        beamtalk_class_hierarchy_table:delete('BT1960LoopB'),
-        beamtalk_class_module_table:delete('BT1960LoopA'),
-        beamtalk_class_module_table:delete('BT1960LoopB')
+        beamtalk_class_metadata:delete('BT1960LoopA'),
+        beamtalk_class_metadata:delete('BT1960LoopB')
     end.
 
 hierarchy_method_not_found_no_parent_test() ->
     %% BT-1960: When a class has no parent (not_found in hierarchy table),
     %% the walk raises {supervisor_init_method_not_found, FunName}.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
 
     %% 'BT1960Orphan' has no entry in hierarchy table at all.
     %% The module (erlang) doesn't export class_children/2.
@@ -860,8 +850,7 @@ Set up ETS tables and register a fake class for start_child_via_class_method.
 Returns the fake class pid (a dummy process) that should be cleaned up after the test.
 """.
 setup_fake_class(ClassName) ->
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
     %% Register a dummy process as the class gen_server so whereis_class resolves.
     FakeClassPid = spawn(fun() ->
         receive
@@ -871,7 +860,7 @@ setup_fake_class(ClassName) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
     register(RegName, FakeClassPid),
     %% Register module mapping so call_class_method_direct can find our fake methods.
-    beamtalk_class_module_table:insert(ClassName, ?MODULE),
+    beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined),
     FakeClassPid.
 
 -doc "Clean up after a fake class test.".
@@ -883,7 +872,7 @@ cleanup_fake_class(ClassName, FakeClassPid) ->
         _:_ -> ok
     end),
     FakeClassPid ! stop,
-    beamtalk_class_module_table:delete(ClassName),
+    beamtalk_class_metadata:delete(ClassName),
     ok.
 
 %% --- Tests ---
@@ -1054,14 +1043,14 @@ start_child_via_class_method_returns_supervisor_tuple_test() ->
 
 is_supervisor_transitive_inheritance_test() ->
     %% BT-1960: is_supervisor returns true for a grandchild of Supervisor.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_hierarchy_table:insert('BT1960GrandChild', 'BT1960Middle'),
-    beamtalk_class_hierarchy_table:insert('BT1960Middle', 'Supervisor'),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('BT1960GrandChild', undefined, undefined, 'BT1960Middle'),
+    beamtalk_class_metadata:insert('BT1960Middle', undefined, undefined, 'Supervisor'),
     try
         ?assertEqual(true, beamtalk_supervisor:is_supervisor('BT1960GrandChild'))
     after
-        beamtalk_class_hierarchy_table:delete('BT1960GrandChild'),
-        beamtalk_class_hierarchy_table:delete('BT1960Middle')
+        beamtalk_class_metadata:delete('BT1960GrandChild'),
+        beamtalk_class_metadata:delete('BT1960Middle')
     end.
 
 %%====================================================================
@@ -1086,8 +1075,7 @@ stop_terminates_children_test() ->
 static_init_direct_module_test() ->
     %% BT-1960: static_init finds class methods in the module directly
     %% (no hierarchy walk needed) when the class module exports them.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
 
     %% Register a fake class pid so whereis_class resolves.
     FakeClassPid = spawn(fun() ->
@@ -1411,8 +1399,7 @@ class_initialize(_ClassSelf, _ClassVars, _SupTuple) ->
 run_initialize_invokes_class_initialize_test() ->
     %% BT-1980: run_initialize walks the class chain and calls class_initialize:
     %% with the supervisor tuple as an extra arg.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
     %% Register a class pointing at this module (exports 'class_initialize:'/3).
     ClassName = 'BT1980InitClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
@@ -1423,7 +1410,7 @@ run_initialize_invokes_class_initialize_test() ->
     end),
     try
         register(RegName, FakeClassPid),
-        beamtalk_class_module_table:insert(ClassName, ?MODULE),
+        beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined),
         SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, self()},
         erase(bt1980_init_called),
         Result = beamtalk_supervisor:run_initialize(SupTuple),
@@ -1437,7 +1424,7 @@ run_initialize_invokes_class_initialize_test() ->
             _:_ -> ok
         end),
         FakeClassPid ! stop,
-        beamtalk_class_module_table:delete(ClassName)
+        beamtalk_class_metadata:delete(ClassName)
     end.
 
 %%====================================================================
@@ -1447,18 +1434,15 @@ run_initialize_invokes_class_initialize_test() ->
 to_otp_strategy_oneForOne_test() ->
     %% Exercised indirectly via static_init tests, but we also assert the
     %% strategies land in a supervisor's SupFlags.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
-    beamtalk_class_hierarchy_table:insert('BT1980StratOne', 'BT1980StratOneParent'),
-    beamtalk_class_hierarchy_table:insert('BT1980StratOneParent', none),
-    beamtalk_class_module_table:insert('BT1980StratOneParent', ?MODULE),
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert('BT1980StratOne', undefined, undefined, 'BT1980StratOneParent'),
+    beamtalk_class_metadata:insert('BT1980StratOneParent', ?MODULE, undefined, none),
     try
         {ok, {#{strategy := one_for_one}, _}} =
             beamtalk_supervisor:static_init(erlang, 'BT1980StratOne')
     after
-        beamtalk_class_hierarchy_table:delete('BT1980StratOne'),
-        beamtalk_class_hierarchy_table:delete('BT1980StratOneParent'),
-        beamtalk_class_module_table:delete('BT1980StratOneParent')
+        beamtalk_class_metadata:delete('BT1980StratOne'),
+        beamtalk_class_metadata:delete('BT1980StratOneParent')
     end.
 
 %% Helper fake class methods with non-default strategies.
@@ -1482,27 +1466,24 @@ to_otp_strategy_unknown_passes_through_test() ->
 %% a hierarchy whose class_strategy returns the input and extract the
 %% resulting OTP strategy atom.
 apply_to_otp_strategy(BtStrategy) ->
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
     Name = list_to_atom(
         "BT1980Strat_" ++ atom_to_list(BtStrategy) ++ "_" ++
             integer_to_list(erlang:unique_integer([positive]))
     ),
     Parent = list_to_atom(atom_to_list(Name) ++ "_p"),
-    beamtalk_class_hierarchy_table:insert(Name, Parent),
-    beamtalk_class_hierarchy_table:insert(Parent, none),
+    beamtalk_class_metadata:insert(Name, undefined, undefined, Parent),
     %% Install an on-demand parent module with the right class_strategy. We
     %% compile a tiny module at runtime that exports class_strategy/2 etc.
     ParentMod = compile_strategy_parent(BtStrategy),
-    beamtalk_class_module_table:insert(Parent, ParentMod),
+    beamtalk_class_metadata:insert(Parent, ParentMod, undefined, none),
     try
         {ok, {#{strategy := Strategy}, _}} =
             beamtalk_supervisor:static_init(erlang, Name),
         Strategy
     after
-        beamtalk_class_hierarchy_table:delete(Name),
-        beamtalk_class_hierarchy_table:delete(Parent),
-        beamtalk_class_module_table:delete(Parent)
+        beamtalk_class_metadata:delete(Name),
+        beamtalk_class_metadata:delete(Parent)
     end.
 
 %% Compile a helper module that exports class_children, class_strategy,
@@ -1586,9 +1567,9 @@ wrap_child_actor_returns_beamtalk_object_test() ->
 wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
     %% BT-1980: whichChild returns {beamtalk_supervisor, ...} when the child
     %% class inherits from Supervisor.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_hierarchy_table:insert(
-        'BT1980WrapSupChildCls', 'Supervisor'
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert(
+        'BT1980WrapSupChildCls', undefined, undefined, 'Supervisor'
     ),
     Parent = self(),
     ChildSpec = #{
@@ -1624,7 +1605,7 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
     after
         FakeClassPid ! stop,
         gen_server:stop(SupPid),
-        beamtalk_class_hierarchy_table:delete('BT1980WrapSupChildCls')
+        beamtalk_class_metadata:delete('BT1980WrapSupChildCls')
     end.
 
 %%====================================================================
@@ -1634,9 +1615,9 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
 build_child_specs_nested_supervisor_test() ->
     %% BT-1980: A Supervisor-subclass class object becomes an OTP spec with
     %% {ChildModule, start_link, []}, type => supervisor, shutdown => infinity.
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_hierarchy_table:insert(
-        'BT1980NestedSupCls', 'Supervisor'
+    beamtalk_class_metadata:new(),
+    beamtalk_class_metadata:insert(
+        'BT1980NestedSupCls', undefined, undefined, 'Supervisor'
     ),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->
@@ -1663,7 +1644,7 @@ build_child_specs_nested_supervisor_test() ->
         ?assertEqual(supervisor, maps:get(type, Spec))
     after
         FakeClassPid ! stop,
-        beamtalk_class_hierarchy_table:delete('BT1980NestedSupCls')
+        beamtalk_class_metadata:delete('BT1980NestedSupCls')
     end.
 
 %%====================================================================
@@ -2095,8 +2076,7 @@ test_no_initialize_on_error() ->
 %% Minimal runtime setup for class_dispatch tests that use beamtalk_object_class.
 %% Ensures ETS tables and registry are available.
 setup_class_dispatch_runtime() ->
-    beamtalk_class_hierarchy_table:new(),
-    beamtalk_class_module_table:new(),
+    beamtalk_class_metadata:new(),
     %% Return an opaque context for teardown.
     ok.
 
