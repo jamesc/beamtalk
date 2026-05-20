@@ -100,6 +100,14 @@ empty_selectors_is_not_unset_test() ->
         ?assertEqual({ok, m, []}, beamtalk_class_metadata:lookup_methods('NoClassMethods'))
     end).
 
+%% lookup_methods/1 must not return a module() of `undefined`: selectors without a
+%% module is an incomplete row, so it reads as not_found (keeps the spec honest).
+lookup_methods_requires_module_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('SelectorsOnly', undefined, [foo], 'Object'),
+        ?assertEqual(not_found, beamtalk_class_metadata:lookup_methods('SelectorsOnly'))
+    end).
+
 %%====================================================================
 %% Delete
 %%====================================================================

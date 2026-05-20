@@ -151,7 +151,7 @@ teardown(_) ->
             beamtalk_class_BT1982HasClassNew
         ]
     ),
-    %% Clean up ETS hierarchy table entries
+    %% Clean up unified class metadata table entries (BT-2222)
     try
         ets:delete_all_objects(beamtalk_class_metadata)
     catch

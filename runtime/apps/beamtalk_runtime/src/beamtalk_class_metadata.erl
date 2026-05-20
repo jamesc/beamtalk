@@ -175,12 +175,15 @@ lookup_module(Name) ->
 -doc """
 Look up a class's module and local class-method selectors.
 
-Returns `{ok, Module, Selectors}` only when the selectors field has been written
-(an empty list is valid); otherwise `not_found`.
+Returns `{ok, Module, Selectors}` only when both fields have been written (an
+empty selector list is valid); otherwise `not_found`. The two are always written
+together (`insert/4`), so requiring a non-`undefined` module keeps the return
+honest with the `module()` spec even if a row carries only one of them.
 """.
 -spec lookup_methods(class_name()) -> {ok, module(), [selector()]} | not_found.
 lookup_methods(Name) ->
     case row(Name) of
+        {ok, #class_metadata{module = undefined}} -> not_found;
         {ok, #class_metadata{selectors = undefined}} -> not_found;
         {ok, #class_metadata{module = Module, selectors = Selectors}} -> {ok, Module, Selectors};
         not_found -> not_found
