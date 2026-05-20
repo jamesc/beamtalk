@@ -27,6 +27,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol
 
+pub mod all_sends_query;
 pub mod completion_provider;
 pub mod definition_provider;
 pub mod diagnostic_provider;

@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2206: BUnit-level coverage for `SystemNavigation unimplementedSelectors` —
+// the classic Smalltalk typo-finder. Reports selectors that are SENT somewhere
+// but DEFINED nowhere, with the send-sites so a user can jump to the typo.
+//
+// `unimplementedSelectors` is an instance method on `SystemNavigation`, reached
+// via the `default` (or future scoped) constructor. See the note in
+// `beamtalk_implementors_test.bt` for why the class side is constructors only
+// and the queries live on the instance.
+//
+// Behavioural tests (a real typo surfaces with a site; doesNotUnderstand: /
+// perform: / Erlang FFI do not pollute results; result-record shape) live in
+// the E2E REPL-protocol suite at
+// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
+// workspace_mode with the live class registry populated AND the compiler-port
+// process running (the source-text scan needs both). The BUnit harness does
+// not start the compiler port, so `allSendsIn:` returns `[]` here regardless of
+// source — hence these checks stay structural.
+
+TestCase subclass: SystemNavigationUnimplementedTest
+
+  // --- selector existence ---
+  testIncludesSelectorUnimplementedSelectors =>
+    self assert: (SystemNavigation includesSelector: #unimplementedSelectors)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation builds a defined-set Set, walks aClass methods, fetches
+  // each via `>>`, reads its source, and groups sends into a Dictionary. All of
+  // those primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (Behaviour includesSelector: #includesSelector:)
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // Set is the defined-set accumulator: `add:` builds it, `includes:` filters
+  // sent selectors against it.
+  testSetPrimitivesPresent =>
+    self assert: (Set includesSelector: #add:)
+    self assert: (Set includesSelector: #includes:)
+
+  // Dictionary is the grouping accumulator (selector -> [sites]):
+  // `at:ifAbsent:` fetches the running site list, `at:put:` extends it, `keys`
+  // converts back to the result list.
+  testDictionaryPrimitivesPresent =>
+    self assert: (Dictionary includesSelector: #at:ifAbsent:)
+    self assert: (Dictionary includesSelector: #at:put:)
+    self assert: (Dictionary includesSelector: #keys)
+
+  // The internal helpers factor out per-scope iteration / per-method splitting /
+  // per-send recording so each `inject:into:` body stays a single expression
+  // and so they can be unit-checked separately.
+  testHelperCollectAllSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectAllSendsIn:excluding:into:)
+
+  testHelperAppendAllSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #appendAllSendsIn:owner:methodSelector:handlesDnu:excluding:into:)
+
+  testHelperRecordSendIsDefined =>
+    self assert: (SystemNavigation includesSelector: #recordSend:line:recv:owner:methodSelector:handlesDnu:excluding:into:)
+
+  // The extension-scan helper is present (the `unimplementedSelectors` body
+  // delegates to it after the class-side walk). Behavioural coverage lives in
+  // the E2E suite (the compiler port is not running under BUnit).
+  testHelperCollectExtensionAllSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionAllSendsExcluding:into:)
+
+  // The class-tag resolver helper (shared with sendersOf:) is present.
+  testHelperResolveExtensionClassIsDefined =>
+    self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+
+  // The documented runtime-provided exclusion list is present and (currently)
+  // empty — the stdlib comes back clean under the structural exclusions.
+  testRuntimeProvidedSelectorsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #runtimeProvidedSelectors)
+
+  testRuntimeProvidedSelectorsIsEmpty =>
+    self assert: (SystemNavigation default runtimeProvidedSelectors) isEmpty

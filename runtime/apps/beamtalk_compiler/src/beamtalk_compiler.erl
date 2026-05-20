@@ -30,6 +30,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     compile_core_erlang/1,
     resolve_completion_type/1,
     find_senders_in_source/2,
+    find_all_sends_in_source/1,
     find_references_to_in_source/2
 ]).
 
@@ -158,6 +159,26 @@ Backs `SystemNavigation sendersOf:' for System Browser-style call-site navigatio
     {ok, [pos_integer()]} | {error, [map()]}.
 find_senders_in_source(Source, Selector) ->
     beamtalk_compiler_server:find_senders_in_source(Source, Selector).
+
+-doc """
+Find every message send in a single method's source (BT-2206).
+
+`Source' is the source of a single compiled method (as returned by
+`CompiledMethod source'). Single-pass companion to `find_senders_in_source/2':
+returns EVERY send rather than filtering by one selector.
+
+Returns `{ok, [Send]}' on success, where each `Send' is a map
+`#{selector := binary(), line := pos_integer(), recv := self | super | erlang_ffi | other}'.
+Returns `{ok, []}' when the source has no sends or cannot be parsed. Returns
+`{error, Diagnostics}' if the compiler port is unavailable.
+
+Backs `SystemNavigation unimplementedSelectors' — the classic typo-finder
+(`allSentSelectors − allDefinedSelectors').
+""".
+-spec find_all_sends_in_source(binary()) ->
+    {ok, [map()]} | {error, [map()]}.
+find_all_sends_in_source(Source) ->
+    beamtalk_compiler_server:find_all_sends_in_source(Source).
 
 -doc """
 Find references to a class in a single method's source (BT-2203).

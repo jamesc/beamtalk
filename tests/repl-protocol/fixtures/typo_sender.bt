@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2206: E2E fixture for `SystemNavigation unimplementedSelectors`.
+//
+// `describe` contains a deliberate typo: it sends `printOnStream:`, a selector
+// that is defined nowhere in the workspace. The typo-finder must surface
+// `printOnStream:` with a site pointing at this class / method / line.
+
+Object subclass: TypoSender
+
+  // The deliberate typo send (line 14). `printOnStream:` is implemented by no
+  // class anywhere.
+  describe: x => self printOnStream: x

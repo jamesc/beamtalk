@@ -1327,6 +1327,56 @@ fn handle_find_senders_in_source(request: &Map) -> Term {
     ]))
 }
 
+/// Handle a `find_all_sends_in_source` request (BT-2206).
+///
+/// Backs `SystemNavigation unimplementedSelectors` — parses the source of a
+/// single compiled method and reports EVERY message send (selector name,
+/// 1-based line number relative to the input, and receiver kind), in a single
+/// pass. The typo-finder computes `allSentSelectors − allDefinedSelectors`
+/// from these results without re-parsing each method per candidate selector.
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+///
+/// Response: `#{status => ok, sends => [#{selector => <binary>, line => <int>,
+/// recv => self|super|erlang_ffi|other}, ...]}`. Returns an empty list when the
+/// source has no sends or cannot be parsed.
+fn handle_find_all_sends_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+
+    let sends = beamtalk_core::queries::all_sends_query::find_all_sends_in_source(&source);
+    let send_terms: Vec<Term> = sends
+        .iter()
+        .map(|hit| {
+            let recv = match hit.receiver {
+                beamtalk_core::queries::all_sends_query::ReceiverKind::SelfReceiver => atom("self"),
+                beamtalk_core::queries::all_sends_query::ReceiverKind::SuperReceiver => {
+                    atom("super")
+                }
+                beamtalk_core::queries::all_sends_query::ReceiverKind::ErlangFfi => {
+                    atom("erlang_ffi")
+                }
+                beamtalk_core::queries::all_sends_query::ReceiverKind::Other => atom("other"),
+            };
+            Term::from(Map::from([
+                (atom("selector"), binary(&hit.selector)),
+                (
+                    atom("line"),
+                    int_term(i32::try_from(hit.line).unwrap_or(i32::MAX)),
+                ),
+                (atom("recv"), recv),
+            ]))
+        })
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("sends"), Term::from(List::from(send_terms))),
+    ]))
+}
+
 /// Handle a `find_references_to_in_source` request (BT-2203).
 ///
 /// Backs `SystemNavigation referencesTo:` — parses the source of a single
@@ -1383,6 +1433,7 @@ fn handle_request(request_term: &Term) -> Term {
         "version" => handle_version(),
         "resolve_completion_type" => handle_resolve_completion_type(map),
         "find_senders_in_source" => handle_find_senders_in_source(map),
+        "find_all_sends_in_source" => handle_find_all_sends_in_source(map),
         "find_references_to_in_source" => handle_find_references_to_in_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }

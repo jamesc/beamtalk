@@ -631,3 +631,86 @@ SystemNavigation default selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
 // Non-String argument is rejected with a typed error.
 [SystemNavigation default selectorsMatching: #notAString] on: Error do: [:e | #ok]
 // => ok
+
+// ===========================================================================
+// SYSTEMNAVIGATION UNIMPLEMENTEDSELECTORS — typo-finder lint (BT-2206)
+// ===========================================================================
+
+// Load fixtures: a deliberate typo, a DNU dispatcher, and a perform: caller.
+:load tests/repl-protocol/fixtures/typo_sender.bt
+// => _
+
+:load tests/repl-protocol/fixtures/dnu_dispatcher.bt
+// => _
+
+:load tests/repl-protocol/fixtures/perform_sender.bt
+// => _
+
+// unimplementedSelectors returns a List of records (selector + sites).
+unimpl := SystemNavigation default unimplementedSelectors
+// => _
+
+// The deliberate typo `printOnStream:` (sent in TypoSender >> describe:, defined
+// nowhere) shows up. Collect the flagged selectors and check membership rather
+// than equality against the whole list (which carries any test-session noise).
+unimplSelectors := unimpl collect: [:r | r at: #selector]
+// => _
+
+unimplSelectors includes: #printOnStream:
+// => true
+
+// Locate the printOnStream: record and verify its shape: #selector + #sites.
+typoRecord := unimpl detect: [:r | (r at: #selector) == #printOnStream:]
+// => _
+
+typoRecord includesKey: #selector
+// => true
+
+typoRecord includesKey: #sites
+// => true
+
+// The site list is non-empty and each site has #class / #selector / #line.
+typoSites := typoRecord at: #sites
+// => _
+
+typoSites isEmpty
+// => false
+
+typoSite := typoSites first
+// => _
+
+typoSite includesKey: #class
+// => true
+
+typoSite includesKey: #selector
+// => true
+
+typoSite includesKey: #line
+// => true
+
+// The site points at the right class and method — collect-then-includes to
+// avoid in-block equality against a class reference.
+(typoSites collect: [:s | s at: #class]) includes: TypoSender
+// => true
+
+(typoSites collect: [:s | s at: #selector]) includes: #describe:
+// => true
+
+// Line numbers are 1-based positive integers (relative to the method source).
+(typoSites collect: [:s | s at: #line]) allSatisfy: [:n | n > 0]
+// => true
+
+// A class that defines `doesNotUnderstand:args:` and self-sends an undefined
+// selector does NOT pollute results — the coarse DNU heuristic suppresses
+// self/super sends in such a class.
+unimplSelectors includes: #dnuOnlyHandledSelectorXyzzy
+// => false
+
+// `self perform: #performOnlyXyzzy` does NOT get `performOnlyXyzzy` flagged —
+// the dynamic selector is a Symbol literal, never an AST send.
+unimplSelectors includes: #performOnlyXyzzy
+// => false
+
+// And `perform:` itself (defined on Object) is never flagged.
+unimplSelectors includes: #perform:
+// => false
