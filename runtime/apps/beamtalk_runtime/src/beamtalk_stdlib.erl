@@ -292,7 +292,7 @@ dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
     %% the class process crashed — attempt auto-restart.
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            case beamtalk_class_module_table:lookup(ClassName) of
+            case beamtalk_class_metadata:lookup_module(ClassName) of
                 {ok, _Module} ->
                     case beamtalk_class_registry:restart_class(ClassName) of
                         {ok, NewPid} ->

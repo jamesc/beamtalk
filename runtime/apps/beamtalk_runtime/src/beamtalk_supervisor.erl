@@ -690,7 +690,7 @@ call_inherited_class_method_direct(
     error({supervisor_init_method_not_found, FunName});
 call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth) ->
     Arity = 2 + length(ExtraArgs),
-    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
         not_found ->
             error({supervisor_init_method_not_found, FunName});
         {ok, SuperclassName} ->
@@ -698,9 +698,9 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Ext
             %% If the ancestor is itself a Supervisor subclass currently being initialised,
             %% its class gen_server is blocked inside startLink/1 waiting for OTP
             %% supervisor:start_link to return.  A gen_server:call to it would deadlock.
-            %% beamtalk_class_module_table stores module names written during class init
+            %% beamtalk_class_metadata stores module names written during class init
             %% and is safe to read from any process without coordination.
-            case beamtalk_class_module_table:lookup(SuperclassName) of
+            case beamtalk_class_metadata:lookup_module(SuperclassName) of
                 not_found ->
                     %% Class not yet registered or module not yet recorded — skip upward.
                     call_inherited_class_method_direct(

@@ -1,8 +1,7 @@
 # Class-Keyed ETS Table Topology — Consolidation Investigation
 
 **Issue:** [BT-2222](https://linear.app/beamtalk/issue/BT-2222)
-**Status:** Decided — do not consolidate the cold pair or `pids`; hot trio tracked as [BT-2227](https://linear.app/beamtalk/issue/BT-2227)
-**Follow-up:** [BT-2227](https://linear.app/beamtalk/issue/BT-2227)
+**Status:** Implemented — cold pair + `pids` left as-is; the hot trio was merged into one `beamtalk_class_metadata` table in this change.
 
 ## Question
 
@@ -73,21 +72,36 @@ Reject the six-into-one consolidation.
   shows the merge is all cost and no benefit.
 - **`module` + `methods` + `hierarchy`** (the hot trio) — the only genuinely
   cohesive class-lifetime state: same key, same `read_concurrency` profile, same
-  writer, same three lifecycle points (`init` `beamtalk_object_class.erl:415-420`,
-  `update_class` `:1077-1083`, `terminate` `:792-794`), and it already duplicates
-  the `Module` field. Worth a follow-up (BT-2227) to merge into one `set` keyed by
-  `ClassName`, gated on a hot-path perf sanity check (the hierarchy walk in
-  `inherits_from/2` runs per exception match).
+  writer, same three lifecycle points (`init`, `update_class`, `terminate`), and
+  it already duplicated the `Module` field. **Merged** into one `set` keyed by
+  `ClassName`.
 
-Net: **leave the cold pair and `pids` as-is**; **partial consolidation of the hot
-trio in a follow-up**. This inverts the issue's premise — the cold pair proposed
-as the safe first step is the *worst* merge candidate, while the hot trio is the
-only one worth touching.
+Net: **left the cold pair and `pids` as-is**; **merged the hot trio**. This
+inverts the issue's premise — the cold pair proposed as the safe first step is the
+*worst* merge candidate, while the hot trio is the only one worth touching.
+
+## Implementation
+
+- New module `beamtalk_class_metadata` owns one `set` ETS table keyed by
+  `ClassName`, with rows `#class_metadata{name, module, selectors, superclass}`
+  and `{read_concurrency, true}` + the BT-1888 heir. `undefined` is the
+  "field unset" sentinel, distinct from `none` (root class) and `[]` (no class
+  methods), so a row carrying one field behaves like the old per-table absence of
+  the others.
+- The three former owner modules (`beamtalk_class_module_table`,
+  `beamtalk_class_methods_table`, `beamtalk_class_hierarchy_table`) were deleted.
+  Readers call `lookup_module/1`, `lookup_methods/1`, `lookup_superclass/1`,
+  `match_subclasses/1`, `foldl/2`, `all_builtins/0`.
+- `beamtalk_object_class` `init`/`update_class` now do a single full-row
+  `insert/4` (atomic for readers; was three inserts), and `terminate` a single
+  `delete/1` (was a three-table fan-out). `Module` is stored once.
+- `beamtalk_class_registry:ensure_{hierarchy,module,methods}_table/0` are kept as
+  aliases that all create the one table, so bootstrap and test call sites are
+  unchanged.
 
 ## References
 
-- Source: `beamtalk_class_registry.erl`, `beamtalk_class_module_table.erl`,
-  `beamtalk_class_methods_table.erl`, `beamtalk_class_hierarchy_table.erl`,
-  `beamtalk_object_class.erl`
+- Source: `beamtalk_class_metadata.erl` (new), `beamtalk_class_registry.erl`,
+  `beamtalk_object_class.erl`, `beamtalk_class_dispatch.erl`, `beamtalk_supervisor.erl`
 - BT-2008 — origin of the `module`/`methods` dispatch caches
 - BT-1888 — ETS heir survival pattern; BT-1768 — `pids` crash-recovery index
