@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2207: E2E fixture for `SystemNavigation unusedSelectors`.
+//
+// `UnusedRuntimeCalled` overrides `hash` — a runtime-called selector (invoked by
+// hashed collections, not via a source-visible send). Crucially, `hash` is NOT
+// sent anywhere in stdlib source, so the sent-set does NOT cover it: the ONLY
+// thing keeping this override out of the unused report is the
+// `runtimeCalledSelectors` exclusion. The body is real Beamtalk (not
+// `@primitive` / `@intrinsic`), so the primitive heuristic does not cover it
+// either — making this a genuine test of the runtime-called-override exclusion
+// (unlike, say, `printString`, which stdlib also sends directly and which the
+// sent-set would exclude regardless).
+
+Object subclass: UnusedRuntimeCalled
+
+  // Runtime-called override with a real (non-primitive) body: reached through
+  // hashed-collection machinery, never a source-visible Beamtalk send.
+  hash -> Integer => 42

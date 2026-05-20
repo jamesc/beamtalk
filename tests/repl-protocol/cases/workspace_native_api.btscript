@@ -719,12 +719,12 @@ unimplSelectors includes: #perform:
 // SYSTEMNAVIGATION UNUSEDSELECTORS — dead-method candidates (BT-2207)
 // ===========================================================================
 
-// Load fixtures: a class with a used + an unused method, a printString override,
-// a TestCase subclass, and a perform:-only caller.
+// Load fixtures: a class with a used + an unused method, a runtime-called `hash`
+// override, a TestCase subclass, and a perform:-only caller.
 :load tests/repl-protocol/fixtures/unused_demo.bt
 // => _
 
-:load tests/repl-protocol/fixtures/unused_printer.bt
+:load tests/repl-protocol/fixtures/unused_runtime_called.bt
 // => _
 
 :load tests/repl-protocol/fixtures/unused_testcase.bt
@@ -770,23 +770,34 @@ unusedRecord includesKey: #selector
   collect: [:r | r at: #class]) includes: UnusedDemo
 // => true
 
-// A `printString` override is NOT flagged even though nothing visibly sends it —
-// runtime-called-override exclusion (it is in runtimeCalledSelectors).
-unusedSelectors includes: #printString
+// A `hash` override is NOT flagged even though nothing visibly sends it —
+// runtime-called-override exclusion (it is in runtimeCalledSelectors). `hash` is
+// chosen deliberately: it is sent NOWHERE in stdlib source, so the sent-set does
+// not cover it, and the fixture's body is real Beamtalk, so the primitive
+// heuristic does not cover it — the runtimeCalledSelectors exclusion is the only
+// thing keeping it out, so this genuinely exercises that exclusion.
+unusedSelectors includes: #hash
+// => false
+
+// The override's body is real (non-primitive) Beamtalk, confirming the exclusion
+// above is doing the work rather than the primitive heuristic.
+SystemNavigation default isPrimitiveMethod: #hash in: UnusedRuntimeCalled
 // => false
 
 // A TestCase subclass's `testSomething` / `setUp` / `tearDown` are NOT flagged —
-// the runner invokes them reflectively (TestCase test-runner exclusion).
-unusedSelectors includes: #testSomething
+// the runner invokes them reflectively (TestCase test-runner exclusion). Scope
+// each check to the fixture class so an unrelated future class defining one of
+// these names cannot perturb the assertion.
+((unused select: [:r | (r at: #selector) == #testSomething])
+  collect: [:r | r at: #class]) includes: UnusedTestCaseFixture
 // => false
 
-// `setUp` and `tearDown` on a TestCase subclass are excluded too — the runner
-// invokes them reflectively. They are defined on TestCase subclasses only, so
-// global non-membership is a sound check of the test-runner exclusion.
-unusedSelectors includes: #setUp
+((unused select: [:r | (r at: #selector) == #setUp])
+  collect: [:r | r at: #class]) includes: UnusedTestCaseFixture
 // => false
 
-unusedSelectors includes: #tearDown
+((unused select: [:r | (r at: #selector) == #tearDown])
+  collect: [:r | r at: #class]) includes: UnusedTestCaseFixture
 // => false
 
 // A `@primitive` / `@intrinsic`-bodied method is NOT flagged. `fieldAt:put:`

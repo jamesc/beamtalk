@@ -1029,7 +1029,9 @@ sealed typed Object subclass: SystemNavigation
   /// the surrounding `inject:into:` body a single expression.
   ///
   /// Guards the `>>` send with `respondsTo:` so a scope for which `>>` is not yet
-  /// supported is skipped rather than aborting the whole walk.
+  /// supported is skipped rather than aborting the whole walk, and guards a `nil`
+  /// `method source` (a sourceless method, e.g. a primitive) so
+  /// `addSentSelectorsIn:` always receives a String.
   collectSentSelectorsIn: aScope :: Behaviour into: result :: Set(Symbol) -> Set(Symbol) =>
     aScope methods
       inject: result
@@ -1037,9 +1039,14 @@ sealed typed Object subclass: SystemNavigation
         method := (aScope respondsTo: #'>>') ifTrue: [
           aScope >> methodSel
         ] ifFalse: [nil]
-        method isNil ifTrue: [
-          acc
-        ] ifFalse: [self addSentSelectorsIn: method source into: acc]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            src := method source
+            src isNil ifTrue: [
+              acc
+            ] ifFalse: [self addSentSelectorsIn: src into: acc]
+          ]
       ]
 
   /// Add each non-FFI sent selector found in `methodSource` to the Set `result`.
