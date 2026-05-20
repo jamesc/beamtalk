@@ -892,4 +892,114 @@ Actor subclass: Foo
             "ensure: catch should re-raise after cleanup. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_on_do_zero_arg_handler_no_exception_binding() {
+        // Handler block takes no argument: [0] instead of [:e | 0].
+        // make_handler_apply is called with takes_arg=false, generating
+        // `apply HandlerFun ()` rather than `apply HandlerFun (ExObj)`.
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [0]\n";
+        let code = codegen(src);
+        assert!(
+            code.split("apply _HandlerFun").skip(1).any(|suffix| {
+                suffix
+                    .trim_start_matches(|ch: char| ch.is_ascii_digit())
+                    .starts_with(" ()")
+            }),
+            "on:do: with 0-arg handler should apply handler with empty args. Got:\n{code}"
+        );
+        assert!(
+            !code.contains(" (_ExObj"),
+            "on:do: with 0-arg handler must not pass exception object to handler apply. Got:\n{code}"
+        );
+        assert!(
+            code.contains("try apply"),
+            "on:do: with 0-arg handler should generate try/catch via apply. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'$bt_nlr'"),
+            "on:do: with 0-arg handler should detect NLR throws. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "on:do: with 0-arg handler should re-raise non-matching exceptions. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_on_do_with_state_mutation_in_handler_uses_threading() {
+        // Handler block mutates actor field — triggers generate_on_do_with_mutations,
+        // which inlines block bodies with StateAcc threading instead of wrapping as
+        // closures. Also exercises on_do_catch_preamble and
+        // generate_exception_body_with_threading.
+        let src = "\
+Actor subclass: Srv
+  state: count = 0
+
+  run =>
+    [42] on: Error do: [:e | self.count := self.count + 1]
+";
+        let code = codegen(src);
+        assert!(
+            code.contains("StateAcc"),
+            "on:do: with handler state mutation must use StateAcc threading. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'beamtalk_exception_handler':'ensure_wrapped'"),
+            "on:do: with mutation must still wrap exceptions. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'$bt_nlr'"),
+            "on:do: with mutation must still detect NLR throws. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "on:do: with mutation must re-raise non-matching exceptions. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_ensure_with_state_mutation_in_cleanup_uses_threading() {
+        // Cleanup block mutates actor field — triggers generate_ensure_with_mutations,
+        // which inlines both try body and cleanup with StateAcc threading.
+        let src = "\
+Actor subclass: Srv
+  state: count = 0
+
+  run =>
+    [42] ensure: [self.count := self.count + 1]
+";
+        let code = codegen(src);
+        assert!(
+            code.contains("StateAcc"),
+            "ensure: with cleanup state mutation must use StateAcc threading. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "ensure: with mutation must re-raise after cleanup on error. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_ensure_with_state_mutation_in_try_body_uses_threading() {
+        // Try body (receiver block) mutates actor field — also triggers
+        // generate_ensure_with_mutations. Exercises the try-body threading branch
+        // (generate_exception_body_with_threading called for receiver_block).
+        let src = "\
+Actor subclass: Srv
+  state: count = 0
+
+  run =>
+    [self.count := self.count + 1] ensure: [nil]
+";
+        let code = codegen(src);
+        assert!(
+            code.contains("StateAcc"),
+            "ensure: with try-body state mutation must use StateAcc threading. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "ensure: with mutation must re-raise after cleanup on error. Got:\n{code}"
+        );
+    }
 }
