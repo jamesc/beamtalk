@@ -36,7 +36,10 @@ absence of the others.
   class gen_server via `beamtalk_object_class`.
 * `{read_concurrency, true}` — the hierarchy/module/methods reads are on hot
   dispatch and supervisor-init paths.
-* `{heir, beamtalk_runtime_sup, undefined}` (BT-1888) — survives owner crash.
+* Heir (BT-1888): created at app start by `beamtalk_runtime_app:start/2` (the
+  long-lived app-master process owns it), then `start/2` re-runs `ensure_*` once
+  the supervisor is alive so `beamtalk_runtime_sup` is set as `{heir, ...}`. The
+  table therefore survives both a class-process crash and an app-master swap.
 
 ## Concurrency
 
@@ -113,12 +116,14 @@ new() ->
 %%====================================================================
 
 -doc """
-Insert or overwrite the full metadata row for a class.
+Insert or overwrite the **entire** metadata row for a class.
 
-`ets:set` semantics: overwrites any existing row. The class gen_server always
-supplies all three fields together (`init`/`update_class`), so a single
-full-row insert is atomic for readers. Pass `undefined` for a field that should
-remain unset (used by tests that exercise one field in isolation).
+This is a full-row write, not a per-field merge: every call replaces all of
+`module`, `selectors`, and `superclass`. The class gen_server always supplies
+all three together (`init`/`update_class`), so the write is atomic for readers.
+Do NOT call this to update a single field — the others would be wiped. Pass
+`undefined` only to leave a field genuinely unset (used by tests that exercise
+one field in isolation).
 """.
 -spec insert(
     class_name(), module() | undefined, [selector()] | undefined, superclass() | undefined
@@ -206,10 +211,20 @@ match_subclasses(Name) ->
             [];
         _ ->
             try
-                %% Raw tuple match pattern, not record syntax: `#class_metadata{_ = '_'}`
-                %% would assign the atom '_' to typed fields and trip dialyzer. Shape is
-                %% {Tag, name, module, selectors, superclass} — bind name, match superclass.
-                Pattern = {class_metadata, '$1', '_', '_', Name},
+                %% Build the match pattern from record field indices rather than a
+                %% literal tuple, so it stays correct if the record's fields are
+                %% reordered or extended. (Record syntax `#class_metadata{_ = '_'}`
+                %% can't be used here — it assigns the atom '_' to typed fields and
+                %% trips dialyzer.) Bind the name column, match the superclass column.
+                Pattern = erlang:make_tuple(
+                    record_info(size, class_metadata),
+                    '_',
+                    [
+                        {1, class_metadata},
+                        {#class_metadata.name, '$1'},
+                        {#class_metadata.superclass, Name}
+                    ]
+                ),
                 Matches = ets:match(?TABLE, Pattern),
                 [N || [N] <- Matches]
             catch

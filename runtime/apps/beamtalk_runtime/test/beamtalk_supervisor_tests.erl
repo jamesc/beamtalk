@@ -683,7 +683,7 @@ via ETS — without any gen_server being registered for those classes.
 In the old code, call_inherited_class_method_direct called
 beamtalk_object_class:module_name/1 (gen_server:call).  If the ancestor
 class gen_server is blocked inside startLink/1, that call deadlocks.
-The new code reads from beamtalk_class_module_table (ETS) instead.
+The new code reads from beamtalk_class_metadata (ETS) instead.
 
 We simulate the deadlock scenario by populating ETS for a fake two-level
 hierarchy where NO gen_server processes are registered for either class.
