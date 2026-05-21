@@ -364,13 +364,21 @@ result_to_json_skip_has_no_error_key_test() ->
 
 run_all_negative_integer_test() ->
     ?assertError(
-        #{error := #beamtalk_error{kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'}},
+        #{
+            error := #beamtalk_error{
+                kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'
+            }
+        },
         beamtalk_test_runner:run_all(-1)
     ).
 
 run_all_atom_argument_test() ->
     ?assertError(
-        #{error := #beamtalk_error{kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'}},
+        #{
+            error := #beamtalk_error{
+                kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'
+            }
+        },
         beamtalk_test_runner:run_all(sequential)
     ).
 
