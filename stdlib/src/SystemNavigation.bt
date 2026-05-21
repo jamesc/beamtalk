@@ -242,16 +242,16 @@ sealed typed Object subclass: SystemNavigation
         self error: "SystemNavigation referencesTo: requires a class/metaclass object."
       ]
     // Resolve the class name once, up front, rather than on every method.
-    // Defensive runtime guard: a Behaviour entry that responds to
-    // `subclasses` but not `name` (no known case today, but possible for
-    // registry-shaped entries) is rejected with the same error path rather
+    // Defensive runtime guard: a registry-shaped value that responds to
+    // `subclasses` but not `name` (no known case today — every real
+    // `Behaviour` answers `name`) is rejected with the same error path rather
     // than crashing on the downstream `aClass name` send.
     (aClass respondsTo: #name)
       ifFalse: [
         self error: "SystemNavigation referencesTo: requires a class/metaclass object."
       ]
-    // Convert to String so Class (returns Symbol) and Metaclass (returns
-    // String) both flow through the same downstream FFI shape.
+    // `name` is a Symbol for both Class and Metaclass; convert to String for
+    // the downstream FFI shape.
     targetName := aClass name asString
     classScan := self allClasses
       inject: List new
@@ -475,8 +475,9 @@ sealed typed Object subclass: SystemNavigation
   /// above.
   ///
   /// The `respondsTo: #name` guard (mirroring `collectSendersFor:in:into:`)
-  /// keeps a registry-shaped Behaviour entry that lacks a name from aborting
-  /// the walk — it is silently skipped for extension lookups instead.
+  /// keeps a registry-shaped value that lacks a name from aborting the walk
+  /// — it is silently skipped for extension lookups instead. (Every real
+  /// `Behaviour` answers `name`; the guard is purely defensive.)
   selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
     instance := aClass methods
     classSide := aClass class methods

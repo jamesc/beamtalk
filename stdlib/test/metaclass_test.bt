@@ -36,15 +36,15 @@ TestCase subclass: MetaclassTest
     self assert: (42 class) isMetaclass equals: false
     self assert: Integer isMetaclass equals: false
 
-  // BT-803: name — e.g. 42 class class name == 'Integer class'
+  // BT-803/BT-2232: name — e.g. 42 class class name == #'Integer class' (Symbol)
   testName =>
-    self assert: (42 class class) name equals: "Integer class"
-    self assert: (3.14 class class) name equals: "Float class"
-    self assert: ("hello" class class) name equals: "String class"
-    self assert: (true class class) name equals: "True class"
-    self assert: (false class class) name equals: "False class"
-    self assert: (nil class class) name equals: "UndefinedObject class"
-    self assert: (#sym class class) name equals: "Symbol class"
+    self assert: (42 class class) name equals: #'Integer class'
+    self assert: (3.14 class class) name equals: #'Float class'
+    self assert: ("hello" class class) name equals: #'String class'
+    self assert: (true class class) name equals: #'True class'
+    self assert: (false class class) name equals: #'False class'
+    self assert: (nil class class) name equals: #'UndefinedObject class'
+    self assert: (#sym class class) name equals: #'Symbol class'
 
   // BT-803: thisClass — e.g. 42 class class thisClass == Integer
   testThisClass =>

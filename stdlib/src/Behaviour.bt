@@ -30,9 +30,10 @@ abstract Object subclass: Behaviour
   ///
   /// Declared on `Behaviour` so registry walks that hold the abstract
   /// `Behaviour` type (e.g. `SystemNavigation allClasses`, `superclassChain`)
-  /// can read the name without a dnu suppression. `Class` and `Metaclass`
-  /// inherit it; the `className` primitive resolves the name for any class
-  /// object.
+  /// can read the name without a dnu suppression. `Class` inherits this
+  /// directly; `Metaclass` overrides it to append ` class` (e.g.
+  /// `#'Integer class'`). The `className` primitive resolves the name for
+  /// any class object.
   ///
   /// ## Examples
   /// ```beamtalk

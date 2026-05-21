@@ -594,7 +594,7 @@ All follow the thin data-access pattern from ADR 0032: raw data reads only, no l
 self assert: (42 class class) equals: Metaclass.
 self assert: (42 class class isMeta) equals: true.
 self assert: (42 class class isClass) equals: false.
-self assert: (42 class class name) equals: 'Integer class'.
+self assert: (42 class class name) equals: #'Integer class'.
 self assert: (42 class class thisClass) equals: Integer.
 self assert: (Metaclass class class == Metaclass class) equals: true.
 ```
