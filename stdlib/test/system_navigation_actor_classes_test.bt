@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2209: BUnit coverage for `SystemNavigation actorClasses` — every class
+// whose `superclassChain` includes `Actor` (the actor-model participants).
+//
+// The user-defined actor fixture lives in fixtures/sysnav_fixture_actor.bt
+// (actor classes are declared in their own file). Behaviour here exercises the
+// live class registry, which BUnit loads with the full stdlib + test fixtures.
+
+TestCase subclass: SystemNavigationActorClassesTest
+
+  // --- selector existence ---
+  testActorClassesSelectorDefined =>
+    self assert: (SystemNavigation includesSelector: #actorClasses)
+    self assert: (Behaviour includesSelector: #superclassChain)
+
+  // Actor itself is included — the abstract root (callers can filter it out).
+  testIncludesActorRoot =>
+    self assert: ((SystemNavigation default actorClasses) includes: Actor)
+
+  // Known stdlib actor subclasses are included (ClassBuilder is `Actor
+  // subclass: ClassBuilder`).
+  testIncludesStdlibActorSubclass =>
+    self assert: ((SystemNavigation default actorClasses) includes: ClassBuilder)
+
+  // A user-defined actor (the fixture) is included.
+  testIncludesUserActorFixture =>
+    self assert: ((SystemNavigation default actorClasses) includes: SysnavFixtureActor)
+
+  // Plain Object descendants are excluded.
+  testExcludesObjectDescendants =>
+    actors := SystemNavigation default actorClasses
+    self deny: (actors includes: Object)
+    self deny: (actors includes: String)
+
+  // Result is sorted alphabetically by class name (stable snapshot order).
+  // `name` lives on `Behaviour` (BT-2232), so it reads directly off each
+  // registry entry without a dnu suppression.
+  testAlphabeticalOrder =>
+    names := (SystemNavigation default actorClasses) collect: [:c | c name asString]
+    self assert: names equals: names sort

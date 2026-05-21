@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2209: A user-defined actor fixture so `SystemNavigation actorClasses`
+// can be asserted to include a non-stdlib actor (its superclassChain includes
+// Actor). The method name is intentionally unique to avoid colliding with
+// selector-search assertions in sibling SystemNavigation tests.
+
+Actor subclass: SysnavFixtureActor
+  state: value = 0
+
+  sysnavFixtureActorValue => value
