@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2220: Stable fixture for SystemNavigation E2E tests.
+//
+// This fixture provides test-owned classes/selectors so that
+// SystemNavigation assertions do not depend on live stdlib content
+// (which can churn across unrelated refactors).
+//
+// Design choices:
+//   - `asString` is defined here to give implementorsOf: a fixture-controlled hit.
+//   - `btAppendMarker` has a uniquely-named selector so selectorsMatching: can
+//     find it without depending on stdlib selectors containing "append".
+//   - `btIfTrueBodyMarker` contains `ifTrue:` in its source body, giving
+//     methodsMatching: a fixture-controlled hit.
+//   - `btNegatedBodyMarker` contains `self negated` in its source body, giving
+//     methodsMatching: a fixture-controlled hit.
+//   - `referencesTo: SysnavFixture` is controlled: the method below references
+//     this class by name.
+
+Object subclass: SysnavFixture
+
+  // Defines asString locally — gives implementorsOf: #asString a fixture hit.
+  asString => "SysnavFixture"
+
+  // Uniquely-named selector containing "append" — used by selectorsMatching: tests.
+  btAppendMarker => "append marker"
+
+  // Body contains `ifTrue:` — gives methodsMatching: (Regex from: "ifTrue:") a hit.
+  btIfTrueBodyMarker => true ifTrue: ["hit"] ifFalse: ["miss"]
+
+  // Body contains the text `self negated` in the expression — gives
+  // methodsMatching: (Regex from: "self negated") a fixture-controlled hit.
+  // The method is not called in tests; the source-text scan is the only use.
+  // STABLE: do not rename this method or edit its body (BT-2220).
+  btNegatedBodyMarker => self negated
+
+  // References SysnavFixture by name — gives referencesTo: SysnavFixture a hit.
+  btReferencesFixture => SysnavFixture name
