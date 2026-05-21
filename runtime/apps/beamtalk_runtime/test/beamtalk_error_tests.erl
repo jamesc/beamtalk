@@ -297,13 +297,13 @@ raise_produces_exception_class_test() ->
 %%% Test: raise_type_error/3 constructs and raises a type_error
 raise_type_error_raises_wrapped_type_error_test() ->
     try
-        beamtalk_error:raise_type_error('Binary', as_string, expected_binary)
+        beamtalk_error:raise_type_error('Binary', as_string, {expected, binary})
     catch
         error:#{'$beamtalk_class' := 'TypeError', error := Inner} ->
             ?assertEqual(type_error, Inner#beamtalk_error.kind),
             ?assertEqual('Binary', Inner#beamtalk_error.class),
             ?assertEqual(as_string, Inner#beamtalk_error.selector),
-            ?assertEqual(<<"expected_binary">>, Inner#beamtalk_error.hint)
+            ?assertEqual(<<"{expected,binary}">>, Inner#beamtalk_error.hint)
     end.
 
 %%% Tests: format_safe/1
