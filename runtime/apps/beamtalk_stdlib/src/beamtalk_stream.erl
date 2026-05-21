@@ -473,6 +473,7 @@ format_value(V) when is_binary(V) -> <<"'", V/binary, "'">>;
 format_value(V) when is_atom(V) -> atom_to_binary(V, utf8);
 format_value(_) -> <<"...">>.
 
+-doc "Raise a Stream type_error by delegating to beamtalk_error:raise_type_error/3.".
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
     beamtalk_error:raise_type_error('Stream', Selector, Hint).

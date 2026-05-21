@@ -268,8 +268,8 @@ raise(#beamtalk_error{} = Error) ->
     Wrapped = beamtalk_exception_handler:wrap(Error),
     error(Wrapped).
 
--doc "Raise a type_error for a given class, selector, and hint. Shared helper used by stdlib modules.".
--spec raise_type_error(atom(), atom(), binary()) -> no_return().
+-doc "Raise a type_error for a given class, selector, and hint term. Shared helper used by stdlib modules.".
+-spec raise_type_error(atom(), atom(), term()) -> no_return().
 raise_type_error(Class, Selector, Hint) ->
     raise(new(type_error, Class, Selector, Hint)).
 

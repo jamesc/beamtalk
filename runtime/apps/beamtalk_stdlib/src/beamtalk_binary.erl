@@ -313,6 +313,7 @@ deserialize_with_used(_) ->
 %%% Internal Helpers
 %%% ============================================================================
 
+-doc "Raise a Binary type_error by delegating to beamtalk_error:raise_type_error/3.".
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
     beamtalk_error:raise_type_error('Binary', Selector, Hint).
