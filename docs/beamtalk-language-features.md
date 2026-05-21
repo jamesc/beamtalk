@@ -2550,9 +2550,10 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `unimplementedSelectors` | `List(Dictionary)` | Selectors sent but defined nowhere — a typo-finder lint |
 | `unusedSelectors` | `List(Dictionary)` | Selectors defined but sent nowhere — dead-method candidates |
 
-All queries scan instance-side, class-side, and extension method bodies.
-Each result's `#class` field is the class object for an instance-side hit and
-the metaclass object (`Counter class`) for a class-side hit.
+Body-based queries (`sendersOf:`, `referencesTo:`, `methodsMatching:`, and the
+selector-lint queries) scan instance-side, class-side, and extension method
+bodies. Each result's `#class` field is the class object for an instance-side
+hit and the metaclass object (`Counter class`) for a class-side hit.
 
 ```beamtalk
 nav := SystemNavigation default
