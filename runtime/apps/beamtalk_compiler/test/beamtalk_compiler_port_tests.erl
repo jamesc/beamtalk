@@ -10,7 +10,13 @@
 compiler_binary() ->
     %% Look in target/debug from project root
     ProjectRoot = find_project_root(filename:absname("")),
-    Path = filename:join([ProjectRoot, "target", "debug", "beamtalk-compiler-port"]),
+    %% On Windows, executables have a .exe extension.
+    ExeName =
+        case os:type() of
+            {win32, _} -> "beamtalk-compiler-port.exe";
+            _ -> "beamtalk-compiler-port"
+        end,
+    Path = filename:join([ProjectRoot, "target", "debug", ExeName]),
     case filelib:is_regular(Path) of
         true -> Path;
         false -> error({compiler_not_found, Path})
