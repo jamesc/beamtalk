@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2220: Companion fixture class for SystemNavigation E2E tests.
+//
+// Beamtalk requires one class per .bt file, so this second implementor of
+// #asString lives apart from SysnavFixture (sysnavigation_fixture.bt). Having
+// two fixture-controlled implementors lets implementorsOf: #asString assert
+// against more than one class without depending on live stdlib content.
+
+Object subclass: SysnavFixtureB
+
+  // A second implementor of asString — kept separate to avoid coupling to SysnavFixture.
+  asString => "SysnavFixtureB"

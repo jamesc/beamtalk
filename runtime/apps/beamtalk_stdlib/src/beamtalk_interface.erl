@@ -33,6 +33,7 @@ dictionary or ETS state is required.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([dispatch/3]).
 %% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
@@ -48,6 +49,11 @@ dictionary or ETS state is required.
     allSendsIn/1,
     findReferencesToIn/2
 ]).
+
+-ifdef(TEST).
+%% Expose internal helper for EUnit testing (BT-2219).
+-export([log_compiler_diagnostics/2]).
+-endif.
 
 %%% ============================================================================
 %%% dispatch/3 — called from compiled bt@stdlib@beamtalk_interface for @primitives
@@ -211,11 +217,15 @@ findSendersIn(Source, Selector) when
     case beamtalk_compiler:find_senders_in_source(Source, SelectorBin) of
         {ok, Lines} ->
             Lines;
-        {error, _Diagnostics} ->
-            %% Compiler port unavailable — degrade to "no senders found"
-            %% rather than crashing the caller. Iteration in `sendersOf:`
-            %% should not be aborted by a transient port failure on one
-            %% method's source.
+        {error, Diagnostics} ->
+            %% Log the diagnostics before returning []. We still return [] because
+            %% the per-method fault-tolerance contract is unchanged: a transient port
+            %% failure on one method's source must not abort the whole `sendersOf:`
+            %% iteration. The log exists for systemic-failure visibility — if the
+            %% compiler port is wedged, every call will emit a warning (or an
+            %% error for port-unavailability) and operators can see the pattern
+            %% in the log rather than getting silently empty results.
+            log_compiler_diagnostics(Diagnostics, 'findSendersIn:selector:'),
             []
     end;
 findSendersIn(_Source, _Selector) ->
@@ -304,11 +314,15 @@ findReferencesToIn(Source, ClassName) when
     case beamtalk_compiler:find_references_to_in_source(Source, ClassNameBin) of
         {ok, Lines} ->
             Lines;
-        {error, _Diagnostics} ->
-            %% Compiler port unavailable — degrade to "no references found"
-            %% rather than crashing the caller. Iteration in `referencesTo:'
-            %% should not be aborted by a transient port failure on one
-            %% method's source.
+        {error, Diagnostics} ->
+            %% Log the diagnostics before returning []. We still return [] because
+            %% the per-method fault-tolerance contract is unchanged: a transient port
+            %% failure on one method's source must not abort the whole `referencesTo:'
+            %% iteration. The log exists for systemic-failure visibility — if the
+            %% compiler port is wedged, every call will emit a warning (or an
+            %% error for port-unavailability) and operators can see the pattern
+            %% in the log rather than getting silently empty results.
+            log_compiler_diagnostics(Diagnostics, 'findReferencesToIn:class:'),
             []
     end;
 findReferencesToIn(_Source, _ClassName) ->
@@ -326,6 +340,75 @@ findReferencesToIn(_Source, _ClassName) ->
 %%% ============================================================================
 %%% Internal method implementations
 %%% ============================================================================
+
+-doc """
+Log compiler-port diagnostics at the appropriate OTP logger level.
+
+Called when `beamtalk_compiler' returns `{error, Diagnostics}' from a source-
+analysis call (find_senders_in_source, find_references_to_in_source, etc.).
+
+Uses `?LOG_ERROR' if the diagnostics indicate port unavailability (messages
+containing "not available" or "timed out"), `?LOG_WARNING' otherwise (e.g. a
+parse failure on a specific method's source).
+
+Includes `domain => [beamtalk, stdlib]' metadata on every log call per project
+convention (CLAUDE.md).
+""".
+-spec log_compiler_diagnostics([map()], atom()) -> ok.
+log_compiler_diagnostics(Diagnostics, Selector) ->
+    IsPortUnavailable = lists:any(
+        fun(D) ->
+            Msg = maps:get(message, D, <<>>),
+            %% Lowercase before matching so capitalised variants (e.g. "Timed out")
+            %% are still classified as port-unavailability (error, not warning).
+            MsgLc =
+                case is_binary(Msg) of
+                    true -> string:lowercase(Msg);
+                    false -> <<>>
+                end,
+            binary:match(MsgLc, <<"not available">>) =/= nomatch orelse
+                binary:match(MsgLc, <<"timed out">>) =/= nomatch
+        end,
+        Diagnostics
+    ),
+    %% Include a short summary in the message body itself: in text log mode the
+    %% handler template renders only `msg`, so the full `diagnostics` payload in
+    %% metadata is invisible there (it only shows up in structured/JSON logs).
+    Summary = summarise_diagnostics(Diagnostics),
+    Meta = #{selector => Selector, diagnostics => Diagnostics, domain => [beamtalk, stdlib]},
+    case IsPortUnavailable of
+        true ->
+            ?LOG_ERROR(
+                "Compiler port unavailable in ~p: ~ts — returning [] (per-method fault-tolerance preserved)",
+                [Selector, Summary],
+                Meta
+            );
+        false ->
+            ?LOG_WARNING(
+                "Compiler port returned diagnostics in ~p: ~ts — returning [] (per-method fault-tolerance preserved)",
+                [Selector, Summary],
+                Meta
+            )
+    end.
+
+-doc "Build a short human-readable summary of compiler diagnostics for a log message body.".
+-spec summarise_diagnostics([map()]) -> binary().
+summarise_diagnostics([]) ->
+    <<"(no diagnostics)">>;
+summarise_diagnostics([First | Rest]) ->
+    MsgBin = diagnostic_message(First),
+    case Rest of
+        [] -> MsgBin;
+        _ -> iolist_to_binary([MsgBin, " (+", integer_to_binary(length(Rest)), " more)"])
+    end.
+
+-doc "Extract a diagnostic's `message` as a binary, falling back to a printed term.".
+-spec diagnostic_message(map()) -> binary().
+diagnostic_message(D) ->
+    case maps:get(message, D, <<"(no message)">>) of
+        Msg when is_binary(Msg) -> Msg;
+        Other -> iolist_to_binary(io_lib:format("~p", [Other]))
+    end.
 
 -doc "Format Erlang module help via beamtalk_erlang_help (dynamic call).".
 -spec handle_erlang_help(binary()) -> binary().

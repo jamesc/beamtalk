@@ -170,21 +170,30 @@ wsGlobals includesKey: #Counter
 // (BT-2214; originally added on Beamtalk in BT-2189, moved here in BT-2214)
 // ===========================================================================
 
-// implementorsOf: returns a non-empty list for a widely-implemented selector
+// Load the stable fixture classes for SystemNavigation tests (BT-2220).
+// These give us controlled, test-owned classes/selectors so assertions do
+// not depend on live stdlib content that may churn across unrelated edits.
+:load tests/repl-protocol/fixtures/sysnavigation_fixture.bt
+// => _
+
+:load tests/repl-protocol/fixtures/sysnavigation_fixture_b.bt
+// => _
+
+// implementorsOf: returns a non-empty list for a selector with known implementors.
+// SysnavFixture and SysnavFixtureB both define #asString locally (see fixture),
+// so the result must include at least these two fixture-controlled classes.
 asStringImpls := SystemNavigation default implementorsOf: #asString
 // => _
 
 asStringImpls isEmpty
 // => false
 
-// Stdlib classes participate — Integer/Float/String all locally define asString
-asStringImpls includes: Integer
+// Fixture-controlled: SysnavFixture locally defines #asString.
+asStringImpls includes: SysnavFixture
 // => true
 
-asStringImpls includes: String
-// => true
-
-asStringImpls includes: Float
+// Fixture-controlled: SysnavFixtureB also locally defines #asString.
+asStringImpls includes: SysnavFixtureB
 // => true
 
 // User-loaded classes show up in results when they implement the selector.
@@ -205,11 +214,14 @@ classImpls includes: Integer
 // => false
 
 // implementorsOf: also finds class-side implementors as metaclass objects.
-// `Bag` defines `class withAll:` — that hit appears as `Bag class`.
-withAllImpls := SystemNavigation default implementorsOf: #withAll:
+// `SystemNavigation class` defines `class default` — that hit appears as
+// `SystemNavigation class` (the metaclass object). This is a stable fixture
+// anchor: `default` is a class-side method on SystemNavigation itself, which
+// is the feature under test, so it cannot disappear without breaking this suite.
+withDefaultImpls := SystemNavigation default implementorsOf: #default
 // => _
 
-withAllImpls includes: Bag class
+withDefaultImpls includes: SystemNavigation class
 // => true
 
 // superclassChain works on metaclass receivers — walks the parallel hierarchy.
@@ -372,36 +384,36 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#'Integer class', #btTwoTw
 // SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
 // ===========================================================================
 
-// referencesTo: returns a non-empty list for a widely-referenced class.
-// Integer is named in many stdlib method sources (return types, generic
-// parameters, examples wrapped in doc-comments are stripped, but the
-// signature mentions remain). In a workspace where stdlib classes are
-// loaded, at least one reference must exist.
-integerRefs := SystemNavigation default referencesTo: Integer
+// referencesTo: returns a non-empty list for a class that the loaded fixture
+// references by name. SysnavFixture >> #btReferencesFixture contains the
+// literal class name `SysnavFixture` in its body, so referencesTo: must find
+// at least one hit. This avoids depending on stdlib mentioning Integer
+// (fragile to stdlib churn — BT-2220).
+fixtureRefs := SystemNavigation default referencesTo: SysnavFixture
 // => _
 
-integerRefs isEmpty
+fixtureRefs isEmpty
 // => false
 
 // Each record is a Dictionary with #class, #selector, #line keys —
 // same shape as sendersOf:.
-intRecord := integerRefs first
+fixtureRecord := fixtureRefs first
 // => _
 
-intRecord includesKey: #class
+fixtureRecord includesKey: #class
 // => true
 
-intRecord includesKey: #selector
+fixtureRecord includesKey: #selector
 // => true
 
-intRecord includesKey: #line
+fixtureRecord includesKey: #line
 // => true
 
 // Line numbers are 1-based positive integers.
-intLineList := integerRefs collect: [:r | r at: #line]
+fixtureLineList := fixtureRefs collect: [:r | r at: #line]
 // => _
 
-intLineList allSatisfy: [:n | n > 0]
+fixtureLineList allSatisfy: [:n | n > 0]
 // => true
 
 // referencesTo: with a class that nothing mentions returns an empty list.
@@ -476,9 +488,10 @@ Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefEx
 // SYSTEMNAVIGATION METHODSMATCHING: — source-text grep (BT-2205)
 // ===========================================================================
 
-// methodsMatching: returns a non-empty list when the pattern hits a stdlib
-// method body. `ifTrue:` is sent from dozens of stdlib methods, so the
-// search must produce hits.
+// methodsMatching: returns a non-empty list when the pattern hits a loaded
+// method body. SysnavFixture >> #btIfTrueBodyMarker sends `ifTrue:` in its
+// body (see fixture), so the search must produce at least one hit. Using a
+// fixture-controlled method avoids depending on stdlib bodies (BT-2220).
 ifTrueMethods := SystemNavigation default methodsMatching: (Regex from: "ifTrue:") unwrap
 // => _
 
@@ -497,16 +510,16 @@ ifTrueMethodRecord includesKey: #class
 ifTrueMethodRecord includesKey: #selector
 // => true
 
-// Integer >> #abs has body `(self < 0) ifTrue: [self negated] ifFalse:
-// [self]`, so a pattern that targets the `self negated` literal must
-// produce an Integer / #abs record.
+// SysnavFixture >> #btNegatedBodyMarker contains `self negated` in its body
+// (see fixture). Confirm the record appears — this is fixture-controlled and
+// stable against stdlib refactoring (BT-2220).
 negatedMatches := SystemNavigation default methodsMatching: (Regex from: "self negated") unwrap
 // => _
 
-(negatedMatches collect: [:r | r at: #class]) includes: Integer
+(negatedMatches collect: [:r | r at: #class]) includes: SysnavFixture
 // => true
 
-(negatedMatches collect: [:r | r at: #selector]) includes: #abs
+(negatedMatches collect: [:r | r at: #selector]) includes: #btNegatedBodyMarker
 // => true
 
 // methodsMatching: with a pattern that nobody's source contains returns an
@@ -561,8 +574,10 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixM
 // SYSTEMNAVIGATION SELECTORSMATCHING: — fuzzy selector search (BT-2204)
 // ===========================================================================
 
-// Substring match across the stdlib — `append` hits selectors like
-// `#appendBinary:contents:` on File. Result is non-empty.
+// Substring match for a fixture-controlled selector. SysnavFixture defines
+// `#btAppendMarker` (see fixture), so a search for "append" must produce at
+// least this hit. Using a fixture-controlled selector avoids depending on
+// stdlib having selectors that contain "append" (BT-2220).
 appendHits := SystemNavigation default selectorsMatching: "append"
 // => _
 
