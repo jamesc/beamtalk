@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2210: BUnit coverage for `SystemNavigation dnuHandlers` — every class that
+// locally overrides Beamtalk's DNU handler `doesNotUnderstand:args:`.
+//
+// Reuses the existing user-defined proxy fixture (fixtures/simple_proxy.bt,
+// `SimpleProxy`), which BUnit loads with the full stdlib + test fixtures, to
+// assert a non-stdlib override is reported.
+
+TestCase subclass: SystemNavigationDnuHandlersTest
+
+  // --- selector existence ---
+  testDnuHandlersSelectorDefined =>
+    self assert: (SystemNavigation includesSelector: #dnuHandlers)
+
+  // ProtoObject is the root definer of `doesNotUnderstand:args:` and is included.
+  testIncludesProtoObjectRoot =>
+    self assert: ((SystemNavigation default dnuHandlers) includes: ProtoObject)
+
+  // A stdlib proxy that overrides the handler (TimeoutProxy forwards all sends).
+  testIncludesStdlibProxy =>
+    self assert: ((SystemNavigation default dnuHandlers) includes: TimeoutProxy)
+
+  // A user-defined proxy fixture (SimpleProxy) is included.
+  testIncludesUserProxyFixture =>
+    self assert: ((SystemNavigation default dnuHandlers) includes: SimpleProxy)
+
+  // Plain classes that only inherit the base handler are excluded —
+  // `includesSelector:` reports local definitions only.
+  testExcludesNonOverriders =>
+    handlers := SystemNavigation default dnuHandlers
+    self deny: (handlers includes: Object)
+    self deny: (handlers includes: Integer)
+
+  // Result is sorted alphabetically by class name (stable snapshot order).
+  testAlphabeticalOrder =>
+    names := (SystemNavigation default dnuHandlers) collect: [:c |
+      c name asString
+    ]
+    self assert: names equals: names sort
