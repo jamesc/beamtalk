@@ -2115,7 +2115,7 @@ mod tests {
     #[test]
     fn test_every_quoted_primitive_resolves_to_a_bif() {
         use crate::ast::Expression;
-        use std::collections::HashMap;
+        use std::collections::{HashMap, HashSet};
 
         let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -2176,12 +2176,16 @@ mod tests {
         };
 
         let mut unmapped: Vec<String> = Vec::new();
+        // Every quoted (class, primitive) pair seen, for the allowlist-rot check.
+        let mut all_quoted: HashSet<(String, String)> = HashSet::new();
         for module in &modules {
             for class in &module.classes {
                 let class_name = class.name.name.as_str();
-                if is_actor_backed(class_name) {
-                    continue;
-                }
+                // Mirror `is_actor_class`: actor classes (by chain) and concrete
+                // supervisor subclasses compile as actors, so their unmapped
+                // quoted primitives route through hand-written dispatch.
+                let is_concrete_supervisor = class.supervisor_kind.is_some() && !class.is_abstract;
+                let actor_backed = is_concrete_supervisor || is_actor_backed(class_name);
                 for method in class.methods.iter().chain(class.class_methods.iter()) {
                     if method.body.len() != 1 {
                         continue;
@@ -2195,7 +2199,8 @@ mod tests {
                     if !is_quoted {
                         continue;
                     }
-                    if is_runtime_dispatched_primitive(class_name, name.as_str()) {
+                    all_quoted.insert((class_name.to_string(), name.to_string()));
+                    if actor_backed || is_runtime_dispatched_primitive(class_name, name.as_str()) {
                         continue;
                     }
                     // Mirror the real codegen path: `current_method_params` holds
@@ -2221,6 +2226,24 @@ mod tests {
              dispatch and raise does_not_understand at runtime (BT-2232/BT-2233). \
              Add a mapping in the relevant primitives/*.rs table:\n  {}",
             unmapped.join("\n  ")
+        );
+
+        // BT-2233: Keep the allowlist honest — a stale entry (for a quoted
+        // primitive that no longer exists in the stdlib) would silently mask a
+        // future unmapped-primitive bug. Every allowlist entry must still
+        // correspond to a real quoted @primitive declaration.
+        let stale: Vec<String> = RUNTIME_DISPATCHED_PRIMITIVES
+            .iter()
+            .filter(|(class, selector)| {
+                !all_quoted.contains(&((*class).to_string(), (*selector).to_string()))
+            })
+            .map(|(class, selector)| format!("{class}:{selector}"))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "RUNTIME_DISPATCHED_PRIMITIVES has stale entries with no matching \
+             quoted @primitive in the stdlib (remove them):\n  {}",
+            stale.join("\n  ")
         );
     }
 }
