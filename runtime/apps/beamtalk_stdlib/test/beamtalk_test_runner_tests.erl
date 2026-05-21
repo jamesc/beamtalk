@@ -392,7 +392,7 @@ ensure_loaded_or_warn_existing_module_test() ->
 
 ensure_loaded_or_warn_nonexistent_module_test() ->
     %% Should return ok even when loading fails — errors are logged, not raised
-    ?assertEqual(ok, beamtalk_test_runner:ensure_loaded_or_warn(beamtalk_nonexistent_module_xyz)).
+    ?assertEqual(ok, beamtalk_test_runner:ensure_loaded_or_warn(nonexistent_module_bt2230)).
 
 %%% ============================================================================
 %%% Helpers
