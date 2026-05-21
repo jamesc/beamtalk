@@ -2533,6 +2533,53 @@ Integer reload
 Hot-swap semantics follow BEAM conventions: live actors running the old code
 continue their current message; the next dispatch uses the new code.
 
+### `SystemNavigation` — Cross-class code queries
+
+`SystemNavigation` provides Smalltalk-style live-image queries over the loaded
+class registry. Reach the singleton via `SystemNavigation default`.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `allClasses` | `List(Behaviour)` | All registered classes (class objects) |
+| `implementorsOf: #sel` | `List(Behaviour)` | Classes that define the given selector |
+| `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
+| `referencesTo: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that references the class name |
+| `methodsMatching: aRegex` | `List(Dictionary)` | `#{#class, #selector}` for every method whose source matches the regex |
+| `selectorsMatching: pattern` | `List(Symbol)` | Selectors matching a case-insensitive substring (e.g., `"print"`) |
+| `selectorsForClass: aClass` | `List(Symbol)` | All selectors defined on a class (instance + class + extension) |
+| `unimplementedSelectors` | `List(Dictionary)` | Selectors sent but defined nowhere — a typo-finder lint |
+| `unusedSelectors` | `List(Dictionary)` | Selectors defined but sent nowhere — dead-method candidates |
+
+Body-based queries (`sendersOf:`, `referencesTo:`, `methodsMatching:`, and the
+selector-lint queries) scan instance-side, class-side, and extension method
+bodies. Each result's `#class` field is the class object for an instance-side
+hit and the metaclass object (`Counter class`) for a class-side hit.
+
+```beamtalk
+nav := SystemNavigation default
+
+nav implementorsOf: #printString
+// => [Object, Integer, String, ...]
+
+nav sendersOf: #increment
+// => [#{#class => CounterTest, #selector => #testIncrement, #line => 12}, ...]
+
+nav referencesTo: Counter
+// => [#{#class => CounterTest, #selector => #setUp, #line => 5}, ...]
+
+nav methodsMatching: (Regex from: "printString") unwrap
+// => [#{#class => Object, #selector => #printString}, ...]
+
+nav selectorsMatching: "print"
+// => [#printString, #printOn:, ...]
+
+nav unimplementedSelectors
+// => []  (empty = no typos in the loaded registry)
+
+nav unusedSelectors
+// => [#{#class => MyLib, #selector => #helperNoOneCalls}, ...]
+```
+
 ### REPL shortcuts (`:` commands) are thin wrappers
 
 The REPL `:` commands are convenience aliases that desugar to the native message sends:
