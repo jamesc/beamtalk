@@ -69,10 +69,7 @@ maybe_emit_deprecation_warning() ->
             )
     end.
 
--doc "Raise a type error for the Logger class.".
+-doc "Raise a Logger type_error by delegating to beamtalk_error:raise_type_error/3.".
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
-    Error0 = beamtalk_error:new(type_error, 'Logger'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Logger', Selector, Hint).

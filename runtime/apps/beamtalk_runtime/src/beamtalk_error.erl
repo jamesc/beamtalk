@@ -28,6 +28,7 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     format_safe/2,
     extract_beamtalk_error/2,
     raise/1,
+    raise_type_error/3,
     generate_message/3,
     format_reason/2
 ]).
@@ -266,6 +267,11 @@ Example:
 raise(#beamtalk_error{} = Error) ->
     Wrapped = beamtalk_exception_handler:wrap(Error),
     error(Wrapped).
+
+-doc "Raise a type_error for a given class, selector, and hint term. Shared helper used by stdlib modules.".
+-spec raise_type_error(atom(), atom(), term()) -> no_return().
+raise_type_error(Class, Selector, Hint) ->
+    raise(new(type_error, Class, Selector, Hint)).
 
 -doc "Generate a human-readable error message from kind, class, and optional selector.".
 -spec generate_message(atom(), atom(), atom() | undefined) -> binary().
