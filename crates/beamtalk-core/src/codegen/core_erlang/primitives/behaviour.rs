@@ -30,6 +30,12 @@ const BEHAVIOUR_ZERO_ARG: &[&str] = &[
     "classAllSuperclasses",
     "classMethods",
     "classAllInstVarNames",
+    // BT-2233: `fieldNames`/`allFieldNames` lower through these intrinsics. They
+    // map 1:1 to `beamtalk_behaviour_intrinsics:classFieldNames/1` and
+    // `classAllFieldNames/1`; their omission was the same latent gap as the
+    // BT-2232 `className` bug (silent runtime-dispatch fallback otherwise).
+    "classFieldNames",
+    "classAllFieldNames",
     "classRemoveFromSystem",
     "classSourceFile",
     "classReload",
@@ -171,6 +177,26 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classInstVarNames'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_field_names() {
+        // BT-2233: `fieldNames` lowers via this Behaviour intrinsic.
+        let result = doc_to_string(generate_behaviour_bif("classFieldNames", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classFieldNames'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_all_field_names() {
+        // BT-2233: `allFieldNames` lowers via this Behaviour intrinsic.
+        let result = doc_to_string(generate_behaviour_bif("classAllFieldNames", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classAllFieldNames'(Self)".to_string())
         );
     }
 

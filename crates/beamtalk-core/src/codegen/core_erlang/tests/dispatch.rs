@@ -2233,6 +2233,49 @@ sealed Object subclass: Other
 }
 
 #[test]
+fn test_bt2233_unmapped_quoted_primitive_errors_in_stdlib_mode() {
+    // BT-2233: In stdlib mode, a quoted @primitive in a value-type class with no
+    // inline BIF lowering is a hard error (naming class + selector) instead of a
+    // silent runtime-dispatch fallback that DNUs at runtime (the BT-2232 bug).
+    let src = "
+sealed Object subclass: Foo
+  doIt => @primitive \"doIt\"
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    let options = CodegenOptions::new("bt@stdlib@foo").with_stdlib_mode(true);
+    let result = generate_module_with_warnings(&module, options);
+    let err = result.expect_err("unmapped quoted @primitive must fail the stdlib build");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("doIt"),
+        "error should name the selector: {msg}"
+    );
+    assert!(msg.contains("Foo"), "error should name the class: {msg}");
+}
+
+#[test]
+fn test_bt2233_unmapped_quoted_primitive_warns_outside_stdlib_mode() {
+    // BT-2233: Outside stdlib mode (e.g. user FFI @primitive via
+    // --allow-primitives) the BT-938 warn-and-fallback path is preserved — the
+    // strict failure is scoped to the stdlib build it protects.
+    let src = "
+sealed Object subclass: Foo
+  doIt => @primitive \"doIt\"
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    let options = CodegenOptions::new("bt@stdlib@foo");
+    let result = generate_module_with_warnings(&module, options);
+    assert!(
+        result.is_ok(),
+        "non-stdlib quoted @primitive should not hard-error (BT-938 warn-and-fallback)"
+    );
+}
+
+#[test]
 fn test_repl_expression_spawn_uses_class_module_index() {
     // When a REPL expression like `Counter spawn` is compiled in a workspace
     // with package "getting_started", the class_module_index must be consulted

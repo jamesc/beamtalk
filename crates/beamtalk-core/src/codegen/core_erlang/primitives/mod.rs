@@ -104,6 +104,38 @@ pub fn generate_primitive_bif(
     }
 }
 
+/// BT-2233: Quoted `@primitive "selector"` declarations that intentionally
+/// route through runtime dispatch instead of an inline BIF, so the fail-loud
+/// cross-check (and `generate_primitive`'s hard error in `mod.rs`) must not
+/// flag them as unmapped.
+///
+/// Each entry is `(defining class, quoted selector)`. These are
+/// call-site-intercepted reflective / identity / dynamic-dispatch operations:
+/// their compiled method body is only a placeholder reached via indirect
+/// dispatch (e.g. `perform:`), so the runtime-dispatch fallback is the correct
+/// lowering for that body. See `dispatch_codegen.rs`
+/// (`beamtalk_object_class:class_send/3`) and `operators.rs` (binary-operator
+/// interception).
+///
+/// Keep this list minimal: a quoted primitive that maps 1:1 to a runtime
+/// function should be added to a per-class BIF table instead, not here.
+const RUNTIME_DISPATCHED_PRIMITIVES: &[(&str, &str)] = &[
+    ("ProtoObject", "=="),
+    ("ProtoObject", "/="),
+    ("ProtoObject", "class"),
+    ("ProtoObject", "perform:withArguments:"),
+    ("ProtoObject", "perform:withArguments:timeout:"),
+    ("ProtoObject", "performLocally:withArguments:"),
+    ("Object", "class"),
+];
+
+/// Returns `true` if `(class_name, selector)` is an intentionally
+/// runtime-dispatched quoted primitive (see `RUNTIME_DISPATCHED_PRIMITIVES`).
+#[must_use]
+pub(crate) fn is_runtime_dispatched_primitive(class_name: &str, selector: &str) -> bool {
+    RUNTIME_DISPATCHED_PRIMITIVES.contains(&(class_name, selector))
+}
+
 // Shared helpers used by per-class modules
 
 /// Generates a comparison BIF call for the standard Erlang comparison operators.
@@ -2037,12 +2069,158 @@ mod tests {
     }
 
     #[test]
+    fn test_is_runtime_dispatched_primitive() {
+        // Allowlisted call-site-intercepted operations.
+        assert!(is_runtime_dispatched_primitive("ProtoObject", "class"));
+        assert!(is_runtime_dispatched_primitive(
+            "ProtoObject",
+            "perform:withArguments:"
+        ));
+        assert!(is_runtime_dispatched_primitive("Object", "class"));
+        // Not allowlisted: mapped primitives and unrelated pairs.
+        assert!(!is_runtime_dispatched_primitive("Integer", "+"));
+        assert!(!is_runtime_dispatched_primitive(
+            "Behaviour",
+            "classFieldNames"
+        ));
+        assert!(!is_runtime_dispatched_primitive(
+            "Object",
+            "perform:withArguments:"
+        ));
+    }
+
+    #[test]
     fn test_core_erlang_binary_string_multi_byte() {
         // "hi" = bytes [104, 105]
         let doc = core_erlang_binary_string("hi");
         assert_eq!(
             doc.to_pretty_string(),
             "#{#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}#"
+        );
+    }
+
+    /// BT-2233: Cross-check that every quoted `@primitive "X"` declared in the
+    /// stdlib resolves to a registered inline BIF lowering. An unmapped quoted
+    /// primitive in a value-type class would silently fall back to runtime
+    /// dispatch and raise `does_not_understand` at runtime (the BT-2232
+    /// regression: moving `name` to Behaviour left `className` unmapped). This
+    /// fast `cargo test` catches such gaps before the slower stdlib build does.
+    ///
+    /// Exclusions, to avoid false positives (acceptance criterion 3):
+    /// - Unquoted `@primitive` (structural intrinsics) — handled by the compiler
+    ///   at the call site, never via `generate_primitive_bif`.
+    /// - Actor-backed classes — they legitimately route unmapped quoted
+    ///   primitives through their hand-written `beamtalk_X:dispatch/3` module
+    ///   (e.g. `Actor`'s `actorPid`, `ReactiveSubprocess`'s `open:args:notify:`).
+    #[test]
+    fn test_every_quoted_primitive_resolves_to_a_bif() {
+        use crate::ast::Expression;
+        use std::collections::HashMap;
+
+        let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("stdlib/src");
+
+        if !lib_dir.exists() {
+            // Skip when stdlib sources aren't present (e.g. partial checkouts).
+            return;
+        }
+
+        // Parse every stdlib module once. Parse diagnostics are ignored — class
+        // and method structure (which is all we need) parses fine per-file, the
+        // same approach `primitive_bindings::load_from_directory` relies on.
+        let mut modules = Vec::new();
+        for entry in std::fs::read_dir(&lib_dir)
+            .expect("read stdlib/src")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bt") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read .bt file");
+            let tokens = crate::source_analysis::lex_with_eof(&source);
+            let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+            modules.push(module);
+        }
+
+        // Build a class -> superclass map across all modules to classify
+        // actor-backed classes (mirrors the spirit of `is_actor_class`).
+        let mut superclass: HashMap<String, String> = HashMap::new();
+        for module in &modules {
+            for class in &module.classes {
+                superclass.insert(
+                    class.name.name.to_string(),
+                    class.superclass_name().to_string(),
+                );
+            }
+        }
+
+        let is_actor_backed = |start: &str| -> bool {
+            if start == "Actor" {
+                return true;
+            }
+            let mut current = start.to_string();
+            // Bounded walk guards against cycles in malformed hierarchies.
+            for _ in 0..64 {
+                match superclass.get(&current) {
+                    Some(parent) if parent == "Actor" => return true,
+                    Some(parent) if parent != "none" => current = parent.clone(),
+                    _ => return false,
+                }
+            }
+            false
+        };
+
+        let mut unmapped: Vec<String> = Vec::new();
+        for module in &modules {
+            for class in &module.classes {
+                let class_name = class.name.name.as_str();
+                if is_actor_backed(class_name) {
+                    continue;
+                }
+                for method in class.methods.iter().chain(class.class_methods.iter()) {
+                    if method.body.len() != 1 {
+                        continue;
+                    }
+                    let Expression::Primitive {
+                        name, is_quoted, ..
+                    } = &method.body[0].expression
+                    else {
+                        continue;
+                    };
+                    if !is_quoted {
+                        continue;
+                    }
+                    if is_runtime_dispatched_primitive(class_name, name.as_str()) {
+                        continue;
+                    }
+                    // Mirror the real codegen path: `current_method_params` holds
+                    // one entry per method parameter (names are irrelevant here).
+                    let params: Vec<String> = (0..method.parameters.len())
+                        .map(|i| format!("Arg{i}"))
+                        .collect();
+                    if generate_primitive_bif(class_name, name.as_str(), &params).is_none() {
+                        unmapped.push(format!(
+                            "{class_name}:{name} (arity {})",
+                            method.parameters.len()
+                        ));
+                    }
+                }
+            }
+        }
+        unmapped.sort();
+
+        assert!(
+            unmapped.is_empty(),
+            "Quoted @primitive selectors with no inline BIF lowering in \
+             generate_primitive_bif. These would silently fall back to runtime \
+             dispatch and raise does_not_understand at runtime (BT-2232/BT-2233). \
+             Add a mapping in the relevant primitives/*.rs table:\n  {}",
+            unmapped.join("\n  ")
         );
     }
 }
