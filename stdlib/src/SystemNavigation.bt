@@ -242,20 +242,16 @@ sealed typed Object subclass: SystemNavigation
         self error: "SystemNavigation referencesTo: requires a class/metaclass object."
       ]
     // Resolve the class name once, up front, rather than on every method.
-    // `name` is declared on Class/Metaclass (not Behaviour), so we also
-    // duck-type-check it: a Behaviour entry that responds to `subclasses`
-    // but not `name` (no known case today, but possible for registry-shaped
-    // entries) is rejected with the same error path rather than crashing
-    // on the downstream `aClass name` send.
+    // Defensive runtime guard: a registry-shaped value that responds to
+    // `subclasses` but not `name` (no known case today — every real
+    // `Behaviour` answers `name`) is rejected with the same error path rather
+    // than crashing on the downstream `aClass name` send.
     (aClass respondsTo: #name)
       ifFalse: [
         self error: "SystemNavigation referencesTo: requires a class/metaclass object."
       ]
-    // Convert to String so Class (returns Symbol) and Metaclass (returns
-    // String) both flow through the same downstream FFI shape. The static
-    // type-checker can't see `name` through the `Behaviour` annotation,
-    // even though the runtime guard above guarantees the receiver responds.
-    @expect dnu
+    // `name` is a Symbol for both Class and Metaclass; convert to String for
+    // the downstream FFI shape.
     targetName := aClass name asString
     classScan := self allClasses
       inject: List new
@@ -478,15 +474,14 @@ sealed typed Object subclass: SystemNavigation
   /// mirroring the `collectSendersFor:in:into:` / `sendersOf:` pairing
   /// above.
   ///
-  /// `name` lives on `Class`, not on the abstract `Behaviour` upper bound,
-  /// so the send is guarded with `respondsTo:` (mirroring
-  /// `collectSendersFor:in:into:`): a non-Class Behaviour entry is silently
-  /// skipped for extension lookups rather than aborting the whole walk.
+  /// The `respondsTo: #name` guard (mirroring `collectSendersFor:in:into:`)
+  /// keeps a registry-shaped value that lacks a name from aborting the walk
+  /// — it is silently skipped for extension lookups instead. (Every real
+  /// `Behaviour` answers `name`; the guard is purely defensive.)
   selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
     instance := aClass methods
     classSide := aClass class methods
     (aClass respondsTo: #name) ifFalse: [^instance ++ classSide]
-    @expect dnu
     className := aClass name
     instanceExtensions := self extensionSelectorsFor: className
     // class_object_tag/1 is the runtime authority that encodes the metaclass

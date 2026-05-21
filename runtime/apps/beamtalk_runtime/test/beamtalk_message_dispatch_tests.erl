@@ -325,9 +325,11 @@ metaclass_dispatch_via_primitive() ->
     ?assert(is_pid(ClassPid)),
     MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = ClassPid},
     %% Sending 'name' to a Metaclass-tagged object goes through primitive dispatch
-    %% which calls metaclass_send_dispatch and returns the class name as a binary.
+    %% which calls metaclass_send_dispatch and returns the metaclass name. BT-2232:
+    %% name is a Symbol across the whole tower, so the metaclass name is the atom
+    %% 'Object class' (printString carries the "Object class" String).
     Result = beamtalk_message_dispatch:send(MetaObj, name, []),
-    ?assertEqual(<<"Object class">>, Result).
+    ?assertEqual('Object class', Result).
 
 send4_metaclass_ignores_timeout() ->
     %% send/4 with Metaclass receiver falls through to beamtalk_primitive:send
@@ -335,7 +337,7 @@ send4_metaclass_ignores_timeout() ->
     ?assert(is_pid(ClassPid)),
     MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = ClassPid},
     Result = beamtalk_message_dispatch:send(MetaObj, name, [], 5000),
-    ?assertEqual(<<"Object class">>, Result).
+    ?assertEqual('Object class', Result).
 
 %% ============================================================================
 %% BT-1981: Future auto-await dispatch paths

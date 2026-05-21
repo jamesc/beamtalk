@@ -18,7 +18,7 @@
 /// ## Examples
 /// ```beamtalk
 /// 42 class class isMeta           // => true
-/// 42 class class name             // => 'Integer class'
+/// 42 class class name             // => #'Integer class'
 /// 42 class class thisClass        // => Integer
 /// Metaclass class class == Metaclass class  // => true
 /// ```
@@ -72,13 +72,17 @@ sealed typed Class subclass: Metaclass
   /// ```
   sealed thisClass -> Class => @primitive "metaclassThisClass"
 
-  /// Return the name of this metaclass (e.g. 'Integer class').
+  /// Return the name of this metaclass as a Symbol (e.g. `#'Integer class'`).
+  ///
+  /// Overrides `Behaviour>>name` to append ` class`, matching the symbol the
+  /// runtime registers the metaclass under. Returns a `Symbol` so the contract
+  /// stays consistent with `Class`/`Behaviour` name (both `Symbol`).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 class class name   // => 'Integer class'
+  /// 42 class class name   // => #'Integer class'
   /// ```
-  sealed name -> String => (self thisClass name asString) ++ " class"
+  sealed name -> Symbol => (self thisClass name asString ++ " class") asAtom
 
   /// Return a human-readable string representation of this metaclass.
   ///
@@ -86,7 +90,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class printString   // => 'Integer class'
   /// ```
-  sealed printString -> String => self name
+  sealed printString -> String => self name asString
 
   /// Return the superclass in the parallel metaclass hierarchy.
   ///
