@@ -74,6 +74,35 @@ sealed typed Object subclass: SystemNavigation
     ]
     actors sort: [:a :b | a name asString < b name asString]
 
+  /// Return every class that overrides the does-not-understand handler — i.e.
+  /// each class that locally defines `doesNotUnderstand:args:` (Beamtalk's DNU
+  /// override selector — note the `:args:`, NOT the Smalltalk-classic
+  /// `doesNotUnderstand:`).
+  ///
+  /// These are the escape-valve classes — proxies, builders, DSL frontends —
+  /// whose instances can absorb arbitrary message sends. Useful for seeing
+  /// which classes might respond to a selector that has no static implementor,
+  /// and as an input to the `unimplementedSelectors` lint, which excludes sends
+  /// to DNU-routed receivers.
+  ///
+  /// Includes `ProtoObject`, the root definer of the handler (matching the
+  /// `methods includes: #doesNotUnderstand:args:` convention used elsewhere in
+  /// this class); callers wanting only genuine overrides can filter it out.
+  /// Iterates `allClasses`, so stdlib and user-defined classes are both in
+  /// scope. `includesSelector:` checks the local method dictionary, so
+  /// inherited (un-overridden) handlers are not reported. Sorted alphabetically
+  /// by class name for a stable, snapshot-friendly order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default dnuHandlers  // => [ErlangModule, ProtoObject, ...]
+  /// ```
+  dnuHandlers -> List(Behaviour) =>
+    handlers := self allClasses select: [:c |
+      c includesSelector: #doesNotUnderstand:args:
+    ]
+    handlers sort: [:a :b | a name asString < b name asString]
+
   /// Return all classes that locally define the given selector.
   ///
   /// Searches both instance-side and class-side definitions:
