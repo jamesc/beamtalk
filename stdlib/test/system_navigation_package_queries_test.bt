@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2213: BUnit coverage for SystemNavigation classesInPackage: and
+// subclassesOf:in: — package-scoped navigation (ADR 0070). Exercises the live
+// class registry and package metadata that BUnit loads with the full stdlib.
+
+TestCase subclass: SystemNavigationPackageQueriesTest
+
+  // classesInPackage: returns the class objects in the package.
+  testClassesInPackageReturnsClasses =>
+    classes := SystemNavigation default classesInPackage: #stdlib
+    self assert: (classes includes: Integer)
+    self assert: (classes includes: String)
+
+  // The package argument may be a String as well as a Symbol.
+  testClassesInPackageAcceptsStringArg =>
+    classes := SystemNavigation default classesInPackage: "stdlib"
+    self assert: (classes includes: Integer)
+
+  // subclassesOf:in: filters allSubclasses by package.
+  testSubclassesOfInPackage =>
+    subs := SystemNavigation default subclassesOf: Number in: #stdlib
+    self assert: (subs includes: Integer)
+    self assert: (subs includes: Float)
+
+  testSubclassesOfInPackageAcceptsStringArg =>
+    subs := SystemNavigation default subclassesOf: Number in: "stdlib"
+    self assert: (subs includes: Integer)
+
+  // No subclasses in the package returns an empty list (not an error). The test
+  // case class has no subclasses at all, so the result is empty.
+  testSubclassesOfInPackageEmpty =>
+    subs := SystemNavigation default subclassesOf: self class in: #stdlib
+    self assert: subs isEmpty
+
+  // An unknown package raises a typed error (a typo must not look like an empty
+  // package).
+  testUnknownPackageRaises =>
+    self should: [
+      SystemNavigation default classesInPackage: #sysnav_no_such_pkg
+    ] raise: #user_error
+    self should: [
+      SystemNavigation default subclassesOf: Number in: #sysnav_no_such_pkg
+    ] raise: #user_error

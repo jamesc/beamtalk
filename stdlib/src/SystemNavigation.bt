@@ -204,6 +204,58 @@ sealed typed Object subclass: SystemNavigation
       ]
     aClass name
 
+  /// Return the class objects belonging to package `aPackageName` (ADR 0070).
+  ///
+  /// Delegates to `Package classes:` (which returns class-name Symbols) and
+  /// resolves each to a class object via `findClass:`. The package argument may
+  /// be a Symbol or String. Raises a typed error if the package is not loaded
+  /// (so a typo surfaces rather than silently returning `[]`); returns `[]` if
+  /// the package exists but is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default classesInPackage: #stdlib  // => [Actor, Array, ...]
+  /// ```
+  classesInPackage: aPackageName :: Symbol | String -> List(Behaviour) =>
+    pkgName := self requirePackage: aPackageName
+    names := Package classes: pkgName
+    names
+      inject: List new
+      into: [:acc :sym |
+        @expect type
+        cls := (Erlang beamtalk_interface) findClass: sym
+        cls isNil ifTrue: [acc] ifFalse: [acc add: cls]
+      ]
+
+  /// Return the subclasses of `aClass` that live in package `aPackageName`
+  /// (ADR 0070) — `allSubclasses` filtered by package.
+  ///
+  /// The package argument may be a Symbol or String. Raises a typed error if
+  /// the package is not loaded; returns `[]` if no subclasses live in that
+  /// package. A class's package is read via `Package packageNameFor:` (the same
+  /// authority behind metaclass `packageName`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default subclassesOf: Number in: #stdlib  // => [Float, Integer]
+  /// ```
+  subclassesOf: aClass :: Behaviour in: aPackageName :: Symbol | String -> List(Behaviour) =>
+    pkgName := self requirePackage: aPackageName
+    aClass allSubclasses select: [:c |
+      (Package packageNameFor: c name) == pkgName
+    ]
+
+  /// Normalise `aPackageName` (Symbol or String) to a package-name String,
+  /// raising a typed error if it is not a currently-loaded package. Lets the
+  /// package queries distinguish "package doesn't exist" (a typo) from "package
+  /// has no matching classes" (a legitimately empty result).
+  requirePackage: aPackageName :: Symbol | String -> String =>
+    pkgName := aPackageName asString
+    (Package all includes: pkgName) ifFalse: [
+      self error: "SystemNavigation: no loaded package named " ++ pkgName ++ "."
+    ]
+    pkgName
+
   /// Return all classes that locally define the given selector.
   ///
   /// Searches both instance-side and class-side definitions:
