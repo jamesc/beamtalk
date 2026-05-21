@@ -50,6 +50,30 @@ sealed typed Object subclass: SystemNavigation
   /// block parameters infer `Class` / `Behaviour` instead of `Dynamic`.
   allClasses -> List(Behaviour) => (Erlang beamtalk_interface) allClasses
 
+  /// Return every class that participates in the actor model — i.e. each class
+  /// whose `superclassChain` includes `Actor`.
+  ///
+  /// Includes `Actor` itself (the abstract root); callers wanting only concrete
+  /// actors can filter it out. Iterates `allClasses`, so stdlib and
+  /// user-defined actor classes are both in scope. Returns `[]` if `Actor` is
+  /// not in the loaded image (defensive).
+  ///
+  /// Sorted alphabetically by class name for a stable, snapshot-friendly order.
+  /// `name` is read directly on the `Behaviour`-typed elements (it lives on
+  /// `Behaviour` per BT-2232), so no dnu suppression is needed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default actorClasses  // => [Actor, ClassBuilder, ...]
+  /// ```
+  actorClasses -> List(Behaviour) =>
+    actorClass := (Erlang beamtalk_interface) findClass: #Actor
+    actorClass isNil ifTrue: [^List new]
+    actors := self allClasses select: [:c |
+      c superclassChain includes: actorClass
+    ]
+    actors sort: [:a :b | a name asString < b name asString]
+
   /// Return all classes that locally define the given selector.
   ///
   /// Searches both instance-side and class-side definitions:
