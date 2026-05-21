@@ -38,5 +38,7 @@ TestCase subclass: SystemNavigationActorClassesTest
   // `name` lives on `Behaviour` (BT-2232), so it reads directly off each
   // registry entry without a dnu suppression.
   testAlphabeticalOrder =>
-    names := (SystemNavigation default actorClasses) collect: [:c | c name asString]
+    names := (SystemNavigation default actorClasses) collect: [:c |
+      c name asString
+    ]
     self assert: names equals: names sort
