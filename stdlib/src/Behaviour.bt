@@ -24,6 +24,23 @@
 /// ```
 abstract Object subclass: Behaviour
 
+  // --- Identity ---
+
+  /// Return the name of the receiver (class or metaclass) as a Symbol.
+  ///
+  /// Declared on `Behaviour` so registry walks that hold the abstract
+  /// `Behaviour` type (e.g. `SystemNavigation allClasses`, `superclassChain`)
+  /// can read the name without a dnu suppression. `Class` and `Metaclass`
+  /// inherit it; the `className` primitive resolves the name for any class
+  /// object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter name   // => #Counter
+  /// Integer name   // => #Integer
+  /// ```
+  sealed name -> Symbol => @primitive "className"
+
   // --- Method lookup ---
 
   /// Look up a method by selector, returning a CompiledMethod object,

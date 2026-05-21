@@ -18,6 +18,10 @@ use crate::docvec;
 
 /// Zero-arg Behaviour intrinsics: selector name equals the runtime function name.
 const BEHAVIOUR_ZERO_ARG: &[&str] = &[
+    // `name` (BT-2232) lives on Behaviour so registry walks holding the
+    // abstract Behaviour type can read it; its `@primitive "className"` body
+    // must lower through the Behaviour table, not just the Class one.
+    "className",
     "classSuperclass",
     "classSubclasses",
     "classAllSubclasses",
@@ -98,7 +102,9 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
 /// These back the `@primitive "classXxx"` method bodies in `lib/Class.bt`.
 pub fn generate_class_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
     match selector {
-        "className" | "classClass" => Some(intrinsic_self(selector)),
+        // `className` now lowers via the Behaviour table (BT-2232: `name` moved
+        // to Behaviour). `classClass` backs `Class>>class`.
+        "classClass" => Some(intrinsic_self(selector)),
         _ => None,
     }
 }
@@ -170,7 +176,8 @@ mod tests {
 
     #[test]
     fn test_class_name() {
-        let result = doc_to_string(generate_class_bif("className", &[]));
+        // `name`/`className` lowers via the Behaviour table (BT-2232).
+        let result = doc_to_string(generate_behaviour_bif("className", &[]));
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'className'(Self)".to_string())
