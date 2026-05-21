@@ -223,6 +223,178 @@ run_method_rejects_non_atom_test_name_test() ->
     ).
 
 %%% ============================================================================
+%%% TestResult accessor tests
+%%% ============================================================================
+
+result_passed_test() ->
+    Result = make_result(3, 2, 1, 0, 1.0, []),
+    ?assertEqual(2, beamtalk_test_runner:result_passed(Result)).
+
+result_failed_test() ->
+    Result = make_result(3, 2, 1, 0, 1.0, []),
+    ?assertEqual(1, beamtalk_test_runner:result_failed(Result)).
+
+result_skipped_test() ->
+    Result = make_result(4, 2, 1, 1, 1.0, []),
+    ?assertEqual(1, beamtalk_test_runner:result_skipped(Result)).
+
+result_total_test() ->
+    Result = make_result(4, 2, 1, 1, 1.0, []),
+    ?assertEqual(4, beamtalk_test_runner:result_total(Result)).
+
+result_duration_test() ->
+    Result = make_result(1, 1, 0, 0, 3.14, []),
+    ?assertEqual(3.14, beamtalk_test_runner:result_duration(Result)).
+
+result_failures_empty_test() ->
+    Result = make_result(2, 2, 0, 0, 1.0, [
+        #{name => testA, class => 'T', status => pass},
+        #{name => testB, class => 'T', status => pass}
+    ]),
+    ?assertEqual([], beamtalk_test_runner:result_failures(Result)).
+
+result_failures_skipped_not_included_test() ->
+    Result = make_result(2, 1, 0, 1, 1.0, [
+        #{name => testA, class => 'T', status => pass},
+        #{name => testB, class => 'T', status => skip, reason => <<"unix only">>}
+    ]),
+    ?assertEqual([], beamtalk_test_runner:result_failures(Result)).
+
+result_failures_returns_failing_tests_test() ->
+    Result = make_result(3, 1, 2, 0, 1.0, [
+        #{name => testA, class => 'T', status => pass},
+        #{name => testB, class => 'T', status => fail, error => <<"boom">>},
+        #{name => testC, class => 'T', status => fail, error => <<"crash">>}
+    ]),
+    Failures = beamtalk_test_runner:result_failures(Result),
+    ?assertEqual(2, length(Failures)),
+    Names = [maps:get(name, F) || F <- Failures],
+    ?assertEqual([testB, testC], Names).
+
+result_has_passed_all_pass_test() ->
+    Result = make_result(2, 2, 0, 0, 1.0, []),
+    ?assert(beamtalk_test_runner:result_has_passed(Result)).
+
+result_has_passed_with_failures_test() ->
+    Result = make_result(2, 1, 1, 0, 1.0, []),
+    ?assertNot(beamtalk_test_runner:result_has_passed(Result)).
+
+result_has_passed_zero_tests_test() ->
+    Result = make_result(0, 0, 0, 0, 0.0, []),
+    ?assert(beamtalk_test_runner:result_has_passed(Result)).
+
+%%% ============================================================================
+%%% result_summary/1 branch tests
+%%% ============================================================================
+
+result_summary_all_pass_test() ->
+    Result = make_result(3, 3, 0, 0, 1.5, []),
+    ?assertEqual(<<"3 tests, 3 passed (1.5s)">>, beamtalk_test_runner:result_summary(Result)).
+
+result_summary_only_skipped_test() ->
+    %% {0, S} branch — skipped but no failures
+    Result = make_result(3, 2, 0, 1, 1.0, []),
+    Summary = beamtalk_test_runner:result_summary(Result),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"3 tests">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"2 passed">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"1 skipped">>)).
+
+result_summary_only_failed_test() ->
+    %% {F, 0} branch — failures but no skipped
+    Result = make_result(3, 2, 1, 0, 1.0, []),
+    Summary = beamtalk_test_runner:result_summary(Result),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"3 tests">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"2 passed">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"1 failed">>)).
+
+result_summary_failed_and_skipped_test() ->
+    %% {F, S} branch — both failures and skipped
+    Result = make_result(5, 2, 2, 1, 2.0, []),
+    Summary = beamtalk_test_runner:result_summary(Result),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"5 tests">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"2 passed">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"1 skipped">>)),
+    ?assertNotEqual(nomatch, binary:match(Summary, <<"2 failed">>)).
+
+%%% ============================================================================
+%%% result_to_json/1 tests
+%%% ============================================================================
+
+result_to_json_all_pass_test() ->
+    Result = make_result(2, 2, 0, 0, 1.0, [
+        #{name => testA, class => 'MyTest', status => pass},
+        #{name => testB, class => 'MyTest', status => pass}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    ?assert(is_binary(Json)),
+    Decoded = json:decode(Json),
+    ?assertEqual(2, maps:get(<<"total">>, Decoded)),
+    ?assertEqual(2, maps:get(<<"passed">>, Decoded)),
+    ?assertEqual(0, maps:get(<<"failed">>, Decoded)),
+    Tests = maps:get(<<"tests">>, Decoded),
+    ?assertEqual(2, length(Tests)).
+
+result_to_json_with_failure_test() ->
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testBad, class => 'T', status => fail, error => <<"expected 1 got 2">>}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    ?assertEqual(1, maps:get(<<"failed">>, Decoded)),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    ?assertEqual(<<"testBad">>, maps:get(<<"name">>, Test)),
+    ?assertEqual(<<"fail">>, maps:get(<<"status">>, Test)),
+    ?assertEqual(<<"expected 1 got 2">>, maps:get(<<"error">>, Test)).
+
+result_to_json_skip_has_no_error_key_test() ->
+    Result = make_result(1, 0, 0, 1, 0.1, [
+        #{name => testSkip, class => 'T', status => skip, reason => <<"unix only">>}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    ?assertEqual(<<"testSkip">>, maps:get(<<"name">>, Test)),
+    ?assertEqual(<<"skip">>, maps:get(<<"status">>, Test)),
+    %% skip entries have no error key
+    ?assertNot(maps:is_key(<<"error">>, Test)).
+
+%%% ============================================================================
+%%% run_all/1 invalid-argument error path
+%%% ============================================================================
+
+run_all_negative_integer_test() ->
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'
+            }
+        },
+        beamtalk_test_runner:run_all(-1)
+    ).
+
+run_all_atom_argument_test() ->
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'
+            }
+        },
+        beamtalk_test_runner:run_all(sequential)
+    ).
+
+%%% ============================================================================
+%%% ensure_loaded_or_warn/1 tests
+%%% ============================================================================
+
+ensure_loaded_or_warn_existing_module_test() ->
+    %% erlang module is always loaded — must return ok without warning
+    ?assertEqual(ok, beamtalk_test_runner:ensure_loaded_or_warn(erlang)).
+
+ensure_loaded_or_warn_nonexistent_module_test() ->
+    %% Should return ok even when loading fails — errors are logged, not raised
+    ?assertEqual(ok, beamtalk_test_runner:ensure_loaded_or_warn(nonexistent_module_bt2230)).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
