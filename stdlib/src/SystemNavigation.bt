@@ -103,6 +103,107 @@ sealed typed Object subclass: SystemNavigation
     ]
     handlers sort: [:a :b | a name asString < b name asString]
 
+  /// Return the packages (ADR 0070) that contribute extension methods (ADR 0066)
+  /// to `aClass` — answers "who extends class X?".
+  ///
+  /// Extension *owners* are package/library names, not classes (the registry
+  /// records the owning package — see `beamtalk_extensions:register/4`), so each
+  /// owner is returned as a `Package` object. This mirrors how the other
+  /// navigation queries return rich objects (classes as `Behaviour`) rather than
+  /// bare name atoms. Backed by the reverse index
+  /// (`beamtalk_extensions:extenders_of/1`, BT-2202), which is deduplicated and
+  /// sorted: a package contributing ten extensions to `aClass` appears once.
+  /// Owners that are not currently-loaded packages are skipped (`Package named:`
+  /// would otherwise raise). Returns `[]` (not an error) when nothing extends
+  /// `aClass`; raises a typed error if `aClass` is a Symbol/String rather than a
+  /// class object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default extendersOf: String  // => [(Package named: "my_lib"), ...]
+  /// SystemNavigation default extendersOf: NeverExtended  // => []
+  /// ```
+  extendersOf: aClass :: Behaviour -> List(Package) =>
+    targetName := self requireClassName: aClass selector: "extendersOf:"
+    loaded := Package all
+    owners := (Erlang beamtalk_extensions) extenders_of: targetName
+    owners
+      inject: List new
+      into: [:acc :ownerAtom |
+        @expect type
+        ownerName := ownerAtom asString
+        (loaded includes: ownerName) ifTrue: [
+          acc add: (Package named: ownerName)
+        ] ifFalse: [acc]
+      ]
+
+  /// Return the extension methods (ADR 0066) that the package `aPackage`
+  /// (ADR 0070) contributes — answers "what does library Y add, and to which
+  /// classes?". The inverse of `extendersOf:`.
+  ///
+  /// Each result is a Dictionary `#{#class => ExtendedClass, #selector =>
+  /// Selector}` — one per extension method, shaped like the `sendersOf:` /
+  /// `referencesTo:` records. The `#class` value is the *extended* class object
+  /// (a real class, resolved via `resolveExtensionClass:`), not a name symbol,
+  /// so callers can navigate from it. The argument is a `Package` because
+  /// extension owners are packages, not classes. Backed by
+  /// `beamtalk_extensions:extensions_by/1` (BT-2202). Returns `[]` (not an error)
+  /// when `aPackage` contributes no extensions; raises a typed error if
+  /// `aPackage` is not a Package object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default extensionsBy: (Package named: "my_lib")
+  /// // => [#{#class => String, #selector => #asJson}, ...]
+  /// ```
+  extensionsBy: aPackage :: Package -> List(Dictionary) =>
+    (aPackage isKindOf: Package)
+      ifFalse: [
+        self error: "SystemNavigation extensionsBy: requires a Package object, e.g. (Package named: aPackageName)."
+      ]
+    pairs := (Erlang beamtalk_extensions) extensions_by: aPackage name asAtom
+    pairs
+      collect: [:pair |
+        @expect type
+        extendedName := pair at: 1
+        @expect type
+        selector := pair at: 2
+        #{
+          #class => (self resolveExtensionClass: extendedName),
+          #selector => selector
+        }
+      ]
+
+  /// Validate that `aClass` is a class/metaclass object and return its name
+  /// Symbol, raising a typed error otherwise. `aSelector` names the calling
+  /// query for the message. Mirrors the argument guard in `referencesTo:`;
+  /// `respondsTo: #subclasses` is the reliable "is a class" test (see that
+  /// method for why `isKindOf: Behaviour` is not).
+  requireClassName: aClass :: Behaviour selector: aSelector :: String -> Symbol =>
+    (aClass isKindOf: Symbol)
+      ifTrue: [
+        self
+          error: "SystemNavigation "
+            ++ aSelector
+            ++ " requires a class object, not a Symbol. Pass the class itself (e.g. Counter), not its name as a symbol (e.g. #Counter)."
+      ]
+    (aClass isKindOf: String)
+      ifTrue: [
+        self
+          error: "SystemNavigation "
+            ++ aSelector
+            ++ " requires a class object, not a String. Pass the class itself (e.g. Counter), not its name as a string."
+      ]
+    (aClass respondsTo: #subclasses)
+      ifFalse: [
+        self error: "SystemNavigation " ++ aSelector ++ " requires a class/metaclass object."
+      ]
+    (aClass respondsTo: #name)
+      ifFalse: [
+        self error: "SystemNavigation " ++ aSelector ++ " requires a class/metaclass object."
+      ]
+    aClass name
+
   /// Return all classes that locally define the given selector.
   ///
   /// Searches both instance-side and class-side definitions:
