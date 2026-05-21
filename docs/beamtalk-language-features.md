@@ -2545,7 +2545,7 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
 | `referencesTo: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that references the class name |
 | `methodsMatching: aRegex` | `List(Dictionary)` | `#{#class, #selector}` for every method whose source matches the regex |
-| `selectorsMatching: pattern` | `List(Symbol)` | Selectors matching a glob pattern (e.g., `"print*"`) |
+| `selectorsMatching: pattern` | `List(Symbol)` | Selectors matching a case-insensitive substring (e.g., `"print"`) |
 | `selectorsForClass: aClass` | `List(Symbol)` | All selectors defined on a class (instance + class + extension) |
 | `unimplementedSelectors` | `List(Dictionary)` | Selectors sent but defined nowhere — a typo-finder lint |
 | `unusedSelectors` | `List(Dictionary)` | Selectors defined but sent nowhere — dead-method candidates |
@@ -2567,10 +2567,10 @@ nav sendersOf: #increment
 nav referencesTo: Counter
 // => [#{#class => CounterTest, #selector => #setUp, #line => 5}, ...]
 
-nav methodsMatching: 'printString' asRegex
+nav methodsMatching: (Regex from: "printString") unwrap
 // => [#{#class => Object, #selector => #printString}, ...]
 
-nav selectorsMatching: "print*"
+nav selectorsMatching: "print"
 // => [#printString, #printOn:, ...]
 
 nav unimplementedSelectors
