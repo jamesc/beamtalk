@@ -26,6 +26,9 @@ pub(crate) fn generate_opaque_bif(
     match selector {
         "=:=" => binary_bif("=:=", params),
         "/=" => binary_bif("/=", params),
+        // BT-2233: strict-inequality completes the comparison set. For opaque
+        // identity types (Pid/Port/Reference) `=/=` is equivalent to `/=`.
+        "=/=" => binary_bif("=/=", params),
         "asString" => Some(Document::Str(to_string_fn)),
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
         _ => extra_selector(selector, params),
@@ -137,6 +140,31 @@ mod tests {
     #[test]
     fn test_no_extra_returns_none() {
         assert_eq!(doc_to_string(no_extra("anything", &[])), None);
+    }
+
+    // generate_opaque_bif comparison tests (BT-2233)
+
+    #[test]
+    fn test_opaque_strict_not_equal() {
+        // BT-2233: `=/=` completes the comparison set for opaque identity types.
+        let result = doc_to_string(generate_opaque_bif(
+            "=/=",
+            &["Other".to_string()],
+            "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
+            no_extra,
+        ));
+        assert_eq!(result, Some("call 'erlang':'=/='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_opaque_not_equal() {
+        let result = doc_to_string(generate_opaque_bif(
+            "/=",
+            &["Other".to_string()],
+            "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
+            no_extra,
+        ));
+        assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
     }
 
     // generate_future_bif tests

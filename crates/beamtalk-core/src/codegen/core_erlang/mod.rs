@@ -150,6 +150,28 @@ pub enum CodeGenError {
         span: Option<Span>,
     },
 
+    /// BT-2233: A quoted `@primitive "selector"` in a stdlib value-type class has
+    /// no inline BIF lowering registered in `generate_primitive_bif`. Without a
+    /// mapping it would silently fall back to runtime dispatch and raise
+    /// `does_not_understand` at runtime (the BT-2232 regression). Only raised in
+    /// stdlib mode; actor classes and a small set of call-site-intercepted
+    /// operations are exempt (see the guard in `generate_primitive`).
+    #[error(
+        "unmapped @primitive \"{selector}\" in class '{class}'{}: no inline BIF lowering registered. \
+         Add a mapping for {class}:{selector} in \
+         crates/beamtalk-core/src/codegen/core_erlang/primitives/, otherwise this method falls back \
+         to runtime dispatch and raises does_not_understand at runtime.",
+        DisplayOptionalSpan(.span)
+    )]
+    UnmappedPrimitive {
+        /// The defining class name.
+        class: String,
+        /// The quoted primitive selector with no inline BIF mapping.
+        selector: String,
+        /// Source span for rich error rendering (Miette / MCP).
+        span: Option<Span>,
+    },
+
     /// Internal code generation error.
     #[error("code generation error: {0}")]
     Internal(String),
@@ -241,7 +263,8 @@ impl CodeGenError {
     /// - MCP: "line N, col C" format
     pub fn span(&self) -> Option<Span> {
         match self {
-            CodeGenError::UnsupportedFeature { span, .. } => *span,
+            CodeGenError::UnsupportedFeature { span, .. }
+            | CodeGenError::UnmappedPrimitive { span, .. } => *span,
             _ => None,
         }
     }
@@ -2973,6 +2996,32 @@ impl CoreErlangGenerator {
             let params = self.current_method_params.clone();
             if let Some(code) = primitives::generate_primitive_bif(&class_name, name, &params) {
                 return Ok(code);
+            }
+
+            // BT-2233: An unmapped quoted @primitive in a stdlib value-type class
+            // is a bug — it would silently fall back to the runtime-dispatch path
+            // below and raise does_not_understand at runtime (the BT-2232
+            // regression). Fail the build instead. The check is scoped so it has
+            // no false positives:
+            //  - Stdlib mode only. User/FFI @primitive (via --allow-primitives)
+            //    keeps BT-938's warn-and-fallback behavior for runtime dispatch.
+            //  - Value-type context only. Actor classes legitimately route
+            //    unmapped quoted primitives through their hand-written
+            //    `beamtalk_X:dispatch` module (e.g. Actor's `actorPid`,
+            //    ReactiveSubprocess's `open:args:notify:`).
+            //  - Excluding a small set of call-site-intercepted reflective /
+            //    identity / dynamic operations whose method body is only a
+            //    runtime-dispatch placeholder (see
+            //    `primitives::is_runtime_dispatched_primitive`).
+            if self.stdlib_mode()
+                && self.context == CodeGenContext::ValueType
+                && !primitives::is_runtime_dispatched_primitive(&class_name, name)
+            {
+                return Err(CodeGenError::UnmappedPrimitive {
+                    class: class_name.clone(),
+                    selector: name.to_string(),
+                    span: Some(span),
+                });
             }
         }
 
