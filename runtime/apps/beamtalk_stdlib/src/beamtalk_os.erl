@@ -152,10 +152,7 @@ flush_timer(Timer) ->
 
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
-    Error0 = beamtalk_error:new(type_error, 'OS'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('OS', Selector, Hint).
 
 -spec raise_timeout(atom()) -> no_return().
 raise_timeout(Selector) ->
