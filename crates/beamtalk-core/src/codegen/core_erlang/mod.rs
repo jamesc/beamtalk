@@ -263,7 +263,8 @@ impl CodeGenError {
     /// - MCP: "line N, col C" format
     pub fn span(&self) -> Option<Span> {
         match self {
-            CodeGenError::UnsupportedFeature { span, .. } => *span,
+            CodeGenError::UnsupportedFeature { span, .. }
+            | CodeGenError::UnmappedPrimitive { span, .. } => *span,
             _ => None,
         }
     }
