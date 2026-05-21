@@ -453,13 +453,22 @@ sealed typed Object subclass: SystemNavigation
         self error: "SystemNavigation selectorsMatching: requires a non-empty pattern (empty would match every selector)"
       ]
     needle := aPattern lowercase
-    allSels := self allClasses inject: List new into: [:acc :cls |
-      acc ++ (self selectorsForClass: cls)
-    ]
-    matches := allSels select: [:sel |
+    // Accumulate selectors into a Set so the registry walk stays O(total
+    // selectors): adding to a Set is near-constant, whereas the previous
+    // `acc ++ (self selectorsForClass: cls)` copied the growing accumulator
+    // on every class — O(n²). The Set also subsumes the de-duplication the
+    // result needs, mirroring the Set accumulator in `unimplementedSelectors`.
+    allSels := self allClasses
+      inject: Set new
+      into: [:acc :cls |
+        (self selectorsForClass: cls) inject: acc into: [:innerAcc :sel |
+          innerAcc add: sel
+        ]
+      ]
+    matches := allSels asList select: [:sel |
       sel asString lowercase includesSubstring: needle
     ]
-    matches unique sort
+    matches sort
 
   /// Return every selector defined on the given class: instance-side,
   /// class-side, and extension-method selectors (ADR 0066) registered on
