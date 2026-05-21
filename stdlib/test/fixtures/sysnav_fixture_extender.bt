@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2212: owner class for the synthetic String extensions registered in
+// system_navigation_extensions_test. It only needs to be a loaded class whose
+// name resolves to a class object via `resolveExtensionClass:`, so that
+// `extendersOf:` can return the owner as a class object. No state — `Object
+// subclass:` forbids data declarations.
+
+Object subclass: SysnavFixtureExtender
+
+  sysnavFixtureExtenderMarker => 0

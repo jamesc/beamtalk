@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2212: BUnit coverage for `SystemNavigation extendersOf:` / `extensionsBy:`
+// — the reverse extension-method index (ADR 0066 / BT-2202).
+//
+// Extensions are registered directly via `beamtalk_extensions:register/4`
+// (mirroring extension_sealed_test.bt) so the owner atom is controlled. The
+// owner is the fixture class `SysnavFixtureExtender` (fixtures/), a loaded
+// class whose name resolves back to a class object. Each test registers its
+// extension(s), captures the query result, cleans up the ETS entry, then
+// asserts (so a failing assertion never leaks registry state).
+//
+// Cleanup uses `ets:delete` with a literal `#(#String, #selector)` key tuple
+// (the registry has no unregister API), so the selectors are spelled out
+// literally per test — `#(...)` is a literal array and cannot hold a variable.
+
+TestCase subclass: SystemNavigationExtensionsTest
+
+  // Register `String >> sel` owned by the fixture class.
+  registerStringExt: sel =>
+    extFun := [:a :s | s]
+    Erlang beamtalk_extensions
+      register: #String
+      selector: sel
+      fun: extFun
+      owner: #SysnavFixtureExtender
+
+  // extendersOf: deduplicates — an owner contributing two methods to String
+  // appears exactly once, as a class object.
+  testExtendersOfDeduplicates =>
+    self registerStringExt: #sysnavExtAlpha
+    self registerStringExt: #sysnavExtBeta
+    extenders := SystemNavigation default extendersOf: String
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtBeta)
+    self assert: (extenders includes: SysnavFixtureExtender)
+    self assert: (extenders count: [:c | c == SysnavFixtureExtender]) equals: 1
+
+  // extensionsBy: returns {class, selector} records whose #class is a class
+  // OBJECT (so callers can navigate), not a name symbol.
+  testExtensionsByRecords =>
+    self registerStringExt: #sysnavExtAlpha
+    records := SystemNavigation default extensionsBy: SysnavFixtureExtender
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
+    self assert: (records anySatisfy: [:r | (r at: #class) == String])
+    self assert: (records anySatisfy: [:r |
+      (r at: #selector) == #sysnavExtAlpha
+    ])
+
+  // Symmetric round-trip: extendersOf: T includes E iff extensionsBy: E hits T.
+  testRoundTrip =>
+    self registerStringExt: #sysnavExtAlpha
+    extenders := SystemNavigation default extendersOf: String
+    records := SystemNavigation default extensionsBy: SysnavFixtureExtender
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
+    self assert: (extenders includes: SysnavFixtureExtender)
+    self assert: (records anySatisfy: [:r | (r at: #class) == String])
+
+  // No extensions returns an empty list (not an error). Uses `self class` (the
+  // test case) as the subject: it is never registered as an extension owner or
+  // target, so both queries are reliably empty regardless of other tests'
+  // shared global-ETS state (SysnavFixtureExtender is an owner in other tests).
+  testNoExtensionsEmpty =>
+    self assert: (SystemNavigation default extensionsBy: self class) isEmpty
+    self assert: (SystemNavigation default extendersOf: self class) isEmpty
+
+  // A Symbol argument raises a typed runtime error. The calls go through
+  // `perform:` because the `:: Behaviour` parameter makes a direct
+  // `extendersOf: #String` a compile-time type error — the runtime guard is
+  // reachable only via dynamic dispatch (REPL/eval/perform:).
+  testSymbolArgRaises =>
+    self should: [
+      SystemNavigation default perform: #extendersOf: withArguments: #(#String)
+    ] raise: #user_error
+    self should: [
+      SystemNavigation default perform: #extensionsBy: withArguments: #(#String)
+    ] raise: #user_error
+
+  // A String argument likewise raises a typed runtime error (via perform:).
+  testStringArgRaises =>
+    self should: [
+      SystemNavigation default perform: #extendersOf: withArguments: #("String")
+    ] raise: #user_error
+    self should: [
+      SystemNavigation default perform: #extensionsBy: withArguments: #("String")
+    ] raise: #user_error

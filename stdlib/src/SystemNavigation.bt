@@ -103,6 +103,87 @@ sealed typed Object subclass: SystemNavigation
     ]
     handlers sort: [:a :b | a name asString < b name asString]
 
+  /// Return the class objects that contribute extension methods (ADR 0066) to
+  /// `aClass` — answers "who extends class X?".
+  ///
+  /// Backed by the reverse extension index (`beamtalk_extensions:extenders_of/1`,
+  /// BT-2202), which is deduplicated and sorted: an owner contributing ten
+  /// extensions to `aClass` appears once. Owner name atoms are mapped back to
+  /// class objects via `resolveExtensionClass:`. Returns `[]` (not an error)
+  /// when nothing extends `aClass`. Raises a typed error if `aClass` is a
+  /// Symbol/String rather than a class object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default extendersOf: String  // => [MyJsonLib, ...]
+  /// SystemNavigation default extendersOf: NeverExtended  // => []
+  /// ```
+  extendersOf: aClass :: Behaviour -> List(Behaviour) =>
+    targetName := self requireClassName: aClass selector: "extendersOf:"
+    owners := (Erlang beamtalk_extensions) extenders_of: targetName
+    owners
+      collect: [:ownerName |
+        @expect type
+        self resolveExtensionClass: ownerName
+      ]
+
+  /// Return the extension methods (ADR 0066) that `aClass` contributes to other
+  /// classes — answers "what does class Y contribute as extensions?".
+  ///
+  /// Each result is a Dictionary `#{#class => ExtendedClass, #selector =>
+  /// Selector}` — one per extension method, shaped like the `sendersOf:` /
+  /// `referencesTo:` records. The `#class` value is a class object (resolved via
+  /// `resolveExtensionClass:`), not a name symbol, so callers can navigate from
+  /// it. Backed by `beamtalk_extensions:extensions_by/1` (BT-2202). Returns `[]`
+  /// (not an error) when `aClass` contributes no extensions. Raises a typed
+  /// error if `aClass` is a Symbol/String rather than a class object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default extensionsBy: MyJsonLib
+  /// // => [#{#class => String, #selector => #asJson}, ...]
+  /// ```
+  extensionsBy: aClass :: Behaviour -> List(Dictionary) =>
+    ownerName := self requireClassName: aClass selector: "extensionsBy:"
+    pairs := (Erlang beamtalk_extensions) extensions_by: ownerName
+    pairs
+      collect: [:pair |
+        @expect type
+        extendedName := pair at: 1
+        @expect type
+        selector := pair at: 2
+        #{
+          #class => (self resolveExtensionClass: extendedName),
+          #selector => selector
+        }
+      ]
+
+  /// Validate that `aClass` is a class/metaclass object and return its name
+  /// Symbol, raising a typed error otherwise. `aSelector` names the calling
+  /// query for the message. Mirrors the argument guard in `referencesTo:`;
+  /// `respondsTo: #subclasses` is the reliable "is a class" test (see that
+  /// method for why `isKindOf: Behaviour` is not).
+  requireClassName: aClass :: Behaviour selector: aSelector :: String -> Symbol =>
+    (aClass isKindOf: Symbol)
+      ifTrue: [
+        self
+          error: "SystemNavigation "
+            ++ aSelector
+            ++ " requires a class object, not a Symbol. Pass the class itself (e.g. Counter), not its name as a symbol (e.g. #Counter)."
+      ]
+    (aClass isKindOf: String)
+      ifTrue: [
+        self
+          error: "SystemNavigation "
+            ++ aSelector
+            ++ " requires a class object, not a String. Pass the class itself (e.g. Counter), not its name as a string."
+      ]
+    (aClass respondsTo: #subclasses)
+      ifFalse: [
+        self error: "SystemNavigation " ++ aSelector ++ " requires a class/metaclass object."
+      ]
+    aClass name
+
   /// Return all classes that locally define the given selector.
   ///
   /// Searches both instance-side and class-side definitions:
