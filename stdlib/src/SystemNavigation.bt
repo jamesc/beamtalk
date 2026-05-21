@@ -453,22 +453,21 @@ sealed typed Object subclass: SystemNavigation
         self error: "SystemNavigation selectorsMatching: requires a non-empty pattern (empty would match every selector)"
       ]
     needle := aPattern lowercase
-    // Accumulate selectors into a Set so the registry walk stays O(total
-    // selectors): adding to a Set is near-constant, whereas the previous
-    // `acc ++ (self selectorsForClass: cls)` copied the growing accumulator
-    // on every class — O(n²). The Set also subsumes the de-duplication the
-    // result needs, mirroring the Set accumulator in `unimplementedSelectors`.
-    allSels := self allClasses
-      inject: Set new
-      into: [:acc :cls |
-        (self selectorsForClass: cls) inject: acc into: [:innerAcc :sel |
-          innerAcc add: sel
-        ]
-      ]
-    matches := allSels asList select: [:sel |
+    // `++` copies only its LEFT operand (it lowers to Erlang `++`), so keep the
+    // growing accumulator on the RIGHT: `(perClass) ++ acc` copies just the
+    // small per-class selector list each step and shares `acc`, keeping the
+    // registry walk O(total_selectors). The original `acc ++ (perClass)` copied
+    // the growing accumulator on every class — O(n²). Order is reversed but
+    // irrelevant: the result is de-duplicated and sorted below. (A `Set`
+    // accumulator would not help — stdlib `Set` is ordsets-backed, so `add:`
+    // is itself O(n).)
+    allSels := self allClasses inject: List new into: [:acc :cls |
+      (self selectorsForClass: cls) ++ acc
+    ]
+    matches := allSels select: [:sel |
       sel asString lowercase includesSubstring: needle
     ]
-    matches sort
+    matches unique sort
 
   /// Return every selector defined on the given class: instance-side,
   /// class-side, and extension-method selectors (ADR 0066) registered on
