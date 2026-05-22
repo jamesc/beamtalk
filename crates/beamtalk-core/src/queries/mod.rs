@@ -34,6 +34,7 @@ pub mod diagnostic_provider;
 pub mod document_symbols_provider;
 mod erlang_modules;
 pub mod hover_provider;
+pub mod ivar_accesses_query;
 pub mod references_provider;
 pub mod references_to_query;
 pub mod senders_query;

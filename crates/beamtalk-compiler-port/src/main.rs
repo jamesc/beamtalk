@@ -1413,6 +1413,72 @@ fn handle_find_references_to_in_source(request: &Map) -> Term {
     ]))
 }
 
+/// Handle a `find_inst_var_readers_in_source` request (BT-2208).
+///
+/// Backs `SystemNavigation instVarReadersOf:in:` — parses the source of a
+/// single compiled method and reports 1-based line numbers (relative to the
+/// input source) where the named instance variable is READ (`self.x` outside
+/// an assignment target).
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+/// - `ivar` (binary): the target instance-variable name (without the leading `#`)
+///
+/// Response: `#{status => ok, lines => [Line, ...]}`. Returns an empty list
+/// when no reads are found or the source cannot be parsed.
+fn handle_find_inst_var_readers_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(ivar) = map_get(request, "ivar").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'ivar' field".to_string()]);
+    };
+
+    let lines =
+        beamtalk_core::queries::ivar_accesses_query::find_ivar_readers_in_source(&source, &ivar);
+    ivar_lines_response(&lines)
+}
+
+/// Handle a `find_inst_var_writers_in_source` request (BT-2208).
+///
+/// Backs `SystemNavigation instVarWritersOf:in:` — parses the source of a
+/// single compiled method and reports 1-based line numbers (relative to the
+/// input source) where the named instance variable is WRITTEN (`self.x := ...`,
+/// the assignment target).
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+/// - `ivar` (binary): the target instance-variable name (without the leading `#`)
+///
+/// Response: `#{status => ok, lines => [Line, ...]}`. Returns an empty list
+/// when no writes are found or the source cannot be parsed.
+fn handle_find_inst_var_writers_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(ivar) = map_get(request, "ivar").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'ivar' field".to_string()]);
+    };
+
+    let lines =
+        beamtalk_core::queries::ivar_accesses_query::find_ivar_writers_in_source(&source, &ivar);
+    ivar_lines_response(&lines)
+}
+
+/// Build the standard `#{status => ok, lines => [...]}` response shared by the
+/// instance-variable reader/writer queries (BT-2208).
+fn ivar_lines_response(lines: &[u32]) -> Term {
+    let line_terms: Vec<Term> = lines
+        .iter()
+        .map(|&line| int_term(i32::try_from(line).unwrap_or(i32::MAX)))
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("lines"), Term::from(List::from(line_terms))),
+    ]))
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -1435,6 +1501,8 @@ fn handle_request(request_term: &Term) -> Term {
         "find_senders_in_source" => handle_find_senders_in_source(map),
         "find_all_sends_in_source" => handle_find_all_sends_in_source(map),
         "find_references_to_in_source" => handle_find_references_to_in_source(map),
+        "find_inst_var_readers_in_source" => handle_find_inst_var_readers_in_source(map),
+        "find_inst_var_writers_in_source" => handle_find_inst_var_writers_in_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }

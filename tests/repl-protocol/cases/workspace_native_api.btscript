@@ -485,6 +485,170 @@ Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefEx
 // => _
 
 // ===========================================================================
+// SYSTEMNAVIGATION INSTVARREADERSOF:IN: / INSTVARWRITERSOF:IN: (BT-2208)
+// ===========================================================================
+
+// Load the stable instance-variable fixtures (parent + subclass). These give
+// test-owned slots so assertions do not depend on live stdlib content.
+:load tests/repl-protocol/fixtures/instvar_fixture.bt
+// => _
+
+:load tests/repl-protocol/fixtures/instvar_fixture_child.bt
+// => _
+
+// --- readers ---
+
+// instVarReadersOf:in: finds every method that reads the named slot. The
+// `tally` slot is read by `readTally` and by `bumpTally` (RHS of its
+// assignment), so the result must be non-empty.
+tallyReaders := SystemNavigation default instVarReadersOf: #tally in: InstVarFixture
+// => _
+
+tallyReaders isEmpty
+// => false
+
+// Each record is a Dictionary with #class, #selector, #line keys — same shape
+// as sendersOf: / referencesTo:.
+tallyReaderRecord := tallyReaders first
+// => _
+
+tallyReaderRecord includesKey: #class
+// => true
+
+tallyReaderRecord includesKey: #selector
+// => true
+
+tallyReaderRecord includesKey: #line
+// => true
+
+// `readTally` reads the slot — collect the selectors and check membership.
+tallyReaderSelectors := tallyReaders collect: [:r | r at: #selector]
+// => _
+
+tallyReaderSelectors includes: #readTally
+// => true
+
+// `bumpTally` reads the slot on the RHS of its assignment — also a reader.
+tallyReaderSelectors includes: #bumpTally
+// => true
+
+// `clearTally` writes a literal (`self.tally := 0`) — it does NOT read the
+// slot, so it must NOT appear among the readers.
+tallyReaderSelectors includes: #clearTally
+// => false
+
+// Line numbers are 1-based positive integers.
+(tallyReaders collect: [:r | r at: #line]) allSatisfy: [:n | n > 0]
+// => true
+
+// --- writers ---
+
+// instVarWritersOf:in: finds every method that writes (assigns) the slot.
+// `bumpTally` and `clearTally` both assign `self.tally`.
+tallyWriters := SystemNavigation default instVarWritersOf: #tally in: InstVarFixture
+// => _
+
+tallyWriterSelectors := tallyWriters collect: [:r | r at: #selector]
+// => _
+
+tallyWriterSelectors includes: #bumpTally
+// => true
+
+tallyWriterSelectors includes: #clearTally
+// => true
+
+// `readTally` only reads — it must NOT appear among the writers.
+tallyWriterSelectors includes: #readTally
+// => false
+
+// --- read-modify-write appears in BOTH sets ---
+
+// `bumpTally` (`self.tally := self.tally + 1`) reads AND writes the slot, so it
+// shows up in the readers AND the writers result.
+(tallyReaderSelectors includes: #bumpTally) and: [tallyWriterSelectors includes: #bumpTally]
+// => true
+
+// --- subclass inheriting the slot ---
+
+// instVarReadersOf:/Writers: walk `aClass allSubclasses`. `InstVarChild`
+// inherits `tally` and defines `childBump` (`self.tally := self.tally + 2`),
+// which reads and writes it. Scanning the PARENT must surface the child hit.
+childReaders := SystemNavigation default instVarReadersOf: #tally in: InstVarFixture
+// => _
+
+(childReaders collect: [:r | r at: #selector]) includes: #childBump
+// => true
+
+childWriters := SystemNavigation default instVarWritersOf: #tally in: InstVarFixture
+// => _
+
+(childWriters collect: [:r | r at: #selector]) includes: #childBump
+// => true
+
+// The child hit names the subclass in #class — collect-then-includes to avoid
+// in-block equality against a class reference.
+((childReaders select: [:r | (r at: #selector) == #childBump])
+  collect: [:r | r at: #class]) includes: InstVarChild
+// => true
+
+// --- class-side instance variable (classState:) via the metaclass walk ---
+
+// `spawnCount` is a class-side ivar touched only by class-side methods. The
+// metaclass walk (`cls class`) must find them; the #class is the metaclass
+// object. `bumpSpawnCount` reads and writes it; `readSpawnCount` reads it.
+spawnReaders := SystemNavigation default instVarReadersOf: #spawnCount in: InstVarFixture
+// => _
+
+(spawnReaders collect: [:r | r at: #selector]) includes: #bumpSpawnCount
+// => true
+
+(spawnReaders collect: [:r | r at: #selector]) includes: #readSpawnCount
+// => true
+
+// Class-side hits report the metaclass OBJECT in #class.
+((spawnReaders select: [:r | (r at: #selector) == #readSpawnCount])
+  collect: [:r | r at: #class]) includes: InstVarFixture class
+// => true
+
+spawnWriters := SystemNavigation default instVarWritersOf: #spawnCount in: InstVarFixture
+// => _
+
+(spawnWriters collect: [:r | r at: #selector]) includes: #bumpSpawnCount
+// => true
+
+// `readSpawnCount` only reads — not a writer.
+(spawnWriters collect: [:r | r at: #selector]) includes: #readSpawnCount
+// => false
+
+// --- declared-but-untouched slot returns [] ---
+
+// `untouched` is a declared slot that no method reads or writes. Both queries
+// return an empty list (NOT an error — it is a real slot).
+SystemNavigation default instVarReadersOf: #untouched in: InstVarFixture
+// => []
+
+SystemNavigation default instVarWritersOf: #untouched in: InstVarFixture
+// => []
+
+// --- slot-name typo raises ---
+
+// A name that is not a declared slot raises (typo guard) rather than silently
+// returning [].
+[SystemNavigation default instVarReadersOf: #notARealSlotXyzzy in: InstVarFixture] on: Error do: [:e | #ok]
+// => ok
+
+[SystemNavigation default instVarWritersOf: #notARealSlotXyzzy in: InstVarFixture] on: Error do: [:e | #ok]
+// => ok
+
+// --- Symbol slot name required ---
+
+// Passing a non-Symbol slot name raises. Dispatch dynamically via perform: so
+// the typed `:: Symbol` parameter does not reject the bad argument at compile
+// time.
+[SystemNavigation default perform: #instVarReadersOf:in: withArguments: #(42, #InstVarFixture)] on: Error do: [:e | #ok]
+// => ok
+
+// ===========================================================================
 // SYSTEMNAVIGATION METHODSMATCHING: — source-text grep (BT-2205)
 // ===========================================================================
 

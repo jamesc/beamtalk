@@ -33,7 +33,9 @@ to avoid temp files on disk (BT-48).
     resolve_completion_type/1,
     find_senders_in_source/2,
     find_all_sends_in_source/1,
-    find_references_to_in_source/2
+    find_references_to_in_source/2,
+    find_inst_var_readers_in_source/2,
+    find_inst_var_writers_in_source/2
 ]).
 
 %% gen_server callbacks
@@ -236,6 +238,48 @@ find_references_to_in_source(Source, ClassName) ->
     end.
 
 -doc """
+Find reads of an instance variable in a single method's source (BT-2208).
+
+Backs `SystemNavigation instVarReadersOf:in:' — parses the method source and
+returns a list of 1-based line numbers (relative to `Source') where the named
+slot is read (`self.x' outside an assignment target). Returns `{ok, []}' if no
+reads are found; returns `{error, Diagnostics}' if the compiler port is
+unavailable.
+""".
+-spec find_inst_var_readers_in_source(binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_inst_var_readers_in_source(Source, IVar) ->
+    try
+        gen_server:call(?MODULE, {find_inst_var_readers_in_source, Source, IVar}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, [#{message => <<"Compiler server is not available">>}]};
+        exit:{timeout, _} ->
+            {error, [#{message => <<"Compiler server timed out">>}]}
+    end.
+
+-doc """
+Find writes of an instance variable in a single method's source (BT-2208).
+
+Backs `SystemNavigation instVarWritersOf:in:' — parses the method source and
+returns a list of 1-based line numbers (relative to `Source') where the named
+slot is written (`self.x := ...', the assignment target). Returns `{ok, []}' if
+no writes are found; returns `{error, Diagnostics}' if the compiler port is
+unavailable.
+""".
+-spec find_inst_var_writers_in_source(binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_inst_var_writers_in_source(Source, IVar) ->
+    try
+        gen_server:call(?MODULE, {find_inst_var_writers_in_source, Source, IVar}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, [#{message => <<"Compiler server is not available">>}]};
+        exit:{timeout, _} ->
+            {error, [#{message => <<"Compiler server timed out">>}]}
+    end.
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -337,6 +381,16 @@ handle_call({find_all_sends_in_source, Source}, _From, State) ->
 handle_call({find_references_to_in_source, Source, ClassName}, _From, State) ->
     Result = beamtalk_compiler_port:find_references_to_in_source(
         State#state.port, Source, ClassName
+    ),
+    {reply, Result, State};
+handle_call({find_inst_var_readers_in_source, Source, IVar}, _From, State) ->
+    Result = beamtalk_compiler_port:find_inst_var_readers_in_source(
+        State#state.port, Source, IVar
+    ),
+    {reply, Result, State};
+handle_call({find_inst_var_writers_in_source, Source, IVar}, _From, State) ->
+    Result = beamtalk_compiler_port:find_inst_var_writers_in_source(
+        State#state.port, Source, IVar
     ),
     {reply, Result, State};
 handle_call(version, _From, State) ->
