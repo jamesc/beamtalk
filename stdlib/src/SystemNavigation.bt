@@ -524,6 +524,188 @@ sealed typed Object subclass: SystemNavigation
         acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
       ]
 
+  /// Return a collection of methods that READ the named field.
+  ///
+  /// Each result is a Dictionary with three keys:
+  /// - `#class` — the class whose method reads the slot (the class object for
+  ///   an instance-side hit, the metaclass object for a class-side hit)
+  /// - `#selector` — the selector of the method that reads the slot
+  /// - `#line` — the 1-based line number within the method source where the
+  ///   read appears
+  ///
+  /// A "read" is an access `self.x` (where `x` is `aSym`) anywhere EXCEPT the
+  /// target of an assignment. So `self.x := self.x + 1` reads `x` (on the RHS)
+  /// and writes it (on the LHS); the bare assignment target `self.x := 0`
+  /// counts as a write only, never a read (Pharo precedent). A bare local
+  /// variable `x` is not an field and is ignored. A method that
+  /// reads `aSym` multiple times produces one record per occurrence.
+  ///
+  /// Scope: walks `aClass` and every class in `aClass allSubclasses` (a
+  /// subclass inherits the slot, so methods it defines can touch it), and on
+  /// each of those walks both the instance side (`cls`) and the class side
+  /// (`cls class`, the metaclass) so class-side methods that touch a class-side
+  /// field (`classState:`) are covered too.
+  ///
+  /// `aSym` must be a Symbol naming the slot; passing anything else raises a
+  /// typed error. The slot must be declared on `aClass` — if `aSym` is neither
+  /// in `aClass allFieldNames` (instance-side slots, inherited included) nor
+  /// found by the source scan (which catches class-side slots, not reflectable
+  /// today), a typed error is raised so a typo surfaces rather than silently
+  /// returning `[]`. A declared-but-untouched instance slot returns `[]`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default fieldReadersOf: #value in: Counter
+  ///   // => [#{#class => Counter, #selector => getValue, #line => 5}, ...]
+  /// SystemNavigation default fieldReadersOf: #neverReadSlot in: Counter  // => []
+  /// ```
+  fieldReadersOf: aSym :: Symbol in: aClass :: Behaviour -> List(Dictionary) =>
+    self
+      collectFieldAccessesOf: aSym
+      in: aClass
+      readers: true
+
+  /// Return a collection of methods that WRITE (assign) the named instance
+  /// variable.
+  ///
+  /// Each result is a Dictionary with three keys:
+  /// - `#class` — the class whose method writes the slot (the class object for
+  ///   an instance-side hit, the metaclass object for a class-side hit)
+  /// - `#selector` — the selector of the method that writes the slot
+  /// - `#line` — the 1-based line number within the method source where the
+  ///   write appears
+  ///
+  /// A "write" is an assignment whose target is `self.x` (where `x` is
+  /// `aSym`). The mirror of `fieldReadersOf:in:`: `self.x := self.x + 1`
+  /// appears in BOTH result sets (write on the LHS, read on the RHS). A method
+  /// that writes `aSym` multiple times produces one record per occurrence.
+  ///
+  /// Scope and validation are identical to `fieldReadersOf:in:`: walks
+  /// `aClass` plus `aClass allSubclasses` on both the instance and class sides,
+  /// requires `aSym` to be a declared Symbol slot, and returns `[]` for a
+  /// declared-but-never-written slot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default fieldWritersOf: #value in: Counter
+  ///   // => [#{#class => Counter, #selector => increment, #line => 3}, ...]
+  /// SystemNavigation default fieldWritersOf: #neverWrittenSlot in: Counter  // => []
+  /// ```
+  fieldWritersOf: aSym :: Symbol in: aClass :: Behaviour -> List(Dictionary) =>
+    self
+      collectFieldAccessesOf: aSym
+      in: aClass
+      readers: false
+
+  /// Shared driver for `fieldReadersOf:in:` and `fieldWritersOf:in:`.
+  ///
+  /// `wantReaders` selects which access kind to collect (reads when `true`,
+  /// writes when `false`). Validates the arguments, builds the scope (`aClass`
+  /// + `aClass allSubclasses`), walks each scope on both the instance and class
+  /// sides, then applies slot validation: if no hits were found and `aSym` is
+  /// not an instance-side slot of `aClass`, the slot does not exist and a typed
+  /// error is raised (typo guard). A real-but-untouched slot returns `[]`.
+  collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
+    selector := wantReaders ifTrue: [
+      "fieldReadersOf:in:"
+    ] ifFalse: ["fieldWritersOf:in:"]
+    (aSym isKindOf: Symbol)
+      ifFalse: [
+        self error: "SystemNavigation " ++ selector ++ " requires a Symbol naming the field."
+      ]
+    self requireClassName: aClass selector: selector
+    scopes := aClass allSubclasses addFirst: aClass
+    // Collect instance-side and class-side hits separately so the slot can be
+    // validated against `aClass` itself: an instance slot must be in
+    // `aClass allFieldNames` (inherited included) — a slot declared only on a
+    // *subclass* must NOT satisfy a query against `aClass`. Class-side slots
+    // (`classState:`) are not reflectable today (BT-2238), so a class-side hit
+    // is what attests their existence.
+    instanceHits := scopes
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectFieldAccessesFor: aSym
+          in: cls
+          readers: wantReaders
+          into: acc
+      ]
+    classHits := scopes
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectFieldAccessesFor: aSym
+          in: cls class
+          readers: wantReaders
+          into: acc
+      ]
+    // Validation: accept an instance slot of `aClass` (declared or inherited),
+    // or a class-side slot evidenced by a class-side hit; otherwise it is a typo
+    // (or a subclass-only slot that `aClass` does not declare) and we raise.
+    (aClass allFieldNames includes: aSym)
+      ifFalse: [
+        classHits isEmpty
+          ifTrue: [
+            self
+              error: "SystemNavigation "
+                ++ selector
+                ++ " "
+                ++ aSym asString
+                ++ " is not a field declared on "
+                ++ aClass name asString
+          ]
+      ]
+    instanceHits ++ classHits
+
+  /// Append field access records found in any method of `aScope`
+  /// (a class or metaclass) to `result`. Returns the (possibly extended) list.
+  ///
+  /// Internal helper for `collectFieldAccessesOf:in:readers:`. Iterates
+  /// `aScope methods`, fetches each method's source via `>>`, and asks the
+  /// compiler to find matching read or write line numbers. Guards the `>>`
+  /// send with `respondsTo:` so a scope for which `>>` is not yet supported
+  /// (e.g. metaclass-shaped registry entries) is silently skipped rather than
+  /// aborting the whole walk — mirrors `collectSendersFor:in:into:`.
+  collectFieldAccessesFor: aSym :: Symbol in: aScope :: Behaviour readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            self
+              appendFieldAccessesIn: method source
+              field: aSym
+              owner: aScope
+              methodSelector: methodSel
+              readers: wantReaders
+              into: acc
+          ]
+      ]
+
+  /// Append one record per matching field access found in
+  /// `methodSource`.
+  ///
+  /// Internal helper for `collectFieldAccessesFor:in:readers:into:`. Splits
+  /// the per-method FFI call out so the surrounding `inject:into:` body stays a
+  /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
+  /// `wantReaders` picks the reader vs writer FFI entry point.
+  appendFieldAccessesIn: methodSource :: String field: aSym :: Symbol owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
+    lines := wantReaders ifTrue: [
+      (Erlang beamtalk_interface) findFieldReadersIn: methodSource field: aSym
+    ] ifFalse: [
+      (Erlang beamtalk_interface) findFieldWritersIn: methodSource field: aSym
+    ]
+    lines
+      inject: result
+      into: [:acc :line |
+        @expect type
+        acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
+      ]
+
   /// Return a collection of `{class, selector}` records for every method
   /// whose source text matches `aRegex`.
   ///

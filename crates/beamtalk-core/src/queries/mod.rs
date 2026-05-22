@@ -33,6 +33,7 @@ pub mod definition_provider;
 pub mod diagnostic_provider;
 pub mod document_symbols_provider;
 mod erlang_modules;
+pub mod field_accesses_query;
 pub mod hover_provider;
 pub mod references_provider;
 pub mod references_to_query;

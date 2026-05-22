@@ -47,7 +47,9 @@ dictionary or ETS state is required.
     version/0,
     findSendersIn/2,
     allSendsIn/1,
-    findReferencesToIn/2
+    findReferencesToIn/2,
+    findFieldReadersIn/2,
+    findFieldWritersIn/2
 ]).
 
 -ifdef(TEST).
@@ -333,6 +335,89 @@ findReferencesToIn(_Source, _ClassName) ->
         <<
             "findReferencesToIn:class: expects a binary source and an atom or "
             "binary class name"
+        >>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc """
+Find reads of an field within a single method's source (BT-2208).
+
+Backs `SystemNavigation fieldReadersOf:in:`. Delegates to
+`beamtalk_compiler:find_field_readers_in_source/2`, which parses the source
+via the OTP-port compiler and walks the AST for `FieldAccess` nodes (`self.x`)
+whose field name matches the slot and that are NOT an assignment target.
+
+Called via `(Erlang beamtalk_interface) findFieldReadersIn: source field: aName`.
+The slot-name argument is normalised to a binary before delegation so that a
+Symbol from Beamtalk and a String both work. Returns a list of 1-based line
+numbers (relative to the supplied source); returns `[]` if no reads are found
+or the source cannot be parsed.
+""".
+-spec findFieldReadersIn(binary(), atom() | binary()) -> [pos_integer()].
+findFieldReadersIn(Source, Field) ->
+    find_field_access(Source, Field, readers, 'findFieldReadersIn:field:').
+
+-doc """
+Find writes of an field within a single method's source (BT-2208).
+
+Backs `SystemNavigation fieldWritersOf:in:`. Delegates to
+`beamtalk_compiler:find_field_writers_in_source/2`, which parses the source
+via the OTP-port compiler and walks the AST for assignment targets (`self.x :=
+...`) whose field name matches the slot.
+
+Called via `(Erlang beamtalk_interface) findFieldWritersIn: source field: aName`.
+The slot-name argument is normalised to a binary before delegation so that a
+Symbol from Beamtalk and a String both work. Returns a list of 1-based line
+numbers (relative to the supplied source); returns `[]` if no writes are found
+or the source cannot be parsed.
+""".
+-spec findFieldWritersIn(binary(), atom() | binary()) -> [pos_integer()].
+findFieldWritersIn(Source, Field) ->
+    find_field_access(Source, Field, writers, 'findFieldWritersIn:field:').
+
+-doc """
+Shared driver for the field reader/writer FFI calls (BT-2208).
+
+`Kind` selects the underlying compiler query (`readers' or `writers'); both
+take a binary source and an field name and return a list of
+1-based line numbers, so they share the validation and fault-tolerance path.
+Mirrors `findSendersIn/2`: a transient port failure on one method's source is
+logged and degraded to `[]` rather than aborting the caller's whole iteration.
+""".
+-spec find_field_access(binary(), atom() | binary(), readers | writers, atom()) ->
+    [pos_integer()].
+find_field_access(Source, Field, Kind, Selector) when
+    is_binary(Source), (is_atom(Field) orelse is_binary(Field))
+->
+    IVarBin =
+        case Field of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    Result =
+        case Kind of
+            readers -> beamtalk_compiler:find_field_readers_in_source(Source, IVarBin);
+            writers -> beamtalk_compiler:find_field_writers_in_source(Source, IVarBin)
+        end,
+    case Result of
+        {ok, Lines} ->
+            Lines;
+        {error, Diagnostics} ->
+            %% Degrade to [] on a per-method basis (same contract as
+            %% findSendersIn/2): a transient port failure on one method's
+            %% source must not abort the whole fieldReadersOf:/fieldWritersOf:
+            %% walk. The log gives systemic-failure visibility.
+            log_compiler_diagnostics(Diagnostics, Selector),
+            []
+    end;
+find_field_access(_Source, _IVar, _Kind, Selector) ->
+    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, Selector),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<
+            "expects a binary source and an atom or binary "
+            "field name"
         >>
     ),
     beamtalk_error:raise(Err2).
