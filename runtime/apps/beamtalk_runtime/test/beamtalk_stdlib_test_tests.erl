@@ -227,10 +227,13 @@ load_atom_error_eval(Mod, Kind) ->
     {module, Mod} = code:load_binary(Mod, [], Bin).
 
 load_bt_error_eval(Mod, Kind) ->
-    %% Raise a raw #beamtalk_error{} tuple — matched by run_one's direct-record clause.
-    ErrTuple = erl_parse:abstract(
-        {beamtalk_error, Kind, 'TestClass', undefined, <<"test">>, undefined, #{}}
-    ),
+    %% Raise a #beamtalk_error{} record — matched by run_one's direct-record clause.
+    %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
+    ErrRecord = #beamtalk_error{
+        kind = Kind, class = 'TestClass', selector = undefined,
+        message = <<"test">>, hint = undefined, details = #{}
+    },
+    ErrTuple = erl_parse:abstract(ErrRecord),
     Forms = [
         {attribute, 1, module, Mod},
         {attribute, 1, export, [{eval, 1}]},
@@ -243,9 +246,12 @@ load_bt_error_eval(Mod, Kind) ->
 
 load_wrapped_bt_error_eval(Mod, Kind) ->
     %% Raise an ADR-0015 wrapped exception: error(#{'$beamtalk_class' := _, error := Record}).
-    ErrTuple = erl_parse:abstract(
-        {beamtalk_error, Kind, 'TestClass', undefined, <<"test">>, undefined, #{}}
-    ),
+    %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
+    ErrRecord = #beamtalk_error{
+        kind = Kind, class = 'TestClass', selector = undefined,
+        message = <<"test">>, hint = undefined, details = #{}
+    },
+    ErrTuple = erl_parse:abstract(ErrRecord),
     WrappedMap = erl_parse:abstract(
         #{'$beamtalk_class' => 'RuntimeError', error => placeholder}
     ),
@@ -273,9 +279,12 @@ load_wrapped_bt_error_eval(Mod, Kind) ->
 
 load_future_rejected_eval(Mod, Kind) ->
     %% Throw a future_rejected tuple — matched by run_one's future-rejected clause.
-    ErrTuple = erl_parse:abstract(
-        {beamtalk_error, Kind, 'TestClass', undefined, <<"test">>, undefined, #{}}
-    ),
+    %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
+    ErrRecord = #beamtalk_error{
+        kind = Kind, class = 'TestClass', selector = undefined,
+        message = <<"test">>, hint = undefined, details = #{}
+    },
+    ErrTuple = erl_parse:abstract(ErrRecord),
     ThrowArg = {tuple, 1, [{atom, 1, future_rejected}, ErrTuple]},
     Forms = [
         {attribute, 1, module, Mod},
@@ -288,78 +297,116 @@ load_future_rejected_eval(Mod, Kind) ->
     {module, Mod} = code:load_binary(Mod, [], Bin).
 
 %%% ============================================================================
+%%% run_and_assert/2 — Output-suppression and module-lifetime helpers
+%%% ============================================================================
+
+%% Redirect IO from Fun() to a sink process so run_and_assert FAIL/RESULTS
+%% lines don't appear in EUnit output when testing failure paths.
+suppress_output(Fun) ->
+    Sink = spawn(fun sink/0),
+    OldGL = group_leader(),
+    group_leader(Sink, self()),
+    try Fun()
+    after
+        group_leader(OldGL, self()),
+        Sink ! stop
+    end.
+
+sink() ->
+    receive
+        stop -> ok;
+        _ -> sink()
+    end.
+
+%% Run Fun() then delete and purge the dynamically loaded Mod so it does not
+%% accumulate in the code server across EUnit runs.
+with_module(Mod, Fun) ->
+    try Fun()
+    after
+        code:delete(Mod),
+        code:purge(Mod)
+    end.
+
+%%% ============================================================================
 %%% run_and_assert/2 — Passing assertions
 %%% ============================================================================
 
 run_and_assert_value_pass_test() ->
     Mod = unique_mod("btst_vp_"),
     load_value_eval(Mod, 42),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value, Mod, <<"42">>, none, <<"test:1 `42`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value, Mod, <<"42">>, none, <<"test:1 `42`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_value_wildcard_pass_test() ->
     Mod = unique_mod("btst_wcp_"),
     load_value_eval(Mod, <<"hello world">>),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value_wildcard, Mod, <<"hello _">>, none, <<"test:1 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value_wildcard, Mod, <<"hello _">>, none, <<"test:1 `expr`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_value_any_pass_test() ->
     Mod = unique_mod("btst_ap_"),
     load_value_eval(Mod, anything_at_all),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value_any, Mod, none, <<"test:1 `_`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value_any, Mod, none, <<"test:1 `_`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_error_atom_pass_test() ->
     Mod = unique_mod("btst_eap_"),
     load_atom_error_eval(Mod, badarith),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {error, Mod, badarith, none, <<"test:1 `1/0`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {error, Mod, badarith, none, <<"test:1 `1/0`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_error_bt_record_pass_test() ->
     Mod = unique_mod("btst_btp_"),
     load_bt_error_eval(Mod, does_not_understand),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {error, Mod, does_not_understand, none, <<"test:1 `x foo`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {error, Mod, does_not_understand, none, <<"test:1 `x foo`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_error_wrapped_exception_pass_test() ->
     Mod = unique_mod("btst_wep_"),
     load_wrapped_bt_error_eval(Mod, type_error),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {error, Mod, type_error, none, <<"test:1 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {error, Mod, type_error, none, <<"test:1 `expr`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_error_future_rejected_pass_test() ->
     Mod = unique_mod("btst_frp_"),
     load_future_rejected_eval(Mod, assertion_failed),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {error, Mod, assertion_failed, none, <<"test:1 `future`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {error, Mod, assertion_failed, none, <<"test:1 `future`">>}
+            ])
+        end))
+    end).
 
 %%% ============================================================================
 %%% run_and_assert/2 — Failing assertions
@@ -368,52 +415,57 @@ run_and_assert_error_future_rejected_pass_test() ->
 run_and_assert_value_mismatch_fails_test() ->
     Mod = unique_mod("btst_vm_"),
     load_value_eval(Mod, 42),
-    ?assertError(
-        {test_failures, 1},
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value, Mod, <<"99">>, none, <<"test:1 `42`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertError({test_failures, 1}, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value, Mod, <<"99">>, none, <<"test:1 `42`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_wildcard_mismatch_fails_test() ->
     Mod = unique_mod("btst_wcm_"),
     load_value_eval(Mod, <<"hello world">>),
-    ?assertError(
-        {test_failures, 1},
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value_wildcard, Mod, <<"goodbye _">>, none, <<"test:1 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertError({test_failures, 1}, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value_wildcard, Mod, <<"goodbye _">>, none, <<"test:1 `expr`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_crash_counts_as_failure_test() ->
     Mod = unique_mod("btst_cr_"),
     load_crashing_eval(Mod),
-    ?assertError(
-        {test_failures, 1},
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value, Mod, <<"42">>, none, <<"test:1 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertError({test_failures, 1}, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value, Mod, <<"42">>, none, <<"test:1 `expr`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_error_not_raised_fails_test() ->
     Mod = unique_mod("btst_enr_"),
     load_value_eval(Mod, 42),
-    ?assertError(
-        {test_failures, 1},
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {error, Mod, badarith, none, <<"test:1 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertError({test_failures, 1}, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {error, Mod, badarith, none, <<"test:1 `expr`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_error_wrong_kind_fails_test() ->
     Mod = unique_mod("btst_ewk_"),
     load_bt_error_eval(Mod, type_error),
-    ?assertError(
-        {test_failures, 1},
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {error, Mod, does_not_understand, none, <<"test:1 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertError({test_failures, 1}, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {error, Mod, does_not_understand, none, <<"test:1 `expr`">>}
+            ])
+        end))
+    end).
 
 %%% ============================================================================
 %%% run_and_assert/2 — Binding propagation and counting
@@ -422,22 +474,24 @@ run_and_assert_error_wrong_kind_fails_test() ->
 run_and_assert_bindings_propagate_test() ->
     Mod = unique_mod("btst_bp_"),
     load_value_eval(Mod, 42),
-    ?assertEqual(
-        ok,
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value, Mod, <<"42">>, myvar, <<"test:1 `expr`">>},
-            {value, Mod, <<"42">>, none, <<"test:2 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertEqual(ok, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value, Mod, <<"42">>, myvar, <<"test:1 `expr`">>},
+                {value, Mod, <<"42">>, none, <<"test:2 `expr`">>}
+            ])
+        end))
+    end).
 
 run_and_assert_multiple_failures_counted_test() ->
     Mod = unique_mod("btst_mf_"),
     load_value_eval(Mod, 42),
-    ?assertError(
-        {test_failures, 2},
-        beamtalk_stdlib_test:run_and_assert(btst_label, [
-            {value, Mod, <<"99">>, none, <<"test:1 `expr`">>},
-            {value, Mod, <<"88">>, none, <<"test:2 `expr`">>},
-            {value, Mod, <<"42">>, none, <<"test:3 `expr`">>}
-        ])
-    ).
+    with_module(Mod, fun() ->
+        ?assertError({test_failures, 2}, suppress_output(fun() ->
+            beamtalk_stdlib_test:run_and_assert(btst_label, [
+                {value, Mod, <<"99">>, none, <<"test:1 `expr`">>},
+                {value, Mod, <<"88">>, none, <<"test:2 `expr`">>},
+                {value, Mod, <<"42">>, none, <<"test:3 `expr`">>}
+            ])
+        end))
+    end).
