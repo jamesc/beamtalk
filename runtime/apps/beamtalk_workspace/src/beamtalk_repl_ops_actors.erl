@@ -27,9 +27,7 @@ encode_invalid_pid_error(Reason, PidStr, Msg) ->
         Err1,
         <<"Use :actors to list valid actor PIDs.">>
     ),
-    beamtalk_repl_protocol:encode_error(
-        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-    ).
+    beamtalk_repl_json:encode_error(Err2, Msg).
 
 -doc "Handle actors/inspect/kill/interrupt ops.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
@@ -79,9 +77,7 @@ handle(<<"inspect">>, Params, Msg, _SessionPid) ->
                                 Err3,
                                 iolist_to_binary([<<"Failed to inspect actor: ">>, PidBin])
                             ),
-                            beamtalk_repl_protocol:encode_error(
-                                Err4, Msg, fun beamtalk_repl_json:format_error_message/1
-                            )
+                            beamtalk_repl_json:encode_error(Err4, Msg)
                     end;
                 false ->
                     Err3 = beamtalk_error:new(actor_not_alive, 'Actor'),
@@ -89,9 +85,7 @@ handle(<<"inspect">>, Params, Msg, _SessionPid) ->
                         Err3,
                         iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
                     ),
-                    beamtalk_repl_protocol:encode_error(
-                        Err4, Msg, fun beamtalk_repl_json:format_error_message/1
-                    )
+                    beamtalk_repl_json:encode_error(Err4, Msg)
             end
     end;
 handle(<<"kill">>, Params, Msg, _SessionPid) ->

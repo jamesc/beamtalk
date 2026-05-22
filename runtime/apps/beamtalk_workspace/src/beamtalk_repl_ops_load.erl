@@ -288,9 +288,7 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
     },
     case sync_project(Path, Options) of
         {error, Err} ->
-            beamtalk_repl_protocol:encode_error(
-                Err, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
+            beamtalk_repl_json:encode_error(Err, Msg);
         {ok, Result} ->
             Base = beamtalk_repl_protocol:base_response(Msg),
             DepErrors = maps:get(dep_errors, Result, []),
@@ -318,9 +316,7 @@ handle(<<"load-source">>, Params, Msg, SessionPid) ->
             Err = beamtalk_error:new(empty_expression, 'REPL'),
             Err1 = beamtalk_error:with_message(Err, <<"Empty source">>),
             Err2 = beamtalk_error:with_hint(Err1, <<"Enter Beamtalk source code to compile.">>),
-            beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
+            beamtalk_repl_json:encode_error(Err2, Msg);
         _ ->
             case beamtalk_repl_shell:load_source(SessionPid, Source) of
                 {ok, Classes} ->
@@ -330,9 +326,7 @@ handle(<<"load-source">>, Params, Msg, SessionPid) ->
                     );
                 {error, Reason} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
-                    beamtalk_repl_protocol:encode_error(
-                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
-                    )
+                    beamtalk_repl_json:encode_error(WrappedReason, Msg)
             end
     end;
 handle(<<"unload">>, Params, Msg, SessionPid) ->
@@ -346,9 +340,7 @@ handle(<<"unload">>, Params, Msg, SessionPid) ->
                 Err0,
                 iolist_to_binary([<<"Class not found: '">>, ClassNameBin, <<"'">>])
             ),
-            beamtalk_repl_protocol:encode_error(
-                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
+            beamtalk_repl_json:encode_error(Err1, Msg);
         {ok, ClassName} ->
             case beamtalk_runtime_api:remove_class_from_system(ClassName) of
                 {ok, ModuleName} ->
@@ -363,9 +355,7 @@ handle(<<"unload">>, Params, Msg, SessionPid) ->
                         fun beamtalk_repl_json:term_to_json/1
                     );
                 {error, Err} ->
-                    beamtalk_repl_protocol:encode_error(
-                        Err, Msg, fun beamtalk_repl_json:format_error_message/1
-                    )
+                    beamtalk_repl_json:encode_error(Err, Msg)
             end
     end.
 
