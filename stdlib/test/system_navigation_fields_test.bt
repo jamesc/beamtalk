@@ -18,9 +18,12 @@
 // What IS testable under BUnit (no port needed):
 //   - selector + helper existence and composition primitives
 //   - argument type validation (Symbol slot name; class object scope)
-//   - slot validation: a declared instance slot returns `[]` (no error) while
-//     an undeclared slot name raises (typo guard) — both decided by
-//     `allFieldNames`, not the port
+//   - slot validation: a declared slot returns `[]` (no error) while an
+//     undeclared slot name raises (typo guard) — decided by `allFieldNames`
+//     (instance-side) and `allClassVarNames` (class-side, BT-2238), not the
+//     port. This is why class-side validation is now unit-testable: a declared
+//     class-side `classState:` slot validates by declaration, without needing a
+//     port-driven scan hit to attest its existence.
 //
 // Fixtures reused (auto-loaded): `Circle` (instance `state: radius`),
 // `InheritedParent` (instance `field: x`, class-side `classState: counter`),
@@ -144,3 +147,25 @@ TestCase subclass: SystemNavigationFieldsTest
     cm := (InheritedParent class) >> #counter
     self deny: cm isNil
     self deny: cm source isEmpty
+
+  // --- class-side slot validation (BT-2238, declaration-based) ---
+  //
+  // Class-side slots are now reflectable via `allClassVarNames`, so a declared
+  // `classState:` slot validates by declaration — no port-driven class-side
+  // scan hit required. `InheritedParent` declares `classState: counter`.
+  testClassSideSlotIsReflectable =>
+    self assert: (Behaviour includesSelector: #allClassVarNames)
+    self assert: (InheritedParent allClassVarNames includes: #counter)
+
+  // A declared class-side slot returns a List (empty under BUnit, port off)
+  // WITHOUT raising. Before BT-2238 this raised a false typo error because the
+  // port-disabled scan found no class-side hit to attest the slot's existence.
+  testReadersDeclaredClassSlotDoesNotRaise =>
+    nav := SystemNavigation default
+    result := nav fieldReadersOf: #counter in: InheritedParent
+    self assert: result isEmpty
+
+  testWritersDeclaredClassSlotDoesNotRaise =>
+    nav := SystemNavigation default
+    result := nav fieldWritersOf: #counter in: InheritedParent
+    self assert: result isEmpty

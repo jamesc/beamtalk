@@ -1160,6 +1160,50 @@ fn test_class_registration_generation() {
 }
 
 #[test]
+fn test_class_state_emits_class_fields_in_meta() {
+    // BT-2238: `classState:` declarations must be reflected into __beamtalk_meta/0
+    // as a `class_fields` key, alongside the instance-side `fields` key.
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: value = 0\n",
+        "  classState: total = 0\n",
+        "  classState: label = \"unset\"\n\n",
+        "  class total => self.total\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    // Instance-side fields unchanged.
+    assert!(
+        code.contains("'fields' => ['value']"),
+        "Should include instance fields in meta map. Got:\n{code}"
+    );
+    // Class-side fields emitted in declaration order.
+    assert!(
+        code.contains("'class_fields' => ['total', 'label']"),
+        "Should include class_fields (class variables) in meta map. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_no_class_state_emits_empty_class_fields() {
+    // BT-2238: a class with no `classState:` declarations emits an empty
+    // class_fields list so the runtime intrinsic always finds the key.
+    let src = concat!("Actor subclass: Counter\n", "  state: value = 0\n");
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("'class_fields' => []"),
+        "Class with no class state should emit empty class_fields. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_no_class_registration_for_empty_module() {
     // BT-218: Modules without class definitions should not have on_load or register_class
     let module = Module::new(vec![], Span::new(0, 0));

@@ -52,3 +52,21 @@ TestCase subclass: ClassStateTest
     ClassStateActor counter: 999; label: "modified"; reset
     self assert: ClassStateActor counter equals: 0
     self assert: ClassStateActor label equals: "unset"
+
+  // BT-2238: class-side field reflection — `classVarNames`/`allClassVarNames`
+  // enumerate the `classState:` slots, mirroring instance-side
+  // `fieldNames`/`allFieldNames`.
+  testClassVarNames =>
+    // Reports the class-side slots in declaration order.
+    self assert: ClassStateActor classVarNames equals: #(#counter, #label)
+
+  testAllClassVarNames =>
+    // No ancestor declares class-side state, so allClassVarNames matches the
+    // locally declared class variables.
+    self assert: ClassStateActor allClassVarNames equals: #(#counter, #label)
+
+  testDeclaredClassSlotReturnsListNotTypoError =>
+    // A declared-but-untouched class-side slot is reflectable by declaration —
+    // the foundation for strict class-side slot validation (BT-2238).
+    self assert: (ClassStateActor classVarNames includes: #counter)
+    self deny: (ClassStateActor classVarNames includes: #value)
