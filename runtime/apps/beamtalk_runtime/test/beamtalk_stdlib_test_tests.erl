@@ -314,8 +314,13 @@ suppress_output(Fun) ->
 
 sink() ->
     receive
-        stop -> ok;
-        _ -> sink()
+        stop ->
+            ok;
+        {io_request, From, ReplyAs, _Request} ->
+            From ! {io_reply, ReplyAs, ok},
+            sink();
+        _ ->
+            sink()
     end.
 
 %% Run Fun() then delete and purge the dynamically loaded Mod so it does not
