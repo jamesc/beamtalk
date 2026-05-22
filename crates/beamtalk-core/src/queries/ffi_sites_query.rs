@@ -240,7 +240,41 @@ fn selector_span(selector: &MessageSelector) -> Option<Span> {
     }
 }
 
+/// Record a call site if `module` + `selector` (+ arity) match `target`.
+///
+/// `module` is the resolved Erlang module of the receiver (`None` when the
+/// receiver is not an FFI proxy). Shared by the `MessageSend` and `Cascade`
+/// arms so both match identically.
+#[allow(clippy::too_many_arguments)]
+fn record_ffi_match(
+    module: Option<&str>,
+    selector: &MessageSelector,
+    arg_count: usize,
+    span: Span,
+    target: &FfiTarget,
+    source: &str,
+    lines: &mut Vec<u32>,
+) {
+    let Some(module) = module else { return };
+    if module != target.module {
+        return;
+    }
+    let Some(function) = erlang_function_name(selector) else {
+        return;
+    };
+    if function != target.function {
+        return;
+    }
+    let arity = erlang_arity(selector, arg_count);
+    if target.arity.is_none_or(|wanted| wanted == arity) {
+        lines.push(ffi_site_line(selector, span, source));
+    }
+}
+
 /// Recursively collect line numbers of FFI call sites matching `target`.
+// Exhaustive recursive AST walker: one arm per `Expression` variant, so the
+// length is inherent (mirrors `collect_access_lines` in the sibling queries).
+#[allow(clippy::too_many_lines)]
 fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines: &mut Vec<u32>) {
     match expr {
         Expression::MessageSend {
@@ -251,18 +285,15 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
             ..
         } => {
             // Check whether this send is itself a matching FFI call.
-            if let Some(module) = extract_erlang_module(receiver) {
-                if module == target.module {
-                    if let Some(function) = erlang_function_name(selector) {
-                        if function == target.function {
-                            let arity = erlang_arity(selector, arguments.len());
-                            if target.arity.is_none_or(|wanted| wanted == arity) {
-                                lines.push(ffi_site_line(selector, *span, source));
-                            }
-                        }
-                    }
-                }
-            }
+            record_ffi_match(
+                extract_erlang_module(receiver),
+                selector,
+                arguments.len(),
+                *span,
+                target,
+                source,
+                lines,
+            );
             // Recurse into the receiver and arguments so nested FFI calls (and
             // FFI calls inside argument expressions) are still found.
             collect_ffi_sites(receiver, target, source, lines);
@@ -273,8 +304,29 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
         Expression::Cascade {
             receiver, messages, ..
         } => {
+            // The first message is part of `receiver` (parsed as a full send),
+            // caught by recursing into it below. The remaining cascade messages
+            // are sent to the SAME receiver as the first message — i.e. that
+            // first send's own receiver (e.g. `(Erlang lists)` in
+            // `(Erlang lists) reverse: xs; sort: ys`), so resolve the shared
+            // module from there and match each cascade message against it.
             collect_ffi_sites(receiver, target, source, lines);
+            let shared_module = match unwrap_parens(receiver) {
+                Expression::MessageSend {
+                    receiver: inner, ..
+                } => extract_erlang_module(inner),
+                other => extract_erlang_module(other),
+            };
             for msg in messages {
+                record_ffi_match(
+                    shared_module,
+                    &msg.selector,
+                    msg.arguments.len(),
+                    msg.span,
+                    target,
+                    source,
+                    lines,
+                );
                 for arg in &msg.arguments {
                     collect_ffi_sites(arg, target, source, lines);
                 }
@@ -552,5 +604,27 @@ mod tests {
         let src = "rev: xs =>\n  result := (Erlang lists) reverse: xs\n  result";
         let lines = find_ffi_sites_in_source(src, "lists", "reverse", None);
         assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_ffi_in_cascade_message() {
+        // A cascade sends every message to the same Erlang module receiver, so
+        // both the first send (`reverse:`, line 3) and the cascade message
+        // (`sort:`, line 4) are FFI call sites on `lists`.
+        let src = "go: xs =>\n  (Erlang lists)\n    reverse: xs;\n    sort: xs";
+        assert_eq!(
+            find_ffi_sites_in_source(src, "lists", "reverse", None),
+            vec![3]
+        );
+        assert_eq!(
+            find_ffi_sites_in_source(src, "lists", "sort", None),
+            vec![4]
+        );
+        // Arity filtering still applies to cascade messages (`sort: xs` is arity 1).
+        assert_eq!(
+            find_ffi_sites_in_source(src, "lists", "sort", Some(1)),
+            vec![4]
+        );
+        assert!(find_ffi_sites_in_source(src, "lists", "sort", Some(2)).is_empty());
     }
 }

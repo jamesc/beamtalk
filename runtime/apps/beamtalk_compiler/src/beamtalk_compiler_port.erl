@@ -639,7 +639,8 @@ System Browser-style "who calls this Erlang function?" navigation.
 find_ffi_sites_in_source(Port, Source, Module, Function, Arity) when
     is_binary(Source),
     (is_atom(Module) orelse is_binary(Module)),
-    (is_atom(Function) orelse is_binary(Function))
+    (is_atom(Function) orelse is_binary(Function)),
+    (Arity =:= any orelse (is_integer(Arity) andalso Arity >= 0))
 ->
     ModuleBin = to_binary(Module),
     FunctionBin = to_binary(Function),
@@ -698,8 +699,9 @@ find_ffi_sites_in_source(_Port, _Source, _Module, _Function, _Arity) ->
         #{
             message =>
                 <<
-                    "find_ffi_sites_in_source: source must be a binary and "
-                    "module/function must be atoms or binaries"
+                    "find_ffi_sites_in_source: source must be a binary, "
+                    "module/function must be atoms or binaries, and arity "
+                    "must be any or a non-negative integer"
                 >>
         }
     ]}.
