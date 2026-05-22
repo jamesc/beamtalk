@@ -25,6 +25,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_references_to_in_source/3,
     find_field_readers_in_source/3,
     find_field_writers_in_source/3,
+    find_ffi_sites_in_source/5,
     close/1
 ]).
 
@@ -618,6 +619,96 @@ field_access_query(_Port, Command, _Source, _IVar, _Label) ->
         }
     ]}.
 
+-doc """
+Find Erlang FFI call sites in a single method's source (BT-2211).
+
+Sends an ETF-encoded `find_ffi_sites_in_source' request and returns
+`{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each line is
+a 1-based line number relative to `Source' where the named Erlang function
+(`Module':`Function', optionally constrained to `Arity') is invoked through the
+`Erlang' FFI bridge. `Arity' is either a non-negative integer (match only that
+argument count) or the atom `any' (match any arity).
+
+Used by `SystemNavigation ffiSitesFor:' via `beamtalk_interface' to power
+System Browser-style "who calls this Erlang function?" navigation.
+""".
+-spec find_ffi_sites_in_source(
+    port(), binary(), atom() | binary(), atom() | binary(), non_neg_integer() | any
+) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_ffi_sites_in_source(Port, Source, Module, Function, Arity) when
+    is_binary(Source),
+    (is_atom(Module) orelse is_binary(Module)),
+    (is_atom(Function) orelse is_binary(Function))
+->
+    ModuleBin = to_binary(Module),
+    FunctionBin = to_binary(Function),
+    BaseRequest = #{
+        command => find_ffi_sites_in_source,
+        source => Source,
+        module => ModuleBin,
+        function => FunctionBin
+    },
+    %% `any' means "match any arity" — omit the field entirely so the Rust side
+    %% sees it as absent. A non-negative integer constrains the match.
+    Request =
+        case Arity of
+            any -> BaseRequest;
+            N when is_integer(N), N >= 0 -> BaseRequest#{arity => N}
+        end,
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_ffi_sites_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (ffi sites)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during ffi-sites query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (ffi sites)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (ffi sites)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end;
+find_ffi_sites_in_source(_Port, _Source, _Module, _Function, _Arity) ->
+    {error, [
+        #{
+            message =>
+                <<
+                    "find_ffi_sites_in_source: source must be a binary and "
+                    "module/function must be atoms or binaries"
+                >>
+        }
+    ]}.
+
+%% Normalise an atom-or-binary identifier to a binary.
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
+to_binary(B) when is_binary(B) -> B.
+
 -doc "Close the compiler port.".
 -spec close(port()) -> true.
 close(Port) ->
@@ -778,6 +869,21 @@ handle_field_response(#{status := error, diagnostics := Diagnostics}, _Label) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_field_response(Other, Label) ->
     ?LOG_ERROR("Unexpected ~s response", [Label], #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+-doc """
+Handle ETF response from a find_ffi_sites_in_source request (BT-2211).
+Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
+""".
+-spec handle_ffi_sites_response(map()) -> {ok, [pos_integer()]} | {error, [map()]}.
+handle_ffi_sites_response(#{status := ok, lines := Lines}) when is_list(Lines) ->
+    {ok, Lines};
+handle_ffi_sites_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, normalize_diagnostics(Diagnostics)};
+handle_ffi_sites_response(Other) ->
+    ?LOG_ERROR("Unexpected ffi-sites response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, [#{message => <<"Unexpected compiler response">>}]}.

@@ -35,7 +35,8 @@ to avoid temp files on disk (BT-48).
     find_all_sends_in_source/1,
     find_references_to_in_source/2,
     find_field_readers_in_source/2,
-    find_field_writers_in_source/2
+    find_field_writers_in_source/2,
+    find_ffi_sites_in_source/4
 ]).
 
 %% gen_server callbacks
@@ -280,6 +281,32 @@ find_field_writers_in_source(Source, Field) ->
     end.
 
 -doc """
+Find Erlang FFI call sites in a single method's source (BT-2211).
+
+Backs `SystemNavigation ffiSitesFor:' — parses the method source and returns a
+list of 1-based line numbers (relative to `Source') where the named Erlang
+function (`Module':`Function', optionally constrained to `Arity') is invoked
+through the `Erlang' FFI bridge. `Arity' is a non-negative integer to constrain
+the match, or the atom `any' to match any arity. Returns `{ok, []}' if no sites
+are found; returns `{error, Diagnostics}' if the compiler port is unavailable.
+""".
+-spec find_ffi_sites_in_source(
+    binary(), atom() | binary(), atom() | binary(), non_neg_integer() | any
+) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_ffi_sites_in_source(Source, Module, Function, Arity) ->
+    try
+        gen_server:call(
+            ?MODULE, {find_ffi_sites_in_source, Source, Module, Function, Arity}, 30000
+        )
+    catch
+        exit:{noproc, _} ->
+            {error, [#{message => <<"Compiler server is not available">>}]};
+        exit:{timeout, _} ->
+            {error, [#{message => <<"Compiler server timed out">>}]}
+    end.
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -391,6 +418,11 @@ handle_call({find_field_readers_in_source, Source, Field}, _From, State) ->
 handle_call({find_field_writers_in_source, Source, Field}, _From, State) ->
     Result = beamtalk_compiler_port:find_field_writers_in_source(
         State#state.port, Source, Field
+    ),
+    {reply, Result, State};
+handle_call({find_ffi_sites_in_source, Source, Module, Function, Arity}, _From, State) ->
+    Result = beamtalk_compiler_port:find_ffi_sites_in_source(
+        State#state.port, Source, Module, Function, Arity
     ),
     {reply, Result, State};
 handle_call(version, _From, State) ->

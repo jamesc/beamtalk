@@ -49,7 +49,8 @@ dictionary or ETS state is required.
     allSendsIn/1,
     findReferencesToIn/2,
     findFieldReadersIn/2,
-    findFieldWritersIn/2
+    findFieldWritersIn/2,
+    ffiSitesIn/4
 ]).
 
 -ifdef(TEST).
@@ -421,6 +422,64 @@ find_field_access(_Source, _IVar, _Kind, Selector) ->
         >>
     ),
     beamtalk_error:raise(Err2).
+
+-doc """
+Find Erlang FFI call sites within a single method's source (BT-2211).
+
+Backs `SystemNavigation ffiSitesFor:`. Delegates to
+`beamtalk_compiler:find_ffi_sites_in_source/4`, which parses the source via the
+OTP-port compiler and walks the AST for `MessageSend` nodes that resolve through
+the `Erlang` FFI bridge to the named function.
+
+Called via
+`(Erlang beamtalk_interface) ffiSitesIn: source module: m function: f arity: a`.
+`Module` and `Function` are normalised to binaries so a Symbol from Beamtalk
+and a String both work. `Arity` is a non-negative integer to constrain the match
+to that argument count, or the atom `any` (the conventional Beamtalk encoding of
+"any arity"). Returns a list of 1-based line numbers (relative to the supplied
+source); returns `[]` if no sites are found or the source cannot be parsed.
+
+Mirrors `findSendersIn/2`: a transient port failure on one method's source is
+logged and degraded to `[]` rather than aborting the caller's whole iteration.
+""".
+-spec ffiSitesIn(binary(), atom() | binary(), atom() | binary(), non_neg_integer() | any) ->
+    [pos_integer()].
+ffiSitesIn(Source, Module, Function, Arity) when
+    is_binary(Source),
+    (is_atom(Module) orelse is_binary(Module)),
+    (is_atom(Function) orelse is_binary(Function)),
+    (Arity =:= any orelse (is_integer(Arity) andalso Arity >= 0))
+->
+    ModuleBin = to_binary(Module),
+    FunctionBin = to_binary(Function),
+    case beamtalk_compiler:find_ffi_sites_in_source(Source, ModuleBin, FunctionBin, Arity) of
+        {ok, Lines} ->
+            Lines;
+        {error, Diagnostics} ->
+            %% Degrade to [] on a per-method basis (same contract as
+            %% findSendersIn/2): a transient port failure on one method's source
+            %% must not abort the whole ffiSitesFor: walk. The log gives
+            %% systemic-failure visibility.
+            log_compiler_diagnostics(Diagnostics, 'ffiSitesIn:module:function:arity:'),
+            []
+    end;
+ffiSitesIn(_Source, _Module, _Function, _Arity) ->
+    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'ffiSitesIn:module:function:arity:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<
+            "ffiSitesIn:module:function:arity: expects a binary source, atom or "
+            "binary module and function, and a non-negative integer arity or the "
+            "atom any"
+        >>
+    ),
+    beamtalk_error:raise(Err2).
+
+%% Normalise an atom-or-binary identifier to a binary.
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
+to_binary(B) when is_binary(B) -> B.
 
 %%% ============================================================================
 %%% Internal method implementations

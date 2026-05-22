@@ -33,7 +33,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_all_sends_in_source/1,
     find_references_to_in_source/2,
     find_field_readers_in_source/2,
-    find_field_writers_in_source/2
+    find_field_writers_in_source/2,
+    find_ffi_sites_in_source/4
 ]).
 
 -doc """
@@ -243,3 +244,28 @@ Backs `SystemNavigation fieldWritersOf:in:' for System Browser-style
     {ok, [pos_integer()]} | {error, [map()]}.
 find_field_writers_in_source(Source, Field) ->
     beamtalk_compiler_server:find_field_writers_in_source(Source, Field).
+
+-doc """
+Find Erlang FFI call sites in a single method's source (BT-2211).
+
+`Source' is the source of a single compiled method (as returned by
+`CompiledMethod source'). `Module' and `Function' name the target Erlang
+function (atom or binary, without a leading `#'). `Arity' is a non-negative
+integer to constrain the match to that argument count, or the atom `any' to
+match any arity.
+
+Returns `{ok, [Line]}' on success, where each line is a 1-based line number
+within `Source' at which the named Erlang function is invoked through the
+`Erlang' FFI bridge. Returns `{ok, []}' when no sites are found or the source
+cannot be parsed. Returns `{error, Diagnostics}' if the compiler port is
+unavailable.
+
+Backs `SystemNavigation ffiSitesFor:' for System Browser-style "who calls this
+Erlang function?" navigation.
+""".
+-spec find_ffi_sites_in_source(
+    binary(), atom() | binary(), atom() | binary(), non_neg_integer() | any
+) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_ffi_sites_in_source(Source, Module, Function, Arity) ->
+    beamtalk_compiler_server:find_ffi_sites_in_source(Source, Module, Function, Arity).

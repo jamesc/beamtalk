@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2211: Stable fixture for SystemNavigation ffiSitesFor: E2E tests.
+//
+// Provides test-owned classes/methods that invoke real Erlang FFI functions so
+// the assertions do not depend on live stdlib bodies (which can churn across
+// unrelated refactors).
+//
+// Design choices (STABLE — do not rename methods or edit bodies):
+//   - `revInstance`   calls `lists:reverse/1` (instance side)         → arity 1
+//   - `seqInstance`   calls `lists:seq/2`     (different function)    → arity 2
+//   - `plainSend`     sends a plain Beamtalk message (NOT an FFI call) — must
+//                     NOT show up for any FFI spec.
+//   - class `revClassSide` calls `lists:reverse/1` on the class side, validating
+//     the metaclass (`cls class`) walk.
+
+Object subclass: FfiFixture
+
+  // Class-side FFI call: lists:reverse/1, validating the metaclass walk.
+  class revClassSide: xs => (Erlang lists) reverse: xs
+
+  // Instance-side FFI call: lists:reverse/1.
+  revInstance: xs => (Erlang lists) reverse: xs
+
+  // Instance-side FFI call: lists:seq/2 — a different function, used for the
+  // "does not match other function" assertion.
+  seqInstance => (Erlang lists) seq: 1 to: 10
+
+  // A plain Beamtalk send — NOT an FFI call. `xs reverse` must never appear in
+  // the lists:reverse FFI-site results.
+  plainSend: xs => xs reverse
