@@ -2590,7 +2590,7 @@ nav dnuHandlers
 // => [ErlangModule, ProtoObject, TimeoutProxy, ...]
 
 nav extendersOf: String
-// => [(Package named: "my_lib"), ...]
+// => [Package(my_lib v1.0.0), ...]
 
 nav extensionsBy: (Package named: "my_lib")
 // => [#{#class => String, #selector => #asJson}, ...]
