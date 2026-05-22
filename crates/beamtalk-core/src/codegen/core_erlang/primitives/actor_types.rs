@@ -35,6 +35,39 @@ pub(crate) fn generate_opaque_bif(
     }
 }
 
+/// Registry entry point for `Pid` primitives (BT-2234).
+pub(crate) fn generate_pid_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    generate_opaque_bif(
+        selector,
+        params,
+        "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
+        pid_extra,
+    )
+}
+
+/// Registry entry point for `Port` primitives (BT-2234).
+pub(crate) fn generate_port_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    generate_opaque_bif(
+        selector,
+        params,
+        "call 'beamtalk_opaque_ops':'port_to_string'(Self)",
+        no_extra,
+    )
+}
+
+/// Registry entry point for `Reference` primitives (BT-2234).
+pub(crate) fn generate_reference_bif(
+    selector: &str,
+    params: &[String],
+) -> Option<Document<'static>> {
+    generate_opaque_bif(
+        selector,
+        params,
+        "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
+        reference_extra,
+    )
+}
+
 pub(crate) fn pid_extra(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "isAlive" => Some(Document::Str("call 'erlang':'is_process_alive'(Self)")),
