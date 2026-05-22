@@ -153,6 +153,13 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
         .collect()
 }
 
+/// A field access counts only when the receiver is `self` — `other.x` /
+/// `foo.x := ...` reference a different object's field, not this class's slot,
+/// so they must not be reported (avoids false positives).
+fn is_self_receiver(receiver: &Expression) -> bool {
+    matches!(receiver, Expression::Identifier(id) if id.name == "self")
+}
+
 /// Collect a stand-alone `FieldAccess` (i.e. one that is NOT an assignment
 /// target). Outside an assignment target a `self.x` access is a read; it is
 /// never a write (writes only come from the `Assignment` arm). The receiver is
@@ -166,7 +173,7 @@ fn collect_field_access(
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    if kind == AccessKind::Read && field.name == field_name {
+    if kind == AccessKind::Read && field.name == field_name && is_self_receiver(receiver) {
         lines.push(field_access_line(field.span, span, source));
     }
     collect_access_lines(receiver, field_name, kind, source, lines);
@@ -193,7 +200,7 @@ fn collect_assignment(
         span,
     } = target
     {
-        if kind == AccessKind::Write && field.name == field_name {
+        if kind == AccessKind::Write && field.name == field_name && is_self_receiver(receiver) {
             lines.push(field_access_line(field.span, *span, source));
         }
         // Walk the target's receiver only — NOT the target field as a read.
@@ -525,5 +532,17 @@ mod tests {
         let src = "snapshot =>\n  #{#v => self.value}";
         let reads = find_field_readers_in_source(src, "value");
         assert_eq!(reads, vec![2]);
+    }
+
+    #[test]
+    fn ignores_non_self_receiver() {
+        // `other.value` / `foo.value := ...` reference a different object's
+        // field, not this class's slot, so they must not be reported. Only the
+        // `self.value` read on line 4 counts; there is no `self`-targeted write.
+        let src = "f =>\n  x := other.value\n  foo.value := 1\n  self.value";
+        let reads = find_field_readers_in_source(src, "value");
+        assert_eq!(reads, vec![4]);
+        let writes = find_field_writers_in_source(src, "value");
+        assert!(writes.is_empty());
     }
 }

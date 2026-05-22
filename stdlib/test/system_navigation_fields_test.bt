@@ -61,6 +61,12 @@ TestCase subclass: SystemNavigationFieldsTest
   // at COMPILE time, so the runtime guard is exercised via `perform:` /
   // `perform:withArguments:`, which dispatches dynamically and bypasses the
   // static check. `self error:` raises kind `#user_error`.
+  // The non-Symbol slot name (42) is rejected by the slot-name guard, which runs
+  // BEFORE the class-argument guard in `collectFieldAccessesOf:in:readers:`, so
+  // this exercises that guard. (The 2nd arg can't be a real class object: perform
+  // args must be a literal `#(...)` array, which can't hold a class reference,
+  // and a built `List` is rejected as badarg — so it stays `#Circle`. Both guards
+  // raise `#user_error`, so the kind can't disambiguate them.)
   testReadersRequiresSymbolSlotName =>
     nav := SystemNavigation default
     self should: [

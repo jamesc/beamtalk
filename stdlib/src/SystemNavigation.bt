@@ -606,45 +606,56 @@ sealed typed Object subclass: SystemNavigation
   /// not an instance-side slot of `aClass`, the slot does not exist and a typed
   /// error is raised (typo guard). A real-but-untouched slot returns `[]`.
   collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
+    selector := wantReaders ifTrue: [
+      "fieldReadersOf:in:"
+    ] ifFalse: ["fieldWritersOf:in:"]
     (aSym isKindOf: Symbol)
       ifFalse: [
-        self error: "SystemNavigation field accessor requires a Symbol naming the field"
+        self error: "SystemNavigation " ++ selector ++ " requires a Symbol naming the field."
       ]
-    self requireClassName: aClass selector: "fieldReadersOf:in:/fieldWritersOf:in:"
+    self requireClassName: aClass selector: selector
     scopes := aClass allSubclasses addFirst: aClass
-    hits := scopes
+    // Collect instance-side and class-side hits separately so the slot can be
+    // validated against `aClass` itself: an instance slot must be in
+    // `aClass allFieldNames` (inherited included) — a slot declared only on a
+    // *subclass* must NOT satisfy a query against `aClass`. Class-side slots
+    // (`classState:`) are not reflectable today (BT-2238), so a class-side hit
+    // is what attests their existence.
+    instanceHits := scopes
       inject: List new
       into: [:acc :cls |
-        // Walk both the instance side (`cls`) and the class side (`cls class`,
-        // the metaclass) so class-side fields are covered.
-        withInstance := self
+        self
           collectFieldAccessesFor: aSym
           in: cls
           readers: wantReaders
           into: acc
+      ]
+    classHits := scopes
+      inject: List new
+      into: [:acc :cls |
         self
           collectFieldAccessesFor: aSym
           in: cls class
           readers: wantReaders
-          into: withInstance
+          into: acc
       ]
-    // Slot validation: a hit proves the slot exists. With no hits, accept the
-    // slot only if it is a declared instance-side field of `aClass`
-    // (`allFieldNames` includes inherited slots); otherwise the name is a typo.
-    // Class-side slots (`classState:`) are not reflectable today, so they are
-    // accepted by the presence of a scan hit above rather than this gate.
-    hits isEmpty
-      ifTrue: [
-        (aClass allFieldNames includes: aSym)
-          ifFalse: [
+    // Validation: accept an instance slot of `aClass` (declared or inherited),
+    // or a class-side slot evidenced by a class-side hit; otherwise it is a typo
+    // (or a subclass-only slot that `aClass` does not declare) and we raise.
+    (aClass allFieldNames includes: aSym)
+      ifFalse: [
+        classHits isEmpty
+          ifTrue: [
             self
-              error: "SystemNavigation: "
+              error: "SystemNavigation "
+                ++ selector
+                ++ ": "
                 ++ aSym asString
-                ++ " is not an field declared on "
+                ++ " is not a field declared on "
                 ++ aClass name asString
           ]
       ]
-    hits
+    instanceHits ++ classHits
 
   /// Append field access records found in any method of `aScope`
   /// (a class or metaclass) to `result`. Returns the (possibly extended) list.

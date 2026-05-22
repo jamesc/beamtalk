@@ -644,7 +644,8 @@ SystemNavigation default fieldWritersOf: #untouched in: FieldFixture
 
 // Passing a non-Symbol slot name raises. Dispatch dynamically via perform: so
 // the typed `:: Symbol` parameter does not reject the bad argument at compile
-// time.
+// time. (perform args must be a literal #(...) array, which can't hold a class
+// reference, so the scope stays #FieldFixture; the slot-name guard runs first.)
 [SystemNavigation default perform: #fieldReadersOf:in: withArguments: #(42, #FieldFixture)] on: Error do: [:e | #ok]
 // => ok
 
