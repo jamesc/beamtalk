@@ -30,7 +30,8 @@ Uses OTP `json` module (OTP 27+) for encoding/decoding.
     term_to_json/1,
     format_error_message/1,
     parse_json/1,
-    encode_reloaded/4, encode_reloaded/5
+    encode_reloaded/4, encode_reloaded/5,
+    encode_error/2, encode_error/4, encode_error/5
 ]).
 
 %%% JSON Parsing
@@ -243,6 +244,28 @@ encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
 -spec maybe_add_warnings_reloaded(map(), [binary()]) -> map().
 maybe_add_warnings_reloaded(Map, []) -> Map;
 maybe_add_warnings_reloaded(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
+
+-doc "Encode an error response using the REPL error formatter.".
+-spec encode_error(term(), beamtalk_repl_protocol:protocol_msg()) -> binary().
+encode_error(Err, Msg) ->
+    beamtalk_repl_protocol:encode_error(Err, Msg, fun format_error_message/1).
+
+-doc "Encode an error response with captured stdout and warnings using the REPL error formatter.".
+-spec encode_error(term(), beamtalk_repl_protocol:protocol_msg(), binary(), [binary()]) -> binary().
+encode_error(Err, Msg, Output, Warnings) ->
+    beamtalk_repl_protocol:encode_error(Err, Msg, fun format_error_message/1, Output, Warnings).
+
+-doc """
+Encode an error response with captured stdout, warnings, and extra metadata fields
+using the REPL error formatter.
+""".
+-spec encode_error(
+    term(), beamtalk_repl_protocol:protocol_msg(), binary(), [binary()], map()
+) -> binary().
+encode_error(Err, Msg, Output, Warnings, Metadata) ->
+    beamtalk_repl_protocol:encode_error(
+        Err, Msg, fun format_error_message/1, Output, Warnings, Metadata
+    ).
 
 %%% Term-to-JSON Conversion
 

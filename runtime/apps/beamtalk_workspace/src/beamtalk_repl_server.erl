@@ -381,9 +381,7 @@ handle_protocol_request(Msg, SessionPid) ->
                 domain => [beamtalk, runtime]
             }),
             WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason, Class),
-            beamtalk_repl_protocol:encode_error(
-                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
-            )
+            beamtalk_repl_json:encode_error(WrappedReason, Msg)
     end.
 
 -doc """
@@ -451,9 +449,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
         Err0,
         iolist_to_binary([<<"Unknown operation: ">>, Op])
     ),
-    beamtalk_repl_protocol:encode_error(
-        Err1, Msg, fun beamtalk_repl_json:format_error_message/1
-    ).
+    beamtalk_repl_json:encode_error(Err1, Msg).
 
 %%% Protocol Parsing and Formatting
 

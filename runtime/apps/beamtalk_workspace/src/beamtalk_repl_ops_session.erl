@@ -52,9 +52,7 @@ handle(<<"clone">>, _Params, Msg, _SessionPid) ->
                     io_lib:format("~p", [Reason])
                 ])
             ),
-            beamtalk_repl_protocol:encode_error(
-                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
-            )
+            beamtalk_repl_json:encode_error(Err1, Msg)
     end;
 handle(<<"close">>, _Params, Msg, _SessionPid) ->
     beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1);
@@ -96,9 +94,5 @@ handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
             Err2 = beamtalk_error:with_hint(
                 Err1, <<"Provide the correct node cookie for shutdown.">>
             ),
-            beamtalk_repl_protocol:encode_error(
-                Err2,
-                Msg,
-                fun beamtalk_repl_json:format_error_message/1
-            )
+            beamtalk_repl_json:encode_error(Err2, Msg)
     end.
