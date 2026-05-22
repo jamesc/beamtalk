@@ -360,6 +360,35 @@ class_field_names_with_fields_test_() ->
     end}.
 
 %%% ============================================================================
+%%% classClassVarNames/1 and classAllClassVarNames/1 (BT-2238)
+%%% ============================================================================
+
+%% Dynamic (ClassBuilder) classes carry no static __beamtalk_meta/0, so the
+%% class-side field intrinsics return [] rather than crashing. The meta-reading
+%% path (real class_fields) is covered by the BUnit suite against compiled
+%% fixtures (stdlib/test/class_state_test.bt).
+class_var_names_no_meta_returns_empty_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT2238ClassVarsNoMeta', #{x => 0}, #{}),
+                try
+                    Local = beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj),
+                    All = beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj),
+                    ?assertEqual([], Local),
+                    ?assertEqual([], All)
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
 %%% classIncludesSelector/2
 %%% ============================================================================
 

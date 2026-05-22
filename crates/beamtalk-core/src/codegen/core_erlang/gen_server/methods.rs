@@ -2465,6 +2465,7 @@ impl CoreErlangGenerator {
     ///     ~{'class' => 'Counter',
     ///       'superclass' => 'Actor',
     ///       'fields' => ['value'],
+    ///       'class_fields' => ['total'],
     ///       'methods' => [{'increment', 0}, {'decrement', 0}, {'getValue', 0}],
     ///       'class_methods' => [{'new', 0}]
     ///     }~
@@ -2556,6 +2557,17 @@ impl CoreErlangGenerator {
 
         let fields_doc = Self::meta_atom_list(&fields);
 
+        // BT-2238: Build class-side field list from `classState:` declarations so
+        // class-side slots are reflectable (`Metaclass>>fieldNames`). The instance
+        // `fields` key above carries instance state only.
+        let class_fields: Vec<String> = class
+            .class_variables
+            .iter()
+            .map(|s| s.name.name.to_string())
+            .collect();
+
+        let class_fields_doc = Self::meta_atom_list(&class_fields);
+
         // Boolean flags
         let is_sealed_doc = Self::meta_bool(class.is_sealed);
         let is_abstract_doc = Self::meta_bool(class.is_abstract);
@@ -2628,6 +2640,8 @@ impl CoreErlangGenerator {
             kind_doc,
             ",\n      'fields' => ",
             fields_doc,
+            ",\n      'class_fields' => ",
+            class_fields_doc,
             ",\n      'is_sealed' => ",
             is_sealed_doc,
             ",\n      'is_abstract' => ",

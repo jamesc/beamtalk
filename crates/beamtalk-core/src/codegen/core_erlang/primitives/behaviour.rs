@@ -36,6 +36,12 @@ const BEHAVIOUR_ZERO_ARG: &[&str] = &[
     // BT-2232 `className` bug (silent runtime-dispatch fallback otherwise).
     "classFieldNames",
     "classAllFieldNames",
+    // BT-2238: class-side field (class variable) reflection — the class-side
+    // counterparts to classFieldNames/classAllFieldNames. Distinct selectors
+    // (not `fieldNames`) because `fieldNames` is a call-site-intercepted
+    // reflective selector that never reaches the Behaviour method table.
+    "classClassVarNames",
+    "classAllClassVarNames",
     "classRemoveFromSystem",
     "classSourceFile",
     "classReload",
@@ -197,6 +203,26 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classAllFieldNames'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_class_var_names() {
+        // BT-2238: `classVarNames` lowers via this Behaviour intrinsic.
+        let result = doc_to_string(generate_behaviour_bif("classClassVarNames", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classClassVarNames'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_all_class_var_names() {
+        // BT-2238: `allClassVarNames` lowers via this Behaviour intrinsic.
+        let result = doc_to_string(generate_behaviour_bif("classAllClassVarNames", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classAllClassVarNames'(Self)".to_string())
         );
     }
 
