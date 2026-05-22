@@ -1,0 +1,146 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2208: BUnit-level coverage for `SystemNavigation fieldReadersOf:in:` and
+// `fieldWritersOf:in:` — find the methods that read or write a named instance
+// variable. Backs System Browser-style navigation ("who reads/writes this
+// slot?").
+//
+// Both are instance methods on `SystemNavigation`, reached via the `default`
+// (or future scoped) constructor. As with `beamtalk_senders_test.bt` and
+// `system_navigation_references_test.bt`, the behavioural happy-path checks
+// (does the scan actually find reads and writes, with the right #class /
+// #selector / #line shape?) live in the E2E REPL-protocol suite
+// (tests/repl-protocol/cases/workspace_native_api.btscript) because the
+// compiler-port process that parses each method's source is NOT running under
+// BUnit — the per-method FFI returns `[]` here regardless of source contents.
+//
+// What IS testable under BUnit (no port needed):
+//   - selector + helper existence and composition primitives
+//   - argument type validation (Symbol slot name; class object scope)
+//   - slot validation: a declared instance slot returns `[]` (no error) while
+//     an undeclared slot name raises (typo guard) — both decided by
+//     `allFieldNames`, not the port
+//
+// Fixtures reused (auto-loaded): `Circle` (instance `state: radius`),
+// `InheritedParent` (instance `field: x`, class-side `classState: counter`),
+// and `InheritedChild` (subclass of InheritedParent).
+
+TestCase subclass: SystemNavigationFieldsTest
+
+  // --- selector existence ---
+  testIncludesSelectorFieldReadersOf =>
+    self assert: (SystemNavigation includesSelector: #fieldReadersOf:in:)
+
+  testIncludesSelectorFieldWritersOf =>
+    self assert: (SystemNavigation includesSelector: #fieldWritersOf:in:)
+
+  // --- composition primitives must be in place ---
+  //
+  // The implementation walks `aClass allSubclasses`, fetches each method via
+  // `>>`, reads its source, and asks the compiler to find matching field access
+  // lines. It also validates the slot via `allFieldNames`. All of those
+  // primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (Behaviour includesSelector: #allSubclasses)
+    self assert: (Behaviour includesSelector: #allFieldNames)
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // The shared driver + per-class / per-method helpers are defined so they can
+  // be unit-checked separately.
+  testHelpersDefined =>
+    self assert: (SystemNavigation includesSelector: #collectFieldAccessesOf:in:readers:)
+    self assert: (SystemNavigation includesSelector: #collectFieldAccessesFor:in:readers:into:)
+    self assert: (SystemNavigation includesSelector: #appendFieldAccessesIn:field:owner:methodSelector:readers:into:)
+
+  // --- argument type validation ---
+  //
+  // `aSym` must be a Symbol. A typed `:: Symbol` parameter rejects a non-Symbol
+  // at COMPILE time, so the runtime guard is exercised via `perform:` /
+  // `perform:withArguments:`, which dispatches dynamically and bypasses the
+  // static check. `self error:` raises kind `#user_error`.
+  // The non-Symbol slot name (42) is rejected by the slot-name guard, which runs
+  // BEFORE the class-argument guard in `collectFieldAccessesOf:in:readers:`, so
+  // this exercises that guard. (The 2nd arg can't be a real class object: perform
+  // args must be a literal `#(...)` array, which can't hold a class reference,
+  // and a built `List` is rejected as badarg — so it stays `#Circle`. Both guards
+  // raise `#user_error`, so the kind can't disambiguate them.)
+  testReadersRequiresSymbolSlotName =>
+    nav := SystemNavigation default
+    self should: [
+      nav perform: #fieldReadersOf:in: withArguments: #(42, #Circle)
+    ] raise: #user_error
+
+  testWritersRequiresSymbolSlotName =>
+    nav := SystemNavigation default
+    self should: [
+      nav perform: #fieldWritersOf:in: withArguments: #(42, #Circle)
+    ] raise: #user_error
+
+  // `aClass` must be a class object. Passing a Symbol (the most common
+  // mistake, since the slot name IS a Symbol) raises via the shared
+  // `requireClassName:selector:` guard. A typed `:: Behaviour` parameter
+  // rejects a Symbol at compile time, so dispatch dynamically via `perform:`.
+  testReadersRejectsSymbolScope =>
+    nav := SystemNavigation default
+    self should: [
+      nav perform: #fieldReadersOf:in: withArguments: #(#radius, #Circle)
+    ] raise: #user_error
+
+  testWritersRejectsSymbolScope =>
+    nav := SystemNavigation default
+    self should: [
+      nav perform: #fieldWritersOf:in: withArguments: #(#radius, #Circle)
+    ] raise: #user_error
+
+  // --- slot validation (decided by allFieldNames, not the compiler port) ---
+  //
+  // A name that is not a declared instance slot of the class — and that the
+  // (port-disabled) scan does not find — must raise so a typo surfaces rather
+  // than silently returning `[]`. `Circle` declares `radius`, so `#notASlot`
+  // is a typo.
+  testReadersRaisesOnUnknownSlot =>
+    nav := SystemNavigation default
+    self should: [nav fieldReadersOf: #notASlot in: Circle] raise: #user_error
+
+  testWritersRaisesOnUnknownSlot =>
+    nav := SystemNavigation default
+    self should: [nav fieldWritersOf: #notASlot in: Circle] raise: #user_error
+
+  // A declared instance slot returns a List (empty under BUnit since the port
+  // is off) WITHOUT raising — the validation gate must accept a real slot. This
+  // confirms the "declared-but-untouched slot returns []" contract on the path
+  // that does not need the compiler port.
+  testReadersDeclaredSlotDoesNotRaise =>
+    nav := SystemNavigation default
+    result := nav fieldReadersOf: #radius in: Circle
+    self assert: result isEmpty
+
+  testWritersDeclaredSlotDoesNotRaise =>
+    nav := SystemNavigation default
+    result := nav fieldWritersOf: #radius in: Circle
+    self assert: result isEmpty
+
+  // The slot validation reads `allFieldNames`, which includes INHERITED slots.
+  // `InheritedChild` inherits `field: x` from `InheritedParent`, so a query
+  // scoped to the parent for `#x` must validate (not raise) and return a List.
+  testInheritedSlotValidatesAgainstAllFieldNames =>
+    self assert: (InheritedParent allFieldNames includes: #x)
+    nav := SystemNavigation default
+    result := nav fieldReadersOf: #x in: InheritedParent
+    self assert: result isEmpty
+
+  // --- class-side scope primitives (BT-2208) ---
+  //
+  // The walker also scans `cls class` (the metaclass) so class-side instance
+  // variables (`classState:`) are covered. Behavioural assertions live in the
+  // E2E suite; here we only confirm the metaclass scope responds to the
+  // iteration primitives the walker relies on.
+  testMetaclassScopePrimitivesPresent =>
+    self assert: ((InheritedParent class) respondsTo: #'>>')
+    self assert: ((InheritedParent class) methods includes: #counter)
+    cm := (InheritedParent class) >> #counter
+    self deny: cm isNil
+    self deny: cm source isEmpty

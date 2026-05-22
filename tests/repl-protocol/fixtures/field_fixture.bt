@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2208: Stable base fixture for SystemNavigation fieldReadersOf:in: /
+// fieldWritersOf:in: E2E tests.
+//
+// Provides test-owned classes/slots so the assertions do not depend on live
+// stdlib content (which can churn across unrelated refactors).
+//
+// Design choices (STABLE — do not rename slots/methods or edit bodies):
+//   - `state: tally` is the instance slot under test:
+//       * `readTally`  reads it (read only)
+//       * `bumpTally`  reads AND writes it in one method (`self.tally := self.tally + 1`)
+//       * `clearTally` writes it only (`self.tally := 0`)
+//   - `state: untouched` is declared but never read or written — validates the
+//     "declared-but-untouched slot returns []" contract.
+//   - `classState: spawnCount` is a class-side field, touched only
+//     by class-side methods — validates the metaclass walk:
+//       * class `bumpSpawnCount` reads AND writes it
+//       * class `readSpawnCount` reads it only
+// `FieldChild` (field_fixture_child.bt) subclasses this and touches the
+// inherited `tally` slot, validating the allSubclasses walk.
+
+Actor subclass: FieldFixture
+  state: tally = 0
+  state: untouched = 0
+  classState: spawnCount = 0
+
+  // Class-side: reads AND writes the class-side field `spawnCount`.
+  class bumpSpawnCount =>
+    self.spawnCount := self.spawnCount + 1
+    self.spawnCount
+
+  // Class-side: reads the class-side field `spawnCount` only.
+  class readSpawnCount => self.spawnCount
+
+  // Reads `tally` only.
+  readTally => self.tally
+
+  // Reads AND writes `tally` in one method.
+  bumpTally => self.tally := self.tally + 1
+
+  // Writes `tally` only (RHS is a literal).
+  clearTally => self.tally := 0

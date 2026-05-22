@@ -23,6 +23,8 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_senders_in_source/3,
     find_all_sends_in_source/2,
     find_references_to_in_source/3,
+    find_field_readers_in_source/3,
+    find_field_writers_in_source/3,
     close/1
 ]).
 
@@ -514,6 +516,108 @@ find_references_to_in_source(_Port, _Source, _ClassName) ->
         }
     ]}.
 
+-doc """
+Find reads of an field in a single method's source (BT-2208).
+
+Sends an ETF-encoded `find_field_readers_in_source' request and returns
+`{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each line is
+a 1-based line number relative to `Source' where the named slot is read
+(`self.x' outside an assignment target).
+
+Used by `SystemNavigation fieldReadersOf:in:' via `beamtalk_interface' to
+power System Browser-style "which methods read this slot?" navigation.
+""".
+-spec find_field_readers_in_source(port(), binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_field_readers_in_source(Port, Source, Field) ->
+    field_access_query(Port, find_field_readers_in_source, Source, Field, <<"field readers">>).
+
+-doc """
+Find writes of an field in a single method's source (BT-2208).
+
+Sends an ETF-encoded `find_field_writers_in_source' request and returns
+`{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each line is
+a 1-based line number relative to `Source' where the named slot is written
+(`self.x := ...', the assignment target).
+
+Used by `SystemNavigation fieldWritersOf:in:' via `beamtalk_interface' to
+power System Browser-style "which methods write this slot?" navigation.
+""".
+-spec find_field_writers_in_source(port(), binary(), atom() | binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+find_field_writers_in_source(Port, Source, Field) ->
+    field_access_query(Port, find_field_writers_in_source, Source, Field, <<"field writers">>).
+
+-doc """
+Shared driver for the field reader/writer queries (BT-2208).
+
+Both queries take a `Source' binary and an field name and return a
+list of 1-based line numbers, so they share the request/response plumbing.
+`Command' selects the port command atom; `Label' is used only in log messages.
+""".
+-spec field_access_query(port(), atom(), binary(), atom() | binary(), binary()) ->
+    {ok, [pos_integer()]} | {error, [map()]}.
+field_access_query(Port, Command, Source, Field, Label) when
+    is_atom(Field) orelse is_binary(Field)
+->
+    IVarBin =
+        case Field of
+            A when is_atom(A) -> atom_to_binary(A, utf8);
+            B when is_binary(B) -> B
+        end,
+    Request = #{
+        command => Command,
+        source => Source,
+        field => IVarBin
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_field_response(Response, Label)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (~s)", [Label], #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during ~s query", [Label], #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (~s)", [Label], #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (~s)", [Label], #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end;
+field_access_query(_Port, Command, _Source, _IVar, _Label) ->
+    {error, [
+        #{
+            message =>
+                iolist_to_binary([
+                    atom_to_binary(Command, utf8),
+                    <<": field name must be an atom or binary">>
+                ])
+        }
+    ]}.
+
 -doc "Close the compiler port.".
 -spec close(port()) -> true.
 close(Port) ->
@@ -658,6 +762,22 @@ handle_references_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_references_response(Other) ->
     ?LOG_ERROR("Unexpected references response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+-doc """
+Handle ETF response from a find_field_readers/writers_in_source request
+(BT-2208). Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on
+failure. `Label' is used only to disambiguate the unexpected-response log line.
+""".
+-spec handle_field_response(map(), binary()) -> {ok, [pos_integer()]} | {error, [map()]}.
+handle_field_response(#{status := ok, lines := Lines}, _Label) when is_list(Lines) ->
+    {ok, Lines};
+handle_field_response(#{status := error, diagnostics := Diagnostics}, _Label) ->
+    {error, normalize_diagnostics(Diagnostics)};
+handle_field_response(Other, Label) ->
+    ?LOG_ERROR("Unexpected ~s response", [Label], #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
