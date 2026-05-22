@@ -232,6 +232,26 @@ abstract Object subclass: Behaviour
   /// ```
   sealed allFieldNames -> List(Symbol) => @primitive "classAllFieldNames"
 
+  /// Return the class-side field (class variable) names declared in this class.
+  ///
+  /// These are the slots declared with `classState:` (the class-side counterpart
+  /// to instance-side `fieldNames`). A distinct selector is required because
+  /// `fieldNames` is a call-site-intercepted instance-reflection operation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// TranscriptStream classVarNames   // => [current]
+  /// ```
+  sealed classVarNames -> List(Symbol) => @primitive "classClassVarNames"
+
+  /// Return all class-side field names including inherited, in slot order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// TranscriptStream allClassVarNames   // => [current]
+  /// ```
+  sealed allClassVarNames -> List(Symbol) => @primitive "classAllClassVarNames"
+
   // --- Documentation (ADR 0033) ---
 
   /// Return the class documentation string, or nil if none set.
