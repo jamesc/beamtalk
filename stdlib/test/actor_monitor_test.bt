@@ -4,33 +4,31 @@
 // BT-1442: Tests for Actor monitor/pid/onExit: process monitoring API
 
 TestCase subclass: ActorMonitorTest
+  field: counter = nil
+
+  setUp => self withCounter: Counter spawn
+
+  tearDown => self.counter isNil ifFalse: [self.counter isAlive ifTrue: [self.counter stop]]
 
   testPidReturnsAPid =>
-    counter := Counter spawn
-    rawPid := counter pid
+    rawPid := self.counter pid
     self assert: rawPid class equals: Pid
     self assert: rawPid isAlive
-    counter stop
 
   testMonitorReturnsReference =>
-    counter := Counter spawn
-    ref := counter monitor
+    ref := self.counter monitor
     self assert: ref class equals: Reference
     ref demonitor
-    counter stop
 
   testDemonitorCancelsMonitor =>
-    counter := Counter spawn
-    ref := counter monitor
+    ref := self.counter monitor
     result := ref demonitor
     self assert: result
-    counter stop
 
   testOnExitCallsBlockOnActorDeath =>
-    counter := Counter spawn
     exitCounter := AtomicCounter new: #actorMonitorTestExit
-    counter onExit: [:_reason | exitCounter increment]
-    counter stop
+    self.counter onExit: [:_reason | exitCounter increment]
+    self.counter stop
     // Poll with bounded wait instead of fixed sleep (avoids timing flakiness)
     50 timesRepeat: [exitCounter value < 1 ifTrue: [Timer sleep: 10]]
     self assert: exitCounter value equals: 1
@@ -38,27 +36,22 @@ TestCase subclass: ActorMonitorTest
 
   testMultipleOnExitCallbacks =>
     // Multiple onExit: callbacks can be registered on the same actor
-    counter := Counter spawn
     exitCounter := AtomicCounter new: #actorMonitorTestMulti
-    counter onExit: [:_reason | exitCounter increment]
-    counter onExit: [:_reason | exitCounter increment]
-    counter stop
+    self.counter onExit: [:_reason | exitCounter increment]
+    self.counter onExit: [:_reason | exitCounter increment]
+    self.counter stop
     // Poll with bounded wait instead of fixed sleep
     50 timesRepeat: [exitCounter value < 2 ifTrue: [Timer sleep: 10]]
     self assert: exitCounter value equals: 2
     exitCounter delete
 
   testRespondsToMonitorMethods =>
-    counter := Counter spawn
-    self assert: (counter respondsTo: #pid)
-    self assert: (counter respondsTo: #monitor)
-    self assert: (counter respondsTo: #onExit:)
-    counter stop
+    self assert: (self.counter respondsTo: #pid)
+    self assert: (self.counter respondsTo: #monitor)
+    self assert: (self.counter respondsTo: #onExit:)
 
   testErlangMonitorWithActorProxy =>
     // Direct Erlang FFI monitor should work with actor proxy (auto-coercion)
-    counter := Counter spawn
-    ref := Erlang erlang monitor: #process arg: counter
+    ref := Erlang erlang monitor: #process arg: self.counter
     self assert: ref class equals: Reference
     Erlang erlang demonitor: ref
-    counter stop
