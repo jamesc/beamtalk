@@ -23,9 +23,7 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
             Err = beamtalk_error:new(empty_expression, 'REPL'),
             Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
             Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
-            beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
+            beamtalk_repl_json:encode_error(Err2, Msg);
         _ when Trace ->
             case beamtalk_repl_shell:eval_trace(SessionPid, Code) of
                 {ok, Steps, Output, Warnings} ->
@@ -34,13 +32,7 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
                     );
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
-                    beamtalk_repl_protocol:encode_error(
-                        WrappedReason,
-                        Msg,
-                        fun beamtalk_repl_json:format_error_message/1,
-                        Output,
-                        Warnings
-                    )
+                    beamtalk_repl_json:encode_error(WrappedReason, Msg, Output, Warnings)
             end;
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
@@ -50,13 +42,7 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
                     );
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
-                    beamtalk_repl_protocol:encode_error(
-                        WrappedReason,
-                        Msg,
-                        fun beamtalk_repl_json:format_error_message/1,
-                        Output,
-                        Warnings
-                    )
+                    beamtalk_repl_json:encode_error(WrappedReason, Msg, Output, Warnings)
             end
     end;
 handle(<<"clear">>, _Params, Msg, SessionPid) ->
