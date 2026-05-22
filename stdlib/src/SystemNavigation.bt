@@ -602,9 +602,10 @@ sealed typed Object subclass: SystemNavigation
   /// `wantReaders` selects which access kind to collect (reads when `true`,
   /// writes when `false`). Validates the arguments, builds the scope (`aClass`
   /// + `aClass allSubclasses`), walks each scope on both the instance and class
-  /// sides, then applies slot validation: if no hits were found and `aSym` is
-  /// not an instance-side slot of `aClass`, the slot does not exist and a typed
-  /// error is raised (typo guard). A real-but-untouched slot returns `[]`.
+  /// sides, then applies slot validation: `aSym` must be a declared slot of
+  /// `aClass` — instance-side (`allFieldNames`) or class-side
+  /// (`allClassVarNames`, BT-2238), inherited included. An undeclared name
+  /// raises a typed error (typo guard); a real-but-untouched slot returns `[]`.
   collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
     selector := wantReaders ifTrue: [
       "fieldReadersOf:in:"
@@ -615,12 +616,12 @@ sealed typed Object subclass: SystemNavigation
       ]
     self requireClassName: aClass selector: selector
     scopes := aClass allSubclasses addFirst: aClass
-    // Collect instance-side and class-side hits separately so the slot can be
-    // validated against `aClass` itself: an instance slot must be in
-    // `aClass allFieldNames` (inherited included) — a slot declared only on a
-    // *subclass* must NOT satisfy a query against `aClass`. Class-side slots
-    // (`classState:`) are not reflectable today (BT-2238), so a class-side hit
-    // is what attests their existence.
+    // Collect instance-side and class-side hits separately. Validation is
+    // declaration-based against `aClass` itself: an instance slot must be in
+    // `aClass allFieldNames`, a class-side slot in `aClass allClassVarNames`
+    // (both inherited-included) — a slot declared only on a *subclass* must NOT
+    // satisfy a query against `aClass`. (BT-2238 made class-side slots
+    // reflectable; earlier this leaned on a class-side scan hit.)
     instanceHits := scopes
       inject: List new
       into: [:acc :cls |
@@ -639,21 +640,23 @@ sealed typed Object subclass: SystemNavigation
           readers: wantReaders
           into: acc
       ]
-    // Validation: accept an instance slot of `aClass` (declared or inherited),
-    // or a class-side slot evidenced by a class-side hit; otherwise it is a typo
-    // (or a subclass-only slot that `aClass` does not declare) and we raise.
-    (aClass allFieldNames includes: aSym)
+    // Validation: accept an instance slot of `aClass` (declared or inherited,
+    // via `allFieldNames`) or a class-side slot (declared or inherited, via
+    // `allClassVarNames`, BT-2238). Otherwise it is a typo (or a subclass-only
+    // slot that `aClass` does not declare) and we raise. Declaration-based on
+    // both sides — no longer dependent on a class-side scan hit, so an
+    // untouched-but-declared class-side slot returns `[]` instead of raising.
+    ((aClass allFieldNames includes: aSym) or: [
+      aClass allClassVarNames includes: aSym
+    ])
       ifFalse: [
-        classHits isEmpty
-          ifTrue: [
-            self
-              error: "SystemNavigation "
-                ++ selector
-                ++ " "
-                ++ aSym asString
-                ++ " is not a field declared on "
-                ++ aClass name asString
-          ]
+        self
+          error: "SystemNavigation "
+            ++ selector
+            ++ " "
+            ++ aSym asString
+            ++ " is not a field declared on "
+            ++ aClass name asString
       ]
     instanceHits ++ classHits
 
