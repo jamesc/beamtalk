@@ -17,6 +17,11 @@
 - **`SystemNavigation unimplementedSelectors`** — returns selectors that are *sent* somewhere in the loaded registry but *defined* nowhere — a typo-finder lint. Each result is a `#{#selector, #sites}` record where each site has `#{#class, #selector, #line}` for IDE jump-to-source. Excludes Erlang FFI sends, `doesNotUnderstand:args:` DNU dispatchers, and parse-recovery phantoms to minimize false positives (BT-2206).
 - **`SystemNavigation unusedSelectors`** — returns selectors *defined* on some class but *sent* nowhere — dead-method candidates. Each result is a `#{#class, #selector}` record (class object for instance-side, metaclass for class-side). Conservatively excludes runtime-called overrides (`initialize`, `printString`, `hash`, etc.), TestCase lifecycle methods (`setUp`/`tearDown`/`test*`), and `@primitive`/`@intrinsic` methods (BT-2207).
 - **`Behaviour >> superclassChain`** — returns the chain from self up to and including `Object` as a list. Self is at the head; `Object` is at the tail. For metaclass receivers, walks the parallel metaclass hierarchy: `Counter class superclassChain` returns `[Counter class, Actor class, Object class]` (BT-2189).
+- **`Behaviour >> name` promoted from `Class`** — `name` now lives on `Behaviour` (the abstract superclass of `Class` and `Metaclass`) so registry walks holding the `Behaviour` type can read it without `@expect dnu`. `Metaclass >> name` now returns a `Symbol` (e.g. `#'Integer class'`) instead of a `String`, matching `Class >> name` (BT-2232).
+- **`SystemNavigation actorClasses`** — returns every class whose superclass chain includes `Actor`, sorted alphabetically. Includes `Actor` itself; returns `[]` if `Actor` is not loaded (BT-2209).
+- **`SystemNavigation dnuHandlers`** — returns every class that locally overrides `doesNotUnderstand:args:` (the DNU handler), sorted alphabetically. Useful for identifying proxy/builder/DSL classes that absorb arbitrary sends (BT-2210).
+- **`SystemNavigation extendersOf:`** / **`extensionsBy:`** — reverse extension-method navigation. `extendersOf: aClass` returns the packages contributing extension methods to `aClass`; `extensionsBy: aPackage` returns `#{#class, #selector}` records for each extension method a package contributes (BT-2212).
+- **`SystemNavigation selectorsMatching:` performance** — accumulator changed from O(n²) left-append to O(n) right-append. No behavior change (BT-2218).
 
 ### Runtime
 
@@ -29,6 +34,7 @@
 - Fix `findClass:` not resolving metaclass display tags — `findClass: #'Integer class'` now returns the metaclass object instead of `nil`, so stdlib code no longer needs string surgery to resolve metaclass names (BT-2223).
 - Consolidate three hot class-metadata ETS tables (`beamtalk_class_module_table`, `beamtalk_class_methods_table`, `beamtalk_class_hierarchy_table`) into a single `beamtalk_class_metadata` table with typed field accessors. One atomic insert/delete per class instead of three; `inherits_from/2` reads via `ets:lookup_element/4` for ~10–14% speedup on the per-exception-match hot path (BT-2222).
 - **`beamtalk_extensions:extenders_of/1`** and **`extensions_by/1`** — reverse-index queries for extension methods. `extenders_of(ClassName)` returns unique owner atoms contributing extensions to a target class; `extensions_by(OwnerName)` returns `{TargetClass, Selector}` tuples for every extension an owner contributes (BT-2202).
+- Compiler-port diagnostics in `findSendersIn`/`findReferencesToIn` now logged via OTP logger instead of silently discarded — port-unavailability escalates to `?LOG_ERROR`, parse errors use `?LOG_WARNING`, all with `domain => [beamtalk, stdlib]` metadata (BT-2219).
 
 ### Tooling
 
@@ -61,6 +67,8 @@
 - Replace `format!()` violations with `Document`/`docvec!` API in `value_type_codegen.rs` module header — continues the BT-875 cleanup (BT-2181).
 - Resolve type references into preloaded modules — `resolve_remote_type` for `:erlang` and other preloaded modules now reads type specs from the BEAM binary via `code:get_object_code/1` instead of returning `Dynamic` (BT-2185).
 - Remove three duplicate Erlang string escape implementations in beamtalk-cli — consolidated onto `escape_for_erlang_string` from `erlang_eval.rs` (BT-2224).
+- Unmapped quoted `@primitive` in stdlib value-type codegen now fails the build with a clear error naming class + selector, instead of silently falling back to runtime dispatch (BT-2233).
+- Shared `beamtalk_error:raise_type_error/3` extracted from five stdlib modules — zero behavior change (BT-2229).
 
 ## 0.4.0 — 2026-04-27
 

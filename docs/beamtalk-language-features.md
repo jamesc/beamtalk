@@ -2541,6 +2541,10 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `allClasses` | `List(Behaviour)` | All registered classes (class objects) |
+| `actorClasses` | `List(Behaviour)` | Classes whose superclass chain includes `Actor`, sorted alphabetically |
+| `dnuHandlers` | `List(Behaviour)` | Classes that locally override `doesNotUnderstand:args:`, sorted alphabetically |
+| `extendersOf: aClass` | `List(Package)` | Packages contributing extension methods to `aClass` |
+| `extensionsBy: aPackage` | `List(Dictionary)` | `#{#class, #selector}` for each extension method `aPackage` contributes |
 | `implementorsOf: #sel` | `List(Behaviour)` | Classes that define the given selector |
 | `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
 | `referencesTo: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that references the class name |
@@ -2578,6 +2582,18 @@ nav unimplementedSelectors
 
 nav unusedSelectors
 // => [#{#class => MyLib, #selector => #helperNoOneCalls}, ...]
+
+nav actorClasses
+// => [Actor, ClassBuilder, MyActor, ...]
+
+nav dnuHandlers
+// => [ErlangModule, ProtoObject, TimeoutProxy, ...]
+
+nav extendersOf: String
+// => [Package(my_lib v1.0.0), ...]
+
+nav extensionsBy: (Package named: "my_lib")
+// => [#{#class => String, #selector => #asJson}, ...]
 ```
 
 ### REPL shortcuts (`:` commands) are thin wrappers
