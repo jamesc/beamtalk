@@ -2558,8 +2558,9 @@ impl CoreErlangGenerator {
         let fields_doc = Self::meta_atom_list(&fields);
 
         // BT-2238: Build class-side field list from `classState:` declarations so
-        // class-side slots are reflectable (`Metaclass>>fieldNames`). The instance
-        // `fields` key above carries instance state only.
+        // class-side slots are reflectable (`Behaviour>>classVarNames` /
+        // `allClassVarNames`). The instance `fields` key above carries instance
+        // state only.
         let class_fields: Vec<String> = class
             .class_variables
             .iter()
