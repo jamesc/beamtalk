@@ -1005,3 +1005,147 @@ unusedSelectors includes: #dynamicOnly
 // ordinary unsent methods, not just contrived ones.
 unusedSelectors includes: #caller
 // => true
+
+// ===========================================================================
+// SYSTEMNAVIGATION FFISITESFOR: — Erlang FFI call-site finder (BT-2211)
+// ===========================================================================
+
+// Load the stable FFI fixture. It defines test-owned methods that invoke real
+// Erlang functions through the `Erlang` bridge, so assertions do not depend on
+// live stdlib bodies.
+:load tests/repl-protocol/fixtures/ffi_fixture.bt
+// => _
+
+// --- happy path: a real FFI call shows up with {#class, #selector, #line} ---
+
+// ffiSitesFor: "lists:reverse" finds every method that calls lists:reverse
+// through the FFI bridge. FfiFixture >> #revInstance: and the class-side
+// #revClassSide: both call it, so the result must be non-empty.
+revSites := SystemNavigation default ffiSitesFor: "lists:reverse"
+// => _
+
+revSites isEmpty
+// => false
+
+// Each record is a Dictionary with #class, #selector, #line keys — same shape
+// as sendersOf: / referencesTo: / fieldReadersOf:in:.
+revSiteRecord := revSites first
+// => _
+
+revSiteRecord includesKey: #class
+// => true
+
+revSiteRecord includesKey: #selector
+// => true
+
+revSiteRecord includesKey: #line
+// => true
+
+// `revInstance:` calls lists:reverse — collect the selectors and check membership.
+revSiteSelectors := revSites collect: [:r | r at: #selector]
+// => _
+
+revSiteSelectors includes: #revInstance:
+// => true
+
+// `plainSend:` sends a plain Beamtalk `reverse` (not an FFI call) — it must NOT
+// appear among the FFI sites.
+revSiteSelectors includes: #plainSend:
+// => false
+
+// `seqInstance` calls lists:seq, a DIFFERENT function — not a lists:reverse site.
+revSiteSelectors includes: #seqInstance
+// => false
+
+// Line numbers are 1-based positive integers.
+(revSites collect: [:r | r at: #line]) allSatisfy: [:n | n > 0]
+// => true
+
+// --- class-side FFI sites participate (metaclass walk) ---
+
+// `revClassSide:` is a class-side method calling lists:reverse. The metaclass
+// walk (`cls class`) must find it; the #class is the metaclass object.
+revSiteSelectors includes: #revClassSide:
+// => true
+
+((revSites select: [:r | (r at: #selector) == #revClassSide:])
+  collect: [:r | r at: #class]) includes: FfiFixture class
+// => true
+
+// --- arity-qualified spec narrows the match ---
+
+// lists:reverse is called with arity 1 in the fixture. The arity-qualified spec
+// "lists:reverse/1" still matches `revInstance:`...
+revArity1 := SystemNavigation default ffiSitesFor: "lists:reverse/1"
+// => _
+
+(revArity1 collect: [:r | r at: #selector]) includes: #revInstance:
+// => true
+
+// ...while "lists:reverse/2" matches nothing (no arity-2 reverse call exists).
+SystemNavigation default ffiSitesFor: "lists:reverse/2"
+// => []
+
+// --- different function is matched independently ---
+
+// "lists:seq" finds `seqInstance` (a lists:seq/2 call) but NOT the reverse sites.
+seqSites := SystemNavigation default ffiSitesFor: "lists:seq"
+// => _
+
+(seqSites collect: [:r | r at: #selector]) includes: #seqInstance
+// => true
+
+(seqSites collect: [:r | r at: #selector]) includes: #revInstance:
+// => false
+
+// The arity-qualified "lists:seq/2" matches (seq: 1 to: 10 is arity 2).
+seqArity2 := SystemNavigation default ffiSitesFor: "lists:seq/2"
+// => _
+
+(seqArity2 collect: [:r | r at: #selector]) includes: #seqInstance
+// => true
+
+// --- extension-method FFI sites participate (ADR 0066 / BT-2196) ---
+
+// Register an extension whose body makes a lists:reverse FFI call, then assert
+// ffiSitesFor: finds it. Clean up both ETS tables afterward.
+extFfiFun := [:a :s | s]
+// => _
+
+extFfiSource := "describe: xs => (Erlang lists) reverse: xs"
+// => _
+
+Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneOneFfiExt fun: extFfiFun owner: #test source: extFfiSource
+// => _
+
+extFfiHits := SystemNavigation default ffiSitesFor: "lists:reverse"
+// => _
+
+(extFfiHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneOneFfiExt
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneOneFfiExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneOneFfiExt)
+// => _
+
+// --- no-match returns [] ---
+
+// A well-formed spec for a function that nobody calls returns an empty list
+// (NOT an error).
+SystemNavigation default ffiSitesFor: "lists:noSuchFunctionXyzzy"
+// => []
+
+// --- malformed spec raises ---
+
+// A spec that does not match the module:function[/arity] shape raises (kind
+// #user_error), so a typo surfaces rather than silently returning [].
+[SystemNavigation default ffiSitesFor: "nocolon"] on: Error do: [:e | #ok]
+// => ok
+
+[SystemNavigation default ffiSitesFor: "a:b:c"] on: Error do: [:e | #ok]
+// => ok
+
+[SystemNavigation default ffiSitesFor: "lists:reverse/x"] on: Error do: [:e | #ok]
+// => ok

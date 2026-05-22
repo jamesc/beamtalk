@@ -709,6 +709,205 @@ sealed typed Object subclass: SystemNavigation
         acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
       ]
 
+  /// Return a collection of the Erlang FFI call sites that invoke the named
+  /// Erlang function across the loaded class registry.
+  ///
+  /// `aSpec` is a String naming the target function in `"module:function"` form
+  /// (e.g. `"lists:reverse"`), optionally arity-qualified as
+  /// `"module:function/arity"` (e.g. `"lists:reverse/1"`). When an arity is
+  /// given, only call sites with exactly that argument count match; without it,
+  /// the function matches at any arity. A spec that does not match the
+  /// `module:function[/arity]` shape raises a typed error (kind `#user_error`).
+  ///
+  /// An FFI call site is a send routed through the `Erlang` bridge —
+  /// `(Erlang lists) reverse: xs` or `Erlang lists reverse: xs`. There is no
+  /// dedicated AST node for these; the compiler recognises the
+  /// `Erlang <module> <function>` send shape, recovers the module/function/arity
+  /// the same way codegen lowers the call, and matches them against the spec.
+  ///
+  /// Each result is a Dictionary with three keys:
+  /// - `#class` — the class whose method contains the call (the class object for
+  ///   an instance-side hit, the metaclass object for a class-side hit, or the
+  ///   resolved extension target for an extension hit)
+  /// - `#selector` — the selector of the method that contains the call
+  /// - `#line` — the 1-based line number within the method source where the
+  ///   call appears
+  ///
+  /// A method that calls the function multiple times produces one record per
+  /// occurrence. Iterates the navigation scope (`allClasses`) and walks both
+  /// instance-side and class-side method dictionaries (BT-2195), plus
+  /// source-bearing extension methods (ADR 0066 / BT-2196), so stdlib and user
+  /// classes are covered on all three. Returns an empty collection if no call
+  /// sites are found (not an error).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default ffiSitesFor: "lists:reverse"
+  ///   // => [#{#class => SystemNavigation, #selector => ..., #line => 7}, ...]
+  /// SystemNavigation default ffiSitesFor: "lists:reverse/1"   // arity-qualified
+  /// SystemNavigation default ffiSitesFor: "lists:noSuchFunctionXyzzy"  // => []
+  /// ```
+  ffiSitesFor: aSpec :: String -> List(Dictionary) =>
+    (aSpec isKindOf: String)
+      ifFalse: [
+        self error: "SystemNavigation ffiSitesFor: requires a String argument of the form ""module:function"" or ""module:function/arity"""
+      ]
+    parsed := self parseFfiSpec: aSpec
+    targetModule := parsed at: #module
+    targetFunction := parsed at: #function
+    targetArity := parsed at: #arity
+    classScan := self allClasses
+      inject: List new
+      into: [:acc :cls |
+        // BT-2195: Walk both instance side (`cls`) and class side
+        // (`cls class`, the metaclass) so class-method bodies are searched
+        // too. `collectFfiSitesFor:function:arity:in:into:` skips scopes for
+        // which `>>` is not yet supported, so the metaclass walk is safe even
+        // on registry entries that don't carry source.
+        withInstance := self
+          collectFfiSitesFor: targetModule
+          function: targetFunction
+          arity: targetArity
+          in: cls
+          into: acc
+        self
+          collectFfiSitesFor: targetModule
+          function: targetFunction
+          arity: targetArity
+          in: cls class
+          into: withInstance
+      ]
+    // BT-2196: walk source-bearing extensions registered via `register/5`.
+    self
+      collectExtensionFfiSitesFor: targetModule
+      function: targetFunction
+      arity: targetArity
+      into: classScan
+
+  /// Parse an FFI spec String into its components, raising on a malformed shape.
+  ///
+  /// Returns a Dictionary `#{#module => String, #function => String,
+  /// #arity => Integer | #any}`. The `#arity` value is the special Symbol
+  /// `#any` when the spec omits the `/arity` suffix (the conventional encoding
+  /// the underlying FFI accepts for "match any arity"), otherwise the parsed
+  /// non-negative Integer.
+  ///
+  /// Accepts `"module:function"` and `"module:function/arity"`. Raises a typed
+  /// error (kind `#user_error`) for any other shape: a missing/extra `:`, an
+  /// empty module or function, more than one `/`, or a non-numeric arity.
+  parseFfiSpec: aSpec :: String -> Dictionary =>
+    slashParts := aSpec split: "/"
+    slashParts size > 2 ifTrue: [^self raiseFfiSpecError: aSpec]
+    moduleFunction := slashParts first
+    arityValue := slashParts size == 2
+      ifTrue: [
+        arityStr := slashParts last
+        arityStr isDigit ifFalse: [^self raiseFfiSpecError: aSpec]
+        arityStr asInteger
+      ]
+      ifFalse: [#any]
+    colonParts := moduleFunction split: ":"
+    colonParts size == 2 ifFalse: [^self raiseFfiSpecError: aSpec]
+    moduleName := colonParts first
+    functionName := colonParts last
+    (moduleName isEmpty or: [
+      functionName isEmpty
+    ]) ifTrue: [^self raiseFfiSpecError: aSpec]
+    #{#module => moduleName, #function => functionName, #arity => arityValue}
+
+  /// Raise the shared malformed-spec error for `ffiSitesFor:` / `parseFfiSpec:`.
+  ///
+  /// Always raises (kind `#user_error`); the `^nil` is unreachable and exists
+  /// only so the helper type-checks as returning a value when its result is
+  /// used in an expression position (e.g. inside `ifTrue:` of `parseFfiSpec:`).
+  raiseFfiSpecError: aSpec :: String -> Object =>
+    self
+      error: "SystemNavigation ffiSitesFor: expects a spec of the form ""module:function"" or ""module:function/arity"", got: "
+        ++ aSpec
+    ^nil
+
+  /// Append FFI call sites of `module`:`function` (constrained to `arity` unless
+  /// it is `#any`) found in any method of `aScope` to `result`. Returns the
+  /// (possibly extended) result list.
+  ///
+  /// Internal helper for `ffiSitesFor:`. Iterates `aScope methods`, fetches each
+  /// method's source via `>>`, and asks the compiler to find matching FFI call
+  /// line numbers. Mirrors `collectSendersFor:in:into:`; the `>>` send is guarded
+  /// with `respondsTo:` so a scope for which `>>` is not yet supported (e.g.
+  /// metaclass-shaped registry entries) is silently skipped.
+  collectFfiSitesFor: module :: String function: function :: String arity: arity :: Object in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            self
+              appendFfiSitesIn: method source
+              module: module
+              function: function
+              arity: arity
+              owner: aScope
+              methodSelector: methodSel
+              into: acc
+          ]
+      ]
+
+  /// Append one record per matching FFI call site found in `methodSource`.
+  ///
+  /// Internal helper for `collectFfiSitesFor:function:arity:in:into:`. Splits the
+  /// per-method FFI call out so the surrounding `inject:into:` body stays a
+  /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
+  appendFfiSitesIn: methodSource :: String module: module :: String function: function :: String arity: arity :: Object owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+    lines := (Erlang beamtalk_interface)
+      ffiSitesIn: methodSource
+      module: module
+      function: function
+      arity: arity
+    lines
+      inject: result
+      into: [:acc :line |
+        @expect type
+        acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
+      ]
+
+  /// Append FFI call sites of `module`:`function` found in every extension
+  /// method source (ADR 0066 / BT-2196) to `result`. Returns the (possibly
+  /// extended) result. Mirrors `collectExtensionSendersFor:into:`, swapping the
+  /// per-method scan to the FFI-site query and threading the module/function/
+  /// arity target.
+  collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        @expect type
+        extClassTag := entry at: 1
+        @expect type
+        extSelector := entry at: 2
+        @expect type
+        extSource := entry at: 3
+        extClass := self resolveExtensionClass: extClassTag
+        lines := (Erlang beamtalk_interface)
+          ffiSitesIn: extSource
+          module: module
+          function: function
+          arity: arity
+        lines
+          inject: acc
+          into: [:innerAcc :line |
+            @expect type
+            innerAcc add: #{
+              #class => extClass,
+              #selector => extSelector,
+              #line => line
+            }
+          ]
+      ]
+
   /// Return a collection of `{class, selector}` records for every method
   /// whose source text matches `aRegex`.
   ///

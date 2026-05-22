@@ -1465,8 +1465,43 @@ fn handle_find_field_writers_in_source(request: &Map) -> Term {
     field_lines_response(&lines)
 }
 
+/// Handle a `find_ffi_sites_in_source` request (BT-2211).
+///
+/// Backs `SystemNavigation ffiSitesFor:` — parses the source of a single
+/// compiled method and reports 1-based line numbers (relative to the input
+/// source) where the named Erlang FFI function (`module`:`function`, optionally
+/// constrained to `arity`) is invoked through the `Erlang` bridge.
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+/// - `module` (binary): the Erlang module name (e.g. `lists`)
+/// - `function` (binary): the Erlang function name (e.g. `reverse`)
+/// - `arity` (int, optional): when present, only call sites with this argument
+///   count match; absent means any arity
+///
+/// Response: `#{status => ok, lines => [Line, ...]}`. Returns an empty list
+/// when no sites are found or the source cannot be parsed.
+fn handle_find_ffi_sites_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(module) = map_get(request, "module").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'module' field".to_string()]);
+    };
+    let Some(function) = map_get(request, "function").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'function' field".to_string()]);
+    };
+    // `arity` is optional: absent (or non-integer) means "match any arity".
+    let arity = map_get(request, "arity").and_then(term_to_usize);
+
+    let lines = beamtalk_core::queries::ffi_sites_query::find_ffi_sites_in_source(
+        &source, &module, &function, arity,
+    );
+    field_lines_response(&lines)
+}
+
 /// Build the standard `#{status => ok, lines => [...]}` response shared by the
-/// field reader/writer queries (BT-2208).
+/// field reader/writer queries (BT-2208) and the FFI sites query (BT-2211).
 fn field_lines_response(lines: &[u32]) -> Term {
     let line_terms: Vec<Term> = lines
         .iter()
@@ -1503,6 +1538,7 @@ fn handle_request(request_term: &Term) -> Term {
         "find_references_to_in_source" => handle_find_references_to_in_source(map),
         "find_field_readers_in_source" => handle_find_field_readers_in_source(map),
         "find_field_writers_in_source" => handle_find_field_writers_in_source(map),
+        "find_ffi_sites_in_source" => handle_find_ffi_sites_in_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
