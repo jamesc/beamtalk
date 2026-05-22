@@ -8,10 +8,7 @@ TestCase subclass: ActorMonitorTest
 
   setUp => self withCounter: Counter spawn
 
-  tearDown =>
-    self.counter isNil ifFalse: [
-      self.counter isAlive ifTrue: [self.counter stop]
-    ]
+  tearDown => self.counter isNil ifFalse: [self.counter stop]
 
   testPidReturnsAPid =>
     rawPid := self.counter pid
