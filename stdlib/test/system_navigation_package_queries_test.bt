@@ -34,12 +34,23 @@ TestCase subclass: SystemNavigationPackageQueriesTest
     subs := SystemNavigation default subclassesOf: self class in: #stdlib
     self assert: subs isEmpty
 
-  // An unknown package raises a typed error (a typo must not look like an empty
-  // package).
+  // An unknown package raises the dedicated #package_not_found error (the same
+  // error Package named: raises), so a typo is distinguishable from an empty
+  // package and from general argument errors.
   testUnknownPackageRaises =>
     self should: [
       SystemNavigation default classesInPackage: #sysnav_no_such_pkg
-    ] raise: #user_error
+    ] raise: #package_not_found
     self should: [
       SystemNavigation default subclassesOf: Number in: #sysnav_no_such_pkg
-    ] raise: #user_error
+    ] raise: #package_not_found
+
+  // subclassesOf:in: rejects a non-class first argument with a typed error
+  // rather than a DNU. Via perform:, since the `:: Behaviour` parameter rejects
+  // bad args at compile time.
+  testSubclassesOfRejectsNonClass =>
+    self
+      should: [
+        SystemNavigation default perform: #subclassesOf:in: withArguments: #(#String, #stdlib)
+      ]
+      raise: #user_error
