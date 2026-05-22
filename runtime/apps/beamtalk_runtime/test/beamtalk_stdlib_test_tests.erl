@@ -230,8 +230,12 @@ load_bt_error_eval(Mod, Kind) ->
     %% Raise a #beamtalk_error{} record — matched by run_one's direct-record clause.
     %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
     ErrRecord = #beamtalk_error{
-        kind = Kind, class = 'TestClass', selector = undefined,
-        message = <<"test">>, hint = undefined, details = #{}
+        kind = Kind,
+        class = 'TestClass',
+        selector = undefined,
+        message = <<"test">>,
+        hint = undefined,
+        details = #{}
     },
     ErrTuple = erl_parse:abstract(ErrRecord),
     Forms = [
@@ -248,13 +252,15 @@ load_wrapped_bt_error_eval(Mod, Kind) ->
     %% Raise an ADR-0015 wrapped exception: error(#{'$beamtalk_class' := _, error := Record}).
     %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
     ErrRecord = #beamtalk_error{
-        kind = Kind, class = 'TestClass', selector = undefined,
-        message = <<"test">>, hint = undefined, details = #{}
+        kind = Kind,
+        class = 'TestClass',
+        selector = undefined,
+        message = <<"test">>,
+        hint = undefined,
+        details = #{}
     },
     ErrTuple = erl_parse:abstract(ErrRecord),
-    WrappedMap = erl_parse:abstract(
-        #{'$beamtalk_class' => 'RuntimeError', error => placeholder}
-    ),
+    WrappedMap = erl_parse:abstract(#{'$beamtalk_class' => 'RuntimeError', error => placeholder}),
     %% Patch the 'error' field in the abstract form to point to ErrTuple.
     {map, L, Fields} = WrappedMap,
     PatchedFields = lists:map(
@@ -281,8 +287,12 @@ load_future_rejected_eval(Mod, Kind) ->
     %% Throw a future_rejected tuple — matched by run_one's future-rejected clause.
     %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
     ErrRecord = #beamtalk_error{
-        kind = Kind, class = 'TestClass', selector = undefined,
-        message = <<"test">>, hint = undefined, details = #{}
+        kind = Kind,
+        class = 'TestClass',
+        selector = undefined,
+        message = <<"test">>,
+        hint = undefined,
+        details = #{}
     },
     ErrTuple = erl_parse:abstract(ErrRecord),
     ThrowArg = {tuple, 1, [{atom, 1, future_rejected}, ErrTuple]},
