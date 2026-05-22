@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-2208: Stable base fixture for SystemNavigation instVarReadersOf:in: /
-// instVarWritersOf:in: E2E tests.
+// BT-2208: Stable base fixture for SystemNavigation fieldReadersOf:in: /
+// fieldWritersOf:in: E2E tests.
 //
 // Provides test-owned classes/slots so the assertions do not depend on live
 // stdlib content (which can churn across unrelated refactors).
@@ -14,24 +14,24 @@
 //       * `clearTally` writes it only (`self.tally := 0`)
 //   - `state: untouched` is declared but never read or written — validates the
 //     "declared-but-untouched slot returns []" contract.
-//   - `classState: spawnCount` is a class-side instance variable, touched only
+//   - `classState: spawnCount` is a class-side field, touched only
 //     by class-side methods — validates the metaclass walk:
 //       * class `bumpSpawnCount` reads AND writes it
 //       * class `readSpawnCount` reads it only
-// `InstVarChild` (instvar_fixture_child.bt) subclasses this and touches the
+// `FieldChild` (field_fixture_child.bt) subclasses this and touches the
 // inherited `tally` slot, validating the allSubclasses walk.
 
-Actor subclass: InstVarFixture
+Actor subclass: FieldFixture
   state: tally = 0
   state: untouched = 0
   classState: spawnCount = 0
 
-  // Class-side: reads AND writes the class-side ivar `spawnCount`.
+  // Class-side: reads AND writes the class-side field `spawnCount`.
   class bumpSpawnCount =>
     self.spawnCount := self.spawnCount + 1
     self.spawnCount
 
-  // Class-side: reads the class-side ivar `spawnCount` only.
+  // Class-side: reads the class-side field `spawnCount` only.
   class readSpawnCount => self.spawnCount
 
   // Reads `tally` only.

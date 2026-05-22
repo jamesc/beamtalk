@@ -32,8 +32,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_senders_in_source/2,
     find_all_sends_in_source/1,
     find_references_to_in_source/2,
-    find_inst_var_readers_in_source/2,
-    find_inst_var_writers_in_source/2
+    find_field_readers_in_source/2,
+    find_field_writers_in_source/2
 ]).
 
 -doc """
@@ -205,10 +205,10 @@ find_references_to_in_source(Source, ClassName) ->
     beamtalk_compiler_server:find_references_to_in_source(Source, ClassName).
 
 -doc """
-Find reads of an instance variable in a single method's source (BT-2208).
+Find reads of an field in a single method's source (BT-2208).
 
 `Source' is the source of a single compiled method (as returned by
-`CompiledMethod source'). `IVar' is the target instance-variable name as an
+`CompiledMethod source'). `Field' is the target field name as an
 atom or binary (without a leading `#').
 
 Returns `{ok, [Line]}' on success, where each line is a 1-based line number
@@ -216,19 +216,19 @@ within `Source' at which the slot is read (`self.x' outside an assignment
 target). Returns `{ok, []}' when no reads are found or the source cannot be
 parsed. Returns `{error, Diagnostics}' if the compiler port is unavailable.
 
-Backs `SystemNavigation instVarReadersOf:in:' for System Browser-style
+Backs `SystemNavigation fieldReadersOf:in:' for System Browser-style
 "which methods read this slot?" navigation.
 """.
--spec find_inst_var_readers_in_source(binary(), atom() | binary()) ->
+-spec find_field_readers_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.
-find_inst_var_readers_in_source(Source, IVar) ->
-    beamtalk_compiler_server:find_inst_var_readers_in_source(Source, IVar).
+find_field_readers_in_source(Source, Field) ->
+    beamtalk_compiler_server:find_field_readers_in_source(Source, Field).
 
 -doc """
-Find writes of an instance variable in a single method's source (BT-2208).
+Find writes of an field in a single method's source (BT-2208).
 
 `Source' is the source of a single compiled method (as returned by
-`CompiledMethod source'). `IVar' is the target instance-variable name as an
+`CompiledMethod source'). `Field' is the target field name as an
 atom or binary (without a leading `#').
 
 Returns `{ok, [Line]}' on success, where each line is a 1-based line number
@@ -236,10 +236,10 @@ within `Source' at which the slot is written (`self.x := ...', the assignment
 target). Returns `{ok, []}' when no writes are found or the source cannot be
 parsed. Returns `{error, Diagnostics}' if the compiler port is unavailable.
 
-Backs `SystemNavigation instVarWritersOf:in:' for System Browser-style
+Backs `SystemNavigation fieldWritersOf:in:' for System Browser-style
 "which methods write this slot?" navigation.
 """.
--spec find_inst_var_writers_in_source(binary(), atom() | binary()) ->
+-spec find_field_writers_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.
-find_inst_var_writers_in_source(Source, IVar) ->
-    beamtalk_compiler_server:find_inst_var_writers_in_source(Source, IVar).
+find_field_writers_in_source(Source, Field) ->
+    beamtalk_compiler_server:find_field_writers_in_source(Source, Field).

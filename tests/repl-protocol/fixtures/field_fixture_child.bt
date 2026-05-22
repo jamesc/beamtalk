@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2208: Subclass fixture for SystemNavigation fieldReadersOf:in: /
+// fieldWritersOf:in: E2E tests. See field_fixture.bt for the parent.
+//
+// `FieldChild` inherits the `tally` slot from `FieldFixture` and defines a
+// method that reads AND writes it. This validates that fieldReadersOf:in: /
+// fieldWritersOf:in: walk `aClass allSubclasses` (a subclass inherits the
+// slot, so its own methods can read/write it).
+//
+// STABLE — do not rename the method or edit its body (BT-2208).
+
+FieldFixture subclass: FieldChild
+
+  // Reads AND writes the inherited `tally` slot.
+  childBump => self.tally := self.tally + 2

@@ -1,24 +1,24 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Instance-variable access query — find reads/writes of a named instance
+//! Field access query — find reads/writes of a named instance
 //! variable within a single method's source.
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation instVarReadersOf:in:` and `instVarWritersOf:in:`
+//! Backs `SystemNavigation fieldReadersOf:in:` and `fieldWritersOf:in:`
 //! (BT-2208). Where `sendersOf:` answers "who calls this method?" and
 //! `referencesTo:` answers "who mentions this class?", these queries answer
 //! "which methods read (or write) this slot?". Given the source text of a
 //! single compiled method (as returned by `CompiledMethod source`) and an
-//! instance-variable name, each query returns the 1-based line numbers,
+//! field name, each query returns the 1-based line numbers,
 //! relative to the method source, at which the named slot is read (or written).
 //!
 //! # What counts as a read vs a write
 //!
-//! In Beamtalk an instance variable is accessed as `self.x`, parsed as an
+//! In Beamtalk an field is accessed as `self.x`, parsed as an
 //! [`Expression::FieldAccess`] whose `field` name is the slot name. A bare `x`
-//! is a *local* variable, not an instance variable, and is ignored.
+//! is a *local* variable, not an field, and is ignored.
 //!
 //! - A **write** is a `FieldAccess` (with the matching field name) that appears
 //!   as the `target` of an [`Expression::Assignment`] (`self.x := ...`).
@@ -60,7 +60,7 @@ const PREFIX_LINES: u32 = 1;
 /// name uses a leading underscore so it cannot collide with a real class.
 const SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticIvarScope\n";
 
-/// Which kind of instance-variable access the walker is collecting.
+/// Which kind of field access the walker is collecting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AccessKind {
     /// A read of the slot (`self.x` anywhere except an assignment target).
@@ -70,22 +70,22 @@ enum AccessKind {
 }
 
 /// Find the 1-based line numbers within `method_source` where the instance
-/// variable `ivar_name` is **read**.
+/// variable `field_name` is **read**.
 ///
 /// Walks the parsed AST for [`Expression::FieldAccess`] nodes whose `field`
-/// matches `ivar_name`, excluding those that appear as an assignment target
+/// matches `field_name`, excluding those that appear as an assignment target
 /// (those are writes only). Each matching read produces one entry; multiple
 /// reads on the same line produce multiple entries, preserving source order.
 ///
 /// Returns an empty vector if no reads are found or the source cannot be parsed
 /// at all.
 #[must_use]
-pub fn find_ivar_readers_in_source(method_source: &str, ivar_name: &str) -> Vec<u32> {
-    collect_ivar_lines(method_source, ivar_name, AccessKind::Read)
+pub fn find_field_readers_in_source(method_source: &str, field_name: &str) -> Vec<u32> {
+    collect_field_lines(method_source, field_name, AccessKind::Read)
 }
 
 /// Find the 1-based line numbers within `method_source` where the instance
-/// variable `ivar_name` is **written** (assigned).
+/// variable `field_name` is **written** (assigned).
 ///
 /// Walks the parsed AST for [`Expression::Assignment`] nodes whose `target` is
 /// a [`Expression::FieldAccess`] with a matching field name. Each matching
@@ -95,13 +95,13 @@ pub fn find_ivar_readers_in_source(method_source: &str, ivar_name: &str) -> Vec<
 /// Returns an empty vector if no writes are found or the source cannot be
 /// parsed at all.
 #[must_use]
-pub fn find_ivar_writers_in_source(method_source: &str, ivar_name: &str) -> Vec<u32> {
-    collect_ivar_lines(method_source, ivar_name, AccessKind::Write)
+pub fn find_field_writers_in_source(method_source: &str, field_name: &str) -> Vec<u32> {
+    collect_field_lines(method_source, field_name, AccessKind::Write)
 }
 
 /// Shared driver for both queries: wrap, parse, walk, and translate line
 /// numbers back to input-source space.
-fn collect_ivar_lines(method_source: &str, ivar_name: &str, kind: AccessKind) -> Vec<u32> {
+fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) -> Vec<u32> {
     let wrapped = format!("{SYNTHETIC_PREFIX}{method_source}");
     let tokens = lex_with_eof(&wrapped);
     let (module, _diags) = parse(tokens);
@@ -113,7 +113,7 @@ fn collect_ivar_lines(method_source: &str, ivar_name: &str, kind: AccessKind) ->
             for stmt in &method.body {
                 collect_access_lines(
                     &stmt.expression,
-                    ivar_name,
+                    field_name,
                     kind,
                     &wrapped,
                     &mut wrapped_lines,
@@ -128,7 +128,7 @@ fn collect_ivar_lines(method_source: &str, ivar_name: &str, kind: AccessKind) ->
     for stmt in &module.expressions {
         collect_access_lines(
             &stmt.expression,
-            ivar_name,
+            field_name,
             kind,
             &wrapped,
             &mut wrapped_lines,
@@ -138,7 +138,7 @@ fn collect_ivar_lines(method_source: &str, ivar_name: &str, kind: AccessKind) ->
         for stmt in &smd.method.body {
             collect_access_lines(
                 &stmt.expression,
-                ivar_name,
+                field_name,
                 kind,
                 &wrapped,
                 &mut wrapped_lines,
@@ -161,15 +161,15 @@ fn collect_field_access(
     receiver: &Expression,
     field: &crate::ast::Identifier,
     span: Span,
-    ivar_name: &str,
+    field_name: &str,
     kind: AccessKind,
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    if kind == AccessKind::Read && field.name == ivar_name {
+    if kind == AccessKind::Read && field.name == field_name {
         lines.push(field_access_line(field.span, span, source));
     }
-    collect_access_lines(receiver, ivar_name, kind, source, lines);
+    collect_access_lines(receiver, field_name, kind, source, lines);
 }
 
 /// Collect an `Assignment`. The target is a write only — never also a read
@@ -182,7 +182,7 @@ fn collect_field_access(
 fn collect_assignment(
     target: &Expression,
     value: &Expression,
-    ivar_name: &str,
+    field_name: &str,
     kind: AccessKind,
     source: &str,
     lines: &mut Vec<u32>,
@@ -193,24 +193,24 @@ fn collect_assignment(
         span,
     } = target
     {
-        if kind == AccessKind::Write && field.name == ivar_name {
+        if kind == AccessKind::Write && field.name == field_name {
             lines.push(field_access_line(field.span, *span, source));
         }
         // Walk the target's receiver only — NOT the target field as a read.
-        collect_access_lines(receiver, ivar_name, kind, source, lines);
+        collect_access_lines(receiver, field_name, kind, source, lines);
     } else {
         // Non-field target (a local identifier or destructure): it cannot be an
-        // ivar write, so walk it normally.
-        collect_access_lines(target, ivar_name, kind, source, lines);
+        // field write, so walk it normally.
+        collect_access_lines(target, field_name, kind, source, lines);
     }
-    collect_access_lines(value, ivar_name, kind, source, lines);
+    collect_access_lines(value, field_name, kind, source, lines);
 }
 
-/// Recursively collect line numbers of instance-variable accesses of `kind`
-/// matching `ivar_name`.
+/// Recursively collect line numbers of field accesses of `kind`
+/// matching `field_name`.
 fn collect_access_lines(
     expr: &Expression,
-    ivar_name: &str,
+    field_name: &str,
     kind: AccessKind,
     source: &str,
     lines: &mut Vec<u32>,
@@ -220,75 +220,75 @@ fn collect_access_lines(
             receiver,
             field,
             span,
-        } => collect_field_access(receiver, field, *span, ivar_name, kind, source, lines),
+        } => collect_field_access(receiver, field, *span, field_name, kind, source, lines),
         Expression::Assignment { target, value, .. } => {
-            collect_assignment(target, value, ivar_name, kind, source, lines);
+            collect_assignment(target, value, field_name, kind, source, lines);
         }
         Expression::MessageSend {
             receiver,
             arguments,
             ..
         } => {
-            collect_access_lines(receiver, ivar_name, kind, source, lines);
+            collect_access_lines(receiver, field_name, kind, source, lines);
             for arg in arguments {
-                collect_access_lines(arg, ivar_name, kind, source, lines);
+                collect_access_lines(arg, field_name, kind, source, lines);
             }
         }
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            collect_access_lines(receiver, ivar_name, kind, source, lines);
+            collect_access_lines(receiver, field_name, kind, source, lines);
             for msg in messages {
                 for arg in &msg.arguments {
-                    collect_access_lines(arg, ivar_name, kind, source, lines);
+                    collect_access_lines(arg, field_name, kind, source, lines);
                 }
             }
         }
         Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_access_lines(value, ivar_name, kind, source, lines);
+            collect_access_lines(value, field_name, kind, source, lines);
         }
         Expression::Block(block) => {
             for stmt in &block.body {
-                collect_access_lines(&stmt.expression, ivar_name, kind, source, lines);
+                collect_access_lines(&stmt.expression, field_name, kind, source, lines);
             }
         }
         Expression::Parenthesized { expression, .. } => {
-            collect_access_lines(expression, ivar_name, kind, source, lines);
+            collect_access_lines(expression, field_name, kind, source, lines);
         }
         Expression::Match { value, arms, .. } => {
-            collect_access_lines(value, ivar_name, kind, source, lines);
+            collect_access_lines(value, field_name, kind, source, lines);
             for arm in arms {
-                collect_pattern_access_lines(&arm.pattern, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(&arm.pattern, field_name, kind, source, lines);
                 if let Some(guard) = &arm.guard {
-                    collect_access_lines(guard, ivar_name, kind, source, lines);
+                    collect_access_lines(guard, field_name, kind, source, lines);
                 }
-                collect_access_lines(&arm.body, ivar_name, kind, source, lines);
+                collect_access_lines(&arm.body, field_name, kind, source, lines);
             }
         }
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {
                 if let StringSegment::Interpolation(inner) = segment {
-                    collect_access_lines(inner, ivar_name, kind, source, lines);
+                    collect_access_lines(inner, field_name, kind, source, lines);
                 }
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
             for element in elements {
-                collect_access_lines(element, ivar_name, kind, source, lines);
+                collect_access_lines(element, field_name, kind, source, lines);
             }
             if let Some(tail_expr) = tail {
-                collect_access_lines(tail_expr, ivar_name, kind, source, lines);
+                collect_access_lines(tail_expr, field_name, kind, source, lines);
             }
         }
         Expression::ArrayLiteral { elements, .. } => {
             for element in elements {
-                collect_access_lines(element, ivar_name, kind, source, lines);
+                collect_access_lines(element, field_name, kind, source, lines);
             }
         }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                collect_access_lines(&pair.key, ivar_name, kind, source, lines);
-                collect_access_lines(&pair.value, ivar_name, kind, source, lines);
+                collect_access_lines(&pair.key, field_name, kind, source, lines);
+                collect_access_lines(&pair.value, field_name, kind, source, lines);
             }
         }
         Expression::Literal(..)
@@ -302,7 +302,7 @@ fn collect_access_lines(
     }
 }
 
-/// Recursively collect line numbers of instance-variable accesses inside a
+/// Recursively collect line numbers of field accesses inside a
 /// [`Pattern`].
 ///
 /// Patterns are name-binding/literal-matching constructs and carry no field
@@ -313,7 +313,7 @@ fn collect_access_lines(
 /// loosening the parser later does not silently regress these queries.
 fn collect_pattern_access_lines(
     pattern: &Pattern,
-    ivar_name: &str,
+    field_name: &str,
     kind: AccessKind,
     source: &str,
     lines: &mut Vec<u32>,
@@ -321,41 +321,41 @@ fn collect_pattern_access_lines(
     match pattern {
         Pattern::Binary { segments, .. } => {
             for segment in segments {
-                collect_pattern_access_lines(&segment.value, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(&segment.value, field_name, kind, source, lines);
                 if let Some(size) = &segment.size {
-                    collect_access_lines(size, ivar_name, kind, source, lines);
+                    collect_access_lines(size, field_name, kind, source, lines);
                 }
             }
         }
         Pattern::Tuple { elements, .. } => {
             for element in elements {
-                collect_pattern_access_lines(element, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(element, field_name, kind, source, lines);
             }
         }
         Pattern::Array { elements, rest, .. } => {
             for element in elements {
-                collect_pattern_access_lines(element, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(element, field_name, kind, source, lines);
             }
             if let Some(rest_pattern) = rest {
-                collect_pattern_access_lines(rest_pattern, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(rest_pattern, field_name, kind, source, lines);
             }
         }
         Pattern::List { elements, tail, .. } => {
             for element in elements {
-                collect_pattern_access_lines(element, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(element, field_name, kind, source, lines);
             }
             if let Some(tail_pattern) = tail {
-                collect_pattern_access_lines(tail_pattern, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(tail_pattern, field_name, kind, source, lines);
             }
         }
         Pattern::Map { pairs, .. } => {
             for pair in pairs {
-                collect_pattern_access_lines(&pair.value, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(&pair.value, field_name, kind, source, lines);
             }
         }
         Pattern::Constructor { keywords, .. } => {
             for (_selector, inner) in keywords {
-                collect_pattern_access_lines(inner, ivar_name, kind, source, lines);
+                collect_pattern_access_lines(inner, field_name, kind, source, lines);
             }
         }
         Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
@@ -379,10 +379,10 @@ mod tests {
     #[test]
     fn finds_pure_reader() {
         // `getValue => self.value` reads `value` once on line 1.
-        let lines = find_ivar_readers_in_source("getValue => self.value", "value");
+        let lines = find_field_readers_in_source("getValue => self.value", "value");
         assert_eq!(lines, vec![1]);
         // No writes in a pure reader.
-        let writes = find_ivar_writers_in_source("getValue => self.value", "value");
+        let writes = find_field_writers_in_source("getValue => self.value", "value");
         assert!(writes.is_empty());
     }
 
@@ -390,9 +390,9 @@ mod tests {
     fn finds_pure_writer() {
         // `reset => self.value := 0` writes `value` once; the literal RHS has
         // no read of `value`.
-        let writes = find_ivar_writers_in_source("reset => self.value := 0", "value");
+        let writes = find_field_writers_in_source("reset => self.value := 0", "value");
         assert_eq!(writes, vec![1]);
-        let reads = find_ivar_readers_in_source("reset => self.value := 0", "value");
+        let reads = find_field_readers_in_source("reset => self.value := 0", "value");
         assert!(reads.is_empty());
     }
 
@@ -401,9 +401,9 @@ mod tests {
         // `increment => self.value := self.value + 1` reads `value` on the RHS
         // and writes it on the LHS — exactly one of each, on line 1.
         let src = "increment => self.value := self.value + 1";
-        let reads = find_ivar_readers_in_source(src, "value");
+        let reads = find_field_readers_in_source(src, "value");
         assert_eq!(reads, vec![1], "RHS self.value is a read");
-        let writes = find_ivar_writers_in_source(src, "value");
+        let writes = find_field_writers_in_source(src, "value");
         assert_eq!(writes, vec![1], "LHS self.value is a write");
     }
 
@@ -412,7 +412,7 @@ mod tests {
         // `set => self.value := 0` — the target `self.value` must NOT show up
         // as a read (Pharo precedent). The RHS is a literal, so there are zero
         // reads.
-        let reads = find_ivar_readers_in_source("set => self.value := 0", "value");
+        let reads = find_field_readers_in_source("set => self.value := 0", "value");
         assert!(
             reads.is_empty(),
             "assignment target must not count as a read, got {reads:?}"
@@ -420,19 +420,19 @@ mod tests {
     }
 
     #[test]
-    fn bare_identifier_is_not_an_ivar() {
+    fn bare_identifier_is_not_an_field() {
         // A bare `value` is a LOCAL variable, not `self.value` — neither a read
         // nor a write of the slot.
         let src = "compute =>\n  value := 1\n  value + 1";
-        assert!(find_ivar_readers_in_source(src, "value").is_empty());
-        assert!(find_ivar_writers_in_source(src, "value").is_empty());
+        assert!(find_field_readers_in_source(src, "value").is_empty());
+        assert!(find_field_writers_in_source(src, "value").is_empty());
     }
 
     #[test]
     fn finds_read_inside_block() {
         // `report => [:x | x + self.value] value: 1` reads `value` on line 2.
         let src = "report =>\n  [:x | x + self.value] value: 1";
-        let reads = find_ivar_readers_in_source(src, "value");
+        let reads = find_field_readers_in_source(src, "value");
         assert_eq!(reads, vec![2]);
     }
 
@@ -441,16 +441,16 @@ mod tests {
         // `bump => items do: [:i | self.total := self.total + i]` writes
         // `total` on line 2 and reads it on line 2.
         let src = "bump =>\n  items do: [:i | self.total := self.total + i]";
-        let writes = find_ivar_writers_in_source(src, "total");
+        let writes = find_field_writers_in_source(src, "total");
         assert_eq!(writes, vec![2]);
-        let reads = find_ivar_readers_in_source(src, "total");
+        let reads = find_field_readers_in_source(src, "total");
         assert_eq!(reads, vec![2]);
     }
 
     #[test]
     fn finds_read_in_message_argument() {
         // `send => target at: self.value put: 1` reads `value` on line 1.
-        let reads = find_ivar_readers_in_source("send => target at: self.value put: 1", "value");
+        let reads = find_field_readers_in_source("send => target at: self.value put: 1", "value");
         assert_eq!(reads, vec![1]);
     }
 
@@ -458,7 +458,7 @@ mod tests {
     fn finds_read_in_cascade_argument() {
         // Cascade message arguments are walked for reads.
         let src = "report =>\n  Transcript\n    show: self.value;\n    show: self.value";
-        let reads = find_ivar_readers_in_source(src, "value");
+        let reads = find_field_readers_in_source(src, "value");
         assert_eq!(reads, vec![3, 4]);
     }
 
@@ -466,9 +466,9 @@ mod tests {
     fn multiple_writes_to_same_slot() {
         // Three sequential writes to `count`, each also reading it on the RHS.
         let src = "addThrice: n =>\n  self.count := self.count + n\n  self.count := self.count + n\n  self.count := self.count + n";
-        let writes = find_ivar_writers_in_source(src, "count");
+        let writes = find_field_writers_in_source(src, "count");
         assert_eq!(writes, vec![2, 3, 4]);
-        let reads = find_ivar_readers_in_source(src, "count");
+        let reads = find_field_readers_in_source(src, "count");
         assert_eq!(reads, vec![2, 3, 4]);
     }
 
@@ -476,11 +476,11 @@ mod tests {
     fn does_not_match_other_slots() {
         // A query for `count` must not match `self.total`.
         let src = "swap =>\n  self.count := self.total\n  self.total := self.count";
-        let reads = find_ivar_readers_in_source(src, "count");
+        let reads = find_field_readers_in_source(src, "count");
         // `self.count` read appears only on line 3 (RHS of the second
         // assignment); line 2's `self.count` is a write target, not a read.
         assert_eq!(reads, vec![3]);
-        let writes = find_ivar_writers_in_source(src, "count");
+        let writes = find_field_writers_in_source(src, "count");
         assert_eq!(writes, vec![2]);
     }
 
@@ -488,23 +488,23 @@ mod tests {
     fn finds_read_in_return_value() {
         // An early return reading the slot counts as a read.
         let src = "guard =>\n  done ifTrue: [^self.value]\n  -1";
-        let reads = find_ivar_readers_in_source(src, "value");
+        let reads = find_field_readers_in_source(src, "value");
         assert_eq!(reads, vec![2]);
     }
 
     #[test]
     fn returns_empty_for_untouched_slot() {
-        let reads = find_ivar_readers_in_source("greet => self name", "value");
+        let reads = find_field_readers_in_source("greet => self name", "value");
         assert!(reads.is_empty());
-        let writes = find_ivar_writers_in_source("greet => self name", "value");
+        let writes = find_field_writers_in_source("greet => self name", "value");
         assert!(writes.is_empty());
     }
 
     #[test]
     fn handles_unparseable_source_without_panicking() {
-        let reads = find_ivar_readers_in_source(")@!", "value");
+        let reads = find_field_readers_in_source(")@!", "value");
         assert!(reads.is_empty());
-        let writes = find_ivar_writers_in_source(")@!", "value");
+        let writes = find_field_writers_in_source(")@!", "value");
         assert!(writes.is_empty());
     }
 
@@ -513,9 +513,9 @@ mod tests {
         // Class-side methods carry a return-type arrow in the signature. The
         // walker must still find a `classState:` access in the body.
         let src = "create -> Counter =>\n  self.instanceCount := self.instanceCount + 1";
-        let writes = find_ivar_writers_in_source(src, "instanceCount");
+        let writes = find_field_writers_in_source(src, "instanceCount");
         assert_eq!(writes, vec![2]);
-        let reads = find_ivar_readers_in_source(src, "instanceCount");
+        let reads = find_field_readers_in_source(src, "instanceCount");
         assert_eq!(reads, vec![2]);
     }
 
@@ -523,7 +523,7 @@ mod tests {
     fn finds_read_in_map_literal() {
         // A slot read embedded in a map literal value is found.
         let src = "snapshot =>\n  #{#v => self.value}";
-        let reads = find_ivar_readers_in_source(src, "value");
+        let reads = find_field_readers_in_source(src, "value");
         assert_eq!(reads, vec![2]);
     }
 }
