@@ -56,7 +56,6 @@ TestCase subclass: ClassStateTest
   // BT-2238: class-side field reflection — `classVarNames`/`allClassVarNames`
   // enumerate the `classState:` slots, mirroring instance-side
   // `fieldNames`/`allFieldNames`.
-
   testClassVarNames =>
     // Reports the class-side slots in declaration order.
     self assert: ClassStateActor classVarNames equals: #(#counter, #label)
