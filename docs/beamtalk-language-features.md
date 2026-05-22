@@ -2548,13 +2548,19 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `implementorsOf: #sel` | `List(Behaviour)` | Classes that define the given selector |
 | `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
 | `referencesTo: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that references the class name |
+| `ffiSitesFor: aSpec` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that calls Erlang `module:function` (optionally arity-qualified, e.g. `"lists:reverse/1"`) |
+| `fieldReadersOf: #slot in: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method that reads instance field `#slot` (scopes `aClass` + subclasses) |
+| `fieldWritersOf: #slot in: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method that writes (assigns) instance field `#slot` |
 | `methodsMatching: aRegex` | `List(Dictionary)` | `#{#class, #selector}` for every method whose source matches the regex |
 | `selectorsMatching: pattern` | `List(Symbol)` | Selectors matching a case-insensitive substring (e.g., `"print"`) |
 | `selectorsForClass: aClass` | `List(Symbol)` | All selectors defined on a class (instance + class + extension) |
+| `classesInPackage: aPackage` | `List(Behaviour)` | Class objects belonging to package `aPackage` (Symbol or String; ADR 0070) |
+| `subclassesOf: aClass in: aPackage` | `List(Behaviour)` | Subclasses of `aClass` that live in package `aPackage` (`allSubclasses` filtered by package) |
 | `unimplementedSelectors` | `List(Dictionary)` | Selectors sent but defined nowhere — a typo-finder lint |
 | `unusedSelectors` | `List(Dictionary)` | Selectors defined but sent nowhere — dead-method candidates |
 
-Body-based queries (`sendersOf:`, `referencesTo:`, `methodsMatching:`, and the
+Body-based queries (`sendersOf:`, `referencesTo:`, `ffiSitesFor:`,
+`fieldReadersOf:in:`, `fieldWritersOf:in:`, `methodsMatching:`, and the
 selector-lint queries) scan instance-side, class-side, and extension method
 bodies. Each result's `#class` field is the class object for an instance-side
 hit and the metaclass object (`Counter class`) for a class-side hit.
@@ -2594,6 +2600,21 @@ nav extendersOf: String
 
 nav extensionsBy: (Package named: "my_lib")
 // => [#{#class => String, #selector => #asJson}, ...]
+
+nav classesInPackage: #stdlib
+// => [Actor, Array, ...]
+
+nav subclassesOf: Number in: #stdlib
+// => [Float, Integer]
+
+nav fieldReadersOf: #value in: Counter
+// => [#{#class => Counter, #selector => #getValue, #line => 5}, ...]
+
+nav fieldWritersOf: #value in: Counter
+// => [#{#class => Counter, #selector => #increment, #line => 3}, ...]
+
+nav ffiSitesFor: "lists:reverse"
+// => [#{#class => MyList, #selector => #reversed, #line => 7}, ...]
 ```
 
 ### REPL shortcuts (`:` commands) are thin wrappers
