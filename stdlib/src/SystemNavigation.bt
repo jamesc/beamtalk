@@ -649,7 +649,7 @@ sealed typed Object subclass: SystemNavigation
             self
               error: "SystemNavigation "
                 ++ selector
-                ++ ": "
+                ++ " "
                 ++ aSym asString
                 ++ " is not a field declared on "
                 ++ aClass name asString
