@@ -791,6 +791,43 @@ These types are defined in:
 - `runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl` — `t/0` and `t/2`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_error.erl` — `t/0` and `error/0`
 
+### FFI Collection Element Types
+
+The spec importer carries **collection element types** from Erlang `-spec`
+attributes (ADR 0075 amendment), so iterating an FFI-typed list binds block
+parameters to the element type instead of `Dynamic`:
+
+| Erlang spec | Imported Beamtalk type |
+|-------------|------------------------|
+| `[integer()]` | `List(Integer)` |
+| `[{atom(), pos_integer(), atom()}]` | `List(Tuple(Symbol, Integer, Symbol))` |
+| `{atom(), binary()}` | `Tuple(Symbol, String \| Binary)` |
+| `[term()]` / `tuple()` | `List` / `Tuple` (uninformative elements collapse to the bare type) |
+
+```beamtalk
+// allSendsIn/1 is specced [{atom(), pos_integer(), atom()}]:
+sends := (Erlang beamtalk_interface) allSendsIn: source
+sends do: [:s |
+  // s is Tuple(Symbol, Integer, Symbol) — no annotation needed
+  selector := s at: 1   // inferred Symbol
+  arity := s at: 2       // inferred Integer
+]
+```
+
+**Literal-index tuple access:** Sending `at:` with a *literal* integer index to
+a value of a known `Tuple(T1, …, Tn)` type infers the element type at that
+1-based index:
+
+```beamtalk
+pair := someTupleTyped     // Tuple(Symbol, Integer)
+pair at: 1                  // inferred Symbol
+pair at: 2                  // inferred Integer
+```
+
+A non-literal index (`pair at: i`) or an out-of-range literal falls back to
+`Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
+arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
+
 ### Loading Code into the Workspace
 
 Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` singleton. Loaded classes are immediately available — existing actors pick up new code on next dispatch.

@@ -1114,6 +1114,19 @@ impl TypeChecker {
                 );
             }
 
+            // BT-2254 (ADR 0075 amendment): literal-index tuple access.
+            // `aTuple at: <literal int>` on a `Tuple(T1, …, Tn)` with known
+            // positional element types infers the element type at that 1-based
+            // index. A non-literal index, an out-of-range literal, or a bare
+            // `Tuple` (no type_args) falls through to normal dispatch (Dynamic),
+            // so this never produces a false positive.
+            if let Some(elem_ty) =
+                Self::infer_literal_index_tuple_at(class_name, &selector_name, type_args, arguments)
+            {
+                self.check_instance_selector(class_name, &selector_name, span, hierarchy);
+                return elem_ty;
+            }
+
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
             // Skip argument type check for binary messages — check_binary_operand_types
             // already provides more specific warnings for arithmetic/comparison/concat.
@@ -1252,6 +1265,44 @@ impl TypeChecker {
         }
 
         InferredType::Dynamic(DynamicReason::DynamicReceiver)
+    }
+
+    /// BT-2254 (ADR 0075 amendment): infer the element type of
+    /// `aTuple at: <literal int>` from a known `Tuple(T1, …, Tn)` type.
+    ///
+    /// Returns `Some(element_type)` only when **all** of the following hold:
+    /// - the receiver class is `Tuple` and the selector is `at:`
+    /// - the receiver carries positional element types (`type_args` non-empty)
+    /// - the single argument is an integer literal (allowing parentheses)
+    /// - the 1-based literal index is within `1..=type_args.len()`
+    ///
+    /// Any other shape returns `None`, so the caller falls through to normal
+    /// dispatch (which yields `Dynamic` for the untyped `Tuple at:` primitive).
+    /// This guarantees no false-positive type/DNU warnings for non-literal or
+    /// out-of-range indices.
+    fn infer_literal_index_tuple_at(
+        class_name: &str,
+        selector_name: &str,
+        type_args: &[InferredType],
+        arguments: &[Expression],
+    ) -> Option<InferredType> {
+        if class_name != "Tuple" || selector_name != "at:" {
+            return None;
+        }
+        if type_args.is_empty() || arguments.len() != 1 {
+            return None;
+        }
+        let index = match unwrap_parens(&arguments[0]) {
+            Expression::Literal(Literal::Integer(n), _) => *n,
+            _ => return None,
+        };
+        // 1-based index must be in range. `index <= 0` and `index > len` both
+        // fall through to Dynamic rather than warning.
+        let idx = usize::try_from(index).ok()?;
+        if idx == 0 || idx > type_args.len() {
+            return None;
+        }
+        Some(type_args[idx - 1].clone())
     }
 
     /// Infer the return type of an FFI call on an `ErlangModule<module_name>` receiver.
@@ -3442,6 +3493,71 @@ mod tests {
 
     fn str_lit(s: &str) -> Expression {
         Expression::Literal(Literal::String(s.into()), span())
+    }
+
+    // ---- BT-2254: literal-index tuple `at:` ----
+
+    fn tuple_args(names: &[&str]) -> Vec<InferredType> {
+        names.iter().map(|n| InferredType::known(*n)).collect()
+    }
+
+    #[test]
+    fn literal_index_tuple_at_in_range() {
+        let args = tuple_args(&["Symbol", "Integer", "Symbol"]);
+        // `at: 1` → first element type
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("Tuple", "at:", &args, &[int_lit(1)]),
+            Some(InferredType::known("Symbol"))
+        );
+        // `at: 2` → second element type
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("Tuple", "at:", &args, &[int_lit(2)]),
+            Some(InferredType::known("Integer"))
+        );
+    }
+
+    #[test]
+    fn literal_index_tuple_at_out_of_range_is_dynamic() {
+        let args = tuple_args(&["Symbol", "Integer"]);
+        // Index 3 is out of range (only 2 elements) → None (falls back to Dynamic)
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("Tuple", "at:", &args, &[int_lit(3)]),
+            None
+        );
+        // Index 0 is out of range (1-based) → None
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("Tuple", "at:", &args, &[int_lit(0)]),
+            None
+        );
+    }
+
+    #[test]
+    fn literal_index_tuple_at_non_literal_is_dynamic() {
+        let args = tuple_args(&["Symbol", "Integer"]);
+        // Non-literal index (a variable) → None
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("Tuple", "at:", &args, &[var("i")]),
+            None
+        );
+    }
+
+    #[test]
+    fn literal_index_tuple_at_bare_tuple_is_dynamic() {
+        // No positional element types (bare `Tuple`) → None
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("Tuple", "at:", &[], &[int_lit(1)]),
+            None
+        );
+    }
+
+    #[test]
+    fn literal_index_tuple_at_non_tuple_receiver_ignored() {
+        let args = tuple_args(&["Integer"]);
+        // Not a Tuple receiver → None (List uses its own at: handling)
+        assert_eq!(
+            TypeChecker::infer_literal_index_tuple_at("List", "at:", &args, &[int_lit(1)]),
+            None
+        );
     }
 
     // ---- infer_literal ----

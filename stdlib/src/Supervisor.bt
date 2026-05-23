@@ -98,10 +98,16 @@ abstract Object subclass: Supervisor
   /// Return the OTP child ids of currently-running children.
   ///
   /// BT-1997 / ADR 0080 Phase 1: `whichChildren/1` returns a Result-shaped
-  /// value; call `unwrap` at the FFI boundary so the user-facing signature
-  /// stays `Array` while the runtime migrates to Result returns. Stdlib
-  /// signature updates land in Phase 2 (BT-P2-stdlib).
-  children -> Array => ((Erlang beamtalk_supervisor) whichChildren: self) unwrap
+  /// value; call `unwrap` at the FFI boundary so the user-facing signature is
+  /// a list of child-id Symbols while the runtime migrates to Result returns.
+  /// Stdlib signature updates land in Phase 2 (BT-P2-stdlib).
+  ///
+  /// BT-2254: now that FFI list element types are carried, `whichChildren`'s
+  /// `{ok, [atom()]}` spec resolves `unwrap` to `List(Symbol)`. The declared
+  /// return type matches that inferred body type so no type-mismatch warning
+  /// is produced (the runtime value is a list of atoms, i.e. `List(Symbol)`).
+  children -> List(Symbol) =>
+    ((Erlang beamtalk_supervisor) whichChildren: self) unwrap
 
   /// Look up the running child process for the given class.
   ///

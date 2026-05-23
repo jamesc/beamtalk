@@ -161,12 +161,57 @@ map_type_atom_test() ->
 map_type_list_test() ->
     ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, []})).
 
+%% BT-2254: an informative list element type is now carried as `List(T)`.
 map_type_list_with_element_type_test() ->
     ElemType = {type, 0, integer, []},
+    ?assertEqual(
+        <<"List(Integer)">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})
+    ).
+
+%% BT-2254: an uninformative element type (Dynamic from term()) collapses to
+%% bare `List` — no spurious `List(Dynamic)`.
+map_type_list_dynamic_element_collapses_test() ->
+    ElemType = {type, 0, term, []},
     ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})).
 
+%% BT-2254: bare tuple() element is uninformative — `[tuple()]` stays `List`.
+map_type_list_bare_tuple_element_collapses_test() ->
+    ElemType = {type, 0, tuple, any},
+    ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})).
+
+%% BT-2254: nonempty_list carries its element type too.
+map_type_nonempty_list_with_element_type_test() ->
+    ElemType = {type, 0, atom, []},
+    ?assertEqual(
+        <<"List(Symbol)">>, beamtalk_spec_reader:map_type({type, 0, nonempty_list, [ElemType]})
+    ).
+
+%% Untyped tuple() (unknown arity) stays bare Tuple.
 map_type_tuple_test() ->
     ?assertEqual(<<"Tuple">>, beamtalk_spec_reader:map_type({type, 0, tuple, any})).
+
+%% BT-2254: a typed tuple carries positional element types as `Tuple(T1, ..., Tn)`.
+map_type_tuple_positional_test() ->
+    Elements = [{type, 0, atom, []}, {type, 0, pos_integer, []}, {type, 0, atom, []}],
+    ?assertEqual(
+        <<"Tuple(Symbol, Integer, Symbol)">>,
+        beamtalk_spec_reader:map_type({type, 0, tuple, Elements})
+    ).
+
+%% BT-2254: a tuple whose every element is uninformative collapses to bare Tuple.
+map_type_tuple_all_uninformative_collapses_test() ->
+    Elements = [{type, 0, term, []}, {type, 0, any, []}],
+    ?assertEqual(<<"Tuple">>, beamtalk_spec_reader:map_type({type, 0, tuple, Elements})).
+
+%% BT-2254: a list of typed tuples carries both layers —
+%% `[{atom(), pos_integer(), atom()}]` → `List(Tuple(Symbol, Integer, Symbol))`.
+map_type_list_of_typed_tuples_test() ->
+    Tuple =
+        {type, 0, tuple, [{type, 0, atom, []}, {type, 0, pos_integer, []}, {type, 0, atom, []}]},
+    ?assertEqual(
+        <<"List(Tuple(Symbol, Integer, Symbol))">>,
+        beamtalk_spec_reader:map_type({type, 0, list, [Tuple]})
+    ).
 
 map_type_map_test() ->
     ?assertEqual(<<"Dictionary">>, beamtalk_spec_reader:map_type({type, 0, map, any})).
@@ -257,9 +302,10 @@ map_type_integer_literal_test() ->
 map_type_neg_integer_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, neg_integer, []})).
 
+%% BT-2254: nonempty_list carries an informative element type as `List(T)`.
 map_type_nonempty_list_test() ->
     ?assertEqual(
-        <<"List">>,
+        <<"List(Integer)">>,
         beamtalk_spec_reader:map_type({type, 0, nonempty_list, [{type, 0, integer, []}]})
     ).
 
@@ -1162,8 +1208,13 @@ resolve_remote_type_disk_log_test() ->
             ?assert(length(NextFileSpecs) > 0),
             [Spec | _] = NextFileSpecs,
             RetType = maps:get(return_type, Spec),
-            %% Should be Result(Nil, Symbol | Tuple) instead of Result(Nil, Dynamic)
-            ?assertEqual(<<"Result(Nil, Symbol | Tuple)">>, RetType)
+            %% Should be Result(Nil, Symbol | Tuple...) instead of Result(Nil, Dynamic).
+            %% BT-2254: the error tuples now carry their positional element types
+            %% (`{error, Reason}` shapes), so the Tuple branches are parametric.
+            ?assertEqual(
+                <<"Result(Nil, Symbol | Tuple(Symbol, Dynamic) | Tuple(Symbol, List, Dynamic))">>,
+                RetType
+            )
     end.
 
 %% BT-2185: Remote type references into preloaded modules (`erlang`, `init`,
@@ -1173,7 +1224,8 @@ resolve_remote_type_disk_log_test() ->
 %% `code:which/1` returns.
 %%
 %% `erlang:timestamp()` is defined as `{non_neg_integer(), non_neg_integer(),
-%% non_neg_integer()}`, which maps to Tuple.
+%% non_neg_integer()}`. BT-2254: the positional element types are now carried,
+%% so it maps to `Tuple(Integer, Integer, Integer)`.
 resolve_remote_type_erlang_preloaded_test() ->
     case code:get_object_code(erlang) of
         error ->
@@ -1182,7 +1234,7 @@ resolve_remote_type_erlang_preloaded_test() ->
             case beam_lib:chunks(Bin, [abstract_code]) of
                 {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
                     ?assertEqual(
-                        <<"Tuple">>,
+                        <<"Tuple(Integer, Integer, Integer)">>,
                         beamtalk_spec_reader:map_type(
                             {remote_type, 0, [{atom, 0, erlang}, {atom, 0, timestamp}, []]}
                         )
