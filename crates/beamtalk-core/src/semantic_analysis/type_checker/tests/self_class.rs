@@ -762,3 +762,206 @@ typed Object subclass: Beta
          not Known(\"Integer class\"); got {ty:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-2260: a *bare class literal* `Foo` infers `Meta{Foo}` so an unannotated
+// class value routes class-side wherever it flows — through a variable, a
+// collection, or as a class/behaviour argument — not just when used
+// syntactically as a direct receiver (`Foo new`).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bare_class_literal_infers_metatype() {
+    // The core flip: `Expression::ClassReference` is the class *object*, typed
+    // `Meta{C}` — NOT an instance of `C` (`Known(C)`).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let ty = checker.infer_expr(&class_ref("Integer"), &hierarchy, &mut env, false);
+    assert_eq!(
+        ty.as_meta().map(EcoString::as_str),
+        Some("Integer"),
+        "a bare class literal `Integer` must infer Meta{{Integer}}; got {ty:?}"
+    );
+    assert!(
+        ty.as_known().is_none(),
+        "a class literal is the class object, not an instance — `as_known` must be None; got {ty:?}"
+    );
+}
+
+#[test]
+fn class_literal_through_variable_then_new_infers_instance() {
+    // AC: `klass := Foo. klass new` → an instance of `Foo`. The literal `Foo` is
+    // now Meta{Foo}; storing it in a local keeps the metatype, so `klass new`
+    // routes through the type-driven class-side path and yields a `Foo` instance.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // klass := Integer
+    let assign_expr = assign("klass", class_ref("Integer"));
+    let assigned_ty = checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    assert_eq!(
+        assigned_ty.as_meta().map(EcoString::as_str),
+        Some("Integer"),
+        "`klass := Integer` must bind klass to Meta{{Integer}}; got {assigned_ty:?}"
+    );
+    // klass new
+    let new_send = msg_send(var("klass"), MessageSelector::Unary("new".into()), vec![]);
+    let new_ty = checker.infer_expr(&new_send, &hierarchy, &mut env, false);
+    assert_eq!(
+        new_ty.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "`klass new` (klass = a class literal) must infer an Integer instance; got {new_ty:?}"
+    );
+}
+
+#[test]
+fn class_literal_through_variable_resolves_class_selector() {
+    // AC: `klass <classSelector>` resolves class-side when `klass` came from a
+    // bare class literal. `name` lives on Behaviour (class-side) -> Symbol.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let assign_expr = assign("klass", class_ref("Integer"));
+    checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    let name_send = msg_send(var("klass"), MessageSelector::Unary("name".into()), vec![]);
+    let ty = checker.infer_expr(&name_send, &hierarchy, &mut env, false);
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("Symbol"),
+        "`klass name` (klass = a class literal) resolves Behaviour>>name -> Symbol; got {ty:?}"
+    );
+}
+
+#[test]
+fn class_literal_in_collection_routes_class_side_no_false_dnu() {
+    // AC: class values in a collection route class-side. `#(Integer, String)` is
+    // an untyped Array, so each element is still type-checked as Meta{C}; sending
+    // a class-side selector to a class value pulled from the collection must not
+    // produce a false DNU.
+    let source = "
+typed Object subclass: Registry
+  describe -> Object =>
+    #(Integer, String) do: [:c | c new]
+";
+    let diags = dnu_diags(source);
+    assert!(
+        diags.is_empty(),
+        "class values in a collection (`#(Integer, String) do: [:c | c new]`) must not \
+         produce a false DNU; got {diags:?}"
+    );
+}
+
+#[test]
+fn bare_class_literal_satisfies_class_and_behaviour_parameters() {
+    // AC: a class literal passed to a `:: Class` / `:: Behaviour` parameter is
+    // accepted. The bare literal is Meta{C}, and Meta{C} <: Class <: Behaviour.
+    let source = "
+typed Object subclass: Registry
+  register: cls :: Behaviour -> Object => cls
+  registerClass: cls :: Class -> Object => cls
+  use -> Object =>
+    self register: Integer
+    self registerClass: String
+";
+    let diags = dnu_diags(source);
+    assert!(
+        diags.is_empty(),
+        "passing bare class literals to `:: Behaviour` / `:: Class` params must not DNU; got {diags:?}"
+    );
+    let (module, hierarchy) = parse_and_build(source);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let arg_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects Behaviour") || d.message.contains("expects Class"))
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        arg_warnings.is_empty(),
+        "bare class literals must satisfy `:: Behaviour` / `:: Class` params; got {arg_warnings:?}"
+    );
+}
+
+#[test]
+fn syntactic_class_literal_new_still_works() {
+    // REGRESSION: the syntactic `Foo new` direct-literal path must keep working
+    // (it dispatches via the `Expression::ClassReference` receiver arm, not the
+    // type-driven Meta path). `Integer new` infers an Integer instance.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let new_send = msg_send(
+        class_ref("Integer"),
+        MessageSelector::Unary("new".into()),
+        vec![],
+    );
+    let ty = checker.infer_expr(&new_send, &hierarchy, &mut env, false);
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "syntactic `Integer new` must still infer an Integer instance; got {ty:?}"
+    );
+}
+
+#[test]
+fn class_eq_literal_narrowing_not_regressed() {
+    // REGRESSION (critical): `x class = Foo` narrowing must still narrow `x` to a
+    // `Foo` instance in the true branch, even though `Foo` is now Meta{Foo} and
+    // the `= Foo` comparison receiver `x class` is Meta{X}. The narrowing rule is
+    // AST-driven (class_eq.rs), so it builds Known(Foo) from the literal node —
+    // and the `Meta{X} = ...` comparison must stay Boolean (no DNU on the guard).
+    //
+    // Built as AST (mirrors the pinned narrowing tests) so the guard
+    // `x class = Integer` is exercised — the parser does not accept the inline
+    // `(x class = Integer)` paren-spelling, so source-level isn't an option here.
+    let hierarchy = ClassHierarchy::with_builtins();
+    // process: x :: Object =>
+    //   (x class = Integer) ifTrue: [x isEven] ifFalse: [x printString]
+    // `isEven` is an Integer-only selector — it must resolve in the true branch
+    // (x narrowed to Integer), confirming the literal-eq narrowing still fires.
+    let guard = msg_send(
+        msg_send(var("x"), MessageSelector::Unary("class".into()), vec![]),
+        MessageSelector::Binary("=".into()),
+        vec![class_ref("Integer")],
+    );
+    let process_method = make_keyword_method(
+        &["process:"],
+        vec![("x", Some("Object"))],
+        vec![if_true_if_false(
+            guard,
+            block_expr(vec![msg_send(
+                var("x"),
+                MessageSelector::Unary("isEven".into()),
+                vec![],
+            )]),
+            block_expr(vec![msg_send(
+                var("x"),
+                MessageSelector::Unary("printString".into()),
+                vec![],
+            )]),
+        )],
+    );
+    let class = ClassDefinition::new(
+        ident("Probe"),
+        ident("Object"),
+        vec![],
+        vec![process_method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "`x class = Integer` literal-eq narrowing must still narrow x to Integer \
+         (so `x isEven` resolves) and the guard must not DNU; got {dnu:?}"
+    );
+}
