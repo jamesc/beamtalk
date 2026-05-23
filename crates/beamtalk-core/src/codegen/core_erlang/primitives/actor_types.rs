@@ -148,6 +148,43 @@ mod tests {
     use super::super::doc_to_string;
     use super::*;
 
+    // Registry wrapper entry points (BT-2234): assert each wrapper threads the
+    // correct `to_string_fn` and `extra_selector` through `generate_opaque_bif`.
+
+    #[test]
+    fn test_pid_bif_as_string_and_extra() {
+        assert_eq!(
+            doc_to_string(generate_pid_bif("asString", &[])),
+            Some("call 'beamtalk_opaque_ops':'pid_to_string'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_pid_bif("isAlive", &[])),
+            Some("call 'erlang':'is_process_alive'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_port_bif_as_string_and_no_extra() {
+        assert_eq!(
+            doc_to_string(generate_port_bif("asString", &[])),
+            Some("call 'beamtalk_opaque_ops':'port_to_string'(Self)".to_string())
+        );
+        // Port has no extra selectors.
+        assert_eq!(doc_to_string(generate_port_bif("isAlive", &[])), None);
+    }
+
+    #[test]
+    fn test_reference_bif_as_string_and_extra() {
+        assert_eq!(
+            doc_to_string(generate_reference_bif("asString", &[])),
+            Some("call 'beamtalk_opaque_ops':'ref_to_string'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_reference_bif("demonitor", &[])),
+            Some("call 'erlang':'demonitor'(Self)".to_string())
+        );
+    }
+
     // pid_extra tests
 
     #[test]
