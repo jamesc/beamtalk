@@ -193,7 +193,7 @@ pub(super) fn inject_method_source(
 
     let mut methods_map: Option<&[MapPair]> = None;
     let mut has_method_source = false;
-    let mut has_register = false;
+    let mut last_is_register = false;
 
     let all = first_msg.into_iter().chain(
         messages
@@ -201,20 +201,24 @@ pub(super) fn inject_method_source(
             .map(|m| (&m.selector, m.arguments.as_slice())),
     );
     for (selector, args) in all {
-        match selector.name().as_str() {
-            "methods:" => methods_map = single_map_literal(args).or(methods_map),
+        let name = selector.name();
+        last_is_register = name.as_str() == "register";
+        match name.as_str() {
+            // Later setters win in a cascade, so track the *last* `methods:`
+            // map. A later non-literal `methods:` clears it — the methods it
+            // installs have no source literal to index.
+            "methods:" => methods_map = single_map_literal(args),
             "methodSource:" => has_method_source = true,
-            "register" => has_register = true,
             _ => {}
         }
     }
 
-    // Require a terminal `register`: an inline builder construction always
-    // registers in the same cascade (a builder bound to a variable and
-    // registered later is not syntactically recognisable here anyway). This
-    // keeps the recognition from firing on an unrelated `classBuilder`/`methods:`
-    // naming coincidence, where the injected setter would be a runtime DNU.
-    if !has_register || has_method_source {
+    // Require a *terminal* `register`: an inline builder construction always
+    // registers as the final cascade message. Anchoring on the terminal
+    // position (not mere presence) keeps the recognition from firing on an
+    // unrelated `classBuilder`/`methods:` naming coincidence, where the injected
+    // setter would be a runtime DNU.
+    if !last_is_register || has_method_source {
         return None;
     }
 
@@ -356,6 +360,29 @@ mod tests {
         let (recv, msgs) =
             parse_cascade("Object classBuilder name: #Foo; methods: #{ #m => [:_self | _self x] }");
         assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn skips_when_register_is_not_the_terminal_message() {
+        // `register` present but not last — the guard anchors on terminal position.
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder methods: #{ #m => [:_self | _self x] }; register; name: #Foo",
+        );
+        assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn last_methods_map_wins_when_repeated() {
+        // Later setters win in a cascade; the indexed source must come from the
+        // last `methods:` map, not the first.
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder methods: #{ #a => [:_self | _self aa] }; \
+             methods: #{ #b => [:_self | _self bb] }; register",
+        );
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+        let entries = injected_source_map(&augmented, "methodSource:");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "b");
     }
 
     #[test]
