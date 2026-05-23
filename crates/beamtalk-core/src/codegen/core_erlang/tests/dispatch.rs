@@ -2380,15 +2380,7 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
 
 // --- BT-1321: intrinsic async_send → sync_send migration ---
 
-fn codegen_source(src: &str) -> String {
-    let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, _) = crate::source_analysis::parse(tokens);
-    crate::codegen::core_erlang::generate_module(
-        &module,
-        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed")
-}
+use super::codegen as codegen_source;
 
 /// Returns `true` if the generated code contains a `beamtalk_actor:sync_send` call
 /// with the given selector atom (e.g. `"'fieldNames'"`) as the second argument.

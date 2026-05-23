@@ -18,6 +18,20 @@ pub(crate) fn bare(expr: Expression) -> ExpressionStatement {
     ExpressionStatement::bare(expr)
 }
 
+/// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
+///
+/// Shared by control-flow and dispatch test modules to avoid copy-pasting this
+/// boilerplate across every sub-module.
+pub(crate) fn codegen(src: &str) -> String {
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed")
+}
+
 /// Builds a Module with a `Value subclass: Point` with x and y slots.
 pub(crate) fn make_value_subclass_point() -> Module {
     let class = ClassDefinition {
