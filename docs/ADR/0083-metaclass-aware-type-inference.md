@@ -140,11 +140,12 @@ species pattern needs an extra stdlib change and is honestly the harder case.
   subclass. That is sound (the declared return is `Self`) but it means metatype
   typing reproduces the *resolution*, not the subtype precision.
 
-- **Slice 2 (deferred — depends on ADR 0068 Stage 2):** *parametric variance*
+- **Slice 2 (deferred for scope, not blocked):** class-side `Self`-return
   precision for concrete class literals — `Set withAll: → Set`, `List withAll: →
-  List`. ADR 0068 makes all type parameters invariant in Stage 1 (0068:350) and
-  defers variance to Stage 2, so this slice is **blocked on that work**, not
-  merely fiddly.
+  List`. The variance prerequisite (ADR 0068 Stage 2 / BT-1583) is **already
+  complete**, so this can be planned independently on top of Slice 1; it is split
+  out only to keep Slice 1 focused, not because anything blocks it. Tracked as
+  BT-2256.
 
 ### Example
 
@@ -232,8 +233,8 @@ cls new                                             // resolves, but typed Objec
 - **Tension / where reasonable people disagree:** whether re-declaring
   `species -> Self class` is worth it given the runtime species stays statically
   invisible (the def-site only ever sees `Collection`). The win is removing one
-  `@expect` and documenting intent; the subtype precision is not actually gained
-  until 0068 Stage 2. A reviewer could reasonably say "leave the species override;
+  `@expect` and documenting intent; full subtype precision arrives only with
+  Slice 2 (BT-2256). A reviewer could reasonably say "leave the species override;
   ship Slice 1 for reflection only."
 
 ## Alternatives Considered
@@ -277,8 +278,9 @@ the Smalltalk model needs.
 - Adds an `InferredType::Meta` variant — bounded, compiler-guided churn across
   match arms — and must compose with the existing `expected == "Class"` /
   metaclass-compat branch in `validation.rs` (BT-1877 / BT-2038).
-- Subtype precision for concrete generics (`Set withAll: → Set`) is **blocked on
-  ADR 0068 Stage 2** (variance), not deliverable here.
+- Class-side `Self`-return precision for concrete literals (`Set withAll: → Set`)
+  is deferred to Slice 2 (BT-2256) for scope — not deliverable in Slice 1, but not
+  blocked (its variance prerequisite, ADR 0068 Stage 2 / BT-1583, is complete).
 
 ### Neutral
 - No runtime, codegen, or syntax change — static analysis only (the `species`
@@ -311,8 +313,8 @@ the Smalltalk model needs.
 6. **Tests** — type-checker unit tests (`type_checker/tests/`: a `self_class.rs` /
    metatype suite); stdlib BUnit (`stdlib/test/`) for species/reflection; ensure
    `just test-stdlib` stays warning-clean.
-7. **Slice 2 (separate issue, blocked on ADR 0068 Stage 2)** — parametric variance
-   for concrete-class-literal precision.
+7. **Slice 2 (separate issue, BT-2256 — not blocked)** — class-side `Self`-return
+   precision for concrete-class-literal receivers.
 
 Affected components: type checker (`type_resolver`, `inference`, `validation`,
 `types`) plus one stdlib annotation (`Collection.bt`). No parser/codegen/runtime
@@ -333,9 +335,9 @@ changes.
 3. **Species scope → include in Slice 1.** Once metatype routing and `-> Self`
    class-method return exist (required for `self class new` regardless), the species
    fix is the `-> Self class` re-declaration plus removing two overrides, and
-   type-checks cleanly at the definition site. It does not buy subtype precision
-   until 0068 Stage 2, but removes real overrides and documents intent at low
-   marginal cost.
+   type-checks cleanly at the definition site. Full subtype precision waits for
+   Slice 2 (BT-2256), but Slice 1 removes real overrides and documents intent at
+   low marginal cost.
 
 ## Migration Path
 
@@ -348,13 +350,15 @@ still fall back to `Dynamic`.
 - Related issues: BT-2034 (`Self class` / `X class` annotation syntax), BT-1952
   (`Self class` historically resolves to `Dynamic`), BT-1877 / BT-2038
   (`expected == "Class"` shortcut + metaclass-tower compatibility in
-  `validation.rs`), BT-2254 (typed FFI collection element types — sibling), BT-2255
-  (Slice 1 implementation)
+  `validation.rs`), BT-1583 (ADR 0068 Stage 2 variance — **complete**, the Slice 2
+  prerequisite), BT-2254 (typed FFI collection element types — sibling), BT-2255
+  (Slice 1 implementation), BT-2256 (Slice 2 implementation)
 - Related ADRs: ADR 0036 (Full Metaclass Tower — the runtime/hierarchy this types),
   ADR 0068 (Parametric Types — **constraint**: class objects are unparameterized
-  (§511) and variance is deferred to Stage 2 (§350); this ADR stays inside both
-  boundaries), ADR 0025 (Gradual Typing and Protocols — the type system this plugs
-  into), ADR 0075 (Erlang FFI Type Definitions — class-returning reflection FFI),
+  (§511); this ADR stays inside that boundary. Note variance, originally deferred
+  to Stage 2 (§350), is now implemented (BT-1583), so Slice 2 is unblocked),
+  ADR 0025 (Gradual Typing and Protocols — the type system this plugs into),
+  ADR 0075 (Erlang FFI Type Definitions — class-returning reflection FFI),
   ADR 0077 (Type Coverage Visibility — interaction with `@expect`)
 - Documentation: `docs/beamtalk-language-features.md` (type annotations,
   `@expect`)
