@@ -808,15 +808,7 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    fn codegen(src: &str) -> String {
-        let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, _) = crate::source_analysis::parse(tokens);
-        crate::codegen::core_erlang::generate_module(
-            &module,
-            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
-        )
-        .expect("codegen should succeed")
-    }
+    use crate::codegen::core_erlang::tests::codegen;
 
     #[test]
     fn test_while_true_simple_generates_letrec() {
