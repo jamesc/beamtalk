@@ -332,7 +332,7 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",
-    "ws": "^8.0.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
