@@ -29,6 +29,7 @@ mod never_error;
 mod on_do_and_if_not_nil;
 mod protocol;
 mod result_and_type_args;
+mod self_class;
 mod self_type;
 mod state_fields;
 mod super_and_binary;

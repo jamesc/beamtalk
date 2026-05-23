@@ -734,6 +734,18 @@ fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Optio
     }
     None
 }
+/// Map an inferred type to the completion [`ReceiverSide`] for the value it
+/// describes: a `Known` instance offers instance-side methods, while a `Meta`
+/// metatype (a class object, ADR 0083) offers class-side methods. Unions,
+/// Dynamic, and Never have no single receiver side.
+fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
+    match ty {
+        InferredType::Known { class_name: n, .. } => Some(ReceiverSide::Instance(n.clone())),
+        InferredType::Meta { class_name: n, .. } => Some(ReceiverSide::Class(n.clone())),
+        InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => None,
+    }
+}
+
 /// Recursively search for a receiver expression at the given cursor offset.
 fn find_receiver_in_expr(
     expr: &Expression,
@@ -771,28 +783,14 @@ fn find_receiver_in_expr(
                         return Some(ReceiverSide::Class(name.name.clone()));
                     }
                 }
-                return type_map.get(*span).and_then(|ty| match ty {
-                    InferredType::Known { class_name: n, .. } => {
-                        Some(ReceiverSide::Instance(n.clone()))
-                    }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
-                        None
-                    }
-                });
+                return type_map.get(*span).and_then(receiver_side_of_type);
             }
             None
         }
         // If cursor is right after an identifier, use its type
         Expression::Identifier(ident) => {
             if offset >= ident.span.end() && offset <= ident.span.end() + 1 {
-                type_map.get(ident.span).and_then(|ty| match ty {
-                    InferredType::Known { class_name: n, .. } => {
-                        Some(ReceiverSide::Instance(n.clone()))
-                    }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
-                        None
-                    }
-                })
+                type_map.get(ident.span).and_then(receiver_side_of_type)
             } else {
                 None
             }
@@ -808,14 +806,7 @@ fn find_receiver_in_expr(
         // If cursor is after a literal, use its type
         Expression::Literal(_, span) => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                type_map.get(*span).and_then(|ty| match ty {
-                    InferredType::Known { class_name: n, .. } => {
-                        Some(ReceiverSide::Instance(n.clone()))
-                    }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
-                        None
-                    }
-                })
+                type_map.get(*span).and_then(receiver_side_of_type)
             } else {
                 None
             }
@@ -828,14 +819,7 @@ fn find_receiver_in_expr(
         // Recurse into parenthesized
         Expression::Parenthesized { expression, span } => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                type_map.get(*span).and_then(|ty| match ty {
-                    InferredType::Known { class_name: n, .. } => {
-                        Some(ReceiverSide::Instance(n.clone()))
-                    }
-                    InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => {
-                        None
-                    }
-                })
+                type_map.get(*span).and_then(receiver_side_of_type)
             } else {
                 find_receiver_in_expr(expression, offset, type_map)
             }

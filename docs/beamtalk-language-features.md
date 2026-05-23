@@ -911,19 +911,29 @@ class named: name :: Symbol -> Result(Self, Error) => ...
 // (Box(Integer) new) someMethod — where someMethod -> Result(Self, Error)
 //   inferred return type: Result(Box(Integer), Error)
 
-// Self class — the receiver's metaclass (return position only)
+// Self class — the receiver's metatype, i.e. the class object (ADR 0083).
 class -> Self class => @primitive "class"
-// (Counter new) class — inferred type: Counter's metaclass, so
-// `self class instanceCount` type-checks against class-side methods
+// (Counter new) class — inferred type: the metatype-of-Counter (rendered
+// `Counter class`). Sends are routed class-side: `(Counter new) class new`
+// infers a Counter instance, and `(Counter new) class instanceCount`
+// type-checks against Counter's class-side methods.
 
-// <ClassName> class — a named class metatype annotation
+// <ClassName> class — a named class metatype annotation.
 // Valid in any type position (fields, parameters, return types, locals).
-// Tells the type checker the value is a class object in the named class
-// hierarchy, so class-side methods on that class resolve without false DNU
-// warnings. Resolves to Dynamic at runtime (type-erased).
+// Resolves to the metatype-of-<ClassName> (a tracked type, ADR 0083), so
+// class-side methods on that class resolve without false DNU warnings, and a
+// class value flows with type through variables, collections, and FFI returns.
+// The metatype is name-only — the class object is unparameterized (ADR 0068),
+// so there is no `List(E) class`, only `List class`. Type-erased at runtime.
 field: actorClass :: Actor class | nil = nil
 // After `actorClass isNil ifTrue: [^nil]`, actorClass is narrowed to
 // `Actor class` — class-side methods like `isSupervisor` type-check.
+
+// Metatype subtyping: `C class <: Class <: Behaviour <: Object`, so a class
+// value satisfies `:: Class` / `:: Behaviour` parameters and `List(Behaviour)`
+// FFI returns. `new` / `basicNew` on a *concrete* class metatype infers an
+// instance of that class; on an *abstract* class (e.g. `Collection`,
+// `Behaviour`) it stays Dynamic — instantiating an abstract class is an error.
 ```
 
 ### Current Semantics

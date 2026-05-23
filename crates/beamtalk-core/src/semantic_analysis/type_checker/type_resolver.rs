@@ -124,13 +124,36 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             let inner_ty = resolve_type_annotation(inner, subst);
             InferredType::union_of(&[inner_ty, InferredType::known("False")])
         }
-        TypeAnnotation::SelfType { .. }
-        | TypeAnnotation::SelfClass { .. }
-        | TypeAnnotation::ClassOf { .. } => {
-            // `Self` / `Self class` / `<ClassName> class` need the static
-            // receiver class, which the annotation-resolver does not have.
-            // Call sites that do know it (e.g. return-type validation,
-            // nested-Self substitution) handle these cases directly.
+        TypeAnnotation::ClassOf { class_name, .. } => {
+            // ADR 0083: `<ClassName> class` is the metatype of the named class.
+            // The name is carried directly in the annotation, so resolve it to a
+            // dedicated `Meta` here (no enclosing-class context needed). A
+            // metatype value still satisfies `:: Class` / `:: Behaviour`
+            // parameters via the tower subtyping in `validation.rs`.
+            InferredType::Meta {
+                class_name: class_name.name.clone(),
+                provenance: TypeProvenance::Declared(ann.span()),
+            }
+        }
+        TypeAnnotation::SelfClass { .. } => {
+            // ADR 0083: `Self class` is the metatype of the *enclosing* class.
+            // That class isn't known to the free-function resolver, so callers
+            // that have the receiver class thread it through `subst` under the
+            // reserved `Self` key (see `build_self_subst`). Without it, fall
+            // back to `Dynamic` so existing patterns keep working (BT-1952).
+            if let Some(InferredType::Known { class_name, .. }) = subst.get("Self") {
+                return InferredType::Meta {
+                    class_name: class_name.clone(),
+                    provenance: TypeProvenance::Declared(ann.span()),
+                };
+            }
+            InferredType::Dynamic(DynamicReason::Unknown)
+        }
+        TypeAnnotation::SelfType { .. } => {
+            // `Self` needs the static receiver class, which the annotation
+            // resolver does not have. Call sites that do know it (e.g.
+            // return-type validation, nested-Self substitution) handle it
+            // directly.
             InferredType::Dynamic(DynamicReason::Unknown)
         }
         TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
@@ -586,22 +609,37 @@ mod tests {
     }
 
     #[test]
-    fn self_class_resolves_to_dynamic() {
+    fn self_class_without_self_binding_resolves_to_dynamic() {
+        // ADR 0083: `Self class` needs the enclosing class threaded under the
+        // reserved `Self` subst key. Without it (the free-function default),
+        // it still falls back to Dynamic so existing patterns keep working.
         let ann = TypeAnnotation::SelfClass { span: span() };
         let result = resolve_type_annotation(&ann, &empty_subst());
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
     #[test]
-    fn class_of_resolves_to_dynamic() {
-        // BT-2034: `<Name> class` metatype resolves to Dynamic so that
-        // class-side methods on the named class flow through without DNU.
+    fn self_class_with_self_binding_resolves_to_metatype() {
+        // ADR 0083: when callers thread the enclosing class under `Self`,
+        // `Self class` resolves to the metatype of that class.
+        let ann = TypeAnnotation::SelfClass { span: span() };
+        let mut subst = SubstitutionMap::new();
+        subst.insert("Self".into(), InferredType::known("Counter"));
+        let result = resolve_type_annotation(&ann, &subst);
+        assert_eq!(result.as_meta().map(EcoString::as_str), Some("Counter"));
+    }
+
+    #[test]
+    fn class_of_resolves_to_metatype() {
+        // ADR 0083: `<Name> class` resolves to the metatype of the named class
+        // (was Dynamic pre-0083, BT-2034). The metatype subtypes into the
+        // tower so class-side sends route through `find_class_method`.
         let ann = TypeAnnotation::ClassOf {
             class_name: ident("Actor"),
             span: span(),
         };
         let result = resolve_type_annotation(&ann, &empty_subst());
-        assert!(matches!(result, InferredType::Dynamic(_)));
+        assert_eq!(result.as_meta().map(EcoString::as_str), Some("Actor"));
     }
 
     // ---- resolve_type_annotation: singleton ----

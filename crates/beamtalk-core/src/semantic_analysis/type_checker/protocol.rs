@@ -453,6 +453,9 @@ impl TypeChecker {
                     EcoString::from(format!("{}({})", class_name, args.join(", ")))
                 }
             }
+            // Metatype renders as the source spelling `C class` (ADR 0083),
+            // matching `InferredType::display_*`.
+            InferredType::Meta { class_name, .. } => EcoString::from(format!("{class_name} class")),
             InferredType::Dynamic(_) => EcoString::from("Dynamic"),
             InferredType::Never => EcoString::from("Never"),
             InferredType::Union { members, .. } => EcoString::from(
