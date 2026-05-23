@@ -834,3 +834,70 @@ No existing behavior changes. This is purely additive:
 - Related issues: BT-1823, BT-1838 (ok/error → Result conversion — future ADR)
 - Related ADRs: ADR 0025 (gradual typing — the type system this plugs into), ADR 0028 (BEAM interop — the FFI mechanism this types), ADR 0055 (Erlang-backed classes — related FFI pattern), ADR 0068 (parametric types — generic type params in stubs), ADR 0070 (package namespaces — stub distribution via packages), ADR 0072 (user Erlang sources — native code that needs stubs)
 - External: [TypeScript Declaration Files](https://www.typescriptlang.org/docs/handbook/declaration-files/introduction.html), [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped), [Gleam External Functions](https://gleam.run/book/tour/external-functions.html), [Kotlin cinterop](https://kotlinlang.org/docs/native-c-interop.html)
+
+## Amendment: Richer FFI Collection Element Types (BT-2254)
+
+**Date:** 2026-05-23
+
+### Context
+
+The original mapping table (Section "Current State", point 1) maps `tuple()` → `Tuple`
+and lists to `List` / `List(T)`. In practice the spec reader
+(`runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl`, `map_type/1`)
+**erases element types** for both:
+
+```erlang
+map_type({type, _, list, [_ElemType]}) -> <<"List">>;   %% element type dropped
+map_type({type, _, tuple, _})          -> <<"Tuple">>;   %% element types dropped
+```
+
+So a well-specced `-spec allSendsIn(binary()) -> [{atom(), pos_integer(), atom()}]`
+is seen by the type checker as bare `List`. Iterating it yields `Dynamic` block
+parameters, so element accesses (`s at: 1`, `entry asString`) raise spurious
+type/DNU warnings.
+
+An audit of `stdlib/src` found 37 `@expect` suppression directives, ~32 of which
+exist solely to silence these false positives (concentrated in
+`SystemNavigation.bt`, which iterates FFI-returned lists of tuples), plus a large
+share of the `@expect` directives in `stdlib/test`. This is the concrete instance
+of the "Richer type mapping" item already listed under **Future Work** above.
+
+### Decision
+
+Carry collection element types through extraction and inference:
+
+| Erlang type | Beamtalk type (was) | Beamtalk type (now) |
+|-------------|---------------------|---------------------|
+| `[T]` | `List` (element dropped) | `List(T)` |
+| `{T1, …, Tn}` | `Tuple` | `Tuple(T1, …, Tn)` |
+
+The list change is a **conformance fix** — the original table already specified
+`[T] → List(T)`; the implementation simply did not carry it. The tuple change is a
+**new decision**: `tuple()` (untyped, unknown arity) still maps to bare `Tuple`,
+but a tuple type with known positional element types maps to a positional
+`Tuple(T1, …, Tn)`.
+
+To make the element types useful, the type checker gains two capabilities:
+
+1. **Literal-index tuple access** — `aTuple at: <literal int>` on a known
+   `Tuple(T1, …, Tn)` infers the element type at that 1-based index. A non-literal
+   index or an out-of-range literal falls back to `Dynamic` (no false positive).
+2. **Element-type propagation through iteration** — `do:` / `collect:` / `select:`
+   / `inject:into:` over an FFI-typed `List(T)` bind the block parameter to `T`
+   (extending the call-site `type_args` propagation from BT-2023).
+
+### Consequences
+
+- Eliminates the ~32 FFI-driven `@expect` overrides in `stdlib/src` and many in
+  `stdlib/test`. The following are explicitly **retained** (not false positives):
+  `species withAll:` (needs metaclass typing of `Self class`), `perform:…`
+  (inherently reflective), implicit class-side `new` (separate class-hierarchy
+  fix), and intentional-DNU tests.
+- Consistent with the Migration Path principle that FFI typing is additive — but
+  note that *increasing* precision surfaces **new** diagnostics where stdlib code
+  previously rode on `Dynamic` element types. These must be fixed or annotated
+  deliberately; the change is not purely subtractive.
+- `tuple()` with unknown arity remains `Tuple`; only specs with explicit element
+  types gain positional precision.
+
+**Tracking:** BT-2254.
