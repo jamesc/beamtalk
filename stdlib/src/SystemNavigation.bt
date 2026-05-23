@@ -1164,7 +1164,6 @@ sealed typed Object subclass: SystemNavigation
         // BT-2254: `entry at: 3` is the extension source, typed `String | Binary`
         // because the FFI spec uses `binary()`. It is always source text (a
         // String), so `matchesRegex:` is valid; suppress the union-member dnu.
-        @expect type
         (extSource matchesRegex: aRegex) ifTrue: [
           acc add: #{#class => extClass, #selector => extSelector}
         ] ifFalse: [acc]
@@ -1401,7 +1400,6 @@ sealed typed Object subclass: SystemNavigation
         // BT-2254: `extSource` (entry at: 3) is typed `String | Binary` from the
         // `binary()` FFI spec but is always source text (a String), which
         // `appendAllSendsIn:` requires; suppress the union arg-type warning.
-        @expect type
         self
           appendAllSendsIn: extSource
           owner: extClass
@@ -1649,7 +1647,6 @@ sealed typed Object subclass: SystemNavigation
         // BT-2254: `extSource` (entry at: 3) is typed `String | Binary` from the
         // `binary()` FFI spec but is always source text (a String), which
         // `addSentSelectorsIn:` requires; suppress the union arg-type warning.
-        @expect type
         self addSentSelectorsIn: extSource into: acc
       ]
 
