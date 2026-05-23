@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2252: `super` inside a value/primitive-context method or foreign
+// extension must lower to valid Core Erlang. Value-context funs are
+// `fun(Args, Self) -> Result` with no `State` binding, so `super` routes to
+// `beamtalk_dispatch:super_value/4` (no state threading) instead of
+// `super/5`. Before the fix the generated Core Erlang referenced an unbound
+// `State` and failed to compile.
+
+TestCase subclass: ValueSuperExtensionTest
+
+  // The extension compiles (erlc would reject the unbound `State` that the
+  // pre-fix codegen emitted) and the `super` send dispatches up the value-type
+  // chain to Binary's `printString` via `super_value/4`, returning a String
+  // without raising.
+  testValueContextSuperDispatches =>
+    result := "hi" btSuperPrintProbe
+    self assert: result equals: "hi" printString
+String >> btSuperPrintProbe -> String => super printString

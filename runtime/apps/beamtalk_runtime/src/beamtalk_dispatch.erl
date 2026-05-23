@@ -62,6 +62,7 @@ super(Selector, Args, Self, State, CurrentClass)
 -export([
     lookup/5,
     super/5,
+    super_value/4,
     responds_to/2,
     invoke_extension/4
 ]).
@@ -183,6 +184,24 @@ super(Selector, Args, Self, State, CurrentClass) ->
                             lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
                     end
             end
+    end.
+
+-doc """
+Value-context `super` send (BT-2252).
+
+Walks the superclass chain exactly like `super/5`, but for value/primitive
+types whose methods and foreign extensions lower to state-less funs
+(`fun(Args, Self) -> Result`). Such a fun has no `State` binding, so the
+generated code cannot thread one. This wrapper supplies an empty state to the
+shared hierarchy walk (state is meaningless for immutable value types) and
+unwraps the `{reply, Value, _State}` result to a plain value, re-raising any
+structured error.
+""".
+-spec super_value(selector(), args(), bt_self(), class_name()) -> term().
+super_value(Selector, Args, Self, CurrentClass) ->
+    case super(Selector, Args, Self, #{}, CurrentClass) of
+        {reply, Result, _State} -> Result;
+        {error, Error} -> beamtalk_error:raise(Error)
     end.
 
 -doc """
