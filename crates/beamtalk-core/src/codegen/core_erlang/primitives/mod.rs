@@ -25,7 +25,6 @@ mod error_handling;
 mod float;
 mod integer;
 mod list;
-mod metaclass;
 mod protocol;
 mod reflection;
 mod string;
@@ -57,52 +56,57 @@ pub fn generate_primitive_bif(
     selector: &str,
     params: &[String],
 ) -> Option<Document<'static>> {
-    match class_name {
-        "Array" => array::generate_array_bif(selector, params),
-        "Binary" => binary::generate_binary_bif(selector, params),
-        "Integer" => integer::generate_integer_bif(selector, params),
-        "Float" => float::generate_float_bif(selector, params),
-        "String" => string::generate_string_bif(selector, params),
-        "Block" => block::generate_block_bif(selector, params),
-        "Exception" => error_handling::generate_exception_bif(selector, params),
-        "Symbol" => reflection::generate_symbol_bif(selector, params),
-        "Tuple" => value_types::generate_tuple_bif(selector, params),
-        "List" => list::generate_list_bif(selector, params),
-        "Dictionary" => dictionary::generate_dictionary_bif(selector, params),
-        "ProtoObject" => value_types::generate_proto_object_bif(selector, params),
-        "Object" => value_types::generate_object_bif(selector, params),
-        "Set" => value_types::generate_set_bif(selector, params),
-        "CompiledMethod" => reflection::generate_compiled_method_bif(selector, params),
-        "Character" => character::generate_character_bif(selector, params),
-        "Collection" => collection::generate_collection_bif(selector, params),
-        "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
-        "Class" => behaviour::generate_class_bif(selector, params),
-        "Metaclass" => metaclass::generate_metaclass_bif(selector, params),
-        "Protocol" => protocol::generate_protocol_bif(selector, params),
-        "StackFrame" => error_handling::generate_stack_frame_bif(selector, params),
-        "Pid" => actor_types::generate_opaque_bif(
-            selector,
-            params,
-            "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
-            actor_types::pid_extra,
-        ),
-        "Port" => actor_types::generate_opaque_bif(
-            selector,
-            params,
-            "call 'beamtalk_opaque_ops':'port_to_string'(Self)",
-            actor_types::no_extra,
-        ),
-        "Reference" => actor_types::generate_opaque_bif(
-            selector,
-            params,
-            "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
-            actor_types::reference_extra,
-        ),
-        "Future" => actor_types::generate_future_bif(selector, params),
-        "FileHandle" => actor_types::generate_file_handle_bif(selector, params),
-        _ => None,
-    }
+    let lower = REGISTRY
+        .iter()
+        .find_map(|(class, lower)| (*class == class_name).then_some(lower))?;
+    lower(selector, params)
 }
+
+/// Lowering function for one class's `@primitive` selectors: given the selector
+/// and the method's parameters, returns the Core Erlang to emit (or `None` if
+/// the selector has no inline lowering).
+type PrimitiveLowerFn = fn(&str, &[String]) -> Option<Document<'static>>;
+
+/// The single authoritative primitive-lowering registry (BT-2234).
+///
+/// This is the one place that maps a class to how its primitives lower,
+/// replacing the former per-class `match class_name` dispatch. Classes that
+/// share a lowering table point at the **same** function: the
+/// `Behaviour` / `Class` / `Metaclass` tower all route to
+/// [`behaviour::generate_tower_bif`], so a primitive's lowering follows the
+/// primitive, not the class that happens to declare it. That closes the gap
+/// that let `className` silently fall through to runtime dispatch when it moved
+/// up the tower (BT-2232).
+const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
+    ("Array", array::generate_array_bif),
+    ("Binary", binary::generate_binary_bif),
+    ("Integer", integer::generate_integer_bif),
+    ("Float", float::generate_float_bif),
+    ("String", string::generate_string_bif),
+    ("Block", block::generate_block_bif),
+    ("Exception", error_handling::generate_exception_bif),
+    ("Symbol", reflection::generate_symbol_bif),
+    ("Tuple", value_types::generate_tuple_bif),
+    ("List", list::generate_list_bif),
+    ("Dictionary", dictionary::generate_dictionary_bif),
+    ("ProtoObject", value_types::generate_proto_object_bif),
+    ("Object", value_types::generate_object_bif),
+    ("Set", value_types::generate_set_bif),
+    ("CompiledMethod", reflection::generate_compiled_method_bif),
+    ("Character", character::generate_character_bif),
+    ("Collection", collection::generate_collection_bif),
+    // Behaviour / Class / Metaclass tower: one shared table (BT-2234).
+    ("Behaviour", behaviour::generate_tower_bif),
+    ("Class", behaviour::generate_tower_bif),
+    ("Metaclass", behaviour::generate_tower_bif),
+    ("Protocol", protocol::generate_protocol_bif),
+    ("StackFrame", error_handling::generate_stack_frame_bif),
+    ("Pid", actor_types::generate_pid_bif),
+    ("Port", actor_types::generate_port_bif),
+    ("Reference", actor_types::generate_reference_bif),
+    ("Future", actor_types::generate_future_bif),
+    ("FileHandle", actor_types::generate_file_handle_bif),
+];
 
 /// BT-2233: Quoted `@primitive "selector"` declarations that intentionally
 /// route through runtime dispatch instead of an inline BIF, so the fail-loud
