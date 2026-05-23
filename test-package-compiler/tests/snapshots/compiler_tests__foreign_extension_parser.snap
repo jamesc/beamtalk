@@ -1,0 +1,138 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    method_definitions: [
+        StandaloneMethodDefinition {
+            class_name: Identifier {
+                name: "String",
+                span: Span {
+                    start: 290,
+                    end: 296,
+                },
+            },
+            package: None,
+            is_class_method: false,
+            method: MethodDefinition {
+                selector: Unary(
+                    "bt2250Doubled",
+                ),
+                parameters: [],
+                body: [
+                    ExpressionStatement {
+                        comments: CommentAttachment {
+                            leading: [],
+                            trailing: None,
+                        },
+                        expression: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 317,
+                                        end: 321,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "++",
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 325,
+                                            end: 329,
+                                        },
+                                    },
+                                ),
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 317,
+                                end: 329,
+                            },
+                        },
+                        preceding_blank_line: false,
+                    },
+                ],
+                return_type: None,
+                is_sealed: false,
+                is_internal: false,
+                kind: Primary,
+                expect: None,
+                comments: CommentAttachment {
+                    leading: [
+                        Comment {
+                            content: "Copyright 2026 James Casey",
+                            span: Span {
+                                start: 290,
+                                end: 296,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "SPDX-License-Identifier: Apache-2.0",
+                            span: Span {
+                                start: 290,
+                                end: 296,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "BT-2250: a foreign cross-class extension in a class-less file must lower to a",
+                            span: Span {
+                                start: 290,
+                                end: 296,
+                            },
+                            kind: Line,
+                            preceding_blank_line: true,
+                        },
+                        Comment {
+                            content: "valid, erlc-compilable module that registers the extension at load via",
+                            span: Span {
+                                start: 290,
+                                end: 296,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "beamtalk_extensions:register/5 (with the method body source).",
+                            span: Span {
+                                start: 290,
+                                end: 296,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    trailing: None,
+                },
+                doc_comment: None,
+                span: Span {
+                    start: 300,
+                    end: 329,
+                },
+            },
+            span: Span {
+                start: 290,
+                end: 329,
+            },
+        },
+    ],
+    protocols: [],
+    expressions: [],
+    span: Span {
+        start: 290,
+        end: 329,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

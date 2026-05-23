@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2250: a foreign cross-class extension in a class-less file must lower to a
+// valid, erlc-compilable module that registers the extension at load via
+// beamtalk_extensions:register/5 (with the method body source).
+String >> bt2250Doubled => self ++ self

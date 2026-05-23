@@ -197,11 +197,27 @@ impl CoreErlangGenerator {
             .as_ref()
             .is_some_and(|h| h.is_actor_subclass(ext.class_name.name.as_str()));
 
-        if target_is_actor {
+        // BT-2250: scope the generator's class identity to the extension's
+        // TARGET class while generating the body, so a `super` send inside the
+        // extension walks the target class's hierarchy rather than the host
+        // module's (which `class_name()` would otherwise return). The bare class
+        // name matches the convention used by normal instance- and class-side
+        // methods (`generate_super_send` emits `class_name()` as `CurrentClass`
+        // without appending " class"). Restored afterwards so the host module's
+        // own registration chain is unaffected.
+        let prev_identity = self.class_identity().cloned();
+        self.set_class_identity(Some(super::super::util::ClassIdentity::new(
+            ext.class_name.name.as_str(),
+        )));
+
+        let result = if target_is_actor {
             self.generate_actor_extension_fun(ext)
         } else {
             self.generate_value_extension_fun(ext)
-        }
+        };
+
+        self.set_class_identity(prev_identity);
+        result
     }
 
     /// Generates a 2-arity value/primitive extension fun:
