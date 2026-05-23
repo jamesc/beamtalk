@@ -74,16 +74,23 @@ typing alone** — it additionally requires re-declaring `species -> Self class`
 
 Make metatypes first-class in inference:
 
-1. **Represent a metaclass type — over a class *name*, not a parameterized class.**
-   Introduce a representation for "the class object named `C`" — the metatype of
-   `C`. **Critically, the class object is _not_ parameterized** (ADR 0068:511:
-   "there's no `Result(Integer, Error)` class object"). The metatype carries a
-   class *name* only (`metatype-of-List`, not `metatype-of-List(E)`). Instance
-   type arguments are recovered at the *call site* via ADR 0068's existing
-   class-method inference ("class method calls on generic classes as implicit
-   type application sites") — e.g. `List withAll: aList(Integer)` infers the
-   element type from the argument, not from the class object. This keeps 0083 and
-   0068 consistent rather than in conflict.
+1. **Represent a metaclass type as a dedicated, name-only variant.** Add
+   `InferredType::Meta { class_name, provenance }` — the metatype of class `C`,
+   a.k.a. `C class`. **Critically, the class object is _not_ parameterized**
+   (ADR 0068:511: "there's no `Result(Integer, Error)` class object"). `Meta`
+   carries a class *name* only (`Meta{List}`, never `Meta{List(E)}`), which makes
+   parameterized metatypes structurally unrepresentable — the 0068 rule is enforced
+   by the type, not by discipline. Instance type arguments are recovered at the
+   *call site* via ADR 0068's existing class-method inference ("class method calls
+   on generic classes as implicit type application sites") — e.g.
+   `List withAll: aList(Integer)` infers the element type from the argument, not
+   from the class object. A *dedicated variant* (rather than an `is_meta` flag on
+   `Known`) is chosen deliberately: ~131 non-test sites destructure
+   `Known { class_name, .. }` and would silently treat a metatype as the instance
+   type under a flag; a variant makes the relevant matches compiler-visible and
+   degrades safely (an `if let Known{..}` simply falls through to "unknown" rather
+   than producing a wrong answer). Named `Meta` (not `Metaclass`) to avoid collision
+   with the tower's `Metaclass` *class*.
 
 2. **Subtyping into the tower.** `metatype-of-C <: Class <: Behaviour <: Object`,
    so a metatype value still satisfies `:: Class` / `:: Behaviour` parameters and
@@ -267,9 +274,9 @@ the Smalltalk model needs.
   subtractive).
 - Abstract-class `new` is a soundness hazard (`Collection new` must not type as a
   concrete instance) — needs an explicit guard.
-- Touches the `InferredType` representation (variant vs. flag) broadly, and must
-  compose with the existing `expected == "Class"` / metaclass-compat branch in
-  `validation.rs` (BT-1877 / BT-2038).
+- Adds an `InferredType::Meta` variant — bounded, compiler-guided churn across
+  match arms — and must compose with the existing `expected == "Class"` /
+  metaclass-compat branch in `validation.rs` (BT-1877 / BT-2038).
 - Subtype precision for concrete generics (`Set withAll: → Set`) is **blocked on
   ADR 0068 Stage 2** (variance), not deliverable here.
 
@@ -284,10 +291,10 @@ the Smalltalk model needs.
 0. **Spike** — confirm the representation and trace the species case end-to-end on
    one method before broad work (the smallest proof: `Counter class new` infers
    `Counter`, and `self species withAll:` resolves with `species -> Self class`).
-1. **Representation** — a marker on `InferredType::Known` (an `is_meta` flag
-   carrying the class *name* only — **not** a parameterized class object, per
-   ADR 0068) is preferred over a new variant, to minimize churn across the many
-   `Known` match sites. Define `metatype-of-C <: Class <: Behaviour`.
+1. **Representation** — add the `InferredType::Meta { class_name, provenance }`
+   variant (name-only, per Decision item 1). Define `Meta{C} <: Class <: Behaviour`
+   in `is_type_compatible`; display as "`C class`". Expect bounded, compiler-guided
+   churn adding match arms (`display_for_diagnostic`, subtyping, etc.).
 2. **`type_resolver`** — resolve `SelfClass` / `ClassOf` to the metatype instead
    of `Dynamic` (`type_resolver.rs:128–134`).
 3. **`inference.rs`** — when the receiver type is a metatype, set
@@ -311,18 +318,24 @@ Affected components: type checker (`type_resolver`, `inference`, `validation`,
 `types`) plus one stdlib annotation (`Collection.bt`). No parser/codegen/runtime
 changes.
 
-## Open Questions
+## Resolved Questions
 
-1. **`species` re-declaration vs. body-driven inference.** Re-declaring
-   `species -> Self class` is the simplest path (the call site uses the *declared*
-   return, so inferring the body `self class` as a metatype does not help unless
-   the signature changes). Confirm this is acceptable, or decide to special-case
-   `self class` expression inference. *(Recommendation: re-declare — explicit and
-   local.)*
-2. **Representation:** `is_meta` flag on `Known` vs. a dedicated `Metaclass`
-   variant — settle in the spike against the actual breadth of `Known` match sites.
-3. **Is the species slice worth it now,** or ship Slice 1 for reflection only and
-   leave the species override until 0068 Stage 2 buys real subtype precision?
+1. **`species` typing → re-declare `species -> Self class`.** Body-driven `self
+   class` inference was rejected: the call site uses the method's *declared* return
+   type, so inferring the body as a metatype would not help `self species` callers
+   without separately changing return-type computation. Re-declaring is local,
+   explicit, and correct (the body is already `self class`).
+2. **Representation → dedicated `InferredType::Meta { class_name, provenance }`
+   variant** (not an `is_meta` flag). ~131 non-test `Known { class_name, .. }` sites
+   would silently mis-handle a metatype under a flag; the variant is
+   compiler-guided and degrades safely. Name-only, so parameterized metatypes are
+   unrepresentable (enforces ADR 0068 structurally). See Decision item 1.
+3. **Species scope → include in Slice 1.** Once metatype routing and `-> Self`
+   class-method return exist (required for `self class new` regardless), the species
+   fix is the `-> Self class` re-declaration plus removing two overrides, and
+   type-checks cleanly at the definition site. It does not buy subtype precision
+   until 0068 Stage 2, but removes real overrides and documents intent at low
+   marginal cost.
 
 ## Migration Path
 
