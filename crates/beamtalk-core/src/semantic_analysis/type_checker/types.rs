@@ -213,13 +213,20 @@ impl InferredType {
     /// Creates a [`Meta`](InferredType::Meta) metatype with `Inferred`
     /// provenance — the type of the class object `class_name class`.
     ///
-    /// Name-only, per ADR 0083 / ADR 0068 (the class object is unparameterized);
-    /// any type arguments on `class_name` are ignored — pass the base class
-    /// name only.
+    /// Name-only, per ADR 0083 / ADR 0068 (the class object is unparameterized).
+    /// Any type-argument suffix on `class_name` is stripped to enforce this
+    /// invariant — `meta("List(E)")` yields `Meta{List}`, not `Meta{List(E)}`.
     #[must_use]
     pub fn meta(class_name: impl Into<EcoString>) -> Self {
+        let name: EcoString = class_name.into();
+        // Strip any `(...)` type-argument suffix so the stored name is the
+        // bare class name (the class object carries no type args).
+        let base = match name.find('(') {
+            Some(idx) => EcoString::from(&name[..idx]),
+            None => name,
+        };
         Self::Meta {
-            class_name: class_name.into(),
+            class_name: base,
             provenance: TypeProvenance::Inferred(Span::default()),
         }
     }

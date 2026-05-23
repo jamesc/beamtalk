@@ -1076,16 +1076,22 @@ impl TypeChecker {
             ..
         } = receiver_ty
         {
-            // Binary operators (`=`, `==`, `~=`, `=:=`, …) are value/identity
-            // comparisons every object — including a class object — supports at
-            // runtime via the universal `Object`/`ProtoObject` protocol, but
-            // they are not modelled as hierarchy methods. Routing them through
-            // class-side DNU lookup would emit a false `C class does not
-            // understand '='` (it broke `x class = Foo` narrowing). Treat them
-            // as Boolean-returning comparisons without a class-side check —
+            // The equality/identity comparison operators (`=`, `==`, `=:=`,
+            // `/=`, `=/=`) are value/identity comparisons every object —
+            // including a class object — supports at runtime via the universal
+            // `Object`/`ProtoObject` protocol, but they are not modelled as
+            // hierarchy methods. Routing them through class-side DNU lookup
+            // would emit a false `C class does not understand '='` (it broke
+            // `x class = Foo` narrowing). Treat ONLY these comparison
+            // selectors as Boolean-returning without a class-side check —
             // matching the pre-0083 behaviour where `Self class` was Dynamic.
-            if matches!(selector, MessageSelector::Binary(_)) {
-                return InferredType::known("Boolean");
+            // Other binary selectors (e.g. `+`) must fall through to normal
+            // class-side / tower lookup (and DNU if unresolved); typing
+            // `SomeClass + 1` as Boolean would be wrong and suppress the DNU.
+            if let MessageSelector::Binary(op) = selector {
+                if is_equality_comparison_op(op) {
+                    return InferredType::known("Boolean");
+                }
             }
             // `aClass class` is the metaclass of the class object. The static
             // hierarchy doesn't track per-class metaclasses precisely, so fall
@@ -1116,7 +1122,9 @@ impl TypeChecker {
             // return type. Only overrides a Dynamic result, never a concrete
             // class-side answer.
             if matches!(class_side, InferredType::Dynamic(_)) {
-                if let Some(ty) = Self::class_object_tower_return(&selector_name, hierarchy) {
+                if let Some(ty) =
+                    Self::class_object_tower_return(&selector_name, hierarchy, meta_class)
+                {
                     return ty;
                 }
             }
@@ -1665,17 +1673,26 @@ impl TypeChecker {
     /// `printString -> String`. Returns `None` when the selector is not on the
     /// tower or carries no return annotation (the caller keeps the Dynamic
     /// fallback). Resolution starts at `Metaclass` so the whole chain is walked.
+    ///
+    /// `receiver_meta` is the concrete metatype of the receiver class object
+    /// (`Meta{C}`). When the tower method returns `Self` / `Self class` — e.g.
+    /// the identity method `Object>>yourself -> Self` — the receiver *is* the
+    /// class object, so the result stays `Meta{C}` (this keeps
+    /// `aClass yourself new` resolving class-side rather than collapsing to
+    /// Dynamic, BT-2255).
     fn class_object_tower_return(
         selector: &str,
         hierarchy: &ClassHierarchy,
+        receiver_meta: &EcoString,
     ) -> Option<InferredType> {
         let method = hierarchy.find_method("Metaclass", selector)?;
         let ret_ty = method.return_type.as_ref()?;
-        // `Self` / `Self class` on the tower refer to the class object itself —
-        // not statically resolvable to a useful concrete type here, so leave
-        // them to the Dynamic fallback rather than leaking `Known("Self")`.
+        // `Self` / `Self class` on the tower refer to the class object itself.
+        // For a metatype-typed receiver we know that object is `Meta{C}`, so
+        // preserve the concrete metatype rather than dropping to Dynamic — this
+        // keeps tower identity methods (`yourself`) chainable class-side.
         if ret_ty.as_str() == "Self" || ret_ty.as_str() == "Self class" {
-            return None;
+            return Some(InferredType::meta(receiver_meta.clone()));
         }
         if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
             return Some(InferredType::Never);
@@ -1826,6 +1843,17 @@ impl TypeChecker {
                             // the concrete union member (was Dynamic pre-0083,
                             // BT-1952).
                             return_types.push(InferredType::meta(member_name.clone()));
+                        } else if let Some(meta_class) = ret_ty
+                            .as_str()
+                            .strip_suffix(" class")
+                            .filter(|name| hierarchy.has_class(name))
+                        {
+                            // ADR 0083: an explicit `X class` return on a union
+                            // member resolves to `Meta{X}` — mirrors the
+                            // non-union path (BT-2034). Without this branch the
+                            // ` class` suffix leaked through as
+                            // `Known("X class")`.
+                            return_types.push(InferredType::meta(EcoString::from(meta_class)));
                         } else if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                             // BT-1945: Bottom type for divergent methods
                             return_types.push(InferredType::Never);
@@ -3566,6 +3594,20 @@ fn is_class_protocol_selector(selector: &str) -> bool {
             | "module_name"
             | "printString"
     )
+}
+
+/// Returns `true` for the equality / identity comparison binary operators —
+/// the universal value/identity comparisons every object (including a class
+/// object) supports via `Object` / `ProtoObject`.
+///
+/// These mirror the equality operators in the parser's binding-power table
+/// (`==`, `/=`, `=:=`, `=/=` at precedence 10) plus the legacy `=` strict-
+/// equality alias (BT-952, see `codegen/core_erlang/operators.rs`). They are
+/// the same comparison forms `x class = Foo` narrowing recognises
+/// (`narrowing/rules/class_eq.rs`). All other binary selectors are NOT
+/// comparisons and must fall through to normal class-side / tower lookup.
+fn is_equality_comparison_op(op: &str) -> bool {
+    matches!(op, "=" | "==" | "=:=" | "/=" | "=/=")
 }
 
 #[cfg(test)]

@@ -596,3 +596,169 @@ fn metatype_renders_as_source_spelling_in_diagnostics() {
     // canonical (internal) keeps UndefinedObject.
     assert_eq!(nil_meta.display_name().unwrap(), "UndefinedObject class");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: code-review findings on the metaclass-aware inference PR
+// (BT-2255 / ADR 0083). See inference.rs `is_equality_comparison_op`,
+// `class_object_tower_return`, `InferredType::meta`, and the union-send path.
+// ---------------------------------------------------------------------------
+
+/// Like `infer_send_on_local` but also returns the does-not-understand
+/// diagnostics emitted during inference, so a test can assert that a send is
+/// (or is NOT) silently DNU-suppressed.
+fn infer_send_on_local_with_dnu(
+    local: &str,
+    local_ty: InferredType,
+    send: &Expression,
+    hierarchy: &ClassHierarchy,
+) -> (InferredType, Vec<EcoString>) {
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local(local, local_ty);
+    let ty = checker.infer_expr(send, hierarchy, &mut env, false);
+    let dnus = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .map(|d| d.message.clone())
+        .collect();
+    (ty, dnus)
+}
+
+#[test]
+fn non_comparison_binary_on_class_value_is_not_boolean_and_not_dnu_suppressed() {
+    // Finding 1: the binary fast-path must only fire for equality/identity
+    // comparisons. `SomeClass + 1` on a `Meta{Integer}` receiver is NOT a
+    // comparison — it must NOT type as Boolean, and it must NOT be silently
+    // suppressed (it should fall through to normal class-side lookup and DNU,
+    // since `Integer class` has no `+`).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let send = msg_send(
+        var("cls"),
+        MessageSelector::Binary("+".into()),
+        vec![int_lit(1)],
+    );
+    let (ty, dnus) =
+        infer_send_on_local_with_dnu("cls", InferredType::meta("Integer"), &send, &hierarchy);
+    assert_ne!(
+        ty.as_known().map(EcoString::as_str),
+        Some("Boolean"),
+        "`cls + 1` on a metatype must NOT infer Boolean (non-comparison binary); got {ty:?}"
+    );
+    assert!(
+        !dnus.is_empty(),
+        "`cls + 1` on `Integer class` must surface a DNU (the fast-path must not \
+         swallow non-comparison binaries); got no DNU, type {ty:?}"
+    );
+}
+
+#[test]
+fn equality_binary_on_class_value_still_boolean() {
+    // Finding 1 (companion): an equality send on a `Meta{C}` receiver still
+    // infers Boolean via the (now-restricted) fast-path. Covers every
+    // equality/identity operator in the canonical set.
+    let hierarchy = ClassHierarchy::with_builtins();
+    for op in ["=", "==", "=:=", "/=", "=/="] {
+        let send = msg_send(
+            var("cls"),
+            MessageSelector::Binary(op.into()),
+            vec![class_ref("Float")],
+        );
+        let (ty, dnus) =
+            infer_send_on_local_with_dnu("cls", InferredType::meta("Integer"), &send, &hierarchy);
+        assert_eq!(
+            ty.as_known().map(EcoString::as_str),
+            Some("Boolean"),
+            "`cls {op} Float` on a metatype should be Boolean; got {ty:?}"
+        );
+        assert!(
+            dnus.is_empty(),
+            "equality send `cls {op} Float` must not DNU; got {dnus:?}"
+        );
+    }
+}
+
+#[test]
+fn meta_constructor_strips_type_argument_suffix() {
+    // Finding 2: `InferredType::meta` is documented name-only. A name carrying
+    // a `(...)` type-argument suffix must be stripped — `meta("Foo(Bar)")` is
+    // `Meta{Foo}`, never `Meta{Foo(Bar)}`.
+    let m = InferredType::meta("Foo(Bar)");
+    assert_eq!(
+        m.as_meta().map(EcoString::as_str),
+        Some("Foo"),
+        "`meta(\"Foo(Bar)\")` must strip the type-arg suffix to Meta{{Foo}}; got {m:?}"
+    );
+    // Multi-arg / nested suffixes strip at the first paren too.
+    let nested = InferredType::meta("List(Pair(K, V))");
+    assert_eq!(nested.as_meta().map(EcoString::as_str), Some("List"));
+    // A plain name is unchanged.
+    assert_eq!(
+        InferredType::meta("Counter")
+            .as_meta()
+            .map(EcoString::as_str),
+        Some("Counter")
+    );
+}
+
+#[test]
+fn tower_self_returning_method_preserves_metatype() {
+    // Finding 3: a `Self`-returning tower identity method on a `Meta{C}`
+    // receiver must preserve `Meta{C}` rather than collapsing to Dynamic.
+    // `Object>>yourself -> Self`; `aClass yourself` is still the class object,
+    // so it stays `Meta{Integer}` (and `aClass yourself new` keeps working).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let send = msg_send(
+        var("cls"),
+        MessageSelector::Unary("yourself".into()),
+        vec![],
+    );
+    let ty = infer_send_on_local("cls", InferredType::meta("Integer"), &send, &hierarchy);
+    assert_eq!(
+        ty.as_meta().map(EcoString::as_str),
+        Some("Integer"),
+        "`cls yourself` (tower Self-return) on Meta{{Integer}} must stay Meta{{Integer}}; got {ty:?}"
+    );
+
+    // And the metatype must remain chainable class-side: `cls yourself new`
+    // resolves an Integer instance, proving Dynamic was not leaked.
+    let chained = msg_send(send, MessageSelector::Unary("new".into()), vec![]);
+    let chained_ty =
+        infer_send_on_local("cls", InferredType::meta("Integer"), &chained, &hierarchy);
+    assert_eq!(
+        chained_ty.as_known().map(EcoString::as_str),
+        Some("Integer"),
+        "`cls yourself new` must infer an Integer instance (Meta preserved); got {chained_ty:?}"
+    );
+}
+
+#[test]
+fn union_member_x_class_return_infers_metatype() {
+    // Finding 4: a union-member method that explicitly returns `X class` must
+    // resolve to `Meta{X}`, mirroring the non-union path. Without the fix the
+    // ` class` suffix leaked through as `Known("Integer class")`.
+    //
+    // Two user classes both declare `metaOf -> Integer class` so the receiver
+    // stays a genuine `Union` (a single-member union collapses).
+    let source = "
+typed Object subclass: Alpha
+  metaOf -> Integer class => Integer
+typed Object subclass: Beta
+  metaOf -> Integer class => Integer
+";
+    let (_module, hierarchy) = parse_and_build(source);
+    let union =
+        InferredType::union_of(&[InferredType::known("Alpha"), InferredType::known("Beta")]);
+    assert!(
+        matches!(union, InferredType::Union { .. }),
+        "precondition: receiver must be a Union; got {union:?}"
+    );
+    let send = msg_send(var("u"), MessageSelector::Unary("metaOf".into()), vec![]);
+    let ty = infer_send_on_local("u", union, &send, &hierarchy);
+    assert_eq!(
+        ty.as_meta().map(EcoString::as_str),
+        Some("Integer"),
+        "union-member method returning `Integer class` must infer Meta{{Integer}}, \
+         not Known(\"Integer class\"); got {ty:?}"
+    );
+}
