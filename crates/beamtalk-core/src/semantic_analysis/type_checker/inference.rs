@@ -347,8 +347,20 @@ impl TypeChecker {
                 }
             }
 
-            // Class references are the class itself (class-side receiver)
-            Expression::ClassReference { name, .. } => InferredType::known(name.name.clone()),
+            // A bare class literal `Foo` is the class *object*, whose type is the
+            // metatype `Meta{Foo}` (ADR 0083 / BT-2260) — *not* an instance of
+            // `Foo`. Typing it `Meta{C}` makes a class value route class-side
+            // wherever it flows (through a variable, collection, or FFI return),
+            // not just when used syntactically as a direct receiver (`Foo new`).
+            //
+            // The syntactic class-side path (`Expression::ClassReference`
+            // receiver in `infer_message_send`) still fires for direct sends, and
+            // the type-driven `Meta{C}` path covers receivers reached through a
+            // binding. `Meta{C} <: Class <: Behaviour` subtyping (validation.rs)
+            // keeps `:: Class` / `:: Behaviour` parameter checks and `isKindOf:`
+            // satisfied; `x class = Foo` narrowing is AST-driven (class_eq.rs) and
+            // unaffected by this inference change.
+            Expression::ClassReference { name, .. } => InferredType::meta(name.name.clone()),
 
             // Field access — infer type from declared state type for self.field
             // BT-2048: Check env first for narrowed type (e.g. inside isNil ifFalse: block)
@@ -4703,11 +4715,13 @@ mod tests {
 
     #[test]
     fn infer_expr_class_reference() {
+        // BT-2260: a bare class literal `Integer` is the class *object*, whose
+        // type is the metatype `Meta{Integer}` — not an instance of `Integer`.
         let hierarchy = ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
         let ty = checker.infer_expr(&class_ref("Integer"), &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::known("Integer"));
+        assert_eq!(ty, InferredType::meta("Integer"));
     }
 
     #[test]
