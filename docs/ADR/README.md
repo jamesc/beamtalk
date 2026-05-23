@@ -105,6 +105,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0079](0079-named-actor-registration.md) | Named Actor Registration | Accepted | 2026-04-15 |
 | [0080](0080-supervisor-lifecycle-result.md) | Migrate Supervisor Lifecycle to Result | Proposed | 2026-04-16 |
 | [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Proposed | 2026-05-17 |
+| [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Proposed | 2026-05-23 |
 
 ## Creating New ADRs
 
