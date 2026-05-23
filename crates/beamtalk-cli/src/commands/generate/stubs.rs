@@ -320,6 +320,8 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
             let parts: Vec<String> = members.iter().map(format_type).collect();
             parts.join(" | ")
         }
+        // ADR 0083: render a metatype as the source annotation spelling `C class`.
+        InferredType::Meta { class_name, .. } => format!("{class_name} class"),
     }
 }
 

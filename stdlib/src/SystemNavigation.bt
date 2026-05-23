@@ -36,10 +36,9 @@ sealed typed Object subclass: SystemNavigation
   /// SystemNavigation default implementorsOf: #asString
   /// ```
   class default -> SystemNavigation =>
-    // `new` is implicit on sealed Object subclasses (handled by the
-    // runtime's class instantiation path) but isn't surfaced through the
-    // compile-time class hierarchy, so suppress the dnu check.
-    @expect dnu
+    // `new` is implicit on sealed Object subclasses (handled by the runtime's
+    // class instantiation path). ADR 0083 models this in the type checker, so
+    // no `@expect dnu` suppression is needed.
     self new
 
   /// Snapshot of the class registry visible to this navigation query.

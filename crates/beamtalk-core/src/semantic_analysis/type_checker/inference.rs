@@ -930,7 +930,10 @@ impl TypeChecker {
             // BT-2158: detect class-side sends so block-param propagation
             // uses `find_class_method` instead of `find_method`. Shares the
             // helper with the downstream `is_class_side_receiver` check below.
-            let is_class_side = Self::is_class_side_receiver(receiver, env);
+            // ADR 0083: a metatype-typed receiver (`Meta{C}`) is also class-side
+            // — its block params should resolve against `C`'s class methods.
+            let is_class_side = Self::is_class_side_receiver(receiver, env)
+                || matches!(receiver_ty, InferredType::Meta { .. });
             self.infer_args_with_block_context(
                 arguments,
                 &receiver_ty,
@@ -1061,6 +1064,65 @@ impl TypeChecker {
             );
         }
 
+        // ADR 0083: type-driven class-side dispatch. When the receiver's
+        // *inferred type* is a metatype `Meta{C}` — e.g. a value typed
+        // `Self class` / `X class`, the result of `obj class`, or a class value
+        // flowing through a variable/collection/FFI return — route the send to
+        // class-side lookup on `C` exactly like a syntactic `C foo:`. This
+        // generalizes `is_class_side_receiver` from a syntactic test (class
+        // literal / `self` in a class method) to a type-driven one.
+        if let InferredType::Meta {
+            class_name: ref meta_class,
+            ..
+        } = receiver_ty
+        {
+            // Binary operators (`=`, `==`, `~=`, `=:=`, …) are value/identity
+            // comparisons every object — including a class object — supports at
+            // runtime via the universal `Object`/`ProtoObject` protocol, but
+            // they are not modelled as hierarchy methods. Routing them through
+            // class-side DNU lookup would emit a false `C class does not
+            // understand '='` (it broke `x class = Foo` narrowing). Treat them
+            // as Boolean-returning comparisons without a class-side check —
+            // matching the pre-0083 behaviour where `Self class` was Dynamic.
+            if matches!(selector, MessageSelector::Binary(_)) {
+                return InferredType::known("Boolean");
+            }
+            // `aClass class` is the metaclass of the class object. The static
+            // hierarchy doesn't track per-class metaclasses precisely, so fall
+            // back to the `Metaclass` tower class (BT-1952 parity).
+            if selector_name == "class" {
+                return InferredType::known("Metaclass");
+            }
+            self.check_argument_types(
+                meta_class,
+                &selector_name,
+                &arg_types,
+                span,
+                hierarchy,
+                true,
+                Some(arguments),
+                Some(env),
+            );
+            let class_side =
+                self.check_class_side_send(meta_class, &selector_name, span, hierarchy, &arg_types);
+            // ADR 0083: when no class-side method on `C` defined the result, a
+            // class object still responds to its metaclass-tower *instance*
+            // protocol (`Metaclass → Class → Behaviour → Object → ProtoObject`)
+            // at runtime — e.g. `Behaviour>>name -> Symbol`,
+            // `Behaviour>>superclass`. `check_class_side_send` only propagates
+            // `-> Never` from that chain (to avoid false DNUs on class
+            // *literals*); for a metatype-typed receiver we know the value is a
+            // class object, so apply the tower instance method's declared
+            // return type. Only overrides a Dynamic result, never a concrete
+            // class-side answer.
+            if matches!(class_side, InferredType::Dynamic(_)) {
+                if let Some(ty) = Self::class_object_tower_return(&selector_name, hierarchy) {
+                    return ty;
+                }
+            }
+            return class_side;
+        }
+
         // For instance-side sends on known types
         if let InferredType::Known {
             ref class_name,
@@ -1160,12 +1222,21 @@ impl TypeChecker {
                         };
                     }
 
-                    // BT-1952: `Self class` — the method returns a class object.
-                    // Resolve to Dynamic so existing patterns like `x class = Integer`
-                    // continue to work (class objects respond to all Object messages
-                    // at runtime, but the type hierarchy doesn't model `=` as a method).
+                    // ADR 0083: `Self class` — the method returns the receiver's
+                    // class object. Resolve to the metatype of the static
+                    // receiver class so that downstream class-side sends
+                    // (`obj class new`, `self species withAll:`) route through
+                    // `find_class_method`. Pre-0083 this returned `Dynamic`
+                    // (BT-1952).
                     if ret_ty.as_str() == "Self class" {
-                        return InferredType::Dynamic(DynamicReason::Unknown);
+                        return InferredType::meta(class_name.clone());
+                    }
+                    // ADR 0083: `X class` — the method returns the metatype of a
+                    // specific named class (BT-2034 annotation `X class`).
+                    if let Some(meta_class) = ret_ty.as_str().strip_suffix(" class") {
+                        if hierarchy.has_class(meta_class) {
+                            return InferredType::meta(EcoString::from(meta_class));
+                        }
                     }
 
                     // BT-1945: `Never` resolves to the bottom type (divergent methods)
@@ -1583,6 +1654,38 @@ impl TypeChecker {
         matches!(expr, Expression::Identifier(ident) if ident.name == "self")
     }
 
+    /// ADR 0083: resolve a selector against the metaclass *tower* (the instance
+    /// protocol a class object inherits: `Metaclass → Class → Behaviour →
+    /// Object → ProtoObject`) and return its declared return type as an
+    /// `InferredType`.
+    ///
+    /// Used to type sends on a metatype-typed receiver (`Meta{C}`) for
+    /// selectors that aren't class methods of `C` but ARE understood by every
+    /// class object — e.g. `name -> Symbol` (Behaviour), `superclass`,
+    /// `printString -> String`. Returns `None` when the selector is not on the
+    /// tower or carries no return annotation (the caller keeps the Dynamic
+    /// fallback). Resolution starts at `Metaclass` so the whole chain is walked.
+    fn class_object_tower_return(
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<InferredType> {
+        let method = hierarchy.find_method("Metaclass", selector)?;
+        let ret_ty = method.return_type.as_ref()?;
+        // `Self` / `Self class` on the tower refer to the class object itself —
+        // not statically resolvable to a useful concrete type here, so leave
+        // them to the Dynamic fallback rather than leaking `Known("Self")`.
+        if ret_ty.as_str() == "Self" || ret_ty.as_str() == "Self class" {
+            return None;
+        }
+        if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
+            return Some(InferredType::Never);
+        }
+        if super::is_generic_type_param(ret_ty) && !hierarchy.has_class(ret_ty) {
+            return None;
+        }
+        Some(Self::resolve_type_name_string(ret_ty))
+    }
+
     /// Returns true if `expr` resolves to a class-side receiver — either a
     /// direct `ClassReference` or `self` inside a class method. Unwraps
     /// parentheses so `(HTTPRouter) foo:` and `(self) foo:` are treated
@@ -1719,9 +1822,10 @@ impl TypeChecker {
                             // Self resolves to the concrete member type (with type args)
                             return_types.push(member.clone());
                         } else if ret_ty.as_str() == "Self class" {
-                            // BT-1952: Self class — resolve to Dynamic (class objects
-                            // respond to all Object messages at runtime)
-                            return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
+                            // ADR 0083: `Self class` resolves to the metatype of
+                            // the concrete union member (was Dynamic pre-0083,
+                            // BT-1952).
+                            return_types.push(InferredType::meta(member_name.clone()));
                         } else if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                             // BT-1945: Bottom type for divergent methods
                             return_types.push(InferredType::Never);
@@ -1798,7 +1902,8 @@ impl TypeChecker {
                     let nil_contribution = if ret_ty.as_str() == "Self" {
                         InferredType::known(WellKnownClass::UndefinedObject.as_str())
                     } else if ret_ty.as_str() == "Self class" {
-                        InferredType::Dynamic(DynamicReason::Unknown)
+                        // ADR 0083: `nil class` → metatype of `UndefinedObject`.
+                        InferredType::meta(WellKnownClass::UndefinedObject.as_str())
                     } else if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                         InferredType::Never
                     } else {
@@ -2395,6 +2500,18 @@ impl TypeChecker {
         in_abstract_method: bool,
         is_class_side_send: bool,
     ) -> Vec<InferredType> {
+        // ADR 0083: a metatype receiver `Meta{C}` is class-side — normalize it
+        // to a bare `Known{C}` so the method lookup below resolves `C`'s
+        // class-side methods (the class object is unparameterized, so no type
+        // args). The `is_class_side_send` flag is already set by the caller.
+        let normalized_receiver: InferredType;
+        let receiver_ty = if let InferredType::Meta { class_name, .. } = receiver_ty {
+            normalized_receiver = InferredType::known(class_name.clone());
+            &normalized_receiver
+        } else {
+            receiver_ty
+        };
+
         // Fast path: receiver must be Known to look up method signatures.
         // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
         // param types from the signature — but we can still propagate a reason-

@@ -694,15 +694,16 @@ Base(Integer) subclass: IntBase
     }
 }
 
-/// BT-2021 sub-bug C contract pin: `Self class` (as returned by `Object>>class`)
-/// stays `Dynamic`. Promoting it to `Known(class_name, type_args)` would
-/// regress narrowing tests like `x class = Integer` (BT-1952 constraint).
-/// Full metatype support is tracked separately.
+/// ADR 0083 (supersedes the BT-2021 sub-bug C contract pin): `self class` (as
+/// returned by `Object>>class -> Self class`) now resolves to the *metatype* of
+/// the receiver class, not `Dynamic`. The narrowing tests `x class = Integer`
+/// still pass because binary operators on a metatype receiver are treated as
+/// universal value comparisons rather than class-side sends (see
+/// `inference.rs`).
 #[test]
-fn bt2021_self_class_remains_dynamic_for_factory_pattern() {
-    // Probe `self class` directly (not `self class new`) so a future change
-    // that resolves the metatype to a Known type but leaves `new` Dynamic
-    // would still cause this test to fail. CodeRabbit on PR #2064.
+fn self_class_resolves_to_receiver_metatype() {
+    // Probe `self class` directly (not `self class new`) so the metatype
+    // representation is asserted at its source.
     let source = "
 Object subclass: Box(T)
   state: x :: T = nil
@@ -740,9 +741,11 @@ Object subclass: Box(T)
     let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     // `self class` on `Box(T)` resolves through `class -> Self class`
-    // (Object>>class) which intentionally returns Dynamic per BT-1952.
-    assert!(
-        matches!(&ty, InferredType::Dynamic(_)),
-        "self class should stay Dynamic (Self class metatype is deferred); got {ty:?}"
+    // (Object>>class) to the metatype-of-Box (ADR 0083). The metatype is
+    // name-only — no `type_args` even though Box is generic (ADR 0068).
+    assert_eq!(
+        ty.as_meta().map(ecow::EcoString::as_str),
+        Some("Box"),
+        "self class should resolve to the metatype-of-Box; got {ty:?}"
     );
 }

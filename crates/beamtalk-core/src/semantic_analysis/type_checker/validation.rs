@@ -125,7 +125,24 @@ impl TypeChecker {
             // new/new: are now proper class methods on Value (BT-1548) and found
             // via find_class_method through the hierarchy, so no bypass needed.
             let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
+            // ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
+            // every *concrete* Object subclass via the runtime's class
+            // instantiation path, even when no explicit class-side `new` is
+            // declared (e.g. a `sealed typed Object subclass`). Suppress the DNU
+            // for these so the implicit-`new` override (previously documented
+            // with `@expect dnu`, e.g. `SystemNavigation default`) is no longer
+            // needed.
+            //
+            // Excluded:
+            //  * Abstract classes — instantiating them is a genuine error
+            //    (`infer_constructor_type` keeps the result Dynamic for them).
+            //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
+            //    not `new`'d; `A new` must still warn (drift-prevention pin).
+            let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
+                && !hierarchy.is_abstract(class_name)
+                && !hierarchy.is_actor_subclass(class_name);
             let has_class_chain_method = hierarchy.resolves_selector("Class", selector)
+                || is_implicit_constructor
                 || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
             if !has_class_chain_method {
                 self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, true);
@@ -134,7 +151,10 @@ impl TypeChecker {
 
         // Infer return type for known factory methods
         match selector {
-            "spawn" | "spawnWith:" | "new" | "new:" => {
+            // ADR 0083: `basicNew` joins the constructor family so a metatype
+            // receiver `Meta{C} basicNew` infers an instance of `C` (with the
+            // abstract-class guard inside `infer_constructor_type`).
+            "spawn" | "spawnWith:" | "new" | "new:" | "basicNew" => {
                 Self::infer_constructor_type(class_name, hierarchy, selector, arg_types)
             }
             _ => {
@@ -281,12 +301,27 @@ impl TypeChecker {
     /// `Integer`) to produce `GenResult(Integer, Dynamic)`.
     ///
     /// For non-generic classes, returns `Known(class_name)` with no type args.
+    ///
+    /// **ADR 0083 abstract-class guard:** `new` / `basicNew` on an *abstract*
+    /// class (e.g. `Collection`, `Behaviour`) must NOT be blessed as a concrete
+    /// instance — at runtime instantiating an abstract class is an error, and a
+    /// metatype value of an abstract class flowing into `new` (e.g. a
+    /// `Behaviour`-typed reflection result, whose instance type is statically
+    /// unknown) would otherwise produce a misleadingly-precise type. For these
+    /// constructor selectors we fall back to `Dynamic` so downstream sends are
+    /// not checked against the abstract class's instance protocol.
     fn infer_constructor_type(
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
         selector: &str,
         arg_types: &[InferredType],
     ) -> InferredType {
+        // ADR 0083: guard abstract-class instantiation. `new`/`new:`/`basicNew`
+        // on an abstract class does not yield a concrete instance.
+        if matches!(selector, "new" | "new:" | "basicNew") && hierarchy.is_abstract(class_name) {
+            return InferredType::Dynamic(DynamicReason::Unknown);
+        }
+
         let Some(class_info) = hierarchy.get_class(class_name) else {
             return InferredType::known(class_name.clone());
         };
@@ -740,6 +775,39 @@ impl TypeChecker {
                             .push(diag.with_category(DiagnosticCategory::Type));
                     }
                 }
+                InferredType::Meta {
+                    class_name: meta_class,
+                    ..
+                } => {
+                    // ADR 0083: a metatype value `C class` is an instance of the
+                    // metaclass tower (`Meta{C} <: Class <: Behaviour <: Object`).
+                    // It satisfies a parameter whose declared type is `Class`,
+                    // `Behaviour`, `Object`, `ProtoObject` — anything `Class`
+                    // (the runtime class of a class object) is assignable to.
+                    // We model the metatype's own type as `Class` for the
+                    // hierarchy walk, so e.g. `:: Behaviour` accepts it but
+                    // `:: Integer` does not.
+                    let class_name_ty: EcoString = "Class".into();
+                    let compat = Self::is_type_compatible(&class_name_ty, expected_ty, hierarchy);
+                    if !compat {
+                        let param_pos = i + 1;
+                        let actual_display: EcoString = format!("{meta_class} class").into();
+                        let expected_display =
+                            InferredType::class_name_for_diagnostic(expected_ty.as_str());
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
+                                ),
+                                span,
+                            )
+                            .with_hint(format!(
+                                "Expected {expected_display} (or a subclass), got {actual_display}"
+                            ))
+                            .with_category(DiagnosticCategory::Type),
+                        );
+                    }
+                }
                 InferredType::Union { members, .. } => {
                     // BT-1832: Check all union members against the expected type.
                     let Some((compat, total, incompatible)) =
@@ -939,7 +1007,11 @@ impl TypeChecker {
                     )),
                 );
             }
-            InferredType::Dynamic(_) => {} // Can't check
+            // ADR 0083: a declared metatype return (`-> Self class` / `-> X class`)
+            // already short-circuits via the `SelfClass`/`ClassOf` arm above, so
+            // `Meta` is unreachable in practice; skip checking (like `Dynamic`)
+            // to stay safe should a future annotation resolve to a metatype.
+            InferredType::Meta { .. } | InferredType::Dynamic(_) => {}
         }
     }
 
@@ -1225,6 +1297,34 @@ impl TypeChecker {
                 };
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
+            }
+            InferredType::Meta {
+                class_name: meta_class,
+                ..
+            } => {
+                // ADR 0083: a class object `C class` is assignable to a field
+                // declared `:: Class` / `:: Behaviour` / `:: Object` (the
+                // metaclass tower). Model the metatype as `Class` for the
+                // assignability walk.
+                let class_name_ty: EcoString = "Class".into();
+                if !Self::is_assignable_to(&class_name_ty, &declared_type, hierarchy) {
+                    let declared_display =
+                        InferredType::class_name_for_diagnostic(declared_type.as_str());
+                    let value_display: EcoString = format!("{meta_class} class").into();
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Type mismatch: field `{}` declared as {declared_display}, got {value_display}",
+                                field.name
+                            ),
+                            span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!(
+                            "Expected {declared_display} but assigning {value_display}"
+                        )),
+                    );
+                }
             }
             InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
         }
@@ -1637,7 +1737,10 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
-            InferredType::Never => {} // Never — skip (expression diverges)
+            // ADR 0083: structural conformance of a class object's *class-side*
+            // protocol is out of scope for Slice 1 — skip the metatype rather
+            // than emit a false positive (same as `Never`, which diverges).
+            InferredType::Meta { .. } | InferredType::Never => {}
         }
     }
 
@@ -1778,8 +1881,10 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
+                // ADR 0083: a metatype as a type argument is unparameterized and
+                // its class-side bound conformance is out of scope here — skip.
                 // Dynamic/Never values: can't verify bounds (skip silently).
-                InferredType::Dynamic(_) | InferredType::Never => {}
+                InferredType::Meta { .. } | InferredType::Dynamic(_) | InferredType::Never => {}
             }
         }
     }

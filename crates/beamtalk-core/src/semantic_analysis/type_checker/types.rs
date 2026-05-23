@@ -119,6 +119,39 @@ pub enum InferredType {
         members: Vec<InferredType>,
         provenance: TypeProvenance,
     },
+    /// The metatype of a class — the type of the class object `C class`
+    /// (a.k.a. "metatype-of-`C`").
+    ///
+    /// **Name-only, deliberately not parameterized.** Per ADR 0068 the class
+    /// object is unparameterized ("there's no `Result(Integer, Error)` class
+    /// object"), so `Meta` carries a class *name* only (`Meta{List}`, never
+    /// `Meta{List(E)}`). This makes parameterized metatypes structurally
+    /// unrepresentable — the 0068 rule is enforced by the type, not by
+    /// discipline. Instance type arguments are recovered at the *call site*
+    /// via ADR 0068's class-method inference (e.g. `List withAll: aList(Integer)`
+    /// infers the element type from the argument, not the class object).
+    ///
+    /// Subtyping: `Meta{C} <: Class <: Behaviour <: Object` (see
+    /// `validation.rs`), so a metatype value still satisfies `:: Class` /
+    /// `:: Behaviour` parameters.
+    ///
+    /// A *dedicated variant* (rather than an `is_meta` flag on [`Known`]) is
+    /// chosen so the relevant match arms are compiler-visible: an
+    /// `if let Known { .. }` simply falls through to "unknown" rather than
+    /// silently treating a metatype as the instance type.
+    ///
+    /// Named `Meta` (not `Metaclass`) to avoid clashing with the tower's
+    /// `Metaclass` *class*.
+    ///
+    /// **References:** ADR 0083 (Metaclass-Aware Type Inference), ADR 0068,
+    /// ADR 0036.
+    ///
+    /// [`Known`]: InferredType::Known
+    Meta {
+        class_name: EcoString,
+        /// Where this metatype came from.
+        provenance: TypeProvenance,
+    },
     /// Type cannot be determined — skip all checking.
     ///
     /// The [`DynamicReason`] explains *why* the type could not be determined,
@@ -154,6 +187,7 @@ impl PartialEq for InferredType {
             (Self::Union { members: a, .. }, Self::Union { members: b, .. }) => {
                 a.len() == b.len() && a.iter().all(|m| b.contains(m))
             }
+            (Self::Meta { class_name: a, .. }, Self::Meta { class_name: b, .. }) => a == b,
             (Self::Dynamic(_), Self::Dynamic(_)) | (Self::Never, Self::Never) => true,
             _ => false,
         }
@@ -173,6 +207,33 @@ impl InferredType {
             class_name: class_name.into(),
             type_args: vec![],
             provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
+    /// Creates a [`Meta`](InferredType::Meta) metatype with `Inferred`
+    /// provenance — the type of the class object `class_name class`.
+    ///
+    /// Name-only, per ADR 0083 / ADR 0068 (the class object is unparameterized);
+    /// any type arguments on `class_name` are ignored — pass the base class
+    /// name only.
+    #[must_use]
+    pub fn meta(class_name: impl Into<EcoString>) -> Self {
+        Self::Meta {
+            class_name: class_name.into(),
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
+    /// Returns the class name of a [`Meta`](InferredType::Meta) metatype
+    /// (`Meta{C}` → `Some("C")`), or `None` for any other variant.
+    ///
+    /// Use this to route a metatype-typed receiver to class-side method lookup
+    /// via `find_class_method(C, …)`.
+    #[must_use]
+    pub fn as_meta(&self) -> Option<&EcoString> {
+        match self {
+            Self::Meta { class_name, .. } => Some(class_name),
+            _ => None,
         }
     }
 
@@ -204,7 +265,10 @@ impl InferredType {
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
             Self::Known { class_name, .. } => Some(class_name),
-            Self::Dynamic(_) | Self::Union { .. } | Self::Never => None,
+            // A metatype is *not* its instance class — `Meta{C}.as_known()`
+            // must be `None` so callers don't mistake the class object for an
+            // instance of `C`. Use [`as_meta`](Self::as_meta) instead.
+            Self::Meta { .. } | Self::Dynamic(_) | Self::Union { .. } | Self::Never => None,
         }
     }
 
@@ -324,6 +388,17 @@ impl InferredType {
                 }
                 result
             }
+            Self::Meta { class_name, .. } => {
+                // Render as the source spelling `C class` (ADR 0083). Scrub
+                // `UndefinedObject` → `Nil` in the source-friendly mode for
+                // consistency with the other arms.
+                let rendered_name: EcoString = if opts.nil_as_source_name {
+                    Self::class_name_for_diagnostic(class_name.as_str())
+                } else {
+                    class_name.clone()
+                };
+                EcoString::from(format!("{rendered_name} class"))
+            }
             Self::Dynamic(reason) => {
                 if let Some(desc) = reason.description() {
                     EcoString::from(format!("Dynamic ({desc})"))
@@ -348,7 +423,7 @@ impl InferredType {
         let mut best_provenance = TypeProvenance::Inferred(Span::default());
         for m in members {
             match m {
-                Self::Known { provenance, .. } => {
+                Self::Known { provenance, .. } | Self::Meta { provenance, .. } => {
                     if matches!(best_provenance, TypeProvenance::Inferred(_))
                         && !matches!(provenance, TypeProvenance::Inferred(_))
                     {
