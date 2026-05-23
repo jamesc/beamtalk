@@ -28,6 +28,7 @@ typed Actor subclass: ClassBuilder
   state: methodSpecs :: Dictionary = #{}
   state: modifiers :: List(Symbol) = #()
   state: backingModule :: Symbol | Nil = nil
+  state: methodSource :: Dictionary = #{}
 
   /// Set the class name (a Symbol).
   ///
@@ -60,6 +61,20 @@ typed Actor subclass: ClassBuilder
   /// builder methods: #{ #increment => fun }
   /// ```
   methods: aDict :: Dictionary -> Dictionary => self.methodSpecs := aDict
+
+  /// Set per-method source text as a `selector => source string` map.
+  ///
+  /// Populated automatically by the compiler from block-literal method
+  /// bodies (BT-2246) so builder-defined classes are visible to
+  /// `SystemNavigation` source-text queries, just like file-defined ones.
+  /// Methods built from computed/non-literal funs have no source literal
+  /// and are simply omitted (known-present but unindexable).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodSource: #{ #increment => "increment => self.count := self.count + 1" }
+  /// ```
+  methodSource: aDict :: Dictionary -> Dictionary => self.methodSource := aDict
 
   /// Add a single field with a default value.
   ///

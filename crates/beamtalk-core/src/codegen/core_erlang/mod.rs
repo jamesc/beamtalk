@@ -88,6 +88,7 @@
 
 mod actor_codegen;
 mod block_analysis;
+mod class_builder_source;
 mod control_flow;
 mod dispatch_codegen;
 pub mod document;
