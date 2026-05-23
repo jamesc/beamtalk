@@ -3145,6 +3145,32 @@ mod tests {
         );
     }
 
+    /// BT-2252: in a value/primitive context the generated fun is
+    /// `fun(Args, Self) -> Result` with no `State` binding, so `super` must
+    /// lower to `super_value/4` rather than the state-threading `super/5`.
+    /// Referencing the absent `State` produced invalid Core Erlang
+    /// (variable 'State' is unbound).
+    #[test]
+    fn test_generate_super_send_value_context_uses_super_value() {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.context = crate::codegen::core_erlang::CodeGenContext::ValueType;
+        let selector = MessageSelector::Unary("printString".into());
+        let doc = generator.generate_super_send(&selector, &[]).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("beamtalk_dispatch':'super_value'("),
+            "value-context super should route to super_value/4. Got: {output}"
+        );
+        assert!(
+            !output.contains("State"),
+            "value-context super must not reference an unbound State. Got: {output}"
+        );
+        assert!(
+            output.contains("'printString'"),
+            "should include selector. Got: {output}"
+        );
+    }
+
     #[test]
     fn test_generate_actor_spawn_non_repl() {
         let mut generator = CoreErlangGenerator::new("test");
