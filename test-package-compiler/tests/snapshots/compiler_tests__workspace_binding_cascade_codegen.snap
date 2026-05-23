@@ -233,11 +233,13 @@ module 'workspace_binding_cascade' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
             in
             case ExtLookup of
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    %% BT-1512: Pass State to extension, unwrap {Result, NewState}
-                    let ExtReply = apply ExtFun(Args, Self, State) in
-                    let ExtResult = call 'erlang':'element'(1, ExtReply) in
-                    let ExtState = call 'erlang':'element'(2, ExtReply) in
-                    {'reply', ExtResult, ExtState}
+                    %% BT-1512/BT-2250: Invoke via the runtime helper, which
+                    %% accepts both the 3-arity actor shape
+                    %% (fun(Args, Self, State) -> {Result, NewState}) and the
+                    %% 2-arity value shape (fun(Args, Self) -> Result), so a
+                    %% foreign extension whose codegen-time arity could not be
+                    %% resolved still dispatches correctly. Returns {reply, _, _}.
+                    call 'beamtalk_dispatch':'invoke_extension'(ExtFun, Args, Self, State)
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
                     case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'Logger') of
