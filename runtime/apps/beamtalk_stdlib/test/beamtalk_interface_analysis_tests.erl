@@ -5,19 +5,20 @@
 
 %%% **DDD Context:** Object System Context
 
--moduledoc """
-EUnit tests for beamtalk_interface: erlangHelp paths and source-analysis
-degradation paths (BT-2248).
-
-Tests cover:
-- erlangHelp/1,2 and dispatch('erlangHelp:', ...) — happy path and error paths
-- findSendersIn/2 — type guard and compiler-unavailable degradation
-- allSendsIn/1   — type guard and compiler-unavailable degradation
-- findReferencesToIn/2 — type guard and compiler-unavailable degradation
-- findFieldReadersIn/2 / findFieldWritersIn/2 — type guard and degradation
-- ffiSitesIn/4 — type guard and compiler-unavailable degradation
-- log_compiler_diagnostics/2 — port-unavailable (ERROR) and parse-warn (WARNING) paths
-""".
+-moduledoc ""
+"\n"
+"EUnit tests for beamtalk_interface: erlangHelp paths and source-analysis\n"
+"degradation paths (BT-2248).\n"
+"\n"
+"Tests cover:\n"
+"- erlangHelp/1,2 and dispatch('erlangHelp:', ...) — happy path and error paths\n"
+"- findSendersIn/2 — type guard and compiler-unavailable degradation\n"
+"- allSendsIn/1   — type guard and compiler-unavailable degradation\n"
+"- findReferencesToIn/2 — type guard and compiler-unavailable degradation\n"
+"- findFieldReadersIn/2 / findFieldWritersIn/2 — type guard and degradation\n"
+"- ffiSitesIn/4 — type guard and compiler-unavailable degradation\n"
+"- log_compiler_diagnostics/2 — port-unavailable (ERROR) and parse-warn (WARNING) paths\n"
+"".
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -29,7 +30,8 @@ fake_self() ->
 with_compiler_stopped(Fun) ->
     WasStarted = lists:keymember(beamtalk_compiler, 1, application:which_applications()),
     stop_compiler_if_started(WasStarted),
-    try Fun()
+    try
+        Fun()
     after
         start_compiler_if_was_started(WasStarted)
     end.
