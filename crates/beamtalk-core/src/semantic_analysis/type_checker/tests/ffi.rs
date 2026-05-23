@@ -132,6 +132,64 @@ fn test_ffi_call_multi_arg_returns_typed_result() {
     );
 }
 
+/// BT-2254: an FFI call returning `List(Tuple(Symbol, Symbol))` propagates the
+/// element type into a `collect:` block param, and literal-index `at:` recovers
+/// the positional element type. This is the end-to-end path that lets the stdlib
+/// drop its FFI-driven `@expect` overrides (ADR 0075 amendment).
+#[test]
+fn ffi_list_tuple_element_propagates_into_iteration_and_literal_at() {
+    // Reproduces SystemNavigation `extensionsBy:` pattern:
+    //   pairs := (Erlang ext) extensions_by: x
+    //   pairs collect: [:pair | pair at: 1]
+    // With a registry whose return type is List(Tuple(Symbol, Symbol)), the
+    // block param `pair` should be Tuple(Symbol, Symbol) and `pair at: 1`
+    // should be Symbol — not Dynamic.
+    let mut reg = NativeTypeRegistry::new();
+    reg.register_module(
+        "ext",
+        vec![FunctionSignature {
+            name: "extensions_by".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: Some(ecow::EcoString::from("owner")),
+                type_: InferredType::known("Symbol"),
+            }],
+            return_type: InferredType::Known {
+                class_name: ecow::EcoString::from("List"),
+                type_args: vec![InferredType::Known {
+                    class_name: ecow::EcoString::from("Tuple"),
+                    type_args: vec![InferredType::known("Symbol"), InferredType::known("Symbol")],
+                    provenance: TypeProvenance::Extracted,
+                }],
+                provenance: TypeProvenance::Extracted,
+            },
+            provenance: TypeProvenance::Extracted,
+            line: None,
+        }],
+    );
+
+    let src = "typed Object subclass: Nav\n  \
+        run =>\n    \
+          pairs := (Erlang ext) extensions_by: #foo\n    \
+          pairs collect: [:pair |\n      \
+            a := pair at: 1\n      \
+            a]";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+    let diags = checker.take_diagnostics();
+    let relevant: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Dynamic") || d.message.contains("at:"))
+        .collect();
+    assert!(
+        relevant.is_empty(),
+        "block param should be typed Tuple(Symbol,Symbol), got diagnostics: {relevant:#?}"
+    );
+}
+
 #[test]
 fn test_ffi_call_no_registry_falls_back_to_dynamic() {
     // Without registry, FFI calls should return Dynamic (no regression)
