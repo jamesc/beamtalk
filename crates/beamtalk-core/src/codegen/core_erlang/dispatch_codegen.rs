@@ -2059,9 +2059,24 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
         let class_name = self.class_name();
-        let current_state = self.current_state_var();
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
+        // BT-2252: value/primitive-context funs (`fun(Args, Self) -> Result`)
+        // have no `State` binding, so `super` must not reference one. Route to
+        // `super_value/4`, which walks the same chain and returns a plain value.
+        if self.context == CodeGenContext::ValueType {
+            return Ok(docvec![
+                "call 'beamtalk_dispatch':'super_value'('",
+                Document::String(selector_atom),
+                "', [",
+                args_doc,
+                "], Self, '",
+                Document::String(class_name),
+                "')",
+            ]);
+        }
+
+        let current_state = self.current_state_var();
         let doc = docvec![
             "call 'beamtalk_dispatch':'super'('",
             Document::String(selector_atom),

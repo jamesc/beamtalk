@@ -37,6 +37,7 @@
 - Consolidate three hot class-metadata ETS tables (`beamtalk_class_module_table`, `beamtalk_class_methods_table`, `beamtalk_class_hierarchy_table`) into a single `beamtalk_class_metadata` table with typed field accessors. One atomic insert/delete per class instead of three; `inherits_from/2` reads via `ets:lookup_element/4` for ~10–14% speedup on the per-exception-match hot path (BT-2222).
 - **`beamtalk_extensions:extenders_of/1`** and **`extensions_by/1`** — reverse-index queries for extension methods. `extenders_of(ClassName)` returns unique owner atoms contributing extensions to a target class; `extensions_by(OwnerName)` returns `{TargetClass, Selector}` tuples for every extension an owner contributes (BT-2202).
 - Compiler-port diagnostics in `findSendersIn`/`findReferencesToIn` now logged via OTP logger instead of silently discarded — port-unavailability escalates to `?LOG_ERROR`, parse errors use `?LOG_WARNING`, all with `domain => [beamtalk, stdlib]` metadata (BT-2219).
+- Fix `super` in a value/primitive context (a value-type method or a foreign extension on a value/primitive class) generating invalid Core Erlang. Value-context funs are `fun(Args, Self) -> Result` with no `State` binding, so the old codegen's `beamtalk_dispatch:super(Sel, Args, Self, State, Class)` referenced an unbound `State` and failed to compile. Such `super` sends now route to the new `beamtalk_dispatch:super_value/4`, which walks the same superclass chain without threading state and returns a plain value (BT-2252).
 
 ### Tooling
 
