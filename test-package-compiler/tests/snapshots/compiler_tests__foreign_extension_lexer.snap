@@ -1,0 +1,12 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("String"), span: Span { start: 290, end: 296 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-2250: a foreign cross-class extension in a class-less file must lower to a"), Whitespace("\n"), LineComment("// valid, erlc-compilable module that registers the extension at load via"), Whitespace("\n"), LineComment("// beamtalk_extensions:register/5 (with the method body source)."), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: GtGt, span: Span { start: 297, end: 299 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("bt2250Doubled"), span: Span { start: 300, end: 313 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 314, end: 316 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 317, end: 321 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("++"), span: Span { start: 322, end: 324 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 325, end: 329 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 330, end: 330 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

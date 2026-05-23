@@ -987,7 +987,10 @@ impl CoreErlangGenerator {
     /// Generate a fallback body for an empty value-type method.
     ///
     /// Returns `{nil, Self}` when NLR is active, `nil` otherwise.
-    fn generate_vt_empty_body(&self, has_nlr: bool) -> Vec<Document<'static>> {
+    pub(in crate::codegen::core_erlang) fn generate_vt_empty_body(
+        &self,
+        has_nlr: bool,
+    ) -> Vec<Document<'static>> {
         if has_nlr {
             let final_self = self.current_self_var();
             vec![docvec!["    {'nil', ", Document::String(final_self), "}\n",]]
@@ -1002,7 +1005,7 @@ impl CoreErlangGenerator {
     /// to the appropriate handler. Classification happens inline (not upfront) because
     /// some checks (e.g. `is_conditional_with_vt_local_threading`) depend on scope
     /// bindings established by earlier expressions.
-    fn generate_vt_body_exprs(
+    pub(in crate::codegen::core_erlang) fn generate_vt_body_exprs(
         &mut self,
         body: &[&Expression],
         has_nlr: bool,

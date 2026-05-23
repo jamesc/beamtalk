@@ -35,6 +35,39 @@ pub(crate) fn generate_opaque_bif(
     }
 }
 
+/// Registry entry point for `Pid` primitives (BT-2234).
+pub(crate) fn generate_pid_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    generate_opaque_bif(
+        selector,
+        params,
+        "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
+        pid_extra,
+    )
+}
+
+/// Registry entry point for `Port` primitives (BT-2234).
+pub(crate) fn generate_port_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    generate_opaque_bif(
+        selector,
+        params,
+        "call 'beamtalk_opaque_ops':'port_to_string'(Self)",
+        no_extra,
+    )
+}
+
+/// Registry entry point for `Reference` primitives (BT-2234).
+pub(crate) fn generate_reference_bif(
+    selector: &str,
+    params: &[String],
+) -> Option<Document<'static>> {
+    generate_opaque_bif(
+        selector,
+        params,
+        "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
+        reference_extra,
+    )
+}
+
 pub(crate) fn pid_extra(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "isAlive" => Some(Document::Str("call 'erlang':'is_process_alive'(Self)")),
@@ -114,6 +147,43 @@ pub(crate) fn generate_file_handle_bif(
 mod tests {
     use super::super::doc_to_string;
     use super::*;
+
+    // Registry wrapper entry points (BT-2234): assert each wrapper threads the
+    // correct `to_string_fn` and `extra_selector` through `generate_opaque_bif`.
+
+    #[test]
+    fn test_pid_bif_as_string_and_extra() {
+        assert_eq!(
+            doc_to_string(generate_pid_bif("asString", &[])),
+            Some("call 'beamtalk_opaque_ops':'pid_to_string'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_pid_bif("isAlive", &[])),
+            Some("call 'erlang':'is_process_alive'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_port_bif_as_string_and_no_extra() {
+        assert_eq!(
+            doc_to_string(generate_port_bif("asString", &[])),
+            Some("call 'beamtalk_opaque_ops':'port_to_string'(Self)".to_string())
+        );
+        // Port has no extra selectors.
+        assert_eq!(doc_to_string(generate_port_bif("isAlive", &[])), None);
+    }
+
+    #[test]
+    fn test_reference_bif_as_string_and_extra() {
+        assert_eq!(
+            doc_to_string(generate_reference_bif("asString", &[])),
+            Some("call 'beamtalk_opaque_ops':'ref_to_string'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_reference_bif("demonitor", &[])),
+            Some("call 'erlang':'demonitor'(Self)".to_string())
+        );
+    }
 
     // pid_extra tests
 
