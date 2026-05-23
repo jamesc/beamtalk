@@ -1248,15 +1248,23 @@ impl CoreErlangGenerator {
         module: &Module,
         synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
-        // BT-1610: Skip only if there are no class definitions AND no protocols.
-        // Protocol-only files still need register_class/0 for protocol registration.
-        if module.classes.is_empty() && module.protocols.is_empty() {
+        // BT-1610: Skip only if there are no class definitions AND no protocols
+        // AND no foreign extension methods. Protocol-only files still need
+        // register_class/0 for protocol registration; BT-2250: pure-extension
+        // files (only `Target >> sel` with no host class) need it to register
+        // their foreign extensions at load.
+        if module.classes.is_empty()
+            && module.protocols.is_empty()
+            && !Self::has_foreign_extensions(module)
+        {
             return Ok(Document::Nil);
         }
 
-        // BT-1610: Protocol-only module — generate register_class/0 with only
-        // protocol registration calls, no class builder chain.
+        // BT-1610 / BT-2250: Class-less module — generate register_class/0 with
+        // only protocol registration and/or foreign extension registration
+        // calls, no class builder chain.
         if module.classes.is_empty() {
+            let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
             let protocol_reg_doc = Self::generate_protocol_registrations(module);
             return Ok(docvec![
                 "'register_class'/0 = fun () ->",
@@ -1265,7 +1273,10 @@ impl CoreErlangGenerator {
                     docvec![
                         line(),
                         "try",
-                        nest(INDENT, docvec![protocol_reg_doc, line(), "'ok'", "\n",],),
+                        nest(
+                            INDENT,
+                            docvec![ext_reg_doc, protocol_reg_doc, line(), "'ok'", "\n",]
+                        ),
                     ]
                 ),
                 nest(
@@ -1393,7 +1404,15 @@ impl CoreErlangGenerator {
         // BT-738 / BT-749: Build a short-circuit chain so that the first
         // {error, ...} from register/1 propagates out of on_load, regardless
         // of which class position caused it.
-        let try_body = Self::build_short_circuit_chain(&class_docs);
+        let class_chain = Self::build_short_circuit_chain(&class_docs);
+
+        // BT-2250: Register foreign cross-class extension methods at load.
+        // The `let _ExtN = ... in` fragments are prepended to the class
+        // registration chain so extensions register before the chain's trailing
+        // class-registration result is produced (extension registration always
+        // succeeds — it just inserts into ETS — so it does not short-circuit).
+        let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
+        let try_body = docvec![ext_reg_doc, class_chain];
 
         // ADR 0068 Phase 2c: Generate protocol registration calls.
         // Protocol definitions in the module are registered with the runtime

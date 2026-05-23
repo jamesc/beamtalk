@@ -62,7 +62,8 @@ super(Selector, Args, Self, State, CurrentClass)
 -export([
     lookup/5,
     super/5,
-    responds_to/2
+    responds_to/2,
+    invoke_extension/4
 ]).
 
 -include("beamtalk.hrl").
