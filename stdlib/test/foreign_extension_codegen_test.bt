@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2250: Foreign cross-class extension methods (`TargetClass >> sel`) defined
+// in a `.bt` file must be registered at load via `beamtalk_extensions:register/5`
+// (carrying the method body source) and become invocable through the normal
+// dispatch path. Before BT-2250 these were silently dropped by codegen — the
+// selector appeared nowhere in the generated module and calling it raised
+// does_not_understand at runtime.
+//
+// The `String >>` extensions at the bottom are declared HERE in source (not
+// registered manually via Erlang FFI), so the test exercises the codegen path
+// end-to-end: codegen emits the register/5 call + the callable fun, the runtime
+// stores it, and dispatch reaches it. Calls use `perform:` to bypass the
+// sealed-class static check (String is sealed; the type checker cannot see
+// extensions). The three `String` extensions registered below are:
+//   String >> bt2250Shout              (unary instance-side)
+//   String >> bt2250WrapWith:          (keyword instance-side)
+//   String class >> bt2250Banner       (class-side -> metaclass tag)
+
+TestCase subclass: ForeignExtensionCodegenTest
+
+  // A unary foreign extension defined in .bt is invocable at runtime.
+  testUnaryForeignExtension =>
+    result := "hello" perform: #bt2250Shout
+    self assert: result equals: "HELLO!"
+
+  // A keyword foreign extension threads its argument correctly.
+  testKeywordForeignExtension =>
+    result := "x" perform: #bt2250WrapWith: withArguments: #("**")
+    self assert: result equals: "**x**"
+
+  // The extension was registered WITH its body source (register/5), so the
+  // source body round-trips through the extension sources table. This proves the
+  // Source binary argument is emitted, not just register/4. The FFI wraps the
+  // Erlang `{ok, Source}` return as a `Result`.
+  testForeignExtensionHasSource =>
+    result := (Erlang beamtalk_extensions) getSource: #String selector: #bt2250Shout
+    self assert: result isOk
+    self assert: (result unwrap includesSubstring: "uppercase")
+
+  // A class-side foreign extension registers under the metaclass tag.
+  testClassSideForeignExtensionRegistered =>
+    self assert: ((Erlang beamtalk_extensions) has: #'String class' selector: #bt2250Banner)
+String >> bt2250Shout => self uppercase ++ "!"
+String >> bt2250WrapWith: edge :: String -> String => edge ++ self ++ edge
+String class >> bt2250Banner => "=== bt2250 ==="
