@@ -866,10 +866,14 @@ of the "Richer type mapping" item already listed under **Future Work** above.
 
 Carry collection element types through extraction and inference:
 
-| Erlang type | Beamtalk type (was) | Beamtalk type (now) |
-|-------------|---------------------|---------------------|
+| Erlang type | Spec reader emits today | Proposed |
+|-------------|-------------------------|----------|
 | `[T]` | `List` (element dropped) | `List(T)` |
 | `{T1, …, Tn}` | `Tuple` | `Tuple(T1, …, Tn)` |
+
+(The middle column is the *current `map_type/1` implementation* behaviour, not the
+documented mapping — the "Current State" table above already specifies
+`[T] → List(T)`, which the implementation does not yet honour.)
 
 The list change is a **conformance fix** — the original table already specified
 `[T] → List(T)`; the implementation simply did not carry it. The tuple change is a
