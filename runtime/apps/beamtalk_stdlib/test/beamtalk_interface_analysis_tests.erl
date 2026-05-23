@@ -26,6 +26,31 @@ Tests cover:
 fake_self() ->
     {beamtalk_object, 'BeamtalkInterface class', 'bt@stdlib@beamtalk_interface', self()}.
 
+with_compiler_stopped(Fun) ->
+    WasStarted = lists:keymember(beamtalk_compiler, 1, application:which_applications()),
+    stop_compiler_if_started(WasStarted),
+    try Fun()
+    after
+        start_compiler_if_was_started(WasStarted)
+    end.
+
+stop_compiler_if_started(true) ->
+    case application:stop(beamtalk_compiler) of
+        ok -> ok;
+        {error, {not_started, beamtalk_compiler}} -> ok
+    end;
+stop_compiler_if_started(false) ->
+    ok.
+
+start_compiler_if_was_started(true) ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end;
+start_compiler_if_was_started(false) ->
+    ok.
+
 %%====================================================================
 %% erlangHelp: dispatch — happy path
 %%====================================================================
@@ -167,12 +192,16 @@ erlang_help_2_unknown_function_raises_not_found_test() ->
 %%====================================================================
 
 find_senders_in_binary_source_atom_selector_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findSendersIn(<<"x printNl">>, send),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findSendersIn(<<"x printNl">>, send),
+        ?assertEqual([], Result)
+    end).
 
 find_senders_in_binary_source_binary_selector_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findSendersIn(<<"x printNl">>, <<"send">>),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findSendersIn(<<"x printNl">>, <<"send">>),
+        ?assertEqual([], Result)
+    end).
 
 find_senders_in_non_binary_source_raises_type_error_test() ->
     try
@@ -198,8 +227,10 @@ find_senders_in_integer_selector_raises_type_error_test() ->
 %%====================================================================
 
 all_sends_in_binary_source_degrades_to_empty_test() ->
-    Result = beamtalk_interface:allSendsIn(<<"x printNl">>),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:allSendsIn(<<"x printNl">>),
+        ?assertEqual([], Result)
+    end).
 
 all_sends_in_non_binary_raises_type_error_test() ->
     try
@@ -216,12 +247,16 @@ all_sends_in_non_binary_raises_type_error_test() ->
 %%====================================================================
 
 find_references_to_in_atom_class_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findReferencesToIn(<<"x := MyClass new">>, 'MyClass'),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findReferencesToIn(<<"x := MyClass new">>, 'MyClass'),
+        ?assertEqual([], Result)
+    end).
 
 find_references_to_in_binary_class_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findReferencesToIn(<<"x := MyClass new">>, <<"MyClass">>),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findReferencesToIn(<<"x := MyClass new">>, <<"MyClass">>),
+        ?assertEqual([], Result)
+    end).
 
 find_references_to_in_non_binary_source_raises_type_error_test() ->
     try
@@ -237,12 +272,16 @@ find_references_to_in_non_binary_source_raises_type_error_test() ->
 %%====================================================================
 
 find_field_readers_in_atom_field_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findFieldReadersIn(<<"^ self.value">>, value),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findFieldReadersIn(<<"^ self.value">>, value),
+        ?assertEqual([], Result)
+    end).
 
 find_field_readers_in_binary_field_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findFieldReadersIn(<<"^ self.value">>, <<"value">>),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findFieldReadersIn(<<"^ self.value">>, <<"value">>),
+        ?assertEqual([], Result)
+    end).
 
 find_field_readers_in_non_binary_source_raises_type_error_test() ->
     try
@@ -258,12 +297,16 @@ find_field_readers_in_non_binary_source_raises_type_error_test() ->
 %%====================================================================
 
 find_field_writers_in_atom_field_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findFieldWritersIn(<<"self.value := 42">>, value),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findFieldWritersIn(<<"self.value := 42">>, value),
+        ?assertEqual([], Result)
+    end).
 
 find_field_writers_in_binary_field_degrades_to_empty_test() ->
-    Result = beamtalk_interface:findFieldWritersIn(<<"self.value := 42">>, <<"value">>),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:findFieldWritersIn(<<"self.value := 42">>, <<"value">>),
+        ?assertEqual([], Result)
+    end).
 
 find_field_writers_in_non_binary_source_raises_type_error_test() ->
     try
@@ -279,14 +322,18 @@ find_field_writers_in_non_binary_source_raises_type_error_test() ->
 %%====================================================================
 
 ffi_sites_in_integer_arity_degrades_to_empty_test() ->
-    Result = beamtalk_interface:ffiSitesIn(<<"(Erlang lists) reverse: x">>, lists, reverse, 1),
-    ?assertEqual([], Result).
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:ffiSitesIn(<<"(Erlang lists) reverse: x">>, lists, reverse, 1),
+        ?assertEqual([], Result)
+    end).
 
-ffi_sites_in_atom_any_arity_degrades_to_empty_test() ->
-    Result = beamtalk_interface:ffiSitesIn(
-        <<"(Erlang lists) reverse: x">>, <<"lists">>, <<"reverse">>, any
-    ),
-    ?assertEqual([], Result).
+ffi_sites_in_binary_any_arity_degrades_to_empty_test() ->
+    with_compiler_stopped(fun() ->
+        Result = beamtalk_interface:ffiSitesIn(
+            <<"(Erlang lists) reverse: x">>, <<"lists">>, <<"reverse">>, any
+        ),
+        ?assertEqual([], Result)
+    end).
 
 ffi_sites_in_non_binary_source_raises_type_error_test() ->
     try
