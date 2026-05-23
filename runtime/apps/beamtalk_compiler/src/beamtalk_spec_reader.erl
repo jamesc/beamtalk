@@ -692,11 +692,24 @@ map_type({type, _, 'fun', _}) ->
 %% List types
 map_type({type, _, list, []}) ->
     <<"List">>;
-map_type({type, _, list, [_ElemType]}) ->
-    <<"List">>;
+map_type({type, _, list, [ElemType]}) ->
+    %% ADR 0075 amendment (BT-2254): carry the element type so iterating an
+    %% FFI-typed list binds block params to the element type instead of Dynamic.
+    %% A Dynamic element collapses back to bare `List` to avoid `List(Dynamic)`.
+    wrap_collection_type(<<"List">>, [map_type(ElemType)]);
+map_type({type, _, nonempty_list, [ElemType]}) ->
+    wrap_collection_type(<<"List">>, [map_type(ElemType)]);
 map_type({type, _, nonempty_list, _}) ->
     <<"List">>;
 %% Tuple types
+%% Untyped `tuple()` (unknown arity) — abstract form is `{type, _, tuple, any}`.
+map_type({type, _, tuple, any}) ->
+    <<"Tuple">>;
+%% Typed tuple `{T1, ..., Tn}` — carry positional element types so
+%% `aTuple at: <literal int>` can infer the element type at that index
+%% (ADR 0075 amendment, BT-2254). All-Dynamic elements collapse to bare `Tuple`.
+map_type({type, _, tuple, Elements}) when is_list(Elements) ->
+    wrap_collection_type(<<"Tuple">>, [map_type(E) || E <- Elements]);
 map_type({type, _, tuple, _}) ->
     <<"Tuple">>;
 %% Map types — check for Beamtalk tagged maps before falling back to Dictionary.
@@ -902,6 +915,42 @@ format_result_type(OkType, <<"Dynamic">>) ->
     iolist_to_binary([<<"Result(">>, OkType, <<")">>]);
 format_result_type(OkType, ErrType) ->
     iolist_to_binary([<<"Result(">>, OkType, <<", ">>, ErrType, <<")">>]).
+
+%% Format a parametric collection type like `List(T)` or `Tuple(T1, ..., Tn)`.
+%%
+%% ADR 0075 amendment (BT-2254). When *every* element type is uninformative the
+%% bare base type is emitted instead (`List` rather than `List(Dynamic)` /
+%% `List(Object)` / `List(Tuple)`). "Uninformative" means an element type that
+%% adds no actionable precision over the bare collection and would otherwise
+%% trigger spurious return-type mismatches against typed stdlib wrappers that
+%% deliberately assert a narrower element type than the Erlang spec exposes:
+%%
+%%   - `Dynamic` — `term()`/`any()`/unconstrained type variables
+%%   - `Object`  — `beamtalk_object()`; the root class, so narrower wrapper
+%%                 annotations like `List(Behaviour)` are strictly more precise
+%%   - `Tuple`   — bare `tuple()` with unknown arity; no positional element info
+%%
+%% This keeps the change additive: precision is carried only when the element
+%% type is genuinely informative (e.g. `List(Symbol)`,
+%% `List(Tuple(Symbol, Integer))`), matching the pre-amendment behaviour for the
+%% uninformative cases.
+-spec wrap_collection_type(binary(), [binary()]) -> binary().
+wrap_collection_type(Base, []) ->
+    Base;
+wrap_collection_type(Base, ElementTypes) ->
+    case lists:all(fun is_uninformative_element/1, ElementTypes) of
+        true ->
+            Base;
+        false ->
+            iolist_to_binary([Base, <<"(">>, lists:join(<<", ">>, ElementTypes), <<")">>])
+    end.
+
+%% An element type carries no actionable precision over the bare collection.
+-spec is_uninformative_element(binary()) -> boolean().
+is_uninformative_element(<<"Dynamic">>) -> true;
+is_uninformative_element(<<"Object">>) -> true;
+is_uninformative_element(<<"Tuple">>) -> true;
+is_uninformative_element(_) -> false.
 
 %% Normalize a spec variable name to a lowercase binary suitable for Beamtalk keywords.
 -spec normalize_param_name(atom()) -> binary().

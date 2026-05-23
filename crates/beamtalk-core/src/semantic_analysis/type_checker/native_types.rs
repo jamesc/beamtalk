@@ -50,6 +50,11 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 ///   with `Extracted` provenance.
 /// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::DynamicSpec)`.
 /// - Union types (e.g., `"Integer | String"`) are split and produce `Union` types.
+/// - Parametric types (e.g., `"List(Integer)"`, `"Tuple(Symbol, Integer)"`,
+///   `"Result(String, Symbol)"`) parse their element types into `type_args`
+///   (ADR 0075 amendment, BT-2254). Parenthesis-aware splitting ensures unions
+///   nested inside arguments (`"List(String | Binary)"`) are not split at the
+///   top level.
 ///
 /// ## Examples
 ///
@@ -57,6 +62,7 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 /// map_type_name("Integer")           // => Known { class_name: "Integer", .. }
 /// map_type_name("Dynamic")           // => Dynamic
 /// map_type_name("Integer | String")  // => Union { members: [Integer, String], .. }
+/// map_type_name("List(Integer)")     // => Known { class_name: "List", type_args: [Integer] }
 /// ```
 #[must_use]
 pub fn map_type_name(type_name: &str) -> InferredType {
@@ -66,25 +72,54 @@ pub fn map_type_name(type_name: &str) -> InferredType {
         return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
 
-    // Handle union types: "Integer | String"
-    if trimmed.contains(" | ") {
-        let members: Vec<InferredType> = trimmed
-            .split(" | ")
-            .map(|part| map_single_type_name(part.trim()))
-            .collect();
-        return InferredType::union_of(&members);
+    // Handle union types, splitting on `|` while respecting parenthesis nesting
+    // so `List(String | Binary)` and `Result(String, Symbol)` are not split at
+    // an interior `|`.
+    if trimmed.contains('|') {
+        let members = super::TypeChecker::split_union_respecting_parens(trimmed);
+        if members.len() > 1 {
+            let resolved: Vec<InferredType> = members
+                .into_iter()
+                .map(|part| map_single_type_name(part.trim()))
+                .collect();
+            return InferredType::union_of(&resolved);
+        }
+        // Single member — the `|` was inside parens; fall through to the
+        // parametric-type handling below.
     }
 
     map_single_type_name(trimmed)
 }
 
-/// Maps a single (non-union) type name to an [`InferredType`].
+/// Maps a single (non-top-level-union) type name to an [`InferredType`].
+///
+/// Handles bare names (`"Integer"`), `"Dynamic"`/`"Never"` keywords, and
+/// parametric types (`"List(Integer)"`, `"Tuple(Symbol, Integer)"`). Element
+/// types recurse through [`map_type_name`] so nested parametric/union shapes
+/// (`"Result(List(String), Symbol)"`) parse fully.
 fn map_single_type_name(name: &str) -> InferredType {
     if WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic) {
         return InferredType::Dynamic(DynamicReason::DynamicSpec);
     }
     if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
         return InferredType::Never;
+    }
+
+    // Parametric type: e.g., `List(Integer)`, `Tuple(Symbol, Integer)`.
+    // BT-2254: parse element types into `type_args` so iteration and
+    // literal-index `at:` can recover them. Parenthesis-aware arg splitting
+    // lives in the centralised resolver helper.
+    let (base, args_slice) = super::type_resolver::split_generic_base(name);
+    if let Some(inner) = args_slice {
+        let type_args: Vec<InferredType> = super::TypeChecker::split_type_params(inner)
+            .into_iter()
+            .map(map_type_name)
+            .collect();
+        return InferredType::Known {
+            class_name: EcoString::from(base),
+            type_args,
+            provenance: TypeProvenance::Extracted,
+        };
     }
 
     InferredType::Known {
@@ -509,6 +544,110 @@ mod tests {
     fn map_type_name_union() {
         let ty = map_type_name("Integer | String");
         assert_eq!(ty, InferredType::simple_union(&["Integer", "String"]));
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-2254: parametric collection element types
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn map_type_name_list_with_element() {
+        // `[integer()]` → `List(Integer)`
+        let ty = map_type_name("List(Integer)");
+        assert_eq!(
+            ty,
+            InferredType::Known {
+                class_name: EcoString::from("List"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Extracted,
+            }
+        );
+    }
+
+    #[test]
+    fn map_type_name_tuple_positional_elements() {
+        // `{atom(), pos_integer(), atom()}` → `Tuple(Symbol, Integer, Symbol)`
+        let ty = map_type_name("Tuple(Symbol, Integer, Symbol)");
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = ty
+        else {
+            panic!("expected Known Tuple, got {ty:?}");
+        };
+        assert_eq!(class_name, "Tuple");
+        assert_eq!(
+            type_args,
+            vec![
+                InferredType::known("Symbol"),
+                InferredType::known("Integer"),
+                InferredType::known("Symbol"),
+            ]
+        );
+    }
+
+    #[test]
+    fn map_type_name_nested_parametric() {
+        // `Result(List(String), Symbol)` keeps both layers.
+        let ty = map_type_name("Result(List(String), Symbol)");
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = ty
+        else {
+            panic!("expected Known Result, got {ty:?}");
+        };
+        assert_eq!(class_name, "Result");
+        assert_eq!(type_args.len(), 2);
+        assert_eq!(
+            type_args[0],
+            InferredType::Known {
+                class_name: EcoString::from("List"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Extracted,
+            }
+        );
+        assert_eq!(type_args[1], InferredType::known("Symbol"));
+    }
+
+    #[test]
+    fn map_type_name_union_inside_element_not_split_at_top() {
+        // `List(String | Binary)` must parse as a List whose single element
+        // type is the union — not as a top-level union.
+        let ty = map_type_name("List(String | Binary)");
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = ty
+        else {
+            panic!("expected Known List, got {ty:?}");
+        };
+        assert_eq!(class_name, "List");
+        assert_eq!(type_args.len(), 1);
+        assert_eq!(
+            type_args[0],
+            InferredType::simple_union(&["String", "Binary"])
+        );
+    }
+
+    #[test]
+    fn parse_specs_line_list_element_type() {
+        // A spec emitting `List(Symbol)` parses element types into type_args.
+        let mut reg = NativeTypeRegistry::new();
+        let line = "beamtalk-specs-module:mymod:[#{arity => 1,name => <<\"names\">>,params => [#{name => <<\"x\">>,type => <<\"Dynamic\">>}],return_type => <<\"List(Symbol)\">>}]";
+        parse_specs_line(line, &mut reg);
+        let sig = reg.lookup("mymod", "names", 1).unwrap();
+        assert_eq!(
+            sig.return_type,
+            InferredType::Known {
+                class_name: EcoString::from("List"),
+                type_args: vec![InferredType::known("Symbol")],
+                provenance: TypeProvenance::Extracted,
+            }
+        );
     }
 
     #[test]
