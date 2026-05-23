@@ -962,6 +962,6 @@ fn class_eq_literal_narrowing_not_regressed() {
     assert!(
         dnu.is_empty(),
         "`x class = Integer` literal-eq narrowing must still narrow x to Integer \
-         (so `x even` resolves) and the guard must not DNU; got {dnu:?}"
+         (so `x isEven` resolves) and the guard must not DNU; got {dnu:?}"
     );
 }

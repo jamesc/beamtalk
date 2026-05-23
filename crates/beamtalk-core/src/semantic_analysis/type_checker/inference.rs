@@ -79,7 +79,9 @@ impl TypeChecker {
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
                     match &body_type {
-                        InferredType::Known { .. } | InferredType::Never => {
+                        InferredType::Known { .. }
+                        | InferredType::Meta { .. }
+                        | InferredType::Never => {
                             self.method_return_types.insert(
                                 (class.name.name.clone(), method.selector.name(), false),
                                 body_type.clone(),
@@ -112,7 +114,9 @@ impl TypeChecker {
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
                     match &body_type {
-                        InferredType::Known { .. } | InferredType::Never => {
+                        InferredType::Known { .. }
+                        | InferredType::Meta { .. }
+                        | InferredType::Never => {
                             self.method_return_types.insert(
                                 (class.name.name.clone(), method.selector.name(), true),
                                 body_type.clone(),
@@ -167,7 +171,9 @@ impl TypeChecker {
                     .any(|s| matches!(s.expression, Expression::Primitive { .. }))
             {
                 match &body_type {
-                    InferredType::Known { .. } | InferredType::Never => {
+                    InferredType::Known { .. }
+                    | InferredType::Meta { .. }
+                    | InferredType::Never => {
                         self.method_return_types.insert(
                             (
                                 class_name.clone(),
