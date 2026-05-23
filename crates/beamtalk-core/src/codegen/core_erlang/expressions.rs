@@ -1174,6 +1174,12 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         messages: &[CascadeMessage],
     ) -> Result<Document<'static>> {
+        // BT-2246: ClassBuilder construction cascades with literal block
+        // methods get synthesised methodSource:/classMethodSource: setters so
+        // builder-defined classes are indexable by SystemNavigation.
+        let augmented = super::class_builder_source::inject_method_source(receiver, messages);
+        let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
+
         if messages.is_empty() {
             // Edge case: cascade with no messages just evaluates to the receiver
             return self.generate_expression(receiver);
