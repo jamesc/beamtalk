@@ -8,11 +8,17 @@
 //! When a class is built programmatically via the `ClassBuilder` cascade API —
 //! `Object classBuilder name: #C; methods: #{ #m => [:self | ...] }; register`
 //! — the method bodies are block literals written directly in source. This
-//! module recognises that shape and synthesises `methodSource:` /
-//! `classMethodSource:` cascade messages carrying each block's reconstructed
-//! source text, so builder-defined classes are visible to `SystemNavigation`
-//! source-text queries (`sendersOf:`, `methodsMatching:`, ...) exactly like
-//! file-defined classes.
+//! module recognises that shape and synthesises a `methodSource:` cascade
+//! message carrying each block's reconstructed source text, so builder-defined
+//! classes are visible to `SystemNavigation` source-text queries (`sendersOf:`,
+//! `methodsMatching:`, ...) exactly like file-defined classes.
+//!
+//! Scope is the **instance** side only. Class methods defined via the builder
+//! (`classMethods:`) are not handled: a programmatic builder stores them as
+//! runtime funs, but class-method dispatch invokes a compiled `class_<sel>`
+//! module function (`beamtalk_class_dispatch`), so builder class methods are not
+//! callable in the first place — indexing their source would serve no method.
+//! Class-side source indexing already works for file-defined classes (BT-2195).
 //!
 //! Only the **literal** case is handled: a symbol-literal selector mapped to a
 //! block literal. Computed selectors or funs assembled at runtime have no
@@ -156,13 +162,13 @@ fn keyword_setter(name: &str) -> MessageSelector {
     MessageSelector::Keyword(vec![KeywordPart::new(name, Span::new(0, 0))])
 }
 
-/// Recognises a `ClassBuilder` construction cascade with literal block methods
-/// and returns an augmented message list with synthesised `methodSource:` /
-/// `classMethodSource:` setters prepended.
+/// Recognises a `ClassBuilder` construction cascade (terminating in `register`)
+/// with literal block instance methods and returns an augmented message list
+/// with a synthesised `methodSource:` setter prepended.
 ///
 /// Returns `None` when the cascade is not a recognised `ClassBuilder`
-/// construction, has nothing indexable, or already carries explicit
-/// `methodSource:` / `classMethodSource:` setters (which are left untouched).
+/// construction, has nothing indexable, or already carries an explicit
+/// `methodSource:` setter (which is left untouched).
 pub(super) fn inject_method_source(
     receiver: &Expression,
     messages: &[CascadeMessage],
@@ -186,9 +192,8 @@ pub(super) fn inject_method_source(
     }
 
     let mut methods_map: Option<&[MapPair]> = None;
-    let mut class_methods_map: Option<&[MapPair]> = None;
     let mut has_method_source = false;
-    let mut has_class_method_source = false;
+    let mut has_register = false;
 
     let all = first_msg.into_iter().chain(
         messages
@@ -198,38 +203,29 @@ pub(super) fn inject_method_source(
     for (selector, args) in all {
         match selector.name().as_str() {
             "methods:" => methods_map = single_map_literal(args).or(methods_map),
-            "classMethods:" => class_methods_map = single_map_literal(args).or(class_methods_map),
             "methodSource:" => has_method_source = true,
-            "classMethodSource:" => has_class_method_source = true,
+            "register" => has_register = true,
             _ => {}
         }
     }
 
-    let mut injected: Vec<CascadeMessage> = Vec::new();
-    if !has_method_source {
-        if let Some(map_expr) = methods_map.and_then(build_source_map) {
-            injected.push(CascadeMessage::new(
-                keyword_setter("methodSource:"),
-                vec![map_expr],
-                Span::new(0, 0),
-            ));
-        }
-    }
-    if !has_class_method_source {
-        if let Some(map_expr) = class_methods_map.and_then(build_source_map) {
-            injected.push(CascadeMessage::new(
-                keyword_setter("classMethodSource:"),
-                vec![map_expr],
-                Span::new(0, 0),
-            ));
-        }
-    }
-
-    if injected.is_empty() {
+    // Require a terminal `register`: an inline builder construction always
+    // registers in the same cascade (a builder bound to a variable and
+    // registered later is not syntactically recognisable here anyway). This
+    // keeps the recognition from firing on an unrelated `classBuilder`/`methods:`
+    // naming coincidence, where the injected setter would be a runtime DNU.
+    if !has_register || has_method_source {
         return None;
     }
 
-    // Prepend the setters so they run before the terminal `register`; ordering
+    let map_expr = methods_map.and_then(build_source_map)?;
+    let mut injected = vec![CascadeMessage::new(
+        keyword_setter("methodSource:"),
+        vec![map_expr],
+        Span::new(0, 0),
+    )];
+
+    // Prepend the setter so it runs before the terminal `register`; ordering
     // among the pure state setters is irrelevant.
     injected.extend(messages.iter().cloned());
     Some(injected)
@@ -332,18 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn injects_class_method_source_too() {
-        let (recv, msgs) = parse_cascade(
-            "Object classBuilder name: #Foo; \
-             classMethods: #{ #make => [:self | self basicNew] }; register",
-        );
-        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
-        let entries = injected_source_map(&augmented, "classMethodSource:");
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, "make");
-    }
-
-    #[test]
     fn skips_non_class_builder_cascade() {
         let (recv, msgs) = parse_cascade("foo bar; methods: #{ #m => [:self | self x] }; baz");
         assert!(inject_method_source(&recv, &msgs).is_none());
@@ -362,6 +346,15 @@ mod tests {
         // Keyword selector `add:` needs `self` + one arg; block declares only `self`.
         let (recv, msgs) =
             parse_cascade("Object classBuilder methods: #{ #add: => [:self | self x] }; register");
+        assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn skips_cascade_without_terminal_register() {
+        // A ClassBuilder cascade with literal methods but no `register` is not a
+        // complete construction — leave it untouched.
+        let (recv, msgs) =
+            parse_cascade("Object classBuilder name: #Foo; methods: #{ #m => [:_self | _self x] }");
         assert!(inject_method_source(&recv, &msgs).is_none());
     }
 

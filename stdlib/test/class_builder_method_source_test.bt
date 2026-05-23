@@ -24,10 +24,9 @@ TestCase subclass: ClassBuilderMethodSourceTest
   // indexable. Before BT-2246 the method installed as a bare fun with empty
   // source and never matched a source-text query.
   testBuilderBlockMethodBodyIsIndexable =>
-    Object classBuilder
-      name: #BTBuilderSourceProbe;
+    Object classBuilder name: #BTBuilderSourceProbe;
       superclass: Object;
-      methods: #{ #greetLoudly => [:_self | "hi" uppercase] };
+      methods: #{#greetLoudly => [:_self | "hi" uppercase]};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderSourceProbe
     nav := SystemNavigation default
@@ -42,10 +41,9 @@ TestCase subclass: ClassBuilderMethodSourceTest
   // The reconstructed source carries the keyword selector and its parameter,
   // so a query against the body matches and the record names the selector.
   testKeywordBuilderMethodIsIndexable =>
-    Object classBuilder
-      name: #BTBuilderKeywordProbe;
+    Object classBuilder name: #BTBuilderKeywordProbe;
       superclass: Object;
-      methods: #{ #scaleBy: => [:_self :factor | factor * factor] };
+      methods: #{#scaleBy: => [:_self :factor | factor * factor]};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderKeywordProbe
     nav := SystemNavigation default
@@ -61,10 +59,9 @@ TestCase subclass: ClassBuilderMethodSourceTest
   // unindexable — the source query degrades to "no match", never a crash.
   testComputedMethodIsKnownButUnindexable =>
     blk := [:obj | obj size]
-    Object classBuilder
-      name: #BTBuilderComputedProbe;
+    Object classBuilder name: #BTBuilderComputedProbe;
       superclass: Object;
-      methods: #{ #computedSize => blk };
+      methods: #{#computedSize => blk};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderComputedProbe
     self assert: (self.cls includesSelector: #computedSize)
