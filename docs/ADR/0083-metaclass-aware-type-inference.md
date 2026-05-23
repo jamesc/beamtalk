@@ -41,18 +41,22 @@ What already exists and works:
 
 What is missing — entirely in the type checker's *type representation*:
 
-- `Self class` / `X class` resolve to `Dynamic`, not a tracked "metaclass-of-X"
-  type.
-- A method that *returns* a class value (`Collection>>species -> Self class`,
-  `Object>>class -> Self class`, the reflection FFI that returns
-  `List(Behaviour)`) yields `Dynamic` downstream.
+- `Self class` / `X class` resolve to `Dynamic` (`type_resolver.rs:128–134`), not
+  a tracked "metaclass-of-X" type. (`Object>>class` *is* declared `-> Self class`,
+  but that annotation resolves to `Dynamic` today.)
+- A method that *returns* a class value yields `Dynamic` downstream — and a method
+  that returns a class value via a *plain* type loses even more: `Collection>>species`
+  is declared `-> Object => self class` (Collection.bt:57), so `self species` infers
+  as `Object`, not even a class.
 - Sends on a metaclass-typed receiver are not routed through `find_class_method`.
 
 This is the structural reason behind several `@expect` overrides found in the
 stdlib audit (see BT-2254 / the ADR 0075 amendment for the FFI-element-type
 sibling): for example `self species withAll:` in `Collection.bt` carries
-`@expect dnu` purely because `species` returns `Dynamic` and `withAll:` cannot be
-resolved as a class-side send.
+`@expect dnu` because `species` is typed `-> Object`, so `withAll:` cannot be
+resolved as a class-side send. Note this override is **not removable by metatype
+typing alone** — it additionally requires re-declaring `species -> Self class`
+(see Slicing, below).
 
 ### Constraints
 
@@ -70,64 +74,123 @@ resolved as a class-side send.
 
 Make metatypes first-class in inference:
 
-1. **Represent a metaclass type.** Introduce a representation for "the class
-   object whose instances are `T`" — the metatype of `T`. (Representation choice
-   in Implementation below: a flag/marker on `InferredType::Known` vs. a new
-   `Metaclass` variant.)
+1. **Represent a metaclass type — over a class *name*, not a parameterized class.**
+   Introduce a representation for "the class object named `C`" — the metatype of
+   `C`. **Critically, the class object is _not_ parameterized** (ADR 0068:511:
+   "there's no `Result(Integer, Error)` class object"). The metatype carries a
+   class *name* only (`metatype-of-List`, not `metatype-of-List(E)`). Instance
+   type arguments are recovered at the *call site* via ADR 0068's existing
+   class-method inference ("class method calls on generic classes as implicit
+   type application sites") — e.g. `List withAll: aList(Integer)` infers the
+   element type from the argument, not from the class object. This keeps 0083 and
+   0068 consistent rather than in conflict.
 
-2. **Resolve the annotations.** `type_resolver` resolves
-   `TypeAnnotation::SelfClass` to the metatype of the enclosing `Self`, and
+2. **Subtyping into the tower.** `metatype-of-C <: Class <: Behaviour <: Object`,
+   so a metatype value still satisfies `:: Class` / `:: Behaviour` parameters and
+   FFI returns typed `List(Behaviour)`. This must compose with the existing
+   `expected == "Class"` shortcut and class-literal/metaclass compatibility branch
+   in `validation.rs` (BT-1877 / BT-2038, `validation.rs:686–700`).
+
+3. **Resolve the annotations.** `type_resolver` resolves
+   `TypeAnnotation::SelfClass` to the metatype of the enclosing class, and
    `TypeAnnotation::ClassOf { name }` to the metatype of `name`, instead of
-   `Dynamic`.
+   `Dynamic` (`type_resolver.rs:128–134`).
 
-3. **Route sends on metaclass-typed receivers to class-side lookup.** When a
-   receiver's inferred type is the metatype of `T`, resolve the selector via
-   `find_class_method(T, …)` (with the existing `Metaclass → Class → Behaviour`
+4. **Route sends on metaclass-typed receivers to class-side lookup.** When a
+   receiver's inferred type is a metatype of `C`, resolve the selector via
+   `find_class_method(C, …)` (with the existing `Metaclass → Class → Behaviour`
    fallback). This generalizes `is_class_side_send` from a syntactic test to a
-   type-driven one.
+   type-driven one, and applies a class-side method's declared return — including
+   a `-> Self` return resolved to `C` (the same mechanism `new -> Self` needs).
 
-4. **`self class new` and friends type to `Self`.** `new` / `basicNew` on the
-   metatype of `T` returns an instance of `T` (covariant with `Self` when the
-   metatype is `Self class`).
+5. **`self class new` and class-method returns.** `new` / `basicNew` on a metatype
+   of `C` returns an instance of `C`. **Soundness caveat:** when `C` is abstract
+   (`Collection`, `Behaviour`), `new` must *not* be blessed as a concrete instance
+   — guard `infer_constructor_type` (`validation.rs:284`) against abstract
+   metatypes, falling back to the abstract type / `Dynamic`.
 
 ### Slicing
 
-- **Slice 1 (this ADR's core):** items 1–4 above for the *non-covariant-return*
-  cases. Covers `species`, `self class new`, `obj class <selector>` reflection,
-  class values returned from FFI, and the implicit class-side `new` override.
-- **Slice 2 (deferred):** covariant `Self` on *class-side* method returns — e.g.
-  `class withAll: -> Self` so `Set withAll:` types as `Set` and `List withAll:`
-  as `List`. This is the species *return* side and the fiddliest part; it
-  interacts with the existing `Self`-return inference and is split out to keep
-  Slice 1 shippable.
+The clean, self-contained win is **reflection / class-as-value typing**; the
+species pattern needs an extra stdlib change and is honestly the harder case.
+
+- **Slice 1 (this ADR's core):** items 1–5 above — metatype representation,
+  tower subtyping, annotation resolution, type-driven class-side routing, and
+  class-method return typing (`new`/`-> Self` resolved to the metatype's class).
+  Cleanly covers: `aConcreteInstance class new` typed as the instance class,
+  `obj class <selector>` reflective *resolution*, class values flowing through
+  variables/collections, and (subsuming the separate small fix) the implicit
+  class-side `new` override.
+
+- **Species (Slice 1, but requires a stdlib change):** removing the
+  `self species withAll:` override is *not* free. It requires re-declaring
+  `Collection>>species -> Self class` (today `-> Object`). With that, at the
+  definition site `self : Collection(E)` ⇒ `self species : metatype-of-Collection`,
+  `withAll:` resolves class-side and its `-> Self` return is `Collection(E)`, which
+  matches `collect: -> Self`. The DNU disappears. **The runtime species (the
+  concrete subclass) remains statically invisible** — at the abstract definition
+  site `Self` is the defining class, so the body types as `Collection`, not the
+  subclass. That is sound (the declared return is `Self`) but it means metatype
+  typing reproduces the *resolution*, not the subtype precision.
+
+- **Slice 2 (deferred — depends on ADR 0068 Stage 2):** *parametric variance*
+  precision for concrete class literals — `Set withAll: → Set`, `List withAll: →
+  List`. ADR 0068 makes all type parameters invariant in Stage 1 (0068:350) and
+  defers variance to Stage 2, so this slice is **blocked on that work**, not
+  merely fiddly.
 
 ### Example
 
-```beamtalk
-typed Object subclass: Collection(E)
-  collect: block :: Block(E, R) -> Self =>
-    result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
-    self species withAll: result    // species -> Self class; withAll: resolved class-side — no @expect
-```
+Today (`species -> Object`, the override is needed):
 
 ```beamtalk
-// Reflection: a class value flows with type, class-side sends are checked
-cls := SystemNavigation default findClass: #Counter   // -> Behaviour (a class value)
-instance := cls new                                    // class-side new resolved; -> Counter-ish
+typed Object subclass: Collection(E)
+  species -> Object => self class      // returns Object — loses class-ness
+  collect: block :: Block(E, R) -> Self =>
+    result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
+    @expect dnu                        // withAll: not resolvable on Object
+    self species withAll: result
+```
+
+Proposed (Slice 1 + the `species` re-declaration):
+
+```beamtalk
+  species -> Self class => self class   // metatype-of-Self
+  collect: block :: Block(E, R) -> Self =>
+    result := (...) reversed
+    self species withAll: result        // withAll: resolved class-side, -> Self — no @expect
+```
+
+Reflection — honest about precision limits:
+
+```beamtalk
+// allClasses returns List(Behaviour); the element is a class value but its
+// INSTANCE type is statically unknown.
+cls := SystemNavigation default allClasses first   // cls :: Behaviour
+cls name                                            // class-side resolved (Behaviour>>name) — no @expect
+cls new                                             // resolves, but typed Object: the instance type is unknown
 ```
 
 ## Prior Art
 
-- **Smalltalk (Pharo/Squdeak):** every class is an instance of its metaclass; the
-  metaclass tower is the canonical model ADR 0036 follows. Smalltalk is
-  dynamically typed, so it gets class-side dispatch "for free" but no static
-  checking — this ADR adds the static layer.
+- **Strongtalk** (the most relevant prior art): a statically-typed Smalltalk that
+  layered a structural type system over exactly this metaclass model. It typed
+  class-side protocols separately from instance protocols and used `Self`-types for
+  the species/`new` family — the same problem this ADR addresses. Adopted: the
+  separation of class-side from instance-side method lookup and `Self`-return
+  resolution. Adapted: Beamtalk uses the nominal class hierarchy (ADR 0036) rather
+  than Strongtalk's structural protocols.
+- **Smalltalk (Pharo/Squeak):** every class is an instance of its metaclass; the
+  metaclass tower is the canonical model ADR 0036 follows. Dynamically typed, so it
+  gets class-side dispatch "for free" but no static checking — this ADR adds the
+  static layer.
 - **Newspeak:** classes are first-class messages; metaclass-aware but again
   dynamic.
 - **TypeScript:** models "the class object" with `typeof ClassName` and
-  constructor types (`new () => T`). The metatype-of-`T` representation here is
-  the direct analogue, adapted to the Smalltalk tower instead of structural
-  constructor types.
+  constructor types (`new () => T`). Note TypeScript *does* parameterize the
+  constructor side; Beamtalk deliberately does **not** (ADR 0068 — the class
+  object is unparameterized, instance params are inferred at the call site), so the
+  analogue is the unparameterized metatype-of-name, not `typeof` over generics.
 - **Gleam:** no metaclasses; rejected as a model since Beamtalk committed to the
   tower in ADR 0036.
 
@@ -145,15 +208,26 @@ instance := cls new                                    // class-side new resolve
 
 ## Steelman Analysis
 
-- **"Keep it Dynamic" (status quo):** class values are rare enough, and `@expect`
-  documents the boundary honestly. Strongest where the metatype is genuinely
-  unknown (heterogeneous class lists). Countered by the metaprogramming surface
-  (SystemNavigation, builders, DSLs) being exactly where Beamtalk leans hardest on
-  `Dynamic` — the cost concentrates in the most reflective code.
-- **Tension:** covariant `Self` class-side returns (Slice 2) add real complexity
-  for a narrow set of methods (`withAll:`, factory methods). Reasonable people
-  disagree on whether that slice ever pays for itself; hence it is deferred, not
-  committed.
+- **"Keep it Dynamic" (status quo) — newcomer/maintainer:** class values are rare,
+  and `@expect` documents the boundary honestly. Strongest where the metatype is
+  genuinely unknown (heterogeneous class lists from reflection, where `new` is
+  `Object` anyway — see the reflection example). Countered by the metaprogramming
+  surface (SystemNavigation, builders, DSLs) being exactly where Beamtalk leans
+  hardest on `Dynamic`.
+- **BEAM developer:** "class objects are just atoms/modules at runtime; static
+  metatypes add checker complexity for something dispatch already handles." Genuine
+  — and why this ADR is static-only with zero runtime change; the payoff is purely
+  earlier diagnostics, which a BEAM dev may value less than a Smalltalker.
+- **Language designer:** the strongest case *against* is the ADR 0068 boundary —
+  parameterized metatypes were explicitly rejected. This ADR must stay on the
+  unparameterized side of that line (Decision item 1); if a future need for
+  `metatype-of-List(E)` precision appears, it reopens 0068, not just 0083.
+- **Tension / where reasonable people disagree:** whether re-declaring
+  `species -> Self class` is worth it given the runtime species stays statically
+  invisible (the def-site only ever sees `Collection`). The win is removing one
+  `@expect` and documenting intent; the subtype precision is not actually gained
+  until 0068 Stage 2. A reviewer could reasonably say "leave the species override;
+  ship Slice 1 for reflection only."
 
 ## Alternatives Considered
 
@@ -175,46 +249,80 @@ the Smalltalk model needs.
 ## Consequences
 
 ### Positive
-- Removes the `species` overrides and subsumes the implicit class-side `new`
-  override; unlocks typed reflection/metaprogramming generally.
+- Subsumes the implicit class-side `new` override and unlocks typed
+  reflection/metaprogramming (class-side method *resolution* on class values).
 - Generalizes class-side resolution from syntactic to type-driven, so class values
   flow through variables, collections, and FFI returns.
+- Removes the `species` override **given the `species -> Self class` re-declaration**
+  (not for free — see Negative).
 - Complements BT-2254 (FFI element types): that ADR types the *elements*; this one
   types the *class-side* of those elements.
 
 ### Negative
+- The `species` override removal requires a stdlib signature change
+  (`species -> Self class`) and still does not recover the runtime species
+  statically (def-site `Self` is the defining class).
 - Precision increase surfaces **new** diagnostics where stdlib code rode on
   `Dynamic` metatypes; must be fixed or annotated deliberately (not purely
   subtractive).
-- Slice 2 (`Self` class-side covariance) is genuinely intricate and interacts with
-  existing `Self`-return inference.
-- Adds a representation decision (variant vs. flag) that touches `InferredType`
-  pattern matches broadly.
+- Abstract-class `new` is a soundness hazard (`Collection new` must not type as a
+  concrete instance) — needs an explicit guard.
+- Touches the `InferredType` representation (variant vs. flag) broadly, and must
+  compose with the existing `expected == "Class"` / metaclass-compat branch in
+  `validation.rs` (BT-1877 / BT-2038).
+- Subtype precision for concrete generics (`Set withAll: → Set`) is **blocked on
+  ADR 0068 Stage 2** (variance), not deliverable here.
 
 ### Neutral
-- No runtime, codegen, or syntax change — static analysis only.
+- No runtime, codegen, or syntax change — static analysis only (the `species`
+  re-declaration is a type-annotation change; its runtime body is unchanged).
 - `Metaclass`/`Class`/`Behaviour` remain valid explicit annotations; the metatype
-  representation sits alongside them.
+  representation sits alongside them and subtypes into them.
 
 ## Implementation
 
-1. **Representation** — prefer a marker on `InferredType::Known` (e.g. an
-   `is_meta` flag, or reuse `type_args` with a metatype tag) over a new variant,
-   to minimize churn across the many `Known` match sites; evaluate during the
-   spike.
+0. **Spike** — confirm the representation and trace the species case end-to-end on
+   one method before broad work (the smallest proof: `Counter class new` infers
+   `Counter`, and `self species withAll:` resolves with `species -> Self class`).
+1. **Representation** — a marker on `InferredType::Known` (an `is_meta` flag
+   carrying the class *name* only — **not** a parameterized class object, per
+   ADR 0068) is preferred over a new variant, to minimize churn across the many
+   `Known` match sites. Define `metatype-of-C <: Class <: Behaviour`.
 2. **`type_resolver`** — resolve `SelfClass` / `ClassOf` to the metatype instead
-   of `Dynamic` (`type_resolver.rs:64`, `:128`).
+   of `Dynamic` (`type_resolver.rs:128–134`).
 3. **`inference.rs`** — when the receiver type is a metatype, set
-   `is_class_side_send` and look up via `find_class_method`; type `new`/`basicNew`
-   on a metatype to the instance type.
-4. **`validation.rs`** — extend the existing `Metaclass`-chain fallback to
-   metatype-typed receivers (not just class literals).
-5. **stdlib cleanup** — remove the `species` overrides; verify the implicit
-   class-side `new` case; absorb new diagnostics.
-6. **Slice 2 (separate issue)** — covariant `Self` class-side returns.
+   `is_class_side_send` and look up via `find_class_method`; apply class-method
+   returns (incl. `-> Self` → the metatype's class, and ADR 0068 call-site param
+   inference for `withAll:`-style methods).
+4. **`validation.rs`** — extend the `Metaclass`-chain fallback to metatype-typed
+   receivers; compose with the `expected == "Class"` shortcut (`:686–700`); guard
+   `infer_constructor_type` (`:284`) so abstract metatypes don't yield concrete
+   instances.
+5. **stdlib** — re-declare `Collection>>species -> Self class`; remove the species
+   `@expect dnu` overrides; verify/remove the implicit class-side `new` override;
+   absorb new diagnostics.
+6. **Tests** — type-checker unit tests (`type_checker/tests/`: a `self_class.rs` /
+   metatype suite); stdlib BUnit (`stdlib/test/`) for species/reflection; ensure
+   `just test-stdlib` stays warning-clean.
+7. **Slice 2 (separate issue, blocked on ADR 0068 Stage 2)** — parametric variance
+   for concrete-class-literal precision.
 
-Affected components: type checker only (`type_resolver`, `inference`,
-`validation`, `types`). No parser/codegen/runtime changes.
+Affected components: type checker (`type_resolver`, `inference`, `validation`,
+`types`) plus one stdlib annotation (`Collection.bt`). No parser/codegen/runtime
+changes.
+
+## Open Questions
+
+1. **`species` re-declaration vs. body-driven inference.** Re-declaring
+   `species -> Self class` is the simplest path (the call site uses the *declared*
+   return, so inferring the body `self class` as a metatype does not help unless
+   the signature changes). Confirm this is acceptable, or decide to special-case
+   `self class` expression inference. *(Recommendation: re-declare — explicit and
+   local.)*
+2. **Representation:** `is_meta` flag on `Known` vs. a dedicated `Metaclass`
+   variant — settle in the spike against the actual breadth of `Known` match sites.
+3. **Is the species slice worth it now,** or ship Slice 1 for reflection only and
+   leave the species override until 0068 Stage 2 buys real subtype precision?
 
 ## Migration Path
 
@@ -224,10 +332,16 @@ fixed or annotated as part of the stdlib cleanup. Genuinely-unknown metatypes
 still fall back to `Dynamic`.
 
 ## References
-- Related issues: BT-2034 (`Self class` / `X class` annotation syntax), BT-2254
-  (typed FFI collection element types — sibling precision work)
+- Related issues: BT-2034 (`Self class` / `X class` annotation syntax), BT-1952
+  (`Self class` historically resolves to `Dynamic`), BT-1877 / BT-2038
+  (`expected == "Class"` shortcut + metaclass-tower compatibility in
+  `validation.rs`), BT-2254 (typed FFI collection element types — sibling), BT-2255
+  (Slice 1 implementation)
 - Related ADRs: ADR 0036 (Full Metaclass Tower — the runtime/hierarchy this types),
-  ADR 0025 (Gradual Typing and Protocols — the type system this plugs into),
-  ADR 0075 (Erlang FFI Type Definitions — class-returning reflection FFI)
+  ADR 0068 (Parametric Types — **constraint**: class objects are unparameterized
+  (§511) and variance is deferred to Stage 2 (§350); this ADR stays inside both
+  boundaries), ADR 0025 (Gradual Typing and Protocols — the type system this plugs
+  into), ADR 0075 (Erlang FFI Type Definitions — class-returning reflection FFI),
+  ADR 0077 (Type Coverage Visibility — interaction with `@expect`)
 - Documentation: `docs/beamtalk-language-features.md` (type annotations,
   `@expect`)
