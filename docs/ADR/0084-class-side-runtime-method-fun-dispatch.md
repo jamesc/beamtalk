@@ -1,7 +1,7 @@
 # ADR 0084: Class-Side Runtime Method Installation and Fun Dispatch
 
 ## Status
-Proposed (2026-05-24)
+Accepted (2026-05-24)
 
 ## Context
 
