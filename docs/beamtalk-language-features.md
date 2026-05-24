@@ -929,6 +929,13 @@ field: actorClass :: Actor class | nil = nil
 // After `actorClass isNil ifTrue: [^nil]`, actorClass is narrowed to
 // `Actor class` — class-side methods like `isSupervisor` type-check.
 
+// Class literal inference: a bare class literal (`Counter`) infers as the
+// metatype `Counter class`, so class values stored in variables, collections,
+// or returned from FFI calls route class-side sends correctly without annotation.
+klass := Counter            // inferred Counter class (the metatype)
+klass new                   // inferred Counter (an instance)
+klass instanceCount         // resolves class-side method
+
 // Metatype subtyping: `C class <: Class <: Behaviour <: Object`, so a class
 // value satisfies `:: Class` / `:: Behaviour` parameters and `List(Behaviour)`
 // FFI returns. `new` / `basicNew` on a *concrete* class metatype infers an
@@ -2475,6 +2482,21 @@ Map >> at: key :: String put: value :: Integer :: -> Map => // ...
 Both forms are equivalent — the return type flows to the type checker identically.
 The `:: ->` form is preferred for unary extensions; the `->` form is preferred
 when parameters already have `::` annotations (to avoid consecutive `::` tokens).
+
+### Cross-file extensions
+
+Extensions can target classes defined in other files or in stdlib. The compiler
+registers each foreign extension at module load, so it dispatches at runtime just
+like a same-file extension. Class-side extensions register under the metaclass tag
+(`String class`).
+
+```beamtalk
+// In helpers.bt — String is defined in stdlib, not this file
+String >> shoutIt => super printString uppercase ++ "!"
+
+// Class-side foreign extension
+String class >> banner => "=== String ==="
+```
 
 ---
 
