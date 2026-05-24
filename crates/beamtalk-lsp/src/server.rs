@@ -195,7 +195,11 @@ impl Backend {
             .await?;
         let sites = resp.sites?;
         let svc = self.service.lock().expect("service lock poisoned");
-        Some(sites_to_lsp_locations(&svc, &sites))
+        let stdlib_paths = self
+            .stdlib_paths
+            .lock()
+            .expect("stdlib_paths lock poisoned");
+        Some(sites_to_lsp_locations(&svc, &sites, &stdlib_paths))
     }
 
     fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
@@ -1652,10 +1656,13 @@ fn path_to_stdlib_uri(path: &Utf8PathBuf) -> Option<Url> {
 ///
 /// Each site is resolved to a method-relative source span by
 /// `SimpleLanguageService::locate_nav_site`; sites whose class/method are not
-/// in the indexed files (e.g. a REPL-only class) are skipped.
+/// in the indexed files (e.g. a REPL-only class) are skipped. Stdlib files are
+/// mapped to `beamtalk-stdlib://` URIs (matching `goto_definition`) so the
+/// editor opens them as virtual documents rather than missing `file://` paths.
 fn sites_to_lsp_locations(
     svc: &SimpleLanguageService,
     sites: &[beamtalk_repl_protocol::NavSite],
+    stdlib_paths: &HashSet<Utf8PathBuf>,
 ) -> Vec<tower_lsp::lsp_types::Location> {
     sites
         .iter()
@@ -1663,10 +1670,12 @@ fn sites_to_lsp_locations(
             let loc = svc.locate_nav_site(&site.class, &site.selector, site.line)?;
             let source = svc.file_source(&loc.file)?;
             let range = span_to_range(loc.span, &source);
-            Some(tower_lsp::lsp_types::Location {
-                uri: path_to_uri(&loc.file)?,
-                range,
-            })
+            let uri = if stdlib_paths.contains(&loc.file) {
+                path_to_stdlib_uri(&loc.file)?
+            } else {
+                path_to_uri(&loc.file)?
+            };
+            Some(tower_lsp::lsp_types::Location { uri, range })
         })
         .collect()
 }
@@ -1999,7 +2008,7 @@ mod tests {
             selector: "bump".to_string(),
             line: 2,
         }];
-        let locations = sites_to_lsp_locations(&svc, &sites);
+        let locations = sites_to_lsp_locations(&svc, &sites, &HashSet::new());
         assert_eq!(locations.len(), 1);
         // Relative line 2 of `bump` → file line index 2 (the `self step` line).
         assert_eq!(locations[0].range.start.line, 2);
@@ -2015,7 +2024,7 @@ mod tests {
             selector: "whatever".to_string(),
             line: 1,
         }];
-        assert!(sites_to_lsp_locations(&svc, &sites).is_empty());
+        assert!(sites_to_lsp_locations(&svc, &sites, &HashSet::new()).is_empty());
     }
 
     #[test]

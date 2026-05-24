@@ -73,7 +73,13 @@ impl RuntimeClient {
                 .map_err(|_| format!("timed out connecting to runtime at {url}"))?
                 .map_err(|e| format!("failed to connect to runtime at {url}: {e}"))?;
 
-        perform_auth_handshake(&mut ws, &cookie).await?;
+        // Bound the handshake: a runtime that accepts the TCP connection but
+        // never completes the ADR 0020 handshake must not hang an LSP request.
+        match tokio::time::timeout(CONNECT_TIMEOUT, perform_auth_handshake(&mut ws, &cookie)).await
+        {
+            Ok(result) => result?,
+            Err(_) => return Err("timed out during runtime auth handshake".to_string()),
+        }
         Ok(Some(Self { ws }))
     }
 

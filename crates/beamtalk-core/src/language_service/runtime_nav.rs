@@ -32,17 +32,21 @@ use super::value_objects::{ByteOffset, Position};
 /// The returned span covers the full resolved line (from its first byte to the
 /// end of the line, excluding the trailing newline).
 ///
-/// Returns `None` if `method_span.start()` is out of bounds for `source` or the
-/// resolved line lies past the end of `source`.
+/// Returns `None` if `relative_line` is `0` (the contract is 1-based), if
+/// `method_span.start()` is out of bounds for `source`, or if the resolved line
+/// lies past the end of `source`.
 #[must_use]
 pub fn method_relative_line_span(
     source: &str,
     method_span: Span,
     relative_line: u32,
 ) -> Option<Span> {
+    if relative_line == 0 {
+        return None;
+    }
     let header_line =
         Position::from_byte_offset(source, ByteOffset::new(method_span.start()))?.line;
-    let target_line = header_line + relative_line.saturating_sub(1);
+    let target_line = header_line + (relative_line - 1);
     line_span(source, target_line)
 }
 
@@ -118,6 +122,15 @@ other";
         let (start, end) = span_at(3);
         let text = &SRC[start as usize..end as usize];
         assert_eq!(text, "    self log");
+    }
+
+    #[test]
+    fn zero_relative_line_returns_none() {
+        // The contract is 1-based; 0 is invalid input and is rejected rather
+        // than silently resolving to the method header.
+        let header_offset = u32::try_from(SRC.find("increment").unwrap()).unwrap();
+        let method_span = Span::new(header_offset, header_offset + 5);
+        assert!(method_relative_line_span(SRC, method_span, 0).is_none());
     }
 
     #[test]

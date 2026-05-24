@@ -93,7 +93,7 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `nav-query` | -- | `via SystemNavigation default` | -- | `references` | System-Browser navigation (implementorsOf / sendersOf / referencesTo) delegated to the live `SystemNavigation` facade (BT-2239). LSP consumes it for find-references when `lsp.delegate_to_runtime` is enabled and a runtime is attached, falling back to the AST walker otherwise (ADR 0024). Per-method coverage (implementation, typeHierarchy, callHierarchy) lands in BT-2240..2244 |
+| `nav-query` | -- | `via SystemNavigation default` | -- | `textDocument/references` | System-Browser navigation (implementorsOf / sendersOf / referencesTo) delegated to the live `SystemNavigation` facade (BT-2239). LSP consumes it for find-references when `lsp.delegate_to_runtime` is enabled and a runtime is attached, falling back to the AST walker otherwise (ADR 0024). Per-method coverage (implementation, typeHierarchy, callHierarchy) lands in BT-2240..2244 |
 
 ## Performance / Tracing Operations
 
