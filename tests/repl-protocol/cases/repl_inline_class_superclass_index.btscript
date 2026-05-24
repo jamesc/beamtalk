@@ -25,7 +25,7 @@
 Shape subclass: Triangle
   field: base = 1.0
   class withBase: b => self new: #{#base => b}
-// => _
+// => Triangle
 
 Triangle >> base => self.base
 // => _
@@ -48,7 +48,7 @@ t class name
 
 // Field access works on the value object
 t base
-// => _
+// => 6.0
 
 // ===========================================================================
 // CHAINED INLINE SUBCLASS (inline class as parent of another inline class)
@@ -59,7 +59,7 @@ t base
 // so that the next inline compile can resolve Triangle→Shape→Object as value-object.
 Triangle subclass: RightTriangle
   field: hypotenuse = 0.0
-// => _
+// => RightTriangle
 
 rt := RightTriangle new: #{#base => 3.0, #hypotenuse => 5.0}
 // => _
@@ -68,4 +68,4 @@ rt class name
 // => RightTriangle
 
 rt base
-// => _
+// => 3.0
