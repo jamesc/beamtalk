@@ -278,8 +278,9 @@ impl TypeChecker {
     /// This mirrors the instance-side nested unification in
     /// [`super::TypeChecker::infer_method_local_params`] (which handles only
     /// *method-local* params); here we resolve *class-level* params on the
-    /// class-side. The exact-match binding still takes precedence (last write
-    /// wins only for unset keys — see the `entry` guard).
+    /// class-side. Exact-match params are inserted directly and win: the nested
+    /// helper's merge guard refuses to overwrite a `Known`/`Union` binding an
+    /// exact match already set.
     ///
     /// **References:** BT-2018 (preserve generic return types on class-method
     /// assignments), ADR 0068 Phase 1c, BT-2256 (Slice 2 nested composition).
@@ -321,10 +322,10 @@ impl TypeChecker {
     /// Given a declared parameter type like `List(E)` and an argument type like
     /// `List(Integer)`, binds `E -> Integer` when `E` is a class type param and
     /// the argument's base class matches the declared base. Recurses positionally
-    /// so deeper nesting (`Pair(K, List(V))`) composes too. Bindings are merged
-    /// non-destructively: a key already present (e.g. from an exact-match
-    /// parameter) is not overwritten, and a `Dynamic` candidate never replaces a
-    /// `Known`/`Union` binding.
+    /// so deeper nesting (`Pair(K, List(V))`) composes too. Merge precedence: a
+    /// key already bound to a `Known`/`Union` (e.g. from an exact-match parameter)
+    /// is kept and never overwritten; a key that is absent or only bound to
+    /// `Dynamic` is filled in with this candidate.
     fn unify_nested_class_params(
         declared: &str,
         arg_ty: &InferredType,

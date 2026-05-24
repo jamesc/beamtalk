@@ -1126,23 +1126,23 @@ typed AbstractMaker subclass: ConcreteMaker(E)
 }
 
 #[test]
-fn abstract_class_side_self_return_stays_abstract_definition_site() {
-    // Slice 1 boundary (no regression): sending the same `-> Self` class-side
-    // method to the *abstract* class literal resolves Self to the abstract class
-    // itself — not a concrete subclass, and not Dynamic.
+fn class_side_self_return_on_defining_class_literal_resolves_to_itself() {
+    // Slice 1 boundary (no regression): sending a `-> Self` class-side method to
+    // the *defining* class literal resolves Self to that class itself — not a
+    // subclass, and not Dynamic. (The parent here is a plain base class, not
+    // marked `abstract`; this pins the receiver=defining-class case.)
     let source = "
-typed Object subclass: AbstractMaker(E)
+typed Object subclass: BaseMaker(E)
   class make: items :: List(E) -> Self => @primitive \"make:\"
 
-typed AbstractMaker subclass: ConcreteMaker(E)
+typed BaseMaker subclass: ConcreteMaker(E)
 ";
     let (_module, hierarchy) = parse_and_build(source);
-    // AbstractMaker is not flagged `abstract`, so `-> Self` resolves to itself.
-    let send = kw1_send(class_ref("AbstractMaker"), "make:", var("items"));
+    let send = kw1_send(class_ref("BaseMaker"), "make:", var("items"));
     let ty = infer_send_on_local("items", list_of("Integer"), &send, &hierarchy);
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
-        Some("AbstractMaker"),
+        Some("BaseMaker"),
         "class-side `-> Self` on the defining class literal resolves to that class; got {ty:?}"
     );
 }
