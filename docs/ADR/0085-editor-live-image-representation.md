@@ -118,7 +118,7 @@ transport op. It fetches by evaluating a Beamtalk expression over the existing
 |---|---|---|
 | Class | `aClass sourceString` (see below) | `readFile` / `provideTextDocumentContent` |
 | Method | `(aClass >> #selector) source` (← `CompiledMethod`, ADR 0066 reader form) | method-level browsing |
-| Enumeration | `SystemNavigation allClasses`, `aClass selectors` | `readDirectory` |
+| Enumeration | `SystemNavigation default allClasses`, `aClass selectors` | `readDirectory` |
 
 `aClass sourceString` is the new Beamtalk-level accessor this ADR needs. It must
 return source that reflects **in-memory `>>` patches**, which `get_class_source`
@@ -527,7 +527,7 @@ file-assuming tooling behaves differently and the ADR must set expectations:
 | Layer | Change |
 |---|---|
 | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | Patch-aware source: either refresh class source on the `register` chokepoint (co-located with ADR 0082's Phase-1 hook) or expose per-method source for re-stitch; **emit `changed`/`removed` workspace events** on patch/removal |
-| `stdlib` (`Behaviour`/`SystemNavigation`) | `aClass sourceString` accessor (patch-aware, per *Content is a message send*); reuse `SystemNavigation allClasses` / `aClass selectors` for enumeration |
+| `stdlib` (`Behaviour`/`SystemNavigation`) | `aClass sourceString` accessor (patch-aware, per *Content is a message send*); reuse `SystemNavigation default allClasses` / `aClass selectors` for enumeration |
 | `runtime/apps/beamtalk_workspace` | Extend the `classes` push channel beyond `class-loaded` to carry `changed`/`removed` |
 | `editors/vscode/src` | `LiveImageContentProvider` (L1, generalize `StdlibContentProvider`, source over `WorkspaceClient`); `beamtalk-image:/` `FileSystemProvider` (L2); wire push → `onDidChange`; "Browse Live" entry points; route save → ADR 0082 `compile:source:`, "Save to Disk" → `Workspace flush`; enforce the single-editing-surface invariant |
 | `crates/beamtalk-mcp` (parity) | Equivalent live class-source read for surface parity, if applicable |
