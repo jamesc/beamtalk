@@ -202,12 +202,12 @@ mod tests {
     }
 
     #[test]
-    fn escape_for_erlang_string_handles_special_chars() {
-        use erlang_eval::escape_for_erlang_string;
-        assert_eq!(escape_for_erlang_string(r"hello"), "hello");
-        assert_eq!(escape_for_erlang_string(r#"a"b"#), r#"a\"b"#);
-        assert_eq!(escape_for_erlang_string("a\\b"), "a\\\\b");
-        assert_eq!(escape_for_erlang_string("a\nb"), "a\\nb");
+    fn escape_erlang_string_handles_special_chars() {
+        use crate::beam_compiler::escape_erlang_string;
+        assert_eq!(escape_erlang_string(r"hello"), "hello");
+        assert_eq!(escape_erlang_string(r#"a"b"#), r#"a\"b"#);
+        assert_eq!(escape_erlang_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_erlang_string("a\nb"), "a\\nb");
     }
 
     /// erlfmt must correctly format and write back a `.erl` file containing

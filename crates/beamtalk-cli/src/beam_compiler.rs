@@ -90,11 +90,13 @@ fn is_runtime_unavailable_error(err: &miette::Report) -> bool {
     msg.starts_with(RUNTIME_UNAVAILABLE_PREFIX)
 }
 
-/// Escapes a string for use in an Erlang term.
+/// Escapes a string for use in an Erlang string literal.
 ///
 /// This escapes backslashes, quotes, and control characters to prevent
 /// injection attacks and ensure valid Erlang term syntax when constructing
-/// Erlang terms from file paths.
+/// Erlang terms from file paths and other user-supplied strings.
+///
+/// Handles: `\`, `"`, `\n`, `\r`, `\t`, `\0`.
 pub(crate) fn escape_erlang_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
@@ -104,6 +106,7 @@ pub(crate) fn escape_erlang_string(s: &str) -> String {
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '\t' => result.push_str("\\t"),
+            '\0' => result.push_str("\\0"),
             _ => result.push(c),
         }
     }
@@ -1893,6 +1896,11 @@ end
     #[test]
     fn test_escape_erlang_string_tabs() {
         assert_eq!(escape_erlang_string("col1\tcol2"), "col1\\tcol2");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_null_byte() {
+        assert_eq!(escape_erlang_string("\0"), "\\0");
     }
 
     #[test]

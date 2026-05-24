@@ -11,8 +11,7 @@
 //!
 //! Part of ADR 0014 (Beamtalk Test Framework), Phase 1.
 
-use crate::beam_compiler::BeamCompiler;
-use crate::commands::erlang_eval::escape_for_erlang_string;
+use crate::beam_compiler::{BeamCompiler, escape_erlang_string};
 use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -307,8 +306,8 @@ fn generate_eunit_wrapper(
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
         // Build source location comment
-        let escaped_file = escape_for_erlang_string(test_file_path);
-        let escaped_expr = escape_for_erlang_string(&case.expression);
+        let escaped_file = escape_erlang_string(test_file_path);
+        let escaped_expr = escape_erlang_string(&case.expression);
         let location = format!("{escaped_file}:{} `{escaped_expr}`", case.line);
         let location_bin = format!("<<\"{location}\"/utf8>>");
 

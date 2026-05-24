@@ -30,7 +30,7 @@ use super::node_state::{
 };
 use super::startup_command::{build_detached_node_command, write_cookie_args_file};
 
-use crate::commands::erlang_eval::escape_for_erlang_string;
+use crate::beam_compiler::escape_erlang_string;
 use crate::commands::protocol::ProtocolClient;
 use miette::{Result, miette};
 
@@ -118,7 +118,7 @@ fn prepare_workspace_paths(
     let project_path_str = project_path
         .to_str()
         .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
-    let project_path_str = escape_for_erlang_string(project_path_str);
+    let project_path_str = escape_erlang_string(project_path_str);
 
     // If a `starting` tombstone is present, a previous startup was interrupted
     // mid-flight (crash, OOM, SIGKILL, etc.).  Clean up all runtime files —
@@ -151,7 +151,7 @@ fn prepare_workspace_paths(
     let pid_file_path_str = pid_file_path
         .to_str()
         .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?;
-    let pid_file_path_str = escape_for_erlang_string(pid_file_path_str);
+    let pid_file_path_str = escape_erlang_string(pid_file_path_str);
 
     // Compute the startup log path so the eval command's try/catch can write
     // crash diagnostics from within the VM (bypassing -detached's fd redirect).
@@ -162,7 +162,7 @@ fn prepare_workspace_paths(
             startup_log_path
         )
     })?;
-    let startup_log_path_str = escape_for_erlang_string(startup_log_path_str);
+    let startup_log_path_str = escape_erlang_string(startup_log_path_str);
 
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(config.bind_addr);
