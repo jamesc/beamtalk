@@ -315,7 +315,12 @@ build_compiled_class_info(
 ) ->
     InstanceMethods = build_method_map(MethodSpecs),
     Module = maps:get(moduleName, BuilderState, ClassName),
-    ClassMethods = maps:get(classMethods, BuilderState, #{}),
+    %% ADR 0084 / BT-2266: wrap class-method specs the same way instance methods
+    %% are wrapped, so builder-supplied funs become dispatchable #{block, arity}
+    %% entries (compiled #{arity => N} references pass through unchanged). This is
+    %% what makes builder class methods callable and seedable into the retrieval
+    %% store at registration time.
+    ClassMethods = build_method_map(maps:get(classMethods, BuilderState, #{})),
     %% BT-877: Read is_constructible from compiler inference.
     %% The compiler emits isConstructible based on the `new => self error:` pattern.
     %% Superclass inheritance is handled at init/query time via the class hierarchy.

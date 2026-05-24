@@ -467,29 +467,97 @@ apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, Defining
                 class_mod = DefiningModule,
                 pid = self()
             },
-            FunName = class_method_fun_name(Selector),
-            %% BT-412: Pass class variables; the caller pattern-matches
-            %% `{class_var_result, Result, NewClassVars}` vs plain return.
-            try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
-                Raw ->
-                    {ok, Raw}
-            catch
-                error:undef:ST ->
-                    classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
-                ErrClass:Error:ErrST ->
-                    ?LOG_ERROR(
-                        "Class method ~p:~p failed",
-                        [ClassName, Selector],
-                        #{
-                            class => ClassName,
-                            selector => Selector,
-                            reason => beamtalk_error:format_reason(ErrClass, Error),
-                            stacktrace => ErrST,
-                            domain => [beamtalk, runtime]
-                        }
-                    ),
-                    {error, {raised, ErrClass, Error, ErrST}}
+            %% ADR 0084 / BT-2266: a runtime-installed class-method fun shadows
+            %% the compiled export. The retrieval store is keyed by the resolved
+            %% DefiningClass, so this works identically for own and inherited
+            %% methods, and is gated so compile-time-only classes pay no extra
+            %% read on the dispatch hot path (BT-2008).
+            case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+                {ok, #{block := Fun}} ->
+                    apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector);
+                error ->
+                    apply_compiled_class_method(
+                        ClassSelf,
+                        ClassVars,
+                        Args,
+                        ClassName,
+                        DefiningClass,
+                        DefiningModule,
+                        Selector
+                    )
             end
+    end.
+
+-doc """
+Apply a runtime-installed class-method fun (ADR 0084 / BT-2266).
+
+Same calling convention and `{class_var_result, …}` contract as the compiled
+path. A fun has no module export to mismatch, so an `undef` here is always raised
+from inside the fun body (`undef_in_body`); any other error becomes `{raised,…}`.
+""".
+-spec apply_class_method_fun(fun(), #beamtalk_object{}, map(), list(), class_name(), selector()) ->
+    class_method_outcome().
+apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
+    try apply(Fun, [ClassSelf, ClassVars | Args]) of
+        Raw ->
+            {ok, Raw}
+    catch
+        error:undef:ST ->
+            ?LOG_ERROR(
+                "Runtime class method ~p:~p raised undef internally",
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    stacktrace => ST,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {error, undef_in_body};
+        ErrClass:Error:ErrST ->
+            ?LOG_ERROR(
+                "Runtime class method ~p:~p failed",
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    reason => beamtalk_error:format_reason(ErrClass, Error),
+                    stacktrace => ErrST,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {error, {raised, ErrClass, Error, ErrST}}
+    end.
+
+-doc "Apply a compiled `class_<Selector>` export (the historical dispatch path).".
+-spec apply_compiled_class_method(
+    #beamtalk_object{}, map(), list(), class_name(), class_name(), atom(), selector()
+) -> class_method_outcome().
+apply_compiled_class_method(
+    ClassSelf, ClassVars, Args, ClassName, DefiningClass, DefiningModule, Selector
+) ->
+    FunName = class_method_fun_name(Selector),
+    %% BT-412: Pass class variables; the caller pattern-matches
+    %% `{class_var_result, Result, NewClassVars}` vs plain return.
+    try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
+        Raw ->
+            {ok, Raw}
+    catch
+        error:undef:ST ->
+            classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
+        ErrClass:Error:ErrST ->
+            ?LOG_ERROR(
+                "Class method ~p:~p failed",
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    reason => beamtalk_error:format_reason(ErrClass, Error),
+                    stacktrace => ErrST,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {error, {raised, ErrClass, Error, ErrST}}
     end.
 
 -spec classify_undef(class_name(), class_name(), atom(), selector(), atom(), list()) ->

@@ -784,3 +784,79 @@ register_class_load_callback_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% BT-2266 / ADR 0084: callable builder class methods + reload precedence
+%%====================================================================
+
+%% A builder class method supplied as a fun is wrapped through build_method_map,
+%% seeded into the retrieval store, and callable via class_send.
+register_class_method_fun_callable_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Factory = fun(_ClassSelf, _ClassVars) -> made_by_factory end,
+                State = #{
+                    className => 'BT2266BuilderFactory',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{},
+                    classMethods => #{factory => Factory}
+                },
+                {ok, Pid} = beamtalk_class_builder:register(State),
+                ?assert(
+                    beamtalk_class_metadata:has_runtime_class_methods('BT2266BuilderFactory')
+                ),
+                ?assertEqual(
+                    made_by_factory,
+                    beamtalk_class_dispatch:class_send(Pid, factory, [])
+                ),
+                gen_server:stop(Pid, normal, 5000)
+            end)
+        ]
+    end}.
+
+%% Reload precedence (ADR 0082): a hot reload with no class methods drops the
+%% memory-only runtime class-method fun — disk wins, mirroring instance-side
+%% put_method reload semantics.
+register_class_method_fun_dropped_on_reload_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Factory = fun(_ClassSelf, _ClassVars) -> from_runtime end,
+                State1 = #{
+                    className => 'BT2266ReloadDrop',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{},
+                    methodSpecs => #{},
+                    classMethods => #{factory => Factory}
+                },
+                {ok, Pid1} = beamtalk_class_builder:register(State1),
+                ?assertEqual(
+                    from_runtime, beamtalk_class_dispatch:class_send(Pid1, factory, [])
+                ),
+                ?assert(
+                    beamtalk_class_metadata:has_runtime_class_methods('BT2266ReloadDrop')
+                ),
+
+                %% Hot reload without the class method → runtime fun is dropped.
+                State2 = State1#{classMethods => #{}},
+                {ok, Pid2} = beamtalk_class_builder:register(State2),
+                ?assertNot(
+                    beamtalk_class_metadata:has_runtime_class_methods('BT2266ReloadDrop')
+                ),
+                ?assertEqual(
+                    error,
+                    beamtalk_class_metadata:lookup_class_method_fun(
+                        'BT2266ReloadDrop', factory
+                    )
+                ),
+                %% The selector no longer dispatches.
+                ?assertError(
+                    #{error := #beamtalk_error{kind = does_not_understand}},
+                    beamtalk_class_dispatch:class_send(Pid2, factory, [])
+                ),
+                gen_server:stop(Pid2, normal, 5000)
+            end)
+        ]
+    end}.

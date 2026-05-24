@@ -1599,6 +1599,200 @@ test_class_send_supervisor_new_rewrap() ->
     end.
 
 %%% ============================================================================
+%%% BT-2266 / ADR 0084: runtime class-side fun dispatch
+%%% ============================================================================
+
+runtime_class_method_fun_test_() ->
+    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"register-time class-method fun is callable and threads class vars",
+                fun test_runtime_fun_threads_class_vars/0},
+            {"live put_class_method installs a callable class-method fun",
+                fun test_put_class_method_live/0},
+            {"subclass dispatches an inherited runtime class method via the store",
+                fun test_inherited_runtime_class_method/0},
+            {"a runtime fun shadows a compiled class method of the same selector",
+                fun test_runtime_fun_shadows_compiled/0},
+            {"compiled selectors on a mixed class still dispatch to the module",
+                fun test_mixed_class_compiled_selector/0},
+            {"compile-time-only class keeps the gate flag closed and skips the store",
+                fun test_compile_only_class_gate_closed/0},
+            {"a runtime class-method fun that raises surfaces a structured error",
+                fun test_runtime_fun_raises/0}
+        ]
+    end}.
+
+%% A class-method fun supplied at registration accumulates class-variable state
+%% across calls — the BT-873 "dropped state" regression must not return.
+test_runtime_fun_threads_class_vars() ->
+    ClassName = 'BT2266ThreadVars',
+    BumpFun = fun(_ClassSelf, ClassVars) ->
+        N = maps:get(total, ClassVars, 0) + 1,
+        {class_var_result, N, ClassVars#{total => N}}
+    end,
+    ClassInfo = #{
+        superclass => none,
+        module => bt2266_no_module,
+        class_methods => #{bump => #{block => BumpFun, arity => 2}},
+        class_state => #{total => 0}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
+        ?assertEqual(1, beamtalk_class_dispatch:class_send(Pid, bump, [])),
+        ?assertEqual(2, beamtalk_class_dispatch:class_send(Pid, bump, [])),
+        ?assertEqual(3, beamtalk_class_dispatch:class_send(Pid, bump, []))
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% put_class_method/3 installs a class-method fun on a live class object.
+test_put_class_method_live() ->
+    ClassName = 'BT2266LivePut',
+    ClassInfo = #{
+        superclass => none,
+        module => bt2266_no_module,
+        class_methods => #{},
+        class_state => #{count => 10}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        %% Before install: the gate is closed.
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
+        GetCount = fun(_ClassSelf, ClassVars) -> maps:get(count, ClassVars, 0) end,
+        ok = beamtalk_object_class:put_class_method(Pid, getCount, GetCount),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
+        ?assertEqual(10, beamtalk_class_dispatch:class_send(Pid, getCount, []))
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% A subclass dispatches a runtime class method defined on an ancestor. The fun
+%% is resolved from the retrieval store keyed by the DEFINING class (the parent),
+%% so the walk uses only ETS — no gen_server hop into the parent (BT-2008).
+test_inherited_runtime_class_method() ->
+    ParentName = 'BT2266InhParent',
+    ChildName = 'BT2266InhChild',
+    GreetFun = fun(_ClassSelf, _ClassVars, Name) -> {greeting, Name} end,
+    ParentInfo = #{
+        superclass => none,
+        module => bt2266_parent_no_module,
+        class_methods => #{'greet:' => #{block => GreetFun, arity => 3}},
+        class_state => #{}
+    },
+    ChildInfo = #{
+        superclass => ParentName,
+        module => bt2266_child_no_module,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
+    try
+        ?assertEqual(
+            {greeting, world},
+            beamtalk_class_dispatch:class_send(ChildPid, 'greet:', [world])
+        ),
+        %% The fun lives under the defining (parent) class; the child has no
+        %% runtime class methods of its own.
+        ?assertMatch(
+            {ok, #{block := _}},
+            beamtalk_class_metadata:lookup_class_method_fun(ParentName, 'greet:')
+        ),
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(ChildName))
+    after
+        catch gen_server:stop(ChildPid, normal, 5000),
+        catch gen_server:stop(ParentPid, normal, 5000)
+    end.
+
+%% A runtime fun installed for a selector that the compiled module also exports
+%% shadows the compiled export (last writer wins, mirroring instance live-patch).
+test_runtime_fun_shadows_compiled() ->
+    ClassName = 'BT2266Shadow',
+    OverrideFun = fun(_ClassSelf, _ClassVars) -> overridden_value end,
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testSuccess => #{block => OverrideFun, arity => 2}},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        %% Compiled class_testSuccess/2 returns test_success_result; the runtime
+        %% fun shadows it.
+        ?assertEqual(overridden_value, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% On a class carrying both a runtime fun and a compiled-method reference, the
+%% compiled selector still dispatches to the module export even though the gate
+%% flag is open (set by the runtime fun).
+test_mixed_class_compiled_selector() ->
+    ClassName = 'BT2266Mixed',
+    RuntimeFun = fun(_ClassSelf, _ClassVars) -> from_runtime end,
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{
+            runtimeOnly => #{block => RuntimeFun, arity => 2},
+            testSuccess => #{arity => 2}
+        },
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
+        ?assertEqual(from_runtime, beamtalk_class_dispatch:class_send(Pid, runtimeOnly, [])),
+        %% testSuccess has no runtime fun → falls through to the compiled export.
+        ?assertEqual(
+            error, beamtalk_class_metadata:lookup_class_method_fun(ClassName, testSuccess)
+        ),
+        ?assertEqual(test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% A class with only compiled-method references keeps the gate flag closed, so
+%% dispatch never consults the funs store and goes straight to the module.
+test_compile_only_class_gate_closed() ->
+    ClassName = 'BT2266CompileOnly',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testSuccess => #{arity => 2}},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
+        ?assertEqual(
+            error, beamtalk_class_metadata:lookup_class_method_fun(ClassName, testSuccess)
+        ),
+        ?assertEqual(test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% A runtime fun that raises is caught and surfaced as a structured error
+%% (the {raised, ...} outcome → re-raised by class_send).
+test_runtime_fun_raises() ->
+    ClassName = 'BT2266Raise',
+    BoomFun = fun(_ClassSelf, _ClassVars) -> error(boom) end,
+    ClassInfo = #{
+        superclass => none,
+        module => bt2266_no_module,
+        class_methods => #{boom => #{block => BoomFun, arity => 2}},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        ?assertError(_, beamtalk_class_dispatch:class_send(Pid, boom, []))
+    after
+        catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
