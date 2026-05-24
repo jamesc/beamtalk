@@ -109,30 +109,49 @@ stored in `instance_methods` (`beamtalk_object_class.erl:642-644`). Two changes:
 - `beamtalk_class_builder:build_compiled_class_info/8` runs `classMethods:` funs
   through `build_method_map/1` (the wrapper instance methods already use), so
   builder-supplied class-method funs become `#{block, arity}` entries.
-- **`put_class_method/4` must also keep the class-metadata table consistent.**
-  Inherited class-method resolution walks the chain via
-  `beamtalk_class_metadata:lookup_methods/1` (ETS selector lists), *not* the
-  gen_server map (`beamtalk_class_dispatch.erl:589`). `init/1` and
-  `apply_class_info/2` already insert `maps:keys(ClassMethods)` into that table
-  (`beamtalk_object_class.erl:419,1078`), so **register-time builder class
-  methods are visible to subclasses automatically**. A *live* `put_class_method`
-  after registration is the gap: it must call the metadata insert (or an
-  incremental update) for the new selector, or subclasses (and the chain-walk
-  resolution of the owning class itself) will not see it. The instance-side
-  `put_method` does not have this obligation because instance dispatch checks the
-  extension registry / gen_server map directly rather than the metadata ETS — the
-  class side is genuinely different here and the implementation must not assume
-  symmetry.
+- **`put_class_method/4` keeps two ETS-backed stores in sync, because
+  class-method resolution is a *two-step* lookup that must work for inherited
+  methods without a per-send `gen_server` hop:**
+  1. **Discoverability** — *which ancestor defines the selector.* Inherited
+     resolution walks the chain via `beamtalk_class_metadata:lookup_methods/1`
+     (ETS: selectors + module per class, `beamtalk_class_dispatch.erl:589`).
+     `init/1` and `apply_class_info/2` already insert `maps:keys(ClassMethods)`
+     here (`beamtalk_object_class.erl:419,1078`), so register-time builder class
+     methods are discoverable by subclasses automatically; a live
+     `put_class_method` must add its selector here too.
+  2. **Retrieval** — *get the installed fun from that ancestor.* The metadata
+     table holds only selectors + module, so it **cannot return the fun**
+     (Copilot review, PR #2297). Runtime class-method funs are therefore also
+     recorded in a dedicated ETS store keyed by
+     `{DefiningClass, Selector} -> #{block, arity}` (an extension of
+     `beamtalk_class_metadata` or a sibling table), written by both
+     `build_compiled_class_info/8` (register-time) and `put_class_method/4`
+     (live). After the chain walk resolves `DefiningClass`, dispatch does a cheap
+     ETS read on `{DefiningClass, Selector}` — no `gen_server` hop, the same cost
+     model as the existing metadata lookups.
+
+  The gen_server `class_methods` map stays the **source of truth** (reflection,
+  `update_class` rebuild, `local_class_methods`); the ETS store is the
+  dispatch-time read cache, kept in sync on every install / replace / remove.
+  Compiled methods are **absent** from the retrieval store — they are still
+  `erlang:apply`'d by module — so the compiled hot path is untouched. The
+  instance side has no equivalent obligation because instance dispatch consults
+  the extension registry / gen_server map directly; the class side is genuinely
+  different and the implementation must not assume symmetry.
 
 ### 3. Dispatch — check the map first, then fall back to compiled
 
-`beamtalk_class_dispatch:apply_class_method_in_context/6` checks the live
-`class_methods` map for a `#{block, arity}` entry before the compiled apply:
+`beamtalk_class_dispatch:apply_class_method_in_context/6` runs after the chain
+walk has resolved the `DefiningClass`/`DefiningModule` for the selector. It does
+a cheap ETS read on the retrieval store (§2) for a runtime fun before the
+compiled apply — both keyed by the *defining* class, so this works identically
+for own and inherited methods:
 
 ```erlang
-case find_class_method_block(ClassPid, Selector) of
+%% DefiningClass already resolved by find_class_method_in_chain/2.
+case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
     {ok, #{block := Fun}} ->
-        apply(Fun, [ClassSelf, ClassVars | Args]);     %% runtime fun
+        apply(Fun, [ClassSelf, ClassVars | Args]);     %% runtime fun (ETS read, no hop)
     error ->
         FunName = class_method_fun_name(Selector),
         erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args])  %% compiled (today)
@@ -143,14 +162,14 @@ Same arguments, same `{class_var_result, …}` handling, same error
 classification. A runtime override of a compiled selector shadows it (last
 writer wins), matching instance-side live-patch semantics.
 
-This adds one branch before the compiled apply; it does **not** violate ADR 0006
-(unified dispatch) — it is the same "runtime source shadows compiled" pattern the
-instance side already uses for extensions, with a single resolution path. To
-honour BT-2008 (no per-send `gen_server` hops on the hot path), the block lookup
-must read from state already resolved during the chain walk, and should be gated
-so compile-time-only classes (no runtime class methods) pay zero extra cost —
-e.g. a generation counter or an "has runtime class methods" flag on the class,
-checked before consulting the map.
+This adds one ETS branch before the compiled apply; it does **not** violate ADR
+0006 (unified dispatch) — it is the same "runtime source shadows compiled"
+pattern the instance side already uses for extensions, with a single resolution
+path. To honour BT-2008 (no per-send `gen_server` hops on the hot path), the
+retrieval is an ETS read keyed by the already-resolved `DefiningClass` — never a
+`gen_server` call — and is gated so compile-time-only classes (no runtime class
+methods) skip it entirely, e.g. a per-class "has runtime class methods" flag in
+the metadata row, checked before the ETS read.
 
 **`ClassSelf.class_mod` for funs.** For a compiled method, `class_mod` is the
 defining module, and `super`/self-helpers are co-resident named exports in that
@@ -393,8 +412,9 @@ closures) — rejected, reproduces BT-873.
 
 | Layer | Change |
 |-------|--------|
-| `beamtalk_object_class.erl` | Add `put_class_method/4` (mirror `put_method/4`); store `#{block, arity}` in `class_methods`; clear stale class-side signature/return-type; **and update `beamtalk_class_metadata` for the new selector** so subclass / chain-walk lookups see it (init/`apply_class_info` already do this for register-time methods, `:419,1078`). |
-| `beamtalk_class_builder.erl` | Run `classMethods:` through `build_method_map/1` in `build_compiled_class_info/8` (register-time metadata insert already covers these). |
+| `beamtalk_object_class.erl` | Add `put_class_method/4` (mirror `put_method/4`); store `#{block, arity}` in the `class_methods` map (source of truth); clear stale class-side signature/return-type; update `beamtalk_class_metadata` discoverability for the new selector (init/`apply_class_info` already do this for register-time methods, `:419,1078`); and write the fun into the retrieval store. |
+| `beamtalk_class_metadata` | Add a retrieval store keyed by `{DefiningClass, Selector} -> #{block, arity}` plus `lookup_class_method_fun/2` and a per-class "has runtime class methods" flag for gating. Populated by register-time builder methods and `put_class_method/4`; invalidated on `update_class` / remove. |
+| `beamtalk_class_builder.erl` | Run `classMethods:` through `build_method_map/1` in `build_compiled_class_info/8`, and seed the retrieval store + metadata discoverability for the funs (register-time). |
 | `beamtalk_class_dispatch.erl` | In `apply_class_method_in_context/6`, look up a `#{block, arity}` entry and `apply(Fun, [ClassSelf, ClassVars | Args])` before the compiled `erlang:apply` fallback. Gate the lookup so compile-time-only classes pay no extra cost and no per-send `gen_server` hop is added (BT-2008). |
 | `crates/beamtalk-core/src/codegen/` | Lower class-method block bodies (builder `classMethods:`, `ClassName class >> sel`) to **self-contained** funs: class-var threading via `{class_var_result, …}`, `ClassSelf`-based self-sends, and `super` lowered to compile-time class-name-keyed superclass dispatch (no reliance on the defining module — see Decision §4). |
 | `stdlib/src/ClassBuilder.bt` | `classMethods:` (and `classState:`) state field + setter (parity feeds the runtime key already read by `register/1`). |
