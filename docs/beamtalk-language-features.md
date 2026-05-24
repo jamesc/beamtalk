@@ -2488,7 +2488,7 @@ when parameters already have `::` annotations (to avoid consecutive `::` tokens)
 Extensions can target classes defined in other files or in stdlib. The compiler
 registers each foreign extension at module load, so it dispatches at runtime just
 like a same-file extension. Class-side extensions register under the metaclass tag
-(`'String class'`).
+(`String class`).
 
 ```beamtalk
 // In helpers.bt — String is defined in stdlib, not this file
