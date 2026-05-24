@@ -7,6 +7,10 @@
 - **Character literal dispatch** — character literals (`$A`, `$a`, etc.) now dispatch through the Character method table instead of Integer's. `$A asString` returns `"A"` (not `"65"`), `$A class` returns `Character`, and methods like `uppercase`, `lowercase`, `printString` work correctly on character literals. `Character value: 65` class-method sends also work (BT-2095).
 - **`@expect inheritance` diagnostic category** — sealed-class and sealed-method constraint diagnostics are now categorized as `Inheritance`, so they reach CLI and MCP lint surfaces that filter to categorized diagnostics. Previously these diagnostics were uncategorized and only appeared in the LSP (BT-2087).
 - **Class-side block parameter type propagation** — the type checker now infers block parameter types from class-side method signatures (e.g., `ClassName build: [:r | ...]` where the method declares `Block(RouteBuilder, R)` correctly types `r` as `RouteBuilder`), eliminating the need for `@expect type` pragmas on class-side sends and cascades (BT-2158).
+- **Metaclass-aware type inference (ADR 0083 Slice 1)** — metatypes are first-class in inference. `Self class` / `ClassName class` annotations resolve to a tracked metatype instead of `Dynamic`. Sends on metatype receivers route to class-side lookup with metaclass tower fallback. `new`/`basicNew` on concrete metatypes infer instances. `Meta{C} <: Class <: Behaviour` subtyping in validation. LSP completion routes metatype receivers to class-side, and hover renders `C class` (BT-2255).
+- **Class literal metatype inference** — bare class literals (e.g., `Counter`) now infer as the metatype `Meta{Counter}` instead of as an instance type. A class value stored in a variable, passed through a collection, or returned from FFI routes class-side sends correctly without annotation — `klass := Counter. klass new` infers a `Counter` instance (BT-2260).
+- **Typed FFI collection element types** — Erlang `-spec` list/tuple element types now carry through to Beamtalk types: `[integer()]` → `List(Integer)`, `{atom(), binary()}` → `Tuple(Symbol, String | Binary)`. Uninformative elements (`term()`, bare `tuple()`) collapse to the unparameterized collection type. Literal-index `at:` on typed `Tuple(T1, …, Tn)` infers the element type at that 1-based position; non-literal or out-of-range indices fall back to `Dynamic` (BT-2254).
+- Fix foreign cross-class extension methods (`TargetClass >> sel => …` where the target is defined in another file) being silently dropped by codegen — the compiler now emits `beamtalk_extensions:register/5` at module load for each foreign extension, so they dispatch correctly at runtime. Class-side extensions register under the metaclass tag. Pure-extension files (no host class) now emit `register_class/0` + `on_load` (BT-2250).
 
 ### Standard Library
 
@@ -24,6 +28,9 @@
 - **`SystemNavigation dnuHandlers`** — returns every class that locally overrides `doesNotUnderstand:args:` (the DNU handler), sorted alphabetically. Useful for identifying proxy/builder/DSL classes that absorb arbitrary sends (BT-2210).
 - **`SystemNavigation extendersOf:`** / **`extensionsBy:`** — reverse extension-method navigation. `extendersOf: aClass` returns the packages contributing extension methods to `aClass`; `extensionsBy: aPackage` returns `#{#class, #selector}` records for each extension method a package contributes (BT-2212).
 - **`SystemNavigation selectorsMatching:` performance** — accumulator changed from O(n²) left-append to O(n) right-append. No behavior change (BT-2218).
+- **`SystemNavigation ffiSitesFor:`** — returns `#{#class, #selector, #line}` for every method body that calls Erlang `module:function` (optionally arity-qualified, e.g. `"lists:reverse/1"`). Scans instance-side, class-side, and extension method bodies (BT-2211).
+- **`SystemNavigation fieldReadersOf:in:` / `fieldWritersOf:in:`** — field/class-var usage queries. `fieldReadersOf: #slot in: aClass` returns `#{#class, #selector, #line}` for every method that reads `#slot`, scanning `aClass` + subclasses on instance and class sides. `fieldWritersOf:in:` does the same for writes (BT-2208).
+- **`SystemNavigation classesInPackage:` / `subclassesOf:in:`** — package-scoped class queries. `classesInPackage: aPackage` returns class objects belonging to a package; `subclassesOf: aClass in: aPackage` filters `allSubclasses` by package (BT-2213).
 
 ### Runtime
 
@@ -72,6 +79,7 @@
 - Remove three duplicate Erlang string escape implementations in beamtalk-cli — consolidated onto `escape_for_erlang_string` from `erlang_eval.rs` (BT-2224).
 - Unmapped quoted `@primitive` in stdlib value-type codegen now fails the build with a clear error naming class + selector, instead of silently falling back to runtime dispatch (BT-2233).
 - Shared `beamtalk_error:raise_type_error/3` extracted from five stdlib modules — zero behavior change (BT-2229).
+- Unify Behaviour/Class/Metaclass primitive-lowering into a single `REGISTRY` table — tower classes share one function pointer so any tower selector resolves regardless of which class declares it, preventing the BT-2232 regression pattern where moving a method up the tower silently dropped its inline BIF (BT-2234).
 
 ## 0.4.0 — 2026-04-27
 
