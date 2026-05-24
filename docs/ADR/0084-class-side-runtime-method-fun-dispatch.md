@@ -109,6 +109,20 @@ stored in `instance_methods` (`beamtalk_object_class.erl:642-644`). Two changes:
 - `beamtalk_class_builder:build_compiled_class_info/8` runs `classMethods:` funs
   through `build_method_map/1` (the wrapper instance methods already use), so
   builder-supplied class-method funs become `#{block, arity}` entries.
+- **`put_class_method/4` must also keep the class-metadata table consistent.**
+  Inherited class-method resolution walks the chain via
+  `beamtalk_class_metadata:lookup_methods/1` (ETS selector lists), *not* the
+  gen_server map (`beamtalk_class_dispatch.erl:589`). `init/1` and
+  `apply_class_info/2` already insert `maps:keys(ClassMethods)` into that table
+  (`beamtalk_object_class.erl:419,1078`), so **register-time builder class
+  methods are visible to subclasses automatically**. A *live* `put_class_method`
+  after registration is the gap: it must call the metadata insert (or an
+  incremental update) for the new selector, or subclasses (and the chain-walk
+  resolution of the owning class itself) will not see it. The instance-side
+  `put_method` does not have this obligation because instance dispatch checks the
+  extension registry / gen_server map directly rather than the metadata ETS — the
+  class side is genuinely different here and the implementation must not assume
+  symmetry.
 
 ### 3. Dispatch — check the map first, then fall back to compiled
 
@@ -129,22 +143,60 @@ Same arguments, same `{class_var_result, …}` handling, same error
 classification. A runtime override of a compiled selector shadows it (last
 writer wins), matching instance-side live-patch semantics.
 
+This adds one branch before the compiled apply; it does **not** violate ADR 0006
+(unified dispatch) — it is the same "runtime source shadows compiled" pattern the
+instance side already uses for extensions, with a single resolution path. To
+honour BT-2008 (no per-send `gen_server` hops on the hot path), the block lookup
+must read from state already resolved during the chain walk, and should be gated
+so compile-time-only classes (no runtime class methods) pay zero extra cost —
+e.g. a generation counter or an "has runtime class methods" flag on the class,
+checked before consulting the map.
+
+**`ClassSelf.class_mod` for funs.** For a compiled method, `class_mod` is the
+defining module, and `super`/self-helpers are co-resident named exports in that
+module. An anonymous fun has **no** `class_<sel>` export and may not live in the
+defining BEAM module at all, so `class_mod = DefiningModule` cannot be relied on
+to locate the fun's helpers. The fun must be self-contained: all of its
+`super`/self/helper calls are captured in the closure at compile time (see §4),
+so dispatch only needs `ClassSelf` to carry the correct *class identity* (tag +
+defining class name) for further self-sends — not a module it can `erlang:apply`
+into.
+
 ### 4. Funs are compiler-generated — the BT-873 guard
 
-The runtime funs are produced by **the compiler**, lowering class-method block
-bodies (`classMethods:` literals, `ClassName class >> sel`, `compile:source:`)
-with the *same* lowering it already applies to named `class_<sel>` functions:
+The runtime funs are produced by **the compiler**, reusing the lowering it
+already applies to named `class_<sel>` functions, emitting it into an anonymous
+fun instead of a module export. The safety of this ADR rests on this lowering
+being concretely specified — "the compiler will do it right" is a plan, not an
+argument — so the implementation (Phase 2) must establish the following contract,
+each independently tested *for the fun path* before Phase 2 is considered done:
 
-- class-variable writes → `{class_var_result, Result, NewClassVars}`,
-- self-sends → explicit dispatch against `ClassSelf`,
-- `super` sends → explicit superclass-chain dispatch at the metaclass level.
+1. **Class-variable threading.** Writes to class variables lower to the existing
+   `{class_var_result, Result, NewClassVars}` return; the dispatch wrapper commits
+   `NewClassVars`. Test: a builder/patched class method that mutates a class
+   variable, called twice, accumulates (the BT-873 "dropped state" regression).
+2. **`super` resolution without module identity.** `super sel` inside a
+   class-method fun lowers to an explicit, **compile-time class-name-keyed**
+   superclass dispatch (e.g. `beamtalk_class_dispatch:class_self_dispatch(
+   SuperclassName, Sel, ClassVars, Args)`), with `SuperclassName` resolved from
+   the *defining class* at compile time and captured in the closure. It must
+   **not** rely on `erlang:apply(DefiningModule, …)` or on `ClassSelf.class_mod`,
+   because an anonymous fun has no such export (see §3). Test: a builder class
+   method whose body calls `super`, resolving to the superclass's class method.
+3. **`self`-sends.** `self new` / `self otherCM` lower to explicit class-message
+   dispatch against the `ClassSelf` the wrapper passes in. Test: a class method
+   that calls another class method and `self new`.
 
 They are never naive user closures. **This is precisely the property BT-873's
-Path 2 lacked** — Path 2 wrapped raw blocks with no lowering, so it dropped
-state and broke `super`/self. Reusing the existing class-method lowering means
-the runtime fun is byte-for-byte equivalent in behaviour to a compiled class
-method; only its *location* (an anonymous fun in the gen_server map vs a named
-export in the BEAM module) differs.
+Path 2 lacked** — Path 2 wrapped raw blocks with no lowering, so it dropped state
+and broke `super`/self. With the contract above, the runtime fun is
+*behaviourally* equivalent to a compiled class method — verified by parity tests,
+not assumed — differing only in *location* (an anonymous fun in the gen_server
+map vs a named export). The one thing a named export can do that an anonymous fun
+cannot is call **module-local helper functions** by name; the lowering must
+therefore either inline such helpers into the closure or route them through a
+stable module (the stdlib runtime), never through the (possibly absent) defining
+module.
 
 ### 5. Scope boundary — own methods vs cross-class extensions
 
@@ -210,6 +262,19 @@ gen_server map is the finer-grained analogue — one selector at a time — with
 recompiling the module. **Adopted:** memory-only runtime install, file remains
 authoritative.
 
+### Ruby
+A class method is a method on the object's *singleton class* (metaclass); Ruby
+installs them at runtime with `define_singleton_method` / `def self.x` / `class
+<< self`, which mutate the singleton class's method table exactly as
+`define_method` mutates the instance method table. State accessed via class
+instance variables is read/written through the same `self` (the class object).
+**Adopted:** the symmetry — runtime-defined class methods are first-class and
+mutate the class object's own method table, not a side registry. **Diverged:**
+Ruby has no compile step and no `super`-lowering concern — its dynamic dispatch
+resolves `super` at call time via the ancestor chain; Beamtalk lowers `super`
+ahead of time so the runtime fun carries explicit chain dispatch (the property
+that prevents BT-873's `super` breakage).
+
 ### Beamtalk instance side (the local precedent)
 The instance extension path (`invoke_extension`, ADR 0066) already proved that a
 compiler-generated fun with proper state threading dispatches correctly at
@@ -230,7 +295,7 @@ genuinely differs (class-variable threading; `self`-is-the-class).
   logged in the ChangeLog as `flushable: false` for dynamic classes — same
   audit story as instance patches.
 - **Tooling developer:** builder/patched class methods carry `class_method_source`
-  (ADR 0195/BT-2195 channel), so `SystemNavigation` class-side scans see them.
+  (BT-2195 channel), so `SystemNavigation` class-side scans see them.
 
 ## Steelman Analysis
 
@@ -302,26 +367,55 @@ closures) — rejected, reproduces BT-873.
 - A class can now have a class method in *two* places (compiled export and
   gen_server map); dispatch precedence (map shadows compiled) must be documented
   and tested for hot-reload ordering.
+- Dispatch adds a `class_methods`-map lookup before the compiled apply. It must
+  read from state already resolved during the class-chain walk (`DefiningModule`,
+  `ClassVars`) — **not** introduce an extra `gen_server` hop per class-method
+  send (cf. BT-2008, which removed such hops). If a hop is unavoidable, the
+  lookup must be gated on the class actually having runtime class methods.
+- `update_class/2` (recompile / `reload`) rebuilds the `class_methods` map from
+  the incoming `ClassInfo`, which would **drop** runtime-installed class methods
+  unless they are merged. This is the same memory-vs-disk reconciliation ADR 0082
+  governs (runtime methods are memory-only; disk wins on reload). The
+  merge-vs-replace behaviour on reload must be decided and tested, consistent
+  with the instance-side `put_method` reload semantics.
 
 ### Neutral
 - Cross-class class-side extensions remain unimplemented (future, ADR 0066
   registry). This ADR does not address them.
 - Memory-only until flushed (ADR 0082); restart reloads from disk.
+- `apply_class_method_in_context` already special-cases `runAll` / `run:` on
+  `TestCase` subclasses (`test_spawn`, `beamtalk_class_dispatch.erl:461`). A
+  runtime class method named with a test-execution selector on a `TestCase`
+  subclass is shadowed by that guard. This is pre-existing behaviour; the fun
+  path inherits it and should be tested, not silently changed.
 
 ## Implementation
 
 | Layer | Change |
 |-------|--------|
-| `beamtalk_object_class.erl` | Add `put_class_method/4` (mirror `put_method/4`); store `#{block, arity}` in `class_methods`; clear stale class-side signature/return-type. |
-| `beamtalk_class_builder.erl` | Run `classMethods:` through `build_method_map/1` in `build_compiled_class_info/8`. |
-| `beamtalk_class_dispatch.erl` | In `apply_class_method_in_context/6`, look up a `#{block, arity}` entry and `apply(Fun, [ClassSelf, ClassVars | Args])` before the compiled `erlang:apply` fallback. |
-| `crates/beamtalk-core/src/codegen/` | Lower class-method block bodies (builder `classMethods:`, `ClassName class >> sel`) to funs with the compiled class-method convention: class-var threading, `ClassSelf` self-sends, metaclass-chain `super`. |
-| `stdlib/src/ClassBuilder.bt` | `classMethods:` state field + setter (parity feeds the runtime key already read by `register/1`). |
-| tests | `stdlib/test/` — builder class method callable + class-var mutation persists + `super`/self correct; live `class >>` patch round-trip. |
+| `beamtalk_object_class.erl` | Add `put_class_method/4` (mirror `put_method/4`); store `#{block, arity}` in `class_methods`; clear stale class-side signature/return-type; **and update `beamtalk_class_metadata` for the new selector** so subclass / chain-walk lookups see it (init/`apply_class_info` already do this for register-time methods, `:419,1078`). |
+| `beamtalk_class_builder.erl` | Run `classMethods:` through `build_method_map/1` in `build_compiled_class_info/8` (register-time metadata insert already covers these). |
+| `beamtalk_class_dispatch.erl` | In `apply_class_method_in_context/6`, look up a `#{block, arity}` entry and `apply(Fun, [ClassSelf, ClassVars | Args])` before the compiled `erlang:apply` fallback. Gate the lookup so compile-time-only classes pay no extra cost and no per-send `gen_server` hop is added (BT-2008). |
+| `crates/beamtalk-core/src/codegen/` | Lower class-method block bodies (builder `classMethods:`, `ClassName class >> sel`) to **self-contained** funs: class-var threading via `{class_var_result, …}`, `ClassSelf`-based self-sends, and `super` lowered to compile-time class-name-keyed superclass dispatch (no reliance on the defining module — see Decision §4). |
+| `stdlib/src/ClassBuilder.bt` | `classMethods:` (and `classState:`) state field + setter (parity feeds the runtime key already read by `register/1`). |
+| tests | `stdlib/test/` + runtime EUnit — the three §4 contract tests (class-var threading, `super`, self) for the fun path; subclass *inheritance* of a runtime-installed class method; `update_class`/reload precedence; live `class >>` patch round-trip. |
 
-Phasing: (1) runtime fun-path + `put_class_method` + builder wrapping; (2)
-compiler lowering for `classMethods:` block literals; (3) class-side `>>` /
-`compile:source:` wiring (ADR 0082). Each phase independently testable.
+Phasing: (1) runtime fun-path + `put_class_method` (incl. metadata update) +
+builder wrapping — delivers callable builder class methods, the bulk of
+BT-2259's value; (2) compiler lowering for `classMethods:` block literals with
+the §4 contract + parity tests; (3) class-side `>>` / `compile:source:` wiring.
+**Phase 3 is gated on ADR 0082 being accepted** (it owns the `compile:source:` /
+ChangeLog model); if 0082 stalls, Phase 3 ships as its own follow-on rather than
+blocking Phases 1–2. Each phase independently testable.
+
+## Migration Path
+
+None — additive. Existing compiled class methods dispatch exactly as before
+(the runtime fun-path is checked first but is empty for file-defined classes
+that supply no `classMethods:` block funs). No source, codegen output, or
+on-disk format changes for current classes. The only behavioural change is that
+the previously-inert `classMethods:` builder key and the parsed-but-unwired
+`ClassName class >> sel` syntax start working.
 
 ## References
 - Related issues: BT-2259 (epic), BT-873 (Path 2 removal), BT-2195 (class-side
