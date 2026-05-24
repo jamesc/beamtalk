@@ -534,6 +534,7 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
   - ADR 0044 — Comments as First-Class AST Nodes (trivia model used by splice printer)
   - ADR 0046 — VSCode Live Workspace Sidebar (consumer of `workspace/applyEdit`)
   - ADR 0066 — Open Class Extension Methods (`>>` syntax, the patch operator)
+  - ADR 0085 — Editor Live-Image Representation (the read-surface counterpart: renders the in-memory source as the editor buffer and routes saves to this ADR's `compile:source:` / `flush`; the buffer-vs-saved delta *is* this ADR's ChangeLog)
 - Documentation:
   - `docs/beamtalk-principles.md` — principles #4, #5, #11, #12
   - `docs/development/surface-parity.md` — drift contract this ADR must satisfy
