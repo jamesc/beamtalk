@@ -437,9 +437,25 @@ on-disk format changes for current classes. The only behavioural change is that
 the previously-inert `classMethods:` builder key and the parsed-but-unwired
 `ClassName class >> sel` syntax start working.
 
+## Implementation Tracking
+
+**Epic:** BT-2259 (Programmatic ClassBuilder parity)
+**Status:** Planned
+
+| Phase | Issue | Scope |
+|-------|-------|-------|
+| 1 — foundation | BT-2258 | `register` returns a usable class object |
+| 1 — foundation | BT-2266 | Runtime: class-side fun dispatch path + retrieval store (§1–3) |
+| 2 — core | BT-2267 | Callable class methods end-to-end: `classMethods:`/`classState:` + compiler lowering (§4) |
+| 3 — parity | BT-2268 | Metadata setters (signatures, return types, docs, meta, isConstructible) |
+| 3 — parity | BT-2269 | Incremental class-piece API (`addClassMethod:body:`, `addMethod:body:`, `addClassState:default:`, remove*) |
+| 3 — parity | BT-2270 | Compiler: auto-derive class-side `classMethodSource` (extends BT-2246) |
+| 4 — validation | BT-2271 | Capstone: first-class builder + live class-edit e2e, docs, surface parity |
+
 ## References
 - Related issues: BT-2259 (epic), BT-873 (Path 2 removal), BT-2195 (class-side
-  method source), BT-2246 (builder `methodSource:`), BT-2258 (register return)
+  method source), BT-2246 (builder `methodSource:`), BT-2258 (register return),
+  BT-2008 (no per-send gen_server hops)
 - Related ADRs: ADR 0038 (ClassBuilder protocol), ADR 0066 (`>>` extension
   methods), ADR 0082 (method-level edit/save), ADR 0013 (class variables / class
   methods), ADR 0036 (metaclass tower), ADR 0006 (unified dispatch)
