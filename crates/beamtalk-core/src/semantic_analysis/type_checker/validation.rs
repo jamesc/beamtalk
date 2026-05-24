@@ -269,8 +269,20 @@ impl TypeChecker {
     /// For non-generic classes (or classes with no class-method type
     /// substitution to do), the returned map is empty.
     ///
+    /// **ADR 0083 Slice 2 (BT-2256): nested element-type composition.** A
+    /// class-side constructor whose parameter mentions a class type param
+    /// *nested* inside a generic — e.g. `class withAll: list :: List(E) -> Self`
+    /// on `Set(E)` — recovers `E` from the matching-base argument:
+    /// `Set withAll: aList(Integer)` binds `E -> Integer`, so the `-> Self`
+    /// return composes to `Set(Integer)` rather than the erased `Set(Dynamic)`.
+    /// This mirrors the instance-side nested unification in
+    /// [`super::TypeChecker::infer_method_local_params`] (which handles only
+    /// *method-local* params); here we resolve *class-level* params on the
+    /// class-side. The exact-match binding still takes precedence (last write
+    /// wins only for unset keys — see the `entry` guard).
+    ///
     /// **References:** BT-2018 (preserve generic return types on class-method
-    /// assignments), ADR 0068 Phase 1c.
+    /// assignments), ADR 0068 Phase 1c, BT-2256 (Slice 2 nested composition).
     fn class_method_substitution(
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
@@ -285,13 +297,80 @@ impl TypeChecker {
             return subst;
         }
         for (param_ty_opt, arg_ty) in method.param_types.iter().zip(arg_types.iter()) {
-            if let Some(param_ty) = param_ty_opt {
-                if class_info.type_params.contains(param_ty) {
-                    subst.insert(param_ty.clone(), arg_ty.clone());
-                }
+            let Some(param_ty) = param_ty_opt else {
+                continue;
+            };
+            // Exact match: a bare class type param (e.g. `T` in `Box(T)`).
+            if class_info.type_params.contains(param_ty) {
+                subst.insert(param_ty.clone(), arg_ty.clone());
+                continue;
             }
+            // ADR 0083 Slice 2: nested match — a param shaped like `List(E)`
+            // where `E` is a class type param. Recover the binding from a
+            // matching-base `Known` argument (e.g. `List(Integer)` ⇒
+            // `E -> Integer`). Only fills params not already bound by an exact
+            // match, so a direct `T` parameter still wins.
+            Self::unify_nested_class_params(param_ty, arg_ty, class_info, &mut subst);
         }
         subst
+    }
+
+    /// Recover class-level type-param bindings nested inside a generic parameter
+    /// shape (ADR 0083 Slice 2 / BT-2256).
+    ///
+    /// Given a declared parameter type like `List(E)` and an argument type like
+    /// `List(Integer)`, binds `E -> Integer` when `E` is a class type param and
+    /// the argument's base class matches the declared base. Recurses positionally
+    /// so deeper nesting (`Pair(K, List(V))`) composes too. Bindings are merged
+    /// non-destructively: a key already present (e.g. from an exact-match
+    /// parameter) is not overwritten, and a `Dynamic` candidate never replaces a
+    /// `Known`/`Union` binding.
+    fn unify_nested_class_params(
+        declared: &str,
+        arg_ty: &InferredType,
+        class_info: &crate::semantic_analysis::class_hierarchy::ClassInfo,
+        subst: &mut HashMap<EcoString, InferredType>,
+    ) {
+        let (declared_base, declared_args) = super::type_resolver::split_generic_base(declared);
+        let Some(inner) = declared_args else {
+            return;
+        };
+        // Strip a nilable union (`List(String) | Nil`) to its non-nil member so
+        // the optional-collection shape still composes (mirrors BT-2023(A)).
+        let stripped;
+        let effective_arg = if matches!(arg_ty, InferredType::Union { .. }) {
+            stripped = super::TypeChecker::non_nil_type(arg_ty);
+            &stripped
+        } else {
+            arg_ty
+        };
+        let InferredType::Known {
+            class_name: arg_class,
+            type_args,
+            ..
+        } = effective_arg
+        else {
+            return;
+        };
+        if arg_class.as_str() != declared_base || type_args.is_empty() {
+            return;
+        }
+        let declared_params = super::TypeChecker::split_type_params(inner);
+        for (declared_param, actual) in declared_params.iter().zip(type_args.iter()) {
+            let decl_eco: EcoString = (*declared_param).into();
+            if class_info.type_params.contains(&decl_eco) {
+                // Don't clobber an existing binding; don't downgrade to Dynamic.
+                match subst.get(&decl_eco) {
+                    Some(InferredType::Known { .. } | InferredType::Union { .. }) => {}
+                    _ => {
+                        subst.insert(decl_eco, actual.clone());
+                    }
+                }
+            } else {
+                // Recurse into deeper nesting (`Pair(K, List(V))`).
+                Self::unify_nested_class_params(declared_param, actual, class_info, subst);
+            }
+        }
     }
 
     /// Infer the constructor return type for a generic class (ADR 0068 Phase 1c).

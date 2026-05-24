@@ -965,3 +965,253 @@ fn class_eq_literal_narrowing_not_regressed() {
          (so `x isEven` resolves) and the guard must not DNU; got {dnu:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-2256 (ADR 0083 Slice 2): class-side `Self`-return precision for *concrete*
+// class-literal / concrete-metatype receivers. A class-side constructor sent to
+// a concrete class literal infers *that* class's instance type (`Set withAll: →
+// Set`, `List withAll: → List`, `Array withAll: → Array`), composing the element
+// type from the argument where statically known (`Set withAll: aList(Integer) →
+// Set(Integer)`). Abstract receivers (`Collection`) keep Slice 1 behaviour.
+// ---------------------------------------------------------------------------
+
+/// Build a `#(...)` array literal of integer elements.
+fn int_array(ns: &[i64]) -> Expression {
+    Expression::ArrayLiteral {
+        elements: ns.iter().map(|n| int_lit(*n)).collect(),
+        span: span(),
+    }
+}
+
+/// Build a keyword send `recv kw: arg`.
+fn kw1_send(receiver: Expression, kw: &str, arg: Expression) -> Expression {
+    msg_send(
+        receiver,
+        MessageSelector::Keyword(vec![KeywordPart::new(kw, span())]),
+        vec![arg],
+    )
+}
+
+/// A `List(elem)`-typed local value (the typed-argument shape for composition).
+fn list_of(elem: &str) -> InferredType {
+    InferredType::Known {
+        class_name: "List".into(),
+        type_args: vec![InferredType::known(elem)],
+        provenance: super::super::TypeProvenance::Inferred(span()),
+    }
+}
+
+#[test]
+fn concrete_collection_withall_infers_concrete_class() {
+    // AC: `Set withAll:` → Set, `List withAll:` → List, `Array withAll:` → Array.
+    // Each concrete collection's class-side `withAll:` constructor, sent to the
+    // bare class literal, infers the *concrete* receiver class — never the
+    // abstract `Collection`.
+    let hierarchy = ClassHierarchy::with_builtins();
+    for cls in ["Set", "List", "Array", "Bag"] {
+        let send = kw1_send(class_ref(cls), "withAll:", int_array(&[1, 2, 3]));
+        let ty = infer_send_on_local("ignored", InferredType::known("Object"), &send, &hierarchy);
+        assert_eq!(
+            ty.as_known().map(EcoString::as_str),
+            Some(cls),
+            "`{cls} withAll: #(1,2,3)` must infer {cls}, not Collection; got {ty:?}"
+        );
+    }
+}
+
+#[test]
+fn concrete_collection_withall_on_metatype_infers_concrete_class() {
+    // AC: same precision when the receiver is a *metatype* of a concrete class
+    // (a class value flowing through a variable), not only a bare literal.
+    // `(Set class)`-typed value `withAll:` → Set.
+    let hierarchy = ClassHierarchy::with_builtins();
+    for cls in ["Set", "List", "Array"] {
+        let send = kw1_send(var("cls"), "withAll:", int_array(&[1, 2]));
+        let ty = infer_send_on_local("cls", InferredType::meta(cls), &send, &hierarchy);
+        assert_eq!(
+            ty.as_known().map(EcoString::as_str),
+            Some(cls),
+            "`(Meta{{{cls}}}) withAll:` must infer {cls}; got {ty:?}"
+        );
+    }
+}
+
+#[test]
+fn abstract_collection_withall_stays_abstract_no_concrete_inference() {
+    // AC: an *abstract* receiver keeps Slice 1 behaviour — `Self` resolves to the
+    // abstract class itself (Collection), NOT some false concrete subclass. The
+    // result must be the abstract class name (so downstream `Self`-typed chaining
+    // type-checks), never a concrete collection.
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(hierarchy.is_abstract("Collection"));
+    let send = kw1_send(class_ref("Collection"), "withAll:", int_array(&[1]));
+    let ty = infer_send_on_local("ignored", InferredType::known("Object"), &send, &hierarchy);
+    // Collection>>withAll: is declared `-> Self`; on the abstract Collection
+    // literal it resolves to Collection — never a concrete species.
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("Collection"),
+        "abstract `Collection withAll:` must stay Collection (Slice 1 behaviour), \
+         not over-resolve to a concrete species; got {ty:?}"
+    );
+    assert!(
+        !matches!(
+            ty.as_known().map(EcoString::as_str),
+            Some("Set" | "List" | "Array" | "Bag")
+        ),
+        "abstract receiver must never infer a concrete collection; got {ty:?}"
+    );
+}
+
+#[test]
+fn concrete_withall_composes_known_element_type() {
+    // AC: composes with ADR 0068 element-type inference — `Set withAll:
+    // aList(Integer)` infers `Set(Integer)` where the element type is statically
+    // known. The element flows from the `List(E)`-shaped parameter, recovered by
+    // class-side nested unification (BT-2256).
+    let hierarchy = ClassHierarchy::with_builtins();
+    for cls in ["Set", "List", "Array"] {
+        let send = kw1_send(class_ref(cls), "withAll:", var("items"));
+        let ty = infer_send_on_local("items", list_of("Integer"), &send, &hierarchy);
+        let known = ty.as_known();
+        assert_eq!(
+            known.map(EcoString::as_str),
+            Some(cls),
+            "`{cls} withAll: items(List(Integer))` must infer {cls}; got {ty:?}"
+        );
+        // The element type composes to Integer (not erased to Dynamic).
+        let elem = match &ty {
+            InferredType::Known { type_args, .. } => type_args.first(),
+            _ => None,
+        };
+        assert_eq!(
+            elem.and_then(InferredType::as_known).map(EcoString::as_str),
+            Some("Integer"),
+            "`{cls} withAll: items(List(Integer))` must compose to {cls}(Integer); got {ty:?}"
+        );
+    }
+}
+
+#[test]
+fn inherited_class_side_self_return_resolves_to_concrete_subclass() {
+    // The genuine Slice 2 `-> Self` mechanism: a concrete subclass that
+    // *inherits* (does not override) a class-side `-> Self` constructor from an
+    // abstract parent. Sent to the concrete class literal, `Self` resolves to the
+    // *concrete* subclass — not the abstract definition site.
+    let source = "
+typed Object subclass: AbstractMaker(E)
+  class make: items :: List(E) -> Self => @primitive \"make:\"
+
+typed AbstractMaker subclass: ConcreteMaker(E)
+";
+    let (_module, hierarchy) = parse_and_build(source);
+    let send = kw1_send(class_ref("ConcreteMaker"), "make:", var("items"));
+    let ty = infer_send_on_local("items", list_of("Integer"), &send, &hierarchy);
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("ConcreteMaker"),
+        "inherited class-side `-> Self` on a concrete subclass must resolve Self to \
+         the concrete subclass (ConcreteMaker), not the abstract parent; got {ty:?}"
+    );
+    // And it composes the inherited generic element type from the argument.
+    let elem = match &ty {
+        InferredType::Known { type_args, .. } => type_args.first(),
+        _ => None,
+    };
+    assert_eq!(
+        elem.and_then(InferredType::as_known).map(EcoString::as_str),
+        Some("Integer"),
+        "inherited `-> Self` must compose ConcreteMaker(Integer) from List(Integer); got {ty:?}"
+    );
+}
+
+#[test]
+fn abstract_class_side_self_return_stays_abstract_definition_site() {
+    // Slice 1 boundary (no regression): sending the same `-> Self` class-side
+    // method to the *abstract* class literal resolves Self to the abstract class
+    // itself — not a concrete subclass, and not Dynamic.
+    let source = "
+typed Object subclass: AbstractMaker(E)
+  class make: items :: List(E) -> Self => @primitive \"make:\"
+
+typed AbstractMaker subclass: ConcreteMaker(E)
+";
+    let (_module, hierarchy) = parse_and_build(source);
+    // AbstractMaker is not flagged `abstract`, so `-> Self` resolves to itself.
+    let send = kw1_send(class_ref("AbstractMaker"), "make:", var("items"));
+    let ty = infer_send_on_local("items", list_of("Integer"), &send, &hierarchy);
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("AbstractMaker"),
+        "class-side `-> Self` on the defining class literal resolves to that class; got {ty:?}"
+    );
+}
+
+#[test]
+fn concrete_withall_unknown_element_type_does_not_overclaim() {
+    // Safety: when the element type is NOT statically known (untyped array
+    // literal `#(1, 2)`), composition must not invent a concrete element — the
+    // class is still concrete (`Set`) but the element stays Dynamic. This pins
+    // that the nested-unification fix only fires on a typed, base-matching arg.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let send = kw1_send(class_ref("Set"), "withAll:", int_array(&[1, 2]));
+    let ty = infer_send_on_local("ignored", InferredType::known("Object"), &send, &hierarchy);
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("Set"),
+        "`Set withAll: #(1,2)` is still a Set; got {ty:?}"
+    );
+    let elem = match &ty {
+        InferredType::Known { type_args, .. } => type_args.first().cloned(),
+        _ => None,
+    };
+    assert!(
+        matches!(elem, Some(InferredType::Dynamic(_))),
+        "untyped `#(1,2)` arg must leave the element type Dynamic, not over-claim; got {elem:?}"
+    );
+}
+
+#[test]
+fn nested_class_param_composition_recurses() {
+    // The nested-unification fix recurses into deeper generic shapes. A
+    // class-side `from: :: List(Pair(K, V)) -> Self` on `Maply(K, V)` must
+    // recover BOTH K and V from a `List(Pair(Symbol, Integer))` argument.
+    let source = "
+typed Object subclass: Pairly(A, B)
+typed Object subclass: Maply(K, V)
+  class from: entries :: List(Pairly(K, V)) -> Self => @primitive \"from:\"
+";
+    let (_module, hierarchy) = parse_and_build(source);
+    let arg_ty = InferredType::Known {
+        class_name: "List".into(),
+        type_args: vec![InferredType::Known {
+            class_name: "Pairly".into(),
+            type_args: vec![
+                InferredType::known("Symbol"),
+                InferredType::known("Integer"),
+            ],
+            provenance: super::super::TypeProvenance::Inferred(span()),
+        }],
+        provenance: super::super::TypeProvenance::Inferred(span()),
+    };
+    let send = kw1_send(class_ref("Maply"), "from:", var("entries"));
+    let ty = infer_send_on_local("entries", arg_ty, &send, &hierarchy);
+    assert_eq!(
+        ty.as_known().map(EcoString::as_str),
+        Some("Maply"),
+        "`Maply from:` must infer Maply; got {ty:?}"
+    );
+    let args = match &ty {
+        InferredType::Known { type_args, .. } => type_args.clone(),
+        _ => vec![],
+    };
+    let names: Vec<Option<&str>> = args
+        .iter()
+        .map(|a| a.as_known().map(EcoString::as_str))
+        .collect();
+    assert_eq!(
+        names,
+        vec![Some("Symbol"), Some("Integer")],
+        "nested unification must recover both K=Symbol and V=Integer; got {ty:?}"
+    );
+}
