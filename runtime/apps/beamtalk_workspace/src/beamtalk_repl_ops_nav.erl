@@ -114,12 +114,19 @@ encode_result(implementors, Term, Msg) when is_list(Term) ->
     Base = beamtalk_repl_protocol:base_response(Msg),
     Result = Base#{<<"implementors">> => Impls, <<"status">> => [<<"done">>]},
     iolist_to_binary(json:encode(Result));
-encode_result(_Shape, _Term, Msg) ->
+encode_result(Shape, _Term, Msg) ->
     %% Defensive: SystemNavigation always returns a List; a non-list result
-    %% means the query shape changed. Surface an empty result rather than crash.
+    %% means the query shape changed. Surface an empty result in the field that
+    %% matches the requested shape (so the wire contract stays consistent)
+    %% rather than crash.
     ?LOG_WARNING("nav-query: unexpected non-list result", #{domain => [beamtalk, runtime]}),
+    Field =
+        case Shape of
+            implementors -> <<"implementors">>;
+            _ -> <<"sites">>
+        end,
     Base = beamtalk_repl_protocol:base_response(Msg),
-    iolist_to_binary(json:encode(Base#{<<"sites">> => [], <<"status">> => [<<"done">>]})).
+    iolist_to_binary(json:encode(Base#{Field => [], <<"status">> => [<<"done">>]})).
 
 -doc """
 Encode one `{#class, #selector, #line}` record. `#class` is a class or
