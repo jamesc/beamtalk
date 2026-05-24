@@ -430,6 +430,9 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"erlang-complete">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
+handle_op(<<"nav-query">>, Params, Msg, SessionPid) ->
+    %% BT-2239: System-Browser navigation queries delegated to SystemNavigation.
+    beamtalk_repl_ops_nav:handle(<<"nav-query">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->
     %% BT-1239: Restored — fully removes class from the system (actors, gen_server,
     %% BEAM module, workspace_meta, session tracker). Previously returned a deprecation

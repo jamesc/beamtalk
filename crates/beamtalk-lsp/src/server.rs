@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -90,6 +91,12 @@ pub struct Backend {
     workspace_roots: Mutex<Vec<PathBuf>>,
     /// Cached OTP lib directory (e.g., `/usr/lib/erlang/lib`); resolved once at startup.
     otp_lib_dir: Mutex<Option<PathBuf>>,
+    /// BT-2239: feature flag (`lsp.delegate_to_runtime`, default off) gating
+    /// delegation of navigation queries to an attached runtime.
+    delegate_to_runtime: AtomicBool,
+    /// BT-2239: lazily-established connection to the attached runtime's query
+    /// channel. `None` until first use (or after a dropped connection).
+    runtime_client: tokio::sync::Mutex<Option<crate::runtime::RuntimeClient>>,
 }
 
 impl Backend {
@@ -104,7 +111,91 @@ impl Backend {
             stdlib_paths: Mutex::new(HashSet::new()),
             workspace_roots: Mutex::new(Vec::new()),
             otp_lib_dir: Mutex::new(None),
+            delegate_to_runtime: AtomicBool::new(false),
+            runtime_client: tokio::sync::Mutex::new(None),
         }
+    }
+
+    /// BT-2239 dispatch seam: run a navigation query against the attached
+    /// runtime, or return `None` to fall back to the in-process AST walker.
+    ///
+    /// Returns `None` when delegation is disabled (`lsp.delegate_to_runtime`
+    /// off), no runtime is attached, or the query fails. On a transport error
+    /// the cached connection is dropped so the next call reconnects.
+    ///
+    /// This is the reusable transport seam for the BT-2215 navigation children:
+    /// each per-method handler calls this with its `kind`/`arg`, reads `sites`
+    /// or `implementors` from the response, and translates via
+    /// `SimpleLanguageService::locate_nav_site`.
+    async fn delegate_nav_query(
+        &self,
+        kind: &str,
+        arg: &str,
+    ) -> Option<beamtalk_repl_protocol::ReplResponse> {
+        if !self.delegate_to_runtime.load(Ordering::Relaxed) {
+            return None;
+        }
+        let mut guard = self.runtime_client.lock().await;
+        if guard.is_none() {
+            *guard = self.connect_runtime().await;
+        }
+        let client = guard.as_mut()?;
+        match client.nav_query(kind, arg).await {
+            Ok(resp) => Some(resp),
+            Err(e) => {
+                debug!("runtime nav query failed, dropping connection: {e}");
+                *guard = None;
+                None
+            }
+        }
+    }
+
+    /// Connect to the attached runtime for the first workspace root, if any.
+    async fn connect_runtime(&self) -> Option<crate::runtime::RuntimeClient> {
+        let root = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.first().cloned()
+        }?;
+        match crate::runtime::RuntimeClient::discover_and_connect(&root).await {
+            Ok(client) => client,
+            Err(e) => {
+                debug!("runtime discovery/connect failed: {e}");
+                None
+            }
+        }
+    }
+
+    /// BT-2239 worked example: answer find-references from the attached runtime.
+    ///
+    /// Resolves the selector under the cursor, runs `sendersOf` against the
+    /// live image, and translates the `{class, selector, line}` sites back to
+    /// LSP locations. Returns `None` (caller falls back to the AST walker) when
+    /// the cursor is not on a selector or the runtime is unavailable. The
+    /// service lock is never held across the network await.
+    ///
+    /// Scope note: this covers selector senders only. Full references parity
+    /// (class references via `referencesTo`, edge cases, snapshot tests) is
+    /// BT-2240; this establishes the seam the children reuse.
+    async fn references_via_runtime(
+        &self,
+        path: &Utf8PathBuf,
+        params: &ReferenceParams,
+    ) -> Option<Vec<tower_lsp::lsp_types::Location>> {
+        let selector = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let source = svc.file_source(path)?;
+            let pos = to_bt_position(params.text_document_position.position, &source);
+            svc.selector_at(path, pos)?
+        };
+        let resp = self
+            .delegate_nav_query("sendersOf", selector.as_str())
+            .await?;
+        let sites = resp.sites?;
+        let svc = self.service.lock().expect("service lock poisoned");
+        Some(sites_to_lsp_locations(&svc, &sites))
     }
 
     fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
@@ -538,6 +629,8 @@ impl LanguageServer for Backend {
         let roots = workspace_roots(&params);
         let configured_stdlib = configured_stdlib_source_dir(&params);
         let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
+        self.delegate_to_runtime
+            .store(runtime_delegation_enabled(&params), Ordering::Relaxed);
         {
             let mut stored_roots = self
                 .workspace_roots
@@ -966,6 +1059,18 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // BT-2239: when delegation is enabled and a runtime is attached, answer
+        // from the live image (SystemNavigation) — it sees extension methods and
+        // REPL-loaded classes the AST walker cannot. Falls through to the AST
+        // path when the flag is off, no runtime is attached, or it finds nothing.
+        if self.delegate_to_runtime.load(Ordering::Relaxed) {
+            if let Some(locations) = self.references_via_runtime(&path, &params).await {
+                if !locations.is_empty() {
+                    return Ok(Some(locations));
+                }
+            }
+        }
+
         let svc = self.service.lock().expect("service lock poisoned");
         let Some(source) = svc.file_source(&path) else {
             return Ok(None);
@@ -1215,6 +1320,21 @@ fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+/// Reads the `lsp.delegate_to_runtime` feature flag from initialization options
+/// (`delegateToRuntime`, default `false`) — BT-2239.
+///
+/// When enabled, navigation queries are delegated to an attached runtime's
+/// `SystemNavigation` facade (with the AST walker as fallback). When disabled,
+/// all navigation uses the in-process AST path with no behaviour change.
+fn runtime_delegation_enabled(params: &InitializeParams) -> bool {
+    params
+        .initialization_options
+        .as_ref()
+        .and_then(|value| value.get("delegateToRuntime"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// Returns the stdlib source directory auto-discovered from the LSP binary's sysroot.
@@ -1527,6 +1647,30 @@ fn path_to_stdlib_uri(path: &Utf8PathBuf) -> Option<Url> {
     Url::parse(&format!("beamtalk-stdlib:///{filename}")).ok()
 }
 
+/// Translates runtime navigation sites (`{class, selector, line}`) to LSP
+/// locations via the language service (BT-2239).
+///
+/// Each site is resolved to a method-relative source span by
+/// `SimpleLanguageService::locate_nav_site`; sites whose class/method are not
+/// in the indexed files (e.g. a REPL-only class) are skipped.
+fn sites_to_lsp_locations(
+    svc: &SimpleLanguageService,
+    sites: &[beamtalk_repl_protocol::NavSite],
+) -> Vec<tower_lsp::lsp_types::Location> {
+    sites
+        .iter()
+        .filter_map(|site| {
+            let loc = svc.locate_nav_site(&site.class, &site.selector, site.line)?;
+            let source = svc.file_source(&loc.file)?;
+            let range = span_to_range(loc.span, &source);
+            Some(tower_lsp::lsp_types::Location {
+                uri: path_to_uri(&loc.file)?,
+                range,
+            })
+        })
+        .collect()
+}
+
 /// Converts an LSP `Position` (UTF-16 code units) to a beamtalk `Position` (byte offsets).
 ///
 /// LSP positions use UTF-16 code units for the character field.
@@ -1817,6 +1961,61 @@ mod tests {
 
         let configured = configured_stdlib_source_dir(&params);
         assert_eq!(configured.as_deref(), Some("stdlib/src"));
+    }
+
+    #[test]
+    fn runtime_delegation_disabled_by_default() {
+        let params = InitializeParams::default();
+        assert!(!runtime_delegation_enabled(&params));
+    }
+
+    #[test]
+    fn runtime_delegation_reads_initialize_option() {
+        let on = InitializeParams {
+            initialization_options: Some(serde_json::json!({ "delegateToRuntime": true })),
+            ..Default::default()
+        };
+        assert!(runtime_delegation_enabled(&on));
+
+        let off = InitializeParams {
+            initialization_options: Some(serde_json::json!({ "delegateToRuntime": false })),
+            ..Default::default()
+        };
+        assert!(!runtime_delegation_enabled(&off));
+    }
+
+    #[test]
+    fn sites_to_lsp_locations_translates_indexed_sites() {
+        let mut svc = SimpleLanguageService::new();
+        // path_to_uri requires an absolute path (file:// URI).
+        let dir = unique_temp_dir("beamtalk_lsp_nav_sites");
+        let path = Utf8PathBuf::from_path_buf(dir.join("counter.bt")).expect("utf8 temp path");
+        // Method header on line index 1; a send on line index 2 (relative line 2).
+        let source = "Object subclass: Counter\n  bump =>\n    self step\n";
+        svc.update_file(path.clone(), source.to_string());
+
+        let sites = vec![beamtalk_repl_protocol::NavSite {
+            class: "Counter".to_string(),
+            selector: "bump".to_string(),
+            line: 2,
+        }];
+        let locations = sites_to_lsp_locations(&svc, &sites);
+        assert_eq!(locations.len(), 1);
+        // Relative line 2 of `bump` → file line index 2 (the `self step` line).
+        assert_eq!(locations[0].range.start.line, 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sites_to_lsp_locations_skips_unknown_class() {
+        let svc = SimpleLanguageService::new();
+        let sites = vec![beamtalk_repl_protocol::NavSite {
+            class: "NotIndexed".to_string(),
+            selector: "whatever".to_string(),
+            line: 1,
+        }];
+        assert!(sites_to_lsp_locations(&svc, &sites).is_empty());
     }
 
     #[test]

@@ -104,6 +104,18 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<serde_json::Value>,
 
+    // --- Navigation (nav-query op, BT-2239) ---
+    /// Call/reference sites (`sendersOf` / `referencesTo` nav queries). Each
+    /// entry locates a method by `{class, selector, line}`, where `line` is
+    /// 1-based and relative to the method's source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sites: Option<Vec<NavSite>>,
+
+    /// Implementing classes (`implementorsOf` nav query). `meta` is true when
+    /// the selector is defined on the class side (metaclass).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementors: Option<Vec<NavImplementor>>,
+
     /// Actor state (inspect op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<serde_json::Value>,
@@ -223,6 +235,32 @@ impl ReplResponse {
             None => String::new(),
         }
     }
+}
+
+/// A navigation site from a `sendersOf` / `referencesTo` nav query (BT-2239).
+///
+/// Locates a method by class and selector, plus a 1-based line **relative to
+/// that method's source** (the runtime does not store absolute file lines, so
+/// the LSP resolves the method's definition and adds this offset).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct NavSite {
+    /// Name of the class (or metaclass, e.g. `"Counter class"`) whose method
+    /// contains the site.
+    pub class: String,
+    /// The selector of the containing method.
+    pub selector: String,
+    /// 1-based line of the site, relative to the containing method's source.
+    pub line: u32,
+}
+
+/// An implementing class from an `implementorsOf` nav query (BT-2239).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct NavImplementor {
+    /// Name of the implementing class.
+    pub class: String,
+    /// Whether the selector is defined on the class side (metaclass).
+    #[serde(default)]
+    pub meta: bool,
 }
 
 /// Information about a running actor, deserialized from REPL JSON.
@@ -355,6 +393,28 @@ mod tests {
         let json = r#"{"id":"msg-007","status":["done"]}"#;
         let resp: ReplResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.value_string(), "");
+    }
+
+    #[test]
+    fn deserialize_nav_sites() {
+        let json = r#"{"id":"msg-008","sites":[{"class":"Counter","selector":"increment","line":3}],"status":["done"]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        let sites = resp.sites.unwrap();
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].class, "Counter");
+        assert_eq!(sites[0].selector, "increment");
+        assert_eq!(sites[0].line, 3);
+    }
+
+    #[test]
+    fn deserialize_nav_implementors() {
+        let json = r#"{"id":"msg-009","implementors":[{"class":"Integer","meta":false},{"class":"Counter class","meta":true}],"status":["done"]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        let impls = resp.implementors.unwrap();
+        assert_eq!(impls.len(), 2);
+        assert_eq!(impls[0].class, "Integer");
+        assert!(!impls[0].meta);
+        assert!(impls[1].meta);
     }
 
     #[test]

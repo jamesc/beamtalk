@@ -586,7 +586,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `nav-query`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
 
 > **BT-2091 (protocol 2.0):** The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed. Use `Beamtalk help: ClassName`, `Workspace load: "path"`, `ClassName reload`, and `Workspace classes` via the `eval` op instead.
 
@@ -621,6 +621,64 @@ Initiates graceful OTP supervisor tree shutdown. Requires cookie authentication.
 **Response (auth failure):**
 ```json
 {"id": "msg-042", "error": "auth_error: Invalid cookie", "status": ["done", "error"]}
+```
+
+### Navigation Operations
+
+#### `nav-query` — System-Browser Navigation (BT-2239)
+
+Run a System-Browser navigation query against the live image by delegating to
+the `SystemNavigation` facade. This lets editor tooling (the LSP, and a future
+LiveView IDE) answer find-references / go-to-implementation / hierarchy queries
+from the running runtime instead of a static AST walk — the static-first,
+live-augmented model of ADR 0024. The runtime sees facts the AST cannot, such
+as open-class extension methods (ADR 0066) and classes loaded only at the REPL.
+
+**Request:**
+```json
+{"op": "nav-query", "id": "msg-200", "kind": "sendersOf", "arg": "increment"}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | string | **yes** | One of `implementorsOf`, `sendersOf`, `referencesTo` |
+| `arg` | string | **yes** | Selector (for `implementorsOf` / `sendersOf`) or class name (for `referencesTo`). Restricted to selector / class-name characters |
+
+**Response — `sendersOf` / `referencesTo` (call/reference sites):**
+```json
+{
+  "id": "msg-200",
+  "sites": [
+    {"class": "Counter", "selector": "bump", "line": 2},
+    {"class": "Counter class", "selector": "reset", "line": 1}
+  ],
+  "status": ["done"]
+}
+```
+
+Each site locates a method by `class` and `selector`, plus a 1-based `line`
+**relative to that method's source** (the runtime does not store absolute file
+lines). A `class` ending in `" class"` denotes a class-side method. Clients
+resolve the method definition and add the relative line to obtain an absolute
+position.
+
+**Response — `implementorsOf` (implementing classes):**
+```json
+{
+  "id": "msg-200",
+  "implementors": [
+    {"class": "Integer", "meta": false},
+    {"class": "Counter class", "meta": true}
+  ],
+  "status": ["done"]
+}
+```
+
+`meta` is `true` when the selector is defined on the class side (metaclass).
+
+**Response (invalid request):**
+```json
+{"id": "msg-200", "error": "nav-query 'kind' is not a supported navigation query", "status": ["done", "error"]}
 ```
 
 ## Push Messages

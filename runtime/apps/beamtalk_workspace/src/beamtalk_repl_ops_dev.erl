@@ -1772,6 +1772,7 @@ base_ops() ->
             <<"params">> => [],
             <<"optional">> => [<<"filter">>]
         },
+        <<"nav-query">> => #{<<"params">> => [<<"kind">>, <<"arg">>]},
         <<"show-codegen">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]

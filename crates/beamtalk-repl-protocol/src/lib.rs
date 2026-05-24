@@ -16,4 +16,6 @@ mod request;
 mod response;
 
 pub use request::{RequestBuilder, next_msg_id};
-pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo};
+pub use response::{
+    ActorInfo, ClassInfo, ModuleInfo, NavImplementor, NavSite, ReplResponse, SessionInfo,
+};

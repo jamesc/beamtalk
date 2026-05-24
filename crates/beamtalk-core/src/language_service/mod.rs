@@ -50,10 +50,12 @@
 //! ```
 
 mod project_index;
+mod runtime_nav;
 mod value_objects;
 
 // Re-export value objects at the module level
 pub use project_index::ProjectIndex;
+pub use runtime_nav::method_relative_line_span;
 pub use value_objects::{
     ByteOffset, CodeAction, Completion, CompletionKind, Diagnostic, DocumentSymbol,
     DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
@@ -256,6 +258,72 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
         self.files.get(file).map(|data| data.source.clone())
+    }
+
+    /// Resolve a runtime navigation site to a source [`Location`] (BT-2239).
+    ///
+    /// `class` is the class name as reported by `SystemNavigation`; a trailing
+    /// `" class"` marks a class-side (metaclass) method. `selector` is the
+    /// containing method and `relative_line` is 1-based, relative to that
+    /// method's source. Returns `None` when the class/method is not present in
+    /// the indexed files (e.g. a class loaded only at the REPL with no open
+    /// source file) — callers fall back to the AST path or skip the site.
+    ///
+    /// This is the shared translation seam consumed by the runtime-delegated
+    /// navigation children (BT-2240..2244): they obtain `{class, selector,
+    /// line}` sites from the runtime and map each through this method.
+    #[must_use]
+    pub fn locate_nav_site(
+        &self,
+        class: &str,
+        selector: &str,
+        relative_line: u32,
+    ) -> Option<Location> {
+        let (class_name, class_side) = match class.strip_suffix(" class") {
+            Some(base) => (base, true),
+            None => (class, false),
+        };
+        for (path, data) in &self.files {
+            for decl in &data.module.classes {
+                if decl.name.name.as_str() != class_name {
+                    continue;
+                }
+                let methods = if class_side {
+                    &decl.class_methods
+                } else {
+                    &decl.methods
+                };
+                for method in methods {
+                    if method.selector.name() == selector {
+                        let span = runtime_nav::method_relative_line_span(
+                            &data.source,
+                            method.span,
+                            relative_line,
+                        )?;
+                        return Some(Location::new(path.clone(), span));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns the message selector at the given position, if any (BT-2239).
+    ///
+    /// Matches a selector either at a call site (`x bar`, `a + b`,
+    /// `x at: 1 put: 2`) or on a method-definition header (`bar => …`). Returns
+    /// `None` when the cursor is not on a selector.
+    ///
+    /// Used by runtime-delegated navigation to derive the selector argument for
+    /// `sendersOf` / `implementorsOf` queries before delegating to the runtime.
+    #[must_use]
+    pub fn selector_at(&self, file: &Utf8PathBuf, position: Position) -> Option<EcoString> {
+        let file_data = self.get_file(file)?;
+        let offset = position.to_byte_offset(&file_data.source)?;
+        if let Some(lookup) = Self::find_selector_at_offset(&file_data.module, offset.get()) {
+            return Some(lookup.selector_name);
+        }
+        Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
     }
 
     /// If the offset falls inside the header of a method *definition*

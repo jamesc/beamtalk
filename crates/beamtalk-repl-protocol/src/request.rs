@@ -337,6 +337,24 @@ impl RequestBuilder {
         })
     }
 
+    /// Build a `nav-query` request (BT-2239).
+    ///
+    /// Routes a `SystemNavigation` navigation query to the running image so
+    /// the LSP can delegate find-references / go-to-implementation / hierarchy
+    /// queries to the live runtime (the static-first, live-augmented model of
+    /// ADR 0024). `kind` is one of `"implementorsOf"`, `"sendersOf"`, or
+    /// `"referencesTo"`; `arg` is the selector (for implementors/senders) or
+    /// the class name (for references).
+    #[must_use]
+    pub fn nav_query(kind: &str, arg: &str) -> serde_json::Value {
+        serde_json::json!({
+            "op": "nav-query",
+            "id": next_msg_id(),
+            "kind": kind,
+            "arg": arg
+        })
+    }
+
     /// Build a `list-classes` request (BT-1404).
     #[must_use]
     pub fn list_classes(filter: Option<&str>) -> serde_json::Value {
@@ -738,6 +756,15 @@ mod tests {
         let req = RequestBuilder::shutdown("secret-cookie");
         assert_eq!(req["op"], "shutdown");
         assert_eq!(req["cookie"], "secret-cookie");
+    }
+
+    #[test]
+    fn nav_query_request_has_correct_shape() {
+        let req = RequestBuilder::nav_query("sendersOf", "increment");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "sendersOf");
+        assert_eq!(req["arg"], "increment");
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
     }
 
     #[test]

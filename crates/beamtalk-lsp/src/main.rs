@@ -8,6 +8,8 @@
 //! This binary exposes the `SimpleLanguageService` + `ProjectIndex` from
 //! `beamtalk-core` over the Language Server Protocol using `tower-lsp`.
 
+/// Runtime-attached navigation query channel (BT-2239).
+mod runtime;
 /// LSP server backend implementation.
 mod server;
 

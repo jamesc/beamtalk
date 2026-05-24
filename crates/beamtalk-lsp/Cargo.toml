@@ -20,13 +20,22 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true }
+# Shared REPL protocol types + workspace discovery for runtime-attached
+# navigation queries (BT-2239). Lets the LSP delegate to SystemNavigation
+# without depending on beamtalk-cli (which the architecture forbids).
+beamtalk-repl-protocol = { workspace = true }
+beamtalk-workspace = { workspace = true }
 tower-lsp = { workspace = true }
 tokio = { workspace = true }
+# WebSocket client for the runtime query channel (ADR 0020).
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
 camino = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
