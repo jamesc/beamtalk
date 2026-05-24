@@ -10,6 +10,8 @@
 //!
 //! See BT-2059 for context.
 
+use crate::beam_compiler::escape_erlang_string;
+
 /// Exit codes used by the generated Erlang expressions.
 ///
 /// These are chosen to avoid collision with the Erlang VM's own exit codes
@@ -38,7 +40,7 @@ impl ErlangEval {
     /// The path is escaped for safe embedding in Erlang string literals.
     pub fn new(file_path: &str) -> Self {
         Self {
-            escaped_path: escape_for_erlang_string(file_path),
+            escaped_path: escape_erlang_string(file_path),
         }
     }
 
@@ -137,69 +139,9 @@ impl ErlangEval {
     }
 }
 
-/// Escape a string for embedding in an Erlang string literal.
-///
-/// Handles backslashes, double-quotes, and control characters that the
-/// Erlang parser would otherwise interpret.
-pub fn escape_for_erlang_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\0' => out.push_str("\\0"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ---- escape_for_erlang_string tests ----
-
-    #[test]
-    fn escape_plain_string() {
-        assert_eq!(escape_for_erlang_string("hello"), "hello");
-    }
-
-    #[test]
-    fn escape_double_quotes() {
-        assert_eq!(escape_for_erlang_string(r#"a"b"#), r#"a\"b"#);
-    }
-
-    #[test]
-    fn escape_backslash() {
-        assert_eq!(escape_for_erlang_string("a\\b"), "a\\\\b");
-    }
-
-    #[test]
-    fn escape_newline() {
-        assert_eq!(escape_for_erlang_string("a\nb"), "a\\nb");
-    }
-
-    #[test]
-    fn escape_tab_and_carriage_return() {
-        assert_eq!(escape_for_erlang_string("\t\r"), "\\t\\r");
-    }
-
-    #[test]
-    fn escape_null() {
-        assert_eq!(escape_for_erlang_string("\0"), "\\0");
-    }
-
-    #[test]
-    fn escape_path_with_spaces_and_special_chars() {
-        assert_eq!(
-            escape_for_erlang_string("/tmp/my dir/file\"name\\.erl"),
-            "/tmp/my dir/file\\\"name\\\\.erl"
-        );
-    }
 
     // ---- ErlangEval builder tests ----
 

@@ -16,8 +16,8 @@
 
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
+    escape_erlang_string,
 };
-use crate::commands::erlang_eval::escape_for_erlang_string;
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -702,8 +702,8 @@ fn generate_doc_test_eunit_wrapper(
     );
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
-        let escaped_file = escape_for_erlang_string(source_file);
-        let escaped_expr = escape_for_erlang_string(&case.expression);
+        let escaped_file = escape_erlang_string(source_file);
+        let escaped_expr = escape_erlang_string(&case.expression);
         let location = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
         let location_bin = format!("<<\"{location}\"/utf8>>");
 
