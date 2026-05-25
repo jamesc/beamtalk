@@ -5,6 +5,13 @@
 //
 // Tests ClassBuilder error cases: validation failures caught before class
 // registration. Exercises the validate/2 logic in beamtalk_class_builder.erl
+//
+// BT-2258: also covers a successful programmatic register-then-use. Before the
+// fix, the programmatic cascade returned an unusable wrapper
+// ({beamtalk_object, 'Class', beamtalk_class_bt, Pid}) that failed every
+// message with a spurious "actor process has terminated" error and was not
+// `==` to the registry reference. register now returns the canonical class
+// object, so the cascade result is directly usable.
 
 TestCase subclass: ClassBuilderTest
   field: cls = nil
@@ -18,3 +25,23 @@ TestCase subclass: ClassBuilderTest
 
   testMissingSuperclassRejected =>
     self should: [Object classBuilder register] raise: #missing_parameter
+
+  // BT-2258: register returns a usable class object that answers reflection
+  // messages without the "terminated" error the wrapper used to produce.
+  testRegisterReturnsUsableClassObject =>
+    self.cls := Object classBuilder name: #BTBuilderUsable;
+      superclass: Object;
+      methods: #{#greet => [:_self | "hi"]};
+      register
+    self assert: self.cls isClass
+    self assert: self.cls name equals: #BTBuilderUsable
+    self assert: self.cls printString equals: "BTBuilderUsable"
+    self assert: (self.cls methods includes: #greet)
+    self deny: (self.cls >> #greet) isNil
+
+  // BT-2258: the returned object is the canonical class object, so it is `==`
+  // to the registry reference for the same name.
+  testRegisterReturnEqualsRegistryReference =>
+    self.cls := Object classBuilder name: #BTBuilderIdentity; superclass: Object; register
+    registryRef := (Erlang beamtalk_interface) findClass: #BTBuilderIdentity
+    self assert: self.cls == registryRef

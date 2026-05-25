@@ -8,8 +8,8 @@
 // `self` class-method sends — without the BT-873 Path-2 failures.
 //
 // The class is dispatched by its registered name (a registry-resolved class
-// reference), not via register's return value (an unusable wrapper today,
-// BT-2258, fixed separately).
+// reference). Since BT-2258, register also returns the canonical class object
+// (the class name renders directly), so the cascade result is usable too.
 //
 // NOTE: `self new` on a module-less dynamic builder class is a pre-existing
 // limitation (handle_new requires a compiled new/0 export — even external
@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 
 Object classBuilder name: #BT2267Tally; superclass: Object; classVars: #{ #total => 0 }; classMethods: #{ #bump => [:self | self.total := self.total + 1. self.total] }; register
-// => #Actor<Class,_>
+// => BT2267Tally
 
 BT2267Tally bump
 // => 1
@@ -37,7 +37,7 @@ BT2267Tally bump
 // ---------------------------------------------------------------------------
 
 Object classBuilder name: #BT2267Plain; superclass: Object; classMethods: #{ #answer => [:self | 42] }; register
-// => #Actor<Class,_>
+// => BT2267Plain
 
 BT2267Plain answer
 // => 42
@@ -47,7 +47,7 @@ BT2267Plain answer
 // ---------------------------------------------------------------------------
 
 Object classBuilder name: #BT2267Kw; superclass: Object; classMethods: #{ #scale: => [:self :n | n * 3] }; register
-// => #Actor<Class,_>
+// => BT2267Kw
 
 BT2267Kw scale: 4
 // => 12
@@ -58,7 +58,7 @@ BT2267Kw scale: 4
 // ---------------------------------------------------------------------------
 
 Object classBuilder name: #BT2267Self; superclass: Object; classMethods: #{ #base => [:self | 10], #doubled => [:self | self base * 2] }; register
-// => #Actor<Class,_>
+// => BT2267Self
 
 BT2267Self doubled
 // => 20
@@ -69,10 +69,10 @@ BT2267Self doubled
 // ---------------------------------------------------------------------------
 
 Object classBuilder name: #BT2267SuperBase; superclass: Object; classMethods: #{ #greeting => [:self | "base"] }; register
-// => #Actor<Class,_>
+// => BT2267SuperBase
 
 Object classBuilder name: #BT2267SuperChild; superclass: #BT2267SuperBase; classMethods: #{ #greeting => [:self | super greeting] }; register
-// => #Actor<Class,_>
+// => BT2267SuperChild
 
 BT2267SuperChild greeting
 // => base

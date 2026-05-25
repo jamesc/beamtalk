@@ -3257,7 +3257,12 @@ impl CoreErlangGenerator {
     /// Emits a call to `beamtalk_class_builder:register/1` with the builder's
     /// `gen_server` state augmented with the builder's own PID (for cleanup).
     ///
-    /// On success: returns a `#beamtalk_object{class = 'Class', class_mod = beamtalk_class_bt, pid = Pid}`
+    /// On success: returns the canonical class-object record built by
+    /// `beamtalk_class_registry:class_object_from_pid/1`, i.e.
+    /// `#beamtalk_object{class = '<Name> class', class_mod = ModuleName, pid = Pid}`
+    /// — the same shape produced by `generate_class_reference` and
+    /// `beamtalk_interface:handle_class_named/1`, so the value is dispatchable
+    /// and `==` to the registry reference (BT-2258).
     /// On error: raises the structured error via `beamtalk_error:raise/1`
     ///
     /// # Generated Code
@@ -3267,7 +3272,7 @@ impl CoreErlangGenerator {
     /// let _BS = call 'maps':'put'('builderPid', _Pid, State) in
     /// case call 'beamtalk_class_builder':'register'(_BS) of
     ///   <{'ok', _CP}> when 'true' ->
-    ///     {'beamtalk_object', 'Class', 'beamtalk_class_bt', _CP}
+    ///     call 'beamtalk_class_registry':'class_object_from_pid'(_CP)
     ///   <{'error', _Err}> when 'true' ->
     ///     call 'beamtalk_error':'raise'(_Err)
     /// end
@@ -3296,9 +3301,13 @@ impl CoreErlangGenerator {
             "<{'ok', ",
             Document::String(class_pid_var.clone()),
             "}> when 'true' -> ",
-            "{'beamtalk_object', 'Class', 'beamtalk_class_bt', ",
+            // BT-2258: return the canonical class-object shape
+            // {'beamtalk_object', <Name> ++ " class", ModuleName, ClassPid}
+            // built by the runtime helper, instead of an unusable hardcoded
+            // {'beamtalk_object', 'Class', 'beamtalk_class_bt', ClassPid} wrapper.
+            "call 'beamtalk_class_registry':'class_object_from_pid'(",
             Document::String(class_pid_var),
-            "} ",
+            ") ",
             "<{'error', ",
             Document::String(error_var.clone()),
             "}> when 'true' -> ",
