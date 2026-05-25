@@ -88,7 +88,19 @@ instantiation_test_() ->
             {"class_self_spawn_with returns Result error on duplicate name",
                 fun test_class_self_spawn_with_duplicate/0},
             {"class_self_spawn_with returns Result error for abstract class",
-                fun test_class_self_spawn_with_abstract/0}
+                fun test_class_self_spawn_with_abstract/0},
+            %% BT-2275: module-less (builder-built) generic instantiation
+            {"module-less new returns a generic instance with field defaults",
+                fun test_generic_new_defaults/0},
+            {"module-less new: merges initialiser over defaults", fun test_generic_new_with_map/0},
+            {"module-less new: ignores unknown initialiser keys",
+                fun test_generic_new_unknown_keys_ignored/0},
+            {"module-less new with multiple args raises type_error",
+                fun test_generic_new_multi_args/0},
+            {"module-less generic instance dispatches a fun-backed method",
+                fun test_generic_instance_method_dispatch/0},
+            {"module-less subclass inherits builder superclass field defaults",
+                fun test_generic_new_inherited_defaults/0}
         ]
     end}.
 
@@ -150,10 +162,12 @@ test_new_compiled() ->
     cleanup_if_process(Obj).
 
 test_new_compiled_non_constructible() ->
-    %% Integer's new/0 raises instantiation_error
-    code:ensure_loaded(beamtalk_integer),
+    %% Integer's compiled new/0 raises instantiation_error. BT-2275: use the
+    %% real loaded module (bt@stdlib@integer) so handle_new takes the compiled
+    %% path; a non-loadable module name would now route to the generic path.
+    code:ensure_loaded('bt@stdlib@integer'),
     Result = beamtalk_class_instantiation:handle_new(
-        [], 'Integer', beamtalk_integer, undefined
+        [], 'Integer', 'bt@stdlib@integer', undefined
     ),
     ?assertMatch({error, _, _}, Result).
 
@@ -297,11 +311,12 @@ test_class_self_new_success() ->
     ?assert(is_map(Result)).
 
 test_class_self_new_non_constructible() ->
-    %% Integer's new/0 raises, so class_self_new should raise error
-    code:ensure_loaded(beamtalk_integer),
+    %% Integer's compiled new/0 raises, so class_self_new should raise error.
+    %% BT-2275: use the real loaded module so the compiled path is exercised.
+    code:ensure_loaded('bt@stdlib@integer'),
     ?assertError(
         _,
-        beamtalk_class_instantiation:class_self_new('Integer', beamtalk_integer, [])
+        beamtalk_class_instantiation:class_self_new('Integer', 'bt@stdlib@integer', [])
     ).
 
 %%====================================================================
@@ -488,8 +503,114 @@ test_class_self_spawn_with_abstract() ->
     ).
 
 %%====================================================================
+%% BT-2275: module-less (builder-built) generic instantiation
+%%====================================================================
+
+test_generic_new_defaults() ->
+    Pid = register_builder_class('BT2275GNew', 'Object', #{a => 1}, #{}),
+    try
+        {ok, Instance} = beamtalk_object_class:new(Pid, []),
+        ?assert(is_map(Instance)),
+        ?assertEqual('BT2275GNew', maps:get('$beamtalk_class', Instance)),
+        ?assertEqual(1, maps:get(a, Instance))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+test_generic_new_with_map() ->
+    Pid = register_builder_class('BT2275GNewMap', 'Object', #{a => 1, b => 2}, #{}),
+    try
+        {ok, Instance} = beamtalk_object_class:new(Pid, [#{a => 9}]),
+        ?assertEqual('BT2275GNewMap', maps:get('$beamtalk_class', Instance)),
+        %% Supplied key overrides the default; untouched key keeps its default.
+        ?assertEqual(9, maps:get(a, Instance)),
+        ?assertEqual(2, maps:get(b, Instance))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+test_generic_new_unknown_keys_ignored() ->
+    Pid = register_builder_class('BT2275GNewUnknown', 'Object', #{a => 1}, #{}),
+    try
+        {ok, Instance} = beamtalk_object_class:new(Pid, [#{a => 5, zzz => 99}]),
+        ?assertEqual(5, maps:get(a, Instance)),
+        %% Unknown keys are not introduced as slots (matches compiled new/1).
+        ?assertNot(maps:is_key(zzz, Instance))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+test_generic_new_multi_args() ->
+    Pid = register_builder_class('BT2275GNewMulti', 'Object', #{a => 1}, #{}),
+    try
+        Result = beamtalk_object_class:new(Pid, [arg1, arg2]),
+        ?assertMatch(
+            {error, #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}},
+            Result
+        )
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+test_generic_instance_method_dispatch() ->
+    %% A fun-backed instance method follows the value-type calling convention
+    %% fun(Self, Args...) -> Result. getA reads its field; withA: returns a new
+    %% instance with the field replaced (value-type functional update).
+    GetA = fun(Self) -> maps:get(a, Self) end,
+    WithA = fun(Self, NewVal) -> Self#{a => NewVal} end,
+    Methods = #{'getA' => GetA, 'withA:' => WithA},
+    Pid = register_builder_class('BT2275GDispatch', 'Object', #{a => 1}, Methods),
+    try
+        {ok, Instance} = beamtalk_object_class:new(Pid, []),
+        ?assertEqual(1, beamtalk_message_dispatch:send(Instance, 'getA', [])),
+        Updated = beamtalk_message_dispatch:send(Instance, 'withA:', [7]),
+        ?assertEqual(7, maps:get(a, Updated)),
+        %% Original instance is unchanged (value-type immutability).
+        ?assertEqual(1, maps:get(a, Instance)),
+        %% The new instance is itself a usable generic instance.
+        ?assertEqual(7, beamtalk_message_dispatch:send(Updated, 'getA', []))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+test_generic_new_inherited_defaults() ->
+    %% A module-less subclass of a module-less builder class inherits the
+    %% parent's field defaults, with its own fields shadowing.
+    ParentPid = register_builder_class('BT2275GParent', 'Object', #{p => 10, shared => 1}, #{}),
+    ChildPid = register_builder_class(
+        'BT2275GChild', 'BT2275GParent', #{c => 20, shared => 2}, #{}
+    ),
+    try
+        {ok, Instance} = beamtalk_object_class:new(ChildPid, []),
+        ?assertEqual('BT2275GChild', maps:get('$beamtalk_class', Instance)),
+        ?assertEqual(20, maps:get(c, Instance)),
+        ?assertEqual(10, maps:get(p, Instance)),
+        %% Child's own default shadows the inherited one.
+        ?assertEqual(2, maps:get(shared, Instance))
+    after
+        gen_server:stop(ChildPid, normal, 5000),
+        gen_server:stop(ParentPid, normal, 5000)
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
+
+%% Register a module-less (builder-built) class via the ClassBuilder backing.
+%% FieldSpecs carries field => default; MethodSpecs carries selector => fun.
+register_builder_class(ClassName, Superclass, FieldSpecs, MethodSpecs) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined -> ok;
+        Existing when is_pid(Existing) -> gen_server:stop(Existing, normal, 5000)
+    end,
+    State = #{
+        className => ClassName,
+        superclassRef => Superclass,
+        fieldSpecs => FieldSpecs,
+        methodSpecs => MethodSpecs
+    },
+    {ok, Pid} = beamtalk_class_builder:register(State),
+    Pid.
 
 ensure_counter_loaded() ->
     case beamtalk_class_registry:whereis_class('Counter') of

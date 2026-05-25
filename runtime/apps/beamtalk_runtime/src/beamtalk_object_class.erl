@@ -90,6 +90,11 @@ and join the `beamtalk_classes` pg group for enumeration.
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     fields = [] :: [atom()],
+    %% BT-2275: Field name => default value map for module-less (builder-built)
+    %% classes. Used by the generic instantiation path to construct an instance
+    %% map when no compiled module exists. Compiled classes leave this empty and
+    %% bake defaults into their generated `new/0`.
+    field_defaults = #{} :: #{atom() => term()},
     class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
     %% BT-2195: Class-side method source. Symmetric companion to
@@ -450,6 +455,11 @@ init({ClassName, ClassInfo}) ->
     put(beamtalk_class_name, ClassName),
     put(beamtalk_class_module, Module),
     put(beamtalk_class_is_abstract, IsAbstract),
+    %% BT-2275: Cache field defaults in the process dictionary so the `self new`
+    %% self-instantiation path (which runs inside this gen_server) can build a
+    %% generic instance for a module-less class without a gen_server:call to self.
+    FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
+    put(beamtalk_class_field_defaults, FieldDefaults),
 
     %% BT-1768: Record pid→classname mapping for crash recovery.
     %% This entry survives process death, allowing class_send to identify
@@ -492,6 +502,7 @@ init({ClassName, ClassInfo}) ->
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
         fields = maps:get(fields, Meta, maps:get(fields, ClassInfo, [])),
+        field_defaults = FieldDefaults,
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         class_method_source = maps:get(class_method_source, ClassInfo, #{}),
@@ -752,6 +763,10 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
     {reply, IVars, State};
+%% BT-2275: Expose field defaults so the generic instantiation path can read a
+%% module-less superclass's defaults when building an inherited instance map.
+handle_call(field_defaults, _From, #class_state{field_defaults = Defaults} = State) ->
+    {reply, Defaults, State};
 handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
     {reply, Sealed, State};
 handle_call(is_internal, _From, #class_state{is_internal = Internal} = State) ->
@@ -1117,6 +1132,13 @@ apply_class_info(State, ClassInfo) ->
     ),
     put(beamtalk_class_is_abstract, NewIsAbstract),
 
+    %% BT-2275: Reconcile field defaults on reload (ADR 0082 "disk wins").
+    %% A compiled reload supplies no field_defaults (defaults are baked into the
+    %% module's new/0), so we clear them; a builder re-register supplies them
+    %% and they are re-cached. Keep the process-dict cache in sync for self new.
+    NewFieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
+    put(beamtalk_class_field_defaults, NewFieldDefaults),
+
     %% ADR 0071 Phase 5: Recompute is_internal on reload/redefinition.
     %% Same logic as init/1 — keeps visibility in sync after hot-reload.
     NewIsInternal =
@@ -1181,6 +1203,7 @@ apply_class_info(State, ClassInfo) ->
             Meta,
             maps:get(fields, ClassInfo, State#class_state.fields)
         ),
+        field_defaults = NewFieldDefaults,
         is_abstract = NewIsAbstract,
         is_sealed = maps:get(
             is_sealed,

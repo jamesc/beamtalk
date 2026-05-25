@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2275 / ADR 0082: a class built purely programmatically via the
+// ClassBuilder cascade — with no compiled BEAM module behind it — can be
+// instantiated with `new` / `new:`, its fun-backed instance methods dispatch,
+// and `self new` inside a builder class method returns a usable instance. The
+// generic, module-free instance is a tagged map identical in shape to the
+// compiled value-type representation, so behaviour is unchanged across a future
+// flush+reload.
+//
+// Field values are read here via the `fieldAt:` reflection protocol (BT-924),
+// which works on any value-type instance's underlying map. Direct `self.field`
+// access from builder instance-method block literals is a separate compiler
+// concern; the runtime fun calling convention for field read/write is covered
+// directly in beamtalk_class_instantiation_tests.erl.
+//
+// The class is looked up by its registered name via findClass: (register's
+// return is an unusable wrapper today, BT-2258).
+
+TestCase subclass: ClassBuilderInstantiationTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  // AC: `(findClass: #X) new` returns a usable instance with field a = 1.
+  testNewUsesFieldDefaults =>
+    Object classBuilder name: #BT2275New;
+      superclass: Object;
+      fields: #{#a => 1};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2275New
+    instance := self.cls new
+    self assert: (instance fieldAt: #a) equals: 1
+    // The instance reports the builder class as its class.
+    self assert: instance class equals: self.cls
+
+  // AC: `new: #{ #a => 9 }` initialises fields from the map.
+  testNewWithMapInitialisesFields =>
+    Object classBuilder name: #BT2275NewWith;
+      superclass: Object;
+      fields: #{#a => 1, #b => 2};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2275NewWith
+    instance := self.cls new: #{#a => 9}
+    self assert: (instance fieldAt: #a) equals: 9
+    self assert: (instance fieldAt: #b) equals: 2
+
+  // AC: a fun-backed instance method dispatches on a generic instance.
+  testInstanceMethodDispatches =>
+    Object classBuilder name: #BT2275Methods;
+      superclass: Object;
+      fields: #{#a => 1};
+      methods: #{#answer => [:inst | 42], #double: => [:inst :n | n * 2]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2275Methods
+    instance := self.cls new
+    self assert: instance answer equals: 42
+    self assert: (instance double: 21) equals: 42
+
+  // AC: `self new` inside a builder class method returns an instance.
+  testSelfNewInsideClassMethod =>
+    Object classBuilder name: #BT2275SelfNewBt;
+      superclass: Object;
+      fields: #{#a => 7};
+      classMethods: #{#make => [:self | self new]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2275SelfNewBt
+    instance := self.cls make
+    self assert: (instance fieldAt: #a) equals: 7

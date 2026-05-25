@@ -502,20 +502,61 @@ value_type_send(Self, Class, Selector, Args) ->
                 true ->
                     erlang:apply(Module, Selector, [Self | Args]);
                 false ->
-                    case try_object_ops(Selector, Args, Self) of
-                        {ok, Result} ->
-                            Result;
-                        false ->
-                            beamtalk_error:raise(
-                                beamtalk_error:new(
-                                    does_not_understand,
-                                    Class,
-                                    Selector,
-                                    <<"Value type does not understand this message">>
-                                )
-                            )
+                    %% BT-2275: module-less (builder-built) class — dispatch
+                    %% fun-backed instance methods stored in the class gen_server.
+                    %% These follow the value-type calling convention
+                    %% `fun(Self, Arg1..ArgN) -> Result`, identical to the
+                    %% compiled `Module:Selector(Self, Args)` form above, so
+                    %% behaviour is unchanged once the class is flushed.
+                    case runtime_instance_method(Class, Selector) of
+                        {ok, Fun} ->
+                            erlang:apply(Fun, [Self | Args]);
+                        none ->
+                            case try_object_ops(Selector, Args, Self) of
+                                {ok, Result} ->
+                                    Result;
+                                false ->
+                                    beamtalk_error:raise(
+                                        beamtalk_error:new(
+                                            does_not_understand,
+                                            Class,
+                                            Selector,
+                                            <<"Value type does not understand this message">>
+                                        )
+                                    )
+                            end
                     end
             end
+    end.
+
+-doc """
+Look up a fun-backed instance method on a module-less class (BT-2275).
+
+Builder-built classes register instance methods as funs in the class
+gen_server's `instance_methods` map rather than as compiled module functions.
+Resolves the selector against the class — and its superclass chain, via
+`beamtalk_object_class:method/2` — returning the stored block fun if present.
+Returns `none` when the class is unregistered or the selector is not a runtime
+fun (so callers fall through to the Object protocol / does_not_understand).
+
+The `Pid =/= self()` guard avoids a `calling_self` deadlock: if instance
+dispatch ever runs *inside* the class gen_server (e.g. `(self new) someMethod`
+from within a class method), `beamtalk_object_class:method/2` would
+`gen_server:call(self(), ...)` and hang. In that rare case we report `none` and
+let dispatch fall through rather than block the class process.
+""".
+-spec runtime_instance_method(atom(), atom()) -> {ok, fun()} | none.
+runtime_instance_method(Class, Selector) ->
+    case beamtalk_class_registry:whereis_class(Class) of
+        Pid when is_pid(Pid), Pid =/= self() ->
+            case beamtalk_object_class:method(Pid, Selector) of
+                #{'__method_info__' := #{block := Fun}} when is_function(Fun) ->
+                    {ok, Fun};
+                _ ->
+                    none
+            end;
+        _ ->
+            none
     end.
 
 -doc """
@@ -548,6 +589,9 @@ value_type_responds_to(Class, Selector) ->
                     false -> []
                 end,
             lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports) orelse
+                %% BT-2275: module-less classes report their fun-backed instance
+                %% methods (and inherited ones) as understood.
+                runtime_instance_method(Class, Selector) =/= none orelse
                 beamtalk_object_ops:has_method(Selector)
     end.
 
