@@ -374,6 +374,50 @@ abstract Object subclass: Behaviour
   /// ```
   sealed reload -> Behaviour => @primitive "classReload"
 
+  // --- Live method editing (ADR 0082 Phase 1) ---
+
+  /// Compile a method from a source body String and install it in this class,
+  /// recording a **durable** ChangeLog entry (ADR 0082).
+  ///
+  /// This is the underlying primitive that the `>>` patcher form desugars to
+  /// (`Counter >> increment => body` ≡ `Counter compile: #increment source:
+  /// "increment => body"`). The body is passed as a **String value**, not
+  /// concatenated into a `>>` expression — tools (MCP `save_method`, the browser
+  /// "Save" action, the REPL editor) call this directly with the body value so a
+  /// quote char or multi-line body never has to be escaped back into source.
+  ///
+  /// The patch installs in memory immediately. If this class is backed by an
+  /// in-project `.bt` source file, the ChangeLog entry is `flushable` and a later
+  /// `Workspace flush` can splice the body back to disk; for stdlib / dynamic /
+  /// dependency classes the entry is logged `flushable: false` and flush skips
+  /// it (the patch is still live in memory). Returns the receiver class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter compile: #increment source: "increment => self.value := self.value + 1"
+  /// // => Counter
+  /// ```
+  sealed compile: aSelector :: Symbol source: aSource :: String -> Behaviour =>
+    @primitive "classCompileSource"
+
+  /// Compile and install a method like `compile:source:`, but record an
+  /// **ephemeral** ChangeLog entry (ADR 0082).
+  ///
+  /// Intended for exploration: spike a candidate fix, run it, and either discard
+  /// it (ephemeral entries auto-prune on flush and on workspace restart) or
+  /// promote it by calling `compile:source:` with the same body to upgrade the
+  /// intent to durable. The audit trail still records every `tryCompile:source:`
+  /// call — visibility into what was tried is part of the ChangeLog's value.
+  /// Backs the MCP `try_method` tool. Returns the receiver class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter tryCompile: #doubled source: "doubled => self.value * 2"
+  /// // => Counter
+  /// ```
+  sealed tryCompile: aSelector :: Symbol source: aSource :: String -> Behaviour =>
+    @primitive "classTryCompileSource"
+
   // --- Class removal ---
 
   /// Remove this class from the system, cleaning up all associated state.

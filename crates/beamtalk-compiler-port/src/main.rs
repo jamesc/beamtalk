@@ -1514,6 +1514,95 @@ fn field_lines_response(lines: &[u32]) -> Term {
     ]))
 }
 
+/// Handle a `resolve_method_span` request (ADR 0082, Phase 1 — BT-2283).
+///
+/// Backs the live-patch install hook: given the current on-disk source of a
+/// `.bt` file and a target `(class, selector, side)`, resolve the exact byte
+/// span of that method's definition (the Phase 0 resolver) and return both the
+/// span and the bytes currently occupying it (`prev_source`). The install hook
+/// records these on the ChangeEntry so a later `Workspace flush` can splice the
+/// patched body back into the file by byte-span replacement, and so restart can
+/// detect whether disk has drifted from the recorded `prev_source`.
+///
+/// Request fields:
+/// - `source` (binary): the current on-disk source text of the `.bt` file
+/// - `class_name` (binary): the target class name (e.g. `Counter`)
+/// - `selector` (binary): the canonical selector string (e.g. `increment`,
+///   `incrementBy:`, `+`)
+/// - `side` (atom, optional): `instance` (default) or `class`
+///
+/// Response on success: `#{status => ok, span => #{start => S, end => E},
+/// prev_source => <<...>>}`. The resolver is purely parser-level: it never
+/// installs anything and never panics. Failures (selector not found, class not
+/// found, ambiguous) come back as `#{status => error, reason => <atom>, ...}`
+/// so the hook can downgrade to a memory-only patch (no ChangeEntry) rather
+/// than crash the install.
+fn handle_resolve_method_span(request: &Map) -> Term {
+    use beamtalk_core::source_analysis::{MethodSide, resolve_method_span};
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(class_name) = map_get(request, "class_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_name' field".to_string()]);
+    };
+    let Some(selector) = map_get(request, "selector").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'selector' field".to_string()]);
+    };
+    // `side` is optional; absent (or unrecognised) means the instance side.
+    let side = match map_get(request, "side").and_then(term_to_atom).as_deref() {
+        Some("class") => MethodSide::Class,
+        _ => MethodSide::Instance,
+    };
+
+    // Parse diagnostics are intentionally not surfaced as a failure here: the
+    // hook only needs the span. A method whose own body is malformed would not
+    // have been installed in the first place (the install path compiles before
+    // hooking), so a clean span resolution against the disk file is what matters.
+    let (result, _diagnostics) = resolve_method_span(&source, &class_name, &selector, side);
+    match result {
+        Ok(span) => {
+            let start = span.start();
+            let end = span.end();
+            let prev_source = source
+                .get(start as usize..end as usize)
+                .unwrap_or_default()
+                .to_string();
+            let span_map = Term::from(Map::from([
+                (
+                    atom("start"),
+                    int_term(i32::try_from(start).unwrap_or(i32::MAX)),
+                ),
+                (atom("end"), int_term(i32::try_from(end).unwrap_or(i32::MAX))),
+            ]));
+            Term::from(Map::from([
+                (atom("status"), atom("ok")),
+                (atom("span"), span_map),
+                (atom("prev_source"), binary(&prev_source)),
+            ]))
+        }
+        Err(err) => method_span_error_response(&err),
+    }
+}
+
+/// Build a structured error response for a [`SpanResolveError`].
+///
+/// The `reason` atom lets the Erlang hook branch without string-matching; the
+/// `message` carries the human-readable detail for logging.
+fn method_span_error_response(err: &beamtalk_core::source_analysis::SpanResolveError) -> Term {
+    use beamtalk_core::source_analysis::SpanResolveError;
+    let reason = match err {
+        SpanResolveError::ClassNotFound { .. } => "class_not_found",
+        SpanResolveError::SelectorNotFound { .. } => "selector_not_found",
+        SpanResolveError::Ambiguous { .. } => "ambiguous",
+    };
+    Term::from(Map::from([
+        (atom("status"), atom("error")),
+        (atom("reason"), atom(reason)),
+        (atom("message"), binary(&err.to_string())),
+    ]))
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -1539,6 +1628,7 @@ fn handle_request(request_term: &Term) -> Term {
         "find_field_readers_in_source" => handle_find_field_readers_in_source(map),
         "find_field_writers_in_source" => handle_find_field_writers_in_source(map),
         "find_ffi_sites_in_source" => handle_find_ffi_sites_in_source(map),
+        "resolve_method_span" => handle_resolve_method_span(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -1914,6 +2004,99 @@ mod tests {
             map_get(m, "class_name").and_then(term_to_string),
             Some("String".to_string())
         );
+    }
+
+    // --- resolve_method_span tests (ADR 0082 Phase 1, BT-2283) ---
+
+    const SPAN_FIXTURE: &str = "\
+Object subclass: Counter
+
+  increment => self.value := self.value + 1
+
+  class new => self basicNew
+";
+
+    #[test]
+    fn resolve_method_span_instance_method() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_method_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+            (atom("selector"), binary("increment")),
+        ]);
+        let response = handle_resolve_method_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        // prev_source must be exactly the bytes occupying the span — splicing it
+        // back is a no-op, the load-bearing property of the splice strategy.
+        let prev = map_get(m, "prev_source")
+            .and_then(term_to_string)
+            .expect("prev_source present");
+        assert!(prev.starts_with("increment =>"), "got: {prev:?}");
+        assert!(
+            prev.ends_with('\n'),
+            "span includes trailing newline: {prev:?}"
+        );
+        let Some(Term::Map(span)) = map_get(m, "span") else {
+            panic!("span should be a map: {response:?}");
+        };
+        let start = map_get(span, "start").and_then(term_to_usize).unwrap();
+        let end = map_get(span, "end").and_then(term_to_usize).unwrap();
+        assert_eq!(&SPAN_FIXTURE[start..end], prev, "span must bound prev_source");
+    }
+
+    #[test]
+    fn resolve_method_span_class_side() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_method_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+            (atom("selector"), binary("new")),
+            (atom("side"), atom("class")),
+        ]);
+        let response = handle_resolve_method_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let prev = map_get(m, "prev_source")
+            .and_then(term_to_string)
+            .expect("prev_source present");
+        assert!(prev.starts_with("class new =>"), "got: {prev:?}");
+    }
+
+    #[test]
+    fn resolve_method_span_selector_not_found_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_method_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+            (atom("selector"), binary("nope")),
+        ]);
+        let response = handle_resolve_method_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(map_get(m, "reason"), Some(&atom("selector_not_found")));
+    }
+
+    #[test]
+    fn resolve_method_span_class_not_found_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_method_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("NoSuchClass")),
+            (atom("selector"), binary("increment")),
+        ]);
+        let response = handle_resolve_method_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
     }
 
     /// BT-1238: `compile_expression_trace` produces Core Erlang with trace list return.

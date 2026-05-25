@@ -26,6 +26,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_field_readers_in_source/3,
     find_field_writers_in_source/3,
     find_ffi_sites_in_source/5,
+    resolve_method_span/5,
     close/1
 ]).
 
@@ -705,6 +706,97 @@ find_ffi_sites_in_source(_Port, _Source, _Module, _Function, _Arity) ->
                 >>
         }
     ]}.
+
+-doc """
+Resolve the byte span of a method definition in `Source' (ADR 0082 Phase 1).
+
+Given the current on-disk source of a `.bt' file and a target
+`(ClassName, Selector, Side)', returns the exact byte span of that method's
+definition plus the bytes currently occupying it (`prev_source'). The
+live-patch install hook uses both to record a flushable ChangeEntry:
+`span'/`prev_source' let a later `Workspace flush' splice the patched body back
+into the file by byte-span replacement, and let restart detect disk drift.
+
+`Side' is `instance' or `class'. Returns
+`{ok, #{start := S, end := E}, PrevSource}' on success. Resolution failures
+(class not found, selector not found, ambiguous) come back as
+`{error, Reason, Message}' with `Reason' an atom — the hook downgrades to a
+memory-only patch rather than failing the install. Transport failures (port
+down, timeout) return `{error, port_error, Message}'.
+""".
+-spec resolve_method_span(port(), binary(), atom() | binary(), atom() | binary(), instance | class) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_method_span(Port, Source, ClassName, Selector, Side) when
+    is_binary(Source),
+    (is_atom(ClassName) orelse is_binary(ClassName)),
+    (is_atom(Selector) orelse is_binary(Selector)),
+    (Side =:= instance orelse Side =:= class)
+->
+    Request = #{
+        command => resolve_method_span,
+        source => Source,
+        class_name => to_binary(ClassName),
+        selector => to_binary(Selector),
+        side => Side
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_method_span_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (method span)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during method-span query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (method span)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (method span)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+resolve_method_span(_Port, _Source, _ClassName, _Selector, _Side) ->
+    {error, bad_argument,
+        <<"resolve_method_span: source/class/selector must be binary or atom, "
+            "side instance or class">>}.
+
+-spec handle_method_span_response(map()) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+handle_method_span_response(#{
+    status := ok, span := #{start := Start, 'end' := End}, prev_source := PrevSource
+}) when is_integer(Start), is_integer(End), is_binary(PrevSource) ->
+    {ok, #{start => Start, 'end' => End}, PrevSource};
+handle_method_span_response(#{status := error, reason := Reason} = Resp) ->
+    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
+    {error, Reason, Message};
+handle_method_span_response(Other) ->
+    ?LOG_ERROR("Unexpected method-span response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
 
 %% Normalise an atom-or-binary identifier to a binary.
 -spec to_binary(atom() | binary()) -> binary().
