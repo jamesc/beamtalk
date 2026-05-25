@@ -338,11 +338,19 @@ build_compiled_class_info(
     %% The compiler emits isConstructible based on the `new => self error:` pattern.
     %% Superclass inheritance is handled at init/query time via the class hierarchy.
     IsConstructible = maps:get(isConstructible, BuilderState, undefined),
+    %% BT-2275: Preserve the full fieldSpecs map (field => default value) so a
+    %% module-less builder class can build a generic instance from the declared
+    %% defaults. `fields` carries only the names (the convergence target —
+    %% compiled value-type metadata also stores names only, baking the defaults
+    %% into the generated `new/0`); `field_defaults` carries the initial values
+    %% the runtime instantiation path needs when there is no loaded module.
+    FieldDefaults = maps:get(fieldSpecs, BuilderState, #{}),
     Base = #{
         name => ClassName,
         superclass => SuperclassName,
         module => Module,
         fields => Fields,
+        field_defaults => FieldDefaults,
         instance_methods => InstanceMethods,
         class_methods => ClassMethods,
         is_sealed => IsSealed,

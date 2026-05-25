@@ -816,6 +816,80 @@ register_class_method_fun_callable_test_() ->
         ]
     end}.
 
+%% BT-2275: `self new` inside a fun-backed class method of a module-less builder
+%% class returns a usable generic instance. The class-method fun runs inside the
+%% class gen_server, so it routes through handle_self_instantiation exactly as
+%% compiled class-method codegen does — reading field defaults from the process
+%% dictionary cache rather than gen_server:call-ing self (which would deadlock).
+register_self_new_in_class_method_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% `self new` from inside a class method routes through
+                %% class_send(self(), 'new', _), which short-circuits to the
+                %% self-instantiation path (BT-893) — exactly what class-method
+                %% codegen emits for a `self new` send.
+                Make = fun(_ClassSelf, _ClassVars) ->
+                    beamtalk_class_dispatch:class_send(self(), 'new', [])
+                end,
+                State = #{
+                    className => 'BT2275SelfNew',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{a => 1},
+                    methodSpecs => #{},
+                    classMethods => #{make => Make}
+                },
+                {ok, Pid} = beamtalk_class_builder:register(State),
+                Instance = beamtalk_class_dispatch:class_send(Pid, make, []),
+                ?assert(is_map(Instance)),
+                ?assertEqual('BT2275SelfNew', maps:get('$beamtalk_class', Instance)),
+                ?assertEqual(1, maps:get(a, Instance)),
+                gen_server:stop(Pid, normal, 5000)
+            end),
+
+            %% `self new: #{...}` self-instantiation merges the initialiser map.
+            ?_test(begin
+                MakeWith = fun(_ClassSelf, _ClassVars) ->
+                    beamtalk_class_dispatch:class_send(self(), 'new:', [#{a => 42}])
+                end,
+                State = #{
+                    className => 'BT2275SelfNewWith',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{a => 1},
+                    methodSpecs => #{},
+                    classMethods => #{makeWith => MakeWith}
+                },
+                {ok, Pid} = beamtalk_class_builder:register(State),
+                Instance = beamtalk_class_dispatch:class_send(Pid, makeWith, []),
+                ?assertEqual(42, maps:get(a, Instance)),
+                gen_server:stop(Pid, normal, 5000)
+            end),
+
+            %% `self new` on an abstract module-less class raises
+            %% instantiation_error — the generic path screens abstractness via
+            %% the process-dict flag, matching the external `X new` rejection.
+            ?_test(begin
+                MakeAbstract = fun(_ClassSelf, _ClassVars) ->
+                    beamtalk_class_dispatch:class_send(self(), 'new', [])
+                end,
+                State = #{
+                    className => 'BT2275SelfNewAbstract',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{a => 1},
+                    methodSpecs => #{},
+                    classMethods => #{make => MakeAbstract},
+                    modifiers => [abstract]
+                },
+                {ok, Pid} = beamtalk_class_builder:register(State),
+                ?assertError(
+                    #{error := #beamtalk_error{kind = instantiation_error}},
+                    beamtalk_class_dispatch:class_send(Pid, make, [])
+                ),
+                gen_server:stop(Pid, normal, 5000)
+            end)
+        ]
+    end}.
+
 %% Reload precedence (ADR 0082): a hot reload with no class methods drops the
 %% memory-only runtime class-method fun — disk wins, mirroring instance-side
 %% put_method reload semantics.
