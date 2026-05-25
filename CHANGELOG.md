@@ -446,7 +446,7 @@ New language modifier ([ADR 0071](docs/ADR/0071-class-visibility-internal-modifi
 - **Protocols** — `Protocol` declarations with class-body syntax, protocol registry with conformance checking, runtime queries (`conformsTo:`, `protocols`), variance for protocol-typed parameters, and type parameter bounds (`T :: Printable`) ([ADR 0068](docs/ADR/0068-parametric-types-and-protocols.md))
 - **Union types** — `T | U` syntax with exhaustive type checking and provenance tracking
 - **Control flow narrowing** — `class =`, `isKindOf:`, `isNil`, and `respondsTo:` narrow types in `ifTrue:`/`ifFalse:` branches
-- **String is now a subclass of Binary** — String inherits Binary's byte-level methods; Binary moved under Collection hierarchy ([ADR 0069](docs/ADR/0069-string-subclass-of-binary.md))
+- **String is now a subclass of Binary** — String inherits Binary's byte-level methods; Binary moved under Collection hierarchy ([ADR 0086](docs/ADR/0086-string-subclass-of-binary.md))
 - **DynamicSupervisor type parameter** — `startChild` return type narrows based on the supervisor's declared child type
 
 ### Standard Library
@@ -474,7 +474,7 @@ New language modifier ([ADR 0071](docs/ADR/0071-class-visibility-internal-modifi
 
 - ADR 0068: Parametric Types and Protocols (updated)
 - ADR 0069: Actor Observability and Tracing (BT-1429)
-- ADR 0069: Make String a subclass of Binary
+- ADR 0086 (originally 0069): Make String a subclass of Binary
 - Learning guide 27: Generics and Protocols
 
 ### Internal

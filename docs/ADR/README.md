@@ -96,7 +96,6 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
 | [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented | 2026-03-21 |
-| [0069](0069-string-subclass-of-binary.md) † | Make String a Subclass of Binary | Implemented | 2026-03-21 |
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |
@@ -112,8 +111,9 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
 | [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Accepted (in progress) | 2026-05-24 |
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
+| [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
 
-† **Numbering collision:** the number `0069` was assigned to two ADRs — *Actor Observability and Tracing* and *Make String a Subclass of Binary*. Both are kept for historical accuracy; new ADRs must not reuse `0069`.
+> ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
 ## Creating New ADRs
 

@@ -3152,7 +3152,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 
 | Class | Description |
 |-------|-------------|
-| **Binary** | Byte-level data — Collection subclass, parent of String ([ADR 0069](ADR/0069-string-subclass-of-binary.md)) |
+| **Binary** | Byte-level data — Collection subclass, parent of String ([ADR 0086](ADR/0086-string-subclass-of-binary.md)) |
 | **Array** | Fixed-size indexed collection |
 | **List** | Linked list with fast prepend (`#()` syntax) |
 | **Dictionary** | Key-value map |
@@ -3222,7 +3222,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 
 ### Binary — Byte-Level Data
 
-Binary is a sealed Collection subclass for byte-level data. String is a subclass of Binary that adds grapheme-aware text operations. The class hierarchy is `Collection > Binary > String` ([ADR 0069](ADR/0069-string-subclass-of-binary.md)).
+Binary is a sealed Collection subclass for byte-level data. String is a subclass of Binary that adds grapheme-aware text operations. The class hierarchy is `Collection > Binary > String` ([ADR 0086](ADR/0086-string-subclass-of-binary.md)).
 
 On BEAM, Beamtalk binaries map directly to Erlang binaries (`binary()`). All strings are binaries at runtime — the type system uses the subclass relationship so that String is accepted wherever Binary is expected (e.g. `File writeBinary:contents:` accepts strings without type warnings).
 
