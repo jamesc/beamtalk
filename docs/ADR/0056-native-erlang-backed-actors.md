@@ -1,7 +1,7 @@
 # ADR 0056: Native Erlang-Backed Actors — `native:` and `self delegate`
 
 ## Status
-Accepted (2026-03-07) — Revised from initial `@native` annotation design
+Accepted (partial, 2026-03-07) — revised from initial `@native` annotation design
 
 ## Context
 

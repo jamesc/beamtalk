@@ -11,7 +11,7 @@ instance methods for binary data.
 
 Binary provides class-side methods for serializing/deserializing Erlang
 terms and working with byte-level binary data, plus instance methods for
-iteration, slicing, and conversion (ADR 0069 Phase 1).
+iteration, slicing, and conversion (ADR 0086 Phase 1).
 
 ## Class Methods
 
@@ -51,7 +51,7 @@ iteration, slicing, and conversion (ADR 0069 Phase 1).
 ]).
 -export([serialize/1, deserialize/1, size/1, fromIolist/1, fromBytes/1, deserializeWithUsed/1]).
 
-%% Instance methods (ADR 0069 Phase 1)
+%% Instance methods (ADR 0086 Phase 1)
 -export([do/2, at/2, byte_at/2, byte_size/1, part/3, concat/2]).
 -export([to_bytes/1, from_bytes/1]).
 -export([as_string/1, as_string_unchecked/1, print_string/1]).
@@ -118,7 +118,7 @@ input. Atoms not already in the atom table will cause an error.
     end.
 
 %%% ============================================================================
-%%% Instance Methods (ADR 0069 Phase 1)
+%%% Instance Methods (ADR 0086 Phase 1)
 %%% ============================================================================
 
 -doc "Iterate over bytes in binary, calling Fun with each byte (Integer 0-255).".

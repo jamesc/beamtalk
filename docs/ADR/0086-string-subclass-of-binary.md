@@ -1,7 +1,11 @@
-# ADR 0069: Make String a Subclass of Binary
+# ADR 0086: Make String a Subclass of Binary
 
 ## Status
-Accepted (2026-03-21)
+Implemented (2026-03-21)
+
+> **Renumbered** from ADR 0069 to ADR 0086 (2026-05-25) to resolve a numbering
+> collision with ADR 0069 (Actor Observability and Tracing). Linear epic BT-1590
+> and historical commits/code comments may still cite "ADR 0069".
 
 ## Context
 
@@ -354,10 +358,10 @@ Rejected because String is already a Collection — if Binary is between Collect
 
 ## Implementation Tracking
 
-**Epic:** BT-1590 — Epic: String subclass of Binary (ADR 0069)
+**Epic:** BT-1590 — Epic: String subclass of Binary (ADR 0086, formerly 0069)
 **Issues:** BT-1591, BT-1592, BT-1593, BT-1594, BT-1595, BT-1596, BT-1597
 **Supersedes:** BT-1560 (subset of Binary methods)
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 - Related issues: BT-1555 (File binary I/O), Exdura EventStore FFI removal

@@ -1,7 +1,7 @@
 # ADR 0080: Migrate Supervisor Lifecycle to Result
 
 ## Status
-Accepted (2026-04-16). Phase 0a probe (BT-1994) empirically selected
+Implemented (2026-04-16) — all phases landed (BT-1994..BT-2001)
 **Option 2** (hook extension) over Option 3 (synchronous helper
 process); see §Phase 0a Probe Outcome below and §Phase 1 for the
 updated prescription.

@@ -1,7 +1,7 @@
 # ADR 0067: Separate state:/field: Keywords by Class Kind
 
 ## Status
-Accepted (2026-03-18)
+Implemented (2026-03-18)
 
 ## Context
 
@@ -567,7 +567,7 @@ Set, Bag, Interval (currently `Collection subclass:`, will inherit Value kind af
 ## Implementation Tracking
 
 **Epic:** [BT-1526](https://linear.app/beamtalk/issue/BT-1526)
-**Status:** Planned
+**Status:** Implemented
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|

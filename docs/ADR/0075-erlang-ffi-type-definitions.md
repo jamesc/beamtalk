@@ -1,7 +1,7 @@
 # ADR 0075: Erlang FFI Type Definitions
 
 ## Status
-Accepted (2026-04-02)
+Implemented (Phase 1, 2026-04-02; Phase 2 deferred)
 
 ## Context
 
