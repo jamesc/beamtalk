@@ -21,6 +21,7 @@ Architecture (from ADR 0004, implemented in BT-262):
 ```
 beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
+  ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082, BT-2282)
   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
@@ -120,6 +121,25 @@ init(Config) ->
                 shutdown => 5000,
                 type => worker,
                 modules => [beamtalk_workspace_meta]
+            },
+
+            %% ChangeLog gen_server (ADR 0082 Phase 1, BT-2282).
+            %% Append-only log of live in-memory method mutations; dirty-state +
+            %% undo store, consumed cross-surface (REPL/MCP/LSP/browser). Owns the
+            %% two-part on-disk persistence under <workspace>/changes/. Depends only
+            %% on workspace_id, so it can start right after meta. In run mode
+            %% (repl=false) the id is dropped to undefined so the log stays
+            %% memory-only — no workspace artifacts on disk, matching workspace_meta.
+            #{
+                id => beamtalk_workspace_changelog,
+                start =>
+                    {beamtalk_workspace_changelog, start_link, [
+                        #{workspace_id => changelog_workspace_id(Repl, WorkspaceId)}
+                    ]},
+                restart => permanent,
+                shutdown => 5000,
+                type => worker,
+                modules => [beamtalk_workspace_changelog]
             }
 
             %% Actor singleton — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
@@ -238,6 +258,17 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, Max
             modules => [beamtalk_session_sup]
         }
     ].
+
+%%% ChangeLog workspace id
+
+-doc """
+Resolve the workspace id passed to the ChangeLog gen_server.
+Run mode (repl=false) returns `undefined` so the log stays memory-only and
+writes no artifacts to disk; REPL mode passes the real id through.
+""".
+-spec changelog_workspace_id(boolean(), binary()) -> binary() | undefined.
+changelog_workspace_id(false, _WorkspaceId) -> undefined;
+changelog_workspace_id(true, WorkspaceId) -> WorkspaceId.
 
 %%% Singleton Child Specs
 

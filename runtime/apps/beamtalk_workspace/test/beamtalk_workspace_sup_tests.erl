@@ -49,11 +49,11 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 10 children: workspace_meta, transcript_stream, actor_registry,
-    %% class_events, bindings_events, workspace_bootstrap, repl_server, idle_monitor,
-    %% actor_sup, session_sup.
+    %% Should have 11 children: workspace_meta, workspace_changelog,
+    %% transcript_stream, actor_registry, class_events, bindings_events,
+    %% workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup.
     %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
-    ?assertEqual(10, length(ChildSpecs)).
+    ?assertEqual(11, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -63,6 +63,7 @@ children_ids_test() ->
     %% they are NOT gen_server children of this supervisor.
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
+    ?assert(lists:member(beamtalk_workspace_changelog, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
@@ -258,6 +259,7 @@ all_children_alive_test() ->
         %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
         ExpectedIds = [
             beamtalk_workspace_meta,
+            beamtalk_workspace_changelog,
             beamtalk_transcript_stream,
             beamtalk_actor_registry,
             beamtalk_class_events,
@@ -472,10 +474,10 @@ run_mode_config() ->
 run_mode_children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
 
-    %% Run mode: 7 children (no repl_server, idle_monitor, session_sup).
-    %% workspace_meta, transcript_stream, actor_registry, class_events,
-    %% bindings_events, workspace_bootstrap, actor_sup.
-    ?assertEqual(7, length(ChildSpecs)).
+    %% Run mode: 8 children (no repl_server, idle_monitor, session_sup).
+    %% workspace_meta, workspace_changelog, transcript_stream, actor_registry,
+    %% class_events, bindings_events, workspace_bootstrap, actor_sup.
+    ?assertEqual(8, length(ChildSpecs)).
 
 run_mode_no_repl_server_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),

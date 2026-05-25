@@ -1,0 +1,775 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_workspace_changelog).
+-behaviour(gen_server).
+
+%%% **DDD Context:** Workspace Context
+
+-moduledoc """
+Append-only ChangeLog for live in-memory method mutations (ADR 0082 Phase 1).
+
+The ChangeLog is the workspace-local record of every in-memory class/method
+mutation made via the live-edit path (`Counter >> sel`, `compile:source:`,
+`tryCompile:source:`, `Workspace newClass:at:`). It is both the *dirty-state*
+tracker — "what has the running workspace changed relative to disk?" — and the
+*undo* store. It lives in the **Workspace context** (not the REPL) because it is
+consumed cross-surface by REPL, MCP, LSP, and the browser IDE.
+
+This module owns the gen_server that serialises log appends (and, in a later
+phase, flush-start reads). Live state is held in an ETS table for fast,
+concurrent reads; durable state is a two-part on-disk layout per the ADR:
+
+```
+<workspace>/changes/
+  changes.jsonl              % one compact JSON object per ChangeEntry
+  sources/
+    000142-source.bt        % the patched method body (source_ref)
+    000142-prev.bt          % the prior on-disk body (prev_source_ref), if any
+  archive/
+    changes-<ts>.jsonl.gz    % rotated metadata segment
+    sources-<ts>.tar.gz      % rotated source bodies
+```
+
+The metadata line stays small (well under ~300 chars) regardless of method
+size because the bodies live in `sources/` as plain `.bt` files — `cat`, `less`,
+`bt fmt`, `diff`, and syntax highlighting all work on them without escaping.
+
+### ChangeEntry schema
+
+Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
+*ChangeLog format*):
+
+| Field                  | Type                                   | Notes |
+|------------------------|----------------------------------------|-------|
+| `ts`                   | integer (ms since epoch)               | append time |
+| `seq`                  | integer                                | monotonic per workspace |
+| `epoch`                | integer                                | bumped each workspace start |
+| `class`                | string                                 | e.g. `"Counter"` |
+| `selector`             | string \| null                         | null for `new-class` |
+| `kind`                 | `"instance"`\|`"class"`\|`"new-class"` | open enum |
+| `source_ref`           | string                                 | filename in `sources/` |
+| `prev_source_ref`      | string \| null                         | null for `new-class` |
+| `sourceFile`           | string \| null                         | null for stdlib/dynamic |
+| `span`                 | `{start,end}` \| null                  | null for `new-class` |
+| `intent`               | `"durable"`\|`"ephemeral"`             | |
+| `flushable`            | boolean                                | true iff in-project source |
+| `not_flushable_reason` | string \| null                         | `"stdlib"`/`"dynamic"`/`"dependency:<path>"` |
+| `author`               | string                                 | session/tool id |
+| `author_kind`          | `"human"`\|`"agent"`                   | audit metadata |
+
+### Restart semantics
+
+The on-disk log survives workspace restart; the in-memory BEAM module state does
+not. On startup the gen_server reads `changes.jsonl`, assigns a **fresh epoch**
+(prior `max(epoch)` + 1), and tags every pre-existing entry as belonging to a
+prior epoch. An entry is additionally tagged `orphan` when its recorded
+`prev_source` no longer matches the current on-disk content of `sourceFile` (the
+disk advanced — via VSCode/git/another flush — while the workspace was down).
+Prior-epoch and orphan entries are excluded from the active dirty view; they
+remain in the log for audit.
+
+### Scope (Phase 1)
+
+This module implements the gen_server, the append API, the two-part persistence,
+restart epoch/orphan tagging, and the bounded ring with archive rotation. The
+install hook that *emits* entries, `Workspace flush`, and the `ChangeLog.bt`
+stdlib facade are later phases (BT-2280 epic). In run mode (no workspace, no
+`workspace_id`) the gen_server keeps state in ETS only and never touches disk —
+release nodes do not start a workspace, so this code is a no-op there.
+""".
+
+-include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+%% Public API
+-export([
+    start_link/1,
+    append/1,
+    entries/0,
+    active_entries/0,
+    size/0,
+    epoch/0,
+    clear/0
+]).
+
+%% Accessors on the opaque entry type (used by callers and tests).
+-export([
+    entry_seq/1,
+    entry_class/1,
+    entry_selector/1,
+    entry_kind/1,
+    entry_intent/1,
+    entry_flushable/1,
+    entry_author_kind/1,
+    entry_is_orphan/1,
+    entry_is_prior_epoch/1
+]).
+
+%% gen_server callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+%% Exported for tests only.
+-export([changes_dir/1, entry_to_json/1, entry_from_json/1]).
+
+-define(ETS_TABLE, beamtalk_changelog_entries).
+%% Bounded ring: keep at most this many entries on disk before rotating older
+%% segments into archive/ (ADR 0082, "ChangeLog growth").
+-define(MAX_ENTRIES, 1000).
+
+%%% ----------------------------------------------------------------------------
+%%% Types
+%%% ----------------------------------------------------------------------------
+
+-type kind() :: instance | class | 'new-class'.
+-type intent() :: durable | ephemeral.
+-type author_kind() :: human | agent.
+-type span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
+
+%% A ChangeEntry as stored in memory. Bodies are not kept in the record —
+%% only the `source_ref` / `prev_source_ref` filenames — so the ETS footprint
+%% stays small regardless of method size. The bodies live as files in sources/.
+-record(entry, {
+    seq :: non_neg_integer(),
+    ts :: integer(),
+    epoch :: non_neg_integer(),
+    class :: binary(),
+    selector :: binary() | undefined,
+    kind :: kind(),
+    source_ref :: binary(),
+    prev_source_ref :: binary() | undefined,
+    source_file :: binary() | undefined,
+    span :: span() | undefined,
+    intent :: intent(),
+    flushable :: boolean(),
+    not_flushable_reason :: binary() | undefined,
+    author :: binary(),
+    author_kind :: author_kind(),
+    %% Derived, in-memory only — not persisted (recomputed on restart).
+    prior_epoch = false :: boolean(),
+    orphan = false :: boolean()
+}).
+
+-opaque entry() :: #entry{}.
+
+%% Input map accepted by append/1. Bodies (`source`, `prev_source`) are passed
+%% in full; the gen_server writes them to sources/ and stores only the refs.
+-type append_input() :: #{
+    class := binary(),
+    kind := kind(),
+    source := binary(),
+    intent := intent(),
+    flushable := boolean(),
+    author := binary(),
+    author_kind := author_kind(),
+    selector => binary() | undefined,
+    prev_source => binary() | undefined,
+    source_file => binary() | undefined,
+    span => span() | undefined,
+    not_flushable_reason => binary() | undefined
+}.
+
+-export_type([entry/0, append_input/0, kind/0, intent/0, author_kind/0, span/0]).
+
+-record(state, {
+    %% Absolute path to <workspace>/changes, or undefined in run mode
+    %% (no workspace_id) — in run mode everything stays in ETS only.
+    changes_dir :: string() | undefined,
+    %% Path to changes.jsonl (undefined in run mode).
+    log_path :: string() | undefined,
+    %% Next sequence number to assign (monotonic across restarts).
+    next_seq :: non_neg_integer(),
+    %% Epoch for entries appended in this session (bumped each start).
+    epoch :: non_neg_integer()
+}).
+
+%%% ----------------------------------------------------------------------------
+%%% Public API
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Start the ChangeLog gen_server, registered locally under the module name.
+
+`Config` is a map; the only field consulted in Phase 1 is `workspace_id`
+(binary). When absent or `undefined` the server runs in *memory-only* mode
+(run mode / tests with no workspace): ETS holds the live entries and nothing is
+written to disk. When present, durable state lives under
+`<home>/.beamtalk/workspaces/<workspace_id>/changes/`.
+""".
+-spec start_link(map()) -> {ok, pid()} | {error, term()}.
+start_link(Config) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []).
+
+-doc """
+Append a ChangeEntry to the log.
+
+Writes the source bodies to `sources/` and the metadata line to `changes.jsonl`
+crash-safely (bodies first, then the metadata line that references them, so a
+crash never leaves a metadata line pointing at a missing body), assigns the next
+sequence number, and inserts the entry into ETS. Returns the assigned `seq`.
+
+The append is serialised by the gen_server, so concurrent callers cannot
+interleave sequence numbers or partial writes.
+""".
+-spec append(append_input()) -> {ok, non_neg_integer()} | {error, #beamtalk_error{}}.
+append(Input) when is_map(Input) ->
+    gen_server:call(?MODULE, {append, Input}).
+
+-doc "Return all entries (including prior-epoch and orphan), oldest first.".
+-spec entries() -> [entry()].
+entries() ->
+    Es = [E || {_Seq, E} <- ets:tab2list(?ETS_TABLE)],
+    lists:keysort(#entry.seq, Es).
+
+-doc """
+Return only *active* entries — those from the current epoch that are not
+orphaned. This is the dirty-state view; `Workspace changes` (a later phase) is
+backed by this. Prior-epoch and orphan entries are excluded.
+""".
+-spec active_entries() -> [entry()].
+active_entries() ->
+    [E || E <- entries(), not E#entry.prior_epoch, not E#entry.orphan].
+
+-doc "Total number of entries in the log (all epochs).".
+-spec size() -> non_neg_integer().
+size() ->
+    ets:info(?ETS_TABLE, size).
+
+-doc "The epoch assigned to entries appended in this session.".
+-spec epoch() -> non_neg_integer().
+epoch() ->
+    gen_server:call(?MODULE, epoch).
+
+-doc """
+Discard all entries from the in-memory log and truncate the on-disk metadata
+segment. Source bodies in `sources/` are left in place (they are cheap and a
+later `revert:`/audit flow may still want them; rotation prunes them). Used by
+`Workspace changes clear` (a later phase) and by tests.
+""".
+-spec clear() -> ok.
+clear() ->
+    gen_server:call(?MODULE, clear).
+
+%%% ----------------------------------------------------------------------------
+%%% Entry accessors
+%%% ----------------------------------------------------------------------------
+%%% The entry() type is opaque; these accessors are the supported way to read a
+%%% ChangeEntry's fields (consumed by later phases and by tests).
+
+-spec entry_seq(entry()) -> non_neg_integer().
+entry_seq(#entry{seq = V}) -> V.
+
+-spec entry_class(entry()) -> binary().
+entry_class(#entry{class = V}) -> V.
+
+-spec entry_selector(entry()) -> binary() | undefined.
+entry_selector(#entry{selector = V}) -> V.
+
+-spec entry_kind(entry()) -> kind().
+entry_kind(#entry{kind = V}) -> V.
+
+-spec entry_intent(entry()) -> intent().
+entry_intent(#entry{intent = V}) -> V.
+
+-spec entry_flushable(entry()) -> boolean().
+entry_flushable(#entry{flushable = V}) -> V.
+
+-spec entry_author_kind(entry()) -> author_kind().
+entry_author_kind(#entry{author_kind = V}) -> V.
+
+-spec entry_is_orphan(entry()) -> boolean().
+entry_is_orphan(#entry{orphan = V}) -> V.
+
+-spec entry_is_prior_epoch(entry()) -> boolean().
+entry_is_prior_epoch(#entry{prior_epoch = V}) -> V.
+
+%%% ----------------------------------------------------------------------------
+%%% gen_server callbacks
+%%% ----------------------------------------------------------------------------
+
+init(Config) ->
+    %% Inherit the runtime logging domain for every log call from this process.
+    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    WorkspaceId = maps:get(workspace_id, Config, undefined),
+    ChangesDir = changes_dir(WorkspaceId),
+    ensure_ets(),
+    State0 = #state{
+        changes_dir = ChangesDir,
+        log_path = log_path(ChangesDir),
+        next_seq = 0,
+        epoch = 0
+    },
+    State = load_from_disk(State0),
+    {ok, State}.
+
+handle_call({append, Input}, _From, State) ->
+    case do_append(Input, State) of
+        {ok, Seq, State1} ->
+            {reply, {ok, Seq}, State1};
+        {error, _Reason} = Err ->
+            {reply, Err, State}
+    end;
+handle_call(epoch, _From, State) ->
+    {reply, State#state.epoch, State};
+handle_call(clear, _From, State) ->
+    ets:delete_all_objects(?ETS_TABLE),
+    truncate_log(State),
+    {reply, ok, State};
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%% ----------------------------------------------------------------------------
+%%% Append
+%%% ----------------------------------------------------------------------------
+
+-spec do_append(append_input(), #state{}) ->
+    {ok, non_neg_integer(), #state{}} | {error, #beamtalk_error{}}.
+do_append(Input, State) ->
+    Seq = State#state.next_seq,
+    SourceRef = source_ref_filename(Seq, source),
+    PrevSource = maps:get(prev_source, Input, undefined),
+    PrevSourceRef =
+        case PrevSource of
+            undefined -> undefined;
+            _ -> source_ref_filename(Seq, prev)
+        end,
+    Entry = #entry{
+        seq = Seq,
+        ts = erlang:system_time(millisecond),
+        epoch = State#state.epoch,
+        class = maps:get(class, Input),
+        selector = maps:get(selector, Input, undefined),
+        kind = maps:get(kind, Input),
+        source_ref = SourceRef,
+        prev_source_ref = PrevSourceRef,
+        source_file = maps:get(source_file, Input, undefined),
+        span = maps:get(span, Input, undefined),
+        intent = maps:get(intent, Input),
+        flushable = maps:get(flushable, Input),
+        not_flushable_reason = maps:get(not_flushable_reason, Input, undefined),
+        author = maps:get(author, Input),
+        author_kind = maps:get(author_kind, Input)
+    },
+    case persist_append(Entry, maps:get(source, Input), PrevSource, State) of
+        ok ->
+            ets:insert(?ETS_TABLE, {Seq, Entry}),
+            State1 = State#state{next_seq = Seq + 1},
+            State2 = maybe_rotate(State1),
+            {ok, Seq, State2};
+        {error, Reason} ->
+            {error, append_error(Reason)}
+    end.
+
+%% Crash-safe persistence ordering: write the body files first (atomically via
+%% temp+rename), then append the metadata line. A crash between the two leaves
+%% orphaned body files (harmless — pruned on rotation) but never a metadata line
+%% pointing at a missing body. In run mode (no changes_dir) this is a no-op and
+%% the entry lives in ETS only.
+-spec persist_append(#entry{}, binary(), binary() | undefined, #state{}) ->
+    ok | {error, term()}.
+persist_append(_Entry, _Source, _PrevSource, #state{changes_dir = undefined}) ->
+    ok;
+persist_append(Entry, Source, PrevSource, State) ->
+    SourcesDir = filename:join(State#state.changes_dir, "sources"),
+    case filelib:ensure_path(SourcesDir) of
+        ok ->
+            SourcePath = filename:join(SourcesDir, binary_to_list(Entry#entry.source_ref)),
+            case write_file_atomic(SourcePath, Source) of
+                ok ->
+                    case write_prev_source(SourcesDir, Entry, PrevSource) of
+                        ok -> append_metadata_line(Entry, State);
+                        Err -> Err
+                    end;
+                Err ->
+                    Err
+            end;
+        {error, Reason} ->
+            {error, {ensure_path, SourcesDir, Reason}}
+    end.
+
+-spec write_prev_source(string(), #entry{}, binary() | undefined) -> ok | {error, term()}.
+write_prev_source(_SourcesDir, #entry{prev_source_ref = undefined}, _PrevSource) ->
+    ok;
+write_prev_source(SourcesDir, #entry{prev_source_ref = Ref}, PrevSource) ->
+    Path = filename:join(SourcesDir, binary_to_list(Ref)),
+    write_file_atomic(Path, PrevSource).
+
+-spec append_metadata_line(#entry{}, #state{}) -> ok | {error, term()}.
+append_metadata_line(Entry, State) ->
+    Line = [entry_to_json(Entry), $\n],
+    case file:write_file(State#state.log_path, Line, [append]) of
+        ok -> ok;
+        {error, Reason} -> {error, {write_log, Reason}}
+    end.
+
+%%% ----------------------------------------------------------------------------
+%%% Load on startup (restart semantics)
+%%% ----------------------------------------------------------------------------
+
+%% Read changes.jsonl, rebuild ETS, assign a fresh epoch, and tag every
+%% pre-existing entry as prior-epoch + (if prev_source no longer matches disk)
+%% orphan. In run mode (no changes_dir) there is nothing on disk — start clean.
+-spec load_from_disk(#state{}) -> #state{}.
+load_from_disk(#state{changes_dir = undefined} = State) ->
+    State#state{next_seq = 0, epoch = 0};
+load_from_disk(State) ->
+    LogPath = State#state.log_path,
+    case file:read_file(LogPath) of
+        {ok, Bin} ->
+            Entries = parse_log(Bin),
+            PriorEpochMax = max_epoch(Entries),
+            NextSeq = max_seq(Entries) + 1,
+            FreshEpoch = PriorEpochMax + 1,
+            SourcesDir = filename:join(State#state.changes_dir, "sources"),
+            Tagged = [tag_prior(E, SourcesDir) || E <- Entries],
+            lists:foreach(fun(E) -> ets:insert(?ETS_TABLE, {E#entry.seq, E}) end, Tagged),
+            State#state{next_seq = NextSeq, epoch = FreshEpoch};
+        {error, enoent} ->
+            State#state{next_seq = 0, epoch = 1};
+        {error, Reason} ->
+            ?LOG_WARNING("Failed to read ChangeLog at ~ts: ~p", [LogPath, Reason]),
+            State#state{next_seq = 0, epoch = 1}
+    end.
+
+%% Pre-existing entry → prior epoch; orphan iff its recorded prev_source no
+%% longer matches the current on-disk content of its sourceFile.
+-spec tag_prior(#entry{}, string()) -> #entry{}.
+tag_prior(Entry, SourcesDir) ->
+    Entry#entry{prior_epoch = true, orphan = is_orphan(Entry, SourcesDir)}.
+
+-spec is_orphan(#entry{}, string()) -> boolean().
+is_orphan(#entry{source_file = undefined}, _SourcesDir) ->
+    %% Non-flushable (stdlib/dynamic) entries have no disk file to compare —
+    %% their memory state is gone on restart, but they are not "orphaned"
+    %% against disk content. Excluded from the active view via prior_epoch.
+    false;
+is_orphan(#entry{prev_source_ref = undefined}, _SourcesDir) ->
+    %% new-class entries: the file should not have existed at append time. If it
+    %% exists now, the active view excludes it via prior_epoch regardless; we do
+    %% not mark new-class entries orphan here (relocation/conflict is Phase 2).
+    false;
+is_orphan(#entry{source_file = SourceFile, span = Span, prev_source_ref = PrevRef}, SourcesDir) ->
+    PrevPath = filename:join(SourcesDir, binary_to_list(PrevRef)),
+    case {file:read_file(binary_to_list(SourceFile)), file:read_file(PrevPath)} of
+        {{ok, DiskBin}, {ok, PrevBin}} ->
+            not span_matches(DiskBin, Span, PrevBin);
+        _ ->
+            %% Source file or recorded prev body unreadable → treat as orphaned:
+            %% the patch can no longer be safely reconciled against disk.
+            true
+    end.
+
+%% The recorded prev_source must still be byte-identical to the bytes currently
+%% occupying the recorded span in the on-disk file. If the span is out of range
+%% or the bytes differ, the disk advanced under us — orphan.
+-spec span_matches(binary(), span() | undefined, binary()) -> boolean().
+span_matches(_DiskBin, undefined, _PrevBin) ->
+    false;
+span_matches(DiskBin, #{start := Start, 'end' := End}, PrevBin) when
+    is_integer(Start), is_integer(End), End >= Start, End =< byte_size(DiskBin)
+->
+    binary:part(DiskBin, Start, End - Start) =:= PrevBin;
+span_matches(_DiskBin, _Span, _PrevBin) ->
+    false.
+
+-spec parse_log(binary()) -> [#entry{}].
+parse_log(Bin) ->
+    Lines = binary:split(Bin, <<"\n">>, [global, trim_all]),
+    lists:filtermap(
+        fun(Line) ->
+            try
+                {true, entry_from_json(Line)}
+            catch
+                Class:Reason ->
+                    ?LOG_WARNING("Skipping malformed ChangeLog line: ~p:~p", [Class, Reason]),
+                    false
+            end
+        end,
+        Lines
+    ).
+
+-spec max_seq([#entry{}]) -> integer().
+max_seq([]) -> -1;
+max_seq(Entries) -> lists:max([E#entry.seq || E <- Entries]).
+
+-spec max_epoch([#entry{}]) -> integer().
+max_epoch([]) -> 0;
+max_epoch(Entries) -> lists:max([E#entry.epoch || E <- Entries]).
+
+%%% ----------------------------------------------------------------------------
+%%% Bounded ring + archive rotation
+%%% ----------------------------------------------------------------------------
+
+%% When the on-disk log exceeds MAX_ENTRIES, archive the oldest segment
+%% (metadata as a gzipped .jsonl, the referenced source bodies as a gzipped tar)
+%% and drop those entries from the live log + ETS. Human and agent entries are
+%% pruned on equal footing — only the ring bound applies.
+-spec maybe_rotate(#state{}) -> #state{}.
+maybe_rotate(#state{changes_dir = undefined} = State) ->
+    State;
+maybe_rotate(State) ->
+    All = entries(),
+    case length(All) > ?MAX_ENTRIES of
+        false ->
+            State;
+        true ->
+            Overflow = length(All) - ?MAX_ENTRIES,
+            {ToArchive, ToKeep} = lists:split(Overflow, All),
+            archive_segment(ToArchive, State),
+            ets:delete_all_objects(?ETS_TABLE),
+            lists:foreach(fun(E) -> ets:insert(?ETS_TABLE, {E#entry.seq, E}) end, ToKeep),
+            rewrite_log(ToKeep, State),
+            State
+    end.
+
+-spec archive_segment([#entry{}], #state{}) -> ok.
+archive_segment(Entries, State) ->
+    ArchiveDir = filename:join(State#state.changes_dir, "archive"),
+    _ = filelib:ensure_path(ArchiveDir),
+    Ts = integer_to_list(erlang:system_time(second)),
+    archive_metadata(Entries, ArchiveDir, Ts),
+    archive_sources(Entries, ArchiveDir, Ts, State),
+    ok.
+
+-spec archive_metadata([#entry{}], string(), string()) -> ok.
+archive_metadata(Entries, ArchiveDir, Ts) ->
+    Path = filename:join(ArchiveDir, "changes-" ++ Ts ++ ".jsonl.gz"),
+    Lines = [[entry_to_json(E), $\n] || E <- Entries],
+    Gz = zlib:gzip(iolist_to_binary(Lines)),
+    case write_file_atomic(Path, Gz) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING("Failed to archive ChangeLog metadata to ~ts: ~p", [Path, Reason]),
+            ok
+    end.
+
+-spec archive_sources([#entry{}], string(), string(), #state{}) -> ok.
+archive_sources(Entries, ArchiveDir, Ts, State) ->
+    SourcesDir = filename:join(State#state.changes_dir, "sources"),
+    Refs = source_refs(Entries),
+    Members = collect_source_members(Refs, SourcesDir),
+    Path = filename:join(ArchiveDir, "sources-" ++ Ts ++ ".tar.gz"),
+    case Members of
+        [] ->
+            ok;
+        _ ->
+            case erl_tar:create(Path, Members, [compressed]) of
+                ok ->
+                    %% Tarred safely — remove the now-archived body files.
+                    lists:foreach(
+                        fun({_Name, AbsPath}) -> _ = file:delete(AbsPath) end, Members
+                    ),
+                    ok;
+                {error, Reason} ->
+                    ?LOG_WARNING("Failed to archive ChangeLog sources to ~ts: ~p", [Path, Reason]),
+                    ok
+            end
+    end.
+
+-spec source_refs([#entry{}]) -> [binary()].
+source_refs(Entries) ->
+    lists:flatten([refs_of(E) || E <- Entries]).
+
+-spec refs_of(#entry{}) -> [binary()].
+refs_of(#entry{source_ref = SR, prev_source_ref = undefined}) -> [SR];
+refs_of(#entry{source_ref = SR, prev_source_ref = PR}) -> [SR, PR].
+
+%% Build erl_tar member list {NameInArchive, AbsolutePath} for refs that exist.
+-spec collect_source_members([binary()], string()) -> [{string(), string()}].
+collect_source_members(Refs, SourcesDir) ->
+    lists:filtermap(
+        fun(Ref) ->
+            Name = binary_to_list(Ref),
+            Abs = filename:join(SourcesDir, Name),
+            case filelib:is_regular(Abs) of
+                true -> {true, {Name, Abs}};
+                false -> false
+            end
+        end,
+        Refs
+    ).
+
+%%% ----------------------------------------------------------------------------
+%%% On-disk helpers
+%%% ----------------------------------------------------------------------------
+
+%% Rewrite changes.jsonl from scratch with exactly Entries (used after rotation
+%% and never on the hot append path). Atomic temp+rename so a crash mid-rewrite
+%% cannot truncate the live log.
+-spec rewrite_log([#entry{}], #state{}) -> ok | {error, term()}.
+rewrite_log(_Entries, #state{log_path = undefined}) ->
+    ok;
+rewrite_log(Entries, State) ->
+    Lines = [[entry_to_json(E), $\n] || E <- Entries],
+    write_file_atomic(State#state.log_path, iolist_to_binary(Lines)).
+
+-spec truncate_log(#state{}) -> ok.
+truncate_log(#state{log_path = undefined}) ->
+    ok;
+truncate_log(State) ->
+    _ = write_file_atomic(State#state.log_path, <<>>),
+    ok.
+
+%% Write Data to Path via a sibling temp file + atomic rename so readers never
+%% observe a partially written file.
+-spec write_file_atomic(string(), iodata()) -> ok | {error, term()}.
+write_file_atomic(Path, Data) ->
+    _ = filelib:ensure_dir(Path),
+    Tmp = Path ++ ".tmp",
+    case file:write_file(Tmp, Data) of
+        ok ->
+            case file:rename(Tmp, Path) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    _ = file:delete(Tmp),
+                    {error, {rename, Reason}}
+            end;
+        {error, Reason} ->
+            {error, {write, Reason}}
+    end.
+
+%% sources/<seq6>-source.bt / sources/<seq6>-prev.bt
+-spec source_ref_filename(non_neg_integer(), source | prev) -> binary().
+source_ref_filename(Seq, Which) ->
+    Padded = io_lib:format("~6..0b", [Seq]),
+    Suffix =
+        case Which of
+            source -> "-source.bt";
+            prev -> "-prev.bt"
+        end,
+    iolist_to_binary([Padded, Suffix]).
+
+-doc """
+Return the absolute `changes/` directory for a workspace, or `undefined` when
+there is no workspace (run mode). Mirrors `beamtalk_workspace_meta`'s path
+resolution: `<home>/.beamtalk/workspaces/<id>/changes`, falling back to the OS
+user-cache dir when HOME/USERPROFILE is unset. Exported for tests.
+""".
+-spec changes_dir(binary() | undefined) -> string() | undefined.
+changes_dir(undefined) ->
+    undefined;
+changes_dir(WorkspaceId) when is_binary(WorkspaceId) ->
+    Base =
+        case beamtalk_platform:home_dir() of
+            false -> filename:basedir(user_cache, "beamtalk");
+            Home -> filename:join(Home, ".beamtalk")
+        end,
+    filename:join([Base, "workspaces", binary_to_list(WorkspaceId), "changes"]).
+
+-spec log_path(string() | undefined) -> string() | undefined.
+log_path(undefined) -> undefined;
+log_path(ChangesDir) -> filename:join(ChangesDir, "changes.jsonl").
+
+-spec ensure_ets() -> ok.
+ensure_ets() ->
+    case ets:whereis(?ETS_TABLE) of
+        undefined ->
+            ets:new(?ETS_TABLE, [named_table, public, set, {read_concurrency, true}]);
+        _ ->
+            ets:delete_all_objects(?ETS_TABLE)
+    end,
+    ok.
+
+%%% ----------------------------------------------------------------------------
+%%% JSON (de)serialisation
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Encode a ChangeEntry to a compact JSON binary (one `changes.jsonl` line, no
+trailing newline). Exported for tests. The derived in-memory flags
+(`prior_epoch`, `orphan`) are not persisted — they are recomputed on restart.
+""".
+-spec entry_to_json(entry()) -> binary().
+entry_to_json(#entry{} = E) ->
+    Map = #{
+        <<"ts">> => E#entry.ts,
+        <<"seq">> => E#entry.seq,
+        <<"epoch">> => E#entry.epoch,
+        <<"class">> => E#entry.class,
+        <<"selector">> => null_or(E#entry.selector),
+        <<"kind">> => atom_to_binary(E#entry.kind, utf8),
+        <<"source_ref">> => E#entry.source_ref,
+        <<"prev_source_ref">> => null_or(E#entry.prev_source_ref),
+        <<"sourceFile">> => null_or(E#entry.source_file),
+        <<"span">> => span_to_json(E#entry.span),
+        <<"intent">> => atom_to_binary(E#entry.intent, utf8),
+        <<"flushable">> => E#entry.flushable,
+        <<"not_flushable_reason">> => null_or(E#entry.not_flushable_reason),
+        <<"author">> => E#entry.author,
+        <<"author_kind">> => atom_to_binary(E#entry.author_kind, utf8)
+    },
+    iolist_to_binary(json:encode(Map)).
+
+-doc "Decode a `changes.jsonl` line into a ChangeEntry record. Exported for tests.".
+-spec entry_from_json(binary()) -> entry().
+entry_from_json(Line) ->
+    Map = json:decode(Line),
+    #entry{
+        ts = maps:get(<<"ts">>, Map),
+        seq = maps:get(<<"seq">>, Map),
+        epoch = maps:get(<<"epoch">>, Map),
+        class = maps:get(<<"class">>, Map),
+        selector = from_null(maps:get(<<"selector">>, Map, null)),
+        kind = binary_to_existing_atom(maps:get(<<"kind">>, Map), utf8),
+        source_ref = maps:get(<<"source_ref">>, Map),
+        prev_source_ref = from_null(maps:get(<<"prev_source_ref">>, Map, null)),
+        source_file = from_null(maps:get(<<"sourceFile">>, Map, null)),
+        span = span_from_json(maps:get(<<"span">>, Map, null)),
+        intent = binary_to_existing_atom(maps:get(<<"intent">>, Map), utf8),
+        flushable = maps:get(<<"flushable">>, Map),
+        not_flushable_reason = from_null(maps:get(<<"not_flushable_reason">>, Map, null)),
+        author = maps:get(<<"author">>, Map),
+        author_kind = binary_to_existing_atom(maps:get(<<"author_kind">>, Map), utf8)
+    }.
+
+-spec span_to_json(span() | undefined) -> map() | null.
+span_to_json(undefined) -> null;
+span_to_json(#{start := Start, 'end' := End}) -> #{<<"start">> => Start, <<"end">> => End}.
+
+-spec span_from_json(map() | null) -> span() | undefined.
+span_from_json(null) -> undefined;
+span_from_json(#{<<"start">> := Start, <<"end">> := End}) -> #{start => Start, 'end' => End}.
+
+-spec null_or(binary() | undefined) -> binary() | null.
+null_or(undefined) -> null;
+null_or(V) -> V.
+
+-spec from_null(term()) -> term().
+from_null(null) -> undefined;
+from_null(V) -> V.
+
+%%% ----------------------------------------------------------------------------
+%%% Errors
+%%% ----------------------------------------------------------------------------
+
+-spec append_error(term()) -> #beamtalk_error{}.
+append_error(Reason) ->
+    #beamtalk_error{
+        kind = changelog_write_error,
+        class = 'ChangeLog',
+        selector = 'append:',
+        message = <<"Failed to persist ChangeLog entry to disk">>,
+        hint = <<"Check that the workspace changes/ directory is writable">>,
+        details = #{reason => Reason}
+    }.
