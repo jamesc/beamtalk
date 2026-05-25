@@ -39,6 +39,13 @@ changelog_test_() ->
         fun clear_empties_log/1
     ]}.
 
+%% These run with no gen_server started so they exercise the table-absent guards.
+no_server_test_() ->
+    [
+        fun entries_returns_empty_when_table_absent/0,
+        fun size_returns_zero_when_table_absent/0
+    ].
+
 setup() ->
     {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
@@ -287,7 +294,10 @@ restart_keeps_prior_when_disk_matches() ->
 
 rotation_test_() ->
     {setup, fun() -> ok end, fun(_) -> ok end, [
-        fun rotation_archives_overflow/0
+        fun rotation_archives_overflow/0,
+        fun rotation_keeps_state_when_archive_fails/0,
+        fun archive_filenames_unique_within_same_second/0,
+        fun load_enforces_ring_bound_when_disk_exceeds_max/0
     ]}.
 
 rotation_archives_overflow() ->
@@ -320,6 +330,159 @@ rotation_archives_overflow() ->
         restore_home(OldHome),
         del_tree(TmpHome)
     end.
+
+rotation_keeps_state_when_archive_fails() ->
+    %% Transactional rotation: if archiving the overflow segment fails, the live
+    %% ETS and on-disk log must be left untouched (no history loss).
+    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    try
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        Total = 1003,
+        lists:foreach(
+            fun(N) ->
+                Sel = list_to_binary("m" ++ integer_to_list(N)),
+                {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel))
+            end,
+            lists:seq(1, Total)
+        ),
+        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        %% After a healthy rotation the ring is bounded and an archive exists.
+        ?assertEqual(1000, beamtalk_workspace_changelog:size()),
+        %% Now sabotage the archive dir: make it a regular file so the next
+        %% rotation's archive write fails. Append enough to trigger a rotation.
+        ArchiveDir = filename:join(Dir, "archive"),
+        ok = file:del_dir_r(ArchiveDir),
+        ok = file:write_file(ArchiveDir, <<"not a dir">>),
+        SizeBefore = beamtalk_workspace_changelog:size(),
+        {ok, LogBefore} = file:read_file(filename:join(Dir, "changes.jsonl")),
+        %% This append overflows the ring and attempts a rotation that must fail.
+        {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"boom">>)),
+        SizeAfter = beamtalk_workspace_changelog:size(),
+        {ok, LogAfter} = file:read_file(filename:join(Dir, "changes.jsonl")),
+        %% The new entry was appended (persist_append succeeded); rotation was
+        %% attempted, failed, and left the ring intact rather than dropping
+        %% the oldest 1 entry. So size grew by exactly the one append.
+        ?assertEqual(SizeBefore + 1, SizeAfter),
+        %% The on-disk log was NOT rewritten/truncated by the failed rotation —
+        %% it still contains everything it had before (plus the new line).
+        ?assert(byte_size(LogAfter) >= byte_size(LogBefore)),
+        ?assert(is_process_alive(Pid)),
+        stop(Pid)
+    after
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+archive_filenames_unique_within_same_second() ->
+    %% Two rotations in the same wall-clock second must not collide.
+    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    try
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        %% Drive enough appends to force at least two separate rotations quickly.
+        lists:foreach(
+            fun(N) ->
+                Sel = list_to_binary("m" ++ integer_to_list(N)),
+                {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel))
+            end,
+            lists:seq(1, 1002)
+        ),
+        %% First rotation done. Append more to trigger a second rotation in the
+        %% (very likely) same second.
+        lists:foreach(
+            fun(N) ->
+                Sel = list_to_binary("n" ++ integer_to_list(N)),
+                {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel))
+            end,
+            lists:seq(1, 5)
+        ),
+        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        ArchiveDir = filename:join(Dir, "archive"),
+        {ok, ArchiveFiles} = file:list_dir(ArchiveDir),
+        MetaArchives = [F || F <- ArchiveFiles, lists:suffix(".jsonl.gz", F)],
+        %% Both rotations produced distinct archive files (no overwrite).
+        ?assert(length(MetaArchives) >= 2),
+        ?assertEqual(length(MetaArchives), length(lists:usort(MetaArchives))),
+        stop(Pid)
+    after
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+load_enforces_ring_bound_when_disk_exceeds_max() ->
+    %% A changes.jsonl persisted with > MAX_ENTRIES must be trimmed to the ring
+    %% bound on startup, not left unbounded until the next append.
+    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    try
+        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        ok = filelib:ensure_path(Dir),
+        %% Hand-write 1005 metadata lines straight to disk (no source bodies
+        %% needed for this test — entries with source_file=null are non-orphan).
+        Lines = [
+            begin
+                Entry = beamtalk_workspace_changelog:entry_from_json(
+                    line_json(N)
+                ),
+                [beamtalk_workspace_changelog:entry_to_json(Entry), $\n]
+            end
+         || N <- lists:seq(0, 1004)
+        ],
+        ok = file:write_file(
+            filename:join(Dir, "changes.jsonl"), iolist_to_binary(Lines)
+        ),
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        Size = beamtalk_workspace_changelog:size(),
+        {ok, LogBin} = file:read_file(filename:join(Dir, "changes.jsonl")),
+        LogLines = binary:split(LogBin, <<"\n">>, [global, trim_all]),
+        ?assertEqual(1000, Size),
+        ?assertEqual(1000, length(LogLines)),
+        stop(Pid)
+    after
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%%====================================================================
+%% Forward-compatibility: unknown enum values must not drop the line
+%%====================================================================
+
+forward_compat_test_() ->
+    [
+        fun unknown_kind_preserved_not_dropped/0,
+        fun known_kinds_decode_to_atoms/0
+    ].
+
+unknown_kind_preserved_not_dropped() ->
+    %% A newer writer may emit a kind this beam doesn't know. Decoding must keep
+    %% the line (map unknown to 'unknown') rather than throw and drop history.
+    Json = line_json_with(#{<<"kind">> => <<"future-kind">>}),
+    Entry = beamtalk_workspace_changelog:entry_from_json(Json),
+    ?assertEqual(unknown, beamtalk_workspace_changelog:entry_kind(Entry)).
+
+known_kinds_decode_to_atoms() ->
+    Instance = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"kind">> => <<"instance">>})
+    ),
+    Class = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"kind">> => <<"class">>})
+    ),
+    NewClass = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"kind">> => <<"new-class">>})
+    ),
+    ?assertEqual(instance, beamtalk_workspace_changelog:entry_kind(Instance)),
+    ?assertEqual(class, beamtalk_workspace_changelog:entry_kind(Class)),
+    ?assertEqual('new-class', beamtalk_workspace_changelog:entry_kind(NewClass)).
+
+%%====================================================================
+%% Table-absent guards (no gen_server started)
+%%====================================================================
+
+entries_returns_empty_when_table_absent() ->
+    ok = ensure_no_changelog_table(),
+    ?assertEqual([], beamtalk_workspace_changelog:entries()).
+
+size_returns_zero_when_table_absent() ->
+    ok = ensure_no_changelog_table(),
+    ?assertEqual(0, beamtalk_workspace_changelog:size()).
 
 %%====================================================================
 %% Run mode (no workspace_id): memory-only
@@ -410,3 +573,39 @@ span_of(Haystack, Needle) ->
 
 is_orphan_flag(Entry) ->
     beamtalk_workspace_changelog:entry_is_orphan(Entry).
+
+%% A minimal, valid changes.jsonl line (non-orphan: sourceFile=null) for tests
+%% that hand-write the log. Seq/ts derived from N so lines are distinct.
+line_json(N) ->
+    line_json_with(#{<<"seq">> => N, <<"ts">> => N}).
+
+%% Build a changes.jsonl line from a base map merged with Overrides.
+line_json_with(Overrides) ->
+    Base = #{
+        <<"ts">> => 0,
+        <<"seq">> => 0,
+        <<"epoch">> => 1,
+        <<"class">> => <<"Counter">>,
+        <<"selector">> => <<"inc">>,
+        <<"kind">> => <<"instance">>,
+        <<"source_ref">> => <<"000000-source.bt">>,
+        <<"prev_source_ref">> => null,
+        <<"sourceFile">> => null,
+        <<"span">> => null,
+        <<"intent">> => <<"durable">>,
+        <<"flushable">> => true,
+        <<"not_flushable_reason">> => null,
+        <<"author">> => <<"sess-1">>,
+        <<"author_kind">> => <<"human">>
+    },
+    iolist_to_binary(json:encode(maps:merge(Base, Overrides))).
+
+%% Ensure the changelog ETS table does not exist (table-absent guard tests).
+ensure_no_changelog_table() ->
+    case ets:whereis(beamtalk_changelog_entries) of
+        undefined ->
+            ok;
+        Tid ->
+            ets:delete(Tid),
+            ok
+    end.

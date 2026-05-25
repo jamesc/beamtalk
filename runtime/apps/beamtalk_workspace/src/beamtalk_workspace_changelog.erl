@@ -128,9 +128,12 @@ release nodes do not start a workspace, so this code is a no-op there.
 %%% Types
 %%% ----------------------------------------------------------------------------
 
--type kind() :: instance | class | 'new-class'.
--type intent() :: durable | ephemeral.
--type author_kind() :: human | agent.
+%% `kind` is an open enum (ADR 0082): newer writers may add values this beam does
+%% not know. Decoding maps any unrecognised value to `unknown` so history is
+%% preserved across versions rather than dropped.
+-type kind() :: instance | class | 'new-class' | unknown.
+-type intent() :: durable | ephemeral | unknown.
+-type author_kind() :: human | agent | unknown.
 -type span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
 
 %% A ChangeEntry as stored in memory. Bodies are not kept in the record —
@@ -222,11 +225,21 @@ interleave sequence numbers or partial writes.
 append(Input) when is_map(Input) ->
     gen_server:call(?MODULE, {append, Input}).
 
--doc "Return all entries (including prior-epoch and orphan), oldest first.".
+-doc """
+Return all entries (including prior-epoch and orphan), oldest first.
+
+Returns `[]` when the ChangeLog server has not been started (the ETS table is
+absent), so callers on a node without a workspace do not crash.
+""".
 -spec entries() -> [entry()].
 entries() ->
-    Es = [E || {_Seq, E} <- ets:tab2list(?ETS_TABLE)],
-    lists:keysort(#entry.seq, Es).
+    case ets:info(?ETS_TABLE, id) of
+        undefined ->
+            [];
+        _ ->
+            Es = [E || {_Seq, E} <- ets:tab2list(?ETS_TABLE)],
+            lists:keysort(#entry.seq, Es)
+    end.
 
 -doc """
 Return only *active* entries — those from the current epoch that are not
@@ -237,10 +250,18 @@ backed by this. Prior-epoch and orphan entries are excluded.
 active_entries() ->
     [E || E <- entries(), not E#entry.prior_epoch, not E#entry.orphan].
 
--doc "Total number of entries in the log (all epochs).".
+-doc """
+Total number of entries in the log (all epochs).
+
+Returns `0` when the ChangeLog server has not been started (the ETS table is
+absent).
+""".
 -spec size() -> non_neg_integer().
 size() ->
-    ets:info(?ETS_TABLE, size).
+    case ets:info(?ETS_TABLE, size) of
+        undefined -> 0;
+        N -> N
+    end.
 
 -doc "The epoch assigned to entries appended in this session.".
 -spec epoch() -> non_neg_integer().
@@ -306,7 +327,12 @@ init(Config) ->
         next_seq = 0,
         epoch = 0
     },
-    State = load_from_disk(State0),
+    State1 = load_from_disk(State0),
+    %% A persisted log may already exceed MAX_ENTRIES (it was written by an older
+    %% build, hand-edited, or restored from backup). The ring bound is otherwise
+    %% only enforced on append, so trim the overflow now rather than letting a
+    %% large log linger until the next mutation.
+    State = maybe_rotate(State1),
     {ok, State}.
 
 handle_call({append, Input}, _From, State) ->
@@ -523,6 +549,12 @@ max_epoch(Entries) -> lists:max([E#entry.epoch || E <- Entries]).
 %% (metadata as a gzipped .jsonl, the referenced source bodies as a gzipped tar)
 %% and drop those entries from the live log + ETS. Human and agent entries are
 %% pruned on equal footing — only the ring bound applies.
+%%
+%% Rotation is transactional: the live ETS and changes.jsonl are mutated ONLY
+%% after the archive segment is written AND the trimmed log is rewritten, both
+%% successfully. If archiving or the rewrite fails (disk full, permissions,
+%% tar/gzip error) the existing ETS + log are left untouched and the error is
+%% logged — a failed rotation must never lose history or leave disk inconsistent.
 -spec maybe_rotate(#state{}) -> #state{}.
 maybe_rotate(#state{changes_dir = undefined} = State) ->
     State;
@@ -534,23 +566,79 @@ maybe_rotate(State) ->
         true ->
             Overflow = length(All) - ?MAX_ENTRIES,
             {ToArchive, ToKeep} = lists:split(Overflow, All),
-            archive_segment(ToArchive, State),
-            ets:delete_all_objects(?ETS_TABLE),
-            lists:foreach(fun(E) -> ets:insert(?ETS_TABLE, {E#entry.seq, E}) end, ToKeep),
-            rewrite_log(ToKeep, State),
+            rotate_transactional(ToArchive, ToKeep, State)
+    end.
+
+%% Perform the rotation only if every disk step succeeds. Order:
+%%   1. archive the overflow segment (metadata + sources) to archive/
+%%   2. rewrite changes.jsonl with exactly the retained entries
+%% Both are crash-safe (atomic temp+rename). Only once both succeed do we prune
+%% the archived source bodies and swap ETS to the retained set. On any failure we
+%% return State unchanged (ETS and the live log keep all entries) and log it.
+-spec rotate_transactional([#entry{}], [#entry{}], #state{}) -> #state{}.
+rotate_transactional(ToArchive, ToKeep, State) ->
+    case archive_segment(ToArchive, State) of
+        {ok, ArchivedMembers} ->
+            case rewrite_log(ToKeep, State) of
+                ok ->
+                    %% Both disk steps committed — now it is safe to drop the
+                    %% archived body files and swap ETS to the retained set.
+                    prune_source_members(ArchivedMembers),
+                    ets:delete_all_objects(?ETS_TABLE),
+                    lists:foreach(
+                        fun(E) -> ets:insert(?ETS_TABLE, {E#entry.seq, E}) end, ToKeep
+                    ),
+                    State;
+                {error, Reason} ->
+                    %% Archive succeeded but the live-log rewrite failed. Leave
+                    %% ETS + log untouched; the (harmless) extra archive segment
+                    %% will be superseded on the next successful rotation.
+                    ?LOG_ERROR(
+                        "ChangeLog rotation aborted: failed to rewrite live log",
+                        #{reason => Reason, domain => [beamtalk, runtime]}
+                    ),
+                    State
+            end;
+        {error, Reason} ->
+            ?LOG_ERROR(
+                "ChangeLog rotation aborted: failed to archive overflow segment",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
             State
     end.
 
--spec archive_segment([#entry{}], #state{}) -> ok.
+%% Archive the overflow segment. Returns `{ok, Members}` (the source-body files
+%% that were tarred, so the caller can delete them after the whole rotation
+%% commits) or `{error, Reason}` if any disk step fails. Source bodies are NOT
+%% deleted here — deletion is deferred until rewrite_log/2 also succeeds.
+-spec archive_segment([#entry{}], #state{}) ->
+    {ok, [{string(), string()}]} | {error, term()}.
 archive_segment(Entries, State) ->
     ArchiveDir = filename:join(State#state.changes_dir, "archive"),
-    _ = filelib:ensure_path(ArchiveDir),
-    Ts = integer_to_list(erlang:system_time(second)),
-    archive_metadata(Entries, ArchiveDir, Ts),
-    archive_sources(Entries, ArchiveDir, Ts, State),
-    ok.
+    Ts = archive_suffix(),
+    case filelib:ensure_path(ArchiveDir) of
+        ok ->
+            case archive_metadata(Entries, ArchiveDir, Ts) of
+                ok ->
+                    archive_sources(Entries, ArchiveDir, Ts, State);
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, Reason} ->
+            {error, {ensure_path, ArchiveDir, Reason}}
+    end.
 
--spec archive_metadata([#entry{}], string(), string()) -> ok.
+%% Unique, monotonic, collision-free archive filename suffix. A millisecond
+%% timestamp can still collide when two rotations land in the same millisecond
+%% (e.g. a single overflowing batch), so we append a strictly-increasing unique
+%% integer. Format: "<ms>-<unique>".
+-spec archive_suffix() -> string().
+archive_suffix() ->
+    Ms = integer_to_list(erlang:system_time(millisecond)),
+    Unique = integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Ms ++ "-" ++ Unique.
+
+-spec archive_metadata([#entry{}], string(), string()) -> ok | {error, term()}.
 archive_metadata(Entries, ArchiveDir, Ts) ->
     Path = filename:join(ArchiveDir, "changes-" ++ Ts ++ ".jsonl.gz"),
     Lines = [[entry_to_json(E), $\n] || E <- Entries],
@@ -559,11 +647,14 @@ archive_metadata(Entries, ArchiveDir, Ts) ->
         ok ->
             ok;
         {error, Reason} ->
-            ?LOG_WARNING("Failed to archive ChangeLog metadata to ~ts: ~p", [Path, Reason]),
-            ok
+            {error, {archive_metadata, Path, Reason}}
     end.
 
--spec archive_sources([#entry{}], string(), string(), #state{}) -> ok.
+%% Tar the referenced source bodies into archive/. Returns `{ok, Members}` with
+%% the body files that were archived (deleted later, once the rotation commits)
+%% or `{error, Reason}`. An empty member set is a successful no-op.
+-spec archive_sources([#entry{}], string(), string(), #state{}) ->
+    {ok, [{string(), string()}]} | {error, term()}.
 archive_sources(Entries, ArchiveDir, Ts, State) ->
     SourcesDir = filename:join(State#state.changes_dir, "sources"),
     Refs = source_refs(Entries),
@@ -571,20 +662,22 @@ archive_sources(Entries, ArchiveDir, Ts, State) ->
     Path = filename:join(ArchiveDir, "sources-" ++ Ts ++ ".tar.gz"),
     case Members of
         [] ->
-            ok;
+            {ok, []};
         _ ->
             case erl_tar:create(Path, Members, [compressed]) of
                 ok ->
-                    %% Tarred safely — remove the now-archived body files.
-                    lists:foreach(
-                        fun({_Name, AbsPath}) -> _ = file:delete(AbsPath) end, Members
-                    ),
-                    ok;
+                    {ok, Members};
                 {error, Reason} ->
-                    ?LOG_WARNING("Failed to archive ChangeLog sources to ~ts: ~p", [Path, Reason]),
-                    ok
+                    {error, {archive_sources, Path, Reason}}
             end
     end.
+
+%% Delete the source-body files that were safely archived. Called only after the
+%% whole rotation has committed (archive + log rewrite both succeeded).
+-spec prune_source_members([{string(), string()}]) -> ok.
+prune_source_members(Members) ->
+    lists:foreach(fun({_Name, AbsPath}) -> _ = file:delete(AbsPath) end, Members),
+    ok.
 
 -spec source_refs([#entry{}]) -> [binary()].
 source_refs(Entries) ->
@@ -731,17 +824,59 @@ entry_from_json(Line) ->
         epoch = maps:get(<<"epoch">>, Map),
         class = maps:get(<<"class">>, Map),
         selector = from_null(maps:get(<<"selector">>, Map, null)),
-        kind = binary_to_existing_atom(maps:get(<<"kind">>, Map), utf8),
+        kind = decode_kind(maps:get(<<"kind">>, Map)),
         source_ref = maps:get(<<"source_ref">>, Map),
         prev_source_ref = from_null(maps:get(<<"prev_source_ref">>, Map, null)),
         source_file = from_null(maps:get(<<"sourceFile">>, Map, null)),
         span = span_from_json(maps:get(<<"span">>, Map, null)),
-        intent = binary_to_existing_atom(maps:get(<<"intent">>, Map), utf8),
+        intent = decode_intent(maps:get(<<"intent">>, Map)),
         flushable = maps:get(<<"flushable">>, Map),
         not_flushable_reason = from_null(maps:get(<<"not_flushable_reason">>, Map, null)),
         author = maps:get(<<"author">>, Map),
-        author_kind = binary_to_existing_atom(maps:get(<<"author_kind">>, Map), utf8)
+        author_kind = decode_author_kind(maps:get(<<"author_kind">>, Map))
     }.
+
+%% Enum decoders use an explicit allowlist with a safe `unknown` fallback rather
+%% than binary_to_existing_atom/2. A value written by a newer build (kind is an
+%% open enum) — or a corrupt closed-enum field — would otherwise throw and cause
+%% parse_log/1 to silently drop the whole line, losing history. Mapping to
+%% `unknown` keeps the entry; it is excluded from the active view via prior_epoch
+%% on restart regardless.
+-spec decode_kind(binary()) -> kind().
+decode_kind(<<"instance">>) ->
+    instance;
+decode_kind(<<"class">>) ->
+    class;
+decode_kind(<<"new-class">>) ->
+    'new-class';
+decode_kind(Other) ->
+    log_unknown_enum(kind, Other),
+    unknown.
+
+-spec decode_intent(binary()) -> intent().
+decode_intent(<<"durable">>) ->
+    durable;
+decode_intent(<<"ephemeral">>) ->
+    ephemeral;
+decode_intent(Other) ->
+    log_unknown_enum(intent, Other),
+    unknown.
+
+-spec decode_author_kind(binary()) -> author_kind().
+decode_author_kind(<<"human">>) ->
+    human;
+decode_author_kind(<<"agent">>) ->
+    agent;
+decode_author_kind(Other) ->
+    log_unknown_enum(author_kind, Other),
+    unknown.
+
+-spec log_unknown_enum(atom(), term()) -> ok.
+log_unknown_enum(Field, Value) ->
+    ?LOG_WARNING(
+        "Unknown ChangeLog enum value; preserving entry as 'unknown'",
+        #{field => Field, value => Value, domain => [beamtalk, runtime]}
+    ).
 
 -spec span_to_json(span() | undefined) -> map() | null.
 span_to_json(undefined) -> null;
