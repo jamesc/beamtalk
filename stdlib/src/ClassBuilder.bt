@@ -30,6 +30,7 @@ typed Actor subclass: ClassBuilder
   state: backingModule :: Symbol | Nil = nil
   state: methodSource :: Dictionary = #{}
   state: classMethods :: Dictionary = #{}
+  state: classMethodSource :: Dictionary = #{}
   state: classState :: Dictionary = #{}
   state: methodSignatures :: Dictionary = #{}
   state: classMethodSignatures :: Dictionary = #{}
@@ -99,6 +100,22 @@ typed Actor subclass: ClassBuilder
   /// builder classMethods: #{ #bump => [:self | self.total := self.total + 1] }
   /// ```
   classMethods: aDict :: Dictionary -> Dictionary => self.classMethods := aDict
+
+  /// Set per-class-method source text as a `selector => source string` map.
+  ///
+  /// The class-side counterpart of `methodSource:`. Populated automatically by
+  /// the compiler from `classMethods:` block-literal bodies (BT-2270) so
+  /// builder-defined class methods are visible to `SystemNavigation`
+  /// source-text queries on the class side (BT-2195), just like file-defined
+  /// ones. Class methods built from computed/non-literal funs have no source
+  /// literal and are simply omitted (known-present but unindexable).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodSource: #{ #bump => "bump => self.total := self.total + 1" }
+  /// ```
+  classMethodSource: aDict :: Dictionary -> Dictionary =>
+    self.classMethodSource := aDict
 
   /// Set class-variable initial values (ADR 0084, BT-2267).
   ///

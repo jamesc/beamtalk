@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2270: The compiler auto-populates ClassBuilder `classMethodSource:` from
+// `classMethods:` block-literal bodies (the class-side companion of BT-2246), so
+// a class built programmatically via the ClassBuilder cascade API has its
+// class-side methods visible to `SystemNavigation` source-text queries just like
+// a file-defined class (BT-2195 added the class-side scanning channel).
+//
+// `methodsMatching:` runs in pure Beamtalk (regex over each method's source via
+// `String >> #matchesRegex:`) and walks both the instance side (`cls`) and the
+// class side (`cls class`, the metaclass), so it exercises the class-side source
+// channel in BUnit without the compiler port that `sendersOf:` requires.
+//
+// The class is looked up via the registry (`findClass:`) rather than the value
+// returned by `register`: the programmatic-builder cascade currently returns an
+// unusable wrapper around the (live, registered) class — a pre-existing bug
+// tracked separately. The registry entry is the genuine, dispatchable class.
+
+TestCase subclass: ClassBuilderClassMethodSourceTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  // Build a class with a literal-block class method, then confirm its body is
+  // indexable via the class-side scan. Before BT-2270 the class method installed
+  // as a bare fun with empty source and never matched a source-text query.
+  testBuilderClassMethodBodyIsIndexable =>
+    Object classBuilder name: #BTBuilderClassSourceProbe;
+      superclass: Object;
+      classMethods: #{#shoutClass => [:_self | "hi" uppercase]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderClassSourceProbe
+    nav := SystemNavigation default
+    results := nav
+      collectMethodsMatching: (Regex from: "uppercase") unwrap
+      in: self.cls class
+      into: List new
+    self deny: results isEmpty
+    selectors := results collect: [:r | r at: #selector]
+    self assert: (selectors includes: #shoutClass)
+
+  // The reconstructed source carries the keyword selector and its parameter, so
+  // a query against the class-method body matches and names the selector.
+  testKeywordBuilderClassMethodIsIndexable =>
+    Object classBuilder name: #BTBuilderClassKeywordProbe;
+      superclass: Object;
+      classMethods: #{#scaleClassBy: => [:_self :factor | factor * factor]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderClassKeywordProbe
+    nav := SystemNavigation default
+    results := nav
+      collectMethodsMatching: (Regex from: "factor") unwrap
+      in: self.cls class
+      into: List new
+    selectors := results collect: [:r | r at: #selector]
+    self assert: (selectors includes: #scaleClassBy:)
+
+  // AC2: a class method built from a computed (non-literal) fun has no source
+  // literal. It is still known-present (dispatchable / reflectable) but
+  // unindexable — the class-side source query degrades to "no match", never a
+  // crash.
+  testComputedClassMethodIsKnownButUnindexable =>
+    blk := [:_self | "x" size]
+    Object classBuilder name: #BTBuilderClassComputedProbe;
+      superclass: Object;
+      classMethods: #{#computedClassSize => blk};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderClassComputedProbe
+    self assert: (self.cls class includesSelector: #computedClassSize)
+    nav := SystemNavigation default
+    results := nav
+      collectMethodsMatching: (Regex from: "size") unwrap
+      in: self.cls class
+      into: List new
+    self assert: results isEmpty

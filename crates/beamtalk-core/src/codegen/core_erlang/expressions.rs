@@ -1174,9 +1174,11 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         messages: &[CascadeMessage],
     ) -> Result<Document<'static>> {
-        // BT-2246: ClassBuilder construction cascades with literal block
-        // methods get a synthesised methodSource: setter so builder-defined
-        // classes are indexable by SystemNavigation.
+        // BT-2246 / BT-2270: ClassBuilder construction cascades with literal
+        // block methods get synthesised source setters — methodSource: from
+        // methods: (instance side) and classMethodSource: from classMethods:
+        // (class side) — so builder-defined classes are indexable by
+        // SystemNavigation on both sides.
         let augmented = super::class_builder_source::inject_method_source(receiver, messages);
         let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
 
