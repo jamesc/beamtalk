@@ -6,7 +6,7 @@
 TestCase subclass: CompiledMethodTest
 
   testMethodLookup =>
-    self assert: (Counter >> #getValue) notNil
+    self assert: (Counter >> #getValue) class equals: CompiledMethod
     self assert: (Counter >> #nonExistent) equals: nil
 
   testMethodLookupOnVariableReceivers =>
@@ -16,7 +16,7 @@ TestCase subclass: CompiledMethodTest
     // resolves class-side via Behaviour instead of producing a DNU hint. At
     // runtime, cls holds the class object and dispatches through the
     // Class→Behaviour chain.
-    self assert: (cls >> #getValue) notNil
+    self assert: (cls >> #getValue) class equals: CompiledMethod
     self assert: (cls >> #getValue) selector equals: #getValue
     self assert: (cls >> #nonExistent) equals: nil
 
@@ -51,7 +51,7 @@ TestCase subclass: CompiledMethodTest
   // receivers through the `{class_method, _}` handler.
   testMetaclassLookupHit =>
     cm := SystemNavigation class >> #default
-    self deny: cm isNil
+    self assert: cm class equals: CompiledMethod
     self assert: cm selector equals: #default
 
   // BT-2195: Class-side source is preserved end-to-end and reachable via
