@@ -329,6 +329,10 @@ ancestor_builder_defaults(Name) ->
                     #{};
                 exit:{normal, _} ->
                     #{};
+                exit:{{shutdown, _}, _} ->
+                    #{};
+                exit:{{normal, _}, _} ->
+                    #{};
                 exit:{Reason, _} ->
                     ?LOG_WARNING(
                         "ancestor_builder_defaults: class ~p process exited (~p) "
