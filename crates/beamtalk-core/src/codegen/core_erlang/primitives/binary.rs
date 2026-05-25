@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Binary primitive implementations (ADR 0069 Phase 1).
+//! Binary primitive implementations (ADR 0086 Phase 1).
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -12,7 +12,7 @@ use super::super::document::Document;
 use super::param;
 use crate::docvec;
 
-/// Binary primitive implementations (ADR 0069).
+/// Binary primitive implementations (ADR 0086).
 pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Collection subclass-responsibility (size) and byte-level alias (byteSize)
