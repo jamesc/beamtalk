@@ -421,8 +421,20 @@ impl NameResolver {
     /// `addClassMethod: #sel body: [block]` setter — the selector symbol normally
     /// and the block body as a class-method body (so `super`/`self` and
     /// class-variable access resolve, matching `classMethods:`).
+    ///
+    /// BT-2279: the block is only resolved as a class-method body when the
+    /// selector is a **literal symbol** — that is exactly when codegen lowers it
+    /// as a class-method fun (`generate_class_method_single_arg`, gated on
+    /// `[Literal::Symbol, Block]`). For a non-literal selector, codegen falls
+    /// back to ordinary cascade lowering, so the block must resolve as an
+    /// ordinary block here too (rejecting `super`), keeping the resolver and
+    /// codegen in agreement.
     fn resolve_add_class_method_argument(&mut self, args: &[Expression]) {
-        if let [sel_arg, Expression::Block(block)] = args {
+        if let [
+            sel_arg @ Expression::Literal(Literal::Symbol(_), _),
+            Expression::Block(block),
+        ] = args
+        {
             self.resolve_expression(sel_arg);
             self.resolve_builder_class_method_block(block);
         } else {
@@ -757,6 +769,27 @@ mod tests {
         assert!(
             shadow.is_empty(),
             "self param in an addClassMethod:body: block must not warn shadowing, got: {shadow:?}"
+        );
+    }
+
+    #[test]
+    fn incremental_add_class_method_non_literal_selector_rejects_super() {
+        // BT-2279: when the addClassMethod:body: selector is NOT a literal
+        // symbol, codegen lowers the block as an ordinary block (not a
+        // class-method fun), so the resolver must treat it as an ordinary block
+        // too — `super` is rejected, keeping resolver and codegen in agreement.
+        // (Resolving it as a class-method body would let `super` compile but then
+        // lower with an unbound Self.)
+        let resolver = run("Object classBuilder name: #BT2279T; superclass: Object; \
+             addClassMethod: someSel body: [:self | super greeting]; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            !super_errors.is_empty(),
+            "super must be rejected in an addClassMethod:body: block with a non-literal selector"
         );
     }
 

@@ -12,10 +12,9 @@
 // class side (`cls class`, the metaclass), so it exercises the class-side source
 // channel in BUnit without the compiler port that `sendersOf:` requires.
 //
-// The class is looked up via the registry (`findClass:`) rather than the value
-// returned by `register`: the programmatic-builder cascade currently returns an
-// unusable wrapper around the (live, registered) class — a pre-existing bug
-// tracked separately. The registry entry is the genuine, dispatchable class.
+// The class is captured directly from `register`'s return value, which is the
+// canonical, dispatchable class object (BT-2258 fixed the earlier bug where the
+// programmatic-builder cascade returned an unusable wrapper).
 
 TestCase subclass: ClassBuilderClassMethodSourceTest
   field: cls = nil
@@ -26,11 +25,10 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
   // indexable via the class-side scan. Before BT-2270 the class method installed
   // as a bare fun with empty source and never matched a source-text query.
   testBuilderClassMethodBodyIsIndexable =>
-    Object classBuilder name: #BTBuilderClassSourceProbe;
+    self.cls := Object classBuilder name: #BTBuilderClassSourceProbe;
       superclass: Object;
       classMethods: #{#shoutClass => [:_self | "hi" uppercase]};
       register
-    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderClassSourceProbe
     nav := SystemNavigation default
     results := nav
       collectMethodsMatching: (Regex from: "uppercase") unwrap
@@ -43,11 +41,10 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
   // The reconstructed source carries the keyword selector and its parameter, so
   // a query against the class-method body matches and names the selector.
   testKeywordBuilderClassMethodIsIndexable =>
-    Object classBuilder name: #BTBuilderClassKeywordProbe;
+    self.cls := Object classBuilder name: #BTBuilderClassKeywordProbe;
       superclass: Object;
       classMethods: #{#scaleClassBy: => [:_self :factor | factor * factor]};
       register
-    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderClassKeywordProbe
     nav := SystemNavigation default
     results := nav
       collectMethodsMatching: (Regex from: "factor") unwrap
@@ -68,11 +65,10 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
   // class method looks like.
   testComputedClassMethodIsKnownButUnindexable =>
     blk := [:_self :_classVars | "x" size]
-    Object classBuilder name: #BTBuilderClassComputedProbe;
+    self.cls := Object classBuilder name: #BTBuilderClassComputedProbe;
       superclass: Object;
       classMethods: #{#computedClassSize => blk};
       register
-    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderClassComputedProbe
     self assert: (self.cls class includesSelector: #computedClassSize)
     nav := SystemNavigation default
     results := nav
