@@ -16,8 +16,8 @@
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
 use crate::ast::{
-    Block, CascadeMessage, ClassDefinition, Expression, Identifier, MatchArm, MessageSelector,
-    MethodDefinition, Module,
+    Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MatchArm,
+    MessageSelector, MethodDefinition, Module,
 };
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -432,20 +432,47 @@ impl NameResolver {
     }
 
     /// Returns `true` if a cascade is a `ClassBuilder` construction terminating in
-    /// `register` (so its `classMethods:` blocks should resolve as class methods).
+    /// `register` with a **literal** `name:` (so its `classMethods:` blocks should
+    /// resolve as class methods).
+    ///
+    /// The literal-`name:` requirement deliberately matches the codegen recogniser
+    /// (`class_builder_source::builder_class_method_context`): both must agree, or
+    /// the resolver would permit `super` in a block that codegen then lowers as an
+    /// ordinary block (producing an instance-`super` call with unbound `Self`).
     fn cascade_is_class_builder(receiver: &Expression, messages: &[CascadeMessage]) -> bool {
         // The parser keeps the first cascade message inside `receiver` (the outer
         // MessageSend); the constructed object is that send's receiver.
-        let underlying = match receiver {
-            Expression::MessageSend {
-                receiver: inner, ..
-            } => inner.as_ref(),
-            other => other,
-        };
-        Self::is_class_builder_construction(underlying)
-            && messages
-                .last()
-                .is_some_and(|m| m.selector.name().as_str() == "register")
+        let (underlying, first_msg): (&Expression, Option<(&MessageSelector, &[Expression])>) =
+            match receiver {
+                Expression::MessageSend {
+                    receiver: inner,
+                    selector,
+                    arguments,
+                    ..
+                } => (inner.as_ref(), Some((selector, arguments.as_slice()))),
+                other => (other, None),
+            };
+        if !Self::is_class_builder_construction(underlying) {
+            return false;
+        }
+        if !messages
+            .last()
+            .is_some_and(|m| m.selector.name().as_str() == "register")
+        {
+            return false;
+        }
+        // Require a literal `name:` (matches the codegen recogniser).
+        first_msg
+            .into_iter()
+            .chain(
+                messages
+                    .iter()
+                    .map(|m| (&m.selector, m.arguments.as_slice())),
+            )
+            .any(|(selector, args)| {
+                selector.name().as_str() == "name:"
+                    && matches!(args, [Expression::Literal(Literal::Symbol(_), _)])
+            })
     }
 
     /// Returns `true` if `expr` constructs a `ClassBuilder`: `<receiver>
@@ -666,6 +693,24 @@ mod tests {
         assert!(
             super_errors.is_empty(),
             "super should be allowed in a classMethods: block, got: {super_errors:?}"
+        );
+    }
+
+    #[test]
+    fn builder_without_literal_name_does_not_permit_super() {
+        // BT-2267: the resolver must require a literal name: to match the codegen
+        // recogniser — otherwise super would be allowed here but codegen would
+        // lower the block as an ordinary block (instance-super, unbound Self).
+        let resolver = run("Object classBuilder superclass: Object; \
+             classMethods: #{ #greeting => [:self | super greeting] }; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            !super_errors.is_empty(),
+            "super in a name-less builder cascade must still error (codegen cannot lower it)"
         );
     }
 

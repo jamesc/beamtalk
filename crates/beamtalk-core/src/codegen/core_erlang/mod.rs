@@ -1429,6 +1429,12 @@ impl CoreErlangGenerator {
         };
         self.set_in_class_method(true);
         *self.class_var_names_mut() = class_var_names.iter().cloned().collect();
+        // class_method_selectors is intentionally left empty: in builder mode
+        // `generate_class_method_self_send` routes EVERY self-send through
+        // `class_self_dispatch_local` (the fun has no `class_<sel>` export) before
+        // it ever consults this set, so it is not needed for dispatch. Class-var
+        // threading across such self-sends rides on the open scope that
+        // `emit_class_var_result_unwrap` always produces, not on this set.
         self.class_method_selectors_mut().clear();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
