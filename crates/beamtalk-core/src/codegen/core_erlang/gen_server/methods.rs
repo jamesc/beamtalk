@@ -2104,9 +2104,7 @@ impl CoreErlangGenerator {
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
         // `self` identifier) and also via the block's receiver parameter under
-        // whatever name it was declared. Binding both lets the body use either,
-        // and lets tests name the receiver `_self` (avoiding a `self`-shadows
-        // warning) while the body still uses `self`.
+        // whatever name it was declared.
         self.bind_var("self", "ClassSelf");
         if let Some(receiver_param) = block.parameters.first() {
             self.bind_var(&receiver_param.name, "ClassSelf");

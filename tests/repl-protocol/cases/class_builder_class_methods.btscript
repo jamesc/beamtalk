@@ -11,11 +11,9 @@
 // reference), not via register's return value (an unusable wrapper today,
 // BT-2258, fixed separately).
 //
-// NOTE: `super` inside a builder class method requires the cascade to sit
-// inside a method body (the name resolver rejects `super` in a REPL top-level
-// block, depth < 2); recognising `classMethods:` blocks as class-method bodies
-// in semantic analysis is follow-up work. `self new` on a module-less dynamic
-// builder class is likewise deferred.
+// NOTE: `self new` on a module-less dynamic builder class is a pre-existing
+// limitation (handle_new requires a compiled new/0 export — even external
+// `X new` cannot instantiate a dynamic class), independent of class methods.
 
 // ---------------------------------------------------------------------------
 // Class-variable threading: classState seeded via classVars:, mutation
@@ -64,3 +62,17 @@ Object classBuilder name: #BT2267Self; superclass: Object; classMethods: #{ #bas
 
 BT2267Self doubled
 // => 20
+
+// ---------------------------------------------------------------------------
+// `super` inside a builder class method resolves up the metaclass chain to the
+// superclass's class method.
+// ---------------------------------------------------------------------------
+
+Object classBuilder name: #BT2267SuperBase; superclass: Object; classMethods: #{ #greeting => [:self | "base"] }; register
+// => #Actor<Class,_>
+
+Object classBuilder name: #BT2267SuperChild; superclass: #BT2267SuperBase; classMethods: #{ #greeting => [:self | super greeting] }; register
+// => #Actor<Class,_>
+
+BT2267SuperChild greeting
+// => base
