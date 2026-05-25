@@ -1,0 +1,123 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2268 / ADR 0084 Phase 3: explicit ClassBuilder metadata setters bring a
+// programmatically built class to metadata parity with a file-defined one.
+// Each setter forwards a BuilderState key that `beamtalk_class_builder:register/1`
+// passes through to the class gen_server, where the same query surfaces that
+// serve file-defined classes read it back:
+//
+//   * method / class-method display signatures + doc comments → `:help`
+//     (`beamtalk_interface:help/2`, here via the `help: <class> selector:` FFI)
+//   * class-level doc comment → class-level `:help`
+//   * instance / class-method return types → `beamtalk_class_registry`
+//   * `isConstructible` → `beamtalk_object_class:is_constructible/1`
+//
+// The class is dispatched by registered name via `findClass:` because the
+// builder cascade's return value is an unusable wrapper today (BT-2258, fixed
+// separately) — the registry entry is the genuine, dispatchable class.
+
+TestCase subclass: ClassBuilderMetadataParityTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  // AC1 + AC2 (instance side): a builder-defined method shows its display
+  // signature and doc comment in `:help`, exactly like a file-defined method.
+  testInstanceSignatureAndDocInHelp =>
+    Object classBuilder name: #BT2268SigDoc;
+      superclass: Object;
+      methods: #{#ping => [:_self | 7]};
+      methodSignatures: #{#ping => "ping -> Integer"};
+      methodDocs: #{#ping => "Returns the canned ping value."};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268SigDoc
+    helpText := (Erlang beamtalk_interface) help: #BT2268SigDoc selector: #ping
+    self assert: (helpText includesSubstring: "ping -> Integer")
+    self assert: (helpText includesSubstring: "Returns the canned ping value.")
+
+  // AC1 + AC2 (class side): a builder-defined class method shows its display
+  // signature and doc comment in `:help`. Class-side metadata is meaningful
+  // only because BT-2267 made builder class methods callable/reflectable.
+  testClassSignatureAndDocInHelp =>
+    Object classBuilder name: #BT2268ClassSigDoc;
+      superclass: Object;
+      classMethods: #{#tally => [:_self | 0]};
+      classMethodSignatures: #{#tally => "tally -> Integer"};
+      classMethodDocs: #{#tally => "The starting tally."};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268ClassSigDoc
+    helpText := (Erlang beamtalk_interface) help: #BT2268ClassSigDoc selector: #tally
+    self assert: (helpText includesSubstring: "tally -> Integer")
+    self assert: (helpText includesSubstring: "The starting tally.")
+
+  // AC2 (class-level doc): a builder-defined class shows its class-level doc
+  // comment in class-level `:help`.
+  testClassDocInHelp =>
+    Object classBuilder name: #BT2268ClassDoc;
+      superclass: Object;
+      methods: #{#noop => [:_self | nil]};
+      classDoc: "A documented builder-defined class.";
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268ClassDoc
+    helpText := (Erlang beamtalk_interface) help: #BT2268ClassDoc
+    self assert: (helpText includesSubstring: "A documented builder-defined class.")
+
+  // AC4 (instance side): the instance-method return-type channel is settable
+  // and read back through the same registry accessor file-defined classes use.
+  testMethodReturnTypeReadBack =>
+    Object classBuilder name: #BT2268RetType;
+      superclass: Object;
+      methods: #{#count => [:_self | 0]};
+      methodReturnTypes: #{#count => #Integer};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268RetType
+    result := (Erlang beamtalk_class_registry) get_method_return_type: #BT2268RetType selector: #count
+    self assert: result ok
+    self assert: result value equals: #Integer
+
+  // AC4 (class side): the class-method return-type channel is settable and
+  // read back through the class-side registry accessor.
+  testClassMethodReturnTypeReadBack =>
+    Object classBuilder name: #BT2268ClassRetType;
+      superclass: Object;
+      classMethods: #{#make => [:self | self]};
+      classMethodReturnTypes: #{#make => #BT2268ClassRetType};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268ClassRetType
+    result := (Erlang beamtalk_class_registry) get_class_method_return_type: #BT2268ClassRetType selector: #make
+    self assert: result ok
+    self assert: result value equals: #BT2268ClassRetType
+
+  // AC3 (false): `isConstructible: false` is honoured — the class reports it is
+  // not constructible.
+  testIsConstructibleFalseHonoured =>
+    Object classBuilder name: #BT2268NotConstructible;
+      superclass: Object;
+      isConstructible: false;
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268NotConstructible
+    pid := (Erlang beamtalk_class_registry) whereis_class: #BT2268NotConstructible
+    self deny: ((Erlang beamtalk_object_class) is_constructible: pid)
+
+  // AC3 (true): `isConstructible: true` is honoured — the explicit flag is
+  // returned directly rather than lazily recomputed.
+  testIsConstructibleTrueHonoured =>
+    Object classBuilder name: #BT2268Constructible;
+      superclass: Object;
+      isConstructible: true;
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268Constructible
+    pid := (Erlang beamtalk_class_registry) whereis_class: #BT2268Constructible
+    self assert: ((Erlang beamtalk_object_class) is_constructible: pid)
+
+  // The `meta:` channel is settable; supplying a meta map does not break
+  // registration and the class remains live and dispatchable.
+  testMetaSettableWithoutRegression =>
+    Object classBuilder name: #BT2268Meta;
+      superclass: Object;
+      methods: #{#answer => [:_self | 42]};
+      meta: #{#is_abstract => false};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2268Meta
+    self assert: (self.cls includesSelector: #answer)
