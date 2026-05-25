@@ -2918,3 +2918,109 @@ fn test_unqualified_class_reference_unchanged() {
         "Unqualified spawn should use package heuristic. Got:\n{output}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-2276: classMethods: block arity validation (compile-time).
+// A `classMethods:` block whose parameter count does not match the selector
+// (`self` plus one per selector slot) must be rejected with a clear
+// BlockArityError naming the selector, not silently lowered to a wrong-arity
+// fun that crashes with an opaque `error:undef` only when first called.
+// ---------------------------------------------------------------------------
+
+/// Parse `src` as a single top-level cascade expression and run it through
+/// `expression_doc` (the path the REPL / workspace evaluator takes for a bare
+/// `Object classBuilder …; register` cascade). Returns the codegen Result so
+/// failures can be asserted.
+fn try_codegen(src: &str) -> std::result::Result<String, CodeGenError> {
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let expr = module
+        .expressions
+        .into_iter()
+        .next()
+        .expect("expected one top-level expression")
+        .expression;
+    let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .expression_doc(&expr)
+        .map(|doc| doc.to_pretty_string())
+}
+
+#[test]
+fn test_bt2276_class_methods_zero_arg_block_rejected() {
+    // `#greet => [42]` forgot the leading `:self`: a unary class-method block
+    // needs exactly one parameter (`self`).
+    let src = "Object classBuilder name: #BT2276Z; superclass: Object; \
+               classMethods: #{ #greet => [42] }; register";
+    match try_codegen(src) {
+        Err(CodeGenError::BlockArityError {
+            selector,
+            expected,
+            actual,
+            ..
+        }) => {
+            assert!(
+                selector.contains("greet"),
+                "error should name the selector, got: {selector}"
+            );
+            assert_eq!(expected, "1", "unary class method expects `self` only");
+            assert_eq!(actual, 0, "the block declared zero parameters");
+        }
+        other => panic!("expected BlockArityError for zero-arg classMethods block, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_bt2276_class_methods_keyword_wrong_arity_block_rejected() {
+    // Keyword selector `scale:` needs `self` + one arg = 2 params; the block
+    // declares only `self`.
+    let src = "Object classBuilder name: #BT2276K; superclass: Object; \
+               classMethods: #{ #scale: => [:self | 1] }; register";
+    match try_codegen(src) {
+        Err(CodeGenError::BlockArityError {
+            selector,
+            expected,
+            actual,
+            hint,
+        }) => {
+            assert!(
+                selector.contains("scale:"),
+                "error should name the selector, got: {selector}"
+            );
+            assert_eq!(expected, "2", "scale: expects self + one arg");
+            assert_eq!(actual, 1, "the block declared one parameter");
+            assert!(
+                hint.contains("classMethods:"),
+                "hint should mention classMethods:, got: {hint}"
+            );
+        }
+        other => {
+            panic!(
+                "expected BlockArityError for wrong-arity keyword classMethods block, got: {other:?}"
+            )
+        }
+    }
+}
+
+#[test]
+fn test_bt2276_class_methods_correct_block_unaffected() {
+    // A correctly-shaped block (`self` plus one per selector slot) still lowers
+    // to a class-method fun and compiles cleanly.
+    let src = "Object classBuilder name: #BT2276OK; superclass: Object; \
+               classMethods: #{ #answer => [:self | 42], #scale: => [:self :n | n * 3] }; register";
+    let code = try_codegen(src).expect("correct classMethods blocks must compile");
+    assert!(
+        code.contains("fun (ClassSelf, ClassVars"),
+        "correct classMethods block should lower to a class-method fun. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt2276_class_methods_computed_fun_passes_compile() {
+    // A computed (non-block) value cannot have its arity checked at compile
+    // time, so it must NOT be rejected by the compiler — its arity is validated
+    // at registration time (beamtalk_class_builder).
+    let src = "Object classBuilder name: #BT2276C; superclass: Object; \
+               classMethods: #{ #greet => someFun }; register";
+    try_codegen(src).expect("computed classMethods fun must compile (validated at register time)");
+}

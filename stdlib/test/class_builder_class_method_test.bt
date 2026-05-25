@@ -71,3 +71,32 @@ TestCase subclass: ClassBuilderClassMethodTest
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2267BSuperChild
     self assert: self.cls greeting equals: "base"
+
+  // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
+  // not match the class-method calling convention `fun(ClassSelf, ClassVars, ...)`
+  // is rejected at register time with a structured #arity_mismatch error, instead
+  // of installing successfully and crashing with an opaque error:undef when the
+  // class method is first called. Here `blk` is arity 1 but unary `#size` needs
+  // arity 2 (ClassSelf, ClassVars).
+  testWrongArityComputedFunRejected =>
+    blk := [:_self | "x" size]
+    self
+      should: [
+        Object classBuilder name: #BT2276Computed;
+          superclass: Object;
+          classMethods: #{#size => blk};
+          register
+      ]
+      raise: #arity_mismatch
+
+  // A correctly-shaped computed (non-block-literal) class-method fun follows the
+  // `fun(ClassSelf, ClassVars, ...)` convention (arity 2 for a unary selector)
+  // and registers and dispatches unaffected (BT-2276).
+  testCorrectArityComputedFunUnaffected =>
+    blk := [:_self :_classVars | 99]
+    Object classBuilder name: #BT2276ComputedOk;
+      superclass: Object;
+      classMethods: #{#answer => blk};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2276ComputedOk
+    self assert: self.cls answer equals: 99

@@ -60,8 +60,14 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
   // literal. It is still known-present (dispatchable / reflectable) but
   // unindexable — the class-side source query degrades to "no match", never a
   // crash.
+  //
+  // BT-2276: a computed class-method fun must follow the class-method calling
+  // convention `fun(ClassSelf, ClassVars, ...)` — a unary class method is arity
+  // 2 (ClassSelf, ClassVars). A wrong-arity computed fun is now rejected at
+  // register time, so this conforming arity-2 block is what a real computed
+  // class method looks like.
   testComputedClassMethodIsKnownButUnindexable =>
-    blk := [:_self | "x" size]
+    blk := [:_self :_classVars | "x" size]
     Object classBuilder name: #BTBuilderClassComputedProbe;
       superclass: Object;
       classMethods: #{#computedClassSize => blk};

@@ -2078,24 +2078,59 @@ impl CoreErlangGenerator {
 
     /// Lowers a single `classMethods:` map value: a class-method fun for a literal
     /// block of the right shape, else ordinary expression lowering.
+    ///
+    /// BT-2276: A block literal whose parameter count does not match the
+    /// selector (`self` plus one parameter per selector slot) is rejected at
+    /// compile time with a [`CodeGenError::BlockArityError`]. Previously such a
+    /// block fell through to ordinary expression lowering, producing a fun of the
+    /// wrong arity that crashed with an opaque `error:undef` only when the class
+    /// method was first called. A computed (non-block) value cannot have its
+    /// arity checked at compile time, so it still falls through here and is
+    /// validated at registration time (`beamtalk_class_builder:validate_class_method_arities/2`).
     fn class_method_map_value_doc(
         &mut self,
         key: &Expression,
         value: &Expression,
     ) -> Result<Document<'static>> {
-        if let (Expression::Literal(Literal::Symbol(sym), _), Expression::Block(block)) =
-            (key, value)
-        {
+        if let Expression::Literal(Literal::Symbol(sym), _) = key {
             if let Some(selector) = super::super::class_builder_source::selector_from_symbol(sym) {
-                // A class-method block declares `self` plus one parameter per
-                // selector slot.
-                if block.parameters.len() == selector.arity() + 1 {
-                    return self.generate_class_method_fun_from_block(&selector, block);
+                if let Expression::Block(block) = value {
+                    // A class-method block declares `self` plus one parameter per
+                    // selector slot.
+                    let expected = selector.arity() + 1;
+                    if block.parameters.len() == expected {
+                        return self.generate_class_method_fun_from_block(&selector, block);
+                    }
+                    return Err(CodeGenError::BlockArityError {
+                        selector: format!("classMethods: {sym}"),
+                        expected: expected.to_string(),
+                        actual: block.parameters.len(),
+                        hint: format!(
+                            "Fix: A classMethods: block takes `self` plus one parameter per \
+                             selector argument, so #{sym} needs {expected} parameter(s):\n\
+                             \x20 classMethods: #{{ #{sym} => [:self{} | ...] }}",
+                            Self::class_method_block_param_example(selector.arity())
+                        ),
+                    });
                 }
             }
         }
-        // Computed fun or non-conforming block: lower as an ordinary value.
+        // Computed fun or non-conforming key: lower as an ordinary value. A
+        // computed fun's arity is unknown until runtime and is validated at
+        // registration time (BT-2276).
         self.expression_doc(value)
+    }
+
+    /// Builds the example trailing block parameters (`:a1 :a2 …`) for the
+    /// `BlockArityError` hint shown when a `classMethods:` block has the wrong
+    /// parameter count. Empty for a unary selector (just `:self`).
+    fn class_method_block_param_example(selector_arity: usize) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        for i in 1..=selector_arity {
+            let _ = write!(out, " :a{i}");
+        }
+        out
     }
 
     /// Emits an anonymous class-method fun from a builder block literal.
