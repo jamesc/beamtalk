@@ -32,6 +32,15 @@ typed Actor subclass: ClassBuilder
   state: classMethods :: Dictionary = #{}
   state: classMethodSource :: Dictionary = #{}
   state: classState :: Dictionary = #{}
+  state: methodSignatures :: Dictionary = #{}
+  state: classMethodSignatures :: Dictionary = #{}
+  state: methodReturnTypes :: Dictionary = #{}
+  state: classMethodReturnTypes :: Dictionary = #{}
+  state: methodDocs :: Dictionary = #{}
+  state: classMethodDocs :: Dictionary = #{}
+  state: classDoc :: String | Nil = nil
+  state: meta :: Dictionary | Nil = nil
+  state: isConstructible :: Boolean | Nil = nil
 
   /// Set the class name (a Symbol).
   ///
@@ -120,6 +129,122 @@ typed Actor subclass: ClassBuilder
   /// builder classVars: #{ #total => 0 }
   /// ```
   classVars: aDict :: Dictionary -> Dictionary => self.classState := aDict
+
+  /// Set instance-method display signatures as a `selector => signature` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// These are the human-readable signatures shown by `:help` (e.g.
+  /// `"increment -> Integer"`). The file-defined path derives them from the
+  /// method AST; the builder path supplies them explicitly so programmatically
+  /// built classes reach `:help` parity.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodSignatures: #{ #increment => "increment -> Integer" }
+  /// ```
+  methodSignatures: aDict :: Dictionary -> Dictionary =>
+    self.methodSignatures := aDict
+
+  /// Set class-side method display signatures as a `selector => signature` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// The class-side counterpart of `methodSignatures:`, shown by `:help` for
+  /// class methods.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodSignatures: #{ #default => "default -> Counter" }
+  /// ```
+  classMethodSignatures: aDict :: Dictionary -> Dictionary =>
+    self.classMethodSignatures := aDict
+
+  /// Set instance-method return-type metadata as a `selector => type` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// Mirrors the return-type channel the compiler emits for file-defined
+  /// classes so reflective type queries return the same data for
+  /// builder-defined ones.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodReturnTypes: #{ #increment => #Integer }
+  /// ```
+  methodReturnTypes: aDict :: Dictionary -> Dictionary =>
+    self.methodReturnTypes := aDict
+
+  /// Set class-side method return-type metadata as a `selector => type` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// The class-side counterpart of `methodReturnTypes:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodReturnTypes: #{ #default => #Counter }
+  /// ```
+  classMethodReturnTypes: aDict :: Dictionary -> Dictionary =>
+    self.classMethodReturnTypes := aDict
+
+  /// Set per-method doc comments as a `selector => doc string` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// These are the doc comments reflected by documentation queries and shown in
+  /// `:help`, matching the doc channel the compiler emits for file-defined
+  /// classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodDocs: #{ #increment => "Add one to the count." }
+  /// ```
+  methodDocs: aDict :: Dictionary -> Dictionary => self.methodDocs := aDict
+
+  /// Set per-class-method doc comments as a `selector => doc string` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// The class-side counterpart of `methodDocs:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodDocs: #{ #default => "Build a fresh counter." }
+  /// ```
+  classMethodDocs: aDict :: Dictionary -> Dictionary =>
+    self.classMethodDocs := aDict
+
+  /// Set the class-level doc comment (ADR 0084, BT-2268).
+  ///
+  /// Reflected by documentation queries on the class, matching the `classDoc`
+  /// channel the compiler emits for file-defined classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classDoc: "A simple mutable counter."
+  /// ```
+  classDoc: aString :: String -> String => self.classDoc := aString
+
+  /// Set the class meta map (ADR 0084, BT-2268).
+  ///
+  /// The meta map carries static class metadata (flags, fields, method info)
+  /// that the runtime reads during registration. Left unset, the runtime falls
+  /// back to reading the backing module's `__beamtalk_meta/0`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder meta: #{ #is_abstract => false }
+  /// ```
+  meta: aDict :: Dictionary -> Dictionary => self.meta := aDict
+
+  /// Set whether instances of the class can be created via `new` / `new:`
+  /// (ADR 0084, BT-2268).
+  ///
+  /// File-defined classes infer this from the `new => self error:` pattern;
+  /// the builder path sets it explicitly. Leaving it unset (`nil`) lets the
+  /// runtime compute constructibility lazily, as it does for primitive classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder isConstructible: false
+  /// ```
+  isConstructible: aBoolean :: Boolean -> Boolean =>
+    self.isConstructible := aBoolean
 
   /// Add a single field with a default value.
   ///
