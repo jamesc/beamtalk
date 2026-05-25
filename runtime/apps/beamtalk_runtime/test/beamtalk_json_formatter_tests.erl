@@ -513,6 +513,154 @@ format_handles_format_args_with_binary_test() ->
     ?assertEqual(<<"http server started">>, maps:get(<<"msg">>, Decoded)).
 
 %%====================================================================
+%% Error-path Tests (BT-2273)
+%%====================================================================
+
+%% Exercises format_reason_with_bt_error/2 BtError branch: when the crash
+%% reason in a gen_server terminate report contains a beamtalk error, the
+%% formatted BT error message is used in the msg field instead of the raw term.
+format_gen_server_terminate_with_bt_error_reason_test() ->
+    BtError = beamtalk_error:new(does_not_understand, 'Counter', 'increment'),
+    WrappedError = #{'$beamtalk_class' => 'NoSuchMethodError', error => BtError},
+    Event = #{
+        level => error,
+        msg =>
+            {report, #{
+                label => {gen_server, terminate},
+                name => my_counter_server,
+                reason => WrappedError
+            }},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    Msg = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Counter does not understand">>)),
+    %% If the BtError branch was NOT taken, the raw ~tp of WrappedError would
+    %% include the '$beamtalk_class' atom key. Its absence confirms extraction.
+    ?assertEqual(nomatch, binary:match(Msg, <<"$beamtalk_class">>)).
+
+%% Exercises format_reason_with_bt_error/2 AND format_reason_concise/1 BtError
+%% branches (top-level key form): when a supervisor child_terminated report has
+%% a beamtalk error as the termination reason both the msg field and the
+%% structured reason field use the BT error message.
+format_supervisor_child_terminated_with_bt_error_reason_test() ->
+    BtError = beamtalk_error:new(does_not_understand, 'Worker', 'process'),
+    WrappedError = #{'$beamtalk_class' => 'NoSuchMethodError', error => BtError},
+    Event = #{
+        level => error,
+        msg =>
+            {report, #{
+                label => {supervisor, child_terminated},
+                supervisor => test_sup,
+                reason => WrappedError,
+                offender => [{id, worker_child}, {pid, self()}]
+            }},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    Msg = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Worker does not understand">>)),
+    %% If the BtError branch was NOT taken, the raw ~tp of WrappedError would
+    %% include the '$beamtalk_class' atom key. Its absence confirms extraction.
+    ?assertEqual(nomatch, binary:match(Msg, <<"$beamtalk_class">>)),
+    %% format_reason_concise/1 BtError branch: the reason field also uses the BT error message
+    Reason = maps:get(<<"reason">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Reason, <<"Worker does not understand">>)),
+    ?assertEqual(nomatch, binary:match(Reason, <<"$beamtalk_class">>)).
+
+%% Exercises format_reason_with_bt_error/2 BtError branch in the proplist-form
+%% supervisor child_terminated handler (data nested under `report` key).
+format_supervisor_child_terminated_proplist_with_bt_error_test() ->
+    BtError = beamtalk_error:new(does_not_understand, 'Service', 'call'),
+    WrappedError = #{'$beamtalk_class' => 'NoSuchMethodError', error => BtError},
+    Event = #{
+        level => error,
+        msg =>
+            {report, #{
+                label => {supervisor, child_terminated},
+                report => [
+                    {supervisor, {local, svc_sup}},
+                    {reason, WrappedError},
+                    {offender, [{id, svc_worker}]}
+                ]
+            }},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    Msg = maps:get(<<"msg">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Service does not understand">>)),
+    %% If the BtError branch was NOT taken, the raw ~tp of WrappedError would
+    %% include the '$beamtalk_class' atom key. Its absence confirms extraction.
+    ?assertEqual(nomatch, binary:match(Msg, <<"$beamtalk_class">>)),
+    %% format_reason_concise/1 BtError branch: the reason field also uses the BT error message
+    Reason = maps:get(<<"reason">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Reason, <<"Service does not understand">>)),
+    ?assertEqual(nomatch, binary:match(Reason, <<"$beamtalk_class">>)).
+
+%% Exercises format_extra_value/2 non-list stacktrace BtError branch: when the
+%% stacktrace metadata value is not a list but contains an embedded beamtalk
+%% error, the BT error message is extracted and used in the output.
+format_non_list_stacktrace_with_bt_error_test() ->
+    BtError = beamtalk_error:new(does_not_understand, 'MyClass', 'myMethod'),
+    WrappedError = #{'$beamtalk_class' => 'NoSuchMethodError', error => BtError},
+    Event = #{
+        level => error,
+        msg => {string, "error occurred"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            stacktrace => WrappedError
+        }
+    },
+    Decoded = decode_event(Event),
+    StackBin = maps:get(<<"stacktrace">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(StackBin, <<"MyClass does not understand">>)),
+    %% The BtError branch in format_extra_value/2 appends "\n  raw: <term>" after
+    %% the error message. Asserting the "raw:" marker proves this branch was taken
+    %% rather than the undefined-branch ~tp fallback (which does not append it).
+    ?assertNotEqual(nomatch, binary:match(StackBin, <<"raw:">>)).
+
+%% Exercises the inner catch in format_msg_fallback/1: when the outer formatter
+%% path crashes (here via a binary domain element) and the log msg is a
+%% {Format, Args} pair whose io_lib:format call also fails (mismatched arity),
+%% the inner catch renders the {Format, Args} pair as a raw term.
+format_msg_fallback_inner_catch_test() ->
+    %% A binary in the domain list crashes atom_to_list inside format_domain,
+    %% triggering the outer catch in format/2 which calls format_msg_fallback/1.
+    %% The msg has 2 format directives but only 1 arg, so io_lib:format raises
+    %% inside format_msg_fallback, exercising the inner catch.
+    Event = #{
+        level => info,
+        msg => {"~p ~p", [only_one_arg]},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            domain => [<<"not-an-atom">>]
+        }
+    },
+    Result = beamtalk_json_formatter:format(Event, #{}),
+    Bin = iolist_to_binary(Result),
+    %% Outer catch emits a "formatter error:" marker
+    ?assertNotEqual(nomatch, binary:match(Bin, <<"formatter error:">>)),
+    %% Inner catch in format_msg_fallback formats {Format,Args} as a term;
+    %% the atom only_one_arg must appear in that rendered tuple.
+    ?assertNotEqual(nomatch, binary:match(Bin, <<"only_one_arg">>)).
+
+%% Exercises key_to_binary/1 fallback clause: when an extra metadata key is
+%% neither an atom nor a binary (e.g., a tuple), it is formatted via ~tp and
+%% used as the JSON key.
+format_extra_meta_non_atom_key_test() ->
+    Event = #{
+        level => info,
+        msg => {string, "test"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            {custom, meta_key} => <<"meta_value">>
+        }
+    },
+    Decoded = decode_event(Event),
+    %% Tuple key {custom,meta_key} becomes the string "{custom,meta_key}" in JSON
+    ?assertEqual(<<"meta_value">>, maps:get(<<"{custom,meta_key}">>, Decoded)).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
