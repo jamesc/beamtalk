@@ -100,7 +100,15 @@ instantiation_test_() ->
             {"module-less generic instance dispatches a fun-backed method",
                 fun test_generic_instance_method_dispatch/0},
             {"module-less subclass inherits builder superclass field defaults",
-                fun test_generic_new_inherited_defaults/0}
+                fun test_generic_new_inherited_defaults/0},
+            %% BT-2277: ancestor exit handling during default collection
+            {"new on a child stays robust when its builder ancestor process is gone",
+                fun test_generic_new_ancestor_gone/0},
+            %% BT-2277: fun-backed instance dispatch from inside the class process
+            {"self new + instance-method dispatch resolves inside the class process",
+                fun test_self_new_instance_method_dispatch/0},
+            {"self new + inherited instance-method dispatch resolves inside the class process",
+                fun test_self_new_inherited_instance_method_dispatch/0}
         ]
     end}.
 
@@ -593,6 +601,94 @@ test_generic_new_inherited_defaults() ->
     end.
 
 %%====================================================================
+%% BT-2277: ancestor exit handling
+%%====================================================================
+
+test_generic_new_ancestor_gone() ->
+    %% A module-less child whose builder ancestor process has exited must still
+    %% instantiate — the dead ancestor contributes no defaults rather than
+    %% crashing `new` (ancestor_builder_defaults broadens its exit catch).
+    ParentPid = register_builder_class('BT2277Parent', 'Object', #{p => 10}, #{}),
+    ChildPid = register_builder_class('BT2277Child', 'BT2277Parent', #{c => 20}, #{}),
+    try
+        %% Kill the ancestor abnormally so the field_defaults gen_server:call
+        %% inside collect_ancestor_defaults exits with a non-{noproc/timeout}
+        %% reason (a racing call) or, post-deregister, with noproc.
+        MRef = erlang:monitor(process, ParentPid),
+        exit(ParentPid, kill),
+        receive
+            {'DOWN', MRef, process, ParentPid, _} -> ok
+        after 5000 -> error(parent_not_killed)
+        end,
+        {ok, Instance} = beamtalk_object_class:new(ChildPid, []),
+        ?assertEqual('BT2277Child', maps:get('$beamtalk_class', Instance)),
+        ?assertEqual(20, maps:get(c, Instance)),
+        %% The dead ancestor's defaults are simply absent — no crash.
+        ?assertNot(maps:is_key(p, Instance))
+    after
+        gen_server:stop(ChildPid, normal, 5000),
+        case is_process_alive(ParentPid) of
+            true -> gen_server:stop(ParentPid, normal, 5000);
+            false -> ok
+        end
+    end.
+
+%%====================================================================
+%% BT-2277: fun-backed instance dispatch from inside the class process
+%%====================================================================
+
+test_self_new_instance_method_dispatch() ->
+    %% A fun-backed class method that does `self new` then sends an
+    %% instance-method message runs entirely inside the class gen_server. Before
+    %% BT-2277 the `Pid =/= self()` guard reported `none` for the self case and
+    %% dispatch fell through to does_not_understand; now the local instance-method
+    %% cache resolves the block fun deadlock-free.
+    GetA = fun(Self) -> maps:get(a, Self) end,
+    %% Class method `makeAndGetA` (arity selector_arity+2 = 2): build an instance
+    %% via the self-instantiation path, then send it `getA` while inside the
+    %% class process.
+    MakeAndGetA = fun(_ClassSelf, _ClassVars) ->
+        ClassName = get(beamtalk_class_name),
+        Module = get(beamtalk_class_module),
+        Inst = beamtalk_class_instantiation:class_self_new(ClassName, Module, []),
+        beamtalk_message_dispatch:send(Inst, 'getA', [])
+    end,
+    Pid = register_builder_class_with_class_methods(
+        'BT2277SelfDispatch', 'Object', #{a => 42}, #{'getA' => GetA}, #{
+            'makeAndGetA' => MakeAndGetA
+        }
+    ),
+    try
+        ?assertEqual({ok, 42}, gen_server:call(Pid, {class_method_call, 'makeAndGetA', []}))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+test_self_new_inherited_instance_method_dispatch() ->
+    %% The self-dispatch path also resolves *inherited* fun-backed instance
+    %% methods: the child class process consults its local cache, misses, then
+    %% walks to the parent process (a distinct pid — safe to gen_server:call).
+    GetP = fun(Self) -> maps:get(p, Self) end,
+    ParentPid = register_builder_class(
+        'BT2277SelfParent', 'Object', #{p => 7}, #{'getP' => GetP}
+    ),
+    MakeAndGetP = fun(_ClassSelf, _ClassVars) ->
+        ClassName = get(beamtalk_class_name),
+        Module = get(beamtalk_class_module),
+        Inst = beamtalk_class_instantiation:class_self_new(ClassName, Module, []),
+        beamtalk_message_dispatch:send(Inst, 'getP', [])
+    end,
+    ChildPid = register_builder_class_with_class_methods(
+        'BT2277SelfChild', 'BT2277SelfParent', #{}, #{}, #{'makeAndGetP' => MakeAndGetP}
+    ),
+    try
+        ?assertEqual({ok, 7}, gen_server:call(ChildPid, {class_method_call, 'makeAndGetP', []}))
+    after
+        gen_server:stop(ChildPid, normal, 5000),
+        gen_server:stop(ParentPid, normal, 5000)
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -608,6 +704,27 @@ register_builder_class(ClassName, Superclass, FieldSpecs, MethodSpecs) ->
         superclassRef => Superclass,
         fieldSpecs => FieldSpecs,
         methodSpecs => MethodSpecs
+    },
+    {ok, Pid} = beamtalk_class_builder:register(State),
+    Pid.
+
+%% Like register_builder_class/4 but also installs class-side method funs
+%% (selector => fun(ClassSelf, ClassVars, A1..An)). Used to exercise the
+%% self-dispatch path (BT-2277): a class method that does `self new` then sends
+%% an instance message, all while inside the class gen_server.
+register_builder_class_with_class_methods(
+    ClassName, Superclass, FieldSpecs, MethodSpecs, ClassMethodSpecs
+) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined -> ok;
+        Existing when is_pid(Existing) -> gen_server:stop(Existing, normal, 5000)
+    end,
+    State = #{
+        className => ClassName,
+        superclassRef => Superclass,
+        fieldSpecs => FieldSpecs,
+        methodSpecs => MethodSpecs,
+        classMethods => ClassMethodSpecs
     },
     {ok, Pid} = beamtalk_class_builder:register(State),
     Pid.
