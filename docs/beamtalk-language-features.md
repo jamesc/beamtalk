@@ -625,6 +625,75 @@ sealed Object subclass: MyRegistry
 
 `classState:` is distinct from `state:` (per-instance actor state) and `field:` (per-instance immutable data). It stores values at the class level, analogous to Smalltalk class variables.
 
+### Programmatic Class Creation (ClassBuilder) (ADR 0038 / ADR 0084)
+
+`Object subclass: Counter …` is the grammar form, but a class can also be built
+**programmatically** by cascading messages to a `ClassBuilder` and ending with
+`register`. This is a first-class user API (the same protocol the compiler emits
+for the grammar form): `register` returns the new, dispatchable class object.
+
+```beamtalk
+// Build a class in one cascade. register returns the canonical class object.
+account := Object classBuilder
+  name: #Account;
+  superclass: Object;
+  classVars: #{ #opened => 0 };
+  fields: #{ #balance => 0 };
+  methods: #{ #balance => [:inst | inst fieldAt: #balance] };
+  classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };
+  register
+
+account new balance        // => 0
+Account open               // => 1  (also reachable by name — the name IS the class)
+Account open               // => 2  (class-variable state threads correctly)
+```
+
+Each block value is **compiler-lowered** into the same dispatchable fun a
+file-defined method produces, so class-variable mutations thread, and `super` /
+`self` resolve — it is not a naive runtime closure. Class methods built this way
+are callable and reflectable (ADR 0084).
+
+**Incremental piece API.** A class can be assembled one piece at a time before
+`register` — the "browser" use case. The `add*` setters write the same maps the
+bulk setters do, and `removeMethod:` / `removeClassMethod:` drop a piece:
+
+```beamtalk
+Object classBuilder
+  name: #Tally;
+  superclass: Object;
+  addClassState: #total default: 10;
+  addField: #count default: 0;
+  addMethod: #answer body: [:inst | 42];
+  addClassMethod: #tally body: [:self | self.total := self.total + 5. self.total];
+  register
+
+Tally new answer           // => 42
+Tally tally                // => 15
+```
+
+**Instantiation.** A purely programmatic (module-less) builder class instantiates
+with `new` / `new:`, exactly like a compiled value type:
+
+```beamtalk
+point := Object classBuilder name: #P; superclass: Object; fields: #{ #x => 0, #y => 0 }; register
+point new: #{ #x => 3, #y => 4 }     // => a P  (fields seeded from the map)
+```
+
+**Metadata parity.** Optional setters bring a builder-defined class to `:help`
+parity with a file-defined one — `methodSignatures:` / `classMethodSignatures:`,
+`methodDocs:` / `classMethodDocs:`, `methodReturnTypes:` / `classMethodReturnTypes:`,
+`classDoc:`, `meta:`, and `isConstructible:`. The class-side method bodies are
+also auto-indexed for `SystemNavigation` source-text queries.
+
+**Class-side live edit.** A registered class's class method can be live-edited
+with the same `>>` patcher used for instance methods (see *Live Patching* and
+*Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
+The class-side dispatch path picks up the new class method immediately (ADR 0084).
+
+> The grammar form (`Object subclass: …`) remains the idiomatic way to define a
+> class in source. The programmatic builder is for tooling, REPL exploration, and
+> metaprogramming where the class shape is computed rather than written out.
+
 ### Doc Comments (`///`)
 
 Triple-slash comments (`///`) are structured documentation parsed into the AST and queryable at runtime via `Beamtalk help:`. They support Markdown formatting and a `## Examples` convention with fenced code blocks.
@@ -2434,6 +2503,28 @@ Actor subclass: Counter
     self.lastModified := DateTime now
   getValue => self.value
 ```
+
+Live patching works on the **class side** too (ADR 0084): `ClassName class >> sel
+=> body` installs or replaces a class method on a registered class, and class-side
+dispatch resolves the new method immediately.
+
+```beamtalk
+Object subclass: Registry
+  class current => nil
+
+// Live-edit the class method — subsequent class-side sends pick it up
+Registry class >> current => "live"
+Registry current        // => "live"
+
+// Add a brand-new class-side selector
+Registry class >> reset => 0
+Registry reset          // => 0
+```
+
+> The `>>` live-edit path recompiles the class's recorded source, so it applies
+> to classes defined in source (inline `Object subclass:` or `:load`ed files).
+> Purely-programmatic `ClassBuilder` classes have no recorded source; supply their
+> class methods up front via `classMethods:` / `addClassMethod:body:` instead.
 
 ---
 
