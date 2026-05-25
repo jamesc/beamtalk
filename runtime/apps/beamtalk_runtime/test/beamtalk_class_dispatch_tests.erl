@@ -992,14 +992,13 @@ test_class_send_new_colon() ->
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     try
         %% The new: clause calls gen_server:call(Pid, {new, [Map]}).
-        %% The gen_server handles {new, _} by attempting instantiation.
-        %% For a class with no actual new handler, this will fail — but
-        %% the important thing is that the correct code path is exercised.
-        %% We expect an error because the test helper has no real new handler.
-        ?assertError(
-            _,
-            beamtalk_class_dispatch:class_send(Pid, 'new:', [#{}])
-        )
+        %% The helper module exports no new/0, so BT-2275 routes this through
+        %% the generic, module-free instantiation path, returning a
+        %% $beamtalk_class-tagged instance map (before BT-2275 this raised
+        %% because there was no real new handler). The new: clause path is
+        %% still exercised; the observable is now a generic instance.
+        Result = beamtalk_class_dispatch:class_send(Pid, 'new:', [#{}]),
+        ?assert(is_map(Result))
     after
         catch gen_server:stop(Pid, normal, 5000)
     end.
