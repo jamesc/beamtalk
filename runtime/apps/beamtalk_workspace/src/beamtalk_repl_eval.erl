@@ -26,6 +26,12 @@ module loading to beamtalk_repl_loader (BT-863).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
 
+%% ADR 0082 Phase 1 (BT-2283) — stateless live method patch backing
+%% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
+%% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
+%% dependency on beamtalk_workspace.
+-export([compile_method/4]).
+
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
@@ -262,6 +268,86 @@ reload_class_file(Path) ->
 -spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
     beamtalk_repl_loader:reload_class_file(Path, ExpectedClassName).
+
+-doc """
+Install a live method patch from a `(ClassName, Selector, Source, Intent)' tuple
+without REPL session state (ADR 0082 Phase 1, BT-2283).
+
+Backs `Behaviour compile:source:' (`Intent = durable') and
+`tryCompile:source:' (`Intent = ephemeral'). `Source' is the method body String
+exactly as the caller supplied it — either a full `selector => body' definition
+or a bare body; both are accepted because the synthesized `>>' expression
+(`ClassName >> Source') is recompiled to recover the canonical MethodInfo.
+
+The patch compiles and installs in memory, and the install chokepoint
+(`beamtalk_repl_loader:load_recompiled_method/7') emits a ChangeLog entry tagged
+with `Intent'. Returns `{ok, ClassName}' on success or `{error, Reason}' on
+compile/install failure (memory unchanged, no ChangeLog entry — the
+all-or-nothing contract).
+""".
+-spec compile_method(binary(), atom() | binary(), binary(), durable | ephemeral) ->
+    {ok, binary()} | {error, term()}.
+compile_method(ClassNameBin, Selector, Source, Intent) ->
+    SelectorBin = to_binary(Selector),
+    SourceStr = unicode:characters_to_list(normalize_method_source(SelectorBin, Source)),
+    Expression =
+        unicode:characters_to_list(<<ClassNameBin/binary, " >> ">>) ++ SourceStr,
+    %% Compile the synthesized standalone definition to recover the canonical
+    %% MethodInfo (selector, is_class_method, method_source) the install path
+    %% expects, then tag it with the caller's intent so the ChangeLog entry is
+    %% durable / ephemeral as appropriate.
+    State = beamtalk_repl_state:new(undefined, 0),
+    Counter = beamtalk_repl_state:get_eval_counter(State),
+    % elp:fixme W0023 intentional atom creation
+    ModuleName = list_to_atom("beamtalk_compile_method_" ++ integer_to_list(Counter)),
+    case beamtalk_repl_compiler:compile_expression(Expression, ModuleName, #{}) of
+        {ok, method_definition, MethodInfo0, Warnings} ->
+            MethodInfo = MethodInfo0#{
+                intent => Intent,
+                author_kind => human,
+                expression => list_to_binary(Expression)
+            },
+            case
+                beamtalk_repl_loader:reload_method_definition(
+                    MethodInfo, Warnings, Expression, State
+                )
+            of
+                {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
+                {error, Reason, _Output, _W, _S} -> {error, Reason}
+            end;
+        {ok, _OtherKind, _Info, _Warnings} ->
+            {error, {not_a_method_definition, SelectorBin}};
+        {ok, _Binary, _ResultExpr, _Warnings} ->
+            {error, {not_a_method_definition, SelectorBin}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% A `compile:source:' body may be a full `selector => body' definition or a bare
+%% body. When the selector prefix is missing, prepend it so the synthesized `>>'
+%% expression parses as a method definition. Heuristic: if the trimmed source
+%% does not already start with the selector token, prefix `selector => '.
+-spec normalize_method_source(binary(), binary()) -> binary().
+normalize_method_source(SelectorBin, Source) ->
+    Trimmed = string:trim(Source, leading),
+    Head = first_token(SelectorBin),
+    case binary:longest_common_prefix([Trimmed, Head]) =:= byte_size(Head) of
+        true -> Source;
+        false -> <<SelectorBin/binary, " => ", Source/binary>>
+    end.
+
+%% First whitespace/`:'-delimited token of a (possibly keyword) selector binary,
+%% e.g. `at:put:' -> `at', `increment' -> `increment', `+' -> `+'.
+-spec first_token(binary()) -> binary().
+first_token(SelectorBin) ->
+    case binary:split(SelectorBin, [<<":">>, <<" ">>]) of
+        [Head | _] when byte_size(Head) > 0 -> Head;
+        _ -> SelectorBin
+    end.
+
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
+to_binary(B) when is_binary(B) -> B.
 
 %%% Internal functions
 

@@ -45,9 +45,17 @@ Extracted from beamtalk_repl_eval (BT-863).
     try_package_relative/3,
     maybe_add_loaded_module/2,
     store_file_class_sources/3,
-    store_class_sources/4
+    store_class_sources/4,
+    %% ADR 0082 Phase 1 (BT-2283): pure helpers behind the install hook.
+    is_path_inside/2,
+    method_source_binary/1,
+    patch_side/1,
+    classify_source_file/1,
+    span_error_entry/3
 ]).
 -endif.
+
+-include_lib("kernel/include/logger.hrl").
 
 %%% Public API
 
@@ -177,7 +185,7 @@ load_class_module(ClassInfo, Expression, State) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 reload_method_definition(MethodInfo, Warnings, Expression, State) ->
-    #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
+    #{class_name := ClassNameBin} = MethodInfo,
     ExistingSource = beamtalk_workspace_meta:get_class_source(ClassNameBin),
     case ExistingSource of
         undefined ->
@@ -187,7 +195,7 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
             {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
         ClassSource ->
             recompile_with_method(
-                ClassSource, ClassNameBin, SelectorBin, Expression, Warnings, State
+                ClassSource, MethodInfo, Expression, Warnings, State
             )
     end.
 
@@ -574,11 +582,11 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
 %% wraps all compiler calls in wrap_compiler_errors, preventing compiler crashes
 %% from propagating as exits that would kill the REPL process.
 -spec recompile_with_method(
-    string(), binary(), binary(), string(), [binary()], beamtalk_repl_state:state()
+    string(), map(), string(), [binary()], beamtalk_repl_state:state()
 ) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
-recompile_with_method(ClassSource, ClassNameBin, SelectorBin, Expression, Warnings, State) ->
+recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
     CombinedSource = ClassSource ++ "\n" ++ Expression,
     SourceBin = list_to_binary(CombinedSource),
     %% BT-907: Include superclass index so cross-file inheritance resolves correctly.
@@ -603,8 +611,7 @@ recompile_with_method(ClassSource, ClassNameBin, SelectorBin, Expression, Warnin
                 Binary,
                 ModName,
                 Classes,
-                ClassNameBin,
-                SelectorBin,
+                MethodInfo,
                 CombinedSource,
                 AllWarnings,
                 State
@@ -615,7 +622,7 @@ recompile_with_method(ClassSource, ClassNameBin, SelectorBin, Expression, Warnin
 
 %% Load a recompiled method-patched class binary into BEAM.
 -spec load_recompiled_method(
-    binary(), atom(), list(), binary(), binary(), string(), [binary()], beamtalk_repl_state:state()
+    binary(), atom(), list(), map(), string(), [binary()], beamtalk_repl_state:state()
 ) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -623,14 +630,17 @@ load_recompiled_method(
     Binary,
     ModName,
     Classes,
-    ClassNameBin,
-    SelectorBin,
+    MethodInfo,
     CombinedSource,
     AllWarnings,
     State
 ) ->
+    #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
     case code:load_binary(ModName, "", Binary) of
         {module, ModName} ->
+            %% (2) Install in memory. The memory install is the visible effect;
+            %% the ChangeEntry below is step (3) — emitted only after install
+            %% succeeds (all-or-nothing between install and log, ADR 0082).
             activate_module(ModName, Classes),
             %% Update all classes compiled in this module so sibling class entries
             %% reflect the latest combined source and stay consistent for future >> calls.
@@ -641,6 +651,11 @@ load_recompiled_method(
                 end,
                 Classes
             ),
+            %% (3) Emit a ChangeEntry for the live patch (ADR 0082 Phase 1).
+            %% Best-effort: a ChangeLog failure must never fail the install — the
+            %% method is already live in memory. emit_change_entry/1 logs and
+            %% swallows its own errors.
+            emit_change_entry(MethodInfo),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
@@ -652,6 +667,216 @@ load_recompiled_method(
                     {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
             end
     end.
+
+%% Emit a ChangeLog entry for a live in-memory method patch (ADR 0082 Phase 1).
+%%
+%% Called from load_recompiled_method/7 *after* the patched class is installed in
+%% memory. Captures (per the ADR's "Method patch flow"):
+%%   - `kind' (`instance' / `class') from the patch side,
+%%   - `intent' (`durable' for `>>' / `compile:source:'; `ephemeral' for
+%%     `tryCompile:source:'),
+%%   - `author_kind' (`human' / `agent') from the eval submission metadata,
+%%   - `flushable' + `sourceFile' + `span' + `prev_source' when the class is
+%%     backed by an in-project `.bt' file whose method span resolves cleanly.
+%%
+%% Non-flushable classes (stdlib / dynamic / dependency — `sourceFile' nil or
+%% out-of-project) still log an entry, with `flushable: false' and a reason, so
+%% the audit trail stays exhaustive ("every in-memory method mutation produces a
+%% ChangeEntry"). A disk-read or span-resolution failure downgrades the entry to
+%% non-flushable rather than failing the install.
+%%
+%% Best-effort: every failure path is logged and swallowed. The method is already
+%% live; a ChangeLog write must not undo or block that (the all-or-nothing rule
+%% only requires that the entry is emitted *after* a successful install — if
+%% emission itself fails, the patch still stands).
+-spec emit_change_entry(map()) -> ok.
+emit_change_entry(MethodInfo) ->
+    try
+        do_emit_change_entry(MethodInfo)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for live patch (patch still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    method_info => maps:with([class_name, selector], MethodInfo),
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-spec do_emit_change_entry(map()) -> ok.
+do_emit_change_entry(MethodInfo) ->
+    ClassNameBin = maps:get(class_name, MethodInfo),
+    SelectorBin = maps:get(selector, MethodInfo),
+    IsClassMethod = maps:get(is_class_method, MethodInfo, false),
+    %% `>>' and `compile:source:' are durable; `tryCompile:source:' is ephemeral.
+    Intent = maps:get(intent, MethodInfo, durable),
+    %% MCP-issued patches tag `agent'; REPL / `>>' default to `human'.
+    AuthorKind = maps:get(author_kind, MethodInfo, human),
+    Author = maps:get(author, MethodInfo, <<"repl">>),
+    Source = method_source_binary(MethodInfo),
+    Kind = patch_side(IsClassMethod),
+    Side = patch_side(IsClassMethod),
+    Base = #{
+        class => ClassNameBin,
+        selector => SelectorBin,
+        kind => Kind,
+        source => Source,
+        intent => Intent,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    Entry = add_flushability(Base, ClassNameBin, SelectorBin, Side),
+    _ = beamtalk_workspace_changelog:append(Entry),
+    ok.
+
+-spec patch_side(boolean()) -> instance | class.
+patch_side(true) -> class;
+patch_side(false) -> instance.
+
+%% Best source for the patched method body, preferring the compiler-extracted
+%% `method_source' (the `selector => body' fragment) and falling back to the raw
+%% `expression' (the full `Class >> selector => body' line).
+-spec method_source_binary(map()) -> binary().
+method_source_binary(MethodInfo) ->
+    case maps:get(method_source, MethodInfo, undefined) of
+        Bin when is_binary(Bin) ->
+            Bin;
+        Str when is_list(Str) ->
+            list_to_binary(Str);
+        undefined ->
+            case maps:get(expression, MethodInfo, <<>>) of
+                B when is_binary(B) -> B;
+                L when is_list(L) -> list_to_binary(L);
+                _ -> <<>>
+            end
+    end.
+
+%% Derive flushability and, when flushable, the on-disk span + prev_source.
+%%
+%% A class is flushable iff its `sourceFile' is non-nil AND lies inside the active
+%% project tree. For flushable classes we resolve the method's byte span against
+%% the *current on-disk* file (not the in-memory combined source) so a later
+%% flush splices into exactly what is on disk. If the file cannot be read or the
+%% span cannot be resolved, the patch downgrades to non-flushable.
+-spec add_flushability(map(), binary(), binary(), instance | class) -> map().
+add_flushability(Base, ClassNameBin, SelectorBin, Side) ->
+    case class_source_file(ClassNameBin) of
+        nil ->
+            Base#{flushable => false, not_flushable_reason => <<"stdlib">>};
+        SourceFile when is_binary(SourceFile) ->
+            case classify_source_file(SourceFile) of
+                {flushable, AbsPath} ->
+                    add_span_or_downgrade(
+                        Base, ClassNameBin, SelectorBin, Side, SourceFile, AbsPath
+                    );
+                {not_flushable, Reason} ->
+                    Base#{flushable => false, not_flushable_reason => Reason}
+            end
+    end.
+
+%% Resolve the disk span/prev_source for a flushable class; downgrade on failure.
+-spec add_span_or_downgrade(map(), binary(), binary(), instance | class, binary(), string()) ->
+    map().
+add_span_or_downgrade(Base, ClassNameBin, SelectorBin, Side, SourceFile, AbsPath) ->
+    case file:read_file(AbsPath) of
+        {ok, DiskSource} ->
+            resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource);
+        {error, ReadReason} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not read sourceFile for live patch; recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReadReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Base#{flushable => false, not_flushable_reason => <<"disk_read_failed">>}
+    end.
+
+-spec resolve_span_entry(map(), binary(), binary(), instance | class, binary(), binary()) -> map().
+resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource) ->
+    case beamtalk_compiler:resolve_method_span(DiskSource, ClassNameBin, SelectorBin, Side) of
+        {ok, Span, PrevSource} ->
+            Base#{
+                flushable => true,
+                source_file => SourceFile,
+                span => Span,
+                prev_source => PrevSource
+            };
+        {error, Reason, _Message} ->
+            %% Selector absent on disk (a brand-new method added live) is normal:
+            %% record a flushable entry with no prev span — a later flush appends
+            %% the method. Other resolution errors downgrade to memory-only.
+            span_error_entry(Base, SourceFile, Reason)
+    end.
+
+-spec span_error_entry(map(), binary(), atom()) -> map().
+span_error_entry(Base, SourceFile, selector_not_found) ->
+    Base#{flushable => true, source_file => SourceFile};
+span_error_entry(Base, _SourceFile, Reason) ->
+    Base#{
+        flushable => false,
+        not_flushable_reason =>
+            iolist_to_binary([<<"span_unresolved:">>, atom_to_binary(Reason, utf8)])
+    }.
+
+%% Resolve the class's source file via the BEAM module attribute (the same
+%% source-of-truth `Behaviour>>sourceFile' reads). Returns nil for classes with
+%% no backing file (stdlib / dynamic / not loaded).
+-spec class_source_file(binary()) -> binary() | nil.
+class_source_file(ClassNameBin) ->
+    case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+        {ok, ClassName} ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                Pid when is_pid(Pid) ->
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    beamtalk_reflection:source_file_from_module(ModuleName);
+                _ ->
+                    nil
+            end;
+        {error, _} ->
+            nil
+    end.
+
+%% Classify a class's source file as flushable (in-project) or not.
+%%
+%% `flushable' requires the file to resolve to an absolute path inside the active
+%% project source tree (per workspace metadata `project_path'). Files outside it
+%% are a dependency; a workspace with no project path treats all paths as
+%% non-flushable (nothing to flush into).
+-spec classify_source_file(binary()) ->
+    {flushable, string()} | {not_flushable, binary()}.
+classify_source_file(SourceFile) ->
+    SourceStr = binary_to_list(SourceFile),
+    AbsPath = filename:absname(SourceStr),
+    case beamtalk_workspace_meta:get_metadata() of
+        {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
+            ProjectRoot = filename:absname(binary_to_list(ProjectPath)),
+            case is_path_inside(ProjectRoot, AbsPath) of
+                true -> {flushable, AbsPath};
+                false -> {not_flushable, dependency_reason(SourceFile)}
+            end;
+        _ ->
+            %% No project context — cannot flush into a tree we do not know.
+            {not_flushable, dependency_reason(SourceFile)}
+    end.
+
+-spec dependency_reason(binary()) -> binary().
+dependency_reason(SourceFile) ->
+    iolist_to_binary([<<"dependency:">>, SourceFile]).
+
+%% True iff `Path' is `Root' itself or lives beneath it (component-wise prefix,
+%% so "/a/bc" is not considered inside "/a/b").
+-spec is_path_inside(string(), string()) -> boolean().
+is_path_inside(Root, Path) ->
+    RootParts = filename:split(Root),
+    PathParts = filename:split(Path),
+    lists:prefix(RootParts, PathParts).
 
 %% Convert a list of class info maps to a list of existing atoms (BT-738).
 -spec class_name_atoms([map()]) -> [atom()].

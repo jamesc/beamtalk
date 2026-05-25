@@ -461,3 +461,72 @@ store_class_sources_with_classes_list_name_test() ->
     {Name, NewState} = beamtalk_repl_loader:store_class_sources(Classes, some_mod, "expr", State),
     ?assertEqual(<<"MyActor">>, Name),
     ?assertEqual(State, NewState).
+
+%%====================================================================
+%% is_path_inside/2 (ADR 0082 Phase 1, BT-2283)
+%%====================================================================
+
+is_path_inside_direct_child_test() ->
+    ?assert(beamtalk_repl_loader:is_path_inside("/proj", "/proj/src/Counter.bt")).
+
+is_path_inside_root_itself_test() ->
+    ?assert(beamtalk_repl_loader:is_path_inside("/proj", "/proj")).
+
+is_path_inside_sibling_prefix_not_inside_test() ->
+    %% "/proj-other" must NOT count as inside "/proj" — component-wise prefix,
+    %% not a raw string prefix.
+    ?assertNot(beamtalk_repl_loader:is_path_inside("/proj", "/proj-other/src/X.bt")).
+
+is_path_inside_outside_tree_test() ->
+    ?assertNot(beamtalk_repl_loader:is_path_inside("/proj", "/elsewhere/X.bt")).
+
+%%====================================================================
+%% method_source_binary/1 (ADR 0082 Phase 1, BT-2283)
+%%====================================================================
+
+method_source_binary_prefers_method_source_test() ->
+    Info = #{method_source => <<"increment => 1">>, expression => <<"Counter >> increment => 1">>},
+    ?assertEqual(<<"increment => 1">>, beamtalk_repl_loader:method_source_binary(Info)).
+
+method_source_binary_accepts_list_test() ->
+    Info = #{method_source => "doubled => 2"},
+    ?assertEqual(<<"doubled => 2">>, beamtalk_repl_loader:method_source_binary(Info)).
+
+method_source_binary_falls_back_to_expression_test() ->
+    Info = #{expression => <<"Counter >> noop => self">>},
+    ?assertEqual(
+        <<"Counter >> noop => self">>, beamtalk_repl_loader:method_source_binary(Info)
+    ).
+
+method_source_binary_empty_when_absent_test() ->
+    ?assertEqual(<<>>, beamtalk_repl_loader:method_source_binary(#{})).
+
+%%====================================================================
+%% patch_side/1 (ADR 0082 Phase 1, BT-2283)
+%%====================================================================
+
+patch_side_instance_test() ->
+    ?assertEqual(instance, beamtalk_repl_loader:patch_side(false)).
+
+patch_side_class_test() ->
+    ?assertEqual(class, beamtalk_repl_loader:patch_side(true)).
+
+%%====================================================================
+%% span_error_entry/3 (ADR 0082 Phase 1, BT-2283)
+%%====================================================================
+
+span_error_entry_new_method_is_flushable_test() ->
+    %% A brand-new method (not yet on disk) keeps the entry flushable: a later
+    %% flush appends it.
+    Base = #{class => <<"Counter">>},
+    Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, selector_not_found),
+    ?assertEqual(true, maps:get(flushable, Entry)),
+    ?assertEqual(<<"src/counter.bt">>, maps:get(source_file, Entry)).
+
+span_error_entry_other_error_downgrades_test() ->
+    %% A genuine resolution failure (ambiguous, port down) downgrades to
+    %% memory-only with a reason.
+    Base = #{class => <<"Counter">>},
+    Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
+    ?assertEqual(false, maps:get(flushable, Entry)),
+    ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).

@@ -85,6 +85,9 @@ that the Behaviour/Class libraries can rely on.
     %% BT-845: ADR 0040 Phase 2 — class-based reload
     classSourceFile/1,
     classReload/1,
+    %% ADR 0082 Phase 1 (BT-2283): live method patch primitives
+    classCompileSource/3,
+    classTryCompileSource/3,
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
     classProtocols/1,
@@ -729,6 +732,85 @@ classReload(Self) ->
                     )
             end
     end.
+
+%%% ============================================================================
+%%% Live Method Patch Primitives (ADR 0082 Phase 1, BT-2283)
+%%% ============================================================================
+
+-doc """
+Compile a method body String and install it in this class as a **durable** live
+patch (ADR 0082 Phase 1).
+
+Backs `@primitive "classCompileSource"' (`Behaviour>>compile:source:'). The
+underlying primitive the `>>' patcher form desugars to and the target of MCP
+`save_method' / the browser "Save" action. `Selector' is a Symbol (atom),
+`Source' the method body String (binary) passed as a value. Installs in memory
+and records a durable ChangeLog entry; returns the receiver class.
+""".
+-spec classCompileSource(#beamtalk_object{}, atom(), binary()) -> #beamtalk_object{}.
+classCompileSource(Self, Selector, Source) ->
+    do_compile_source(Self, Selector, Source, durable).
+
+-doc """
+Compile a method body String and install it as an **ephemeral** live patch
+(ADR 0082 Phase 1).
+
+Backs `@primitive "classTryCompileSource"' (`Behaviour>>tryCompile:source:') and
+the MCP `try_method' tool. Identical install to `classCompileSource/3' but the
+ChangeLog entry is tagged `intent: ephemeral' so it auto-prunes on flush and on
+workspace restart unless promoted via `compile:source:'. Returns the receiver.
+""".
+-spec classTryCompileSource(#beamtalk_object{}, atom(), binary()) -> #beamtalk_object{}.
+classTryCompileSource(Self, Selector, Source) ->
+    do_compile_source(Self, Selector, Source, ephemeral).
+
+%% Shared compile-and-install path for compile:source: / tryCompile:source:.
+%% Routes to beamtalk_repl_eval:compile_method/4 via erlang:apply to keep
+%% beamtalk_runtime free of a compile-time dependency on beamtalk_workspace
+%% (the same indirection classReload/1 uses).
+-spec do_compile_source(#beamtalk_object{}, atom(), binary(), durable | ephemeral) ->
+    #beamtalk_object{}.
+do_compile_source(Self, Selector, Source, Intent) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    SourceBin = ensure_source_binary(Selector, Source, ClassName),
+    try
+        erlang:apply(beamtalk_repl_eval, compile_method, [
+            ClassNameBin, Selector, SourceBin, Intent
+        ])
+    of
+        {ok, _ClassNameBin} ->
+            Self;
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(compile_failed, ClassName),
+            Msg = iolist_to_binary(
+                io_lib:format("Could not compile method: ~p", [Reason])
+            ),
+            beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
+    catch
+        error:undef ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            beamtalk_error:raise(
+                beamtalk_error:with_message(
+                    Error0,
+                    <<"Workspace not available — live method editing requires a "
+                        "running workspace">>
+                )
+            )
+    end.
+
+%% Validate the `Source' argument is a String (binary). Raises a typed error for
+%% a non-binary so callers get a clear message instead of a deep crash.
+-spec ensure_source_binary(atom(), term(), atom()) -> binary().
+ensure_source_binary(_Selector, Source, _ClassName) when is_binary(Source) ->
+    Source;
+ensure_source_binary(_Selector, Source, ClassName) ->
+    Error0 = beamtalk_error:new(type_error, ClassName),
+    Msg = iolist_to_binary(
+        io_lib:format("compile:source: expects a String body, got: ~p", [Source])
+    ),
+    beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 
 %%% ============================================================================
 %%% Protocol Query Primitives (ADR 0068 Phase 2c)
