@@ -11,7 +11,7 @@ ADRs document significant architectural and design decisions, including:
 
 Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 
-- **Status:** Proposed, Accepted, Implemented, Deprecated, Superseded, Rejected
+- **Status:** Proposed, Accepted, Implemented, Deferred, Deprecated, Superseded, Rejected
 - **Context:** Background, problem statement, constraints
 - **Decision:** What was decided, with code and REPL examples
 - **Prior Art:** How reference languages handle this
@@ -67,47 +67,53 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0038](0038-subclass-classbuilder-protocol.md) | `subclass:` Grammar Desugaring to ClassBuilder Protocol | Implemented | 2026-02-24 |
 | [0039](0039-syntax-pragmatism-vs-smalltalk.md) | Syntax Pragmatism vs Smalltalk | Implemented | 2026-02-24 |
 | [0040](0040-workspace-native-repl-commands.md) | Workspace-Native REPL Commands, Facade/Dictionary Split, and Class-Based Reload | Implemented | 2026-02-24 |
-| [0041](0041-universal-state-threading-block-protocol.md) | Universal State-Threading Block Protocol | Accepted | 2026-02-24 |
+| [0041](0041-universal-state-threading-block-protocol.md) | Universal State-Threading Block Protocol | Implemented | 2026-02-24 |
 | [0042](0042-immutable-value-objects-actor-mutable-state.md) | Immutable Value Objects and Actor-Only Mutable State | Implemented | 2026-02-26 |
 | [0043](0043-sync-by-default-actor-messaging.md) | Sync-by-Default Actor Messaging | Implemented | 2026-02-26 |
 | [0044](0044-comments-as-first-class-ast-nodes.md) | Comments as First-Class AST Nodes | Implemented | 2026-02-28 |
 | [0045](0045-repl-expression-completion-type-inference.md) | REPL Expression-Level Completion via Gradual Type Inference | Implemented | 2026-03-01 |
 | [0046](0046-vscode-live-workspace-sidebar.md) | VSCode Live Workspace Sidebar | Implemented | 2026-03-02 |
-| [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Accepted | 2026-03-02 |
-| [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Proposed | 2026-03-02 |
-| [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Proposed | 2026-03-02 |
+| [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Implemented | 2026-03-02 |
+| [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Deferred | 2026-03-02 |
+| [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Deferred | 2026-03-02 |
 | [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Implemented | 2026-03-04 |
 | [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Accepted \| Implemented | 2026-03-05 |
 | [0052](0052-recursive-descent-pratt-parsing.md) | Recursive Descent Parser with Pratt Parsing for Binary Operators | Accepted \| Implemented | 2026-03-05 |
-| [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Accepted | 2026-03-05 |
+| [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Implemented | 2026-03-05 |
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
-| [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Accepted | 2026-03-06 |
-| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Proposed | 2026-03-06 |
-| [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Accepted | 2026-03-07 |
-| [0058](0058-platform-security-model.md) | Platform Security Model | Accepted | 2026-03-07 |
-| [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Accepted | 2026-03-07 |
-| [0060](0060-result-type-hybrid-error-handling.md) | Result Type — Hybrid Error Handling for Expected Failures | Accepted | 2026-03-08 |
-| [0062](0062-bundled-example-corpus-mcp-search-tool.md) | Bundled Example Corpus and Search Tool for MCP Server | Accepted | 2026-03-15 |
-| [0064](0064-runtime-logging-control-and-observability-api.md) | Runtime Logging Control and Observability API | Accepted | 2026-03-17 |
-| [0065](0065-complete-otp-primitives-actor-lifecycle.md) | Complete OTP Primitives for Actor Lifecycle and Supervision | Accepted | 2026-03-17 |
-| [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Accepted | 2026-03-18 |
-| [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Accepted | 2026-03-18 |
+| [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Implemented | 2026-03-06 |
+| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Accepted (partial) | 2026-03-06 |
+| [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Implemented | 2026-03-07 |
+| [0058](0058-platform-security-model.md) | Platform Security Model | Accepted (policy) | 2026-03-07 |
+| [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Implemented | 2026-03-07 |
+| [0060](0060-result-type-hybrid-error-handling.md) | Result Type — Hybrid Error Handling for Expected Failures | Implemented | 2026-03-08 |
+| [0061](0061-program-entry-points-and-run-lifecycle.md) | Program Entry Points and Run Lifecycle | Implemented | 2026-03-10 |
+| [0062](0062-bundled-example-corpus-mcp-search-tool.md) | Bundled Example Corpus and Search Tool for MCP Server | Implemented | 2026-03-15 |
+| [0063](0063-remove-file-path-sandbox.md) | Remove File Path Sandbox | Implemented | 2026-03-16 |
+| [0064](0064-runtime-logging-control-and-observability-api.md) | Runtime Logging Control and Observability API | Implemented | 2026-03-17 |
+| [0065](0065-complete-otp-primitives-actor-lifecycle.md) | Complete OTP Primitives for Actor Lifecycle and Supervision | Implemented | 2026-03-17 |
+| [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented | 2026-03-18 |
+| [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
 | [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented | 2026-03-21 |
-| [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Accepted | 2026-03-24 |
-| [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Proposed | 2026-03-28 |
-| [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Proposed | 2026-03-29 |
-| [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted | 2026-04-01 |
-| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Accepted | 2026-04-02 |
-| [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Accepted | 2026-04-03 |
-| [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Accepted | 2026-04-05 |
-| [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Accepted | 2026-04-12 |
-| [0079](0079-named-actor-registration.md) | Named Actor Registration | Accepted | 2026-04-15 |
-| [0080](0080-supervisor-lifecycle-result.md) | Migrate Supervisor Lifecycle to Result | Proposed | 2026-04-16 |
+| [0069](0069-string-subclass-of-binary.md) † | Make String a Subclass of Binary | Implemented | 2026-03-21 |
+| [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
+| [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
+| [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |
+| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phase 1) | 2026-03-31 |
+| [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted (deferral) | 2026-04-01 |
+| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Implemented (Phase 1; Phase 2 deferred) | 2026-04-02 |
+| [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Implemented | 2026-04-03 |
+| [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Implemented | 2026-04-05 |
+| [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Implemented | 2026-04-12 |
+| [0079](0079-named-actor-registration.md) | Named Actor Registration | Implemented | 2026-04-15 |
+| [0080](0080-supervisor-lifecycle-result.md) | Migrate Supervisor Lifecycle to Result | Implemented | 2026-04-16 |
 | [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Proposed | 2026-05-17 |
-| [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Accepted | 2026-05-23 |
-| [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Accepted | 2026-05-24 |
+| [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
+| [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Accepted (in progress) | 2026-05-24 |
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
+
+† **Numbering collision:** the number `0069` was assigned to two ADRs — *Actor Observability and Tracing* and *Make String a Subclass of Binary*. Both are kept for historical accuracy; new ADRs must not reuse `0069`.
 
 ## Creating New ADRs
 
