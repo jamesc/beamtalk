@@ -337,7 +337,23 @@ pub(super) fn builder_class_method_context(
                     class_var_names.clear();
                 }
             }
-            "classMethods:" => has_class_methods = true,
+            // BT-2269: an incremental `addClassState: #name default: …` adds one
+            // class variable name (when the name is a literal symbol), so blocks
+            // installed by `addClassMethod:body:` recognise `self.name` as a
+            // class-variable access. Later setters add to the running set;
+            // `classVars:` (a bulk replace) resets it above.
+            "addClassState:default:" => {
+                if let [Expression::Literal(Literal::Symbol(s), _), _] = args {
+                    let name = s.to_string();
+                    if !class_var_names.contains(&name) {
+                        class_var_names.push(name);
+                    }
+                }
+            }
+            // BT-2269: `addClassMethod:body:` is the incremental counterpart of
+            // `classMethods:` — its block argument is lowered as a class-method
+            // fun, so the cascade must enter the class-method lowering context.
+            "classMethods:" | "addClassMethod:body:" => has_class_methods = true,
             _ => {}
         }
     }
@@ -649,5 +665,56 @@ mod tests {
         let augmented = inject_method_source(&recv, &msgs).expect("should inject");
         assert!(has_setter(&augmented, "methodSource:"));
         assert!(!has_setter(&augmented, "classMethodSource:"));
+    }
+
+    // BT-2269: the incremental `addClassMethod:body:` setter enables the
+    // class-method lowering context, just like `classMethods:`.
+    #[test]
+    fn context_recognises_incremental_add_class_method() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder name: #Foo; \
+             addClassMethod: #bump body: [:self | 1]; register",
+        );
+        let ctx = builder_class_method_context(&recv, &msgs).expect("should recognise");
+        assert_eq!(ctx.0, "Foo");
+    }
+
+    // BT-2269: `addClassState: #name default: …` contributes its name to the
+    // class-variable set so `addClassMethod:body:` blocks treat `self.name` as a
+    // class-variable access.
+    #[test]
+    fn context_collects_incremental_class_state_names() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder name: #Foo; \
+             addClassState: #total default: 0; \
+             addClassMethod: #bump body: [:self | self.total]; register",
+        );
+        let (_name, cvars) = builder_class_method_context(&recv, &msgs).expect("should recognise");
+        assert!(cvars.contains(&"total".to_string()), "got: {cvars:?}");
+    }
+
+    // BT-2269: `classVars:` and `addClassState:default:` both feed the class-var
+    // set; a later `classVars:` (bulk replace) resets, then incremental adds
+    // accumulate after it.
+    #[test]
+    fn context_merges_bulk_and_incremental_class_state() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder name: #Foo; \
+             classVars: #{ #a => 1 }; \
+             addClassState: #b default: 2; \
+             addClassMethod: #m body: [:self | self.a + self.b]; register",
+        );
+        let (_name, cvars) = builder_class_method_context(&recv, &msgs).expect("should recognise");
+        assert!(cvars.contains(&"a".to_string()), "got: {cvars:?}");
+        assert!(cvars.contains(&"b".to_string()), "got: {cvars:?}");
+    }
+
+    // BT-2269: no class-side methods (bulk or incremental) → no class-method
+    // lowering context.
+    #[test]
+    fn context_none_without_any_class_methods() {
+        let (recv, msgs) =
+            parse_cascade("Object classBuilder name: #Foo; addMethod: #m body: [:i | 1]; register");
+        assert!(builder_class_method_context(&recv, &msgs).is_none());
     }
 }
