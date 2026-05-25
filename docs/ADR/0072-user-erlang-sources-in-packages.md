@@ -1,7 +1,7 @@
 # ADR 0072: User Erlang Sources in Beamtalk Packages
 
 ## Status
-Accepted (2026-03-29)
+Implemented (2026-03-29)
 
 ## Context
 
@@ -595,7 +595,7 @@ No migration needed — this is additive. Projects without `native/` or `[native
 
 **Epic:** BT-1708
 **Issues:** BT-1709, BT-1710, BT-1711, BT-1712, BT-1713, BT-1714, BT-1715, BT-1716, BT-1717, BT-1718, BT-1719
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 - Related issues: BT-1153, BT-1708

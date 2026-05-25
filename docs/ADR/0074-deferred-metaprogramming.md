@@ -1,7 +1,7 @@
 # ADR 0074: Deferred Metaprogramming
 
 ## Status
-Accepted (2026-04-01)
+Accepted (deferral, 2026-04-01) — decision to defer metaprogramming
 
 ## Context
 

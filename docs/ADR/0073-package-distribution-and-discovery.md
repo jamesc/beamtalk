@@ -1,7 +1,7 @@
 # ADR 0073: Package Distribution and Discovery
 
 ## Status
-Accepted (2026-03-31)
+Implemented (Phase 1, 2026-03-31)
 
 ## Context
 
@@ -468,7 +468,7 @@ Each phase adds new capabilities. The tooling is backwards-compatible, but **con
 
 **Epic:** BT-1739
 **Issues:** BT-1738 (Justfile/--app), BT-1740 (extract HTTP repo), BT-1741 (monorepo git dep), BT-1742 (cross-repo CI)
-**Status:** Planned
+**Status:** Implemented (Phase 1)
 
 ## References
 - Related issues: BT-1721 (MCP discovery), BT-1727 (private hex repo setup), BT-1728 (repo field in native deps), BT-1729 (publish first-party packages)

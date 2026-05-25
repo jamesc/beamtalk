@@ -1,7 +1,7 @@
 # ADR 0061: Program Entry Points and Run Lifecycle
 
 ## Status
-Accepted (2026-03-10)
+Implemented (2026-03-10)
 
 ## Context
 

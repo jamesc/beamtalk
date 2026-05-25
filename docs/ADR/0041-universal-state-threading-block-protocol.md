@@ -1,7 +1,7 @@
 # ADR 0041: Universal State-Threading Block Protocol
 
 ## Status
-Accepted (2026-02-24)
+Implemented (2026-02-24)
 
 ## Context
 
@@ -635,7 +635,7 @@ No user migration is required.
 - [BT-856](https://linear.app/beamtalk/issue/BT-856) — Reclassify whitelist as optimization hint (Phase 3, S)
 - [BT-857](https://linear.app/beamtalk/issue/BT-857) — Tests: HOM composability, NLR, interop (Phase 4, M)
 
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 
