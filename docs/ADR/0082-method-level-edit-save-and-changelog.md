@@ -1,7 +1,7 @@
 # ADR 0082: Method-Level Edit and Save in the Live Workspace
 
 ## Status
-Proposed (2026-05-17)
+Accepted (2026-05-25) — proposed 2026-05-17
 
 ## Context
 
@@ -14,7 +14,7 @@ We do not have a path for this. Today:
 - `>>` mutates the in-memory class and never touches disk
 - `ClassName reload` (ADR 0040) recompiles the whole `.bt` file *from* disk into memory — one direction only
 - `load-source` (browser internal op) compiles a full class source string into memory — also memory-only
-- `Counter sourceFile` (Behaviour.bt:287) records the file association per class, so memory→disk is *addressable* but not *implemented*
+- `Counter sourceFile` (Behaviour.bt:357) records the file association per class, so memory→disk is *addressable* but not *implemented*
 - No op exists to write a single method, the whole class, or any subset back to its source file
 
 Without an explicit decision, any browser "Save" button has to choose silently between (a) memory-only patching that disappears on workspace restart, (b) write-through that mutates the user's git tree on every keystroke save, or (c) something in between. Each choice has implications for ADR 0004 (memory-only hot reload), ADR 0017 (browser IDE), ADR 0024 (LSP/runtime coherence), and ADR 0046 (VSCode coexistence).
@@ -454,7 +454,7 @@ See steelman above. Pharo's Monticello uses overlay files for package deltas wit
 |-------|--------|
 | `crates/beamtalk-core/src/source_analysis/` | New byte-span resolver: given source text and `(class, selector, kind)`, return the byte span of that method's definition. Pure parser-level work; no new printer. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_changelog.erl` (new) | Gen_server owning the append-only ChangeLog. ETS for live state; on disk, JSON-Lines metadata in `changes/changes.jsonl` plus per-entry source files in `changes/sources/`. Exposed via the `Workspace` facade per ADR 0040. Lives in the workspace context, not REPL, because it's consumed cross-surface. |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 438 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | **No changes — no new workspace-side ops.** All operations are reached via the existing `evaluate` op, which receives a Beamtalk expression constructed by the calling layer (MCP / LSP / REPL CLI / browser). See *Rationale: why no new REPL ops* below. |
 | `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `changes` (returns ChangeLog), `newClass:at:`. Four methods total — pending-state queries live on the ChangeLog object (`changes notEmpty`, `changes dirtyMethods`, etc.), matching Pharo's `Smalltalk changes` idiom. |
 | `stdlib/src/Behaviour.bt` | Two new class-side methods: `compile: aSym source: aString` (durable, logs) and `tryCompile: aSym source: aString` (ephemeral, no log). `compile:source:` is the underlying primitive that the existing `>>` patcher form desugars to (ADR 0066 parser rule updated). Both share the same compile-and-install path; only `compile:source:` emits a ChangeEntry. MCP tools call these directly with body values, avoiding fragile string-construction of `>>` expressions. |
@@ -501,13 +501,29 @@ Pharo and GemStone follow the same architecture: there is no "image RPC API" bey
 
 **Out of scope for this ADR but related:** the existing workspace has ~17 redundant REPL ops (`actors`, `methods`, `list-classes`, `inspect`, `test`, etc.) that predate the `Workspace` / `Beamtalk` facade (ADR 0040) and could likewise be collapsed into `evaluate` of a known expression. That cleanup is opportunistic — touched when those handlers next break or are modified. A future "REPL op consolidation" epic may sweep them out.
 
+## Implementation Tracking
+
+**Epic:** BT-2280 — Epic: Method-Level Edit and Save in the Live Workspace (ADR 0082)
+
+**Issues:**
+- Phase 0: BT-2281 (byte-span resolver + corpus round-trip spike)
+- Phase 1: BT-2282 (ChangeLog gen_server + persistence), BT-2283 (`compile:source:`/`tryCompile:source:` + `>>` desugar + install hook), BT-2284 (`Workspace changes` + `ChangeLog.bt`), BT-2285 (`newClass:at:`)
+- Phase 2: BT-2286 (`flush`/`flush:` — splice, atomicity, external-edit detection, pruning)
+- Phase 3: BT-2287 (REPL meta-commands), BT-2288 (MCP tools), BT-2289 (LSP executeCommand + applyEdit)
+- Phase 4: BT-2290 (`revert:`/`clear`/`flushKinds:` + autoflush)
+- Phase 5: BT-2291 (e2e btscript), BT-2292 (docs + surface-parity), BT-2293 (browser UI — gated on ADR 0017 Phase 3)
+
+**Deferred (separate ADRs):** BT-2191 (method-level removal primitive), BT-2192 (destructive workspace ops).
+
+**Status:** Planned
+
 ## Out of Scope
 
 This ADR covers **patch** (existing method) and **create** (new class file). The following are deliberately deferred to follow-up ADRs so that the persistence model can ship without being held up by destructive-op design:
 
 | Deferred concern | Why deferred | Future ADR |
 |------------------|--------------|-----------|
-| **Method-level removal** (`aClass removeSelector:`) | The language primitive does not exist yet. Adding it is a separate design question (raise vs no-op on absent selector? cascade to overrides? extension-method handling?) — not bundled with persistence. The runtime can erase a method's `method_signatures` entry (`beamtalk_object_class.erl:640`) but there is no first-class Beamtalk method that calls it. | "Method-level Removal Language Primitive" |
+| **Method-level removal** (`aClass removeSelector:`) | The language primitive does not exist yet. Adding it is a separate design question (raise vs no-op on absent selector? cascade to overrides? extension-method handling?) — not bundled with persistence. The runtime can erase a method's `method_signatures` entry (`beamtalk_object_class.erl:691`) but there is no first-class Beamtalk method that calls it. | "Method-level Removal Language Primitive" |
 | **Class-level removal flush UX** | `aClass removeFromSystem` already exists (BT-785) for memory removal. What it should mean to *flush* a class removal — deleting a `.bt` file from disk — is irreversibly destructive and wants its own UX: confirmation prompt, `.bt.deleted` tombstone, undo flow. Different concerns than patch/create. | "Destructive Workspace Operations" |
 | **Renames** (class rename, method rename, file relocation) | Touches two paths (the old and the new), needs cross-file rename detection in the splice machinery, and benefits from concrete usage data from the patch-and-create case before its UX is locked in. | "Destructive Workspace Operations" |
 | **Schema accommodation** | The ChangeLog format reserves the `kind` enum as open (`"instance"`, `"class"`, `"new-class"` today; `"remove-method"`, `"remove-class"`, `"rename"` will slot in later) and `author_kind` as open. Future ADRs extend the enum without breaking the format. No prep-work needed in this ADR's implementation phases. | n/a |
@@ -524,7 +540,7 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
 
 ## References
 
-- Related issues: BT-XXX (this ADR; issues to be created via `/plan-adr`)
+- Related issues: BT-2280 (implementation epic — see Implementation Tracking); BT-2191, BT-2192 (deferred follow-up ADRs)
 - Related ADRs:
   - ADR 0004 — Persistent Workspace Management (memory-only hot reload contract)
   - ADR 0017 — Browser Connectivity to Running Workspaces (Phase 3 LiveView IDE that motivates this)

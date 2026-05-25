@@ -107,7 +107,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Implemented | 2026-04-12 |
 | [0079](0079-named-actor-registration.md) | Named Actor Registration | Implemented | 2026-04-15 |
 | [0080](0080-supervisor-lifecycle-result.md) | Migrate Supervisor Lifecycle to Result | Implemented | 2026-04-16 |
-| [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Proposed | 2026-05-17 |
+| [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Accepted | 2026-05-25 |
 | [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
 | [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Accepted (in progress) | 2026-05-24 |
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
