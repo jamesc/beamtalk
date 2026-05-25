@@ -477,50 +477,19 @@ async_send(ActorPid, stop, [], FuturePid) ->
     ok;
 async_send(ActorPid, kill, [], FuturePid) ->
     %% kill is handled locally - forcefully kills the actor process.
-    %% Monitor BEFORE sending the kill signal to close the TOCTOU window:
-    %% if we resolved the future immediately after exit/2 (which is async),
-    %% a caller doing `actor kill. actor isAlive` could still see true because
-    %% the BEAM scheduler had not yet processed the kill signal.
-    %% Waiting for the DOWN message guarantees the process is gone before ok
-    %% is delivered.  If the process is already dead, the DOWN arrives instantly.
-    %% BT-1629: Emit lifecycle telemetry event for async kill request.
-    Class = lookup_class(ActorPid),
-    maybe_execute_telemetry(
-        [beamtalk, actor, lifecycle, kill],
-        #{},
-        #{pid => ActorPid, class => Class}
-    ),
-    Ref = erlang:monitor(process, ActorPid),
-    exit(ActorPid, kill),
-    case
-        receive
-            {'DOWN', Ref, process, ActorPid, _Reason} -> ok
-        after 5000 ->
-            erlang:demonitor(Ref, [flush]),
-            timeout
-        end
-    of
+    %% BT-1629: Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
+    case kill_and_wait(ActorPid) of
         ok ->
             beamtalk_future:resolve(FuturePid, ok);
-        timeout ->
+        {error, Error} ->
             %% We did not observe a DOWN within 5 s; cannot guarantee the actor
             %% is gone, so reject the future rather than silently claiming success.
-            Error = beamtalk_error:new(
-                timeout,
-                unknown,
-                kill,
-                <<"Actor kill timed out: did not receive DOWN within 5000ms">>
-            ),
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
 async_send(_ActorPid, delegate, [], FuturePid) ->
     %% BT-1208: Non-native Actors do not have a backing Erlang module.
-    Error = beamtalk_error:new(signal, unknown, delegate),
-    Error1 = Error#beamtalk_error{
-        message = <<"delegate called on a non-native Actor">>
-    },
-    beamtalk_future:reject(FuturePid, Error1),
+    beamtalk_future:reject(FuturePid, delegate_error(unknown)),
     ok;
 async_send(ActorPid, pid, [], FuturePid) ->
     %% BT-1442: pid returns the raw Erlang PID backing the actor
@@ -693,36 +662,15 @@ sync_send(ActorPid, stop, []) ->
     end;
 sync_send(ActorPid, kill, []) ->
     %% kill is handled locally - forcefully kills the actor process.
-    %% Same monitor-before-kill pattern as async_send/4: wait for the DOWN
-    %% message so that is_process_alive returns false immediately after kill.
-    %% BT-1629: Emit lifecycle telemetry event for kill request.
-    Class = lookup_class(ActorPid),
-    maybe_execute_telemetry(
-        [beamtalk, actor, lifecycle, kill],
-        #{},
-        #{pid => ActorPid, class => Class}
-    ),
-    Ref = erlang:monitor(process, ActorPid),
-    exit(ActorPid, kill),
-    case
-        receive
-            {'DOWN', Ref, process, ActorPid, _Reason} -> ok
-        after 5000 ->
-            erlang:demonitor(Ref, [flush]),
-            timeout
-        end
-    of
+    %% BT-1629: Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
+    case kill_and_wait(ActorPid) of
         ok -> ok;
-        timeout -> raise_timeout(kill)
+        {error, Error} -> error(beamtalk_exception_handler:ensure_wrapped(Error))
     end;
 sync_send(_ActorPid, delegate, []) ->
     %% BT-1208: Non-native Actors do not have a backing Erlang module.
     %% Native Actors will override this at the codegen level.
-    Error = beamtalk_error:new(signal, unknown, delegate),
-    Error1 = Error#beamtalk_error{
-        message = <<"delegate called on a non-native Actor">>
-    },
-    error(beamtalk_exception_handler:ensure_wrapped(Error1));
+    error(beamtalk_exception_handler:ensure_wrapped(delegate_error(unknown)));
 sync_send(ActorPid, pid, []) ->
     %% BT-1442: pid returns the raw Erlang PID backing the actor
     ActorPid;
@@ -1135,6 +1083,64 @@ no_such_process_error_record(Name, Selector) ->
         )
     ),
     beamtalk_error:with_details(Error, #{name => Name}).
+
+-doc """
+Emit lifecycle telemetry, monitor `ActorPid`, send `exit(kill)`, then wait
+for the `'DOWN'` message with a 5 s timeout.
+
+Monitoring before sending the kill signal closes the TOCTOU window: if we
+returned immediately after `exit/2` (which is asynchronous), a racing
+`isAlive` check could still return `true` because the BEAM scheduler had
+not yet processed the signal.  Waiting for `'DOWN'` guarantees the process
+is gone before this function returns.  If the process is already dead, the
+`'DOWN'` message arrives instantly.
+
+Returns `ok` on success, or `{error, Error}` if the `'DOWN'` message is not
+received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
+kind `timeout` and the message `"Actor kill timed out: did not receive DOWN
+within 5000ms"`.  Building it here keeps the message in one place: callers
+pass the error directly to `beamtalk_future:reject/2` (async path) or wrap it
+with `beamtalk_exception_handler:ensure_wrapped/1` before raising (sync path).
+
+Called by both `async_send/4` and `sync_send/3` for the `kill` selector.
+""".
+-spec kill_and_wait(pid()) -> ok | {error, #beamtalk_error{}}.
+kill_and_wait(ActorPid) ->
+    %% BT-1629: Emit lifecycle telemetry event for kill request.
+    Class = lookup_class(ActorPid),
+    maybe_execute_telemetry(
+        [beamtalk, actor, lifecycle, kill],
+        #{},
+        #{pid => ActorPid, class => Class}
+    ),
+    Ref = erlang:monitor(process, ActorPid),
+    exit(ActorPid, kill),
+    receive
+        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+    after 5000 ->
+        erlang:demonitor(Ref, [flush]),
+        {error,
+            beamtalk_error:new(
+                timeout,
+                unknown,
+                kill,
+                <<"Actor kill timed out: did not receive DOWN within 5000ms">>
+            )}
+    end.
+
+-doc """
+Construct a structured `signal` error for the `delegate` selector sent to a
+non-native Actor.
+
+Used by `async_send/4`, `sync_send/3`, and the internal dispatch path that
+is reached via `perform:`/`perform:withArguments:`.  The `ClassName`
+argument is `unknown` at the send sites (where the class is not easily
+available) and the actual class name inside the dispatch loop.
+""".
+-spec delegate_error(atom()) -> #beamtalk_error{}.
+delegate_error(ClassName) ->
+    Error = beamtalk_error:new(signal, ClassName, delegate),
+    Error#beamtalk_error{message = <<"delegate called on a non-native Actor">>}.
 
 -doc """
 Wrap a function in telemetry:span/3 if telemetry is available, else run directly.
@@ -1745,11 +1751,7 @@ dispatch(Selector, Args, Self, State) ->
             %% This path is reached via perform:/perform:withArguments: which
             %% bypass the send site and re-dispatch through dispatch/4.
             ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Error = beamtalk_error:new(signal, ClassName, delegate),
-            Error1 = Error#beamtalk_error{
-                message = <<"delegate called on a non-native Actor">>
-            },
-            {error, Error1, State};
+            {error, delegate_error(ClassName), State};
         'respondsTo:' when length(Args) =:= 1 ->
             %% Check user-defined methods first, then actor built-ins, then hierarchy
             [CheckSelector] = Args,
