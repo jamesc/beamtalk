@@ -27,8 +27,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::ast::Module;
-use crate::source_analysis::method_span::{MethodSide, resolve_method_span};
-use crate::source_analysis::{Span, lex, parse};
+use crate::source_analysis::method_span::{MethodSide, resolve_in_module};
+use crate::source_analysis::{Span, lex_with_eof, parse};
 
 /// Returns the repository root (`CARGO_MANIFEST_DIR/../..`).
 fn repo_root() -> PathBuf {
@@ -57,13 +57,38 @@ fn collect_bt_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The corpus directories: every `.bt` file lives under one of these.
+fn corpus_dirs() -> [PathBuf; 2] {
+    let root = repo_root();
+    [root.join("stdlib/src"), root.join("examples")]
+}
+
+/// Whether the corpus directories are present in this checkout.
+///
+/// They are absent when the crate is built from a source distribution or a
+/// partial checkout that omits the workspace `stdlib/` and `examples/` trees. In
+/// that case the corpus tests skip rather than hard-fail (a present-but-
+/// unreadable *file*, by contrast, is always a hard failure).
+fn corpus_present() -> bool {
+    corpus_dirs().iter().any(|dir| dir.is_dir())
+}
+
 /// Gathers the whole corpus: every `.bt` file under `stdlib/src` and `examples`.
 fn corpus_files() -> Vec<PathBuf> {
-    let root = repo_root();
     let mut files = Vec::new();
-    collect_bt_files(&root.join("stdlib/src"), &mut files);
-    collect_bt_files(&root.join("examples"), &mut files);
+    for dir in corpus_dirs() {
+        collect_bt_files(&dir, &mut files);
+    }
     files
+}
+
+/// Reads a corpus file, hard-failing (with the path + error) if it is present
+/// but cannot be read. Unlike skipping an absent *directory*, an unreadable file
+/// that the walk already discovered must never be silently ignored — that would
+/// let the round-trip proof go false-green.
+fn read_corpus_file(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("could not read corpus file {}: {e}", path.display()))
 }
 
 /// One method to resolve, identified the way a caller would: by class name,
@@ -129,6 +154,11 @@ fn splice(source: &str, span: Span, replacement: &str) -> String {
 /// the entire corpus.
 #[test]
 fn corpus_round_trip_is_byte_identical() {
+    if !corpus_present() {
+        // Partial checkout / source distribution without the workspace corpus
+        // dirs: nothing to validate here.
+        return;
+    }
     let files = corpus_files();
     assert!(
         !files.is_empty(),
@@ -139,32 +169,31 @@ fn corpus_round_trip_is_byte_identical() {
     let mut failures: Vec<String> = Vec::new();
 
     for path in &files {
-        let source = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                failures.push(format!("{}: could not read: {e}", path.display()));
-                continue;
-            }
-        };
-        let tokens = lex(&source);
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
         let (module, _diags) = parse(tokens);
 
         for target in enumerate_methods(&module) {
             total_methods += 1;
-            let span =
-                match resolve_method_span(&source, &target.class, &target.selector, target.side) {
-                    Ok(span) => span,
-                    Err(e) => {
-                        failures.push(format!(
-                            "{}: {}.{} ({}): resolve failed: {e}",
-                            path.display(),
-                            target.class,
-                            target.selector,
-                            target.side.as_str()
-                        ));
-                        continue;
-                    }
-                };
+            let span = match resolve_in_module(
+                &module,
+                &source,
+                &target.class,
+                &target.selector,
+                target.side,
+            ) {
+                Ok(span) => span,
+                Err(e) => {
+                    failures.push(format!(
+                        "{}: {}.{} ({}): resolve failed: {e}",
+                        path.display(),
+                        target.class,
+                        target.selector,
+                        target.side.as_str()
+                    ));
+                    continue;
+                }
+            };
 
             // The core no-op identity: splicing the span's own bytes back is a
             // byte-for-byte no-op.
@@ -206,21 +235,26 @@ fn corpus_round_trip_is_byte_identical() {
 /// its class, and never overlaps a sibling in the same file.
 #[test]
 fn corpus_spans_are_well_formed_and_non_overlapping() {
+    if !corpus_present() {
+        return;
+    }
     let files = corpus_files();
     let mut failures: Vec<String> = Vec::new();
 
     for path in &files {
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let tokens = lex(&source);
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
         let (module, _diags) = parse(tokens);
 
         let mut resolved: Vec<(MethodTarget, Span)> = Vec::new();
         for target in enumerate_methods(&module) {
-            let Ok(span) =
-                resolve_method_span(&source, &target.class, &target.selector, target.side)
-            else {
+            let Ok(span) = resolve_in_module(
+                &module,
+                &source,
+                &target.class,
+                &target.selector,
+                target.side,
+            ) else {
                 // Resolution failures are reported by the round-trip test; skip
                 // here to keep this test focused on geometry.
                 continue;
@@ -300,20 +334,29 @@ fn corpus_spans_are_well_formed_and_non_overlapping() {
 /// finds a span for *every* method the parser knows about.
 #[test]
 fn corpus_every_method_resolves() {
+    if !corpus_present() {
+        return;
+    }
     let files = corpus_files();
     let mut unresolved: BTreeSet<String> = BTreeSet::new();
     let mut total = 0usize;
 
     for path in &files {
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let tokens = lex(&source);
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
         let (module, _diags) = parse(tokens);
 
         for target in enumerate_methods(&module) {
             total += 1;
-            if resolve_method_span(&source, &target.class, &target.selector, target.side).is_err() {
+            if resolve_in_module(
+                &module,
+                &source,
+                &target.class,
+                &target.selector,
+                target.side,
+            )
+            .is_err()
+            {
                 unresolved.insert(format!(
                     "{}: {}.{} ({})",
                     path.display(),

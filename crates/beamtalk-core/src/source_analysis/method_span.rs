@@ -42,7 +42,7 @@
 //! no-op: `source[..start] ++ source[span] ++ source[end..] == source`.
 
 use crate::ast::{ClassDefinition, MessageSelector, Module};
-use crate::source_analysis::{Span, lex, parse};
+use crate::source_analysis::{Diagnostic, Span, lex_with_eof, parse};
 
 /// Which side of a class a method lives on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -140,24 +140,31 @@ impl std::error::Error for SpanResolveError {}
 /// newline; see the module docs for exact boundary semantics. Splicing the
 /// span's own bytes back is a guaranteed no-op.
 ///
-/// # Errors
+/// Parser [`Diagnostic`]s produced while parsing `source` are returned alongside
+/// the result so callers can surface parse problems (per the project convention
+/// that user-facing operations return `(Result, Vec<Diagnostic>)`). The span
+/// `Result` is the resolver's own outcome; an empty diagnostics vector means the
+/// source parsed cleanly.
 ///
-/// Returns [`SpanResolveError`] if the class is absent, the selector is absent
-/// on the requested side, or the match is ambiguous. Never panics.
+/// The `Result` is [`SpanResolveError`] if the class is absent, the selector is
+/// absent on the requested side, or the match is ambiguous. Never panics.
 pub fn resolve_method_span(
     source: &str,
     class: &str,
     selector: &str,
     side: MethodSide,
-) -> Result<Span, SpanResolveError> {
-    let tokens = lex(source);
-    let (module, _diagnostics) = parse(tokens);
-    resolve_in_module(&module, source, class, selector, side)
+) -> (Result<Span, SpanResolveError>, Vec<Diagnostic>) {
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+    let result = resolve_in_module(&module, source, class, selector, side);
+    (result, diagnostics)
 }
 
-/// Resolves against an already-parsed module. Exposed for tests that parse once
-/// and resolve many methods (the corpus round-trip), avoiding repeated lexing.
-fn resolve_in_module(
+/// Resolves against an already-parsed module, avoiding repeated lexing/parsing.
+///
+/// `pub(crate)` so the corpus round-trip test can parse each file once and
+/// resolve many methods against the same [`Module`].
+pub(crate) fn resolve_in_module(
     module: &Module,
     source: &str,
     class: &str,
@@ -282,11 +289,52 @@ impl SelectorMatch for MessageSelector {
 mod tests {
     use super::*;
 
-    const ATOMIC: &str = include_str!("../../../../stdlib/src/AtomicCounter.bt");
+    /// In-crate fixture mirroring the shapes the resolver must handle: a
+    /// class-side keyword method, an instance method, a keyword method with a
+    /// multi-line body, and an instance method preceded by a doc comment.
+    ///
+    /// An inline string (rather than `include_str!` of `stdlib/src/*.bt`) keeps
+    /// these unit tests self-contained so the crate still compiles from a source
+    /// distribution that omits the workspace `stdlib/` directory. The full
+    /// stdlib + `examples/` corpus is exercised by the corpus round-trip tests,
+    /// which read those files at runtime and skip when absent.
+    const ATOMIC: &str = "\
+typed Object subclass: AtomicCounter
+
+  /// Create a new named counter starting at 0 (class method).
+  class sealed new: name :: Symbol -> AtomicCounter =>
+    (Erlang beamtalk_atomic_counter) new: name
+
+  /// Atomically add 1. Returns the new value.
+  increment -> Integer => (Erlang beamtalk_atomic_counter) increment: self
+
+  /// Atomically add N. Returns the new value.
+  incrementBy: n :: Integer -> Integer =>
+    (Erlang beamtalk_atomic_counter) incrementBy: self by: n
+
+  /// Read the current value.
+  value -> Integer => (Erlang beamtalk_atomic_counter) readValue: self
+";
+
+    /// Test helper: resolve and assert there were no parse diagnostics, then
+    /// return the span result.
+    fn resolve(
+        source: &str,
+        class: &str,
+        selector: &str,
+        side: MethodSide,
+    ) -> Result<Span, SpanResolveError> {
+        let (result, diagnostics) = resolve_method_span(source, class, selector, side);
+        assert!(
+            diagnostics.is_empty(),
+            "fixture should parse cleanly, got diagnostics: {diagnostics:?}"
+        );
+        result
+    }
 
     #[test]
     fn resolves_instance_method() {
-        let span = resolve_method_span(ATOMIC, "AtomicCounter", "increment", MethodSide::Instance)
+        let span = resolve(ATOMIC, "AtomicCounter", "increment", MethodSide::Instance)
             .expect("increment should resolve");
         let text = &ATOMIC[span.as_range()];
         assert!(text.starts_with("increment -> Integer =>"), "got: {text:?}");
@@ -300,7 +348,7 @@ mod tests {
 
     #[test]
     fn resolves_keyword_method() {
-        let span = resolve_method_span(
+        let span = resolve(
             ATOMIC,
             "AtomicCounter",
             "incrementBy:",
@@ -322,7 +370,7 @@ mod tests {
 
     #[test]
     fn resolves_class_method() {
-        let span = resolve_method_span(ATOMIC, "AtomicCounter", "new:", MethodSide::Class)
+        let span = resolve(ATOMIC, "AtomicCounter", "new:", MethodSide::Class)
             .expect("class new: should resolve");
         let text = &ATOMIC[span.as_range()];
         assert!(text.starts_with("class sealed new: name"), "got: {text:?}");
@@ -333,14 +381,14 @@ mod tests {
     fn instance_and_class_sides_are_distinct() {
         // `new:` only exists on the class side; asking for it as an instance
         // method must miss.
-        let err = resolve_method_span(ATOMIC, "AtomicCounter", "new:", MethodSide::Instance)
+        let err = resolve(ATOMIC, "AtomicCounter", "new:", MethodSide::Instance)
             .expect_err("new: is class-side only");
         assert!(matches!(err, SpanResolveError::SelectorNotFound { .. }));
     }
 
     #[test]
     fn class_not_found_is_structured_error() {
-        let err = resolve_method_span(ATOMIC, "NoSuchClass", "increment", MethodSide::Instance)
+        let err = resolve(ATOMIC, "NoSuchClass", "increment", MethodSide::Instance)
             .expect_err("missing class");
         assert_eq!(
             err,
@@ -352,7 +400,7 @@ mod tests {
 
     #[test]
     fn selector_not_found_is_structured_error() {
-        let err = resolve_method_span(
+        let err = resolve(
             ATOMIC,
             "AtomicCounter",
             "noSuchSelector",
@@ -373,8 +421,7 @@ mod tests {
     fn ambiguous_duplicate_method_is_structured_error() {
         // Two methods with the same selector on the same side.
         let src = "Object subclass: Dup\n  foo => 1\n  foo => 2\n";
-        let err = resolve_method_span(src, "Dup", "foo", MethodSide::Instance)
-            .expect_err("duplicate foo");
+        let err = resolve(src, "Dup", "foo", MethodSide::Instance).expect_err("duplicate foo");
         assert_eq!(
             err,
             SpanResolveError::Ambiguous {
@@ -389,8 +436,7 @@ mod tests {
     #[test]
     fn binary_selector_method() {
         let src = "Object subclass: Vec\n  + other => self\n";
-        let span =
-            resolve_method_span(src, "Vec", "+", MethodSide::Instance).expect("+ should resolve");
+        let span = resolve(src, "Vec", "+", MethodSide::Instance).expect("+ should resolve");
         let text = &src[span.as_range()];
         assert!(text.starts_with("+ other =>"), "got: {text:?}");
         assert_eq!(splice(src, span, text), src);
@@ -399,8 +445,7 @@ mod tests {
     #[test]
     fn last_method_without_trailing_newline_clamps_to_eof() {
         let src = "Object subclass: Tail\n  done => 42";
-        let span =
-            resolve_method_span(src, "Tail", "done", MethodSide::Instance).expect("done resolves");
+        let span = resolve(src, "Tail", "done", MethodSide::Instance).expect("done resolves");
         assert_eq!(span.end() as usize, src.len());
         let text = &src[span.as_range()];
         assert_eq!(splice(src, span, text), src);
@@ -409,7 +454,7 @@ mod tests {
     #[test]
     fn doc_comment_is_excluded_from_span() {
         // The doc comment precedes the method but is not part of the span.
-        let span = resolve_method_span(ATOMIC, "AtomicCounter", "value", MethodSide::Instance)
+        let span = resolve(ATOMIC, "AtomicCounter", "value", MethodSide::Instance)
             .expect("value resolves");
         let text = &ATOMIC[span.as_range()];
         assert!(
@@ -417,6 +462,19 @@ mod tests {
             "doc comment must be excluded: {text:?}"
         );
         assert!(text.starts_with("value -> Integer =>"));
+    }
+
+    #[test]
+    fn returns_parser_diagnostics_alongside_result() {
+        // A user-facing operation surfaces parse problems rather than swallowing
+        // them. The class still resolves; the diagnostics carry the parse issue.
+        let src = "Object subclass: Broken\n  ok => 1\n  bad => @@@\n";
+        let (result, diagnostics) = resolve_method_span(src, "Broken", "ok", MethodSide::Instance);
+        assert!(result.is_ok(), "ok method should still resolve: {result:?}");
+        assert!(
+            !diagnostics.is_empty(),
+            "malformed body should produce parse diagnostics"
+        );
     }
 
     /// Test helper: replace `span` in `source` with `replacement`.
