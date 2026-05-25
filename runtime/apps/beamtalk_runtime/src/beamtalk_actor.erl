@@ -481,15 +481,9 @@ async_send(ActorPid, kill, [], FuturePid) ->
     case kill_and_wait(ActorPid) of
         ok ->
             beamtalk_future:resolve(FuturePid, ok);
-        timeout ->
+        {error, Error} ->
             %% We did not observe a DOWN within 5 s; cannot guarantee the actor
             %% is gone, so reject the future rather than silently claiming success.
-            Error = beamtalk_error:new(
-                timeout,
-                unknown,
-                kill,
-                <<"Actor kill timed out: did not receive DOWN within 5000ms">>
-            ),
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
@@ -671,7 +665,7 @@ sync_send(ActorPid, kill, []) ->
     %% BT-1629: Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
     case kill_and_wait(ActorPid) of
         ok -> ok;
-        timeout -> raise_timeout(kill)
+        {error, Error} -> error(beamtalk_exception_handler:ensure_wrapped(Error))
     end;
 sync_send(_ActorPid, delegate, []) ->
     %% BT-1208: Non-native Actors do not have a backing Erlang module.
@@ -1101,14 +1095,16 @@ not yet processed the signal.  Waiting for `'DOWN'` guarantees the process
 is gone before this function returns.  If the process is already dead, the
 `'DOWN'` message arrives instantly.
 
-Returns `ok` on success, or `timeout` if the `'DOWN'` message is not
-received within 5 000 ms.
+Returns `ok` on success, or `{error, Error}` if the `'DOWN'` message is not
+received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
+kind `timeout` and the message `"Actor kill timed out: did not receive DOWN
+within 5000ms"`.  Building it here keeps the message in one place: callers
+pass the error directly to `beamtalk_future:reject/2` (async path) or wrap it
+with `beamtalk_exception_handler:ensure_wrapped/1` before raising (sync path).
 
-Called by both `async_send/4` and `sync_send/3` for the `kill` selector;
-each caller handles the `ok`/`timeout` result according to its own
-protocol (future resolve/reject vs. direct return/raise).
+Called by both `async_send/4` and `sync_send/3` for the `kill` selector.
 """.
--spec kill_and_wait(pid()) -> ok | timeout.
+-spec kill_and_wait(pid()) -> ok | {error, #beamtalk_error{}}.
 kill_and_wait(ActorPid) ->
     %% BT-1629: Emit lifecycle telemetry event for kill request.
     Class = lookup_class(ActorPid),
@@ -1123,7 +1119,13 @@ kill_and_wait(ActorPid) ->
         {'DOWN', Ref, process, ActorPid, _Reason} -> ok
     after 5000 ->
         erlang:demonitor(Ref, [flush]),
-        timeout
+        {error,
+            beamtalk_error:new(
+                timeout,
+                unknown,
+                kill,
+                <<"Actor kill timed out: did not receive DOWN within 5000ms">>
+            )}
     end.
 
 -doc """
