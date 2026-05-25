@@ -13,18 +13,20 @@
 //! classes are visible to `SystemNavigation` source-text queries (`sendersOf:`,
 //! `methodsMatching:`, ...) exactly like file-defined classes.
 //!
-//! Scope is the **instance** side only. Class methods defined via the builder
-//! (`classMethods:`) are not handled: a programmatic builder stores them as
-//! runtime funs, but class-method dispatch invokes a compiled `class_<sel>`
-//! module function (`beamtalk_class_dispatch`), so builder class methods are not
-//! callable in the first place — indexing their source would serve no method.
-//! Class-side source indexing already works for file-defined classes (BT-2195).
+//! BT-2270 extends the same pass to the **class** side: a builder
+//! `classMethods: #{ #sel => [block] }` setter gets a companion
+//! `classMethodSource:` setter synthesised from the block literals, so
+//! builder-defined class methods are navigable via the class-side channel
+//! BT-2195 added (`Counter class sendersOf:`, `methodsMatching:`, ...). This is
+//! only meaningful now that BT-2266/BT-2267 made builder class methods callable
+//! (installed as runtime class-method funs); previously they were not
+//! dispatchable, so indexing their source would have served no method.
 //!
-//! Only the **literal** case is handled: a symbol-literal selector mapped to a
-//! block literal. Computed selectors or funs assembled at runtime have no
-//! source literal; they are silently skipped and remain known-present but
-//! unindexable (no crash) — the runtime defaults their `__source__` to an
-//! empty binary.
+//! Only the **literal** case is handled, on both sides: a symbol-literal
+//! selector mapped to a block literal. Computed selectors or funs assembled at
+//! runtime have no source literal; they are silently skipped and remain
+//! known-present but unindexable (no crash) — the runtime defaults their
+//! `__source__` to an empty binary.
 
 use crate::ast::{
     Block, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair, MessageSelector,
@@ -163,12 +165,16 @@ fn keyword_setter(name: &str) -> MessageSelector {
 }
 
 /// Recognises a `ClassBuilder` construction cascade (terminating in `register`)
-/// with literal block instance methods and returns an augmented message list
-/// with a synthesised `methodSource:` setter prepended.
+/// with literal block methods and returns an augmented message list with the
+/// synthesised source setters prepended: `methodSource:` from `methods:`
+/// (BT-2246, instance side) and `classMethodSource:` from `classMethods:`
+/// (BT-2270, class side).
 ///
-/// Returns `None` when the cascade is not a recognised `ClassBuilder`
-/// construction, has nothing indexable, or already carries an explicit
-/// `methodSource:` setter (which is left untouched).
+/// Each side is injected independently: a cascade with only `classMethods:`
+/// gets only `classMethodSource:`, and a side that already carries an explicit
+/// source setter is left untouched. Returns `None` when the cascade is not a
+/// recognised `ClassBuilder` construction or has nothing indexable on either
+/// side.
 pub(super) fn inject_method_source(
     receiver: &Expression,
     messages: &[CascadeMessage],
@@ -192,7 +198,9 @@ pub(super) fn inject_method_source(
     }
 
     let mut methods_map: Option<&[MapPair]> = None;
+    let mut class_methods_map: Option<&[MapPair]> = None;
     let mut has_method_source = false;
+    let mut has_class_method_source = false;
     let mut last_is_register = false;
 
     let all = first_msg.into_iter().chain(
@@ -204,11 +212,13 @@ pub(super) fn inject_method_source(
         let name = selector.name();
         last_is_register = name.as_str() == "register";
         match name.as_str() {
-            // Later setters win in a cascade, so track the *last* `methods:`
-            // map. A later non-literal `methods:` clears it — the methods it
-            // installs have no source literal to index.
+            // Later setters win in a cascade, so track the *last* `methods:` /
+            // `classMethods:` map. A later non-literal setter clears it — the
+            // methods it installs have no source literal to index.
             "methods:" => methods_map = single_map_literal(args),
+            "classMethods:" => class_methods_map = single_map_literal(args),
             "methodSource:" => has_method_source = true,
+            "classMethodSource:" => has_class_method_source = true,
             _ => {}
         }
     }
@@ -218,18 +228,42 @@ pub(super) fn inject_method_source(
     // position (not mere presence) keeps the recognition from firing on an
     // unrelated `classBuilder`/`methods:` naming coincidence, where the injected
     // setter would be a runtime DNU.
-    if !last_is_register || has_method_source {
+    if !last_is_register {
         return None;
     }
 
-    let map_expr = methods_map.and_then(build_source_map)?;
-    let mut injected = vec![CascadeMessage::new(
-        keyword_setter("methodSource:"),
-        vec![map_expr],
-        Span::new(0, 0),
-    )];
+    // Synthesise each source setter independently. The instance side fires only
+    // when there is no explicit `methodSource:` (and an indexable `methods:`
+    // map); the class side likewise for `classMethodSource:` / `classMethods:`.
+    let method_source = (!has_method_source)
+        .then(|| methods_map.and_then(build_source_map))
+        .flatten();
+    let class_method_source = (!has_class_method_source)
+        .then(|| class_methods_map.and_then(build_source_map))
+        .flatten();
 
-    // Prepend the setter so it runs before the terminal `register`; ordering
+    // Nothing to inject on either side — leave the cascade untouched.
+    if method_source.is_none() && class_method_source.is_none() {
+        return None;
+    }
+
+    let mut injected: Vec<CascadeMessage> = Vec::new();
+    if let Some(map_expr) = method_source {
+        injected.push(CascadeMessage::new(
+            keyword_setter("methodSource:"),
+            vec![map_expr],
+            Span::new(0, 0),
+        ));
+    }
+    if let Some(map_expr) = class_method_source {
+        injected.push(CascadeMessage::new(
+            keyword_setter("classMethodSource:"),
+            vec![map_expr],
+            Span::new(0, 0),
+        ));
+    }
+
+    // Prepend the setters so they run before the terminal `register`; ordering
     // among the pure state setters is irrelevant.
     injected.extend(messages.iter().cloned());
     Some(injected)
@@ -470,5 +504,149 @@ mod tests {
              methodSource: #{ #m => \"m => self x\" }; register",
         );
         assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    // BT-2270: class-side `classMethods:` → `classMethodSource:`.
+
+    fn has_setter(messages: &[CascadeMessage], setter: &str) -> bool {
+        messages.iter().any(|m| m.selector.name() == setter)
+    }
+
+    #[test]
+    fn injects_class_method_source_for_literal_block() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder name: #Foo; \
+             classMethods: #{ #bump => [:self | self.total := self.total + 1] }; register",
+        );
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+        let entries = injected_source_map(&augmented, "classMethodSource:");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "bump");
+        assert!(
+            entries[0].1.contains("bump") && entries[0].1.contains("total"),
+            "unexpected source: {}",
+            entries[0].1
+        );
+        // The terminal register message is preserved and stays last.
+        assert_eq!(augmented.last().unwrap().selector.name(), "register");
+    }
+
+    #[test]
+    fn maps_keyword_class_method_block_params_to_signature() {
+        let (recv, msgs) = parse_cascade(
+            "ClassBuilder new classMethods: #{ #addTo: => [:self :n | self.total := n] }; \
+             register",
+        );
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+        let entries = injected_source_map(&augmented, "classMethodSource:");
+        assert_eq!(entries.len(), 1);
+        assert!(
+            entries[0].1.contains("addTo:") && entries[0].1.contains("n"),
+            "unexpected source: {}",
+            entries[0].1
+        );
+    }
+
+    #[test]
+    fn skips_computed_non_literal_class_method_values() {
+        // The class-method fun is referenced, not a literal block — nothing to
+        // index. Degrades gracefully (no injection, no crash).
+        let (recv, msgs) =
+            parse_cascade("Object classBuilder classMethods: #{ #m => someFun }; register");
+        assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn skips_class_method_block_with_wrong_arity() {
+        // Keyword selector `addTo:` needs `self` + one arg; block declares only
+        // `self`. Skipped, not crashed.
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder classMethods: #{ #addTo: => [:self | self x] }; register",
+        );
+        assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn skips_class_methods_cascade_without_terminal_register() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder name: #Foo; classMethods: #{ #m => [:_self | _self x] }",
+        );
+        assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn does_not_double_inject_when_class_method_source_already_present() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder classMethods: #{ #m => [:self | self x] }; \
+             classMethodSource: #{ #m => \"m => self x\" }; register",
+        );
+        assert!(inject_method_source(&recv, &msgs).is_none());
+    }
+
+    #[test]
+    fn last_class_methods_map_wins_when_repeated() {
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder classMethods: #{ #a => [:_self | _self aa] }; \
+             classMethods: #{ #b => [:_self | _self bb] }; register",
+        );
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+        let entries = injected_source_map(&augmented, "classMethodSource:");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "b");
+    }
+
+    #[test]
+    fn injects_both_instance_and_class_sides_independently() {
+        // A cascade with both `methods:` and `classMethods:` literal blocks gets
+        // both source setters; each side is recorded from its own map.
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder name: #Foo; \
+             methods: #{ #greet => [:_self | _self hello] }; \
+             classMethods: #{ #bump => [:_self | _self tick] }; register",
+        );
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+
+        let instance = injected_source_map(&augmented, "methodSource:");
+        assert_eq!(instance.len(), 1);
+        assert_eq!(instance[0].0, "greet");
+
+        let class = injected_source_map(&augmented, "classMethodSource:");
+        assert_eq!(class.len(), 1);
+        assert_eq!(class[0].0, "bump");
+
+        assert_eq!(augmented.last().unwrap().selector.name(), "register");
+    }
+
+    #[test]
+    fn injects_class_side_only_when_instance_side_explicit() {
+        // An explicit `methodSource:` suppresses instance-side injection, but the
+        // class side is still derived independently.
+        let (recv, msgs) = parse_cascade(
+            "Object classBuilder methods: #{ #greet => [:_self | _self hi] }; \
+             methodSource: #{ #greet => \"greet => self hi\" }; \
+             classMethods: #{ #bump => [:_self | _self tick] }; register",
+        );
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+        // Instance side not re-injected (already present once).
+        assert_eq!(
+            augmented
+                .iter()
+                .filter(|m| m.selector.name() == "methodSource:")
+                .count(),
+            1
+        );
+        let class = injected_source_map(&augmented, "classMethodSource:");
+        assert_eq!(class.len(), 1);
+        assert_eq!(class[0].0, "bump");
+    }
+
+    #[test]
+    fn instance_only_cascade_does_not_inject_class_method_source() {
+        // No `classMethods:` → no `classMethodSource:` setter is added.
+        let (recv, msgs) =
+            parse_cascade("Object classBuilder methods: #{ #m => [:_self | _self x] }; register");
+        let augmented = inject_method_source(&recv, &msgs).expect("should inject");
+        assert!(has_setter(&augmented, "methodSource:"));
+        assert!(!has_setter(&augmented, "classMethodSource:"));
     }
 }
