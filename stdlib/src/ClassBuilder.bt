@@ -29,6 +29,8 @@ typed Actor subclass: ClassBuilder
   state: modifiers :: List(Symbol) = #()
   state: backingModule :: Symbol | Nil = nil
   state: methodSource :: Dictionary = #{}
+  state: classMethods :: Dictionary = #{}
+  state: classState :: Dictionary = #{}
 
   /// Set the class name (a Symbol).
   ///
@@ -75,6 +77,32 @@ typed Actor subclass: ClassBuilder
   /// builder methodSource: #{ #increment => "increment => self.count := self.count + 1" }
   /// ```
   methodSource: aDict :: Dictionary -> Dictionary => self.methodSource := aDict
+
+  /// Set all class-side methods at once (ADR 0084, BT-2267).
+  ///
+  /// Each value is a class-method block whose body the compiler lowers with
+  /// the class-method calling convention (`fun(ClassSelf, ClassVars, ...)`),
+  /// so class-variable mutations thread correctly and `super`/`self` resolve.
+  /// The runtime installs them as runtime class-method funs (BT-2266).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethods: #{ #bump => [:self | self.total := self.total + 1] }
+  /// ```
+  classMethods: aDict :: Dictionary -> Dictionary => self.classMethods := aDict
+
+  /// Set class-variable initial values (ADR 0084, BT-2267).
+  ///
+  /// The class-side counterpart of `fields:`. Named `classVars:` rather than
+  /// `classState:` because `classState:` is a reserved class-variable
+  /// declaration keyword (it cannot be a method selector), mirroring how the
+  /// instance-side setter is `fields:`, not the reserved `field:`/`state:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classVars: #{ #total => 0 }
+  /// ```
+  classVars: aDict :: Dictionary -> Dictionary => self.classState := aDict
 
   /// Add a single field with a default value.
   ///
