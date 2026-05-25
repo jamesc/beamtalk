@@ -542,7 +542,7 @@ mod tests {
         let entries = injected_source_map(&augmented, "classMethodSource:");
         assert_eq!(entries.len(), 1);
         assert!(
-            entries[0].1.contains("addTo:") && entries[0].1.contains("n"),
+            entries[0].1.contains("addTo:") && entries[0].1.contains('n'),
             "unexpected source: {}",
             entries[0].1
         );
