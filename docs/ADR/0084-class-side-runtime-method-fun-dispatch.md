@@ -231,7 +231,7 @@ registry*; that is explicitly out of scope here and noted as future work.
 >> c := Object classBuilder
      name: #Tally;
      superclass: Object;
-     classState: #{ #total => 0 };
+     classVars: #{ #total => 0 };
      classMethods: #{ #bump => [:self | self.total := self.total + 1. self.total] };
      register
 => Tally
@@ -415,9 +415,9 @@ closures) — rejected, reproduces BT-873.
 | `beamtalk_object_class.erl` | Add `put_class_method/4` (mirror `put_method/4`); store `#{block, arity}` in the `class_methods` map (source of truth); clear stale class-side signature/return-type; update `beamtalk_class_metadata` discoverability for the new selector (init/`apply_class_info` already do this for register-time methods, `:419,1078`); and write the fun into the retrieval store. |
 | `beamtalk_class_metadata` | Add a retrieval store keyed by `{DefiningClass, Selector} -> #{block, arity}` plus `lookup_class_method_fun/2` and a per-class "has runtime class methods" flag for gating. Populated by register-time builder methods and `put_class_method/4`; invalidated on `update_class` / remove. |
 | `beamtalk_class_builder.erl` | Run `classMethods:` through `build_method_map/1` in `build_compiled_class_info/8`, and seed the retrieval store + metadata discoverability for the funs (register-time). |
-| `beamtalk_class_dispatch.erl` | In `apply_class_method_in_context/6`, look up a `#{block, arity}` entry and `apply(Fun, [ClassSelf, ClassVars | Args])` before the compiled `erlang:apply` fallback. Gate the lookup so compile-time-only classes pay no extra cost and no per-send `gen_server` hop is added (BT-2008). |
+| `beamtalk_class_dispatch.erl` | In `apply_class_method_in_context/6`, look up a `#{block, arity}` entry and `apply(Fun, [ClassSelf, ClassVars \| Args])` before the compiled `erlang:apply` fallback. Gate the lookup so compile-time-only classes pay no extra cost and no per-send `gen_server` hop is added (BT-2008). |
 | `crates/beamtalk-core/src/codegen/` | Lower class-method block bodies (builder `classMethods:`, `ClassName class >> sel`) to **self-contained** funs: class-var threading via `{class_var_result, …}`, `ClassSelf`-based self-sends, and `super` lowered to compile-time class-name-keyed superclass dispatch (no reliance on the defining module — see Decision §4). |
-| `stdlib/src/ClassBuilder.bt` | `classMethods:` (and `classState:`) state field + setter (parity feeds the runtime key already read by `register/1`). |
+| `stdlib/src/ClassBuilder.bt` | `classMethods:` and `classVars:` setters (`classVars:` rather than the reserved `classState:` declaration keyword; it writes the `classState` field / runtime key already read by `register/1`). |
 | tests | `stdlib/test/` + runtime EUnit — the three §4 contract tests (class-var threading, `super`, self) for the fun path; subclass *inheritance* of a runtime-installed class method; `update_class`/reload precedence; live `class >>` patch round-trip. |
 
 Phasing: (1) runtime fun-path + `put_class_method` (incl. metadata update) +
@@ -446,7 +446,7 @@ the previously-inert `classMethods:` builder key and the parsed-but-unwired
 |-------|-------|-------|
 | 1 — foundation | BT-2258 | `register` returns a usable class object |
 | 1 — foundation | BT-2266 | Runtime: class-side fun dispatch path + retrieval store (§1–3) |
-| 2 — core | BT-2267 | Callable class methods end-to-end: `classMethods:`/`classState:` + compiler lowering (§4) |
+| 2 — core | BT-2267 | Callable class methods end-to-end: `classMethods:`/`classVars:` + compiler lowering (§4) |
 | 3 — parity | BT-2268 | Metadata setters (signatures, return types, docs, meta, isConstructible) |
 | 3 — parity | BT-2269 | Incremental class-piece API (`addClassMethod:body:`, `addMethod:body:`, `addClassState:default:`, remove*) |
 | 3 — parity | BT-2270 | Compiler: auto-derive class-side `classMethodSource` (extends BT-2246) |

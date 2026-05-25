@@ -77,7 +77,7 @@ fn is_class_builder_construction(expr: &Expression) -> bool {
 ///
 /// Returns `None` for malformed selectors (e.g. `at:put` — an interior colon
 /// without a trailing one), which are left unindexed rather than guessed at.
-fn selector_from_symbol(sym: &str) -> Option<MessageSelector> {
+pub(super) fn selector_from_symbol(sym: &str) -> Option<MessageSelector> {
     if sym.is_empty() {
         return None;
     }
@@ -233,6 +233,84 @@ pub(super) fn inject_method_source(
     // among the pure state setters is irrelevant.
     injected.extend(messages.iter().cloned());
     Some(injected)
+}
+
+/// ADR 0084 / BT-2267: Recognise a `ClassBuilder` construction cascade that
+/// carries a `classMethods:` setter, returning `(ClassName, ClassVarNames)` for
+/// the codegen that lowers the class-method block literals into funs.
+///
+/// `ClassName` comes from a **literal** `name:` symbol (required — it keys the
+/// runtime self/`super` dispatch the funs emit); `ClassVarNames` are the keys of
+/// the `classVars:` map (used to recognise `self.cvar` as class-variable access).
+/// Returns `None` when the cascade is not a recognised `ClassBuilder`
+/// construction, lacks a terminal `register`, has no `classMethods:` setter, or
+/// has no literal `name:`.
+pub(super) fn builder_class_method_context(
+    receiver: &Expression,
+    messages: &[CascadeMessage],
+) -> Option<(String, Vec<String>)> {
+    let (underlying, first_msg): (&Expression, Option<(&MessageSelector, &[Expression])>) =
+        match receiver {
+            Expression::MessageSend {
+                receiver: inner,
+                selector,
+                arguments,
+                ..
+            } => (inner.as_ref(), Some((selector, arguments.as_slice()))),
+            other => (other, None),
+        };
+
+    if !is_class_builder_construction(underlying) {
+        return None;
+    }
+
+    let mut class_name: Option<String> = None;
+    let mut class_var_names: Vec<String> = Vec::new();
+    let mut has_class_methods = false;
+    let mut last_is_register = false;
+
+    let all = first_msg.into_iter().chain(
+        messages
+            .iter()
+            .map(|m| (&m.selector, m.arguments.as_slice())),
+    );
+    for (selector, args) in all {
+        let name = selector.name();
+        last_is_register = name.as_str() == "register";
+        match name.as_str() {
+            // Later setters win in a cascade — keep the last value, and a later
+            // non-literal setter clears an earlier literal one (the effective
+            // setter is non-literal, so it must not enable lowering with a stale
+            // class name / var set).
+            "name:" => {
+                if let [Expression::Literal(Literal::Symbol(sym), _)] = args {
+                    class_name = Some(sym.to_string());
+                } else {
+                    class_name = None;
+                }
+            }
+            "classVars:" => {
+                if let Some(pairs) = single_map_literal(args) {
+                    class_var_names = pairs
+                        .iter()
+                        .filter_map(|p| match &p.key {
+                            Expression::Literal(Literal::Symbol(s), _) => Some(s.to_string()),
+                            _ => None,
+                        })
+                        .collect();
+                } else {
+                    class_var_names.clear();
+                }
+            }
+            "classMethods:" => has_class_methods = true,
+            _ => {}
+        }
+    }
+
+    if !last_is_register || !has_class_methods {
+        return None;
+    }
+    class_name.map(|cn| (cn, class_var_names))
 }
 
 #[cfg(test)]

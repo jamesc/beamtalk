@@ -16,8 +16,8 @@
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
 use crate::ast::{
-    Block, ClassDefinition, Expression, Identifier, MatchArm, MessageSelector, MethodDefinition,
-    Module,
+    Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MatchArm,
+    MessageSelector, MethodDefinition, Module,
 };
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -33,6 +33,11 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 pub struct NameResolver {
     scope: Scope,
     diagnostics: Vec<Diagnostic>,
+    /// ADR 0084 / BT-2267: depth of nesting inside a programmatic `ClassBuilder`
+    /// `classMethods:` block body. While > 0, `super` is permitted regardless of
+    /// lexical scope depth — such a block IS a class-method body even though it
+    /// appears as a cascade argument (possibly at the REPL top level).
+    builder_class_method_depth: usize,
 }
 
 impl NameResolver {
@@ -42,6 +47,7 @@ impl NameResolver {
         Self {
             scope: Scope::new(),
             diagnostics: Vec::new(),
+            builder_class_method_depth: 0,
         }
     }
 
@@ -259,10 +265,19 @@ impl NameResolver {
             Cascade {
                 receiver, messages, ..
             } => {
+                // ADR 0084 / BT-2267: in a `classBuilder … classMethods: #{…};
+                // register` cascade, resolve each `classMethods:` block value as a
+                // class-method body so `super`/`self` and class-var access resolve
+                // (they would otherwise be plain blocks at the enclosing depth).
+                let is_builder = Self::cascade_is_class_builder(receiver, messages);
                 self.resolve_expression(receiver);
                 for msg in messages {
-                    for arg in &msg.arguments {
-                        self.resolve_expression(arg);
+                    if is_builder && msg.selector.name().as_str() == "classMethods:" {
+                        self.resolve_class_methods_argument(&msg.arguments);
+                    } else {
+                        for arg in &msg.arguments {
+                            self.resolve_expression(arg);
+                        }
                     }
                 }
             }
@@ -308,7 +323,10 @@ impl NameResolver {
             Super(span) => {
                 // super can only be used inside a method body (depth >= 2).
                 // Depth 0 = module, 1 = class, 2+ = method/block.
-                if self.scope.current_depth() < 2 {
+                // ADR 0084 / BT-2267: a `classMethods:` block IS a class-method
+                // body even when it appears as a cascade argument (possibly at the
+                // REPL top level, depth < 2), so allow super there.
+                if self.scope.current_depth() < 2 && self.builder_class_method_depth == 0 {
                     self.diagnostics.push(Diagnostic::error(
                         "super can only be used inside a method body",
                         *span,
@@ -368,6 +386,128 @@ impl NameResolver {
         self.collect_unused_warnings();
 
         self.scope.pop(); // Exit block scope
+    }
+
+    /// ADR 0084 / BT-2267: Resolve the `classMethods:` argument of a `ClassBuilder`
+    /// cascade — a map literal whose values are class-method block literals — by
+    /// resolving each block value as a class-method body.
+    fn resolve_class_methods_argument(&mut self, args: &[Expression]) {
+        if let [Expression::MapLiteral { pairs, .. }] = args {
+            for pair in pairs {
+                self.resolve_expression(&pair.key);
+                if let Expression::Block(block) = &pair.value {
+                    self.resolve_builder_class_method_block(block);
+                } else {
+                    self.resolve_expression(&pair.value);
+                }
+            }
+        } else {
+            for arg in args {
+                self.resolve_expression(arg);
+            }
+        }
+    }
+
+    /// Resolve a `classMethods:` block literal as a class-method body: the block
+    /// parameters (the receiver `self` plus any selector arguments) bind without a
+    /// `self`-shadows-outer warning, and `super` is permitted (the body is a
+    /// class-method body even if it lexically sits at the REPL top level).
+    fn resolve_builder_class_method_block(&mut self, block: &Block) {
+        self.scope.push();
+        self.builder_class_method_depth += 1;
+
+        // Bind the block parameters as method parameters. Skip check_shadowing:
+        // the receiver parameter is conventionally `self`, which legitimately
+        // "shadows" the enclosing method's self here (it IS the class receiver).
+        for param in &block.parameters {
+            self.scope
+                .define(&param.name, param.span, BindingKind::Parameter);
+        }
+
+        self.resolve_body(&block.body);
+        self.collect_unused_warnings();
+
+        self.builder_class_method_depth -= 1;
+        self.scope.pop();
+    }
+
+    /// Returns `true` if a cascade is a `ClassBuilder` construction terminating in
+    /// `register` with a **literal** `name:` (so its `classMethods:` blocks should
+    /// resolve as class methods).
+    ///
+    /// The literal-`name:` requirement deliberately matches the codegen recogniser
+    /// (`class_builder_source::builder_class_method_context`): both must agree, or
+    /// the resolver would permit `super` in a block that codegen then lowers as an
+    /// ordinary block (producing an instance-`super` call with unbound `Self`).
+    fn cascade_is_class_builder(receiver: &Expression, messages: &[CascadeMessage]) -> bool {
+        // The parser keeps the first cascade message inside `receiver` (the outer
+        // MessageSend); the constructed object is that send's receiver.
+        let (underlying, first_msg): (&Expression, Option<(&MessageSelector, &[Expression])>) =
+            match receiver {
+                Expression::MessageSend {
+                    receiver: inner,
+                    selector,
+                    arguments,
+                    ..
+                } => (inner.as_ref(), Some((selector, arguments.as_slice()))),
+                other => (other, None),
+            };
+        if !Self::is_class_builder_construction(underlying) {
+            return false;
+        }
+        if messages
+            .last()
+            .is_none_or(|m| m.selector.name().as_str() != "register")
+        {
+            return false;
+        }
+        // Require the *effective* (last) `name:` setter to be a literal symbol —
+        // matches the codegen recogniser, where a later non-literal `name:`
+        // clears an earlier literal one. Using the last occurrence (not "any")
+        // keeps the two recognisers in lockstep.
+        let mut last_name_is_literal = false;
+        for (selector, args) in first_msg.into_iter().chain(
+            messages
+                .iter()
+                .map(|m| (&m.selector, m.arguments.as_slice())),
+        ) {
+            if selector.name().as_str() == "name:" {
+                last_name_is_literal = matches!(args, [Expression::Literal(Literal::Symbol(_), _)]);
+            }
+        }
+        last_name_is_literal
+    }
+
+    /// Returns `true` if `expr` constructs a `ClassBuilder`: `<receiver>
+    /// classBuilder` or `ClassBuilder new`.
+    fn is_class_builder_construction(expr: &Expression) -> bool {
+        match expr {
+            Expression::Parenthesized { expression, .. } => {
+                Self::is_class_builder_construction(expression)
+            }
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => match selector {
+                MessageSelector::Unary(name) if name == "classBuilder" => true,
+                MessageSelector::Unary(name) if name == "new" => {
+                    arguments.is_empty() && Self::is_class_builder_name(receiver)
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Returns `true` if `expr` names the `ClassBuilder` class.
+    fn is_class_builder_name(expr: &Expression) -> bool {
+        match expr {
+            Expression::ClassReference { name, .. } => name.name == "ClassBuilder",
+            Expression::Identifier(id) => id.name == "ClassBuilder",
+            _ => false,
+        }
     }
 
     /// Resolves a match arm, entering arm scope and defining pattern variables.
@@ -540,6 +680,78 @@ mod tests {
         let mut resolver = NameResolver::new();
         resolver.resolve_module(&module);
         resolver
+    }
+
+    #[test]
+    fn builder_class_method_block_allows_super() {
+        // BT-2267: super inside a classMethods: block of a classBuilder cascade
+        // is a class-method body, so super must be allowed even at module depth.
+        let resolver = run("Object classBuilder name: #BT2267T; superclass: Object; \
+             classMethods: #{ #greeting => [:self | super greeting] }; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            super_errors.is_empty(),
+            "super should be allowed in a classMethods: block, got: {super_errors:?}"
+        );
+    }
+
+    #[test]
+    fn builder_without_literal_name_does_not_permit_super() {
+        // BT-2267: the resolver must require a literal name: to match the codegen
+        // recogniser — otherwise super would be allowed here but codegen would
+        // lower the block as an ordinary block (instance-super, unbound Self).
+        let resolver = run("Object classBuilder superclass: Object; \
+             classMethods: #{ #greeting => [:self | super greeting] }; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            !super_errors.is_empty(),
+            "super in a name-less builder cascade must still error (codegen cannot lower it)"
+        );
+    }
+
+    #[test]
+    fn builder_with_later_non_literal_name_does_not_permit_super() {
+        // BT-2267: a later non-literal name: is the effective setter, so the
+        // recogniser must NOT enable class-method semantics (kept in lockstep
+        // with codegen, which clears the class name on a non-literal name:).
+        let resolver = run("n := someName. Object classBuilder name: #X; name: n; \
+             classMethods: #{ #greeting => [:self | super greeting] }; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            !super_errors.is_empty(),
+            "a later non-literal name: must not enable super (effective name is non-literal)"
+        );
+    }
+
+    #[test]
+    fn builder_class_method_block_self_param_no_shadow_warning() {
+        // BT-2267: the receiver `self` parameter of a classMethods: block must not
+        // warn about shadowing when the cascade is nested in a method body.
+        let resolver = run(
+            "Counter subclass: BT2267Host\n  build =>\n    Object classBuilder name: #BT2267N; \
+             superclass: Object; classMethods: #{ #bump => [:self | self] }; register",
+        );
+        let shadow: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("shadows outer"))
+            .collect();
+        assert!(
+            shadow.is_empty(),
+            "self param in a classMethods: block must not warn shadowing, got: {shadow:?}"
+        );
     }
 
     #[test]

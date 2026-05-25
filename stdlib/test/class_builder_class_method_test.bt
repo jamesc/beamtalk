@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2267 / ADR 0084 Phase 2: callable class methods via the programmatic
+// ClassBuilder cascade, exercised from a typed TestCase. The compiler lowers
+// each `classMethods:` block to a class-method fun (ClassSelf, ClassVars, ...)
+// installed as a runtime class-method fun (BT-2266); the name resolver treats
+// these blocks as class-method bodies so `self`/`super` resolve and the
+// receiver `self` parameter does not warn about shadowing.
+//
+// The class is dispatched by its registered name via findClass: (register's
+// return is an unusable wrapper today, BT-2258, fixed separately).
+
+TestCase subclass: ClassBuilderClassMethodTest
+  field: cls = nil
+  field: parentCls = nil
+
+  tearDown =>
+    self.cls isNil ifFalse: [self.cls removeFromSystem]
+    self.parentCls isNil ifFalse: [self.parentCls removeFromSystem]
+
+  // Class-variable mutation persists across calls (the BT-873 "dropped state"
+  // regression); classVars: seeds the initial value.
+  testClassVarThreadsAcrossCalls =>
+    Object classBuilder name: #BT2267BTally;
+      superclass: Object;
+      classVars: #{#total => 0};
+      classMethods: #{#bump => [:self |
+          self.total := self.total + 1
+          self.total
+        ]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2267BTally
+    self assert: self.cls bump equals: 1
+    self assert: self.cls bump equals: 2
+    self assert: self.cls bump equals: 3
+
+  // Plain-value and keyword class methods.
+  testPlainAndKeywordClassMethods =>
+    Object classBuilder name: #BT2267BKw;
+      superclass: Object;
+      classMethods: #{#answer => [:self | 42], #scale: => [:self :n | n * 3]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2267BKw
+    self assert: self.cls answer equals: 42
+    self assert: (self.cls scale: 4) equals: 12
+
+  // A self class-method send resolves a sibling class method.
+  testSelfClassMethodSend =>
+    Object classBuilder name: #BT2267BSelf;
+      superclass: Object;
+      classMethods: #{
+        #base => [:self | 10],
+        #doubled => [:self | self base * 2]
+      };
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2267BSelf
+    self assert: self.cls doubled equals: 20
+
+  // `super` resolves to the superclass's class method.
+  testSuperResolvesToSuperclass =>
+    Object classBuilder name: #BT2267BSuperBase;
+      superclass: Object;
+      classMethods: #{#greeting => [:self | "base"]};
+      register
+    self.parentCls := (Erlang beamtalk_interface) findClass: #BT2267BSuperBase
+    Object classBuilder name: #BT2267BSuperChild;
+      superclass: #BT2267BSuperBase;
+      classMethods: #{#greeting => [:self | super greeting]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT2267BSuperChild
+    self assert: self.cls greeting equals: "base"

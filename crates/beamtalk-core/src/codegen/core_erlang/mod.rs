@@ -951,6 +951,29 @@ pub(super) struct ClassContext {
     /// When true, `generate_register_class` emits `stdlibMode => true` in the builder
     /// state so the runtime can bypass the sealed-superclass check for stdlib loading.
     pub stdlib_mode: bool,
+    /// ADR 0084 / BT-2267: When `Some(ClassName)`, we are lowering a programmatic
+    /// `ClassBuilder` class-method block into an anonymous fun. Such a fun has no
+    /// `class_<sel>` module export, so self-sends and `super` route through the
+    /// runtime dispatch helpers (`class_self_dispatch_local`/`class_self_dispatch`)
+    /// keyed on this class name, not through a direct module call.
+    pub builder_class_method_class: Option<String>,
+}
+
+/// ADR 0084 / BT-2267: Snapshot of the class-method-relevant `ClassContext`
+/// fields, captured when entering a programmatic `ClassBuilder` class-method
+/// lowering and restored on exit. `had_context` records whether a `ClassContext`
+/// existed beforehand, so a context created solely for a standalone builder
+/// cascade is dropped rather than leaked.
+#[derive(Debug)]
+pub(super) struct SavedClassMethodCtx {
+    had_context: bool,
+    in_class_method: bool,
+    class_var_names: std::collections::HashSet<String>,
+    class_method_selectors: std::collections::HashSet<String>,
+    class_var_version: usize,
+    class_var_mutated: bool,
+    class_slot_constructor_selector: Option<String>,
+    builder_class_method_class: Option<String>,
 }
 
 impl ClassContext {
@@ -967,6 +990,7 @@ impl ClassContext {
             class_slot_constructor_selector: None,
             in_class_method: false,
             stdlib_mode: false,
+            builder_class_method_class: None,
         }
     }
 }
@@ -1367,6 +1391,74 @@ impl CoreErlangGenerator {
     /// Sets the in-class-method flag.
     pub(super) fn set_in_class_method(&mut self, value: bool) {
         self.class_context_mut().in_class_method = value;
+    }
+
+    /// ADR 0084 / BT-2267: the builder class name when lowering a programmatic
+    /// `ClassBuilder` class-method block into an anonymous fun, else `None`.
+    pub(super) fn builder_class_method_class(&self) -> Option<String> {
+        self.class_context
+            .as_ref()
+            .and_then(|ctx| ctx.builder_class_method_class.clone())
+    }
+
+    /// Sets (or clears) the builder class-method class name.
+    pub(super) fn set_builder_class_method_class(&mut self, value: Option<String>) {
+        self.class_context_mut().builder_class_method_class = value;
+    }
+
+    /// ADR 0084 / BT-2267: Enter the class-method lowering context for a
+    /// programmatic `ClassBuilder` cascade's `classMethods:` funs, returning the
+    /// prior state to restore. Sets `in_class_method`, the class-variable names
+    /// (from the cascade's `classVars:` keys), and the builder class name used
+    /// for runtime self/`super` dispatch. Safe whether or not an enclosing class
+    /// is being compiled — a context created here is dropped on exit.
+    pub(super) fn enter_builder_class_method_context(
+        &mut self,
+        class_name: &str,
+        class_var_names: &[String],
+    ) -> SavedClassMethodCtx {
+        let saved = SavedClassMethodCtx {
+            had_context: self.class_context.is_some(),
+            in_class_method: self.in_class_method(),
+            class_var_names: self.class_var_names().clone(),
+            class_method_selectors: self.class_method_selectors().clone(),
+            class_var_version: self.class_var_version(),
+            class_var_mutated: self.class_var_mutated(),
+            class_slot_constructor_selector: self.class_slot_constructor_selector().cloned(),
+            builder_class_method_class: self.builder_class_method_class(),
+        };
+        self.set_in_class_method(true);
+        *self.class_var_names_mut() = class_var_names.iter().cloned().collect();
+        // class_method_selectors is intentionally left empty: in builder mode
+        // `generate_class_method_self_send` routes EVERY self-send through
+        // `class_self_dispatch_local` (the fun has no `class_<sel>` export) before
+        // it ever consults this set, so it is not needed for dispatch. Class-var
+        // threading across such self-sends rides on the open scope that
+        // `emit_class_var_result_unwrap` always produces, not on this set.
+        self.class_method_selectors_mut().clear();
+        self.set_class_var_version(0);
+        self.set_class_var_mutated(false);
+        self.set_class_slot_constructor_selector(None);
+        self.set_builder_class_method_class(Some(class_name.to_string()));
+        saved
+    }
+
+    /// Restore the class-method context saved by
+    /// [`enter_builder_class_method_context`](Self::enter_builder_class_method_context).
+    pub(super) fn exit_builder_class_method_context(&mut self, saved: SavedClassMethodCtx) {
+        if saved.had_context {
+            self.set_in_class_method(saved.in_class_method);
+            *self.class_var_names_mut() = saved.class_var_names;
+            *self.class_method_selectors_mut() = saved.class_method_selectors;
+            self.set_class_var_version(saved.class_var_version);
+            self.set_class_var_mutated(saved.class_var_mutated);
+            self.set_class_slot_constructor_selector(saved.class_slot_constructor_selector);
+            self.set_builder_class_method_class(saved.builder_class_method_class);
+        } else {
+            // No enclosing class context — drop the one we created so standalone
+            // (REPL) builder cascades don't leak a class context.
+            self.class_context = None;
+        }
     }
 
     /// Returns whether stdlib mode is active.

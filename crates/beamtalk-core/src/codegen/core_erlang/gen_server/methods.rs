@@ -11,8 +11,9 @@
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
-    Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module, StateDeclaration, TypeParamDecl, WellKnownSelector,
+    Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair, MessageSelector,
+    MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration, TypeParamDecl,
+    WellKnownSelector,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -1936,17 +1937,18 @@ impl CoreErlangGenerator {
                 // Empty class method body returns self (ClassSelf)
                 docvec!["ClassSelf"]
             } else {
-                let inner_doc =
-                    match self.generate_class_method_body(method, &class.class_variables) {
-                        Ok(doc) => doc,
-                        Err(e) => {
-                            self.set_current_nlr_token(None);
-                            self.pop_scope();
-                            self.set_in_class_method(false);
-                            self.current_method_selector = None;
-                            return Err(e);
-                        }
-                    };
+                let inner_doc = match self
+                    .generate_class_method_body(method, !class.class_variables.is_empty())
+                {
+                    Ok(doc) => doc,
+                    Err(e) => {
+                        self.set_current_nlr_token(None);
+                        self.pop_scope();
+                        self.set_in_class_method(false);
+                        self.current_method_selector = None;
+                        return Err(e);
+                    }
+                };
                 self.set_current_nlr_token(None);
                 // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
                 // to preserve the {class_var_result, ...} contract. The normal path only wraps
@@ -1966,13 +1968,8 @@ impl CoreErlangGenerator {
                 }
             };
 
-            // Build function header with params
-            let params_suffix = if param_vars.is_empty() {
-                String::new()
-            } else {
-                format!(", {}", param_vars.join(", "))
-            };
-
+            // Build function header with params (Document pieces, not format! —
+            // Core Erlang fragments must use the Document API, BT-875).
             let doc = docvec![
                 "\n",
                 "'class_",
@@ -1980,7 +1977,7 @@ impl CoreErlangGenerator {
                 "'/",
                 Document::String(arity.to_string()),
                 " = fun (ClassSelf, ClassVars",
-                Document::String(params_suffix),
+                Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",
                 nest(INDENT, docvec![line(), body_doc,]),
                 "\n",
@@ -1997,6 +1994,195 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
+    /// ADR 0084 / BT-2267: Lower the `classMethods:` argument of a programmatic
+    /// `ClassBuilder` cascade — a map literal whose values are class-method block
+    /// literals — into a Core Erlang map whose values are class-method funs.
+    ///
+    /// Each `#selector => [:self ... | body]` entry becomes
+    /// `'selector' => fun (ClassSelf, ClassVars, A1..An) -> ... end`, matching the
+    /// compiled `class_<sel>` calling convention so the runtime's fun-dispatch
+    /// path (BT-2266) installs and invokes it identically. Non-block values, or
+    /// blocks whose shape does not match the selector, fall through to ordinary
+    /// expression lowering (a computed fun the user supplied).
+    ///
+    /// `class_var_names` are the keys of the cascade's `classVars:` map; they make
+    /// `self.cvar` reads/writes lower as class-variable access (threaded through
+    /// `{class_var_result, …}`). `class_name` keys the runtime self/`super`
+    /// dispatch the funs emit (they have no module export to call).
+    pub(in crate::codegen::core_erlang) fn generate_class_methods_map_arg(
+        &mut self,
+        pairs: &[MapPair],
+        class_name: &str,
+        class_var_names: &[String],
+    ) -> Result<Document<'static>> {
+        if pairs.is_empty() {
+            return Ok(Document::Str("~{}~"));
+        }
+
+        // Establish the shared class-method context for every fun in the map,
+        // saving/restoring any enclosing class context so a builder cascade
+        // inside another class's method (or at the REPL top level) is unaffected.
+        let saved = self.enter_builder_class_method_context(class_name, class_var_names);
+
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        let mut result: Result<()> = Ok(());
+        for (i, pair) in pairs.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let key_doc = match self.expression_doc(&pair.key) {
+                Ok(d) => d,
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            };
+            let val_doc = match self.class_method_map_value_doc(&pair.key, &pair.value) {
+                Ok(d) => d,
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            };
+            parts.push(key_doc);
+            parts.push(Document::Str(" => "));
+            parts.push(val_doc);
+        }
+        parts.push(Document::Str(" }~"));
+
+        self.exit_builder_class_method_context(saved);
+        result?;
+        Ok(Document::Vec(parts))
+    }
+
+    /// Lowers a single `classMethods:` map value: a class-method fun for a literal
+    /// block of the right shape, else ordinary expression lowering.
+    fn class_method_map_value_doc(
+        &mut self,
+        key: &Expression,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        if let (Expression::Literal(Literal::Symbol(sym), _), Expression::Block(block)) =
+            (key, value)
+        {
+            if let Some(selector) = super::super::class_builder_source::selector_from_symbol(sym) {
+                // A class-method block declares `self` plus one parameter per
+                // selector slot.
+                if block.parameters.len() == selector.arity() + 1 {
+                    return self.generate_class_method_fun_from_block(&selector, block);
+                }
+            }
+        }
+        // Computed fun or non-conforming block: lower as an ordinary value.
+        self.expression_doc(value)
+    }
+
+    /// Emits an anonymous class-method fun from a builder block literal.
+    ///
+    /// `fun (ClassSelf, ClassVars, P1..Pn) -> body` where the block's first
+    /// parameter (the receiver) binds to `ClassSelf`, the remaining parameters to
+    /// `P1..Pn`, and the body is lowered with the class-method machinery
+    /// (`{class_var_result, …}` wrapping; self/`super` routed to runtime dispatch
+    /// because there is no `class_<sel>` export). Assumes the caller has already
+    /// entered the builder class-method context.
+    fn generate_class_method_fun_from_block(
+        &mut self,
+        selector: &MessageSelector,
+        block: &Block,
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        self.current_method_params.clear();
+        self.reset_state_version();
+        self.set_class_var_version(0);
+        self.set_class_var_mutated(false);
+
+        // The class is reachable via the conventional literal `self` (so
+        // `self.cvar` access and self-sends lower correctly — both key on the
+        // `self` identifier) and also via the block's receiver parameter under
+        // whatever name it was declared.
+        self.bind_var("self", "ClassSelf");
+        if let Some(receiver_param) = block.parameters.first() {
+            self.bind_var(&receiver_param.name, "ClassSelf");
+        }
+        // Remaining parameters become the fun's user parameters P1..Pn.
+        let param_vars: Vec<String> = block.parameters[1..]
+            .iter()
+            .map(|bp| {
+                let var_name = self.fresh_var(&bp.name);
+                self.current_method_params.push(var_name.clone());
+                var_name
+            })
+            .collect();
+
+        // Synthesize a MethodDefinition so the shared class-method body lowering
+        // applies unchanged.
+        let params: Vec<ParameterDefinition> = block.parameters[1..]
+            .iter()
+            .map(|bp| ParameterDefinition::new(Identifier::new(bp.name.clone(), bp.span)))
+            .collect();
+        let method =
+            MethodDefinition::new(selector.clone(), params, block.body.clone(), block.span);
+
+        let needs_nlr = self
+            .semantic_facts
+            .has_block_nlr_or_walk(&block.span, &block.body);
+        let nlr_token_var = if needs_nlr {
+            let token_var = self.fresh_temp_var("NlrToken");
+            self.set_current_nlr_token(Some(token_var.clone()));
+            Some(token_var)
+        } else {
+            None
+        };
+
+        let has_class_vars = !self.class_var_names().is_empty();
+        let body_doc: Document<'static> = if method.body.is_empty() {
+            self.set_current_nlr_token(None);
+            docvec!["ClassSelf"]
+        } else {
+            let inner_doc = match self.generate_class_method_body(&method, has_class_vars) {
+                Ok(doc) => doc,
+                Err(e) => {
+                    self.set_current_nlr_token(None);
+                    self.pop_scope();
+                    return Err(e);
+                }
+            };
+            self.set_current_nlr_token(None);
+            let returns_class_var_result = self.class_var_mutated();
+            if let Some(ref token_var) = nlr_token_var {
+                self.wrap_class_method_body_with_nlr_catch(
+                    inner_doc,
+                    token_var,
+                    returns_class_var_result,
+                )
+            } else {
+                inner_doc
+            }
+        };
+
+        let doc = docvec![
+            "fun (ClassSelf, ClassVars",
+            Self::class_method_params_suffix_doc(&param_vars),
+            ") ->",
+            nest(INDENT, docvec![line(), body_doc]),
+        ];
+
+        self.pop_scope();
+        Ok(doc)
+    }
+
+    /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
+    /// (never `format!` — Core Erlang fragments must use the Document API,
+    /// BT-875). Empty when there are no user parameters.
+    fn class_method_params_suffix_doc(param_vars: &[String]) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for var in param_vars {
+            parts.push(Document::Str(", "));
+            parts.push(Document::String(var.clone()));
+        }
+        Document::Vec(parts)
+    }
+
     /// Generates the body of a class-side method.
     ///
     /// Unlike instance methods, class methods have no state threading.
@@ -2006,10 +2192,8 @@ impl CoreErlangGenerator {
     fn generate_class_method_body(
         &mut self,
         method: &MethodDefinition,
-        class_vars: &[crate::ast::StateDeclaration],
+        has_class_vars: bool,
     ) -> Result<Document<'static>> {
-        let has_class_vars = !class_vars.is_empty();
-
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Filter out @expect directives (compile-time only, no runtime representation).

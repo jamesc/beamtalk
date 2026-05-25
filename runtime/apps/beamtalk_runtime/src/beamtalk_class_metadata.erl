@@ -59,20 +59,36 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_superclass/1,
     match_subclasses/1,
     foldl/2,
-    all_builtins/0
+    all_builtins/0,
+    %% BT-2266 / ADR 0084: runtime class-method fun retrieval store + gate flag.
+    put_class_method_fun/3,
+    lookup_class_method_fun/2,
+    delete_class_method_funs/1,
+    has_runtime_class_methods/1,
+    set_runtime_class_methods/2
 ]).
 
 -define(TABLE, beamtalk_class_metadata).
+%% BT-2266 / ADR 0084: sibling table holding runtime-installed class-method funs,
+%% keyed by {DefiningClass, Selector}. The metadata row's
+%% `has_runtime_class_methods` flag gates reads on this table so compile-time-only
+%% classes pay nothing on the dispatch hot path (BT-2008).
+-define(FUN_TABLE, beamtalk_class_method_funs).
 
 -type class_name() :: atom().
 -type superclass() :: class_name() | none.
 -type selector() :: atom().
+-type class_method_fun_info() :: #{block := fun(), arity := non_neg_integer()}.
 
 -record(class_metadata, {
     name :: class_name(),
     module :: module() | undefined,
     selectors :: [selector()] | undefined,
-    superclass :: superclass() | undefined
+    superclass :: superclass() | undefined,
+    %% BT-2266 / ADR 0084: true once a runtime/builder class-method fun has been
+    %% installed for this class. The dispatch-time gate: false means the funs
+    %% table is never read for this class.
+    has_runtime_class_methods = false :: boolean()
 }).
 
 %%====================================================================
@@ -88,26 +104,35 @@ handles the race between `ets:info/1` and `ets:new/2`.
 """.
 -spec new() -> ok.
 new() ->
-    case ets:info(?TABLE) of
+    ensure_table(?TABLE, [
+        set,
+        public,
+        named_table,
+        {keypos, #class_metadata.name},
+        {read_concurrency, true}
+    ]),
+    %% BT-2266: the funs table is a plain {Key, Value} set (default keypos 1),
+    %% Key = {DefiningClass, Selector}, Value = #{block, arity}.
+    ensure_table(?FUN_TABLE, [
+        set,
+        public,
+        named_table,
+        {read_concurrency, true}
+    ]),
+    ok.
+
+-spec ensure_table(atom(), [term()]) -> ok.
+ensure_table(Table, Opts) ->
+    case ets:info(Table) of
         undefined ->
             try
-                ets:new(
-                    ?TABLE,
-                    [
-                        set,
-                        public,
-                        named_table,
-                        {keypos, #class_metadata.name},
-                        {read_concurrency, true}
-                        | beamtalk_class_registry:heir_option()
-                    ]
-                ),
+                ets:new(Table, Opts ++ beamtalk_class_registry:heir_option()),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
-            beamtalk_class_registry:maybe_set_heir(?TABLE),
+            beamtalk_class_registry:maybe_set_heir(Table),
             ok
     end.
 
@@ -153,6 +178,10 @@ does not exist.
 """.
 -spec delete(class_name()) -> ok.
 delete(Name) ->
+    %% BT-2266: drop any runtime class-method funs alongside the metadata row so
+    %% a class that is removed (or whose process terminates) leaves no stale
+    %% dispatch entries behind.
+    delete_class_method_funs(Name),
     try
         ets:delete(?TABLE, Name),
         ok
@@ -333,6 +362,115 @@ all_builtins() ->
         'Value',
         'WorkspaceInterface'
     ].
+
+%%====================================================================
+%% Runtime class-method funs (BT-2266 / ADR 0084)
+%%====================================================================
+
+-doc """
+Write a runtime/builder-installed class-method fun into the retrieval store.
+
+Keyed by `{DefiningClass, Selector}` so inherited dispatch can fetch the fun
+after the chain walk resolves the defining class — without a `gen_server` hop
+(BT-2008). Callers must also flip the gate flag via `set_runtime_class_methods/2`
+(write the fun first, publish the flag second) so a reader never sees an enabled
+gate without the fun present.
+""".
+-spec put_class_method_fun(class_name(), selector(), class_method_fun_info()) -> ok.
+put_class_method_fun(Name, Selector, Info) ->
+    new(),
+    Key = {Name, Selector},
+    try
+        ets:insert(?FUN_TABLE, {Key, Info}),
+        ok
+    catch
+        error:badarg ->
+            new(),
+            ets:insert(?FUN_TABLE, {Key, Info}),
+            ok
+    end.
+
+-doc """
+Fetch a runtime class-method fun for `{DefiningClass, Selector}`.
+
+Gated on the per-class `has_runtime_class_methods` flag: a compile-time-only
+class returns `error` without ever reading the funs table (the BT-2008 hot-path
+guarantee). Returns `{ok, #{block, arity}}` when a runtime fun is installed.
+""".
+-spec lookup_class_method_fun(class_name(), selector()) ->
+    {ok, class_method_fun_info()} | error.
+lookup_class_method_fun(Name, Selector) ->
+    case has_runtime_class_methods(Name) of
+        false ->
+            error;
+        true ->
+            case ets:info(?FUN_TABLE) of
+                undefined ->
+                    error;
+                _ ->
+                    try ets:lookup(?FUN_TABLE, {Name, Selector}) of
+                        [{_, Info}] -> {ok, Info};
+                        [] -> error
+                    catch
+                        error:badarg -> error
+                    end
+            end
+    end.
+
+-doc """
+Remove every runtime class-method fun installed for `Name`.
+
+Called on class teardown (`delete/1`) and before re-seeding on `update_class`
+reload, so memory-only runtime methods do not survive a recompile (ADR 0082).
+""".
+-spec delete_class_method_funs(class_name()) -> ok.
+delete_class_method_funs(Name) ->
+    case ets:info(?FUN_TABLE) of
+        undefined ->
+            ok;
+        _ ->
+            try
+                ets:match_delete(?FUN_TABLE, {{Name, '_'}, '_'}),
+                ok
+            catch
+                error:badarg -> ok
+            end
+    end.
+
+-doc """
+Read the per-class "has runtime class methods" gate flag.
+
+`false` (the default for compile-time-only classes) means dispatch skips the
+funs-table read entirely. Exposed for dispatch gating and tests.
+""".
+-spec has_runtime_class_methods(class_name()) -> boolean().
+has_runtime_class_methods(Name) ->
+    case field(Name, #class_metadata.has_runtime_class_methods) of
+        true -> true;
+        _ -> false
+    end.
+
+-doc """
+Atomically publish the class's local selectors and set the gate flag.
+
+Used by `init`/`update_class` seeding and live `put_class_method`: the funs are
+written first (`put_class_method_fun/3`), then this single `update_element`
+publishes the new selector set together with the gate flag, so a concurrent
+reader never observes a discoverable selector whose gate is still closed.
+Leaves `module` and `superclass` untouched. A no-op if the row is absent.
+""".
+-spec set_runtime_class_methods(class_name(), [selector()]) -> ok.
+set_runtime_class_methods(Name, Selectors) ->
+    new(),
+    try
+        ets:update_element(?TABLE, Name, [
+            {#class_metadata.selectors, Selectors},
+            {#class_metadata.has_runtime_class_methods, true}
+        ]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 %%====================================================================
 %% Internal

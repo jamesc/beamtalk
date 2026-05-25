@@ -1226,6 +1226,12 @@ impl CoreErlangGenerator {
             (receiver, all)
         };
 
+        // ADR 0084 / BT-2267: A `classBuilder … classMethods: #{…}; register`
+        // cascade gets its `classMethods:` block-literal values lowered as
+        // class-method funs (see `generate_class_methods_map_arg`).
+        let builder_ctx: Option<(String, Vec<String>)> =
+            super::class_builder_source::builder_class_method_context(receiver, messages);
+
         let receiver_var = self.fresh_temp_var("Receiver");
         let recv_doc = self.expression_doc(underlying_receiver)?;
         let mut docs: Vec<Document<'static>> = vec![docvec![
@@ -1250,7 +1256,19 @@ impl CoreErlangGenerator {
 
             // BT-884: Hoist field-assignment arg bindings BEFORE the `let _ =`
             // wrapper so that StateN remains in scope for subsequent messages.
-            let arg_docs = self.generate_cascade_args(arguments, &mut docs)?;
+            // BT-2267: the `classMethods:` argument of a recognised builder
+            // cascade gets its block values lowered as class-method funs.
+            let arg_docs = match &builder_ctx {
+                Some((bclass, cvars)) if selector.name().as_str() == "classMethods:" => {
+                    match arguments {
+                        [Expression::MapLiteral { pairs, .. }] => {
+                            vec![self.generate_class_methods_map_arg(pairs, bclass, cvars)?]
+                        }
+                        _ => self.generate_cascade_args(arguments, &mut docs)?,
+                    }
+                }
+                _ => self.generate_cascade_args(arguments, &mut docs)?,
+            };
 
             if !is_last {
                 // For all but the last message, discard the result

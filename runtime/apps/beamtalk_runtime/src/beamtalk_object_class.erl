@@ -38,6 +38,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     has_method/2,
     put_method/3,
     put_method/4,
+    put_class_method/3,
+    put_class_method/4,
     instance_variables/1,
     is_sealed/1,
     is_abstract/1,
@@ -347,6 +349,25 @@ put_method(ClassPid, Selector, Fun) ->
 put_method(ClassPid, Selector, Fun, Source) ->
     gen_server:call(ClassPid, {put_method, Selector, Fun, Source}).
 
+-doc """
+Install or replace a class-side method with a runtime fun (ADR 0084, BT-2266).
+
+Class-side mirror of `put_method/4`. The fun follows the compiled class-method
+calling convention exactly: `fun(ClassSelf, ClassVars, A1..An) -> Result |
+{class_var_result, Result, NewClassVars}`, arity `n + 2`. The fun is stored in
+the class gen_server `class_methods` map (the source of truth) and mirrored into
+the metadata retrieval store so subclasses can dispatch it without a gen_server
+hop. A runtime fun shadows any compiled method of the same selector.
+""".
+-spec put_class_method(pid(), selector(), fun()) -> ok.
+put_class_method(ClassPid, Selector, Fun) ->
+    put_class_method(ClassPid, Selector, Fun, <<"">>).
+
+-doc "Install or replace a class-side method with a runtime fun and source.".
+-spec put_class_method(pid(), selector(), fun(), binary()) -> ok.
+put_class_method(ClassPid, Selector, Fun, Source) ->
+    gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
+
 -doc "Get instance variable names.".
 -spec instance_variables(pid()) -> [atom()].
 instance_variables(ClassPid) ->
@@ -417,6 +438,12 @@ init({ClassName, ClassInfo}) ->
     %% init (BT-1285); the selector set lets the inherited class-method chain walk
     %% in beamtalk_class_dispatch avoid gen_server hops (BT-2008).
     beamtalk_class_metadata:insert(ClassName, Module, maps:keys(ClassMethods), Superclass),
+
+    %% ADR 0084 / BT-2266: Seed the runtime class-method fun retrieval store for
+    %% any builder-supplied class methods that arrived as funs (#{block, arity}).
+    %% Compile-time-only classes seed nothing and keep the gate flag false, so
+    %% their dispatch never reads the funs table.
+    seed_runtime_class_methods(ClassName, ClassMethods),
 
     %% BT-893: Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
@@ -657,6 +684,36 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
     %% from the live class_state record instead.  Return types are cleared for
     %% hot-patched methods — the compiler treats them as dynamic.
+    notify_hot_patch(NewState),
+    {reply, ok, NewState};
+%% ADR 0084 / BT-2266: Install or replace a class-side method with a runtime fun.
+%% Class-side mirror of {put_method, ...}. The fun is stored in the class_methods
+%% map (source of truth) and mirrored into the metadata retrieval store so
+%% inherited dispatch resolves it without a gen_server hop (BT-2008). Stale
+%% class-side signature/return-type entries are cleared (no AST for dynamic funs).
+handle_call(
+    {put_class_method, Selector, Fun, Source},
+    _From,
+    #class_state{name = ClassName} = State
+) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    MethodInfo = #{block => Fun, arity => Arity},
+    NewClassMethods = maps:put(Selector, MethodInfo, State#class_state.class_methods),
+    NewState = State#class_state{
+        class_methods = NewClassMethods,
+        class_method_source = maps:put(Selector, Source, State#class_state.class_method_source),
+        class_method_signatures = maps:remove(
+            Selector, State#class_state.class_method_signatures
+        ),
+        class_method_return_types = maps:remove(
+            Selector, State#class_state.class_method_return_types
+        )
+    },
+    %% Write the fun first, then publish the selector + gate flag atomically so a
+    %% concurrent subclass dispatch never sees a discoverable selector whose fun
+    %% is not yet present.
+    beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
+    beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
     notify_hot_patch(NewState),
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).
@@ -937,6 +994,33 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
     {MetaMethodInfo, ReturnTypes}.
 
 -doc """
+Seed the runtime class-method fun retrieval store from a class_methods map.
+
+ADR 0084 / BT-2266: picks out the entries that carry a `block` (runtime/builder
+funs, as opposed to compiled `#{arity => N}` references), writes each into the
+metadata retrieval store, then sets the per-class gate flag. Classes with no fun
+entries leave the gate flag false so their dispatch never reads the funs table.
+""".
+-spec seed_runtime_class_methods(class_name(), map()) -> ok.
+seed_runtime_class_methods(ClassName, ClassMethods) ->
+    Funs = maps:filter(
+        fun(_Selector, Info) -> is_map(Info) andalso maps:is_key(block, Info) end,
+        ClassMethods
+    ),
+    case maps:size(Funs) of
+        0 ->
+            ok;
+        _ ->
+            maps:foreach(
+                fun(Selector, Info) ->
+                    beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, Info)
+                end,
+                Funs
+            ),
+            beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(ClassMethods))
+    end.
+
+-doc """
 Notify the compiler server of a hot-patch.
 
 ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
@@ -1075,9 +1159,17 @@ apply_class_info(State, ClassInfo) ->
     %% BT-2222: Single metadata-row update keeps hierarchy + module + selectors in
     %% sync on hot reload (all three may change: new superclass, recompiled module,
     %% added class methods).
+    %%
+    %% ADR 0084 / BT-2266: reload is memory-vs-disk reconciliation (ADR 0082) —
+    %% disk wins. Purge stale runtime class-method funs, then insert (which resets
+    %% the gate flag to false), then re-seed from the incoming class methods. A
+    %% pure compiled reload thus drops runtime funs; a builder re-register that
+    %% supplies funs re-installs them.
+    beamtalk_class_metadata:delete_class_method_funs(State#class_state.name),
     beamtalk_class_metadata:insert(
         State#class_state.name, NewModule, maps:keys(NewClassMethods), NewSuperclass
     ),
+    seed_runtime_class_methods(State#class_state.name, NewClassMethods),
 
     State#class_state{
         module = NewModule,

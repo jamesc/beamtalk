@@ -10,6 +10,8 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(TABLE, beamtalk_class_metadata).
+%% BT-2266: sibling table holding runtime class-method funs.
+-define(FUN_TABLE, beamtalk_class_method_funs).
 
 %% Save/clear/restore the shared table around each test so the live runtime's
 %% rows (if any) are not disturbed.
@@ -22,6 +24,22 @@ with_clean_table(Fun) ->
     after
         ets:delete_all_objects(?TABLE),
         ets:insert(?TABLE, Saved)
+    end.
+
+%% BT-2266: clean both the metadata table and the funs sibling table.
+with_clean_tables(Fun) ->
+    beamtalk_class_metadata:new(),
+    SavedMeta = ets:tab2list(?TABLE),
+    SavedFuns = ets:tab2list(?FUN_TABLE),
+    ets:delete_all_objects(?TABLE),
+    ets:delete_all_objects(?FUN_TABLE),
+    try
+        Fun()
+    after
+        ets:delete_all_objects(?TABLE),
+        ets:delete_all_objects(?FUN_TABLE),
+        ets:insert(?TABLE, SavedMeta),
+        ets:insert(?FUN_TABLE, SavedFuns)
     end.
 
 %%====================================================================
@@ -164,6 +182,85 @@ foldl_skips_rows_without_superclass_test() ->
 foldl_empty_returns_acc_test() ->
     with_clean_table(fun() ->
         ?assertEqual(sentinel, beamtalk_class_metadata:foldl(fun(_, Acc) -> Acc end, sentinel))
+    end).
+
+%%====================================================================
+%% Runtime class-method funs + gate flag (BT-2266 / ADR 0084)
+%%====================================================================
+
+%% Default: a freshly inserted compiled-class row has the gate flag off.
+has_runtime_class_methods_defaults_false_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('CompileOnly', m, [foo], 'Object'),
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('CompileOnly')),
+        %% Unknown class is also false (no row).
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('NeverSeen'))
+    end).
+
+%% Round-trip: write a fun, set the gate flag, fetch it back.
+put_and_lookup_class_method_fun_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Tally', m, [], 'Object'),
+        Fun = fun(_CS, CV) -> CV end,
+        Info = #{block => Fun, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('Tally', bump, Info),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Tally', [bump]),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('Tally')),
+        ?assertEqual({ok, Info}, beamtalk_class_metadata:lookup_class_method_fun('Tally', bump)),
+        %% set_runtime_class_methods also published the selector for chain discovery.
+        ?assertEqual({ok, m, [bump]}, beamtalk_class_metadata:lookup_methods('Tally'))
+    end).
+
+%% The gate: with the flag unset, a present fun is NOT returned (funs table
+%% never consulted). This is the compile-time-only skip guarantee.
+lookup_class_method_fun_is_gated_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Gated', m, [], 'Object'),
+        Info = #{block => fun(_, CV) -> CV end, arity => 2},
+        %% Write the fun directly but leave the gate flag false.
+        ok = beamtalk_class_metadata:put_class_method_fun('Gated', bump, Info),
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Gated')),
+        ?assertEqual(error, beamtalk_class_metadata:lookup_class_method_fun('Gated', bump))
+    end).
+
+%% A missing selector returns error even when the gate is open.
+lookup_class_method_fun_missing_selector_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Tally', m, [], 'Object'),
+        Info = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('Tally', bump, Info),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Tally', [bump]),
+        ?assertEqual(error, beamtalk_class_metadata:lookup_class_method_fun('Tally', notThere))
+    end).
+
+%% delete_class_method_funs/1 removes only the target class's funs.
+delete_class_method_funs_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('A', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('B', m, [], 'Object'),
+        InfoA = #{block => fun(_, CV) -> CV end, arity => 2},
+        InfoB = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('A', f, InfoA),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('A', [f]),
+        ok = beamtalk_class_metadata:put_class_method_fun('B', g, InfoB),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('B', [g]),
+        ok = beamtalk_class_metadata:delete_class_method_funs('A'),
+        %% A's fun is gone (flag still set, but the entry was purged).
+        ?assertEqual(error, beamtalk_class_metadata:lookup_class_method_fun('A', f)),
+        %% B is untouched.
+        ?assertEqual({ok, InfoB}, beamtalk_class_metadata:lookup_class_method_fun('B', g))
+    end).
+
+%% delete/1 (class teardown) also purges the funs sibling table.
+delete_row_purges_funs_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Gone', m, [], 'Object'),
+        Info = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('Gone', f, Info),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Gone', [f]),
+        ok = beamtalk_class_metadata:delete('Gone'),
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Gone')),
+        ?assertEqual(error, beamtalk_class_metadata:lookup_class_method_fun('Gone', f))
     end).
 
 %%====================================================================

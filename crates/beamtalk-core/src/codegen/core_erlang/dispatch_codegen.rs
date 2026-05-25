@@ -1128,6 +1128,32 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
 
+        // ADR 0084 / BT-2267: inside a programmatic ClassBuilder class-method fun
+        // there is no `class_<sel>` module export to call, so self-sends route
+        // through the runtime dispatch helper (own runtime fun first, then the
+        // super/inherited chain), threading ClassVars via the standard
+        // `{class_var_result, …}` unwrap. Instantiation intrinsics (self new /
+        // spawn) still use the process-dict-backed helpers (no export needed).
+        if let Some(builder_class) = self.builder_class_method_class() {
+            if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
+                return Ok(doc);
+            }
+            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let cv = self.current_class_var();
+            let call_doc = docvec![
+                "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('",
+                Document::String(builder_class),
+                "', '",
+                Document::String(selector_atom),
+                "', ",
+                Document::String(cv),
+                ", [",
+                args_doc,
+                "])"
+            ];
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+        }
+
         if self.class_method_selectors().contains(&selector_atom) {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
             let module = self.module_name.clone();
@@ -2058,6 +2084,30 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
+
+        // ADR 0084 / BT-2267: `super` inside a builder class-method fun resolves
+        // up the metaclass chain via the runtime helper, keyed on the builder
+        // class name — `class_self_dispatch/4` begins the walk at that class's
+        // superclass, which is exactly super semantics. The fun has no module
+        // export, so this must not use the compiled `beamtalk_dispatch:super/5`
+        // instance path below.
+        if let Some(builder_class) = self.builder_class_method_class() {
+            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let cv = self.current_class_var();
+            let call_doc = docvec![
+                "call 'beamtalk_class_dispatch':'class_self_dispatch'('",
+                Document::String(builder_class),
+                "', '",
+                Document::String(selector_atom),
+                "', ",
+                Document::String(cv),
+                ", [",
+                args_doc,
+                "])"
+            ];
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+        }
+
         let class_name = self.class_name();
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
