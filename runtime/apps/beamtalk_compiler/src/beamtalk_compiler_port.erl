@@ -778,9 +778,10 @@ resolve_method_span(Port, Source, ClassName, Selector, Side) when
             {error, port_error, <<"Compiler port is not available">>}
     end;
 resolve_method_span(_Port, _Source, _ClassName, _Selector, _Side) ->
-    {error, bad_argument,
-        <<"resolve_method_span: source/class/selector must be binary or atom, "
-            "side instance or class">>}.
+    {error, bad_argument, <<
+        "resolve_method_span: source/class/selector must be binary or atom, "
+        "side instance or class"
+    >>}.
 
 -spec handle_method_span_response(map()) ->
     {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}

@@ -794,8 +794,10 @@ do_compile_source(Self, Selector, Source, Intent) ->
             beamtalk_error:raise(
                 beamtalk_error:with_message(
                     Error0,
-                    <<"Workspace not available — live method editing requires a "
-                        "running workspace">>
+                    <<
+                        "Workspace not available — live method editing requires a "
+                        "running workspace"
+                    >>
                 )
             )
     end.

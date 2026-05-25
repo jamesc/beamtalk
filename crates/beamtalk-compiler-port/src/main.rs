@@ -1520,7 +1520,7 @@ fn field_lines_response(lines: &[u32]) -> Term {
 /// `.bt` file and a target `(class, selector, side)`, resolve the exact byte
 /// span of that method's definition (the Phase 0 resolver) and return both the
 /// span and the bytes currently occupying it (`prev_source`). The install hook
-/// records these on the ChangeEntry so a later `Workspace flush` can splice the
+/// records these on the `ChangeEntry` so a later `Workspace flush` can splice the
 /// patched body back into the file by byte-span replacement, and so restart can
 /// detect whether disk has drifted from the recorded `prev_source`.
 ///
@@ -1535,7 +1535,7 @@ fn field_lines_response(lines: &[u32]) -> Term {
 /// prev_source => <<...>>}`. The resolver is purely parser-level: it never
 /// installs anything and never panics. Failures (selector not found, class not
 /// found, ambiguous) come back as `#{status => error, reason => <atom>, ...}`
-/// so the hook can downgrade to a memory-only patch (no ChangeEntry) rather
+/// so the hook can downgrade to a memory-only patch (no `ChangeEntry`) rather
 /// than crash the install.
 fn handle_resolve_method_span(request: &Map) -> Term {
     use beamtalk_core::source_analysis::{MethodSide, resolve_method_span};
@@ -1573,7 +1573,10 @@ fn handle_resolve_method_span(request: &Map) -> Term {
                     atom("start"),
                     int_term(i32::try_from(start).unwrap_or(i32::MAX)),
                 ),
-                (atom("end"), int_term(i32::try_from(end).unwrap_or(i32::MAX))),
+                (
+                    atom("end"),
+                    int_term(i32::try_from(end).unwrap_or(i32::MAX)),
+                ),
             ]));
             Term::from(Map::from([
                 (atom("status"), atom("ok")),
@@ -2044,7 +2047,11 @@ Object subclass: Counter
         };
         let start = map_get(span, "start").and_then(term_to_usize).unwrap();
         let end = map_get(span, "end").and_then(term_to_usize).unwrap();
-        assert_eq!(&SPAN_FIXTURE[start..end], prev, "span must bound prev_source");
+        assert_eq!(
+            &SPAN_FIXTURE[start..end],
+            prev,
+            "span must bound prev_source"
+        );
     }
 
     #[test]
