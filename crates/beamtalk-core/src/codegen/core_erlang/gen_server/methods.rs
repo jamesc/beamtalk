@@ -2055,6 +2055,27 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
+    /// BT-2269: Lower the block argument of an incremental
+    /// `addClassMethod: #sel body: [block]` setter into a class-method fun,
+    /// mirroring how a `classMethods:` map value is lowered. The `key` is the
+    /// selector-symbol argument (used to validate the block's parameter count).
+    /// Enters/exits the builder class-method context around the single value so
+    /// `self.cvar` access and self/`super` sends lower correctly, exactly as the
+    /// map path does for each entry.
+    pub(in crate::codegen::core_erlang) fn generate_class_method_single_arg(
+        &mut self,
+        key: &Expression,
+        block: &Block,
+        class_name: &str,
+        class_var_names: &[String],
+    ) -> Result<Document<'static>> {
+        let value = Expression::Block(block.clone());
+        let saved = self.enter_builder_class_method_context(class_name, class_var_names);
+        let result = self.class_method_map_value_doc(key, &value);
+        self.exit_builder_class_method_context(saved);
+        result
+    }
+
     /// Lowers a single `classMethods:` map value: a class-method fun for a literal
     /// block of the right shape, else ordinary expression lowering.
     fn class_method_map_value_doc(

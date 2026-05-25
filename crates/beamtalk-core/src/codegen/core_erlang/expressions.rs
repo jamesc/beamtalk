@@ -1260,11 +1260,33 @@ impl CoreErlangGenerator {
             // wrapper so that StateN remains in scope for subsequent messages.
             // BT-2267: the `classMethods:` argument of a recognised builder
             // cascade gets its block values lowered as class-method funs.
+            // BT-2269: `addClassMethod: #sel body: [block]` is the incremental
+            // counterpart — its block (the second argument) is lowered the same
+            // way, keeping the selector argument as an ordinary value.
             let arg_docs = match &builder_ctx {
                 Some((bclass, cvars)) if selector.name().as_str() == "classMethods:" => {
                     match arguments {
                         [Expression::MapLiteral { pairs, .. }] => {
                             vec![self.generate_class_methods_map_arg(pairs, bclass, cvars)?]
+                        }
+                        _ => self.generate_cascade_args(arguments, &mut docs)?,
+                    }
+                }
+                Some((bclass, cvars)) if selector.name().as_str() == "addClassMethod:body:" => {
+                    match arguments {
+                        [
+                            sel_arg @ Expression::Literal(Literal::Symbol(_), _),
+                            Expression::Block(block),
+                        ] => {
+                            let sel_doc = self
+                                .generate_cascade_args(std::slice::from_ref(sel_arg), &mut docs)?;
+                            let mut combined = sel_doc;
+                            combined.push(
+                                self.generate_class_method_single_arg(
+                                    sel_arg, block, bclass, cvars,
+                                )?,
+                            );
+                            combined
                         }
                         _ => self.generate_cascade_args(arguments, &mut docs)?,
                     }

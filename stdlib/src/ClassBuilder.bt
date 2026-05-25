@@ -255,6 +255,77 @@ typed Actor subclass: ClassBuilder
   addField: aName :: Symbol default: aValue :: Object -> Dictionary =>
     self.fieldSpecs := self.fieldSpecs at: aName put: aValue
 
+  /// Add a single instance method from a block body (the "browser" use case).
+  ///
+  /// The incremental counterpart of `methods:`. It writes the same
+  /// `methodSpecs` map the bulk setter populates, so a class can be assembled
+  /// one method at a time before `register`. In a `classBuilder … register`
+  /// cascade the compiler lowers the block argument exactly as it lowers a
+  /// `methods:` map value — the method is installed as a compiler-generated
+  /// runtime fun, not a naive closure (BT-873). A computed (non-literal) fun is
+  /// stored verbatim and dispatches with the `fun(Self, Args…)` convention.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addMethod: #answer body: [:self | 42]
+  /// ```
+  addMethod: aSelector :: Symbol body: aBlock :: Object -> Dictionary =>
+    self.methodSpecs := self.methodSpecs at: aSelector put: aBlock
+
+  /// Add a single class-side method from a block body (ADR 0084, BT-2267).
+  ///
+  /// The incremental counterpart of `classMethods:`. It writes the same
+  /// `classMethods` map, so a class can gain class methods one at a time before
+  /// `register`. In a `classBuilder … register` cascade the compiler lowers the
+  /// block with the class-method calling convention (`fun(ClassSelf, ClassVars,
+  /// …)`) so class-variable mutations thread and `super`/`self` resolve, just
+  /// like a `classMethods:` map value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addClassMethod: #bump body: [:self | self.total := self.total + 1]
+  /// ```
+  addClassMethod: aSelector :: Symbol body: aBlock :: Object -> Dictionary =>
+    self.classMethods := self.classMethods at: aSelector put: aBlock
+
+  /// Add a single class variable with a default value (ADR 0084, BT-2267).
+  ///
+  /// The incremental counterpart of `classVars:`. It writes the same
+  /// `classState` map. Named `addClassState:default:` rather than
+  /// `addClassVar:default:` for symmetry with the `classState:` declaration
+  /// keyword used on file-defined classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addClassState: #total default: 0
+  /// ```
+  addClassState: aName :: Symbol default: aValue :: Object -> Dictionary =>
+    self.classState := self.classState at: aName put: aValue
+
+  /// Remove a single instance method before `register` (live-editing parity).
+  ///
+  /// Drops the selector from the `methodSpecs` map. A no-op when the selector
+  /// was never added.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder removeMethod: #answer
+  /// ```
+  removeMethod: aSelector :: Symbol -> Dictionary =>
+    self.methodSpecs := self.methodSpecs removeKey: aSelector
+
+  /// Remove a single class-side method before `register` (live-editing parity).
+  ///
+  /// Drops the selector from the `classMethods` map. A no-op when the selector
+  /// was never added.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder removeClassMethod: #bump
+  /// ```
+  removeClassMethod: aSelector :: Symbol -> Dictionary =>
+    self.classMethods := self.classMethods removeKey: aSelector
+
   /// Apply a class modifier (#abstract, #sealed, #typed, #internal).
   ///
   /// ## Examples

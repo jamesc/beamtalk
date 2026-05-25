@@ -272,11 +272,20 @@ impl NameResolver {
                 let is_builder = Self::cascade_is_class_builder(receiver, messages);
                 self.resolve_expression(receiver);
                 for msg in messages {
-                    if is_builder && msg.selector.name().as_str() == "classMethods:" {
-                        self.resolve_class_methods_argument(&msg.arguments);
-                    } else {
-                        for arg in &msg.arguments {
-                            self.resolve_expression(arg);
+                    match msg.selector.name().as_str() {
+                        "classMethods:" if is_builder => {
+                            self.resolve_class_methods_argument(&msg.arguments);
+                        }
+                        // BT-2269: the incremental counterpart of `classMethods:`.
+                        // Resolve its selector argument normally and its block
+                        // body argument as a class-method body.
+                        "addClassMethod:body:" if is_builder => {
+                            self.resolve_add_class_method_argument(&msg.arguments);
+                        }
+                        _ => {
+                            for arg in &msg.arguments {
+                                self.resolve_expression(arg);
+                            }
                         }
                     }
                 }
@@ -401,6 +410,21 @@ impl NameResolver {
                     self.resolve_expression(&pair.value);
                 }
             }
+        } else {
+            for arg in args {
+                self.resolve_expression(arg);
+            }
+        }
+    }
+
+    /// BT-2269: Resolve the arguments of an incremental
+    /// `addClassMethod: #sel body: [block]` setter — the selector symbol normally
+    /// and the block body as a class-method body (so `super`/`self` and
+    /// class-variable access resolve, matching `classMethods:`).
+    fn resolve_add_class_method_argument(&mut self, args: &[Expression]) {
+        if let [sel_arg, Expression::Block(block)] = args {
+            self.resolve_expression(sel_arg);
+            self.resolve_builder_class_method_block(block);
         } else {
             for arg in args {
                 self.resolve_expression(arg);
@@ -696,6 +720,43 @@ mod tests {
         assert!(
             super_errors.is_empty(),
             "super should be allowed in a classMethods: block, got: {super_errors:?}"
+        );
+    }
+
+    #[test]
+    fn incremental_add_class_method_block_allows_super() {
+        // BT-2269: the incremental `addClassMethod:body:` setter's block is a
+        // class-method body just like a `classMethods:` map value, so super is
+        // allowed even at module depth.
+        let resolver = run("Object classBuilder name: #BT2269T; superclass: Object; \
+             addClassMethod: #greeting body: [:self | super greeting]; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            super_errors.is_empty(),
+            "super should be allowed in an addClassMethod:body: block, got: {super_errors:?}"
+        );
+    }
+
+    #[test]
+    fn incremental_add_class_method_self_param_no_shadow_warning() {
+        // BT-2269: the receiver `self` parameter of an addClassMethod:body: block
+        // must not warn about shadowing when nested in a method body.
+        let resolver = run(
+            "Counter subclass: BT2269Host\n  build =>\n    Object classBuilder name: #BT2269N; \
+             superclass: Object; addClassMethod: #bump body: [:self | self]; register",
+        );
+        let shadow: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("shadows outer"))
+            .collect();
+        assert!(
+            shadow.is_empty(),
+            "self param in an addClassMethod:body: block must not warn shadowing, got: {shadow:?}"
         );
     }
 
