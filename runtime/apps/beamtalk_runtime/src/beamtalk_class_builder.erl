@@ -100,21 +100,32 @@ register(BuilderState) when is_map(BuilderState) ->
         {error, _} = Err ->
             Err;
         ok when is_map(FieldSpecs), is_map(MethodSpecs) ->
-            SuperclassName = resolve_superclass_name(SuperclassRef),
-            ClassInfo = build_class_info(
-                ClassName,
-                SuperclassName,
-                FieldSpecs,
-                MethodSpecs,
-                Modifiers,
-                BuilderState
-            ),
-            case do_register(ClassName, ClassInfo) of
-                {ok, ClassPid} ->
-                    maybe_stop_builder(BuilderPid),
-                    {ok, ClassPid};
-                {error, _} = Err ->
-                    Err
+            %% BT-2276: a computed (non-block) classMethods: fun of the wrong
+            %% arity would otherwise install successfully and only crash with an
+            %% opaque error:undef when the class method is first called. Validate
+            %% each class-method fun's arity here and surface a structured
+            %% #beamtalk_error{} naming the selector and expected shape instead.
+            ClassMethodSpecs = maps:get(classMethods, BuilderState, #{}),
+            case validate_class_method_arities(ClassName, ClassMethodSpecs) of
+                {error, _} = ArityErr ->
+                    ArityErr;
+                ok ->
+                    SuperclassName = resolve_superclass_name(SuperclassRef),
+                    ClassInfo = build_class_info(
+                        ClassName,
+                        SuperclassName,
+                        FieldSpecs,
+                        MethodSpecs,
+                        Modifiers,
+                        BuilderState
+                    ),
+                    case do_register(ClassName, ClassInfo) of
+                        {ok, ClassPid} ->
+                            maybe_stop_builder(BuilderPid),
+                            {ok, ClassPid};
+                        {error, _} = Err ->
+                            Err
+                    end
             end;
         ok ->
             Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
@@ -431,6 +442,127 @@ maybe_put(_Key, nil, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-doc """
+Validate the arity of every class-method fun in a classMethods: spec (BT-2276).
+
+A class-method fun is dispatched as `apply(Fun, [ClassSelf, ClassVars | Args])`
+(`beamtalk_class_dispatch:apply_class_method_fun/6`), so a fun for `Selector`
+must have arity `selector_arity(Selector) + 2`. The compiler enforces this for
+classMethods: *block* literals at compile time (a wrong-arity block is a
+CodeGenError). A *computed* (non-block) fun, however, only has its arity known
+at runtime: without this check it installs successfully and crashes with an
+opaque `error:undef` the first time the class method is called. Here we reject
+it up front with a structured #beamtalk_error{} naming the selector and the
+expected arity.
+
+Non-fun values (compiled `#{arity => N}` references, other terms) are ignored;
+build_method_map/1 handles them. Returns `ok` if every fun conforms.
+""".
+-spec validate_class_method_arities(atom(), map()) -> ok | {error, #beamtalk_error{}}.
+validate_class_method_arities(ClassName, ClassMethodSpecs) when is_map(ClassMethodSpecs) ->
+    Mismatch = maps:fold(
+        fun
+            (_Selector, _Spec, {error, _} = Acc) ->
+                %% Already found a mismatch; keep the first one.
+                Acc;
+            (Selector, Fun, ok) when is_atom(Selector), is_function(Fun) ->
+                {arity, Arity} = erlang:fun_info(Fun, arity),
+                Expected = selector_arity(Selector) + 2,
+                case Arity =:= Expected of
+                    true -> ok;
+                    false -> {error, {Selector, Expected, Arity}}
+                end;
+            (_Selector, _Other, ok) ->
+                ok
+        end,
+        ok,
+        ClassMethodSpecs
+    ),
+    case Mismatch of
+        ok ->
+            ok;
+        {error, {Selector, Expected, Actual}} ->
+            {error, class_method_arity_error(ClassName, Selector, Expected, Actual)}
+    end;
+validate_class_method_arities(_ClassName, _Other) ->
+    ok.
+
+-doc """
+Build the structured #beamtalk_error{} for a wrong-arity class-method fun (BT-2276).
+
+The reported arities are the dispatch arities (`selector_arity + 2`: the leading
+ClassSelf and ClassVars plus one per selector argument). The hint frames the
+expected shape in Beamtalk block terms (`:self` plus one parameter per selector
+argument) so the message is actionable whether the user supplied a wrong-arity
+block or a computed fun.
+""".
+-spec class_method_arity_error(atom(), atom(), non_neg_integer(), non_neg_integer()) ->
+    #beamtalk_error{}.
+class_method_arity_error(ClassName, Selector, Expected, Actual) ->
+    BlockParams = Expected - 1,
+    Error0 = beamtalk_error:new(arity_mismatch, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:with_hint(
+        Error1,
+        iolist_to_binary(
+            io_lib:format(
+                "classMethods: ~p must take ~b argument(s) (ClassSelf, ClassVars plus one per "
+                "selector slot), got ~b. A class-method block takes `self` plus one parameter "
+                "per selector argument, so it needs ~b parameter(s).",
+                [Selector, Expected, Actual, BlockParams]
+            )
+        )
+    ).
+
+-doc """
+Count the selector arity of a class-method selector atom (BT-2276).
+
+A keyword selector ends with `:` and has one argument slot per colon
+(`addTo:from:` -> 2). A unary selector has no colon (`answer` -> 0). A binary
+(operator) selector such as `+`, `*`, `>=` takes exactly one argument; it is
+recognised by consisting entirely of operator characters (matching the lexer's
+`is_binary_selector_char`).
+""".
+-spec selector_arity(atom()) -> non_neg_integer().
+selector_arity(Selector) when is_atom(Selector) ->
+    Chars = atom_to_list(Selector),
+    Colons = lists:foldl(
+        fun
+            ($:, Acc) -> Acc + 1;
+            (_, Acc) -> Acc
+        end,
+        0,
+        Chars
+    ),
+    case Colons of
+        0 ->
+            %% Unary or binary operator. Binary selectors consist only of
+            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \, ,).
+            case Chars =/= [] andalso lists:all(fun is_binary_selector_char/1, Chars) of
+                true -> 1;
+                false -> 0
+            end;
+        N ->
+            N
+    end.
+
+-doc "Mirror of the compiler's is_binary_selector_char for BT-2276 selector arity.".
+-spec is_binary_selector_char(char()) -> boolean().
+is_binary_selector_char($+) -> true;
+is_binary_selector_char($-) -> true;
+is_binary_selector_char($*) -> true;
+is_binary_selector_char($/) -> true;
+is_binary_selector_char($<) -> true;
+is_binary_selector_char($>) -> true;
+is_binary_selector_char($=) -> true;
+is_binary_selector_char($~) -> true;
+is_binary_selector_char($%) -> true;
+is_binary_selector_char($&) -> true;
+is_binary_selector_char($?) -> true;
+is_binary_selector_char($,) -> true;
+is_binary_selector_char($\\) -> true;
+is_binary_selector_char(_) -> false.
 
 -doc """
 Convert a methodSpecs map to the instance_methods format expected by the class gen_server.
