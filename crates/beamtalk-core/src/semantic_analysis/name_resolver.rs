@@ -455,9 +455,9 @@ impl NameResolver {
         if !Self::is_class_builder_construction(underlying) {
             return false;
         }
-        if !messages
+        if messages
             .last()
-            .is_some_and(|m| m.selector.name().as_str() == "register")
+            .is_none_or(|m| m.selector.name().as_str() != "register")
         {
             return false;
         }
