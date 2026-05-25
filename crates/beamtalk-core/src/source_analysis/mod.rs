@@ -39,6 +39,7 @@
 
 mod error;
 mod lexer;
+pub mod method_span;
 mod parser;
 mod span;
 pub mod summary;
@@ -48,8 +49,13 @@ mod token;
 #[cfg(test)]
 mod lexer_property_tests;
 
+// Corpus round-trip validation for the byte-span resolver (ADR 0082, Phase 0).
+#[cfg(test)]
+mod method_span_corpus_tests;
+
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
+pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
 pub use parser::{
     Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete,
     needs_blank_line_to_complete, parse,
