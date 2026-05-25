@@ -800,7 +800,7 @@ fn parse_intrinsic_bare_identifier() {
         Expression::Primitive {
             name, is_quoted, ..
         } => {
-            assert_eq!(name.as_ref(), "blockValue");
+            assert_eq!(name.as_str(), "blockValue");
             assert!(!is_quoted, "bare @intrinsic should not be quoted");
         }
         other => panic!("Expected Primitive, got: {other:?}"),
@@ -818,7 +818,7 @@ fn parse_intrinsic_quoted_selector() {
         Expression::Primitive {
             name, is_quoted, ..
         } => {
-            assert_eq!(name.as_ref(), "size");
+            assert_eq!(name.as_str(), "size");
             assert!(*is_quoted, "quoted @intrinsic should be quoted");
         }
         other => panic!("Expected Primitive, got: {other:?}"),
