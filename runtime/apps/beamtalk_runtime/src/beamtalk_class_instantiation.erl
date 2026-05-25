@@ -253,7 +253,12 @@ inherited_field_defaults(ClassName) ->
 -spec collect_ancestor_defaults(class_name() | none, map(), non_neg_integer()) -> map().
 collect_ancestor_defaults(none, Acc, _Depth) ->
     Acc;
-collect_ancestor_defaults(_Name, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+collect_ancestor_defaults(Name, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "collect_ancestor_defaults: max hierarchy depth ~p exceeded at ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, Name],
+        #{domain => [beamtalk, runtime]}
+    ),
     Acc;
 collect_ancestor_defaults(Name, Acc, Depth) ->
     Module =
@@ -296,7 +301,19 @@ ancestor_compiled_defaults(Module) ->
             #{}
     end.
 
--doc "Read a module-less ancestor's cached field defaults via the registry.".
+-doc """
+Read a module-less ancestor's cached field defaults via the registry.
+
+`new` must stay robust if the ancestor class process is unavailable while we
+collect defaults: a missing, timing-out, or terminating ancestor is treated as
+contributing no defaults rather than crashing instantiation. Any `gen_server:call`
+exit signals a process-lifecycle problem (the ancestor is gone/going), never a
+programming error in *this* call site — those would surface as `error:`/`throw:`,
+which are deliberately left to propagate. The known-unavailable reasons
+(`noproc`, `timeout`, `shutdown`, `normal`) are handled silently; any other exit
+is logged at warning level so a genuinely crashing ancestor `handle_call` stays
+diagnosable while instantiation degrades gracefully to "no inherited defaults".
+""".
 -spec ancestor_builder_defaults(class_name()) -> map().
 ancestor_builder_defaults(Name) ->
     case beamtalk_class_registry:whereis_class(Name) of
@@ -304,8 +321,22 @@ ancestor_builder_defaults(Name) ->
             try
                 gen_server:call(Pid, field_defaults, 5000)
             catch
-                exit:{timeout, _} -> #{};
-                exit:{noproc, _} -> #{}
+                exit:{timeout, _} ->
+                    #{};
+                exit:{noproc, _} ->
+                    #{};
+                exit:{shutdown, _} ->
+                    #{};
+                exit:{normal, _} ->
+                    #{};
+                exit:{Reason, _} ->
+                    ?LOG_WARNING(
+                        "ancestor_builder_defaults: class ~p process exited (~p) "
+                        "while collecting field defaults — treating as no defaults",
+                        [Name, Reason],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    #{}
             end;
         _ ->
             #{}

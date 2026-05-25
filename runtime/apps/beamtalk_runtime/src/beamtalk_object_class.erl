@@ -460,6 +460,15 @@ init({ClassName, ClassInfo}) ->
     %% generic instance for a module-less class without a gen_server:call to self.
     FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
     put(beamtalk_class_field_defaults, FieldDefaults),
+    %% BT-2277: Cache the local instance-method map and superclass so fun-backed
+    %% instance dispatch that happens *inside* this gen_server (e.g. a class method
+    %% does `Inst := self new` then `Inst someMethod`) can resolve the block fun
+    %% without a deadlocking `gen_server:call(self(), ...)`. The cache is the local
+    %% (non-inherited) methods only; inherited methods live in ancestor processes
+    %% and are reachable without deadlock. Kept in sync by the {put_method, ...}
+    %% handler so hot-patched methods stay visible to self-dispatch.
+    put(beamtalk_class_instance_methods, InstanceMethods),
+    put(beamtalk_class_superclass, Superclass),
 
     %% BT-1768: Record pid→classname mapping for crash recovery.
     %% This entry survives process death, allowing class_send to identify
@@ -685,8 +694,13 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     %% BT-988: Remove stale display signature — dynamically-defined methods
     %% have no AST, so the fallback to selector atom is correct.
     %% BT-1002: Also clear stale return-type entry for the same reason.
+    NewInstanceMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
+    %% BT-2277: Keep the self-dispatch process-dictionary cache in sync with the
+    %% authoritative instance_methods map so hot-patched fun-backed methods are
+    %% visible to dispatch that happens inside this gen_server.
+    put(beamtalk_class_instance_methods, NewInstanceMethods),
     NewState = State#class_state{
-        instance_methods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
+        instance_methods = NewInstanceMethods,
         method_source = maps:put(Selector, Source, State#class_state.method_source),
         method_signatures = maps:remove(Selector, State#class_state.method_signatures),
         method_return_types = maps:remove(Selector, State#class_state.method_return_types)
@@ -1178,6 +1192,11 @@ apply_class_info(State, ClassInfo) ->
             %% corrected value from compiled module
             {ok, S} -> S
         end,
+    %% BT-2277: Reconcile the self-dispatch caches on reload, mirroring the
+    %% field-defaults handling above so fun-backed instance dispatch from inside
+    %% the class process resolves against the current method set / hierarchy.
+    put(beamtalk_class_instance_methods, NewInstanceMethods),
+    put(beamtalk_class_superclass, NewSuperclass),
     %% BT-2222: Single metadata-row update keeps hierarchy + module + selectors in
     %% sync on hot reload (all three may change: new superclass, recompiled module,
     %% added class methods).

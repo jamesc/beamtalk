@@ -539,25 +539,79 @@ Resolves the selector against the class — and its superclass chain, via
 Returns `none` when the class is unregistered or the selector is not a runtime
 fun (so callers fall through to the Object protocol / does_not_understand).
 
-The `Pid =/= self()` guard avoids a `calling_self` deadlock: if instance
-dispatch ever runs *inside* the class gen_server (e.g. `(self new) someMethod`
-from within a class method), `beamtalk_object_class:method/2` would
-`gen_server:call(self(), ...)` and hang. In that rare case we report `none` and
-let dispatch fall through rather than block the class process.
+The common (external) path goes through `beamtalk_object_class:method/2`, which
+issues a `gen_server:call`. That is unsafe when dispatch runs *inside* the class
+gen_server itself — e.g. a fun-backed class method does `Inst := self new`
+followed by `Inst someMethod`, all while the class process is mid-`handle_call`.
+Calling `self()` there would deadlock.
+
+BT-2277: rather than reporting `none` in that case (which made self-dispatch
+silently diverge from external dispatch, a pre/post-flush hazard), the
+`Pid =:= self()` branch resolves deadlock-free. It consults the local
+instance-method cache kept in the process dictionary by
+`beamtalk_object_class` (`beamtalk_class_instance_methods`), then walks the
+superclass chain — superclasses are *other* processes, so the normal
+`gen_server:call` resolution is safe for them.
 """.
 -spec runtime_instance_method(atom(), atom()) -> {ok, fun()} | none.
 runtime_instance_method(Class, Selector) ->
     case beamtalk_class_registry:whereis_class(Class) of
         Pid when is_pid(Pid), Pid =/= self() ->
-            case beamtalk_object_class:method(Pid, Selector) of
-                #{'__method_info__' := #{block := Fun}} when is_function(Fun) ->
-                    {ok, Fun};
+            method_fun_from_resolved(beamtalk_object_class:method(Pid, Selector));
+        Pid when is_pid(Pid) ->
+            %% Dispatch is running inside this class gen_server: resolve without a
+            %% deadlocking call to self().
+            runtime_instance_method_self(Selector);
+        _ ->
+            none
+    end.
+
+-doc """
+Deadlock-free resolution of a fun-backed instance method from inside the class
+gen_server (BT-2277).
+
+Reads the local class's instance methods from the process-dictionary cache
+seeded by `beamtalk_object_class:init/1` (and kept current by `put_method` and
+hot reload). On a miss, walks the superclass chain — those are distinct
+processes, so the ordinary `gen_server:call`-based resolution is safe.
+""".
+-spec runtime_instance_method_self(atom()) -> {ok, fun()} | none.
+runtime_instance_method_self(Selector) ->
+    LocalMethods =
+        case get(beamtalk_class_instance_methods) of
+            M when is_map(M) -> M;
+            _ -> #{}
+        end,
+    case maps:find(Selector, LocalMethods) of
+        {ok, #{block := Fun}} when is_function(Fun) ->
+            {ok, Fun};
+        _ ->
+            runtime_instance_method_in_super(Selector)
+    end.
+
+-doc "Resolve a fun-backed instance method on the superclass chain (BT-2277).".
+-spec runtime_instance_method_in_super(atom()) -> {ok, fun()} | none.
+runtime_instance_method_in_super(Selector) ->
+    case get(beamtalk_class_superclass) of
+        Super when is_atom(Super), Super =/= none, Super =/= nil ->
+            case beamtalk_class_registry:whereis_class(Super) of
+                SuperPid when is_pid(SuperPid), SuperPid =/= self() ->
+                    method_fun_from_resolved(
+                        beamtalk_object_class:method(SuperPid, Selector)
+                    );
                 _ ->
                     none
             end;
         _ ->
             none
     end.
+
+-doc "Extract a block fun from a resolved method map, or `none`.".
+-spec method_fun_from_resolved(term()) -> {ok, fun()} | none.
+method_fun_from_resolved(#{'__method_info__' := #{block := Fun}}) when is_function(Fun) ->
+    {ok, Fun};
+method_fun_from_resolved(_) ->
+    none.
 
 -doc """
 Check if a selector is a mutation method on a value type (BT-359, BT-924).
