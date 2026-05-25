@@ -66,6 +66,19 @@ Additional keys for compiled classes (BT-837 / ADR 0038 Phase 3):
   - `classDoc`     — binary | none: class doc comment (default: none)
   - `methodDocs`   — map: selector => binary doc text (default: #{})
 
+Programmatic metadata-parity keys (BT-2268 / ADR 0084 Phase 3). These let a
+builder- or browser-built class reach metadata parity with a file-defined one
+(`:help` signatures, doc reflection, return-type metadata, `meta`, and
+constructibility). Each is optional; `nil`/`undefined` falls back to the same
+default the file-defined path uses when its compiler input is absent:
+  - `methodSignatures`        — map: selector => binary display signature
+  - `classMethodSignatures`   — map: class selector => binary display signature
+  - `methodReturnTypes`       — map: selector => return-type repr
+  - `classMethodReturnTypes`  — map: class selector => return-type repr
+  - `classMethodDocs`         — map: class selector => binary doc text
+  - `meta`                    — map: class meta map (default: read_meta/1)
+  - `isConstructible`         — boolean: explicit constructibility flag
+
 On success: registers the class with the runtime and returns `{ok, ClassPid}`.
 Hot reload: if the class already exists, updates it and returns `{ok, ClassPid}`.
 On failure: returns `{error, #beamtalk_error{}}` without stopping any process.
@@ -401,9 +414,20 @@ build_compiled_class_info(
         )
     ).
 
--doc "Conditionally add a key to a map (skips undefined values).".
+-doc """
+Conditionally add a key to a map (skips unset values).
+
+A value is considered unset when it is `undefined` (compiler omitted the key)
+or `nil` (the ClassBuilder state field was left at its default). Beamtalk's
+`nil` becomes the atom `nil` when a builder forwards its gen_server state, so
+treating it as "not set" lets these metadata channels fall back to the runtime
+defaults (`#{}`, `none`, lazy `is_constructible`, `read_meta/1`) exactly as the
+file-defined path does when the corresponding compiler input is absent.
+""".
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->
+    Map;
+maybe_put(_Key, nil, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.

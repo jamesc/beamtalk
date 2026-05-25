@@ -32,6 +32,7 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     all_classes/0,
     live_class_entries/0,
     user_classes/0,
+    class_object_from_pid/1,
     registry_name/1,
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
@@ -155,6 +156,22 @@ user_classes() ->
         exit:{noproc, _} ->
             []
     end.
+
+-doc """
+Build a canonical class object record from a class gen_server pid (BT-2258).
+
+Mirrors the inline `{beamtalk_object, ClassTag, ModuleName, Pid}` construction
+in user_classes/0. Used by the programmatic ClassBuilder `register` intrinsic
+so its return value matches the shape produced by codegen class references and
+beamtalk_interface:handle_class_named/1 (i.e. is_class_object/1 is true and it
+is `==` to the registry reference).
+""".
+-spec class_object_from_pid(pid()) -> #beamtalk_object{}.
+class_object_from_pid(Pid) when is_pid(Pid) ->
+    ClassName = beamtalk_object_class:class_name(Pid),
+    ModuleName = beamtalk_object_class:module_name(Pid),
+    ClassTag = class_object_tag(ClassName),
+    #beamtalk_object{class = ClassTag, class_mod = ModuleName, pid = Pid}.
 
 -doc "Compute the Erlang registry name for a class.".
 -spec registry_name(class_name()) -> atom().

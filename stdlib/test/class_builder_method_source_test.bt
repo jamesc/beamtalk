@@ -10,10 +10,9 @@
 // via `String >> #matchesRegex:`), so it is exercisable in BUnit without the
 // compiler port that `sendersOf:` requires.
 //
-// The class is looked up via the registry (`findClass:`) rather than the value
-// returned by `register`: the programmatic-builder cascade currently returns an
-// unusable wrapper around the (live, registered) class — a pre-existing bug
-// tracked separately. The registry entry is the genuine, dispatchable class.
+// BT-2258: the programmatic-builder cascade now returns the canonical class
+// object, so these tests use `register`'s return value directly (the earlier
+// `findClass:` registry lookup was a workaround for the now-fixed wrapper bug).
 
 TestCase subclass: ClassBuilderMethodSourceTest
   field: cls = nil
@@ -24,11 +23,10 @@ TestCase subclass: ClassBuilderMethodSourceTest
   // indexable. Before BT-2246 the method installed as a bare fun with empty
   // source and never matched a source-text query.
   testBuilderBlockMethodBodyIsIndexable =>
-    Object classBuilder name: #BTBuilderSourceProbe;
+    self.cls := Object classBuilder name: #BTBuilderSourceProbe;
       superclass: Object;
       methods: #{#greetLoudly => [:_self | "hi" uppercase]};
       register
-    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderSourceProbe
     nav := SystemNavigation default
     results := nav
       collectMethodsMatching: (Regex from: "uppercase") unwrap
@@ -41,11 +39,10 @@ TestCase subclass: ClassBuilderMethodSourceTest
   // The reconstructed source carries the keyword selector and its parameter,
   // so a query against the body matches and the record names the selector.
   testKeywordBuilderMethodIsIndexable =>
-    Object classBuilder name: #BTBuilderKeywordProbe;
+    self.cls := Object classBuilder name: #BTBuilderKeywordProbe;
       superclass: Object;
       methods: #{#scaleBy: => [:_self :factor | factor * factor]};
       register
-    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderKeywordProbe
     nav := SystemNavigation default
     results := nav
       collectMethodsMatching: (Regex from: "factor") unwrap
@@ -59,11 +56,10 @@ TestCase subclass: ClassBuilderMethodSourceTest
   // unindexable — the source query degrades to "no match", never a crash.
   testComputedMethodIsKnownButUnindexable =>
     blk := [:obj | obj size]
-    Object classBuilder name: #BTBuilderComputedProbe;
+    self.cls := Object classBuilder name: #BTBuilderComputedProbe;
       superclass: Object;
       methods: #{#computedSize => blk};
       register
-    self.cls := (Erlang beamtalk_interface) findClass: #BTBuilderComputedProbe
     self assert: (self.cls includesSelector: #computedSize)
     nav := SystemNavigation default
     results := nav

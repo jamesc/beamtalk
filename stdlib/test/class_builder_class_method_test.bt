@@ -8,8 +8,9 @@
 // these blocks as class-method bodies so `self`/`super` resolve and the
 // receiver `self` parameter does not warn about shadowing.
 //
-// The class is dispatched by its registered name via findClass: (register's
-// return is an unusable wrapper today, BT-2258, fixed separately).
+// The class is dispatched by its registered name via findClass:. (Since
+// BT-2258, register also returns the canonical, dispatchable class object;
+// these tests keep the registry lookup, which exercises the same class.)
 
 TestCase subclass: ClassBuilderClassMethodTest
   field: cls = nil
