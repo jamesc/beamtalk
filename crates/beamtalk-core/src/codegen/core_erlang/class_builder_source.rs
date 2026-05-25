@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `ClassBuilder` `methodSource:` auto-population (BT-2246).
+//! `ClassBuilder` `methodSource:` / `classMethodSource:` auto-population
+//! (BT-2246, BT-2270).
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
