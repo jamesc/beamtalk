@@ -1,7 +1,7 @@
 # ADR 0067: Separate state:/field: Keywords by Class Kind
 
 ## Status
-Accepted (2026-03-18)
+Implemented (2026-03-18)
 
 ## Context
 

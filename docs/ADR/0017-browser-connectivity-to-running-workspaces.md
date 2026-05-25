@@ -1,7 +1,7 @@
 # ADR 0017: Browser Connectivity to Running Workspaces
 
 ## Status
-Accepted (2026-02-17)
+Implemented (Phases 0–2, 2026-02-17)
 
 **Update (2026-02-17):** Context updated to reflect ADR 0022 (embedded compiler — no Unix socket daemon) and ADR 0027 (cross-platform support — Beamtalk runs natively on Windows/macOS). Phase 0 infrastructure (Cowboy, WebSocket handler, cookie auth) delivered by ADR 0020/BT-683; Phase 0 here reduces to serving a static HTML page.
 

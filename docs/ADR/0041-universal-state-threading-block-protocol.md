@@ -1,7 +1,7 @@
 # ADR 0041: Universal State-Threading Block Protocol
 
 ## Status
-Accepted (2026-02-24)
+Implemented (2026-02-24)
 
 ## Context
 

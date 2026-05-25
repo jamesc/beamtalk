@@ -1,7 +1,7 @@
 # ADR 0083: Metaclass-Aware Type Inference
 
 ## Status
-Accepted (2026-05-23)
+Implemented (2026-05-23)
 
 ## Context
 

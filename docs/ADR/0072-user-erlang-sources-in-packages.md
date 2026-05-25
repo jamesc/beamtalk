@@ -1,7 +1,7 @@
 # ADR 0072: User Erlang Sources in Beamtalk Packages
 
 ## Status
-Accepted (2026-03-29)
+Implemented (2026-03-29)
 
 ## Context
 

@@ -1,7 +1,7 @@
 # ADR 0073: Package Distribution and Discovery
 
 ## Status
-Accepted (2026-03-31)
+Implemented (Phase 1, 2026-03-31)
 
 ## Context
 

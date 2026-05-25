@@ -1,7 +1,7 @@
 # ADR 0079: Named Actor Registration
 
 ## Status
-Accepted (2026-04-15)
+Implemented (2026-04-15)
 
 ## Context
 

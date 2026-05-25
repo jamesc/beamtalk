@@ -1,7 +1,7 @@
 # ADR 0060: Result Type — Hybrid Error Handling for Expected Failures
 
 ## Status
-Accepted (2026-03-08)
+Implemented (2026-03-08)
 
 ## Context
 

@@ -1,7 +1,7 @@
 # ADR 0084: Class-Side Runtime Method Installation and Fun Dispatch
 
 ## Status
-Accepted (2026-05-24)
+Accepted (in progress, 2026-05-24) — implementation epic BT-2259
 
 ## Context
 

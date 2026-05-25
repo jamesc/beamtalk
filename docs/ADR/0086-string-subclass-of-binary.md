@@ -1,7 +1,7 @@
 # ADR 0086: Make String a Subclass of Binary
 
 ## Status
-Accepted (2026-03-21)
+Implemented (2026-03-21)
 
 > **Renumbered** from ADR 0069 to ADR 0086 (2026-05-25) to resolve a numbering
 > collision with ADR 0069 (Actor Observability and Tracing). Linear epic BT-1590

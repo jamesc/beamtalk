@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-03-28)
+Implemented (2026-03-28)
 
 ## Context
 

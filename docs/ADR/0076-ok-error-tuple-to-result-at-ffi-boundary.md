@@ -1,7 +1,7 @@
 # ADR 0076: Convert Erlang ok/error Tuples to Result at FFI Boundary
 
 ## Status
-Accepted (2026-04-03)
+Implemented (2026-04-03)
 
 ## Context
 

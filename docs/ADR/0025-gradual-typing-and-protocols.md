@@ -1,7 +1,7 @@
 # ADR 0025: Gradual Typing and Protocols
 
 ## Status
-Accepted (2026-02-15) — Phases 1 and 2 complete; Phase 3 (Protocols) planned
+Implemented (Phases 1–2, 2026-02-15) — Phase 3 (Protocols) planned
 
 ## Context
 
