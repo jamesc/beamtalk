@@ -1968,13 +1968,8 @@ impl CoreErlangGenerator {
                 }
             };
 
-            // Build function header with params
-            let params_suffix = if param_vars.is_empty() {
-                String::new()
-            } else {
-                format!(", {}", param_vars.join(", "))
-            };
-
+            // Build function header with params (Document pieces, not format! —
+            // Core Erlang fragments must use the Document API, BT-875).
             let doc = docvec![
                 "\n",
                 "'class_",
@@ -1982,7 +1977,7 @@ impl CoreErlangGenerator {
                 "'/",
                 Document::String(arity.to_string()),
                 " = fun (ClassSelf, ClassVars",
-                Document::String(params_suffix),
+                Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",
                 nest(INDENT, docvec![line(), body_doc,]),
                 "\n",
@@ -2165,21 +2160,27 @@ impl CoreErlangGenerator {
             }
         };
 
-        let params_suffix = if param_vars.is_empty() {
-            String::new()
-        } else {
-            format!(", {}", param_vars.join(", "))
-        };
-
         let doc = docvec![
             "fun (ClassSelf, ClassVars",
-            Document::String(params_suffix),
+            Self::class_method_params_suffix_doc(&param_vars),
             ") ->",
             nest(INDENT, docvec![line(), body_doc]),
         ];
 
         self.pop_scope();
         Ok(doc)
+    }
+
+    /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
+    /// (never `format!` — Core Erlang fragments must use the Document API,
+    /// BT-875). Empty when there are no user parameters.
+    fn class_method_params_suffix_doc(param_vars: &[String]) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for var in param_vars {
+            parts.push(Document::Str(", "));
+            parts.push(Document::String(var.clone()));
+        }
+        Document::Vec(parts)
     }
 
     /// Generates the body of a class-side method.

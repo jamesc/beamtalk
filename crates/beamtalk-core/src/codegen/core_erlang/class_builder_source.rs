@@ -278,10 +278,15 @@ pub(super) fn builder_class_method_context(
         let name = selector.name();
         last_is_register = name.as_str() == "register";
         match name.as_str() {
-            // Later setters win in a cascade — keep the last value.
+            // Later setters win in a cascade — keep the last value, and a later
+            // non-literal setter clears an earlier literal one (the effective
+            // setter is non-literal, so it must not enable lowering with a stale
+            // class name / var set).
             "name:" => {
                 if let [Expression::Literal(Literal::Symbol(sym), _)] = args {
                     class_name = Some(sym.to_string());
+                } else {
+                    class_name = None;
                 }
             }
             "classVars:" => {
@@ -293,6 +298,8 @@ pub(super) fn builder_class_method_context(
                             _ => None,
                         })
                         .collect();
+                } else {
+                    class_var_names.clear();
                 }
             }
             "classMethods:" => has_class_methods = true,

@@ -461,18 +461,21 @@ impl NameResolver {
         {
             return false;
         }
-        // Require a literal `name:` (matches the codegen recogniser).
-        first_msg
-            .into_iter()
-            .chain(
-                messages
-                    .iter()
-                    .map(|m| (&m.selector, m.arguments.as_slice())),
-            )
-            .any(|(selector, args)| {
-                selector.name().as_str() == "name:"
-                    && matches!(args, [Expression::Literal(Literal::Symbol(_), _)])
-            })
+        // Require the *effective* (last) `name:` setter to be a literal symbol —
+        // matches the codegen recogniser, where a later non-literal `name:`
+        // clears an earlier literal one. Using the last occurrence (not "any")
+        // keeps the two recognisers in lockstep.
+        let mut last_name_is_literal = false;
+        for (selector, args) in first_msg.into_iter().chain(
+            messages
+                .iter()
+                .map(|m| (&m.selector, m.arguments.as_slice())),
+        ) {
+            if selector.name().as_str() == "name:" {
+                last_name_is_literal = matches!(args, [Expression::Literal(Literal::Symbol(_), _)]);
+            }
+        }
+        last_name_is_literal
     }
 
     /// Returns `true` if `expr` constructs a `ClassBuilder`: `<receiver>
@@ -711,6 +714,24 @@ mod tests {
         assert!(
             !super_errors.is_empty(),
             "super in a name-less builder cascade must still error (codegen cannot lower it)"
+        );
+    }
+
+    #[test]
+    fn builder_with_later_non_literal_name_does_not_permit_super() {
+        // BT-2267: a later non-literal name: is the effective setter, so the
+        // recogniser must NOT enable class-method semantics (kept in lockstep
+        // with codegen, which clears the class name on a non-literal name:).
+        let resolver = run("n := someName. Object classBuilder name: #X; name: n; \
+             classMethods: #{ #greeting => [:self | super greeting] }; register");
+        let super_errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("super can only be used"))
+            .collect();
+        assert!(
+            !super_errors.is_empty(),
+            "a later non-literal name: must not enable super (effective name is non-literal)"
         );
     }
 
