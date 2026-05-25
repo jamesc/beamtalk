@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2267 / ADR 0084 Phase 2: callable class methods via the programmatic
+// ClassBuilder cascade. A `classMethods:` block literal is lowered to a
+// class-method fun (ClassSelf, ClassVars, ...) and installed as a runtime
+// class-method fun (BT-2266), so it threads class variables and dispatches
+// `self` class-method sends — without the BT-873 Path-2 failures.
+//
+// The class is dispatched by its registered name (a registry-resolved class
+// reference), not via register's return value (an unusable wrapper today,
+// BT-2258, fixed separately).
+//
+// NOTE: `super` inside a builder class method requires the cascade to sit
+// inside a method body (the name resolver rejects `super` in a REPL top-level
+// block, depth < 2); recognising `classMethods:` blocks as class-method bodies
+// in semantic analysis is follow-up work. `self new` on a module-less dynamic
+// builder class is likewise deferred.
+
+// ---------------------------------------------------------------------------
+// Class-variable threading: classState seeded via classVars:, mutation
+// persists across calls (the BT-873 "dropped state" regression).
+// ---------------------------------------------------------------------------
+
+Object classBuilder name: #BT2267Tally; superclass: Object; classVars: #{ #total => 0 }; classMethods: #{ #bump => [:self | self.total := self.total + 1. self.total] }; register
+// => #Actor<Class,_>
+
+BT2267Tally bump
+// => 1
+
+BT2267Tally bump
+// => 2
+
+BT2267Tally bump
+// => 3
+
+// ---------------------------------------------------------------------------
+// A plain-value class method.
+// ---------------------------------------------------------------------------
+
+Object classBuilder name: #BT2267Plain; superclass: Object; classMethods: #{ #answer => [:self | 42] }; register
+// => #Actor<Class,_>
+
+BT2267Plain answer
+// => 42
+
+// ---------------------------------------------------------------------------
+// A keyword class method receives its argument.
+// ---------------------------------------------------------------------------
+
+Object classBuilder name: #BT2267Kw; superclass: Object; classMethods: #{ #scale: => [:self :n | n * 3] }; register
+// => #Actor<Class,_>
+
+BT2267Kw scale: 4
+// => 12
+
+// ---------------------------------------------------------------------------
+// A self class-method send resolves a sibling class method (routed through the
+// runtime dispatch helper, not a non-existent module export).
+// ---------------------------------------------------------------------------
+
+Object classBuilder name: #BT2267Self; superclass: Object; classMethods: #{ #base => [:self | 10], #doubled => [:self | self base * 2] }; register
+// => #Actor<Class,_>
+
+BT2267Self doubled
+// => 20

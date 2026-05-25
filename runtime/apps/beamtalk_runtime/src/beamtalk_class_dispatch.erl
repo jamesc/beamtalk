@@ -25,6 +25,7 @@ Extracted from beamtalk_object_class.erl (BT-704).
 -export([
     class_send/3,
     class_self_dispatch/4,
+    class_self_dispatch_local/4,
     metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
@@ -123,32 +124,85 @@ class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
             %% class_var_result pattern match handles the tuple shape — and raise
             %% structured errors on dispatch/body failures so callers see proper
             %% `#beamtalk_error{}` instead of a bare `undef`.
-            case
+            unwrap_self_dispatch_outcome(
+                ClassName,
+                Selector,
                 apply_class_method_in_context(
                     Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
                 )
-            of
-                {ok, Raw} ->
-                    Raw;
-                {error, #beamtalk_error{} = Error} ->
-                    beamtalk_error:raise(Error);
-                {error, undef_in_body} ->
-                    %% Preserve the `error:undef` contract for callers that rely on
-                    %% it (e.g. user code catching `error:undef` from a method body).
-                    erlang:error(undef);
-                {error, {raised, ErrClass, Error, ST}} ->
-                    erlang:raise(ErrClass, Error, ST);
-                test_spawn ->
-                    %% `TestCase>>runAll` / `run:` self-sent from inside another
-                    %% class method would run the test suite inline in the class
-                    %% gen_server process — the exact deadlock the `test_spawn`
-                    %% escape hatch was added to avoid (BT-440). Surface a
-                    %% structured error instead of blocking; callers should invoke
-                    %% test runners from outside the class body.
-                    raise_test_spawn_self_dispatch_unsupported(ClassName, Selector)
-            end;
+            );
         not_found ->
             raise_class_self_dnu(ClassName, Selector)
+    end.
+
+-doc """
+ADR 0084 / BT-2266: Dispatch a class-method self-send that may resolve to the
+class's OWN runtime-installed class method.
+
+Class-method funs created by the programmatic `ClassBuilder` (BT-2267) are
+anonymous funs with no `class_<sel>` module export, so a self-send inside such a
+fun cannot use the compiled direct-call path. It routes here instead: this checks
+the class's own runtime class-method fun (the retrieval store) first, and only
+falls back to `class_self_dispatch/4` (super + inherited, walked from the
+superclass) when the selector is not a local runtime method.
+
+Returns the raw `{class_var_result, Result, NewClassVars}` | plain value — the
+shape the calling fun threads — and raises a structured `does_not_understand`
+when no definition is found. No `gen_server` hop: the local lookup is the same
+ETS read the dispatch hot path already uses (BT-2008).
+""".
+-spec class_self_dispatch_local(class_name(), selector(), map(), list()) ->
+    {class_var_result, term(), map()} | term() | no_return().
+class_self_dispatch_local(ClassName, Selector, ClassVars, Args) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+        {ok, _Info} ->
+            %% Own runtime class method: dispatch with DefiningClass = ClassName
+            %% so apply_class_method_in_context resolves the fun from the store.
+            DefiningModule =
+                case beamtalk_class_metadata:lookup_module(ClassName) of
+                    {ok, M} -> M;
+                    not_found -> ClassName
+                end,
+            unwrap_self_dispatch_outcome(
+                ClassName,
+                Selector,
+                apply_class_method_in_context(
+                    Selector, Args, ClassName, ClassName, DefiningModule, ClassVars
+                )
+            );
+        error ->
+            %% Not a local runtime method — walk the chain (super + inherited),
+            %% which also resolves inherited runtime funs and compiled methods.
+            class_self_dispatch(ClassName, Selector, ClassVars, Args)
+    end.
+
+-doc """
+Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
+self-dispatch caller shape: raw value on success, structured raises on failure.
+Shared by `class_self_dispatch/4` and `class_self_dispatch_local/4`.
+""".
+-spec unwrap_self_dispatch_outcome(class_name(), selector(), class_method_outcome()) ->
+    term() | no_return().
+unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
+    case Outcome of
+        {ok, Raw} ->
+            Raw;
+        {error, #beamtalk_error{} = Error} ->
+            beamtalk_error:raise(Error);
+        {error, undef_in_body} ->
+            %% Preserve the `error:undef` contract for callers that rely on
+            %% it (e.g. user code catching `error:undef` from a method body).
+            erlang:error(undef);
+        {error, {raised, ErrClass, Error, ST}} ->
+            erlang:raise(ErrClass, Error, ST);
+        test_spawn ->
+            %% `TestCase>>runAll` / `run:` self-sent from inside another
+            %% class method would run the test suite inline in the class
+            %% gen_server process — the exact deadlock the `test_spawn`
+            %% escape hatch was added to avoid (BT-440). Surface a
+            %% structured error instead of blocking; callers should invoke
+            %% test runners from outside the class body.
+            raise_test_spawn_self_dispatch_unsupported(ClassName, Selector)
     end.
 
 -spec raise_test_spawn_self_dispatch_unsupported(class_name(), selector()) -> no_return().

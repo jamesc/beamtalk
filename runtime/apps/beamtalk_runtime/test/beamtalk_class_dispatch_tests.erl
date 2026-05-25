@@ -1618,7 +1618,9 @@ runtime_class_method_fun_test_() ->
             {"compile-time-only class keeps the gate flag closed and skips the store",
                 fun test_compile_only_class_gate_closed/0},
             {"a runtime class-method fun that raises surfaces a structured error",
-                fun test_runtime_fun_raises/0}
+                fun test_runtime_fun_raises/0},
+            {"class_self_dispatch_local resolves local, inherited, and DNU",
+                fun test_class_self_dispatch_local/0}
         ]
     end}.
 
@@ -1790,6 +1792,58 @@ test_runtime_fun_raises() ->
         ?assertError(_, beamtalk_class_dispatch:class_send(Pid, boom, []))
     after
         catch gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% class_self_dispatch_local/4: the self-send primitive for builder class-method
+%% funs — local runtime fun first, else chain (super/inherited), else DNU.
+test_class_self_dispatch_local() ->
+    ParentName = 'BT2267DispParent',
+    ChildName = 'BT2267DispChild',
+    LocalFun = fun(_ClassSelf, _ClassVars) -> local_value end,
+    BumpFun = fun(_ClassSelf, ClassVars) -> {class_var_result, bumped, ClassVars#{n => 1}} end,
+    InheritedFun = fun(_ClassSelf, _ClassVars) -> inherited_value end,
+    ParentInfo = #{
+        superclass => none,
+        module => bt2267_disp_parent_no_module,
+        class_methods => #{inherited => #{block => InheritedFun, arity => 2}},
+        class_state => #{}
+    },
+    ChildInfo = #{
+        superclass => ParentName,
+        module => bt2267_disp_child_no_module,
+        class_methods => #{
+            local => #{block => LocalFun, arity => 2},
+            bump => #{block => BumpFun, arity => 2}
+        },
+        class_state => #{}
+    },
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
+    try
+        %% Local runtime fun resolves.
+        ?assertEqual(
+            local_value,
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, local, #{}, [])
+        ),
+        %% A local class-var mutation returns the raw {class_var_result, ...} the
+        %% calling fun threads.
+        ?assertEqual(
+            {class_var_result, bumped, #{n => 1}},
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, bump, #{}, [])
+        ),
+        %% Not local → falls back to the chain and finds the inherited method.
+        ?assertEqual(
+            inherited_value,
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, inherited, #{}, [])
+        ),
+        %% Nothing anywhere → structured does_not_understand.
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand}},
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, missing, #{}, [])
+        )
+    after
+        catch gen_server:stop(ChildPid, normal, 5000),
+        catch gen_server:stop(ParentPid, normal, 5000)
     end.
 
 %%% ============================================================================
