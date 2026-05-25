@@ -534,7 +534,10 @@ format_gen_server_terminate_with_bt_error_reason_test() ->
     },
     Decoded = decode_event(Event),
     Msg = maps:get(<<"msg">>, Decoded),
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"Counter does not understand">>)).
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Counter does not understand">>)),
+    %% If the BtError branch was NOT taken, the raw ~tp of WrappedError would
+    %% include the '$beamtalk_class' atom key. Its absence confirms extraction.
+    ?assertEqual(nomatch, binary:match(Msg, <<"$beamtalk_class">>)).
 
 %% Exercises format_reason_with_bt_error/2 AND format_reason_concise/1 BtError
 %% branches (top-level key form): when a supervisor child_terminated report has
@@ -557,9 +560,13 @@ format_supervisor_child_terminated_with_bt_error_reason_test() ->
     Decoded = decode_event(Event),
     Msg = maps:get(<<"msg">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(Msg, <<"Worker does not understand">>)),
+    %% If the BtError branch was NOT taken, the raw ~tp of WrappedError would
+    %% include the '$beamtalk_class' atom key. Its absence confirms extraction.
+    ?assertEqual(nomatch, binary:match(Msg, <<"$beamtalk_class">>)),
     %% format_reason_concise/1 BtError branch: the reason field also uses the BT error message
     Reason = maps:get(<<"reason">>, Decoded),
-    ?assertNotEqual(nomatch, binary:match(Reason, <<"Worker does not understand">>)).
+    ?assertNotEqual(nomatch, binary:match(Reason, <<"Worker does not understand">>)),
+    ?assertEqual(nomatch, binary:match(Reason, <<"$beamtalk_class">>)).
 
 %% Exercises format_reason_with_bt_error/2 BtError branch in the proplist-form
 %% supervisor child_terminated handler (data nested under `report` key).
@@ -581,7 +588,14 @@ format_supervisor_child_terminated_proplist_with_bt_error_test() ->
     },
     Decoded = decode_event(Event),
     Msg = maps:get(<<"msg">>, Decoded),
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"Service does not understand">>)).
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Service does not understand">>)),
+    %% If the BtError branch was NOT taken, the raw ~tp of WrappedError would
+    %% include the '$beamtalk_class' atom key. Its absence confirms extraction.
+    ?assertEqual(nomatch, binary:match(Msg, <<"$beamtalk_class">>)),
+    %% format_reason_concise/1 BtError branch: the reason field also uses the BT error message
+    Reason = maps:get(<<"reason">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Reason, <<"Service does not understand">>)),
+    ?assertEqual(nomatch, binary:match(Reason, <<"$beamtalk_class">>)).
 
 %% Exercises format_extra_value/2 non-list stacktrace BtError branch: when the
 %% stacktrace metadata value is not a list but contains an embedded beamtalk
@@ -599,7 +613,11 @@ format_non_list_stacktrace_with_bt_error_test() ->
     },
     Decoded = decode_event(Event),
     StackBin = maps:get(<<"stacktrace">>, Decoded),
-    ?assertNotEqual(nomatch, binary:match(StackBin, <<"MyClass does not understand">>)).
+    ?assertNotEqual(nomatch, binary:match(StackBin, <<"MyClass does not understand">>)),
+    %% The BtError branch in format_extra_value/2 appends "\n  raw: <term>" after
+    %% the error message. Asserting the "raw:" marker proves this branch was taken
+    %% rather than the undefined-branch ~tp fallback (which does not append it).
+    ?assertNotEqual(nomatch, binary:match(StackBin, <<"raw:">>)).
 
 %% Exercises the inner catch in format_msg_fallback/1: when the outer formatter
 %% path crashes (here via a binary domain element) and the log msg is a
