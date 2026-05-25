@@ -316,8 +316,8 @@ compile_method(ClassNameBin, Selector, Source, Intent) ->
                 {error, Reason, _Output, _W, _S} -> {error, Reason}
             end;
         {ok, _OtherKind, _Info, _Warnings} ->
-            {error, {not_a_method_definition, SelectorBin}};
-        {ok, _Binary, _ResultExpr, _Warnings} ->
+            %% A class/protocol definition, or a plain expression — not a method
+            %% patch. compile:source: only accepts a single method body.
             {error, {not_a_method_definition, SelectorBin}};
         {error, Reason} ->
             {error, Reason}
