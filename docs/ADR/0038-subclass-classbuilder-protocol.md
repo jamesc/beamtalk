@@ -1,7 +1,25 @@
 # ADR 0038: `subclass:` Grammar Desugaring to ClassBuilder Protocol
 
 ## Status
-Accepted | Implemented (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25)
+Accepted | Implemented (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25) — programmatic builder restored as a first-class user API on the compiled path (epic [BT-2259](https://linear.app/beamtalk/issue/BT-2259), [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md), 2026-05-25)
+
+> **Open question resolved (BT-2271): is the builder a first-class *user* API?**
+> **Yes.** BT-873 removed Path 2 (the closure-based dynamic path) because its
+> state-threading was broken, which left the impression that the programmatic
+> `Object classBuilder … register` cascade was an internal codegen detail only.
+> Epic BT-2259 ([ADR 0084](0084-class-side-runtime-method-fun-dispatch.md))
+> closed that gap *without* resurrecting Path 2: builder-supplied instance and
+> class methods are lowered by the **compiler** into the same dispatchable funs
+> file-defined methods produce, so they thread class-variable state, resolve
+> `super`/`self`, and stay navigable. The result is a genuine first-class user
+> API — `register` returns the canonical, dispatchable class object (BT-2258);
+> instance and class methods are callable (BT-2266/BT-2267); module-less classes
+> instantiate via `new`/`new:` (BT-2275); the incremental piece API
+> (`addMethod:body:`, `addClassMethod:body:`, `addClassState:default:`) assembles
+> a class one piece at a time (BT-2269); metadata (signatures/docs/return-types/
+> `isConstructible`) reaches `:help` (BT-2268); and class-side source is
+> navigable (BT-2270). The historical "no longer works" notes below are
+> superseded by ADR 0084 and retained only as a record of the BT-873 detour.
 
 ## Context
 
@@ -184,8 +202,11 @@ The BEAM module still provides the compiled method functions (`increment/1`, `va
 
 ### REPL Self-Hosting Design
 
-> **Note (BT-873):** Path 2 (dynamic/closure-based) was removed. The REPL now
-> uses the compile-and-load path (BT-869). The subsection below is historical.
+> **Note (BT-873, updated by [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md) / BT-2259):** Path 2 (dynamic/closure-based) was removed. The REPL
+> compiles inline `Object subclass:` definitions via the compile-and-load path
+> (BT-869), and the programmatic `Object classBuilder … register` cascade is a
+> first-class user API on the same compiled path. The subsection below is
+> historical.
 
 When the Beamtalk REPL is ported to pure Beamtalk, class definitions go through the compile-and-load path:
 
@@ -230,7 +251,7 @@ This avoids constructor explosion (one method with N positional arguments) — t
 
 ### REPL Session
 
-> **Note (BT-873):** The dynamic class example below (using `addField:default:` / `addMethod:body:`) was part of Path 2 and no longer works. The REPL uses the compile-and-load path (BT-869). The reflection queries (`respondsTo:`, `canUnderstand:`, `superclass`) remain valid for compiled classes.
+> **Note (BT-873, superseded by [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md) / BT-2259):** The dynamic class example below (using `addField:default:` / `addMethod:body:`) was part of Path 2 and stopped working when Path 2 was removed. It now works again on the **compiled** path: the incremental piece API (`addField:default:`, `addMethod:body:`, `addClassMethod:body:`, `addClassState:default:`) was restored by BT-2269, with each block compiler-lowered into a dispatchable fun (not a Path-2 closure). The reflection queries (`respondsTo:`, `canUnderstand:`, `superclass`) remain valid for compiled classes.
 
 ```beamtalk
 >> Class respondsTo: #classBuilder
@@ -242,8 +263,11 @@ This avoids constructor explosion (one method with N positional arguments) — t
 >> ClassBuilder localMethods
 => [name:, superclass:, fields:, methods:, addField:default:, addMethod:body:, modifier:, register]
 
-// NOTE (BT-873): Dynamic class creation via addMethod:body: is not supported.
-// The REPL now compiles class definitions to BEAM modules (BT-869).
+// NOTE (BT-873, superseded by ADR 0084 / BT-2269): addMethod:body: and the
+// incremental piece API are supported again on the compiled builder path; each
+// block is compiler-lowered into a dispatchable fun, not a Path-2 closure.
+// The REPL still compiles inline `Object subclass:` definitions to BEAM
+// modules (BT-869); the programmatic cascade is the first-class API alongside it.
 ```
 
 ### Error Examples
@@ -471,7 +495,19 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 | BT-839 | Phase 3 — REPL integration | REPL evaluator desugaring + E2E tests | Not merged (too complex) |
 | BT-873 | Cleanup — Remove dynamic path | Delete Path 2: `beamtalk_dynamic_object`, closure dispatch, wrapper functions | Done |
 
+**First-class programmatic builder (epic [BT-2259](https://linear.app/beamtalk/issue/BT-2259), [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md)):** restored the programmatic `Object classBuilder … register` cascade as a genuine first-class user API on the compiled path — see ADR 0084's Implementation Tracking for the full breakdown.
+
+| Issue | Description | Status |
+|-------|-------------|--------|
+| BT-2258 | `register` returns a usable canonical class object | Done |
+| BT-2266 / BT-2267 | Runtime class-side fun dispatch + callable builder class methods | Done |
+| BT-2268 | Metadata parity (signatures / docs / return types / `isConstructible` / `meta`) | Done |
+| BT-2269 | Incremental piece API (`addMethod:body:`, `addClassMethod:body:`, `addClassState:default:`, `remove*`) | Done |
+| BT-2270 | Compiler auto-derives class-side `classMethodSource` from builder blocks | Done |
+| BT-2275 | Instantiate module-less builder classes via `new` / `new:` | Done |
+| BT-2271 | Capstone: end-to-end validation + docs + surface parity | Done |
+
 ## References
-- Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Instantiation Protocol), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (Compiler Port), [ADR 0024](0024-static-first-live-augmented-ide-tooling.md) (Static-First Tooling), [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol), [ADR 0034](0034-stdlib-self-hosting-in-beamtalk.md) (Stdlib Self-Hosting), [ADR 0036](0036-full-metaclass-tower.md) (Full Metaclass Tower)
+- Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Instantiation Protocol), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (Compiler Port), [ADR 0024](0024-static-first-live-augmented-ide-tooling.md) (Static-First Tooling), [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol), [ADR 0034](0034-stdlib-self-hosting-in-beamtalk.md) (Stdlib Self-Hosting), [ADR 0036](0036-full-metaclass-tower.md) (Full Metaclass Tower), [ADR 0066](0066-open-class-extension-methods.md) (`>>` Extension/Patcher), [ADR 0082](0082-method-level-edit-save-and-changelog.md) (Live Method Editing), [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md) (Class-Side Runtime Fun Dispatch — restores the programmatic builder as a first-class user API)
 - Principle: [Principle 6 — Messages All The Way Down](../beamtalk-principles.md)
 - Prior art: [Pharo ClassBuilder](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/ClassBuilder.class.st), [Pharo Reflective Core Booklet](https://books.pharo.org/booklet-ReflectiveCore/), [Newspeak Specification](https://newspeaklanguage.org/spec/newspeak-spec.pdf), [GNU Smalltalk: Creating Classes](https://www.gnu.org/software/smalltalk/manual/html_node/Creating-classes.html)

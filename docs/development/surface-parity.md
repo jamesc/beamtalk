@@ -72,6 +72,8 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
 | `unload` | -- | `:unload <class>` | `unload` | -- | Unload a class from the workspace |
+| `define-class` | -- | *(via `eval`: `Object subclass: …` **or** `Object classBuilder … register`)* | *(via `evaluate`)* | -- | Define/register a class. Both the grammar form and the programmatic `ClassBuilder` cascade (ADR 0038 / ADR 0084) flow through the shared `eval`/`evaluate` surface, so any surface that can evaluate an expression can create a class — no dedicated op. `register` returns the canonical class object (BT-2258). |
+| `live-edit-method` | -- | *(via `eval`: `Class >> sel => body` / `Class class >> sel => body`)* | *(via `evaluate`)* | -- | Live-patch an instance- or class-side method on a registered class (ADR 0066 / ADR 0082 / ADR 0084). Reached through the shared `eval`/`evaluate` surface; the class-side path recompiles the class's recorded source. No dedicated op. |
 
 ## Test Operations
 

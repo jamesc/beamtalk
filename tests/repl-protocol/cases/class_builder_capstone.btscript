@@ -1,0 +1,220 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2271 / ADR 0084 (epic BT-2259) capstone: the complete first-class
+// programmatic ClassBuilder + live class-side edit story, exercised end-to-end
+// through the REPL. Per ADR 0069, EUnit/BUnit alone are insufficient for a
+// user-facing feature — this drives the REPL TCP protocol with cross-turn
+// workspace variable persistence, which BUnit cannot.
+//
+// What this covers (one assertion per shipped piece of the epic):
+//   * BT-2258 — `register` returns a usable canonical class object; bound to a
+//     workspace variable it is dispatchable directly.
+//   * BT-2267 — instance AND class methods built via the cascade are callable.
+//   * BT-2275 — `new` / `new:` instantiate a module-less builder class (fields
+//     default and are seeded from the init map).
+//   * BT-2269 — the incremental piece API (`addMethod:body:`,
+//     `addClassMethod:body:`, `addClassState:default:`) assembles a class.
+//   * BT-2268 — metadata parity: signatures + docs reach `:help` for instance
+//     and class methods and the class-level doc.
+//   * BT-2270 — class-side `classMethodSource` is navigable via
+//     `SystemNavigation` source-text queries.
+//   * ADR 0084 / 0082 / 0066 — class-side `>>` live edit of a registered class
+//     installs and dispatches the new class method.
+//
+// Two REPL-surface notes that shape the test (not feature gaps):
+//   1. The register return value is bound to a *lowercase* workspace variable
+//      (`cap`, not `Cap`) — an uppercase identifier is parsed as a class
+//      reference, not an assignable local.
+//   2. `var := <cascade whose block has a `.` statement separator>` is a
+//      pre-existing REPL assignment-parse limitation; where a class method must
+//      thread class-variable state (a multi-statement block), the registered
+//      class is reached by its *name* (which is itself the canonical class
+//      object) rather than through a bound variable. The class-side `>>`
+//      live-edit case targets an inline-defined class, because the `>>` reload
+//      path recompiles the class's recorded source — inline `Object subclass:`
+//      definitions have it; purely-programmatic builder classes do not
+//      (out of scope per the issue).
+
+// ===========================================================================
+// BT-2258 + BT-2267 — full cascade build; register returns a usable class
+// object; instance + class methods are callable through it.
+// ===========================================================================
+
+// Build a class in one cascade: name, superclass, instance methods, and class
+// methods. register returns the canonical class object — bound to `cap`.
+cap := Object classBuilder name: #CapstoneAccount; superclass: Object; methods: #{ #balance => [:inst | 0], #describe => [:inst | "account"] }; classMethods: #{ #greeting => [:self | "bank"], #doubled => [:self | self answer * 2], #answer => [:self | 21] }; register
+// => CapstoneAccount
+
+// The bound value is the genuine class object: it renders as the class name and
+// answers reflection (BT-2258).
+cap printString
+// => CapstoneAccount
+
+cap name
+// => CapstoneAccount
+
+cap superclass
+// => Object
+
+// Instance method dispatch through the returned class object's instances.
+(cap new) balance
+// => 0
+
+(cap new) describe
+// => account
+
+// Class method dispatch through the returned class object (BT-2267), including
+// a `self` class-method send resolving a sibling class method.
+cap greeting
+// => bank
+
+cap doubled
+// => 42
+
+// A class method threading class-variable state is reached by class name (the
+// name *is* the canonical class object). Mutation persists across calls — the
+// BT-873 "dropped state" regression must not recur.
+Object classBuilder name: #CapstoneCounter; superclass: Object; classVars: #{ #opened => 0 }; classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] }; register
+// => CapstoneCounter
+
+CapstoneCounter open
+// => 1
+
+CapstoneCounter open
+// => 2
+
+// ===========================================================================
+// BT-2275 — instantiate a module-less builder class via new / new:
+// ===========================================================================
+
+// A purely programmatic class (no compiled BEAM module) instantiates with new,
+// fields take their declared defaults, and the instance reports its class.
+capv := Object classBuilder name: #CapstonePoint; superclass: Object; fields: #{ #x => 0, #y => 0 }; methods: #{ #sum => [:inst | (inst fieldAt: #x) + (inst fieldAt: #y)] }; register
+// => CapstonePoint
+
+p := capv new
+// => a CapstonePoint
+
+p class
+// => CapstonePoint
+
+(p fieldAt: #x)
+// => 0
+
+// new: seeds fields from the init map; the others keep their defaults.
+p2 := capv new: #{#x => 3, #y => 4}
+// => a CapstonePoint
+
+(p2 fieldAt: #x)
+// => 3
+
+(p2 fieldAt: #y)
+// => 4
+
+// A fun-backed instance method dispatches on the generic instance.
+p2 sum
+// => 7
+
+// ===========================================================================
+// BT-2269 — incremental piece API assembles a class one piece at a time.
+// ===========================================================================
+
+// addClassState:default: + addMethod:body: + addClassMethod:body: write the
+// same maps the bulk setters do; the cascade compiles each block the same way.
+// The class variable threads through the class method, so it is reached by name.
+Object classBuilder name: #CapstoneTally; superclass: Object; addClassState: #total default: 10; addMethod: #answer body: [:inst | 42]; addClassMethod: #tally body: [:self | self.total := self.total + 5. self.total]; register
+// => CapstoneTally
+
+(CapstoneTally new) answer
+// => 42
+
+CapstoneTally tally
+// => 15
+
+CapstoneTally tally
+// => 20
+
+// ===========================================================================
+// BT-2268 — metadata parity: signatures + docs reach :help for a builder class.
+// ===========================================================================
+
+// Build a fully documented class via the metadata setters.
+Object classBuilder name: #CapstoneDoc; superclass: Object; classDoc: "A documented builder class."; methods: #{ #ping => [:inst | 7] }; methodSignatures: #{ #ping => "ping -> Integer" }; methodDocs: #{ #ping => "Returns the canned value." }; classMethods: #{ #make => [:self | 0] }; classMethodSignatures: #{ #make => "make -> Integer" }; classMethodDocs: #{ #make => "Builds a fresh value." }; register
+// => CapstoneDoc
+
+// Class-level :help shows the header and the class-level doc comment.
+:help CapstoneDoc
+// => == CapstoneDoc < Object ==_A documented builder class._
+
+// Instance-method :help shows the display signature and the doc comment.
+// (Asserted via message-send below; the header form is checked here.)
+:help CapstoneDoc ping
+// => == CapstoneDoc >> ping ==_
+
+// Class-method :help shows the class-side header for a builder class method.
+:help CapstoneDoc make
+// => == CapstoneDoc >> make ==_
+
+// The instance-method display signature and doc both reach :help text.
+(Beamtalk help: #CapstoneDoc selector: #ping) includesSubstring: "ping -> Integer"
+// => true
+
+(Beamtalk help: #CapstoneDoc selector: #ping) includesSubstring: "Returns the canned value."
+// => true
+
+// The class-method display signature and doc both reach :help text.
+(Beamtalk help: #CapstoneDoc selector: #make) includesSubstring: "make -> Integer"
+// => true
+
+(Beamtalk help: #CapstoneDoc selector: #make) includesSubstring: "Builds a fresh value."
+// => true
+
+// ===========================================================================
+// BT-2270 — class-side classMethodSource is navigable via SystemNavigation.
+// ===========================================================================
+
+// The compiler auto-derives classMethodSource from the classMethods: block, so
+// a source-text query over the metaclass finds the class method by selector.
+Object classBuilder name: #CapstoneNav; superclass: Object; classMethods: #{ #shoutClass => [:self | "hi" uppercase] }; register
+// => CapstoneNav
+
+nav := SystemNavigation default
+// => a SystemNavigation
+
+results := nav collectMethodsMatching: (Regex from: "shoutClass") unwrap in: CapstoneNav class into: List new
+// => _
+
+results isEmpty
+// => false
+
+(results first) at: #selector
+// => shoutClass
+
+// ===========================================================================
+// ADR 0084 / 0082 / 0066 — class-side >> live edit of a registered class.
+// ===========================================================================
+
+// Define a class inline with a class-side method (records source for the >>
+// reload path), confirm dispatch, then live-edit the class method via
+// `ClassName class >> sel => body` and confirm dispatch picks up the new body.
+Object subclass: CapstoneLive
+  class greeting => "before"
+// => CapstoneLive
+
+CapstoneLive greeting
+// => before
+
+CapstoneLive class >> greeting => "after"
+// => CapstoneLive>>greeting
+
+// Class-side dispatch now resolves the live-edited class method (ADR 0084 path).
+CapstoneLive greeting
+// => after
+
+// A brand-new class-side selector added via >> is also dispatchable.
+CapstoneLive class >> answer => 42
+// => CapstoneLive>>answer
+
+CapstoneLive answer
+// => 42
