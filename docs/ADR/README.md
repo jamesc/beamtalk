@@ -82,7 +82,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Implemented | 2026-03-05 |
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
 | [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Implemented | 2026-03-06 |
-| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Accepted (partial) | 2026-03-06 |
+| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Accepted (partial) | 2026-03-07 |
 | [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Implemented | 2026-03-07 |
 | [0058](0058-platform-security-model.md) | Platform Security Model | Accepted (policy) | 2026-03-07 |
 | [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Implemented | 2026-03-07 |

@@ -635,7 +635,7 @@ No user migration is required.
 - [BT-856](https://linear.app/beamtalk/issue/BT-856) — Reclassify whitelist as optimization hint (Phase 3, S)
 - [BT-857](https://linear.app/beamtalk/issue/BT-857) — Tests: HOM composability, NLR, interop (Phase 4, M)
 
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 

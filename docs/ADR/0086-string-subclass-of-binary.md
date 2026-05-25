@@ -361,7 +361,7 @@ Rejected because String is already a Collection — if Binary is between Collect
 **Epic:** BT-1590 — Epic: String subclass of Binary (ADR 0086, formerly 0069)
 **Issues:** BT-1591, BT-1592, BT-1593, BT-1594, BT-1595, BT-1596, BT-1597
 **Supersedes:** BT-1560 (subset of Binary methods)
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 - Related issues: BT-1555 (File binary I/O), Exdura EventStore FFI removal

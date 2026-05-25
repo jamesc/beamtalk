@@ -347,7 +347,7 @@ Relative-path code is unaffected — this is a pure relaxation of restrictions.
 ## Implementation Tracking
 
 **Issue:** [BT-1409](https://linear.app/beamtalk/issue/BT-1409)
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 

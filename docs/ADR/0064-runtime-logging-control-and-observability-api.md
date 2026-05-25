@@ -538,7 +538,7 @@ The test `sys.config` sets `logger_level` to `error` to suppress log noise durin
 
 **Epic:** BT-1434
 **Issues:** BT-1435, BT-1436, BT-1437, BT-1438, BT-1439, BT-1440, BT-1441
-**Status:** Planned
+**Status:** Implemented
 
 | Phase | Issue | Title | Size | Blocked by |
 |-------|-------|-------|------|------------|

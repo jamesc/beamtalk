@@ -444,7 +444,7 @@ Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) d
 ## Implementation Tracking
 
 **Epic:** [BT-1985](https://linear.app/beamtalk/issue/BT-1985) — Named Actor Registration (ADR 0079)
-**Status:** Planned
+**Status:** Implemented
 
 | # | Issue | Phase | Summary |
 |---|---|---|---|

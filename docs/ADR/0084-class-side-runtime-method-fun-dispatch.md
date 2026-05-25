@@ -440,7 +440,7 @@ the previously-inert `classMethods:` builder key and the parsed-but-unwired
 ## Implementation Tracking
 
 **Epic:** BT-2259 (Programmatic ClassBuilder parity)
-**Status:** Planned
+**Status:** In progress
 
 | Phase | Issue | Scope |
 |-------|-------|-------|

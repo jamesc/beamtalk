@@ -301,7 +301,7 @@ Low migration effort — most code benefits automatically, but explicit `super i
 - BT-1951: Auto-chain initialize in handle_continue codegen (Phase 1, M)
 - BT-1955: Compiler warning for redundant super initialize (Phase 2, S) — blocked by BT-1951
 - BT-1956: E2E test for auto-chained actor initialization (Phase 3, S) — blocked by BT-1951
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 - Related issues: BT-1949 (UninitializedStateError check), BT-1951 (inherited field validation)

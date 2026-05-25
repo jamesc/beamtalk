@@ -914,7 +914,7 @@ end.
 | [BT-1255](https://linear.app/beamtalk/issue/BT-1255) | Migrate beamtalk_file.erl to Result | BT-1254 |
 | [BT-1256](https://linear.app/beamtalk/issue/BT-1256) | Migrate remaining FFI modules (regex, yaml, json, http, subprocess) | BT-1254 |
 
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 

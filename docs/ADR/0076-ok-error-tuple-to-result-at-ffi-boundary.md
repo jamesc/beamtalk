@@ -489,7 +489,7 @@ t := Tuple withAll: #(#ok, 42)
 ## Implementation Tracking
 
 **Epic:** BT-1863
-**Status:** Planned
+**Status:** Implemented
 
 | Phase | Issue | Title | Size | Blocked by |
 |-------|-------|-------|------|------------|

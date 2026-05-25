@@ -438,7 +438,7 @@ BT-1451 delivers `terminate:` runtime support. Follow-up issue for `withShutdown
 - BT-1458: Sync-in-Timer-block lint (M) — Phase 3, blocked by BT-1455
 - BT-1459: Documentation (S) — Phase 3, blocked by BT-1457
 
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 - Related issues: BT-1452 (this ADR), BT-1442 (monitor/pid/onExit — landed), BT-1451 (terminate: runtime fix — in progress)
