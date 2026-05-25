@@ -105,7 +105,8 @@ typed Actor subclass: ClassBuilder
   /// ```beamtalk
   /// builder classMethodSource: #{ #bump => "bump => self.total := self.total + 1" }
   /// ```
-  classMethodSource: aDict :: Dictionary -> Dictionary => self.classMethodSource := aDict
+  classMethodSource: aDict :: Dictionary -> Dictionary =>
+    self.classMethodSource := aDict
 
   /// Set class-variable initial values (ADR 0084, BT-2267).
   ///
