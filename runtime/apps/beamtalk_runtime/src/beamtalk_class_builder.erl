@@ -518,34 +518,56 @@ class_method_arity_error(ClassName, Selector, Expected, Actual) ->
 -doc """
 Count the selector arity of a class-method selector atom (BT-2276).
 
-A keyword selector ends with `:` and has one argument slot per colon
+A keyword selector *ends* with `:` and has one argument slot per colon
 (`addTo:from:` -> 2). A unary selector has no colon (`answer` -> 0). A binary
 (operator) selector such as `+`, `*`, `>=` takes exactly one argument; it is
 recognised by consisting entirely of operator characters (matching the lexer's
 `is_binary_selector_char`).
+
+The trailing-colon guard mirrors the compiler-side `selector_from_symbol`
+(`class_builder_source.rs`), which rejects malformed selectors that contain an
+interior colon without a trailing one (e.g. `'at:put'`). Such selectors are not
+valid keyword selectors, so counting their interior colons would yield a
+misleading expected arity and a spurious `arity_mismatch` (BT-2278). A malformed
+selector is treated as unary (arity 0) here; the matching computed-fun arity is
+then `0 + 2`, the same shape the dispatcher uses for a unary selector.
 """.
 -spec selector_arity(atom()) -> non_neg_integer().
 selector_arity(Selector) when is_atom(Selector) ->
     Chars = atom_to_list(Selector),
-    Colons = lists:foldl(
+    case is_keyword_selector(Chars) of
+        true ->
+            %% Keyword selector: one argument slot per colon.
+            count_colons(Chars);
+        false ->
+            %% Unary or binary operator. Binary selectors consist only of
+            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \, ,).
+            %% A malformed selector with an interior colon (e.g. 'at:put')
+            %% falls here too and is treated as unary (arity 0).
+            case Chars =/= [] andalso lists:all(fun is_binary_selector_char/1, Chars) of
+                true -> 1;
+                false -> 0
+            end
+    end.
+
+-doc "True when the selector chars form a keyword selector (non-empty and ending with `:`).".
+-spec is_keyword_selector(string()) -> boolean().
+is_keyword_selector([]) ->
+    false;
+is_keyword_selector(Chars) ->
+    lists:last(Chars) =:= $:.
+
+-doc "Count the `:` characters in a selector's chars (keyword argument slots).".
+-spec count_colons(string()) -> non_neg_integer().
+count_colons(Chars) ->
+    lists:foldl(
         fun
             ($:, Acc) -> Acc + 1;
             (_, Acc) -> Acc
         end,
         0,
         Chars
-    ),
-    case Colons of
-        0 ->
-            %% Unary or binary operator. Binary selectors consist only of
-            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \, ,).
-            case Chars =/= [] andalso lists:all(fun is_binary_selector_char/1, Chars) of
-                true -> 1;
-                false -> 0
-            end;
-        N ->
-            N
-    end.
+    ).
 
 -doc "Mirror of the compiler's is_binary_selector_char for BT-2276 selector arity.".
 -spec is_binary_selector_char(char()) -> boolean().
@@ -650,3 +672,82 @@ notify_class_loaded(ClassName) ->
         undefined ->
             ok
     end.
+
+%%% ============================================================================
+%%% Tests
+%%% ============================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+%%% --- selector_arity/1 (BT-2276, BT-2278) ---
+
+selector_arity_unary_test() ->
+    %% Unary selector: no colon, not all operator chars -> 0.
+    ?assertEqual(0, selector_arity(answer)),
+    ?assertEqual(0, selector_arity(spawn)).
+
+selector_arity_binary_test() ->
+    %% Binary (operator) selector: all operator chars -> 1.
+    ?assertEqual(1, selector_arity('+')),
+    ?assertEqual(1, selector_arity('*')),
+    ?assertEqual(1, selector_arity('>=')),
+    ?assertEqual(1, selector_arity('//')).
+
+selector_arity_keyword_test() ->
+    %% Keyword selector: ends with `:`, one slot per colon.
+    ?assertEqual(1, selector_arity('at:')),
+    ?assertEqual(2, selector_arity('at:put:')),
+    ?assertEqual(2, selector_arity('addTo:from:')),
+    ?assertEqual(3, selector_arity('a:b:c:')).
+
+selector_arity_malformed_interior_colon_test() ->
+    %% BT-2278: an interior colon without a trailing one is NOT a keyword
+    %% selector. It must not be counted as a keyword (would yield a misleading
+    %% arity and a spurious arity_mismatch). Treated as unary (arity 0).
+    ?assertEqual(0, selector_arity('at:put')),
+    ?assertEqual(0, selector_arity('a:b')),
+    %% Leading colon with no trailing colon is likewise malformed.
+    ?assertEqual(0, selector_arity(':foo')).
+
+selector_arity_empty_test() ->
+    %% Empty selector atom: not keyword, not binary -> unary (0).
+    ?assertEqual(0, selector_arity('')).
+
+%%% --- is_keyword_selector/1 ---
+
+is_keyword_selector_test() ->
+    ?assert(is_keyword_selector("at:")),
+    ?assert(is_keyword_selector("at:put:")),
+    ?assertNot(is_keyword_selector("at:put")),
+    ?assertNot(is_keyword_selector("answer")),
+    ?assertNot(is_keyword_selector("")).
+
+%%% --- validate_class_method_arities/2 (BT-2276, BT-2278) ---
+
+validate_class_method_arities_keyword_ok_test() ->
+    %% A keyword selector 'at:put:' (arity 2) dispatches with arity 2 + 2 = 4.
+    Specs = #{'at:put:' => fun(_ClassSelf, _ClassVars, _A, _B) -> ok end},
+    ?assertEqual(ok, validate_class_method_arities('Demo', Specs)).
+
+validate_class_method_arities_unary_ok_test() ->
+    %% A unary selector 'answer' (arity 0) dispatches with arity 0 + 2 = 2.
+    Specs = #{answer => fun(_ClassSelf, _ClassVars) -> 42 end},
+    ?assertEqual(ok, validate_class_method_arities('Demo', Specs)).
+
+validate_class_method_arities_keyword_mismatch_test() ->
+    %% Wrong-arity keyword fun is rejected with a structured arity_mismatch.
+    Specs = #{'at:put:' => fun(_ClassSelf, _ClassVars, _A) -> ok end},
+    {error, Err} = validate_class_method_arities('Demo', Specs),
+    ?assertEqual(arity_mismatch, Err#beamtalk_error.kind),
+    ?assertEqual('Demo', Err#beamtalk_error.class).
+
+validate_class_method_arities_malformed_no_false_mismatch_test() ->
+    %% BT-2278: a malformed selector 'at:put' is treated as unary (arity 0),
+    %% so a fun with arity 0 + 2 = 2 validates cleanly instead of being
+    %% rejected with a misleading arity_mismatch from counting the interior
+    %% colon (which would expect 1 + 2 = 3).
+    Specs = #{'at:put' => fun(_ClassSelf, _ClassVars) -> ok end},
+    ?assertEqual(ok, validate_class_method_arities('Demo', Specs)).
+
+-endif.
