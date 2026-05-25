@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // String/Binary inheritance tests — verify byte-level methods inherited
-// from Binary work correctly on String instances (ADR 0069 Phase 3b, BT-1595)
+// from Binary work correctly on String instances (ADR 0086 Phase 3b, BT-1595)
 
 TestCase subclass: StringBinaryInheritanceTest
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-03-28)
+Implemented (2026-03-28)
 
 ## Context
 
@@ -500,7 +500,7 @@ Update all developer-facing surfaces to be visibility-aware. Per the "visibility
 
 **Epic:** BT-1688
 **Issues:** BT-1689, BT-1690, BT-1691, BT-1692, BT-1693, BT-1694, BT-1695, BT-1696, BT-1697
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 

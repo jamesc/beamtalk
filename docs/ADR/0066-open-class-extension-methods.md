@@ -1,7 +1,7 @@
 # ADR 0066: Open Class Extension Methods (`>>` Syntax)
 
 ## Status
-Accepted (2026-03-18)
+Implemented (2026-03-18)
 
 ## Context
 

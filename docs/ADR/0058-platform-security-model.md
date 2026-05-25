@@ -1,7 +1,7 @@
 # ADR 0058: Platform Security Model
 
 ## Status
-Accepted (2026-03-07)
+Accepted (policy, 2026-03-07) — security stance; no separate implementation epic
 **Update (2026-03-15):** TLS distribution support (`--tls`, `beamtalk tls init`) was removed in PR #1401. The mTLS examples below are not currently implemented; use Tailscale or reverse proxy TLS termination instead.
 
 ## Context

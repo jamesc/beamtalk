@@ -1,7 +1,7 @@
 # ADR 0063: Remove File Path Sandbox
 
 ## Status
-Accepted (2026-03-16)
+Implemented (2026-03-16)
 
 ## Context
 
@@ -347,7 +347,7 @@ Relative-path code is unaffected — this is a pure relaxation of restrictions.
 ## Implementation Tracking
 
 **Issue:** [BT-1409](https://linear.app/beamtalk/issue/BT-1409)
-**Status:** Planned
+**Status:** Implemented
 
 ## References
 

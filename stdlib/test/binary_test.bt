@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Stdlib tests for Binary class — instance methods, Collection protocol,
-// byte access, slicing, conversion, and serialization (BT-1594, ADR 0069 Phase 3a)
+// byte access, slicing, conversion, and serialization (BT-1594, ADR 0086 Phase 3a)
 //
 // Note: On BEAM, all binaries dispatch as String at runtime. Binary-only
 // methods (byteSize, byteAt:, part:size:, concat:, toBytes, asString,

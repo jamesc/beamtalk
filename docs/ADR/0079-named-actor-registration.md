@@ -1,7 +1,7 @@
 # ADR 0079: Named Actor Registration
 
 ## Status
-Accepted (2026-04-15)
+Implemented (2026-04-15)
 
 ## Context
 
@@ -444,7 +444,7 @@ Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) d
 ## Implementation Tracking
 
 **Epic:** [BT-1985](https://linear.app/beamtalk/issue/BT-1985) — Named Actor Registration (ADR 0079)
-**Status:** Planned
+**Status:** Implemented
 
 | # | Issue | Phase | Summary |
 |---|---|---|---|

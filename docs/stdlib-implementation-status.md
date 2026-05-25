@@ -117,7 +117,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 
 ### Binary (`stdlib/src/Binary.bt`)
 
-**Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0069](ADR/0069-string-subclass-of-binary.md))
+**Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
 **Methods:** 14/14 implemented (100%)
 **Note:** Byte-level data and serialization. Parent of String. Maps to Erlang `binary()`.
 
@@ -199,7 +199,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 
 ### String (`stdlib/src/String.bt`)
 
-**Class:** `String` — superclass: `Binary` — `@sealed` ([ADR 0069](ADR/0069-string-subclass-of-binary.md))
+**Class:** `String` — superclass: `Binary` — `@sealed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
 **Methods:** 48/48 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
