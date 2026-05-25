@@ -639,7 +639,7 @@ account := Object classBuilder
   superclass: Object;
   classVars: #{ #opened => 0 };
   fields: #{ #balance => 0 };
-  methods: #{ #balance => [:inst | inst balance] };
+  methods: #{ #balance => [:inst | inst fieldAt: #balance] };
   classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };
   register
 
