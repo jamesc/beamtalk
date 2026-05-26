@@ -696,7 +696,36 @@ normalise_files_for_push(Files) when is_list(Files) ->
             (F) when is_binary(F) ->
                 {true, F};
             (F) when is_list(F) ->
-                {true, unicode:characters_to_binary(F)};
+                %% `unicode:characters_to_binary/1` returns a binary on
+                %% success but `{error, _, _}` / `{incomplete, _, _}` tuples
+                %% on bad data — it does NOT throw. Filter failure tuples
+                %% out so a malformed entry never reaches the JSON encoder.
+                %% `try` also catches the `badarg` case (improper list,
+                %% bitstring, etc.) so a single bad entry can't crash the
+                %% whole push frame.
+                try unicode:characters_to_binary(F) of
+                    Bin when is_binary(Bin) ->
+                        {true, Bin};
+                    {error, _Encoded, _Rest} ->
+                        ?LOG_WARNING(
+                            "flush_completed push: dropping invalid unicode path entry",
+                            #{entry => F, domain => [beamtalk, runtime]}
+                        ),
+                        false;
+                    {incomplete, _Encoded, _Rest} ->
+                        ?LOG_WARNING(
+                            "flush_completed push: dropping incomplete unicode path entry",
+                            #{entry => F, domain => [beamtalk, runtime]}
+                        ),
+                        false
+                catch
+                    _:_ ->
+                        ?LOG_WARNING(
+                            "flush_completed push: dropping non-path file entry",
+                            #{entry => F, domain => [beamtalk, runtime]}
+                        ),
+                        false
+                end;
             (Other) ->
                 ?LOG_WARNING(
                     "flush_completed push: dropping non-path file entry",
