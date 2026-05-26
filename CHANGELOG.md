@@ -12,6 +12,7 @@
 - **Typed FFI collection element types** — Erlang `-spec` list/tuple element types now carry through to Beamtalk types: `[integer()]` → `List(Integer)`, `{atom(), binary()}` → `Tuple(Symbol, String | Binary)`. Uninformative elements (`term()`, bare `tuple()`) collapse to the unparameterized collection type. Literal-index `at:` on typed `Tuple(T1, …, Tn)` infers the element type at that 1-based position; non-literal or out-of-range indices fall back to `Dynamic` (BT-2254).
 - Fix foreign cross-class extension methods (`TargetClass >> sel => …` where the target is defined in another file) being silently dropped by codegen — the compiler now emits `beamtalk_extensions:register/5` at module load for each foreign extension, so they dispatch correctly at runtime. Class-side extensions register under the metaclass tag. Pure-extension files (no host class) now emit `register_class/0` + `on_load` (BT-2250).
 - **`ClassBuilder classMethods:` arity validation** — a `classMethods:` block whose parameter count does not match its selector (e.g. `#{ #greet => [42] }`, forgetting the leading `:self`) is now rejected at compile time with a clear diagnostic naming the selector and expected shape, instead of silently lowering to a wrong-arity fun that crashed with an opaque `error:undef` only when the class method was first called. A computed (non-literal) `classMethods:` fun of the wrong arity is rejected at registration time with a structured `#beamtalk_error{}` (`arity_mismatch`), since its arity is unknown until runtime. Correctly-shaped blocks and funs (following the `fun(ClassSelf, ClassVars, …)` convention) are unaffected (BT-2276).
+- Fix `addClassMethod:body:` allowing `super` in blocks with non-literal selectors — the name resolver now mirrors codegen's literal-symbol gate, correctly rejecting `super` when the selector is not a compile-time known symbol (BT-2279).
 
 ### Standard Library
 
@@ -33,6 +34,8 @@
 - **`SystemNavigation ffiSitesFor:`** — returns `#{#class, #selector, #line}` for every method body that calls Erlang `module:function` (optionally arity-qualified, e.g. `"lists:reverse/1"`). Scans instance-side, class-side, and extension method bodies (BT-2211).
 - **`SystemNavigation fieldReadersOf:in:` / `fieldWritersOf:in:`** — field/class-var usage queries. `fieldReadersOf: #slot in: aClass` returns `#{#class, #selector, #line}` for every method that reads `#slot`, scanning `aClass` + subclasses on instance and class sides. `fieldWritersOf:in:` does the same for writes (BT-2208).
 - **`SystemNavigation classesInPackage:` / `subclassesOf:in:`** — package-scoped class queries. `classesInPackage: aPackage` returns class objects belonging to a package; `subclassesOf: aClass in: aPackage` filters `allSubclasses` by package (BT-2213).
+- **`ClassBuilder >> register` returns canonical class object** — previously returned an unusable wrapper that failed all dispatch; now returns the same shape as `classNamed:` (dispatchable, `isClass: true`, `==` to the registry reference) (BT-2258).
+- **`ClassBuilder` metadata parity setters** — `methodSignatures:`, `classMethodSignatures:`, `methodDocs:`, `classMethodDocs:`, `methodReturnTypes:`, `classMethodReturnTypes:`, `classDoc:`, `meta:`, and `isConstructible:` bring programmatically built classes to `:help` parity with file-defined ones (BT-2268).
 
 ### Runtime
 
@@ -47,6 +50,11 @@
 - **`beamtalk_extensions:extenders_of/1`** and **`extensions_by/1`** — reverse-index queries for extension methods. `extenders_of(ClassName)` returns unique owner atoms contributing extensions to a target class; `extensions_by(OwnerName)` returns `{TargetClass, Selector}` tuples for every extension an owner contributes (BT-2202).
 - Compiler-port diagnostics in `findSendersIn`/`findReferencesToIn` now logged via OTP logger instead of silently discarded — port-unavailability escalates to `?LOG_ERROR`, parse errors use `?LOG_WARNING`, all with `domain => [beamtalk, stdlib]` metadata (BT-2219).
 - Fix `super` in a value/primitive context (a value-type method or a foreign extension on a value/primitive class) generating invalid Core Erlang. Value-context funs are `fun(Args, Self) -> Result` with no `State` binding, so the old codegen's `beamtalk_dispatch:super(Sel, Args, Self, State, Class)` referenced an unbound `State` and failed to compile. Such `super` sends now route to the new `beamtalk_dispatch:super_value/4`, which walks the same superclass chain without threading state and returns a plain value (BT-2252).
+- **Class-side runtime method dispatch** — programmatic `ClassBuilder` classes can now install and dispatch class-method funs via an ETS retrieval store, mirroring the instance extension path. `classMethods:` blocks lower to anonymous class-method funs matching the compiled convention, with `self`/`super` resolution and class-variable state threading (BT-2266, BT-2267).
+- **Module-less `ClassBuilder` instantiation** — classes built purely programmatically via `ClassBuilder` can now be instantiated with `new` / `new:` before being flushed to a compiled module. The generic instance uses the same tagged-map shape as compiled value types for seamless post-flush behavior (BT-2275).
+- Harden module-less `ClassBuilder` instantiation — depth-guard logging on ancestor chain walks, deadlock-free self-dispatch for fun-backed instance methods inside the class gen_server, and robust ancestor exit handling (BT-2277).
+- Fix `selector_arity` for malformed selectors — interior-colon atoms (e.g. `'at:put'`) are now treated as unary instead of keyword, avoiding spurious `arity_mismatch` diagnostics (BT-2278).
+- **`beamtalk_workspace_changelog`** gen_server — workspace-local ChangeLog that records every live method patch as a crash-safe, session-aware change entry with two-part on-disk persistence (ADR 0082 Phase 1) (BT-2282).
 
 ### Tooling
 
@@ -82,6 +90,8 @@
 - Unmapped quoted `@primitive` in stdlib value-type codegen now fails the build with a clear error naming class + selector, instead of silently falling back to runtime dispatch (BT-2233).
 - Shared `beamtalk_error:raise_type_error/3` extracted from five stdlib modules — zero behavior change (BT-2229).
 - Unify Behaviour/Class/Metaclass primitive-lowering into a single `REGISTRY` table — tower classes share one function pointer so any tower selector resolves regardless of which class declares it, preventing the BT-2232 regression pattern where moving a method up the tower silently dropped its inline BIF (BT-2234).
+- Byte-span resolver validates that the parser can resolve exact method byte spans for flush-time splice replacement — 1347 methods across 161 files pass no-op round-trip (ADR 0082 Phase 0) (BT-2281).
+- Extract `kill_and_wait/1` and `delegate_error/1` helpers in `beamtalk_actor.erl` — zero behavior change (BT-2272).
 
 ## 0.4.0 — 2026-04-27
 
