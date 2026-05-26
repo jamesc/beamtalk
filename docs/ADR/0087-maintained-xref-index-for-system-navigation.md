@@ -1,7 +1,40 @@
 # ADR 0087: Maintained Selector→Sites Cross-Reference Index for SystemNavigation
 
 ## Status
-Proposed (2026-05-26)
+Accepted (2026-05-26)
+
+## Implementation Tracking
+
+**Epic:** [BT-2228](https://linear.app/beamtalk/issue/BT-2228) — Runtime: maintained selector→sites xref index for SystemNavigation queries
+
+**Phases / child issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2297](https://linear.app/beamtalk/issue/BT-2297) | Runtime: `beamtalk_xref` gen_server + supervisor wiring | M | – |
+| 2 | [BT-2298](https://linear.app/beamtalk/issue/BT-2298) | Codegen + runtime: bake `method_xref` into `register_class/0`; sync-forward in `start/2` | M | BT-2297 |
+| 3 | [BT-2299](https://linear.app/beamtalk/issue/BT-2299) | Stdlib: migrate `sendersOf:` to xref + miss-policy fallback + benchmark (napkin wire-check) | M | BT-2298 |
+| 4 | [BT-2300](https://linear.app/beamtalk/issue/BT-2300) | Runtime: hot-reload purge + new-gen install with atomicity | M | BT-2299 |
+| 4 | [BT-2301](https://linear.app/beamtalk/issue/BT-2301) | Runtime: `put_method/4`, extension, and ClassBuilder lifecycle hooks | M | BT-2298 |
+| 5 | [BT-2302](https://linear.app/beamtalk/issue/BT-2302) | Stdlib: migrate `referencesTo:` + `implementorsOf:` + `selectorsMatching:` to xref | M | BT-2299 |
+| 5 | [BT-2303](https://linear.app/beamtalk/issue/BT-2303) | Stdlib: migrate `unimplementedSelectors` + `unusedSelectors` to xref | M | BT-2299 |
+| 6 | [BT-2304](https://linear.app/beamtalk/issue/BT-2304) | Codegen: synthetic-method xref emission + parity tests + ADR Accepted→Implemented | M | BT-2298 |
+
+**Wave plan:**
+
+```
+Wave 1 (1 issue):    BT-2297
+Wave 2 (1 issue):    BT-2298
+Wave 3 (1 issue):    BT-2299   ← napkin wire-check
+Wave 4 (3 parallel): BT-2300   BT-2302   BT-2304
+Wave 5 (2 parallel): BT-2301   BT-2303
+```
+
+File-overlap constraints:
+- BT-2302 and BT-2303 both touch `stdlib/src/SystemNavigation.bt` — serialized across waves 4 and 5.
+- BT-2300 and BT-2301 both touch `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` API surface — serialized across waves 4 and 5.
+
+**Status will move to `Implemented` when BT-2304 (Phase 6) merges** — that issue's acceptance criteria include updating this header.
 
 ## Context
 
