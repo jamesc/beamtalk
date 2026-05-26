@@ -109,7 +109,8 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
 
 -export([
     flush/0,
-    flush/1
+    flush/1,
+    flush_kinds/1
 ]).
 
 %% Exported for tests.
@@ -121,7 +122,12 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
     renamed_target_keys/1
 ]).
 
--type filter() :: any | {class, binary()} | {selector, atom()} | {file, binary()}.
+-type filter() ::
+    any
+    | {class, binary()}
+    | {selector, atom()}
+    | {file, binary()}
+    | {kinds, [atom()], [atom()]}.
 
 %%% ----------------------------------------------------------------------------
 %%% Public API
@@ -160,6 +166,97 @@ flush(Filter) ->
         {ok, F} -> do_flush(F);
         {error, _} = Err -> Err
     end.
+
+-doc """
+Flush only the ChangeEntries whose kind or author_kind is in `Kinds`
+(ADR 0082 Phase 4, BT-2290).
+
+`Kinds` is a list of Symbols (atoms). Each symbol classifies as either an
+**entry kind** (`instance`, `class`, `'new-class'`) or an **author kind**
+(`human`, `agent`):
+
+  - If at least one entry-kind symbol is present, an entry's `kind` must be in
+    that set.
+  - If at least one author-kind symbol is present, the entry's `author_kind`
+    must be in that set.
+  - An entry must satisfy **all** non-empty constraint sets (entry-kind AND
+    author-kind, when both are provided), so the caller can flush, e.g., "all
+    agent-authored new-class entries" with `[agent, 'new-class']`.
+
+Empty `Kinds` is rejected with a structured error (use `flush/0` to flush
+everything). Unknown symbols are rejected with a structured error so a typo
+fails loudly rather than silently flushing the wrong set.
+
+Returns the same `FlushResult` summary as `flush/0` / `flush/1`.
+""".
+-spec flush_kinds([atom()]) -> {ok, map()} | {error, #beamtalk_error{}}.
+flush_kinds(Kinds) when is_list(Kinds) ->
+    case classify_kinds(Kinds) of
+        {ok, EntryKinds, AuthorKinds} ->
+            do_flush({kinds, EntryKinds, AuthorKinds});
+        {error, _} = Err ->
+            Err
+    end;
+flush_kinds(_Other) ->
+    {error,
+        filter_error(
+            <<"flushKinds: expects a List or Set of kind Symbols (e.g. #instance, #agent)">>
+        )}.
+
+%% Classify each symbol in `Kinds' as an entry-kind or an author-kind. Unknown
+%% symbols are rejected — surface as a structured error so the caller sees the
+%% typo rather than silently flushing the wrong set. Empty `Kinds' is also
+%% rejected (use `flush/0' to flush everything).
+-spec classify_kinds([atom()]) -> {ok, [atom()], [atom()]} | {error, #beamtalk_error{}}.
+classify_kinds([]) ->
+    {error,
+        filter_error(<<
+            "flushKinds: requires at least one kind Symbol — use Workspace flush to flush "
+            "every pending durable change"
+        >>)};
+classify_kinds(Kinds) ->
+    classify_kinds(Kinds, [], [], []).
+
+classify_kinds([], EKs, AKs, []) ->
+    {ok, lists:usort(EKs), lists:usort(AKs)};
+classify_kinds([], _EKs, _AKs, Unknowns) ->
+    {error, unknown_kind_error(lists:reverse(Unknowns))};
+classify_kinds([K | Rest], EKs, AKs, Unknowns) when is_atom(K) ->
+    case classify_kind(K) of
+        entry -> classify_kinds(Rest, [K | EKs], AKs, Unknowns);
+        author -> classify_kinds(Rest, EKs, [K | AKs], Unknowns);
+        unknown -> classify_kinds(Rest, EKs, AKs, [K | Unknowns])
+    end;
+classify_kinds([Other | _], _EKs, _AKs, _Unknowns) ->
+    {error,
+        filter_error(
+            iolist_to_binary([
+                <<"flushKinds: expects Symbol elements, got: ">>,
+                io_lib:format("~p", [Other])
+            ])
+        )}.
+
+-spec classify_kind(atom()) -> entry | author | unknown.
+classify_kind(instance) -> entry;
+classify_kind(class) -> entry;
+classify_kind('new-class') -> entry;
+classify_kind(human) -> author;
+classify_kind(agent) -> author;
+classify_kind(_) -> unknown.
+
+-spec unknown_kind_error([atom()]) -> #beamtalk_error{}.
+unknown_kind_error(Unknowns) ->
+    Joined = lists:join(<<", ">>, [atom_to_binary(K, utf8) || K <- Unknowns]),
+    filter_error(
+        iolist_to_binary([
+            <<"flushKinds: unrecognised kind symbol(s): ">>,
+            Joined,
+            <<
+                ". Allowed: #instance, #class, #'new-class' (entry kinds); "
+                "#human, #agent (author kinds)"
+            >>
+        ])
+    ).
 
 %%% ----------------------------------------------------------------------------
 %%% Filter normalisation
@@ -250,7 +347,20 @@ filter_entries(Entries, {selector, Sel}) ->
     SelBin = atom_to_binary(Sel, utf8),
     [E || E <- Entries, beamtalk_workspace_changelog:entry_selector(E) =:= SelBin];
 filter_entries(Entries, {file, FileBin}) ->
-    [E || E <- Entries, beamtalk_workspace_changelog:entry_source_file(E) =:= FileBin].
+    [E || E <- Entries, beamtalk_workspace_changelog:entry_source_file(E) =:= FileBin];
+filter_entries(Entries, {kinds, EntryKinds, AuthorKinds}) ->
+    [E || E <- Entries, entry_matches_kinds(E, EntryKinds, AuthorKinds)].
+
+-spec entry_matches_kinds(term(), [atom()], [atom()]) -> boolean().
+entry_matches_kinds(E, EntryKinds, AuthorKinds) ->
+    matches_set(EntryKinds, beamtalk_workspace_changelog:entry_kind(E)) andalso
+        matches_set(AuthorKinds, beamtalk_workspace_changelog:entry_author_kind(E)).
+
+%% An empty constraint set means "no filter on this dimension" — accept any
+%% value. Otherwise require membership.
+-spec matches_set([atom()], atom()) -> boolean().
+matches_set([], _Value) -> true;
+matches_set(Set, Value) -> lists:member(Value, Set).
 
 -spec run_flush([term()]) -> {ok, map()} | {error, #beamtalk_error{}}.
 run_flush(Pending) ->

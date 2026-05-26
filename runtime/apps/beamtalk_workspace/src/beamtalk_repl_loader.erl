@@ -662,6 +662,15 @@ load_recompiled_method(
             %% method is already live in memory. emit_change_entry/1 logs and
             %% swallows its own errors.
             emit_change_entry(MethodInfo),
+            %% (4) ADR 0082 Phase 4: when the workspace is in `autoflush: true'
+            %% mode, every successful durable in-memory patch is immediately
+            %% flushed to disk. Best-effort and synchronous; a flush failure does
+            %% NOT roll back the BEAM module install (prior binary may already be
+            %% unloaded and live actors may hold references to the new closures)
+            %% — the entry simply stays pending in the log for manual flush
+            %% reconciliation. Ephemeral patches are not autoflushed because
+            %% only durable+flushable entries are written by `flush/0'.
+            maybe_autoflush(maps:get(intent, MethodInfo, durable)),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
@@ -782,6 +791,10 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
                 ClassNames
             ),
             emit_new_class_entry(DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)),
+            %% ADR 0082 Phase 4: autoflush also covers new-class entries (they
+            %% are durable + flushable by construction). See the analogous
+            %% comment in load_recompiled_method/7 for the failure semantics.
+            maybe_autoflush(durable),
             {ok, loaded_class_objects(ClassNames)};
         {error, LoadReason} ->
             ClassAtoms = class_name_atoms(ClassNames),
@@ -947,6 +960,62 @@ class_loaded(ClassNameBin) ->
 -spec loaded_class_objects([map()]) -> [#beamtalk_object{}].
 loaded_class_objects(ClassNames) ->
     beamtalk_workspace_interface_primitives:loaded_class_objects(ClassNames).
+
+%% Trigger `Workspace flush' when `autoflush: true' is set on the workspace
+%% (ADR 0082 Phase 4, BT-2290). Best-effort and synchronous:
+%%
+%%   - Ephemeral patches are never autoflushed (they are not flushable by
+%%     definition — only `durable AND flushable' entries are written).
+%%   - The flush call itself is wrapped in try/catch so a flush failure (e.g.
+%%     external-edit conflict surfaces a conflict-summary, not an exception,
+%%     but the ChangeLog server being unreachable would exit the gen_server
+%%     call) cannot bubble up and undo the BEAM module install — the patch is
+%%     already live in memory.
+%%   - The flush is best-effort. A conflict / I/O failure leaves the entry
+%%     pending in the log; the user can re-flush manually after reconciling.
+%%
+%% A successful flush returns a `FlushResult' summary; we log a warning when
+%% the summary reports conflicts so an autoflush failure is observable in the
+%% workspace log even though the install path returns successfully.
+-spec maybe_autoflush(durable | ephemeral) -> ok.
+maybe_autoflush(ephemeral) ->
+    ok;
+maybe_autoflush(durable) ->
+    case beamtalk_workspace_meta:get_setting(autoflush, false) of
+        true -> do_autoflush();
+        _ -> ok
+    end.
+
+-spec do_autoflush() -> ok.
+do_autoflush() ->
+    try beamtalk_workspace_flush:flush() of
+        {ok, #{conflicts := Conflicts} = Summary} when Conflicts =/= [] ->
+            ?LOG_WARNING(
+                "Autoflush reported conflicts — pending entries remain in the log",
+                #{conflicts => Conflicts, summary => Summary, domain => [beamtalk, runtime]}
+            ),
+            ok;
+        {ok, _Summary} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Autoflush returned a structured error (entries remain pending)",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Autoflush crashed (entries remain pending; patch still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
 
 %% Emit the durable `new-class` ChangeEntry for a freshly created class. Best
 %% effort: a ChangeLog write must never fail or undo the in-memory install (the

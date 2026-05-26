@@ -92,7 +92,8 @@ release nodes do not start a workspace, so this code is a no-op there.
     mark_flushed/1,
     size/0,
     epoch/0,
-    clear/0
+    clear/0,
+    find_revert_target/2
 ]).
 
 %% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
@@ -343,11 +344,64 @@ epoch() ->
 Discard all entries from the in-memory log and truncate the on-disk metadata
 segment. Source bodies in `sources/` are left in place (they are cheap and a
 later `revert:`/audit flow may still want them; rotation prunes them). Used by
-`Workspace changes clear` (a later phase) and by tests.
+`Workspace changes clear` (ADR 0082 Phase 4) and by tests.
 """.
 -spec clear() -> ok.
 clear() ->
     gen_server:call(?MODULE, clear).
+
+-doc """
+Find the most recent active ChangeEntry for `(Class, Selector)` and return its
+recorded prior source body (ADR 0082 Phase 4, BT-2290).
+
+Used by `Workspace changes revert: aMethod` to look up the pre-patch body that
+must be re-installed. Returns:
+
+  - `{ok, PrevBody, Entry}` when an active entry for the target exists *and* has
+    a `prev_source_ref` whose body can be read from `sources/` — the typical
+    method-revert path.
+  - `{error, no_entry}` when no active entry targets `(Class, Selector)`
+    (nothing to revert: either never patched, or already reverted/flushed).
+  - `{error, no_prev_source}` when the most recent entry's `prev_source_ref`
+    is missing or unreadable (e.g. an entry from before the source-body
+    persistence — should not happen in normal flow but defensive).
+
+`Class` is the unsuffixed display name as a binary; `Selector` is an atom or a
+binary (an atom is converted to a binary so the comparison matches the entry's
+recorded selector). A new-class entry has `selector = undefined` and therefore
+never matches a regular selector lookup — the rejection of new-class reverts
+lives at the FFI boundary (`changeLogRevert/1`) rather than here.
+""".
+-spec find_revert_target(binary(), atom() | binary()) ->
+    {ok, binary(), entry()} | {error, no_entry | no_prev_source}.
+find_revert_target(Class, Selector) when is_binary(Class) ->
+    SelectorBin = revert_selector_binary(Selector),
+    Candidates = lists:filter(
+        fun(E) ->
+            E#entry.class =:= Class andalso
+                E#entry.selector =:= SelectorBin andalso
+                (not E#entry.prior_epoch) andalso
+                (not E#entry.orphan) andalso
+                (not E#entry.flushed)
+        end,
+        entries()
+    ),
+    case lists:reverse(lists:keysort(#entry.seq, Candidates)) of
+        [] ->
+            {error, no_entry};
+        [#entry{prev_source_ref = undefined} | _] ->
+            {error, no_prev_source};
+        [Entry | _] ->
+            case read_prev_source_body(Entry) of
+                {ok, Body} -> {ok, Body, Entry};
+                {error, _} -> {error, no_prev_source}
+            end
+    end.
+
+%% Normalise the selector argument: callers may pass an atom or a binary.
+-spec revert_selector_binary(atom() | binary()) -> binary().
+revert_selector_binary(Sel) when is_binary(Sel) -> Sel;
+revert_selector_binary(Sel) when is_atom(Sel) -> atom_to_binary(Sel, utf8).
 
 %%% ----------------------------------------------------------------------------
 %%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284)

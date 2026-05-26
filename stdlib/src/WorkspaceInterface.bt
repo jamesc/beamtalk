@@ -287,6 +287,43 @@ sealed typed Object subclass: WorkspaceInterface
   supervisors -> List =>
     (Erlang beamtalk_workspace_interface_primitives) supervisors
 
+  /// Read the `autoflush` workspace setting (ADR 0082 Phase 4).
+  ///
+  /// Default is `false`. When `true`, every successful durable in-memory patch
+  /// (via `>>` / `compile:source:` / `newClass:at:`) immediately triggers a
+  /// `Workspace flush` after the install, collapsing the model to write-through
+  /// at the workspace level. The setting persists across workspace restarts.
+  ///
+  /// Autoflush is best-effort: on flush failure (external-edit conflict,
+  /// write error) memory and disk diverge and the ChangeEntry remains in the
+  /// log for manual reconciliation — the BEAM module install is not rolled
+  /// back (live actors may hold references to the new closures).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace autoflush   // => false
+  /// ```
+  autoflush -> Boolean =>
+    (Erlang beamtalk_workspace_interface_primitives) autoflush
+
+  /// Set the `autoflush` workspace setting (ADR 0082 Phase 4).
+  ///
+  /// `enabled` must be a Boolean. Persists to the workspace metadata.json so
+  /// the setting survives workspace restart. Returns the new value so the
+  /// caller can confirm the effective state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace autoflush: true    // => true
+  /// Workspace autoflush: false   // => false
+  /// ```
+  autoflush: enabled :: Boolean -> Boolean =>
+    // FFI returns whatever the Erlang module returns; the validator typed
+    // the call as Dynamic, suppress the warning since the boolean return is
+    // guaranteed by the underlying setAutoflush/1 implementation.
+    @expect type
+    (Erlang beamtalk_workspace_interface_primitives) autoflush: enabled
+
   /// Return a Dictionary of direct dependency packages for the current workspace.
   ///
   /// Keys are package name Strings, values are Package objects.
