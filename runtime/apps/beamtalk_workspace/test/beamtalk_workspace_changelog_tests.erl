@@ -41,7 +41,13 @@ changelog_test_() ->
         fun dirty_methods_groups_active_by_class/1,
         fun dirty_methods_uses_new_class_placeholder/1,
         fun append_returns_error_on_unwritable_dir/1,
-        fun clear_empties_log/1
+        fun clear_empties_log/1,
+        %% ADR 0082 Phase 4 (BT-2290)
+        fun find_revert_target_returns_prev_body/1,
+        fun find_revert_target_no_entry_when_unknown/1,
+        fun find_revert_target_picks_most_recent_entry/1,
+        fun find_revert_target_skips_flushed_entries/1,
+        fun find_revert_target_rejects_new_class/1
     ]}.
 
 %% FFI surface with no gen_server started: must degrade to empty, not crash.
@@ -310,6 +316,91 @@ clear_empties_log(#{workspace_id := WsId}) ->
     [
         ?_assertEqual(0, beamtalk_workspace_changelog:size()),
         ?_assertEqual(<<>>, LogBin)
+    ].
+
+%%====================================================================
+%% find_revert_target/2 (ADR 0082 Phase 4, BT-2290)
+%%====================================================================
+%% Used by `ChangeLog>>revert:` to recover the prior body for a method.
+%% The lookup walks the active entries (current epoch, not orphaned, not
+%% already flushed), keeps only entries for the requested `(class, selector)`,
+%% picks the highest-seq survivor, and reads its recorded prev_source body.
+
+find_revert_target_returns_prev_body(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(
+        durable_input(<<"Counter">>, <<"inc">>)
+    ),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, inc),
+    [
+        ?_assertMatch({ok, <<"^ self value">>, _Entry}, Result)
+    ].
+
+find_revert_target_no_entry_when_unknown(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(
+        durable_input(<<"Counter">>, <<"inc">>)
+    ),
+    %% Class matches but selector does not.
+    NoSel = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, never),
+    %% Selector matches but class does not.
+    NoClass = beamtalk_workspace_changelog:find_revert_target(<<"Other">>, inc),
+    [
+        ?_assertEqual({error, no_entry}, NoSel),
+        ?_assertEqual({error, no_entry}, NoClass)
+    ].
+
+find_revert_target_picks_most_recent_entry(_Ctx) ->
+    %% Two patches against the same method — revert must return the most recent
+    %% prev body, because that is the state immediately before the latest patch.
+    %% In our fixture every append uses `prev_source = <<"^ self value">>`, so
+    %% we vary the body via a custom input to make the comparison meaningful.
+    Input1 = (durable_input(<<"Counter">>, <<"inc">>))#{
+        source => <<"^ 1">>,
+        prev_source => <<"^ 0">>
+    },
+    Input2 = (durable_input(<<"Counter">>, <<"inc">>))#{
+        source => <<"^ 2">>,
+        prev_source => <<"^ 1">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(Input1),
+    {ok, _} = beamtalk_workspace_changelog:append(Input2),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, inc),
+    [
+        ?_assertMatch({ok, <<"^ 1">>, _}, Result)
+    ].
+
+find_revert_target_skips_flushed_entries(_Ctx) ->
+    %% A flushed entry must not be reverted — it has been written to disk and
+    %% is therefore not part of the active dirty set any more.
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        durable_input(<<"Counter">>, <<"inc">>)
+    ),
+    ok = beamtalk_workspace_changelog:mark_flushed([Seq]),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, inc),
+    [
+        ?_assertEqual({error, no_entry}, Result)
+    ].
+
+find_revert_target_rejects_new_class(_Ctx) ->
+    %% A new-class entry has `selector = undefined`, so the regular
+    %% `find_revert_target(Class, SomeSelector)` lookup never matches it —
+    %% the rejection of new-class reverts is enforced at the FFI boundary
+    %% (`extract_revert_target_from_map/1`) rather than here. From the
+    %% perspective of this lower-level API, a method-selector lookup on a
+    %% new-class-only entry returns `{error, no_entry}`.
+    NewClassInput = #{
+        class => <<"NewThing">>,
+        kind => 'new-class',
+        source => <<"Object subclass: NewThing\nend\n">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/new_thing.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    NoEntry = beamtalk_workspace_changelog:find_revert_target(<<"NewThing">>, anything),
+    [
+        ?_assertEqual({error, no_entry}, NoEntry)
     ].
 
 %%====================================================================

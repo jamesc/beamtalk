@@ -40,7 +40,13 @@ flush_test_() ->
         fun mark_flushed_excludes_from_active/1,
         fun filter_by_class/1,
         fun filter_by_file/1,
-        fun filter_by_new_class_selector/1
+        fun filter_by_new_class_selector/1,
+        %% ADR 0082 Phase 4 (BT-2290): flushKinds: surface
+        fun flush_kinds_by_entry_kind/1,
+        fun flush_kinds_by_author_kind/1,
+        fun flush_kinds_combined_dimensions_intersect/1,
+        fun flush_kinds_empty_set_is_rejected/1,
+        fun flush_kinds_unknown_kind_is_rejected/1
     ]}.
 
 unit_test_() ->
@@ -679,6 +685,152 @@ filter_shadowed_drops_unrenamed_survivors() ->
         restore_home(OldHome),
         del_tree(TmpHome)
     end.
+
+%%====================================================================
+%% ADR 0082 Phase 4 (BT-2290): flushKinds: filter
+%%====================================================================
+%% Each test sets up multiple ChangeEntries with mixed kinds and author_kinds,
+%% calls `flush_kinds/1` with a Symbol set, and asserts that exactly the
+%% matching entries were written to disk and the others remain pending.
+
+flush_kinds_by_entry_kind(#{proj_dir := ProjDir}) ->
+    %% Two method-patch entries (`instance` kind) + one new-class entry.
+    %% `flushKinds: #{#instance}` must write only the method patches.
+    InstanceFile = filename:join([ProjDir, "src", "counter.bt"]),
+    NewClassFile = filename:join([ProjDir, "src", "greeter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(InstanceFile, Original),
+    {S, E, Old} = locate(Original, <<"value => 0\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"value">>,
+            <<"value => 1\n">>,
+            Old,
+            list_to_binary(InstanceFile),
+            S,
+            E
+        )
+    ),
+    NewSource = <<"Object subclass: Greeter\n  hi => 'hi'\nend\n">>,
+    {ok, _} = beamtalk_workspace_changelog:append(
+        new_class_input(<<"Greeter">>, NewSource, list_to_binary(NewClassFile))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds([instance]),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        %% The new-class file is NOT written because its kind is `'new-class'`.
+        ?_assertEqual(false, filelib:is_regular(NewClassFile)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Counter\n  value => 1\nend\n">>},
+            file:read_file(InstanceFile)
+        ),
+        %% The new-class entry remains pending after a partial flush.
+        ?_assertEqual(1, length(beamtalk_workspace_changelog:active_entries()))
+    ].
+
+flush_kinds_by_author_kind(#{proj_dir := ProjDir}) ->
+    %% Two method patches against different files, one human-authored, one
+    %% agent-authored. `flushKinds: #{#agent}` must write only the agent entry.
+    HumanFile = filename:join([ProjDir, "src", "counter.bt"]),
+    AgentFile = filename:join([ProjDir, "src", "widget.bt"]),
+    Original1 = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    Original2 = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    ok = file:write_file(HumanFile, Original1),
+    ok = file:write_file(AgentFile, Original2),
+    {S1, E1, B1} = locate(Original1, <<"value => 0\n">>),
+    {S2, E2, B2} = locate(Original2, <<"render => nil\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"value">>,
+            <<"value => 1\n">>,
+            B1,
+            list_to_binary(HumanFile),
+            S1,
+            E1
+        )
+    ),
+    AgentEntry = (method_input(
+        <<"Widget">>,
+        <<"render">>,
+        <<"render => 'x'\n">>,
+        B2,
+        list_to_binary(AgentFile),
+        S2,
+        E2
+    ))#{
+        author_kind => agent, author => <<"agent-1">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(AgentEntry),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds([agent]),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual({ok, Original1}, file:read_file(HumanFile)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Widget\n  render => 'x'\nend\n">>},
+            file:read_file(AgentFile)
+        )
+    ].
+
+flush_kinds_combined_dimensions_intersect(#{proj_dir := ProjDir}) ->
+    %% `flushKinds: #{#agent, #'new-class'}` must select only entries that are
+    %% BOTH agent-authored AND new-class — a per-dimension AND of constraints.
+    AgentInstanceFile = filename:join([ProjDir, "src", "counter.bt"]),
+    HumanNewClassFile = filename:join([ProjDir, "src", "widget.bt"]),
+    AgentNewClassFile = filename:join([ProjDir, "src", "greeter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(AgentInstanceFile, Original),
+    {S, E, Old} = locate(Original, <<"value => 0\n">>),
+    %% (1) Agent + instance — fails the new-class dimension.
+    AgentInstance = (method_input(
+        <<"Counter">>,
+        <<"value">>,
+        <<"value => 1\n">>,
+        Old,
+        list_to_binary(AgentInstanceFile),
+        S,
+        E
+    ))#{
+        author_kind => agent, author => <<"agent">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(AgentInstance),
+    %% (2) Human + new-class — fails the author-kind dimension.
+    HumanNewSrc = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    HumanNewClass = (new_class_input(
+        <<"Widget">>, HumanNewSrc, list_to_binary(HumanNewClassFile)
+    ))#{
+        author_kind => human, author => <<"human">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(HumanNewClass),
+    %% (3) Agent + new-class — passes both dimensions.
+    AgentNewSrc = <<"Object subclass: Greeter\n  hi => 'hi'\nend\n">>,
+    AgentNewClass = (new_class_input(
+        <<"Greeter">>, AgentNewSrc, list_to_binary(AgentNewClassFile)
+    ))#{
+        author_kind => agent, author => <<"agent">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(AgentNewClass),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds([agent, 'new-class']),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(1, maps:get(newClasses, Summary)),
+        ?_assertEqual({ok, Original}, file:read_file(AgentInstanceFile)),
+        ?_assertEqual(false, filelib:is_regular(HumanNewClassFile)),
+        ?_assertEqual({ok, AgentNewSrc}, file:read_file(AgentNewClassFile))
+    ].
+
+flush_kinds_empty_set_is_rejected(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush_kinds([]),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+flush_kinds_unknown_kind_is_rejected(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush_kinds([bogus, also_bogus]),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
 
 %%====================================================================
 %% Pure helpers

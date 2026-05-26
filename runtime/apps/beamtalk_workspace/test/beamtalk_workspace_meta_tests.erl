@@ -548,6 +548,66 @@ run_mode_metadata_accessible_test() ->
 
     gen_server:stop(Pid).
 
+%%% ADR 0082 Phase 4 (BT-2290): workspace-scoped settings (autoflush)
+
+settings_get_returns_default_when_unset_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    %% Never-set key returns the caller's default.
+    ?assertEqual(false, beamtalk_workspace_meta:get_setting(autoflush, false)),
+    ?assertEqual(<<"x">>, beamtalk_workspace_meta:get_setting(any_key, <<"x">>)),
+    gen_server:stop(Pid).
+
+settings_set_then_get_roundtrips_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    ok = beamtalk_workspace_meta:set_setting(autoflush, true),
+    ?assertEqual(true, beamtalk_workspace_meta:get_setting(autoflush, false)),
+    ok = beamtalk_workspace_meta:set_setting(autoflush, false),
+    ?assertEqual(false, beamtalk_workspace_meta:get_setting(autoflush, true)),
+    gen_server:stop(Pid).
+
+settings_survive_restart_test() ->
+    %% A boolean setting persisted on shutdown must be re-readable after restart.
+    stop_if_running(),
+    WsId = <<"settings_persist_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    %% Clean up any leftover metadata from a prior run with a colliding id.
+    _ = file:delete(MetaFile),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/settings">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        ok = beamtalk_workspace_meta:set_setting(autoflush, true),
+        %% Force a synchronous persist by stopping the gen_server — `terminate/2`
+        %% calls `persist_metadata_to_disk/1` (the debounced timer path could
+        %% leave the test racing, so we use the deterministic shutdown path).
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(true, beamtalk_workspace_meta:get_setting(autoflush, false)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile)
+    end.
+
+settings_get_returns_default_in_run_mode_test() ->
+    %% No gen_server running ⇒ get_setting/2 must return the default rather
+    %% than crash, mirroring the other graceful-on-noproc accessors.
+    stop_if_running(),
+    ?assertEqual(false, beamtalk_workspace_meta:get_setting(autoflush, false)),
+    ?assertEqual(123, beamtalk_workspace_meta:get_setting(any_key, 123)).
+
+settings_set_in_run_mode_is_noop_test() ->
+    %% No gen_server running ⇒ set_setting/2 must succeed (returns ok) without
+    %% spawning a server, so caller code that runs in non-workspace contexts
+    %% (release nodes, test harnesses) is safe.
+    stop_if_running(),
+    ?assertEqual(ok, beamtalk_workspace_meta:set_setting(autoflush, true)).
+
 %%% BT-1242: class_removed cast triggered by classRemoveFromSystemByName
 
 class_removed_cast_unregisters_module_test() ->

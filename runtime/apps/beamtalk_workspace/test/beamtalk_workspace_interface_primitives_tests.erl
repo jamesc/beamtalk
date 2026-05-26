@@ -782,3 +782,79 @@ dependencies_returns_empty_when_no_package_test() ->
             %% only assert the type — content depends on loaded packages.
             ok
     end.
+
+%%====================================================================
+%% ADR 0082 Phase 4 (BT-2290): ChangeLog operations and autoflush
+%%====================================================================
+%% These tests exercise the FFI-shaped surface directly without booting a
+%% workspace. The underlying flush/changelog gen_servers are tested in their
+%% own suites; here we focus on argument-shape validation and error paths
+%% which do not require a live workspace.
+
+revert_rejects_non_changeentry_test() ->
+    %% Passing something that is not a ChangeEntry must raise a typed error
+    %% at the FFI boundary, not a deep crash.
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogRevert(42)
+    ).
+
+revert_rejects_new_class_entry_test() ->
+    %% A ChangeEntry shaped as a new-class entry (selector = nil) must be
+    %% rejected with a structured error rather than attempting a revert.
+    NewClassEntry = #{
+        '$beamtalk_class' => 'ChangeEntry',
+        className => 'NewThing',
+        selector => nil,
+        kind => 'new-class'
+    },
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogRevert(NewClassEntry)
+    ).
+
+flush_kinds_rejects_non_set_non_list_test() ->
+    %% A non-Set/non-List argument surfaces a typed error.
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogFlushKinds(42)
+    ).
+
+flush_kinds_accepts_beamtalk_set_test() ->
+    %% A Beamtalk Set tagged map flows through. An empty Set then surfaces
+    %% the structured "use Workspace flush" error from the lower layer.
+    EmptySet = #{'$beamtalk_class' => 'Set', elements => []},
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogFlushKinds(EmptySet)
+    ).
+
+set_autoflush_rejects_non_boolean_test() ->
+    %% Any non-Boolean value raises a typed error.
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:setAutoflush(<<"yes">>)
+    ),
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:setAutoflush(1)
+    ).
+
+autoflush_default_is_false_test() ->
+    %% With no workspace running, autoflush/0 must fall back to the default
+    %% (false) instead of crashing — mirrors get_setting/2's graceful-on-noproc
+    %% behaviour.
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ?assertEqual(false, beamtalk_workspace_interface_primitives:autoflush());
+        _ ->
+            %% Server running (parallel integration suite); only assert that
+            %% it returns a Boolean.
+            ?assert(is_boolean(beamtalk_workspace_interface_primitives:autoflush()))
+    end.

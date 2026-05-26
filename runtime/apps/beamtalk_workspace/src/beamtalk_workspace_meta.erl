@@ -29,6 +29,8 @@ and can be queried by other components (e.g., idle monitor).
 %% BT-1685: File mtime tracking for incremental load-project.
 -export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
+%% ADR 0082 Phase 4 (BT-2290): workspace-scoped boolean settings (autoflush).
+-export([get_setting/2, set_setting/2]).
 % Alias for get_metadata/0
 -export([get/0]).
 
@@ -61,6 +63,10 @@ and can be queried by other components (e.g., idle monitor).
     %% BT-1685: Map from absolute file path (string) to mtime (erlang:universaltime()).
     %% Used by incremental load-project to detect changed files.
     file_mtimes :: #{string() => calendar:datetime()},
+    %% ADR 0082 Phase 4 (BT-2290): workspace-scoped settings (e.g. `autoflush`).
+    %% Keyed by atom; persisted to metadata.json. Treated as opaque so future
+    %% settings slot in without a schema migration.
+    settings :: #{atom() => term()},
     metadata_path :: string() | undefined,
     persist_timer :: reference() | undefined,
     monitor_refs :: #{pid() => reference()}
@@ -297,6 +303,39 @@ remove_file_mtime(FilePath) when is_list(FilePath) ->
             ok
     end.
 
+-doc """
+Read a workspace-scoped setting (ADR 0082 Phase 4, BT-2290).
+
+Returns the stored value for `Key`, or `Default` if the setting was never set
+or the server is not running (run mode). Used today for the `autoflush` flag;
+the surface is intentionally generic so future workspace-wide booleans
+(e.g. confirm-on-flush, prune-ephemerals-on-flush) can reuse it.
+""".
+-spec get_setting(atom(), term()) -> term().
+get_setting(Key, Default) when is_atom(Key) ->
+    try
+        gen_server:call(?MODULE, {get_setting, Key, Default})
+    catch
+        exit:{noproc, _} ->
+            Default
+    end.
+
+-doc """
+Set a workspace-scoped setting (ADR 0082 Phase 4, BT-2290).
+
+Updates the in-memory value, mirrors it to ETS, and schedules the debounced
+persist so the setting survives workspace restart. No-op (returns `ok`) when
+the server is not running (run mode).
+""".
+-spec set_setting(atom(), term()) -> ok.
+set_setting(Key, Value) when is_atom(Key) ->
+    try
+        gen_server:call(?MODULE, {set_setting, Key, Value})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
@@ -359,6 +398,7 @@ init(InitialMetadata) ->
         loaded_modules = #{},
         class_sources = #{},
         file_mtimes = #{},
+        settings = #{},
         metadata_path = MetadataPath,
         persist_timer = undefined,
         monitor_refs = #{}
@@ -403,6 +443,12 @@ handle_call({set_class_source, ClassName, Source}, _From, State) ->
     {reply, ok, schedule_persist(State2)};
 handle_call(get_file_mtimes, _From, State) ->
     {reply, {ok, State#state.file_mtimes}, State};
+handle_call({get_setting, Key, Default}, _From, State) ->
+    {reply, maps:get(Key, State#state.settings, Default), State};
+handle_call({set_setting, Key, Value}, _From, State) ->
+    State2 = State#state{settings = (State#state.settings)#{Key => Value}},
+    store_state_in_ets(State2),
+    {reply, ok, schedule_persist(State2)};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -602,6 +648,12 @@ load_metadata_from_disk(State) ->
                                 #{}
                         end,
 
+                    %% ADR 0082 Phase 4 (BT-2290): restore workspace-scoped
+                    %% settings (autoflush etc.). Unknown setting keys are
+                    %% preserved so a newer build's settings survive a
+                    %% downgrade-then-upgrade cycle.
+                    Settings = restore_settings(maps:get(<<"settings">>, Map, #{})),
+
                     State#state{
                         project_path = ProjectPath,
                         created_at = CreatedAt,
@@ -613,7 +665,8 @@ load_metadata_from_disk(State) ->
                         %% BT-1685: File mtimes always start fresh — files may
                         %% have changed between sessions, so first load-project
                         %% after restart always does a full load.
-                        file_mtimes = #{}
+                        file_mtimes = #{},
+                        settings = Settings
                     }
             catch
                 % Failed to parse, use default
@@ -689,7 +742,10 @@ persist_metadata_to_disk(State) ->
             end,
             #{},
             State#state.class_sources
-        )
+        ),
+        %% ADR 0082 Phase 4 (BT-2290): persist workspace-scoped settings so
+        %% e.g. `autoflush` survives workspace restart.
+        <<"settings">> => persist_settings(State#state.settings)
     },
 
     %% Write to disk
@@ -763,6 +819,50 @@ detect_package_name(ProjectPath) when is_binary(ProjectPath) ->
         {error, _} ->
             undefined
     end.
+
+%% ADR 0082 Phase 4 (BT-2290): persist/restore opaque workspace settings via
+%% the JSON metadata blob. Keys are stored as atom strings (so they round-trip
+%% to/from the existing atom-keyed map without intern leaks — we restore only
+%% atoms that already exist in this beam).
+-spec persist_settings(#{atom() => term()}) -> #{binary() => term()}.
+persist_settings(Settings) ->
+    maps:fold(
+        fun(K, V, Acc) ->
+            case persistable_setting_value(V) of
+                {ok, Encoded} -> Acc#{atom_to_binary(K, utf8) => Encoded};
+                skip -> Acc
+            end
+        end,
+        #{},
+        Settings
+    ).
+
+%% Whitelist of types we are willing to round-trip through JSON. Today only
+%% booleans (autoflush). Other types are silently dropped from persistence
+%% rather than risk a JSON-encode crash bringing down the gen_server.
+-spec persistable_setting_value(term()) -> {ok, term()} | skip.
+persistable_setting_value(V) when is_boolean(V) -> {ok, V};
+persistable_setting_value(V) when is_integer(V) -> {ok, V};
+persistable_setting_value(V) when is_binary(V) -> {ok, V};
+persistable_setting_value(_) -> skip.
+
+-spec restore_settings(term()) -> #{atom() => term()}.
+restore_settings(Map) when is_map(Map) ->
+    maps:fold(
+        fun
+            (K, V, Acc) when is_binary(K) ->
+                case safe_existing_atom(K) of
+                    undefined -> Acc;
+                    Atom -> Acc#{Atom => V}
+                end;
+            (_, _, Acc) ->
+                Acc
+        end,
+        #{},
+        Map
+    );
+restore_settings(_) ->
+    #{}.
 
 -doc """
 Extract the package name from beamtalk.toml content.
